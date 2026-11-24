@@ -7345,5 +7345,8 @@
   "skillBurger.card.madeBy": "Utworzone przez {name}",
   "settings.nav.phoneConnected": "Telefon jest połączony",
   "settings.nav.phoneNeedsYou": "Telefon wymaga uwagi",
-  "devices.reach.sameWifi": "w tej samej sieci Wi-Fi"
+  "devices.reach.sameWifi": "w tej samej sieci Wi-Fi",
+  "phone.reach.offAdding": "Wyłączone · Dodanie telefonu włącza te opcje",
+  "settings.nav.devicesNeedYou": "Urządzenie lub sieć prywatna wymaga uwagi",
+  "settings.nav.phoneConnectedAllClear": "Telefon jest połączony i nic nie wymaga uwagi"
 }

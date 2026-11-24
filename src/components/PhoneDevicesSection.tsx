@@ -367,9 +367,9 @@ export function ReachSection({ c, state, simple, moreWaysAsked, managedBy, onPai
   const httpsShown = (!simple || httpsOn || httpsPeek) && showHttpsAddressRow(state, c.account, companionBridge());
   if (!(showRoutes || state.devices.length > 0 || anyRoute || moreWaysAsked)) {
     return (
-      <SettingsGroup block="reach" footnote={t("phone.reach.footAdding")}>
+      <SettingsGroup label={t("phone.reach.title")} block="reach">
         <SettingsRows>
-          <SettingsLinkRow title={t("phone.reach.title")} value={t("devices.route.off")} onClick={() => setShowRoutes(true)} data={{ "data-reach-fold": "" }} />
+          <SettingsLinkRow title={t("phone.reach.offAdding")} onClick={() => setShowRoutes(true)} data={{ "data-reach-fold": "" }} />
         </SettingsRows>
         <span data-settings-block="more-ways" className="contents" />
       </SettingsGroup>

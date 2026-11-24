@@ -8183,5 +8183,8 @@
   "skillBurger.card.madeBy": "{name} が作成",
   "settings.nav.phoneConnected": "スマホが接続されています",
   "settings.nav.phoneNeedsYou": "スマホの対応が必要です",
-  "devices.reach.sameWifi": "同じ Wi-Fi で"
+  "devices.reach.sameWifi": "同じ Wi-Fi で",
+  "phone.reach.offAdding": "オフ · スマホを追加するとこれらがオンになります",
+  "settings.nav.devicesNeedYou": "デバイスまたはプライベートネットワークの対応が必要です",
+  "settings.nav.phoneConnectedAllClear": "スマホが接続されていて、対応が必要なものはありません"
 }

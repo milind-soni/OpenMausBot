@@ -6144,5 +6144,8 @@
   "skillBurger.card.madeBy": "Do {name} tạo",
   "settings.nav.phoneConnected": "Một điện thoại đang kết nối",
   "settings.nav.phoneNeedsYou": "Một điện thoại cần bạn",
-  "devices.reach.sameWifi": "trên cùng Wi-Fi"
+  "devices.reach.sameWifi": "trên cùng Wi-Fi",
+  "phone.reach.offAdding": "Tắt · Thêm điện thoại sẽ bật các mục này",
+  "settings.nav.devicesNeedYou": "Một thiết bị hoặc mạng riêng cần bạn",
+  "settings.nav.phoneConnectedAllClear": "Một điện thoại đang kết nối, và không có gì cần bạn"
 }

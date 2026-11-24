@@ -4329,5 +4329,8 @@
   "skillBurger.card.madeBy": "Створено: {name}",
   "settings.nav.phoneConnected": "Телефон під’єднано",
   "settings.nav.phoneNeedsYou": "Телефону потрібна ваша увага",
-  "devices.reach.sameWifi": "у тій самій Wi-Fi"
+  "devices.reach.sameWifi": "у тій самій Wi-Fi",
+  "phone.reach.offAdding": "Вимк. · Додавання телефона вмикає їх",
+  "settings.nav.devicesNeedYou": "Пристрою або приватній мережі потрібна ваша увага",
+  "settings.nav.phoneConnectedAllClear": "Телефон під’єднано, і ніщо не потребує вашої уваги"
 }

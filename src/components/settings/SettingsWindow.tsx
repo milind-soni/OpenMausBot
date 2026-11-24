@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronLeft, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -61,6 +61,7 @@ export function SettingsWindow() {
   const [narrowPage, setNarrowPage] = useState(section !== "overview");
   const [query, setQuery] = useState("");
   const [sub, setSub] = useState<SettingsSub | null>(null);
+  const [headerAction, setHeaderAction] = useState<ReactNode | null>(null);
   const pages = visiblePages(ctx);
   const page = pageById(target.page);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -142,7 +143,7 @@ export function SettingsWindow() {
     return () => { window.removeEventListener("keydown", onKey); previousFocus?.focus(); };
   }, [dispatch, isTop]);
 
-  const shell: SettingsShell = { ctx, place, page: target.page, anchor, go, narrow, setSub };
+  const shell: SettingsShell = { ctx, place, page: target.page, anchor, go, narrow, setSub, setHeaderAction };
   const missing = target.missing ? pageLabel(pageById(target.missing), place, ctx.desktop) : undefined;
   const showList = narrow && !narrowPage;
   // Narrow header: the back label and the centred page title share 48 px of height; when the pair can't fit (half the
@@ -197,7 +198,7 @@ export function SettingsWindow() {
                   <div ref={scrollRef} data-settings-scroll data-settings-content=""
                     className={cn("settings-scroll min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]", narrow ? "pb-12" : "pb-12 pl-8 pr-16")}>
                     <div className={cn("flex max-w-[640px] flex-col", narrow && "max-w-none")}>
-                      <SettingsPageHeader page={page} ctx={ctx} place={place} narrow={narrow} missing={missing} peek={!ctx.advanced && !page.when(ctx) && !anchor} sub={sub} />
+                      <SettingsPageHeader page={page} ctx={ctx} place={place} narrow={narrow} missing={missing} peek={!ctx.advanced && !page.when(ctx) && !anchor} sub={sub} action={headerAction} />
                       <div key={target.page} data-settings-page-body={target.page} className={cn("flex flex-col gap-6", narrow && "px-4")}>
                         <LicenseExpiryBanner config={config} />
                         {page.owner === "place" && config === null

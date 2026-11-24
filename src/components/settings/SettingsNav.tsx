@@ -13,6 +13,7 @@ import { PlaceMark } from "../PlacesRail";
 import { profileInitials } from "../SidebarProfileMenu";
 import { Switch, SettingsTag } from "../SettingsPrimitives";
 import { accountLine, useAccountSummary, useYou } from "./account-summary";
+import { devicesDot, devicesPlaceKey, useDevicesSignal, type NavDot } from "./devices-signal";
 import { usePhonePlaceState } from "./phone-status";
 import type { SettingsPlace } from "./settings-context";
 import { OWNERS, pageById, type SearchHit, type SettingsContext, type SettingsOwner, type SettingsPage, type SettingsPageId } from "./settings-index";
@@ -101,13 +102,26 @@ function IdentityRow({ page, current, badge, name, line, onOpen, narrow }: {
   );
 }
 
-/** The mark beside Devices: a phone connected (green) or one that needs the person (amber), said in words too. */
-function PageDot({ dot }: { dot: "success" | "warning" }) {
-  const label = t(dot === "success" ? "settings.nav.phoneConnected" : "settings.nav.phoneNeedsYou");
-  return <span role="img" aria-label={label} title={label} data-settings-dot={dot} className={cn("size-1.5 shrink-0 rounded-full", dot === "success" ? "bg-success" : "bg-warning")} />;
+type Dot = { tone: NavDot; label: string };
+
+/** The mark beside Devices, said in words too: amber while a device or the private network needs the person, green while
+ * a phone is connected and nothing does. Before Devices has been read, the phones alone decide it. */
+function useDevicesDot(place: SettingsPlace, enabled: boolean): Dot | null {
+  const phone = usePhonePlaceState(enabled);
+  const seen = useDevicesSignal(devicesPlaceKey(place));
+  if (seen) {
+    const tone = devicesDot(seen);
+    return tone && { tone, label: t(tone === "warning" ? "settings.nav.devicesNeedYou" : "settings.nav.phoneConnectedAllClear") };
+  }
+  if (phone.kind === "paired" && phone.connected) return { tone: "success", label: t("settings.nav.phoneConnected") };
+  return phone.kind === "attention" ? { tone: "warning", label: t("settings.nav.phoneNeedsYou") } : null;
 }
 
-function PageItem({ page, label, current, dot, onOpen }: { page: SettingsPage; label: string; current: boolean; dot?: "success" | "warning" | null; onOpen: () => void }) {
+function PageDot({ dot }: { dot: Dot }) {
+  return <span role="img" aria-label={dot.label} title={dot.label} data-settings-dot={dot.tone} className={cn("size-1.5 shrink-0 rounded-full", dot.tone === "success" ? "bg-success" : "bg-warning")} />;
+}
+
+function PageItem({ page, label, current, dot, onOpen }: { page: SettingsPage; label: string; current: boolean; dot?: Dot | null; onOpen: () => void }) {
   const Icon = page.icon;
   return (
     <button type="button" data-settings-page={page.id} data-settings-section={page.id} aria-current={current ? "page" : undefined} onClick={onOpen}
@@ -188,7 +202,7 @@ export function SettingsNav({ ctx, place, pages, current, query, hits, keyHits, 
   const account = { ...summary, email: summary.email ?? (summary.plan ? profile?.email ?? null : null) };
   const placeLine = usePlaceSubLine(place);
   const appLine = useAppSubLine(ctx.desktop);
-  const phone = usePhonePlaceState(!ctx.client);
+  const devicesMark = useDevicesDot(place, !ctx.client);
   const listRef = useRef<HTMLDivElement>(null);
   const openSource = ctx.desktop && !window.ogb?.cloudAccount && !window.ogb?.cloudPlan;
   const lines: Record<SettingsOwner, { badge: ReactNode; name: string; line: string; page: SettingsPageId }> = {
@@ -196,8 +210,7 @@ export function SettingsNav({ ctx, place, pages, current, query, hits, keyHits, 
     account: { badge: <YouAvatar size={24} />, name: t("settings.page.account"), line: accountLine(account, { browser: !ctx.desktop, place: place.name, openSource }), page: "account" },
     app: { badge: <AppIcon size={24} />, name: ctx.desktop ? t("settings.page.app") : t("settings.page.browser"), line: appLine, page: "app" },
   };
-  const dot = (page: SettingsPageId) => page === "devices" && phone.kind === "paired" && phone.connected ? "success" as const
-    : page === "devices" && phone.kind === "attention" ? "warning" as const : null;
+  const dot = (page: SettingsPageId) => (page === "devices" ? devicesMark : null);
   const searching = query.trim() !== "";
   return (
     <nav aria-label={t("settings.title")} className={cn("flex min-h-0 flex-col", narrow ? "flex-1" : "w-[220px] shrink-0 shadow-[inset_-0.5px_0_0_var(--settings-edge)]")}>

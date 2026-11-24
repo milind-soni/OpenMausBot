@@ -6144,5 +6144,8 @@
   "skillBurger.card.madeBy": "{name} tarafından yapıldı",
   "settings.nav.phoneConnected": "Bir telefon bağlı",
   "settings.nav.phoneNeedsYou": "Bir telefonun ilgilenmenize ihtiyacı var",
-  "devices.reach.sameWifi": "aynı Wi-Fi'da"
+  "devices.reach.sameWifi": "aynı Wi-Fi'da",
+  "phone.reach.offAdding": "Kapalı · Telefon eklemek bunları açar",
+  "settings.nav.devicesNeedYou": "Bir cihazın veya özel ağın ilgilenmenize ihtiyacı var",
+  "settings.nav.phoneConnectedAllClear": "Bir telefon bağlı ve hiçbir şeyin ilgilenmenize ihtiyacı yok"
 }

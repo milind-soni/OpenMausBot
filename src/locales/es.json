@@ -6649,5 +6649,8 @@
   "skillBurger.card.madeBy": "Hecho por {name}",
   "settings.nav.phoneConnected": "Hay un teléfono conectado",
   "settings.nav.phoneNeedsYou": "Un teléfono te necesita",
-  "devices.reach.sameWifi": "en la misma red Wi-Fi"
+  "devices.reach.sameWifi": "en la misma red Wi-Fi",
+  "phone.reach.offAdding": "Desactivado · Al añadir un teléfono se activan",
+  "settings.nav.devicesNeedYou": "Un dispositivo o la red privada te necesita",
+  "settings.nav.phoneConnectedAllClear": "Hay un teléfono conectado y nada te necesita"
 }

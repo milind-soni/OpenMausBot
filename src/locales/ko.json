@@ -7873,5 +7873,8 @@
   "skillBurger.card.madeBy": "{name}이(가) 만듦",
   "settings.nav.phoneConnected": "휴대폰이 연결되어 있어요",
   "settings.nav.phoneNeedsYou": "휴대폰을 확인해야 해요",
-  "devices.reach.sameWifi": "같은 Wi-Fi에서"
+  "devices.reach.sameWifi": "같은 Wi-Fi에서",
+  "phone.reach.offAdding": "꺼짐 · 휴대폰을 추가하면 이 설정이 켜져요",
+  "settings.nav.devicesNeedYou": "기기나 사설 네트워크를 확인해야 해요",
+  "settings.nav.phoneConnectedAllClear": "휴대폰이 연결되어 있고 확인할 것이 없어요"
 }

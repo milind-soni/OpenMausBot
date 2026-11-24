@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Laptop, Loader2 } from "lucide-react";
 import { deviceGroup, privateNetwork, groupByKind, type Device, type DeviceAction, type DeviceGroup, type PrivateNetwork } from "@/lib/devices";
 import { copyText } from "@/lib/copy-text";
@@ -11,7 +11,7 @@ import type { CompanionState } from "@/lib/companion-types";
 import { api } from "@/state/api";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { AddDevicePanel, lastInputWasKeys, withinPage, type AddKind } from "../../devices/AddDevicePanel";
-import { DevicesNotice, DevicesTopLine, GroupSection, HereSection, type NetworkAction, type NetworkShare, type Opened } from "../../devices/DeviceRows";
+import { DevicesAttention, DevicesNotice, GroupSection, HereSection, networkNeedsPerson, type NetworkAction, type NetworkShare, type Opened } from "../../devices/DeviceRows";
 import { PhoneCodeInline } from "../../devices/CodeCard";
 import { DeviceMap, deviceMapShown } from "../../devices/DeviceMap";
 import { usePairAccess } from "../../devices/PairCodePanel";
@@ -26,6 +26,7 @@ import { canPairDevices, pairingBlockedReason } from "../../ServerPairingCard";
 import { SettingsGroup, SettingsMark } from "../../SettingsPrimitives";
 import { PlaceBadge } from "../SettingsNav";
 import { SettingsSkeletonCard } from "../SettingsStates";
+import { devicesPlaceKey, setDevicesSignal } from "../devices-signal";
 import { useSettingsShell } from "../settings-shell";
 
 /** Tailscale's download page for this computer's system. */
@@ -62,7 +63,7 @@ const PHONES_ADD = "[data-add-group=phones]";
 type Adding = { start: AddKind | null; from: string; keys: boolean; ask?: PairAsk };
 
 export function DevicesPage() {
-  const { ctx, place, go, setSub, anchor } = useSettingsShell();
+  const { ctx, place, go, setSub, setHeaderAction, anchor } = useSettingsShell();
   const dispatch = useStoreDispatch();
   const config = useStoreSelector((state) => state.config);
   const focus = useStoreSelector((state) => state.appSettingsPhonePairing);
@@ -143,6 +144,23 @@ export function DevicesPage() {
   }, [anchor]);
   const networkAction = nextNetworkStep(network, { check: () => void check() },
     { busy: c.busy, blocked: Boolean(blocked), platform: window.ogb?.platform });
+  const groups = groupByKind(devices, { all: true }).map((entry) => ({ ...entry, devices: needsFirst(entry.devices) }));
+  const needing = groups.flatMap((entry) => entry.devices.filter(needsPerson));
+  const networkNeeding = blocked ? null : network;
+  const signalPlace = devicesPlaceKey(place);
+  const needsYou = needing.length > 0 || networkNeedsPerson(networkNeeding);
+  const phoneConnected = devices.some((device) => device.kind === "phone" && device.status === "online");
+  useEffect(() => { if (loaded) setDevicesSignal({ place: signalPlace, needsYou, phoneConnected }); }, [loaded, signalPlace, needsYou, phoneConnected]);
+
+  const isAdding = adding !== null;
+  const addButton = useMemo(() => <span data-settings-block="add" className="flex scroll-mt-4">
+    <button type="button" data-add-device="" onClick={() => startAdding(null, "[data-add-device]")} className="ui-button ui-button-primary ui-button-sm shrink-0">{t("devicesPage.add")}</button>
+  </span>, [startAdding]);
+  useLayoutEffect(() => {
+    if (!setHeaderAction) return;
+    setHeaderAction(isAdding ? null : addButton);
+    return () => setHeaderAction(null);
+  }, [setHeaderAction, isAdding, addButton]);
 
   const environments = ctx.here ? window.ogb?.environments : undefined;
   const workspaces = ctx.here ? window.ogb?.workspaces : undefined;
@@ -239,8 +257,6 @@ export function DevicesPage() {
 
   const here = devices.find((device) => device.here)!;
   const mark = place.kind === "computer" ? <SettingsMark><Laptop /></SettingsMark> : <PlaceBadge place={place} size={28} />;
-  const groups = groupByKind(devices, { all: true }).map((entry) => ({ ...entry, devices: needsFirst(entry.devices) }));
-  const needing = groups.flatMap((entry) => entry.devices.filter(needsPerson));
   const now = Date.now();
   const onAction = (device: Device, action: DeviceAction) => void act(device, action);
   const openRow = (id: string) => {
@@ -254,6 +270,12 @@ export function DevicesPage() {
       row?.querySelector<HTMLElement>("[data-device-node]")?.focus({ preventScroll: true });
     });
   };
+  const openNetwork = () => window.requestAnimationFrame(() => {
+    const row = document.querySelector<HTMLElement>("[data-private-network]");
+    const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    row?.scrollIntoView?.({ block: "center", behavior: still ? "auto" : "smooth" });
+    (row?.querySelector<HTMLElement>("a[href], button:not([disabled])") ?? row)?.focus({ preventScroll: true });
+  });
   // Beside the next step, at most one quiet button: ask again after installing or approving.
   const secondary = network && !blocked && networkAction?.href
     ? <button type="button" className="settings-quiet cursor-pointer" disabled={c.busy} onClick={() => void check()}>{c.busy ? t("common.checking") : t("remote.checkAgain")}</button> : null;
@@ -281,7 +303,8 @@ export function DevicesPage() {
     {state && <RouteNotices c={c} notices={state.notices ?? []} />}
     {error && <p role="alert" className="px-4 text-[13px] leading-[18px] text-danger">{error}</p>}
     {notice && !notice.group && noticeLine}
-    <DevicesTopLine needing={needing} now={now} onOpen={openRow} onAdd={() => startAdding(null, "[data-add-device]")} />
+    {!setHeaderAction && addButton}
+    <DevicesAttention needing={needing} network={networkNeeding} now={now} onOpen={openRow} onNetwork={openNetwork} />
     {mapShown && <DeviceMap devices={devices} mark={mark} network={network} loaded={loaded} onOpen={openRow} now={now} />}
     <HereSection device={here} mark={mark} opened={opened} onAction={onAction} now={now} titled={!mapShown}
       network={network && { network, line: blocked ?? (network.state === "ready" && !network.shared ? null : networkLine(network)), action: network.state === "ready" ? null : networkAction, secondary, share }} pending={ctx.here}

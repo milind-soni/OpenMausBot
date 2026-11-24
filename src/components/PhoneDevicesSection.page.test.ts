@@ -38,11 +38,11 @@ beforeEach(() => {
 });
 
 describe("How your phone reaches this computer", () => {
-  it("with nothing paired and no way in on, folds the ways in into one row that says adding a phone turns them on", () => {
+  it("with nothing paired and no way in on, keeps its heading over one row that says they are off and adding a phone turns them on", () => {
     const html = page(true);
-    expect(html).toContain("How your phone reaches this computer");
-    expect(html).toContain("Adding a phone turns these on. You can change them here.");
-    expect(html).toContain("data-reach-fold");
+    expect(html).toMatch(/<h3[^>]*>How your phone reaches this computer<\/h3>[\s\S]*data-reach-fold/);
+    expect(html).toMatch(/data-reach-fold[^>]*>[\s\S]*Off · Adding a phone turns these on/);
+    expect(html).not.toContain("You can change them here");
     expect(html).not.toContain('data-route-row="wifi"');
     expect(html).toContain('data-settings-block="more-ways"');
   });

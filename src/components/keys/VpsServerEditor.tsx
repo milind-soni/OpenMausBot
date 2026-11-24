@@ -163,7 +163,7 @@ export function VpsServerEditor({ onRemoved, hint = true, ...which }: VpsServerE
             aria-describedby={isDefault ? undefined : `${fieldId}-ssh`}
             className={cn(KEY_FIELD, isDefault && "font-mono")}
           />
-          {!isDefault && <span id={`${fieldId}-ssh`} data-vps-ssh-name="" className="break-all text-[12px] leading-4 text-ink-secondary">{t("keys.vps.sshNameLine", { alias })}</span>}
+          {!isDefault && <span id={`${fieldId}-ssh`} data-vps-ssh-name="" className="break-all text-[12px] leading-4 text-ink-secondary">{t("keys.vps.sshSettingsName", { alias })}</span>}
         </Field>
         <Field id={ids.memory} label={t("keys.vps.field.memory")}>
           <LimitField id={ids.memory} value={memory} onChange={setMemory} range={MEMORY_GB} placeholder={inherited.memoryGb} disabled={busy} onEnter={submit} />

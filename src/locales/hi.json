@@ -3909,5 +3909,8 @@
   "skillBurger.card.madeBy": "{name} ने बनाया",
   "settings.nav.phoneConnected": "एक फ़ोन जुड़ा है",
   "settings.nav.phoneNeedsYou": "एक फ़ोन को आपकी ज़रूरत है",
-  "devices.reach.sameWifi": "एक ही Wi-Fi पर"
+  "devices.reach.sameWifi": "एक ही Wi-Fi पर",
+  "phone.reach.offAdding": "बंद · फ़ोन जोड़ने पर ये चालू हो जाते हैं",
+  "settings.nav.devicesNeedYou": "किसी डिवाइस या निजी नेटवर्क को आपकी ज़रूरत है",
+  "settings.nav.phoneConnectedAllClear": "एक फ़ोन जुड़ा है, और किसी चीज़ को आपकी ज़रूरत नहीं है"
 }

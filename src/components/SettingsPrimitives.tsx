@@ -162,12 +162,14 @@ export function SettingsTag({ children }: { children: ReactNode }) {
   return <span data-settings-tag="" className="inline-flex h-4 shrink-0 items-center rounded-full bg-ink/[0.06] px-1.5 text-[11px] font-medium leading-4 text-ink-secondary">{children}</span>;
 }
 
-export function SettingsGroup({ label, block, actions, footnote, description, children }: {
+export function SettingsGroup({ label, block, actions, footnote, description, wrapActions = false, children }: {
   label?: string;
   block?: string;
   actions?: ReactNode;
   footnote?: ReactNode;
   description?: ReactNode;
+  /** A title that would wrap beside its action puts the action on the next line, under the title's start. */
+  wrapActions?: boolean;
   children: ReactNode;
 }) {
   const labelId = useId();
@@ -181,9 +183,9 @@ export function SettingsGroup({ label, block, actions, footnote, description, ch
         <div className="flex flex-col gap-1 px-4">
           {/* The title and its one action share a 28 px line; the description runs 4 under them, the full width, and the
               card follows 8 below (§6.4's section description: the one place a section says more than its title). */}
-          <div className="flex min-h-7 items-center justify-between gap-3">
-            {label && <h3 id={labelId} className="min-w-0 text-[13px] font-medium leading-[18px] text-ink">{label}</h3>}
-            {actions && <div data-settings-actions="" className="ml-auto flex shrink-0 items-center gap-2">{actions}</div>}
+          <div className={cn("flex min-h-7 items-center justify-between gap-3", wrapActions && "flex-wrap gap-y-0.5")}>
+            {label && <h3 id={labelId} className={cn("min-w-0 text-[13px] font-medium leading-[18px] text-ink", wrapActions && "grow")}>{label}</h3>}
+            {actions && <div data-settings-actions="" className={cn("flex shrink-0 items-center gap-2", wrapActions ? "-ms-1.5" : "ml-auto")}>{actions}</div>}
           </div>
           {description && <p className="text-[13px] leading-[18px] text-ink-secondary">{description}</p>}
         </div>

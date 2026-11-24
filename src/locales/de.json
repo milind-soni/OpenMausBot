@@ -4380,5 +4380,8 @@
   "skillBurger.card.madeBy": "Erstellt von {name}",
   "settings.nav.phoneConnected": "Ein Telefon ist verbunden",
   "settings.nav.phoneNeedsYou": "Ein Telefon braucht dich",
-  "devices.reach.sameWifi": "im gleichen WLAN"
+  "devices.reach.sameWifi": "im gleichen WLAN",
+  "phone.reach.offAdding": "Aus · Wenn du ein Telefon hinzufügst, wird das eingeschaltet",
+  "settings.nav.devicesNeedYou": "Ein Gerät oder das private Netzwerk braucht dich",
+  "settings.nav.phoneConnectedAllClear": "Ein Telefon ist verbunden, und nichts braucht dich"
 }

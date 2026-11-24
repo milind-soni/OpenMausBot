@@ -229,7 +229,7 @@ export function AddDevicePanel(props: AddDeviceProps) {
               </Steps>)}
             {kind === "server" && <Steps>
               <Step n={1} title={t("devicesPage.addFlow.serverRunTerminal")}>
-                <CommandRow label={t("devicesPage.addFlow.serverAnywhere")} command={SERVER_COMMANDS.anywhere} />
+                <CommandRow label={t("devicesPage.route.anywhere", { app: productName() })} command={SERVER_COMMANDS.anywhere} />
                 <CommandRow label={t("devicesPage.addFlow.serverPrivate")} command={SERVER_COMMANDS.tailscale} />
                 <p className="text-[12px] leading-4 text-ink-secondary">{t("devicesPage.addFlow.serverHowPlain")}</p>
               </Step>

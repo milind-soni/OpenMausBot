@@ -42,8 +42,7 @@ export function statusText(device: Device, now = Date.now()): string {
   if (device.kind === "vm") return device.desktop ? t(DESKTOP[device.desktop]) : "";
   if (device.status === "online") return t("devicesPage.status.online");
   if (device.status === "offline") return device.lastSeen ? t("devicesPage.status.seen", { when: lastSeen(device.lastSeen, now) }) : t("devicesPage.status.offline");
-  if (device.route === "ssh") return "";
-  if (device.kind === "cloud") return device.home ? t("devicesPage.status.homeCloud", { app: productName() }) : t("devicesPage.status.runBy", { app: productName() });
+  if (device.route === "ssh" || device.kind === "cloud") return t("devicesPage.status.notCheckedHere");
   return device.home ? t("servers.homeTag") : t("devicesPage.status.unknown");
 }
 

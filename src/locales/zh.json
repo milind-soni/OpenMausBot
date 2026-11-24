@@ -10373,5 +10373,8 @@
   "skillBurger.card.madeBy": "由 {name} 创建",
   "settings.nav.phoneConnected": "有一部手机已连接",
   "settings.nav.phoneNeedsYou": "有一部手机需要你处理",
-  "devices.reach.sameWifi": "在同一 Wi-Fi 上"
+  "devices.reach.sameWifi": "在同一 Wi-Fi 上",
+  "phone.reach.offAdding": "已关闭 · 添加手机会开启这些",
+  "settings.nav.devicesNeedYou": "有设备或私有网络需要你处理",
+  "settings.nav.phoneConnectedAllClear": "有一部手机已连接，没有需要你处理的事"
 }
