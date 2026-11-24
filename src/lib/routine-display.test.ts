@@ -77,4 +77,10 @@ describe("a run's status", () => {
     expect(routineRunTone(run({}))).toBe("text-danger");
     expect(routineRunLabel(run({ status: "completed", partial: true }))).toBe("Completed");
   });
+
+  it("reads a completed run that kept its failing step partly done, in the waiting colour", () => {
+    expect(routineRunLabel(run({ status: "completed", partial: true, error: "Stopped because the tool call “read_file” failed." }))).toBe("Partly done");
+    expect(routineRunTone(run({ status: "completed", partial: true, error: "Stopped because the tool call “read_file” failed." }))).toBe("text-warning");
+    expect(routineRunLabel(run({ status: "completed", partial: true }))).toBe("Completed");
+  });
 });
