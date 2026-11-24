@@ -641,10 +641,10 @@ describe("configuration boundaries", () => {
   it("names the per-bot desktop limit once every allowed desktop exists", () => {
     const cfg = { localVm: { mode: "per-bot" as const, maxInstances: 8 } };
     expect(perBotLocalVmLimitProblem(cfg, 7)).toBeNull();
-    expect(perBotLocalVmLimitProblem(cfg, 8)).toBe(
-      "The per-bot Local VM limit is 8 — delete an unused bot VM or raise the limit in App Settings",
+    expect(perBotLocalVmLimitProblem(cfg, 8)).toBe("The per-bot Local VM limit is 8 — delete an unused bot VM");
+    expect(perBotLocalVmLimitProblem({}, 2)).toBe(
+      "The per-bot Local VM limit is 2 — delete an unused bot VM or raise the limit in App Settings",
     );
-    expect(perBotLocalVmLimitProblem({}, 2)).toContain("limit is 2");
   });
 
   it("accepts pool mode with the same bounded seat count", () => {

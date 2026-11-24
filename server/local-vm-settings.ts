@@ -52,7 +52,8 @@ export function localVmMaxInstances(cfg: AppConfig): number {
 /** Why another per-bot desktop can't be created, or null while there is room. */
 export function perBotLocalVmLimitProblem(cfg: AppConfig, existing: number): string | null {
   const max = localVmMaxInstances(cfg);
-  return existing >= max ? `The per-bot Local VM limit is ${max} — delete an unused bot VM or raise the limit in App Settings` : null;
+  const raise = max < MAX_LOCAL_VM_MAX_INSTANCES ? " or raise the limit in App Settings" : "";
+  return existing >= max ? `The per-bot Local VM limit is ${max} — delete an unused bot VM${raise}` : null;
 }
 
 export function localVmIdleTimeoutMinutes(cfg: AppConfig): number {
