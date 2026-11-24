@@ -152,7 +152,7 @@ export function planAccountsFromInstances(instances: InstanceConfigMap, env: Nod
     const driver = DRIVER_OF[entry.driver];
     if (!driver) continue;
     const config = asRecord(entry.config), configDir = typeof config?.configDir === "string" ? config.configDir : undefined;
-    const ownCodexHome = driver === "codex" && chatgptAccountSignsInByDevice(config, env); // signed in by device code into a Codex home of its own
+    const ownCodexHome = driver === "codex" && chatgptAccountSignsInByDevice(config, env);
     accounts.push({
       id,
       name: entry.displayName?.trim() || PRODUCT_NAME[driver],
