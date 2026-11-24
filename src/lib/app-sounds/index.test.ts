@@ -10,8 +10,9 @@ function memoryStorage() {
 }
 
 let local: ReturnType<typeof memoryStorage>;
-let browser: EventTarget;
+let page = { visibilityState: "visible", hasFocus: () => true };
 let contexts = 0;
+let started = 0;
 
 class FakeAudioContext {
   sampleRate = 48_000;
@@ -22,59 +23,97 @@ class FakeAudioContext {
   }
   resume = async () => undefined;
   createBuffer = () => ({ copyToChannel: () => undefined });
-  createBufferSource = () => ({ connect: () => undefined, start: () => undefined });
+  createBufferSource = () => ({ connect: () => undefined, start: () => void (started += 1) });
 }
 
-beforeEach(() => {
+/** One app window: its own copy of the module and its own event target, sharing this device's storage. */
+async function openWindow() {
   vi.resetModules();
+  const target = new EventTarget();
+  vi.stubGlobal("window", target);
+  const sounds = await import("./index");
+  sounds.startAppSounds();
+  return { sounds, fire: (type: string) => target.dispatchEvent(new Event(type)) };
+}
+
+const mention = (id: string, threadId: string) => ({ kind: "mention" as const, botId: "b", threadId, id });
+
+beforeEach(() => {
+  vi.useFakeTimers();
   local = memoryStorage();
-  browser = new EventTarget();
+  page = { visibilityState: "visible", hasFocus: () => true };
   contexts = 0;
+  started = 0;
   vi.stubGlobal("localStorage", local);
-  vi.stubGlobal("window", browser);
-  vi.stubGlobal("document", { visibilityState: "visible", hasFocus: () => true });
+  vi.stubGlobal("document", page);
   vi.stubGlobal("AudioContext", FakeAudioContext);
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
 describe("app sounds in a window", () => {
   it("creates its audio context on the first click, not before", async () => {
-    const sounds = await import("./index");
-    sounds.startAppSounds();
-    expect(sounds.playAppSound("send")).toBe(false);
+    const { sounds, fire } = await openWindow();
+    expect(sounds.playAppSound("send")).toBe("unplayable");
     expect(contexts).toBe(0);
-    browser.dispatchEvent(new Event("pointerdown"));
+    fire("pointerdown");
     expect(contexts).toBe(1);
-    expect(sounds.playAppSound("send")).toBe(true);
+    expect(sounds.playAppSound("send")).toBe("played");
   });
 
   it("follows the window used last across every window of the app", async () => {
-    const sounds = await import("./index");
-    sounds.startAppSounds();
-    expect(sounds.isSoundWindow()).toBe(true);
-    local.setItem(sounds.SOUND_WINDOW_KEY, "another-window");
-    expect(sounds.isSoundWindow()).toBe(false);
-    browser.dispatchEvent(new Event("keydown"));
-    expect(sounds.isSoundWindow()).toBe(true);
-    local.setItem(sounds.SOUND_WINDOW_KEY, "another-window");
-    browser.dispatchEvent(new Event("focus"));
-    expect(sounds.isSoundWindow()).toBe(true);
+    const first = await openWindow();
+    const second = await openWindow();
+    first.fire("pointerdown");
+    expect(first.sounds.isSoundWindow()).toBe(true);
+    expect(second.sounds.isSoundWindow()).toBe(false);
+    second.fire("keydown");
+    expect(second.sounds.isSoundWindow()).toBe(true);
+    expect(first.sounds.isSoundWindow()).toBe(false);
+    first.fire("focus");
+    expect(first.sounds.isSoundWindow()).toBe(true);
   });
 
-  it("leaves the system chime only to an untouched window in use, with sounds on", async () => {
-    const sounds = await import("./index");
-    sounds.startAppSounds();
-    expect(sounds.bannerSilent()).toBe(false);
-    local.setItem(sounds.SOUND_WINDOW_KEY, "another-window");
-    expect(sounds.bannerSilent()).toBe(true);
-    local.removeItem(sounds.SOUND_WINDOW_KEY);
-    local.setItem("omb-notification-sounds", "0");
-    expect(sounds.bannerSilent()).toBe(true);
-    local.setItem("omb-notification-sounds", "glass");
-    browser.dispatchEvent(new Event("pointerdown"));
-    expect(sounds.bannerSilent()).toBe(true);
+  it("hands the lead to a window still open when the one in use closes", async () => {
+    const left = await openWindow();
+    const right = await openWindow();
+    right.fire("pointerdown");
+    left.fire("pointerdown");
+    page.visibilityState = "hidden";
+    page.hasFocus = () => false;
+    expect(right.sounds.notificationSound(mention("m1", "t1"), false)).toBe("silenced");
+    left.fire("pagehide");
+    expect(right.sounds.notificationSound(mention("m2", "t2"), false)).toBe("played");
+    expect(left.sounds.isSoundWindow()).toBe(false);
+  });
+
+  it("takes over from a window that stopped answering, but not from one still open in the background", async () => {
+    const quiet = await openWindow();
+    const busy = await openWindow();
+    busy.fire("pointerdown");
+    quiet.fire("pointerdown");
+    page.visibilityState = "hidden";
+    page.hasFocus = () => false;
+    vi.advanceTimersByTime(quiet.sounds.SOUND_WINDOW_STALE_MS * 2);
+    expect(busy.sounds.isSoundWindow()).toBe(false);
+    local.setItem(quiet.sounds.SOUND_WINDOW_KEY, JSON.stringify({ id: "closed-without-a-word", at: Date.now() }));
+    vi.advanceTimersByTime(quiet.sounds.SOUND_WINDOW_STALE_MS - 1);
+    expect(busy.sounds.notificationSound(mention("m3", "t3"), false)).toBe("silenced");
+    local.setItem(quiet.sounds.SOUND_WINDOW_KEY, JSON.stringify({ id: "closed-without-a-word", at: Date.now() - quiet.sounds.SOUND_WINDOW_STALE_MS }));
+    expect(busy.sounds.notificationSound(mention("m4", "t4"), false)).toBe("played");
+  });
+
+  it("plays no style sample while recording", async () => {
+    const { sounds, fire } = await openWindow();
+    fire("pointerdown");
+    const release = sounds.holdAppSounds("recording");
+    expect(sounds.previewAppSound("retro")).toBe("silenced");
+    expect(started).toBe(0);
+    release();
+    expect(sounds.previewAppSound("retro")).toBe("played");
+    expect(started).toBe(1);
   });
 });

@@ -1,6 +1,6 @@
 import type { Notification } from "../../shared/notification";
 import { plainPreviewText } from "../../shared/plain-preview";
-import { bannerSilent, notificationSound } from "./app-sounds";
+import { notificationSound, type SoundOutcome } from "./app-sounds";
 import { finishedNotificationsEnabled } from "./notification-preferences";
 
 export type NotifyFrame = Notification & { id?: string; read?: boolean };
@@ -38,14 +38,19 @@ export function showNotification(
   avatarUrl?: string | null,
   visibleThreadId?: string | null,
 ) {
-  const focused = typeof document !== "undefined" && document.hasFocus();
-  notificationSound(frame, focused && visibleThreadId === frame.threadId);
+  const viewing = typeof document !== "undefined" && document.hasFocus() && visibleThreadId === frame.threadId;
+  const sound = notificationSound(frame, viewing);
   if (typeof Notification === "undefined") return;
   if (frame.kind === "done" && !finishedNotificationsEnabled()) return;
-  const spend = frame.kind === "spend";
-  if (!spend && focused && visibleThreadId === frame.threadId) return;
+  if (frame.kind !== "spend" && viewing) return;
   if (Notification.permission !== "granted") return;
+  if (typeof sound === "string") showBanner(frame, onOpen, avatarUrl, sound);
+  else void sound.then((outcome) => showBanner(frame, onOpen, avatarUrl, outcome));
+}
 
+/** The banner chimes only when the app wanted a sound and could not play it; otherwise the app spoke, or chose quiet. */
+function showBanner(frame: NotifyFrame, onOpen: (target: NotificationTarget) => void, avatarUrl: string | null | undefined, sound: SoundOutcome) {
+  const spend = frame.kind === "spend";
   const title = placeName ? `${placeName} · ${frame.title}` : frame.title;
   // Entries saved before the harness spoke plain text still carry Markdown.
   const body = plainPreviewText(frame.body);
@@ -53,7 +58,7 @@ export function showNotification(
     body,
     ...buildNotificationOptions({ id: frame.botId, avatarUrl }),
     ...(spend ? { tag: "openmausbot:spend", icon: undefined } : {}),
-    ...(bannerSilent() ? { silent: true } : {}),
+    ...(sound === "unplayable" ? {} : { silent: true }),
   };
   const shownByPage = () => {
     new Notification(title, options).onclick = () => {

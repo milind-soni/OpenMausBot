@@ -7,6 +7,10 @@ export const REPEAT_WINDOW_MS = 150;
 
 export type HoldReason = "recording" | "call";
 
+/** What became of one sound: heard, kept quiet on purpose, or one the app cannot make here, which the system chime stands in for. */
+export type SoundOutcome = "played" | "silenced" | "unplayable";
+export type SoundDecision = SoundOutcome | Promise<SoundOutcome>;
+
 export interface SoundOutput {
   readonly sampleRate: number;
   readonly state: string;
@@ -49,16 +53,29 @@ export function createSoundPlayer(host: SoundHost) {
     return samples;
   };
 
-  const emit = (event: SoundEvent, style: SoundStyle) => {
-    if (!output) return;
-    if (output.state === "suspended") void output.resume().catch(() => undefined);
-    const samples = sound(event, style, output.sampleRate);
-    const buffer = output.createBuffer(1, samples.length, output.sampleRate);
+  const emit = (out: SoundOutput, event: SoundEvent, style: SoundStyle) => {
+    const samples = sound(event, style, out.sampleRate);
+    const buffer = out.createBuffer(1, samples.length, out.sampleRate);
     buffer.copyToChannel(samples, 0);
-    const source = output.createBufferSource();
+    const source = out.createBufferSource();
     source.buffer = buffer;
-    source.connect(output.destination);
+    source.connect(out.destination);
     source.start();
+  };
+
+  /** A suspended context only counts once its resume succeeded; a rejected resume leaves the cue to the system. */
+  const emitWhenRunning = (event: SoundEvent, style: SoundStyle): SoundDecision => {
+    const out = output;
+    if (!out) return "unplayable";
+    if (out.state === "running") {
+      emit(out, event, style);
+      return "played";
+    }
+    if (out.state !== "suspended") return "unplayable";
+    return out.resume().then(
+      () => (out.state === "running" ? (emit(out, event, style), "played" as const) : "unplayable" as const),
+      () => "unplayable" as const,
+    );
   };
 
   /** Browsers only let a page make sound after the person clicked or typed in it: call from that gesture. */
@@ -69,27 +86,28 @@ export function createSoundPlayer(host: SoundHost) {
 
   return {
     unlock,
-    unlocked: () => output !== null,
+    holding: () => holds.size > 0,
     hold(reason: HoldReason): () => void {
       const token = Symbol(reason);
       holds.set(token, reason);
       return () => void holds.delete(token);
     },
-    play(event: SoundEvent): boolean {
+    play(event: SoundEvent): SoundDecision {
       const choice = host.choice();
-      if (choice === "off" || !output || held(event)) return false;
-      if (host.background() && (!BACKGROUND_EVENTS.has(event) || !host.leader())) return false;
+      if (choice === "off" || held(event)) return "silenced";
+      if (host.background() && (!BACKGROUND_EVENTS.has(event) || !host.leader())) return "silenced";
+      if (!output) return "unplayable";
       const now = host.now();
       const last = lastPlayed.get(event);
-      if (last !== undefined && now - last < REPEAT_WINDOW_MS) return false;
+      if (last !== undefined && now - last < REPEAT_WINDOW_MS) return "silenced";
       lastPlayed.set(event, now);
-      emit(event, choice);
-      return true;
+      return emitWhenRunning(event, choice);
     },
-    /** The sample a person hears when they pick a style; it comes from their click, so no other rule applies. */
-    preview(style: SoundStyle) {
+    /** The sample a person hears when they pick a style, from their own click; a call or a recording keeps it quiet. */
+    preview(style: SoundStyle): SoundDecision {
+      if (holds.size > 0) return "silenced";
       unlock();
-      emit("done", style);
+      return emitWhenRunning("done", style);
     },
   };
 }

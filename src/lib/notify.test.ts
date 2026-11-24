@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const sounds = vi.hoisted(() => ({ enabled: true, finished: true }));
 vi.mock("./notification-preferences", () => ({
-  readSoundChoice: () => (sounds.enabled ? "click" : "off"),
   finishedNotificationsEnabled: () => sounds.finished,
 }));
+vi.mock("./app-sounds", () => ({ notificationSound: () => (sounds.enabled ? "unplayable" : "silenced") }));
 
 import { setLocale } from "./i18n";
 import {

@@ -1,4 +1,5 @@
 import type { Notification, NotifyKind } from "../../../shared/notification";
+import type { SoundDecision } from "./player";
 import type { SoundEvent } from "./render";
 
 export const NOTIFICATION_SOUNDS: Record<NotifyKind, SoundEvent | null> = {
@@ -26,9 +27,10 @@ const REMEMBERED = 200;
 export type NotificationSoundEntry = Pick<Notification, "kind" | "threadId" | "groupId"> & { id?: string; read?: boolean };
 
 export function createEventSounds(deps: {
-  play: (event: SoundEvent) => boolean;
+  play: (event: SoundEvent) => SoundDecision;
   now: () => number;
   finishedNotices: () => boolean;
+  soundsOn: () => boolean;
 }) {
   const heard = new Set<string>();
   const groupHeard = new Map<string, number>();
@@ -42,19 +44,20 @@ export function createEventSounds(deps: {
 
   return {
     /** `viewing`: the person has this thread open in a focused window, where its reply already made a sound. */
-    notified(entry: NotificationSoundEntry, viewing: boolean): boolean {
+    notified(entry: NotificationSoundEntry, viewing: boolean): SoundDecision {
       const event = NOTIFICATION_SOUNDS[entry.kind];
-      if (!event || entry.read || !firstTime(entry.id)) return false;
-      if (event === "done" && (viewing || !deps.finishedNotices())) return false;
+      if (entry.read || !firstTime(entry.id)) return "silenced";
+      if (!event) return deps.soundsOn() ? "unplayable" : "silenced";
+      if (event === "done" && (viewing || !deps.finishedNotices())) return "silenced";
       const group = `${event}:${entry.groupId ?? entry.threadId}`;
       const now = deps.now();
       const last = groupHeard.get(group);
-      if (last !== undefined && now - last < GROUP_WINDOW_MS) return false;
+      if (last !== undefined && now - last < GROUP_WINDOW_MS) return "silenced";
       groupHeard.set(group, now);
       return deps.play(event);
     },
-    replied(messageId: string, inView: boolean): boolean {
-      if (!inView || !firstTime(`message:${messageId}`)) return false;
+    replied(messageId: string, inView: boolean): SoundDecision {
+      if (!inView || !firstTime(`message:${messageId}`)) return "silenced";
       return deps.play("reply");
     },
   };
