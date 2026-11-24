@@ -226,7 +226,7 @@ export class AntigravityAuthController {
       this.flow = flow;
       return {
         phase: "waiting", flowId: flow.id, authorizationUrl: outcome.request.authorizationUrl,
-        expiresAt: new Date(flow.expiresAt).toISOString(), pasteCode: true,
+        expiresAt: new Date(flow.expiresAt).toISOString(), kind: "pasted-code",
       };
     } catch (error) {
       stop();

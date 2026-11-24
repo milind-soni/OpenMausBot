@@ -2,7 +2,7 @@
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setLocale } from "@/lib/i18n";
 import { BotEditorStore, type InstanceInfo, type useStore } from "@/state/store";
@@ -39,18 +39,18 @@ function auth(body: object) {
   return new Response(JSON.stringify({ auth: body }), { status: 200, headers: { "content-type": "application/json" } });
 }
 
-async function startSignIn(status: object, ogb: object = { remoteClient: { active: false } }, config: object = {}) {
+async function startSignIn(status: object, ogb: object = { remoteClient: { active: false } }, config: object = {}, started: object = {}) {
   const openExternal = vi.fn(async () => {});
   vi.stubGlobal("ogb", { platform: "linux", openExternal, ...ogb });
   const fetched = vi.fn(async (input: RequestInfo | URL) => String(input).includes("/auth/status")
     ? auth(status)
-    : auth({ phase: "waiting", flowId: "flow-1", authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth?state=s" }));
+    : auth({ phase: "waiting", flowId: "flow-1", authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth?state=s", ...started }));
   vi.stubGlobal("fetch", fetched);
   const store = { state: { config }, dispatch: vi.fn(), refreshInstances: vi.fn(async () => {}), refreshModels: vi.fn(async () => {}) } as unknown as ReturnType<typeof useStore>;
   flushSync(() => root.render(createElement(BotEditorStore, { value: store, children: createElement(EngineSetup, { instance: antigravity }) })));
   const button = () => [...host.querySelectorAll("button")].find((b) => /Sign in with Google|Open Google sign-in again/.test(b.textContent ?? ""))!;
   button().click();
-  await vi.waitFor(() => expect(host.querySelector("[data-redirect-paste]")).not.toBeNull());
+  await vi.waitFor(() => expect(host.querySelector("[data-redirect-paste], [data-code-paste]")).not.toBeNull());
   return { store, fetched, openExternal, button };
 }
 
@@ -118,29 +118,59 @@ it("names Google on the sign-in card, never another provider", () => {
   expect(host.textContent).not.toContain("Mistral");
 });
 
-// Antigravity's native CLI signs in with `--login`: Google's Antigravity page shows a code to paste back, and there is no
-// redirect to paste and nothing to finish by itself.
-it("asks for the code the Antigravity page shows when the sign-in is the native CLI's, and sends it", async () => {
-  vi.stubGlobal("ogb", { platform: "linux", openExternal: vi.fn(async () => {}), remoteClient: { active: false } });
-  const fetched = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => String(input).includes("/auth/status")
-    ? auth({ phase: "waiting", flowId: "flow-1", authorizationUrl: null })
-    : auth({ phase: "waiting", flowId: "flow-1", authorizationUrl: "https://accounts.google.com/o/oauth2/auth?state=s", pasteCode: true }));
-  vi.stubGlobal("fetch", fetched);
-  const store = { state: { config: { cloudHome: true } }, dispatch: vi.fn(), refreshInstances: vi.fn(async () => {}), refreshModels: vi.fn(async () => {}) } as unknown as ReturnType<typeof useStore>;
-  flushSync(() => root.render(createElement(BotEditorStore, { value: store, children: createElement(EngineSetup, { instance: antigravity }) })));
-  [...host.querySelectorAll("button")].find((b) => /Sign in with Google/.test(b.textContent ?? ""))!.click();
-  await vi.waitFor(() => expect(host.querySelector("[data-code-paste]")).not.toBeNull());
-  expect(host.querySelector("[data-redirect-paste]")).toBeNull();
-  expect(host.textContent).not.toContain("I finished signing in");
-  expect(host.textContent).not.toContain("Google opens a page that won’t load");
-  expect(host.querySelector("[data-code-paste] p")?.textContent).toBe("After you sign in, Google shows a code on the Antigravity page. Copy it and paste it here.");
-  const field = host.querySelector<HTMLInputElement>("[data-code-paste] input")!;
-  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-  flushSync(() => { setValue.call(field, "4/0Ab-code"); field.dispatchEvent(new Event("input", { bubbles: true })); });
-  const send = [...host.querySelectorAll("button")].find((b) => b.textContent === "Send code")!;
-  await vi.waitFor(() => expect(send.disabled).toBe(false));
-  send.click();
-  await vi.waitFor(() => expect(fetched.mock.calls.some(([url]) => String(url).includes("/auth/complete"))).toBe(true));
-  const [, init] = fetched.mock.calls.find(([url]) => String(url).includes("/auth/complete"))!;
-  expect(JSON.parse(String(init?.body))).toEqual({ flowId: "flow-1", callbackUrl: "4/0Ab-code" });
+it("says on the sign-in card of an account that runs the native CLI, whatever its path, that its sign-in is the one the Antigravity CLI shares, and not on the pinned runtime's", () => {
+  vi.stubGlobal("ogb", { platform: "linux", remoteClient: { active: false } });
+  const store = { state: { config: {} }, dispatch: vi.fn(), refreshInstances: vi.fn(async () => {}), refreshModels: vi.fn(async () => {}) } as unknown as ReturnType<typeof useStore>;
+  const render = (instance: InstanceInfo) => flushSync(() => root.render(createElement(BotEditorStore, { value: store, children: createElement(EngineSetup, { instance }) })));
+  render({ ...antigravity, cli: "antigravity", snapshot: { ...antigravity.snapshot, sharedSignIn: true } });
+  expect(host.textContent).toContain("Antigravity CLI keeps one sign-in on this computer");
+  expect(host.textContent).not.toContain("has its own Google account");
+  render({ ...antigravity, cli: "agy", snapshot: { ...antigravity.snapshot, sharedSignIn: true } });
+  expect(host.textContent).toContain("Antigravity CLI keeps one sign-in on this computer");
+  render({ ...antigravity, cli: "agy" });
+  expect(host.textContent).toContain("has its own Google account");
+  expect(host.textContent).not.toContain("keeps one sign-in");
+});
+
+it("describes and labels the install as Google's Antigravity CLI, unless the path asks for the pinned runtime alone", () => {
+  vi.stubGlobal("ogb", { platform: "linux", remoteClient: { active: false } });
+  const store = { state: { config: {} }, dispatch: vi.fn(), refreshInstances: vi.fn(async () => {}), refreshModels: vi.fn(async () => {}) } as unknown as ReturnType<typeof useStore>;
+  const missing = { state: "unavailable" as const, reason: "The Antigravity CLI is not installed yet." };
+  const render = (cli: string | undefined) => flushSync(() => root.render(createElement(BotEditorStore, { value: store, children: createElement(EngineSetup, { instance: { ...antigravity, cli, snapshot: missing } }) })));
+  for (const cli of [undefined, "agy", "antigravity"]) {
+    render(cli);
+    expect(host.textContent).toContain("installs Google's Antigravity CLI");
+    expect(host.textContent).toContain("Install Google Antigravity CLI");
+    expect(host.textContent).not.toContain("separate from the Antigravity app and agy CLI");
+  }
+  render("agy_acp_server");
+  expect(host.textContent).toContain("separate from the Antigravity app and agy CLI");
+  expect(host.textContent).toContain("Install Classic runtime");
+});
+
+// The native CLI's sign-in ends on a page that shows a code, not on a redirect to this computer.
+describe("a sign-in whose page ends on a code", () => {
+  const native = { kind: "pasted-code", authorizationUrl: "https://accounts.google.com/o/oauth2/auth?state=s" };
+
+  it("asks for the code or the page's address, and never for a redirect that cannot load or a finished button", async () => {
+    await startSignIn({ phase: "waiting", flowId: "flow-1" }, { remoteClient: { active: false } }, { cloudHome: true }, native);
+    expect(host.querySelector("[data-redirect-paste]")).toBeNull();
+    expect(host.textContent).not.toContain("I finished signing in");
+    expect(host.textContent).not.toContain("won’t load");
+    expect(host.querySelector("[data-code-paste] p")?.textContent).toContain("paste the code it shows, or the full address of the page you end on");
+    expect(host.querySelector("[data-code-paste] input")?.getAttribute("aria-label")).toBe("Sign-in code or page address");
+  });
+
+  it("sends what was pasted with the sign-in's id, then reads the engines again", async () => {
+    const { store, fetched } = await startSignIn({ phase: "waiting", flowId: "flow-1" }, { remoteClient: { active: false } }, {}, native);
+    const field = host.querySelector<HTMLInputElement>("[data-code-paste] input")!;
+    const send = [...host.querySelectorAll("button")].find((b) => b.textContent === "Send code")!;
+    expect(send.disabled).toBe(true);
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    flushSync(() => { setValue.call(field, "4/0AbcCode"); field.dispatchEvent(new Event("input", { bubbles: true })); });
+    flushSync(() => send.click());
+    await vi.waitFor(() => expect(store.refreshModels).toHaveBeenCalledWith("antigravity"));
+    const sent = (fetched.mock.calls as unknown as Array<[RequestInfo | URL, RequestInit]>).find(([input]) => String(input).includes("/auth/complete"))!;
+    expect(JSON.parse(String(sent[1].body))).toEqual({ flowId: "flow-1", callbackUrl: "4/0AbcCode" });
+  });
 });

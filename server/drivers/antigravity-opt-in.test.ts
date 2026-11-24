@@ -94,7 +94,6 @@ describe.skipIf(!pinned || WINDOWS)("with the native CLI off (the default), Anti
     expect(latest).not.toHaveBeenCalled();
     // The updater's own question, as main asks it: is an older pinned release installed? No.
     expect(await runtime.antigravityOlderRuntime(baseDir)).toBeNull();
-    expect(await runtime.retirePinnedAntigravityRuntime({ baseDir, inUse: () => false })).toEqual([]);
     expect(existsSync(pinnedDir)).toBe(true);
     expect(existsSync(started)).toBe(false);
   });
@@ -156,15 +155,12 @@ describe.skipIf(!pinned || WINDOWS)("with OMB_ANTIGRAVITY_NATIVE_CLI=1", () => {
     const { baseDir } = computer();
     await expect(runtime.resolveAntigravityRuntime("agy", { PATH: "" }, baseDir)).resolves.toMatchObject({ version: pinned!.version });
     expect(await runtime.antigravityCliUpdate({ baseDir, now: Date.now() + 1e9, latest: latestRelease })).toBe(pinned!.version);
-    expect(await runtime.retirePinnedAntigravityRuntime({ baseDir, inUse: () => false })).toEqual([]);
   });
 
-  it("runs the CLI once it is installed, and removes the pinned runtime only after an account signed in on it", async () => {
+  it("runs the CLI once it is installed, and removes nothing", async () => {
     const runtime = await optedIn();
-    const before = computer({ cli: true });
+    const before = computer({ cli: true, cliSignIn: true });
     await expect(runtime.resolveAntigravityRuntime("agy", { PATH: "" }, before.baseDir)).resolves.toMatchObject({ version: "1.5.15", harnessPath: null });
-    expect(await runtime.retirePinnedAntigravityRuntime({ baseDir: before.baseDir, inUse: () => false })).toEqual([]);
-    const after = computer({ cli: true, cliSignIn: true });
-    expect(await runtime.retirePinnedAntigravityRuntime({ baseDir: after.baseDir, inUse: () => false })).toEqual([pinned!.sha256]);
+    expect(existsSync(before.pinnedDir)).toBe(true);
   });
 });

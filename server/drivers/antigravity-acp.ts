@@ -722,6 +722,7 @@ export async function probeAntigravityModels(input: {
   cwd?: string;
   fallbackDefault: string;
   timeoutMs?: number;
+  onProcess?: (child: ChildProcess) => void;
 }): Promise<ModelCatalog> {
   const deadline = Date.now() + (input.timeoutMs ?? STARTUP_CAP_MS);
   const remaining = () => {
@@ -731,8 +732,10 @@ export async function probeAntigravityModels(input: {
   };
   const client = new AntigravityAcpClient(input.runtime, input.profile, input.cwd ?? input.profile.directory);
   try {
+    input.onProcess?.(client.child);
     const initialized = await client.initialize(remaining(), deadline);
-    await client.request("authenticate", { methodId: "oauth-personal" }, remaining());
+    // Native CLI 1.5.14 opens the system browser on `authenticate` and waits 300 s for it; its sign-in is `acp --login`.
+    if (input.runtime.harnessPath !== null) await client.request("authenticate", { methodId: "oauth-personal" }, remaining());
     const session = await client.request(
       "session/new",
       { cwd: input.cwd ?? input.profile.directory, mcpServers: [], ...antigravitySessionSetup(initialized) },
@@ -775,10 +778,24 @@ const runtimeVersion = (value: unknown) => typeof value === "string" ? value.rep
 
 /** agy_acp_server 1.4.2 to 1.4.5 create or overwrite skills/system/run-workflow/SKILL.md in the session's folder unless
  * the session turns its `run_workflow` tool off. Sent with session/new, session/load and session/resume. */
-export function antigravitySessionSetup(initialized: any): { _meta?: { antigravity: { disabledTools: string[] } } } {
+export function antigravitySessionSetup(
+  initialized: any,
+  system?: string,
+): { _meta?: { antigravity: { disabledTools?: string[]; systemPrompt?: { append: string } } } } {
   const match = /^1\.4\.(\d+)(?!\d)/u.exec(runtimeVersion(initialized?.agentInfo?.version));
   const patch = match ? Number(match[1]) : -1;
-  return patch >= 2 && patch <= 5 ? { _meta: { antigravity: { disabledTools: ["run_workflow"] } } } : {};
+  const antigravity = {
+    ...(patch >= 2 && patch <= 5 ? { disabledTools: ["run_workflow"] } : {}),
+    ...(system === undefined ? {} : { systemPrompt: { append: system } }),
+  };
+  return Object.keys(antigravity).length > 0 ? { _meta: { antigravity } } : {};
+}
+
+/** The native CLI (1.5.14) advertises `_meta.antigravity.systemPrompt.append` in initialize: session/new, session/load and
+ * session/resume then take the system prompt there, kept with the conversation, and it never reaches the scan that turns
+ * a `/word` anywhere in a prompt's first text block into that command. */
+export function antigravityTakesSystemPrompt(initialized: any): boolean {
+  return initialized?.agentCapabilities?._meta?.antigravity?.systemPrompt?.append === true;
 }
 
 /** The agy CLI has no harness sibling and serves ACP through its `acp` subcommand. It joins `--app-data-dir` beneath

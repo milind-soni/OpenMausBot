@@ -24,14 +24,28 @@ export class AntigravityProcesses {
     return this.#running.get(instanceId)?.size ?? 0;
   }
 
-  /** Resolves once this account's processes are gone: each was asked to exit and gets `waitMs` before it is killed. */
-  async stopped(instanceId: string, waitMs = EXIT_WAIT_MS): Promise<void> {
+  /** Each of this account's processes was asked to exit and gets `waitMs` before it is killed, then `waitMs` more to go.
+   * Resolves false when one is still there. */
+  async stopped(instanceId: string, waitMs = EXIT_WAIT_MS): Promise<boolean> {
     const children = [...this.#running.get(instanceId) ?? []];
-    await Promise.all(children.map((child) => new Promise<void>((resolve) => {
-      if (child.exitCode !== null || child.signalCode !== null) return resolve();
-      const timer = setTimeout(() => void killCliTree(child).catch(() => false).then(() => resolve()), waitMs);
+    const gone = await Promise.all(children.map((child) => new Promise<boolean>((resolve) => {
+      if (child.exitCode !== null || child.signalCode !== null) return resolve(true);
+      let giveUp: ReturnType<typeof setTimeout> | undefined;
+      const finish = (gone: boolean) => {
+        clearTimeout(timer);
+        clearTimeout(giveUp);
+        child.off("close", closed);
+        resolve(gone);
+      };
+      const closed = () => finish(true);
+      const timer = setTimeout(() => {
+        void killCliTree(child).catch(() => false);
+        giveUp = setTimeout(() => finish(false), waitMs);
+        giveUp.unref?.();
+      }, waitMs);
       timer.unref?.();
-      child.once("close", () => { clearTimeout(timer); resolve(); });
+      child.once("close", closed);
     })));
+    return gone.every(Boolean);
   }
 }

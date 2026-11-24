@@ -333,11 +333,20 @@ inside the turn's folder: one that names a command, gives no location, or
 reaches outside that folder is asked as usual. A turn fails rather than start
 when the CLI offers no mode or does not confirm `default`.
 
-A computer that already has the pinned runtime keeps it. To move an
-Antigravity account to the native CLI, set its **CLI path** to `antigravity`
-and choose **Install official Antigravity**; to move back, set the CLI path to
-`agy`. New installs get the native CLI when Google's channel can be reached and
-the pinned runtime otherwise.
+A new install takes the native CLI; a computer that already has the pinned
+runtime keeps it. To move an Antigravity account to the native CLI, choose
+**Google Antigravity CLI** under **Runs on** (its CLI path becomes `antigravity`)
+and **Install Google Antigravity CLI**; to move back, choose **Classic runtime**
+(`agy_acp_server`), which runs the pinned runtime alone. An account with no CLI
+path, or `agy`, runs the pinned runtime when it is installed, and the native CLI
+otherwise. The native CLI signs in through its own
+`acp --login`: the link opens Google, and the code or address the page ends on
+is pasted back into the sign-in card. The native CLI keeps one sign-in per
+computer (1.5.14 stores it in a single OS keyring entry, whatever folder it is
+given): every account that runs it and the Antigravity CLI in a terminal use the same
+Google account, an account added here signs in with whichever one is there,
+and signing out of any of them signs them all out. Removing an added account
+leaves that shared sign-in in place.
 
 A new Antigravity bot starts on Auto, the default. Old Antigravity
 `auto` / `autoApprove` settings still behave as Ask and are displayed as Ask;
