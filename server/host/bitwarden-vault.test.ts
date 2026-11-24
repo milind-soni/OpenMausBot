@@ -103,6 +103,23 @@ describe("Bitwarden through its command line tool", () => {
     expect(await read("bw://i-dup-2/password"), "two of a name: by id").toBe("fake-deploy-2");
   });
 
+  it("answers a custom field emptied since the listing as gone, never as the login password", async () => {
+    // The list's entry names the field a bare-name read takes; the item is fetched again at read time, and the entry
+    // is only refreshed once a minute. A field deleted or emptied in Bitwarden in that window leaves nothing to read:
+    // the login password is a different secret the name never asked for, and reading it would mark it used.
+    const items: FakeBwItem[] = [
+      { id: "i-key", name: "Api key", type: 1, login: { uris: [{ uri: "https://api.example.com" }], username: "me", password: "fake-api-login-pass" },
+        fields: [{ name: "key", value: "fake-api-key-1", type: 1 }] },
+    ];
+    const fake = fakeBw({ ...CREDENTIALS, email: "bot@acme.test", items });
+    const vault = new BitwardenLogins({ credentials: () => CREDENTIALS, run: fake.run });
+    await vault.refresh();
+    const read = () => readLinkedSecret(findLinkedSecret([vault], "Api key", "pepper")!);
+    items[0]!.fields = [];
+    await expect(read()).rejects.toThrow("Api key is no longer in Bitwarden");
+    expect(linkedSecrets(vault).find((secret) => secret.name === "Api key"), "not marked used").not.toHaveProperty("lastUsedAt");
+  });
+
   it("parses bw:// references and checks the server address", () => {
     expect(parseBitwardenReference("bw://GitHub/totp")).toEqual({ item: "GitHub", field: "totp" });
     expect(parseBitwardenReference(" bw://Acme OAuth ")).toEqual({ item: "Acme OAuth" });

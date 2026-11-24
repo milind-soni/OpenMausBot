@@ -139,6 +139,7 @@ const listedAsSecret = (entry: ItemEntry) => (entry.type === SECURE_NOTE && entr
 function valueOf(item: BwItem, entry: ItemEntry, field: string | undefined, now: number): string | undefined {
   if (!field) {
     const own = item.type === SECURE_NOTE && item.notes?.trim() ? item.notes : customValue(item, entry.main);
+    if (entry.main !== undefined) return own;
     // A login has no custom field of its own to read: its name reads the password, like `bw://<name>` does.
     return own ?? (item.type === LOGIN ? item.login?.password ?? undefined : undefined);
   }
