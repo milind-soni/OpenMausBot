@@ -43,6 +43,22 @@ test("the rail: My Cloud, the person's Clouds and teams' Clouds in the session's
     "once My Cloud is home, this computer is no circle, whatever its colour");
 });
 
+test("one list for this computer and My Cloud: no rail while they are the only places; any other place keeps it", () => {
+  const pair = { activeId: "local", environments: [{ id: "home", kind: "remote", name: "My Cloud", origin: HOME, home: true }] };
+  const mine = session({ teams: [], clouds: parseCloudList([PRIMARY]) });
+  assert.deepEqual(railPlaces({ saved: pair, home: null, mine: HOME, state: mine }).map(place => place.id), ["local", "home"], "the switch off: the rail as it was");
+  assert.deepEqual(railPlaces({ saved: pair, home: null, mine: HOME, state: mine, joined: true }), [], "on, and only the pair: the one list is the way between them");
+  assert.deepEqual(railPlaces({ saved: pair, home: null, mine: HOME, state: null, joined: true }), [], "the same before the Admin answers");
+  const keeps = (label, input) => assert.ok(railPlaces({ saved: pair, home: null, mine: HOME, state: mine, joined: true, ...input }).length > 1, label);
+  keeps("a team's Cloud", { saved: { ...pair, environments: [...pair.environments, { id: "acme", kind: "remote", name: "Acme", origin: TEAM, team: { id: "team-acme", role: "member" } }] } });
+  keeps("a server saved by hand", { saved: { ...pair, environments: [...pair.environments, { id: "vps", kind: "remote", name: "Office", origin: VPS }] } });
+  keeps("another Cloud of the person's own", { saved: { ...pair, environments: [...pair.environments, { id: "a", kind: "remote", name: "Client A", origin: CLIENT_A, cloud: { id: "c-a", role: "owner" } }] } });
+  keeps("a workspace of this computer's own", { profiles: [{ id: "p1", name: "Side project" }] });
+  keeps("a Cloud still being made", { state: session({ teams: [], clouds: parseCloudList([PRIMARY, entry({ id: "c-new", name: "New", origin: null, status: "setting_up" })]) }) });
+  assert.ok(railPlaces({ saved: pair, home: null, mine: HOME, state: mine, joined: true, accounts: [{ id: "acct-2", email: "other@example.test", places: [], rows: [] }] }).length > 0, "another account signed in here");
+  assert.deepEqual(railPlaces({ saved: pair, home: HOME, mine: HOME, state: mine, joined: true }).map(place => place.id), ["home"], "after a whole move there is no pair to join");
+});
+
 test("a Cloud of your own is a rail even alone, for its ＋; otherwise one place, or none: no rail, the window as it was", () => {
   const alone = { activeId: "home", environments: [{ id: "home", kind: "remote", name: "My Cloud", origin: HOME, home: true }] };
   assert.deepEqual(railPlaces({ saved: alone, home: HOME, mine: HOME, state: session({ teams: [], clouds: parseCloudList([PRIMARY]) }) }).map(place => place.id), ["home"],

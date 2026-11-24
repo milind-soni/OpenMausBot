@@ -45,7 +45,11 @@ function rowState(bot) {
   const waiting = bot.activity === "waiting-on-you" || tasks.some((task) => task.activity === "waiting-on-you");
   const working = !waiting && (Boolean(bot.busy) || tasks.some((task) => task.busy || task.activity === "working"));
   const unread = tasks.length ? tasks.some((task) => task.unread === true) : bot.unread === true;
-  return { ...(waiting ? { waiting: true } : {}), ...(working ? { working: true } : {}), ...(unread ? { unread: true } : {}) };
+  // When its conversations last moved (each thread's own server-derived time, never a word of them): what Unread lists
+  // the row by, newest first, beside this place's own rows.
+  const times = tasks.map((task) => task.updatedAt).filter((at) => Number.isFinite(at) && at > 0);
+  const lastAt = times.length ? Math.max(...times) : null;
+  return { ...(waiting ? { waiting: true } : {}), ...(working ? { working: true } : {}), ...(unread ? { unread: true } : {}), ...(lastAt !== null ? { lastAt } : {}) };
 }
 
 /** One bot of the other place as its row: who it is, how it looks and how it is doing. A bot that is archived, hidden
@@ -85,6 +89,8 @@ const needsSignIn = (response) => response?.status === 401 || response?.status =
 /**
  * @param {{
  *   pref: { read(): unknown, write(value: unknown): void },
+ *   onlyPair?(): boolean,
+ *   switched?(): void,
  *   cloud(): { origin: string | null, account: string | null, asleep: boolean },
  *   powerChecked(): Promise<boolean>,
  *   computer(): boolean,
@@ -111,13 +117,16 @@ const needsSignIn = (response) => response?.status === 401 || response?.status =
  * own switch to that place, waking My Cloud as opening it always does. `send`: to the page on screen. `changed()`: the
  * list or the switch changed, so a page that draws it asks again. `address(home, botId)`: the address the link between
  * the two places gives that bot (electron/bot-link-main.mjs), or null while no link of this Cloud and account is on.
+ * `onlyPair()`: this computer and My Cloud are the person's only places, so with the switch on the one list stands for
+ * both and the rail of places is not drawn (cloud-rail.mjs `railPlaces` `joined`); the page hides its place pill too.
+ * `switched()`: the switch was turned, so the rail is drawn again.
  *
  * Security: My Cloud is never asked while it sleeps, since any request would wake it and run up its hours. It is asked
  * only right after the Admin said it is awake, at most once a minute, and only while the person is using the window. What
  * remains is a Cloud that fell asleep in the seconds since the Admin answered; one that only agreed to sleep answers so
  * itself and is left alone. Rows are kept for the Cloud and account they came from, and dropped the moment either changes.
  */
-export function createPlacesTogether({ pref, cloud, powerChecked, computer, local, cloudFetch, napped = () => {}, address = () => null, shown, focused, openPlace, send, changed, now = Date.now,
+export function createPlacesTogether({ pref, onlyPair = () => false, switched = () => {}, cloud, powerChecked, computer, local, cloudFetch, napped = () => {}, address = () => null, shown, focused, openPlace, send, changed, now = Date.now,
   setTimer = setInterval, clearTimer = clearInterval, later = setTimeout, cancelLater = clearTimeout }) {
   /** What each place gave last: its rows, when, and how the last read went. */
   const kept = new Map();
@@ -291,13 +300,16 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
       if (!active()) return { v: 1, available: available(), on: isOn(), here, other: null };
       watch();
       void refresh(otherHome(here));
-      return { v: 1, available: true, on: true, here, other: otherOf(here) };
+      let pair = false;
+      try { pair = onlyPair() === true; } catch {}
+      return { v: 1, available: true, on: true, here, other: otherOf(here), ...(pair ? { onlyPair: true } : {}) };
     },
     /** The switch. Off forgets every list. */
     set(asking, value) {
       on = value === true;
       pref.write({ v: 1, on });
       sameScope();
+      try { switched(); } catch {}
       tell();
       return this.state(asking);
     },

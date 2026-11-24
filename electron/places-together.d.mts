@@ -21,6 +21,8 @@ export interface PlaceBotRow {
   waiting?: true;
   working?: true;
   unread?: true;
+  /** Epoch ms its conversations last moved there (the newest thread's `updatedAt`): Unread's order across places. */
+  lastAt?: number;
 }
 
 export interface PlacesTogetherState {
@@ -33,6 +35,10 @@ export interface PlacesTogetherState {
   /** The other place's bots while the switch is on. `state`: how that place is doing: asleep, waking and offline keep the
    * bots it gave last; "signin" is a My Cloud this window has not signed in to yet, which lists none. */
   other: { home: BotHome; state: "ready" | "loading" | "asleep" | "waking" | "offline" | "signin"; bots: PlaceBotRow[]; newBot?: boolean } | null;
+  /** On, and this computer and My Cloud are the person's only places: the one list stands for both, so neither the rail
+   * of places nor the page's place pill is drawn. Absent while there is a Team Cloud, a server saved by hand, a
+   * workspace of this computer's own, another account or a Cloud still being made: those keep the rail and the pill. */
+  onlyPair?: true;
 }
 
 /** `window.ogb.placesTogether`: this computer's page and My Cloud's own page. */
