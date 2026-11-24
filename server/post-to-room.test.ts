@@ -776,6 +776,11 @@ describe("limits counted per turn on a bearer that outlives the turn", () => {
   }, 40_000);
 
   it("tells a same-turn one-way (reply: none) hand-off that nothing comes back", async () => {
+    // The case above resumes its delegator when the delegate reports; a new bot's department is set only while every bot is idle.
+    await expect.poll(async () => {
+      const bots = field((await api("GET", "/api/bots?messages=0")).body, "bots");
+      return Array.isArray(bots) && bots.some((bot) => Boolean(field(bot as Record<string, unknown>, "busy")));
+    }, { timeout: 20_000 }).toBe(false);
     const from = await makeBot("One Way Delegator", "One way delegations");
     const to = await makeBot("One Way Delegate", "One way delegations");
     const token = await startTurn(from.id, from.threadId);
