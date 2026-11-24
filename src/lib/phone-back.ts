@@ -4,6 +4,8 @@ export interface PhoneBackPlace {
   calendar: boolean;
   drawerOpen: boolean;
   panelOpen: boolean;
+  /** A file or app preview covers the chat; it has its own store, apart from the side panels, and closes with them. */
+  preview: boolean;
   /** The apps page is open; it stays open under the list unless back closes it. */
   appsPage: boolean;
   /** Steps the bot list keeps: the open list, and a screen reached from it. */
@@ -13,7 +15,7 @@ export interface PhoneBackPlace {
 export type PhoneBackStep = "calendar" | "drawer" | "panels" | "apps-page";
 
 export function phoneBackSteps(place: PhoneBackPlace): number {
-  return (place.calendar ? 1 : 0) + (place.panelOpen ? 1 : 0) + place.drawerSteps;
+  return (place.calendar ? 1 : 0) + (place.panelOpen || place.preview ? 1 : 0) + place.drawerSteps;
 }
 
 /**
@@ -23,6 +25,6 @@ export function phoneBackSteps(place: PhoneBackPlace): number {
 export function phoneBackStep(place: PhoneBackPlace): PhoneBackStep {
   if (place.calendar) return "calendar";
   if (place.drawerOpen) return "drawer";
-  if (place.panelOpen) return "panels";
+  if (place.panelOpen || place.preview) return "panels";
   return place.appsPage && place.drawerSteps > 0 ? "apps-page" : "drawer";
 }

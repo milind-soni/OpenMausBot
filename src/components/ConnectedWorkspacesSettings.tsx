@@ -7,6 +7,7 @@ import { ComputerSharingSettings } from "./ComputerSharingSettings";
 import { ServerList, type OwnServerSharing } from "./ServerList";
 import { useStore } from "@/state/store";
 import { sharedComputersEnabled } from "@/lib/feature-flags";
+import { replaceUrl } from "@/lib/replace-url";
 
 type SavedWorkspaces = Awaited<ReturnType<NonNullable<NonNullable<Window["ogb"]>["environments"]>["state"]>>;
 
@@ -52,7 +53,7 @@ export function ConnectedWorkspacesSettings({ label, description }: { label?: st
       if (id) setComputerId(id);
       const url = new URL(window.location.href);
       url.searchParams.delete("share-computer");
-      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+      replaceUrl(`${url.pathname}${url.search}${url.hash}`);
     };
     consume();
     return bridge?.onOpenSettings?.(consume);

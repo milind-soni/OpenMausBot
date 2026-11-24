@@ -95,7 +95,7 @@ export function isOwnerOrAdmin(state: SessionState | null): boolean {
 export function takePairingCodeFromLocation(): string | null {
   const m = /[#&]code=([^&]+)/.exec(location.hash);
   if (!m) return null;
-  history.replaceState(null, "", location.pathname + location.search);
+  history.replaceState(history.state ?? null, "", location.pathname + location.search);
   return decodeURIComponent(m[1]);
 }
 
@@ -103,7 +103,7 @@ export function takePairingCodeFromLocation(): string | null {
 export function takeBrowserSignInFromLocation(): string | null {
   if (!/[#&]signin=/.test(location.hash)) return null;
   const m = /[#&]signin=(omb_pair_[A-Za-z0-9_-]{43})(?:&|$)/.exec(location.hash);
-  history.replaceState(null, "", location.pathname + location.search);
+  history.replaceState(history.state ?? null, "", location.pathname + location.search);
   return m ? m[1] : null;
 }
 
@@ -116,7 +116,7 @@ export function takeInvitedEmailFromLocation(): string | null {
   if (!email) return null;
   params.delete("email");
   const search = params.toString();
-  history.replaceState(null, "", location.pathname + (search ? `?${search}` : "") + location.hash);
+  history.replaceState(history.state ?? null, "", location.pathname + (search ? `?${search}` : "") + location.hash);
   return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) ? email : null;
 }
 

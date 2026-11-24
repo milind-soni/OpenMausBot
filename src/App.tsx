@@ -32,6 +32,8 @@ import {
 } from "@/components/lazy-screens";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { closeRoomPanel, useRoomPanelShown } from "@/lib/room-panel";
+import { closeAppPreview, useAppPreview } from "@/lib/app-preview";
+import { closeFilePreview, useFilePreview } from "@/lib/file-preview";
 import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupRecovery";
 import { NotificationRail, NotificationsPanel } from "@/components/NotificationsPanel";
 import { useNotificationFeed } from "@/lib/notification-preferences";
@@ -96,6 +98,7 @@ import { AppPreviewPanel } from "@/components/published-apps/AppPreviewPanel";
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { refreshPublishedApps } from "@/lib/own-published-apps";
 import { serverFetch } from "@/lib/relay-server";
+import { replaceUrl } from "@/lib/replace-url";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
@@ -131,7 +134,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       if (computerId) {
         const target = new URL(window.location.href);
         target.searchParams.set("share-computer", computerId);
-        window.history.replaceState(null, "", `${target.pathname}${target.search}${target.hash}`);
+        replaceUrl(`${target.pathname}${target.search}${target.hash}`);
       }
       dispatch({ type: "toggleAppSettings", open: true, section: "desktopWorkspaces" });
     };
@@ -141,7 +144,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     if (requestedSettings === "workspaces" || (requestedSettings === "organization" && window.ogb.organization && !remoteClient) ||
       (cloud && window.ogb.cloudAccount && !remoteClient)) {
       url.searchParams.delete("desktop-settings");
-      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+      replaceUrl(`${url.pathname}${url.search}${url.hash}`);
       if (requestedSettings === "organization") dispatch({ type: "toggleAppSettings", open: true, section: "organization" });
       else if (requestedSettings === "cloud") dispatch(CLOUD_LINK_SETTINGS);
       else if (requestedSettings === "cloud-settings") dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" });
@@ -153,7 +156,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   useEffect(() => {
     const rest = takePhonePairingRequest(window.location.href);
     if (rest === null) return;
-    window.history.replaceState(null, "", rest);
+    replaceUrl(rest);
     dispatch(phonePairingSettingsAction());
   }, [dispatch]);
   useConnectLink(dispatch, Boolean(state.config?.team));
@@ -194,7 +197,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   // On a phone, back closes the open list or side panel, and from a chat picked in the list goes back to the list.
   const phoneLayout = useMediaQuery(PHONE_LAYOUT, false);
   const calendarFocus = state.activeView === "routines" && state.routinesFocus.view === "calendar";
-  const backPlace = { calendar: calendarFocus, drawerOpen, panelOpen, appsPage: state.pluginsOpen, drawerSteps: drawerBackSteps };
+  const appPreview = useAppPreview();
+  const filePreview = useFilePreview();
+  const preview = state.activeView === "chat" && (appPreview !== null || filePreview !== null);
+  const backPlace = { calendar: calendarFocus, drawerOpen, panelOpen, preview, appsPage: state.pluginsOpen, drawerSteps: drawerBackSteps };
   usePhoneBack(phoneLayout, phoneBackSteps(backPlace), () => {
     const step = phoneBackStep(backPlace);
     if (step === "calendar") return dispatch({ type: "showRoutines", view: "list", botId: state.routinesFocus.botId });
@@ -205,6 +211,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     dispatch({ type: "closeForkPanel" });
     closeRoomPanel();
     closeInbox();
+    closeAppPreview();
+    closeFilePreview();
   });
   // A 320 panel leaves room for the open sidebar from 1040 up; a wider one from 1280. Narrower, the sidebar folds.
   const collapseSidebar = sidebarFoldsForPanel(sidePanels, { wide: sidebarAndPanelFit, narrow: sidebarAndNarrowPanelFit });
