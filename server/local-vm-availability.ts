@@ -9,8 +9,8 @@ export interface LocalVmRuntimeStatus {
 
 const RECHECK_MS = 60_000;
 
-/** `start`: when the first check runs (the desktop app holds it until its window is in use); until then it reads as usable. */
-export function createLocalVmAvailability(probe: () => Promise<LocalVmRuntimeStatus>, now: () => number = Date.now, start: (first: () => void) => void = (first) => first()) {
+/** The first check starts at once, so the answer is known before the first turn lists its tools. */
+export function createLocalVmAvailability(probe: () => Promise<LocalVmRuntimeStatus>, now: () => number = Date.now) {
   let usable = true;
   let checkedAt = 0;
   let checking = false;
@@ -26,7 +26,7 @@ export function createLocalVmAvailability(probe: () => Promise<LocalVmRuntimeSta
       .catch(() => {})
       .finally(() => { checking = false; });
   };
-  start(check);
+  check();
   return {
     available: () => {
       if (!usable && now() - checkedAt >= RECHECK_MS) check();

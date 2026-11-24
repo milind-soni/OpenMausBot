@@ -15,6 +15,8 @@ function place() {
   roots.push(root);
   const bin = join(root, "bin");
   mkdirSync(bin);
+  // The interpreter the test programs' `#!/usr/bin/env node` names, found on the same PATH.
+  writeFileSync(join(bin, windows ? "node.exe" : "node"), "\u007fELF node");
   return { root, bin, file: join(root, "user-data", "engine-probes.json") };
 }
 
@@ -124,8 +126,8 @@ describe("engine probe answers kept between desktop starts", () => {
     expect(probedProgram("engine", { env: { PATH: bin } })).toBeNull();
     expect(probedProgram("other", { env: { PATH: shims } })).toBeNull();
     expect(probedProgram("engine --flag", { env: { PATH: bin } })).toBeNull();
-    expect(probedProgram("native", { env: { PATH: bin } })).toMatch(/native$/);
-    expect(probedProgram("node-cli", { env: { PATH: bin } })).toMatch(/node-cli$/);
+    expect(probedProgram("native", { env: { PATH: bin } })).toEqual({ program: expect.stringMatching(/native$/), interpreter: null });
+    expect(probedProgram("node-cli", { env: { PATH: bin } })).toEqual({ program: expect.stringMatching(/node-cli$/), interpreter: expect.stringMatching(/node$/) });
   });
 
   it("runs every probe where nothing may be kept", async () => {
@@ -144,6 +146,42 @@ describe("engine probe answers kept between desktop starts", () => {
     mkdirSync(join(bin, "node_modules", "engine", "bin"), { recursive: true });
     writeFileSync(script, "console.log('1.0.0');\n");
     writeFileSync(join(bin, "engine.cmd"), '@ECHO off\r\n"%~dp0\\node_modules\\engine\\bin\\engine.js" %*\r\n');
-    expect(probedProgram(join(bin, "engine.cmd"), {})?.toLowerCase()).toBe(realpathSync(script).toLowerCase());
+    expect(probedProgram(join(bin, "engine.cmd"), {})?.program.toLowerCase()).toBe(realpathSync(script).toLowerCase());
+  });
+
+  it("keys a script on the interpreter its #! line names too, and keeps nothing when that interpreter is gone", async () => {
+    const { bin, file } = place();
+    program(bin, "engine");
+    const counted = runner();
+    const cache = createCliProbeCache({ file, appVersion: "1", run: counted.run });
+    await ask(cache.exec, cliFor(bin, "engine"), ["--version"], bin);
+    await ask(cache.exec, cliFor(bin, "engine"), ["--version"], bin);
+    expect(counted.calls).toHaveLength(1);
+    // Another Node on the same PATH: asked again.
+    const node = join(bin, windows ? "node.exe" : "node");
+    rmSync(node);
+    writeFileSync(node, "\u007fELF another node build");
+    await ask(cache.exec, cliFor(bin, "engine"), ["--version"], bin);
+    expect(counted.calls).toHaveLength(2);
+    // No Node at all: the program cannot run, so no kept answer may say it is installed.
+    rmSync(node);
+    expect(probedProgram(cliFor(bin, "engine"), { env: { PATH: bin } })).toBeNull();
+    await ask(cache.exec, cliFor(bin, "engine"), ["--version"], bin);
+    expect(counted.calls).toHaveLength(3);
+  });
+
+  it("runs the program again after a status check of that CLI could not finish", async () => {
+    const { bin, file } = place();
+    program(bin, "engine");
+    const counted = runner();
+    let unsettled = false;
+    const cache = createCliProbeCache({ file, appVersion: "1", run: counted.run, unsettled: () => unsettled });
+    await ask(cache.exec, cliFor(bin, "engine"), ["--version"], bin);
+    unsettled = true;
+    await ask(cache.exec, cliFor(bin, "engine"), ["--version"], bin);
+    expect(counted.calls).toHaveLength(2);
+    unsettled = false;
+    await ask(cache.exec, cliFor(bin, "engine"), ["--version"], bin);
+    expect(counted.calls).toHaveLength(2);
   });
 });

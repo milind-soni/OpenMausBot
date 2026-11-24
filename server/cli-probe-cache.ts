@@ -3,8 +3,9 @@
 // Windows). Only under the desktop app (its own folder, OMB_USER_DATA, never the data folder); any other server runs every
 // probe as before. Only successful answers are kept, never a sign-in check (`auth status`), whose answer changes.
 //
-// The key is the program file itself: its real path, size, modification and change times and inode, plus the app's
-// version, the platform and the arguments. An update writes a new file (npm and Homebrew both do, and a reinstall gets a
+// The key is the program file itself, and the interpreter a script names (`#!/usr/bin/env node` is the `node` on the probe's
+// PATH; Windows runs a shim's script with node.exe): each one's real path, size, modification and change times and inode,
+// plus the app's version, the platform and the arguments. A script whose interpreter cannot be found is never kept. An update writes a new file (npm and Homebrew both do, and a reinstall gets a
 // new change time even when the package keeps the 1985 modification time npm gives every file), so it is asked again. Not
 // kept: a program that is a shell script or a version manager's shim (asdf, mise, volta and the like), whose file stays
 // the same while the version it runs changes.
@@ -32,10 +33,13 @@ export function probeCacheFile(env: NodeJS.ProcessEnv = process.env): string | n
   return env.OMB_DESKTOP_PARENT === "1" && env.OMB_USER_DATA && isAbsolute(env.OMB_USER_DATA) ? join(env.OMB_USER_DATA, PROBE_CACHE_FILE) : null;
 }
 
-/** The file a probe of `cli` actually runs, found the way execCli finds it (procs.ts): on Windows a shim or #! script
- * becomes Node plus the script, so the script; elsewhere a bare name is looked up on the PATH the probe runs with. Null
- * when it is not a file whose answer may be kept. */
-export function probedProgram(cli: string, opts: ExecFileOptions): string | null {
+/** A name on a PATH, the way an engine's spawn finds it. */
+const programOnPath = (name: string, path: string): string | null => findCliCandidates(name, path).find(isFile) ?? null;
+
+/** What a probe of `cli` actually runs, found the way execCli finds it (procs.ts): on Windows a shim or #! script becomes
+ * Node plus the script; elsewhere a bare name is looked up on the PATH the probe runs with, and a script's #! line names its
+ * interpreter. Null when it is not something whose answer may be kept. */
+export function probedProgram(cli: string, opts: ExecFileOptions): { program: string; interpreter: string | null } | null {
   if (splitCliString(cli).length !== 1) return null;
   let command: string, rest: string[], env: NodeJS.ProcessEnv;
   try {
@@ -44,16 +48,46 @@ export function probedProgram(cli: string, opts: ExecFileOptions): string | null
   } catch {
     return null;
   }
+  const path = String(env.PATH ?? env.Path ?? "");
   const file = rest.length
     ? rest.find((arg) => isAbsolute(arg) && isFile(arg))
-    : /[\\/]/.test(command) ? command : findCliCandidates(command, String(env.PATH ?? env.Path ?? ""))[0];
+    : /[\\/]/.test(command) ? command : programOnPath(command, path);
   if (!file) return null;
   let real: string;
   try { real = realpathSync(file); } catch { return null; }
   const name = basename(real).toLowerCase().replace(/\.(?:exe|cmd|bat|ps1)$/, "");
   if (SHIM_PROGRAMS.has(name) || real.toLowerCase().split(/[\\/]/).includes("shims")) return null;
   if (/\.(?:ps1|sh|cmd|bat)$/i.test(real) || shellScript(real)) return null;
-  return real;
+  const interpreter = rest.length ? command : interpreterOf(real, path);
+  if (interpreter === undefined) return null;
+  if (interpreter === null) return { program: real, interpreter: null };
+  try { return { program: real, interpreter: realpathSync(interpreter) }; } catch { return null; }
+}
+
+/** The program a script's #! line runs: null for a file with none (a native program), undefined when it cannot be found. */
+function interpreterOf(file: string, path: string): string | null | undefined {
+  const line = firstLine(file);
+  if (line === undefined) return undefined;
+  if (!line.startsWith("#!")) return null;
+  const words = line.slice(2).trim().split(/\s+/).filter(Boolean);
+  if (!words[0]) return undefined;
+  if (basename(words[0]) !== "env") return isFile(words[0]) ? words[0] : undefined;
+  const name = words.slice(1).find((word) => !word.startsWith("-") && !word.includes("="));
+  return name ? programOnPath(name, path) ?? undefined : undefined;
+}
+
+function firstLine(file: string): string | undefined {
+  let fd: number | undefined;
+  try {
+    fd = openSync(file, "r");
+    const head = Buffer.alloc(256);
+    const read = readSync(fd, head, 0, head.length, 0);
+    return head.subarray(0, read).toString("utf8").split("\n")[0]?.replace(/\r$/, "") ?? "";
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== undefined) try { closeSync(fd); } catch {}
+  }
 }
 
 function isFile(path: string): boolean {
@@ -61,25 +95,22 @@ function isFile(path: string): boolean {
 }
 
 function shellScript(file: string): boolean {
-  let fd: number | undefined;
-  try {
-    fd = openSync(file, "r");
-    const head = Buffer.alloc(128);
-    const read = readSync(fd, head, 0, head.length, 0);
-    return SHELL_INTERPRETERS.test(head.subarray(0, read).toString("utf8").split("\n")[0] ?? "");
-  } catch {
-    return true;
-  } finally {
-    if (fd !== undefined) try { closeSync(fd); } catch {}
-  }
+  const line = firstLine(file);
+  return line === undefined || SHELL_INTERPRETERS.test(line);
 }
 
-/** The key one answer is kept under, or null when the program cannot be read. */
-export function probeKey(program: string, args: readonly string[], appVersion: string, platform: NodeJS.Platform = process.platform): string | null {
+function identity(file: string): string[] | null {
   let stat;
-  try { stat = statSync(program, { bigint: true }); } catch { return null; }
-  if (!stat.isFile()) return null;
-  return createHash("sha256").update(JSON.stringify([appVersion, platform, program, String(stat.size), String(stat.mtimeNs), String(stat.ctimeNs), String(stat.ino), String(stat.dev), args])).digest("hex").slice(0, 40);
+  try { stat = statSync(file, { bigint: true }); } catch { return null; }
+  return stat.isFile() ? [file, String(stat.size), String(stat.mtimeNs), String(stat.ctimeNs), String(stat.ino), String(stat.dev)] : null;
+}
+
+/** The key one answer is kept under, or null when the program or its interpreter cannot be read. */
+export function probeKey(run: { program: string; interpreter: string | null }, args: readonly string[], appVersion: string, platform: NodeJS.Platform = process.platform): string | null {
+  const program = identity(run.program);
+  const interpreter = run.interpreter === null ? [] : identity(run.interpreter);
+  if (!program || !interpreter) return null;
+  return createHash("sha256").update(JSON.stringify([appVersion, platform, program, interpreter, args])).digest("hex").slice(0, 40);
 }
 
 function readEntries(file: string): Map<string, Entry> {
@@ -101,7 +132,7 @@ function readEntries(file: string): Map<string, Entry> {
  * execCli for a probe whose answer is fixed by the program file: answered from the desktop app's kept copy when the file
  * is unchanged, else run, and kept when it succeeds with some output. The callback gets exactly what a run would give.
  */
-export function createCliProbeCache(options: { file: string | null; appVersion: string; run?: ExecCli; platform?: NodeJS.Platform }) {
+export function createCliProbeCache(options: { file: string | null; appVersion: string; run?: ExecCli; platform?: NodeJS.Platform; unsettled?: (cli: string) => boolean }) {
   const run: ExecCli = (...args) => (options.run ?? execCli)(...args); // read at each call: tests replace execCli
   const platform = options.platform ?? process.platform;
   let entries: Map<string, Entry> | null = null;
@@ -116,7 +147,8 @@ export function createCliProbeCache(options: { file: string | null; appVersion: 
   const exec: ExecCli = (cli, args, opts, cb) => {
     const program = options.file && args.length === 1 && CACHED_ARGS.has(args[0]!) ? probedProgram(cli, opts) : null;
     const key = program ? probeKey(program, args, options.appVersion, platform) : null;
-    const kept = key ? loaded().get(key) : undefined;
+    // A check again after one that could not finish runs the program: an earlier answer never stands in for it.
+    const kept = key && !(options.unsettled ?? lastCheckUnsettled)(cli) ? loaded().get(key) : undefined;
     if (kept) {
       queueMicrotask(() => cb(null, kept.stdout, kept.stderr));
       return;
@@ -134,6 +166,9 @@ export function createCliProbeCache(options: { file: string | null; appVersion: 
   };
   return { exec, forget() { entries = new Map(); save(); } };
 }
+
+/** Whether a CLI's last status check could not finish; none is known here until the engine status hold reports one. */
+const lastCheckUnsettled = (_cli: string): boolean => false;
 
 let shared: ReturnType<typeof createCliProbeCache> | null = null;
 
