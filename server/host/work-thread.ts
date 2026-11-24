@@ -1,9 +1,10 @@
 import type { Store, TaskRecord } from "../store.ts";
+import { archivedOnResult } from "./finished-work.ts";
 import { OUTSIDE_STAYS_HERE } from "./outside-lineage.ts";
 
 /** Where coordinate_bots sends to a teammate outside a room, by its `thread`: "standing" is the sender conversation's one
  * work thread with that teammate (undefined until it is opened), "new" opens one (undefined), and any other value is the id
- * of a thread the sender opened on that teammate earlier, archived or not, or `answering`: the requester of the sender's running assignment
+ * of a thread the sender opened on that teammate earlier (archived only by its own result), or `answering`: the requester of the sender's running assignment
  * when it asked with reply none. Nothing returns from such work on its own, so it takes a one-way notice (`notice`) there,
  * never new work.
  * Throws when it is neither. `also` narrows which threads count. */
@@ -20,11 +21,12 @@ export function workThreadFor(store: Pick<Store, "workThread" | "taskByThread">,
   if (task && !reach(task)) throw new Error(OUTSIDE_STAYS_HERE);
   const allowed = task !== undefined && also(task);
   const usable = allowed && task.archivedAt === undefined;
+  const reusable = usable || (allowed && archivedOnResult(task));
   if (input.any) {
     if (usable && !task.closedBy) return task;
     throw new Error(`"${thread}" is not an open thread of ${input.botName}: use a threadId list_threads shows on them`);
   }
-  if (allowed && task.openedBy?.botId === input.fromBotId && !task.openedBy.roomLane) return task;
+  if (reusable && task.openedBy?.botId === input.fromBotId && !task.openedBy.roomLane) return task;
   const handedWork = usable && input.answering?.botId === botId && input.answering.threadId === thread;
   if (handedWork && input.notice) return task;
   if (handedWork) throw new Error(`"${thread}" handed you work: answer it there with reply "none", a one-way notice; it cannot be given new work`);

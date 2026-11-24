@@ -388,6 +388,7 @@ it("closes a thread \"new\" opened once its result is back, and opens it again f
   const [child] = leadNodes();
   const closed = await leadTask(child.threadId);
   expect(closed.openedBy).not.toHaveProperty("kind");
+  expect(closed.openedBy.oneShot).toBe(true);
   expect(closed.closedBy).toMatchObject({ botId: f.chief.id, name: "Clive" });
   expect(closed.archivedAt).toBe(closed.closedBy.at);
   expect((await f.messages(child.threadId)).map((message: any) => message.text).filter(Boolean).join("\n")).toContain("FRESH_RESULT verified");
