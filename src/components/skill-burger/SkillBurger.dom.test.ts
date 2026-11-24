@@ -27,7 +27,7 @@ const render = async (messages: RunMessage[], live: string[] = [], busy = false)
   })));
 };
 const burger = () => host.querySelector<HTMLElement>("[data-skill-burger]");
-const button = (text: string) => [...host.querySelectorAll("button")].find((node) => node.textContent?.includes(text));
+const button = (text: string) => [...host.querySelectorAll("button")].find((node) => node.textContent?.includes(text) || node.title === text || node.getAttribute("aria-label") === text);
 
 beforeEach(() => {
   fixture.api.mockReset();
@@ -84,11 +84,35 @@ it("edits the summary in place: Escape puts it back, Enter keeps it", async () =
   expect(button("Weekly sales email")).toBeDefined();
 });
 
-it("folds and closes from the top bun", async () => {
-  await render([ask, app("m1", "GOOGLESHEETS_BATCH_GET"), app("m2", "GMAIL_SEND_EMAIL")]);
-  await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Hide steps"]')!.click());
-  expect(host.querySelector(".burger-fold")?.getAttribute("data-folded")).toBe("true");
-  expect(host.querySelector(".burger-fold")?.hasAttribute("inert")).toBe(true);
+it("stays a closed pill while it cooks, finishes or fails, opens only on a tap, and closes from its panel", async () => {
+  const fold = () => host.querySelector(".burger-fold");
+  const pill = () => host.querySelector<HTMLButtonElement>("[data-burger-pill] button[aria-controls]")!;
+  const shell = (id: string, command: string, extra: Partial<NonNullable<RunMessage["tool"]>> = {}): RunMessage => ({ id, role: "bot", kind: "activity", tool: { name: "Bash", ok: true, input: JSON.stringify({ command }), ...extra } });
+  // One step in, still working: the pill cooks, closed.
+  await render([ask, app("m1", "GOOGLESHEETS_BATCH_GET")], [], true);
+  expect(fold()?.getAttribute("data-folded")).toBe("true");
+  expect(host.querySelector("[data-burger-pill]")?.textContent).toContain("Cooking… 1");
+  // Eight steps across six apps: still closed, the count ticks over, at most four marks.
+  const many = [ask, app("m1", "GOOGLESHEETS_BATCH_GET"), app("m2", "GMAIL_SEND_EMAIL"), app("m3", "SLACK_SEND_MESSAGE"), app("m4", "NOTION_CREATE_PAGE"), app("m5", "LINEAR_CREATE_ISSUE"), app("m6", "GITHUB_CREATE_ISSUE"), shell("m7", "git push"), app("m8", "GMAIL_SEND_EMAIL")];
+  await render(many, [], true);
+  expect(fold()?.getAttribute("data-folded")).toBe("true");
+  expect(host.querySelector("[data-burger-pill]")?.textContent).toContain("Cooking… 8");
+  expect(host.querySelectorAll("[data-burger-pill] .rounded-full.bg-card").length).toBe(4);
+  // Finished, and then with a failed step: never opens by itself; a failure tints the count.
+  await render(many);
+  expect(fold()?.getAttribute("data-folded")).toBe("true");
+  expect(host.querySelector("[data-burger-pill]")?.textContent).toContain("8 steps");
+  await render([...many, shell("m9", "pnpm deploy", { ok: false })]);
+  expect(fold()?.getAttribute("data-folded")).toBe("true");
+  expect(host.querySelector("[data-burger-pill] .text-danger")).not.toBeNull();
+  // A tap opens it; another closes it; Close in the panel dismisses it.
+  await act(async () => pill().click());
+  expect(fold()?.getAttribute("data-folded")).toBe("false");
+  expect(pill().getAttribute("aria-expanded")).toBe("true");
+  await act(async () => pill().click());
+  expect(fold()?.getAttribute("data-folded")).toBe("true");
+  expect(fold()?.hasAttribute("inert")).toBe(true);
+  await act(async () => pill().click());
   await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click());
   expect(burger()).toBeNull();
 });

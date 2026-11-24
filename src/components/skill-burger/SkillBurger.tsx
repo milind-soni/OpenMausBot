@@ -1,14 +1,14 @@
-import { Check, ChevronDown, ChevronUp, FileText, Globe, Monitor, Plus, Signpost, Sparkles, Terminal, X, XCircle } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent } from "react";
+import { Check, FileText, Globe, Monitor, Signpost, Sparkles, Terminal, X, XCircle } from "lucide-react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent } from "react";
 
 import { appMeta, BARE_READ } from "../../../shared/skill-burger/apps";
 import type { BurgerLayer } from "../../../shared/skill-burger/layers";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
-import { burgerStartsFolded, rememberSavedRun, removeBurger, saveBurger, savedRun, type SavedWorkflow } from "@/lib/skill-burger";
+import { rememberSavedRun, removeBurger, saveBurger, savedRun, type SavedWorkflow } from "@/lib/skill-burger";
 import { ServiceIcon } from "../ServiceIcon";
-import { EveryChatToggle } from "./EveryChatToggle";
+import { BurgerPill, PILL_ACTION, pillMarks, Sheen, WithCount } from "./BurgerPill";
 import { hasDetail, StepDetails, type StepDetail } from "./StepDetails";
 
 /** One layer's icon: the app's own mark, or a plain icon for a command, a file, a page or the AI. */
@@ -95,9 +95,11 @@ const FIELD = "w-full min-w-0 rounded-md border border-hairline/60 bg-card px-1.
 
 type Saving = { state: "idle" } | { state: "saving" } | { state: "saved"; skill: SavedWorkflow } | { state: "undone" } | { state: "error"; message: string };
 
-export function SkillBurger({ run, layers, summary: initialSummary, canSave, botId, threadId, onDismiss }: {
+export function SkillBurger({ run, layers, summary: initialSummary, canSave, busy = false, botId, threadId, onDismiss }: {
   /** The run this card is for, so a save is remembered when the card comes back. */
   run: string;
+  /** The bot is still working: the pill cooks. */
+  busy?: boolean;
   layers: BurgerLayer[];
   summary: string;
   /** False while the bot still works, or for someone who can't write in this chat. */
@@ -106,7 +108,9 @@ export function SkillBurger({ run, layers, summary: initialSummary, canSave, bot
   threadId: string;
   onDismiss: () => void;
 }) {
-  const [folded, setFolded] = useState(burgerStartsFolded);
+  // Closed until someone taps the pill; nothing opens it on its own, not a finished or a failed run.
+  const [folded, setFolded] = useState(true);
+  const panelId = useId();
   /** The person's own words, once they changed them; until then the summary follows the ask. */
   const [own, setOwn] = useState<{ summary: string | null; name: string }>({ summary: null, name: "" });
   const [field, setField] = useState<{ summary: string; name: string } | null>(null);
@@ -164,12 +168,19 @@ export function SkillBurger({ run, layers, summary: initialSummary, canSave, bot
 
   const toggleLabel = folded ? t("skillBurger.expand") : t("skillBurger.collapse");
   const count = layers.length === 1 ? t("skillBurger.layersOne") : t("skillBurger.layersMany", { count: layers.length });
+  const cooking = busy || live;
+  const failed = !cooking && layers.some((layer) => layer.status === "failed");
+  const pillLabel = cooking
+    ? <Sheen text={t("skillBurger.pill.cooking", { count: layers.length })}><WithCount template={t("skillBurger.pill.cooking")} count={layers.length} /></Sheen>
+    : layers.length === 1 ? count : <WithCount template={t("skillBurger.layersMany")} count={layers.length} />;
   return (
     <section
       aria-label={t("skillBurger.aria")}
-      data-skill-burger={saved ? "saved" : live ? "live" : "done"}
-      className={cn("skill-burger pointer-events-auto flex w-[21rem] max-w-full flex-col gap-[3px] text-ink", saved && "burger-stacked")}
+      data-skill-burger={saved ? "saved" : cooking ? "live" : "done"}
+      className="skill-burger pointer-events-auto flex max-w-full flex-col items-end gap-1.5 text-ink"
     >
+      <div id={panelId} className="burger-fold w-[21rem] max-w-full" data-folded={folded ? "true" : "false"} inert={folded} aria-hidden={folded || undefined}>
+      <div className={cn("flex min-h-0 flex-col gap-[3px] overflow-hidden", saved && "burger-stacked")}>
       <div className="burger-bun burger-bun-top relative flex items-start gap-1.5 rounded-t-[18px] rounded-b-[8px] bg-raised px-3 pb-2 pt-3.5 shadow-sm">
         <span aria-hidden="true" className="burger-sesame" />
         <div className="flex min-w-0 flex-1 flex-col">
@@ -210,25 +221,19 @@ export function SkillBurger({ run, layers, summary: initialSummary, canSave, bot
               {summary}
             </button>
           )}
-          <span role="status" aria-live="polite" aria-atomic="true" className="truncate text-[12px] text-ink-secondary">{count}</span>
-          {saved && <EveryChatToggle compact skill={saved} onMoved={(skill) => setSaving({ state: "saved", skill })} className="mt-1" />}
+          <span className="truncate text-[12px] text-ink-secondary">{count}</span>
         </div>
-        <button type="button" onClick={() => setFolded((value) => !value)} aria-expanded={!folded} aria-label={toggleLabel} title={toggleLabel} className={ICON_BUTTON}>
-          {folded ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronUp size={14} aria-hidden="true" />}
-        </button>
         <button type="button" onClick={onDismiss} aria-label={t("skillBurger.dismiss")} title={t("skillBurger.dismiss")} className={ICON_BUTTON}>
           <X size={14} aria-hidden="true" />
         </button>
       </div>
 
-      <div className="burger-fold" data-folded={folded ? "true" : "false"} inert={folded} aria-hidden={folded || undefined}>
       <ol aria-label={t("skillBurger.layers")} className="burger-layers flex max-h-60 min-h-0 flex-col gap-[3px] overflow-y-auto">
         {layers.map((layer) => <LayerRow key={layer.id} layer={layer} layers={layers} advanced={advanced} />)}
       </ol>
-      </div>
 
-      <div className="burger-bun burger-bun-bottom flex min-h-10 items-center rounded-b-[18px] rounded-t-[8px] bg-raised shadow-sm">
-        {saved ? (
+      {saved && (
+        <div className="burger-bun burger-bun-bottom flex min-h-10 items-center rounded-b-[18px] rounded-t-[8px] bg-raised shadow-sm">
           <div className="flex w-full items-center gap-2 px-3 text-[13px]">
             <Check size={14} aria-hidden="true" className="shrink-0 text-success" />
             <span className="min-w-0 flex-1 truncate">{t("skillBurger.saved")}</span>
@@ -236,23 +241,27 @@ export function SkillBurger({ run, layers, summary: initialSummary, canSave, bot
               {t("common.undo")}
             </button>
           </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => void save()}
-            disabled={!canSave || live || saving.state === "saving"}
-            title={live ? t("skillBurger.waitForRun") : undefined}
-            className="flex h-10 w-full items-center justify-center gap-1.5 rounded-b-[18px] rounded-t-[8px] text-[13px] font-medium text-accent-text outline-none transition-colors hover:bg-ink/[0.05] focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default disabled:text-ink-tertiary disabled:hover:bg-transparent motion-reduce:transition-none"
-          >
-            {saving.state === "saving" ? t("skillBurger.saving") : <><Plus size={14} aria-hidden="true" />{t("skillBurger.add")}</>}
-          </button>
-        )}
+        </div>
+      )}
+      </div>
       </div>
       {(saving.state === "error" || saving.state === "undone") && (
         <p role={saving.state === "error" ? "alert" : "status"} className={cn("px-3 text-[12px]", saving.state === "error" ? "text-danger" : "text-ink-secondary")}>
           {saving.state === "error" ? saving.message : t("skillBurger.undone")}
         </p>
       )}
+      <BurgerPill
+        marks={pillMarks(layers)}
+        label={<span role="status" aria-live="polite" aria-atomic="true">{pillLabel}</span>}
+        tone={failed ? "danger" : "normal"}
+        open={!folded}
+        controls={panelId}
+        toggleLabel={toggleLabel}
+        onToggle={() => setFolded((value) => !value)}
+        action={saved
+          ? <span className="flex size-7 shrink-0 items-center justify-center text-success" title={t("skillBurger.saved")}><Check size={14} aria-label={t("skillBurger.saved")} /></span>
+          : <button type="button" onClick={() => void save()} disabled={!canSave || cooking || saving.state === "saving"} aria-label={t("skillBurger.add")} title={cooking ? t("skillBurger.waitForRun") : t("skillBurger.add")} className={PILL_ACTION}>{t("skillBurger.pill.add")}</button>}
+      />
     </section>
   );
 }

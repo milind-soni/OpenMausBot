@@ -7766,12 +7766,9 @@
   "skillBurger.list.removed": "{name}을(를) 제거했습니다.",
   "skillBurger.list.removeFailed": "이 스킬을 제거하지 못했습니다. 다시 시도하세요.",
   "skillBurger.list.loadFailed": "저장된 스킬을 불러오지 못했습니다.",
-  "skillBurger.everyChat": "모든 채팅에서 사용",
-  "skillBurger.everyChatFailed": "이 Skill Burger를 사용하는 곳을 바꾸지 못했습니다. 다시 시도하세요.",
   "skillBurger.renameFailed": "이 Skill Burger의 이름을 바꾸지 못했습니다. 다시 시도하세요.",
   "skillBurger.menu.aria": "{name} 더 보기",
   "skillBurger.menu.rename": "이름 바꾸기…",
-  "skillBurger.card.everyChat": "모든 채팅",
   "skillBurger.page.empty": "봇이 만든 Skill Burger가 여기에 표시됩니다.",
   "chat.notice.savedToThread": "이 스레드에 저장했어요",
   "skillBurger.run.button": "실행",
@@ -7797,5 +7794,11 @@
   "skillBurger.detail.reads": "읽는 것",
   "skillBurger.detail.lastTime": "지난번",
   "skillBurger.detail.call": "호출",
-  "skillBurger.detail.learnedFrom": "{name}에게서 배움"
+  "skillBurger.detail.learnedFrom": "{name}에게서 배움",
+  "skillBurger.pill.cooking": "요리 중… {count}",
+  "skillBurger.pill.add": "추가",
+  "skillBurger.pill.running": "실행 중… {count}",
+  "skillBurger.pill.stopped": "멈춤",
+  "skillBurger.pill.addPath": "경로 추가",
+  "skillBurger.card.madeBy": "{name}이(가) 만듦"
 }

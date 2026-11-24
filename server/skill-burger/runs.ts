@@ -34,10 +34,12 @@ export interface BurgerTurn extends Pick<ExecutorContext, "internal" | "connecte
   threadId: string;
   cwd: string;
   publish(event: StepEvent): void;
-  /** A burger used in every chat belongs to the whole place: whether this turn may change one. */
-  mayEditEveryChat: boolean;
+  /** Saved burgers are everyone's: whether a bot's own turn may change one (not on a Team Cloud, where only whoever saved
+   * it, or an admin, does). */
+  mayEditBurgers: boolean;
 }
 
+const CANT_EDIT = "On a Team Cloud a bot can't change a saved Skill Burger: whoever saved it, or an admin, can.";
 const runBody = z.object({ name: z.string().min(1).max(64), args: z.record(z.string(), z.unknown()).optional() }).strict();
 const resumeBody = z.object({ run: z.string().min(1).max(64), response: z.string().max(20_000) }).strict();
 const undoBody = z.object({ undo: z.string().min(1).max(64) }).strict();
@@ -101,8 +103,8 @@ export function createSkillBurgerRuns(deps: { dataDir: string; root?: string; ho
       if (!kept) return json(res, 404, { error: "There is nothing to undo with that id." });
       const found = findWorkflowSkill(turn.botId, kept.name, deps.root);
       if (!found) return json(res, 404, { error: "That Skill Burger is gone." });
-      if ("everyChat" in found.place && !turn.mayEditEveryChat) return json(res, 403, { error: "Only an admin of this installation can change a Skill Burger used in every chat." });
-      const restored = replaceWorkflowSkill({ place: found.place, name: kept.name, workflow: kept.previous, sha256: kept.sha256, root: deps.root });
+      if (!turn.mayEditBurgers) return json(res, 403, { error: CANT_EDIT });
+      const restored = replaceWorkflowSkill({ name: kept.name, workflow: kept.previous, sha256: kept.sha256, root: deps.root });
       if ("stale" in restored) return json(res, 409, { error: "The Skill Burger changed since; undo isn't safe now." });
       return "error" in restored ? json(res, 422, restored) : json(res, 200, { skill: restored });
     }
@@ -113,10 +115,10 @@ export function createSkillBurgerRuns(deps: { dataDir: string; root?: string; ho
     if (!name || !edit.success) return json(res, 400, { error: `workflow_edit needs name and a change: ${edit.success ? "name" : edit.error.issues[0]?.message ?? ""}` });
     const found = findWorkflowSkill(turn.botId, name, deps.root);
     if (!found) return json(res, 404, { error: `No Skill Burger named "${name}" here.` });
-    if ("everyChat" in found.place && !turn.mayEditEveryChat) return json(res, 403, { error: "Only an admin of this installation can change a Skill Burger used in every chat." });
+    if (!turn.mayEditBurgers) return json(res, 403, { error: CANT_EDIT });
     const next = applyEdit(found.workflow, edit.data);
     if ("error" in next) return json(res, 422, next);
-    const saved = replaceWorkflowSkill({ place: found.place, name, workflow: next, sha256: found.sha256, root: deps.root });
+    const saved = replaceWorkflowSkill({ name, workflow: next, sha256: found.sha256, root: deps.root });
     if ("stale" in saved) return json(res, 409, { error: "The Skill Burger changed meanwhile; read it again and retry." });
     if ("error" in saved) return json(res, 422, saved);
     return json(res, 200, { skill: saved, undo: editUndo.keep(name, found.workflow, saved.sha256) });

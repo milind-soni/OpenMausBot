@@ -6034,12 +6034,9 @@
   "skillBurger.list.removed": "{name} kaldırıldı.",
   "skillBurger.list.removeFailed": "Bu beceri kaldırılamadı. Tekrar deneyin.",
   "skillBurger.list.loadFailed": "Kaydedilen beceriler yüklenemedi.",
-  "skillBurger.everyChat": "Her sohbette kullan",
-  "skillBurger.everyChatFailed": "Bu Skill Burger'ın kullanıldığı yer değiştirilemedi. Tekrar deneyin.",
   "skillBurger.renameFailed": "Bu Skill Burger yeniden adlandırılamadı. Tekrar deneyin.",
   "skillBurger.menu.aria": "{name} için daha fazla",
   "skillBurger.menu.rename": "Yeniden adlandır…",
-  "skillBurger.card.everyChat": "Her sohbet",
   "skillBurger.page.empty": "Botlarınızın yaptığı Skill Burger'lar burada görünür.",
   "chat.notice.savedToThread": "Bu konuşmaya kaydedildi",
   "memoryPage.thisThread": "Bu konuşma",
@@ -6068,5 +6065,11 @@
   "skillBurger.detail.reads": "Okuduğu",
   "skillBurger.detail.lastTime": "Geçen sefer",
   "skillBurger.detail.call": "Çağrı",
-  "skillBurger.detail.learnedFrom": "{name} botundan öğrenildi"
+  "skillBurger.detail.learnedFrom": "{name} botundan öğrenildi",
+  "skillBurger.pill.cooking": "Pişiyor… {count}",
+  "skillBurger.pill.add": "Ekle",
+  "skillBurger.pill.running": "Çalışıyor… {count}",
+  "skillBurger.pill.stopped": "Durdu",
+  "skillBurger.pill.addPath": "Yol ekle",
+  "skillBurger.card.madeBy": "{name} tarafından yapıldı"
 }

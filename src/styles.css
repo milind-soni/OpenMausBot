@@ -3891,6 +3891,13 @@ button:disabled.bg-danger {
 }
 :root[data-reduced-motion="true"] :is(.burger-layer, .burger-stacked .burger-bun-bottom, .burger-stacked .burger-bun-bottom > *) { animation: none; }
 :root[data-reduced-motion="true"] .skill-burger .thinking-sheen { display: none; }
+/* The pill's count ticks over in place, and a new app's mark slides in at its end. */
+@keyframes burger-tick { from { opacity: 0; transform: translateY(45%); } }
+.burger-tick { animation: burger-tick 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes burger-mark-in { from { opacity: 0; transform: translateX(-6px) scale(0.96); } }
+.burger-mark-in { animation: burger-mark-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@media (prefers-reduced-motion: reduce) { .burger-tick, .burger-mark-in { animation: none; } }
+:root[data-reduced-motion="true"] :is(.burger-tick, .burger-mark-in) { animation: none; }
 /* Folding the layers: the list's row collapses to nothing and fades, so the bun below glides up rather than jumping. */
 .burger-fold { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease-out; }
 .burger-fold[data-folded="true"] { grid-template-rows: 0fr; opacity: 0; }

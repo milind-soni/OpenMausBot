@@ -8076,12 +8076,9 @@
   "skillBurger.list.removed": "{name} を削除しました。",
   "skillBurger.list.removeFailed": "このスキルを削除できませんでした。もう一度お試しください。",
   "skillBurger.list.loadFailed": "保存したスキルを読み込めませんでした。",
-  "skillBurger.everyChat": "すべてのチャットで使う",
-  "skillBurger.everyChatFailed": "この Skill Burger を使う場所を変更できませんでした。もう一度お試しください。",
   "skillBurger.renameFailed": "この Skill Burger の名前を変更できませんでした。もう一度お試しください。",
   "skillBurger.menu.aria": "{name} のその他の操作",
   "skillBurger.menu.rename": "名前を変更…",
-  "skillBurger.card.everyChat": "すべてのチャット",
   "skillBurger.page.empty": "ボットが作った Skill Burger はここに表示されます。",
   "chat.notice.savedToThread": "このスレッドに保存しました",
   "skillBurger.run.button": "実行",
@@ -8107,5 +8104,11 @@
   "skillBurger.detail.reads": "読むもの",
   "skillBurger.detail.lastTime": "前回",
   "skillBurger.detail.call": "呼び出し",
-  "skillBurger.detail.learnedFrom": "{name} から学習"
+  "skillBurger.detail.learnedFrom": "{name} から学習",
+  "skillBurger.pill.cooking": "調理中… {count}",
+  "skillBurger.pill.add": "追加",
+  "skillBurger.pill.running": "実行中… {count}",
+  "skillBurger.pill.stopped": "停止",
+  "skillBurger.pill.addPath": "手順を追加",
+  "skillBurger.card.madeBy": "{name} が作成"
 }

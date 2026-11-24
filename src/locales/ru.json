@@ -7292,12 +7292,9 @@
   "skillBurger.list.removed": "{name} удалён.",
   "skillBurger.list.removeFailed": "Не удалось удалить навык. Попробуйте ещё раз.",
   "skillBurger.list.loadFailed": "Не удалось загрузить сохранённые навыки.",
-  "skillBurger.everyChat": "Использовать в каждом чате",
-  "skillBurger.everyChatFailed": "Не удалось изменить, где используется этот Skill Burger. Попробуйте ещё раз.",
   "skillBurger.renameFailed": "Не удалось переименовать этот Skill Burger. Попробуйте ещё раз.",
   "skillBurger.menu.aria": "Ещё для {name}",
   "skillBurger.menu.rename": "Переименовать…",
-  "skillBurger.card.everyChat": "Каждый чат",
   "skillBurger.page.empty": "Здесь появляются Skill Burger ваших ботов.",
   "chat.notice.savedToThread": "Сохранено в этой ветке",
   "skillBurger.run.button": "Запустить",
@@ -7323,5 +7320,11 @@
   "skillBurger.detail.reads": "Читает",
   "skillBurger.detail.lastTime": "В прошлый раз",
   "skillBurger.detail.call": "Вызов",
-  "skillBurger.detail.learnedFrom": "перенято у {name}"
+  "skillBurger.detail.learnedFrom": "перенято у {name}",
+  "skillBurger.pill.cooking": "Готовится… {count}",
+  "skillBurger.pill.add": "Добавить",
+  "skillBurger.pill.running": "Выполняется… {count}",
+  "skillBurger.pill.stopped": "Остановлено",
+  "skillBurger.pill.addPath": "Добавить путь",
+  "skillBurger.card.madeBy": "Создано: {name}"
 }

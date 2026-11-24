@@ -65,12 +65,13 @@ export function SkillBurgerSlot({ botId, threadId, busy, canWrite, messages, liv
     const view = runView(runnable.workflow, seen, seen?.name ?? edit!.name);
     return (
       <div className="flex justify-end px-4 pb-2">
-        <RunBurger key={key} view={view} summary={runnable.workflow.summary} everyChat={runnable.everyChat} botId={botId} threadId={threadId} busy={busy}
+        <RunBurger key={key} view={view} summary={runnable.workflow.summary} botId={botId} threadId={threadId} busy={busy}
           onDismiss={close(key)} {...(edit ? { edited: { undo: edit.undo } } : {})} />
       </div>
     );
   }
-  if (!run || layers.length < BURGER_MIN_LAYERS || closed.get(transcriptKey) === run) return null;
+  // The pill shows from the first step while the bot works; a run that ends with fewer steps than a burger needs goes.
+  if (!run || (layers.length < BURGER_MIN_LAYERS && !(busy && layers.length > 0)) || closed.get(transcriptKey) === run) return null;
   const summary = fetched?.summary ?? askOf(messages) ?? layers.map(layerLine).join(", ");
   return (
     <div className="flex justify-end px-4 pb-2">
@@ -80,6 +81,7 @@ export function SkillBurgerSlot({ botId, threadId, busy, canWrite, messages, liv
         layers={layers}
         summary={summary.slice(0, 160)}
         canSave={canWrite && !busy}
+        busy={busy}
         botId={botId}
         threadId={threadId}
         onDismiss={close(run)}

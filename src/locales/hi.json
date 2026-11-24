@@ -3796,12 +3796,9 @@
   "skillBurger.list.removed": "{name} हटाया गया।",
   "skillBurger.list.removeFailed": "यह स्किल हटाई नहीं जा सकी। फिर कोशिश करें।",
   "skillBurger.list.loadFailed": "सहेजी गई स्किल्स लोड नहीं हो सकीं।",
-  "skillBurger.everyChat": "हर चैट में इस्तेमाल करें",
-  "skillBurger.everyChatFailed": "यह Skill Burger कहाँ इस्तेमाल हो, यह बदला नहीं जा सका। फिर कोशिश करें।",
   "skillBurger.renameFailed": "इस Skill Burger का नाम नहीं बदला जा सका। फिर कोशिश करें।",
   "skillBurger.menu.aria": "{name} के लिए और",
   "skillBurger.menu.rename": "नाम बदलें…",
-  "skillBurger.card.everyChat": "हर चैट",
   "skillBurger.page.empty": "आपके बॉट जो Skill Burgers बनाते हैं, वे यहाँ दिखते हैं।",
   "chat.notice.savedToThread": "इस थ्रेड में सहेजा गया",
   "memoryPage.thisThread": "यह थ्रेड",
@@ -3830,5 +3827,11 @@
   "skillBurger.detail.reads": "पढ़ता है",
   "skillBurger.detail.lastTime": "पिछली बार",
   "skillBurger.detail.call": "कॉल",
-  "skillBurger.detail.learnedFrom": "{name} से सीखा"
+  "skillBurger.detail.learnedFrom": "{name} से सीखा",
+  "skillBurger.pill.cooking": "बन रहा है… {count}",
+  "skillBurger.pill.add": "जोड़ें",
+  "skillBurger.pill.running": "चल रहा है… {count}",
+  "skillBurger.pill.stopped": "रुका",
+  "skillBurger.pill.addPath": "रास्ता जोड़ें",
+  "skillBurger.card.madeBy": "{name} ने बनाया"
 }

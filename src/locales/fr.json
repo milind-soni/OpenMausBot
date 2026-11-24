@@ -3944,12 +3944,9 @@
   "skillBurger.list.removed": "{name} retirée.",
   "skillBurger.list.removeFailed": "Impossible de retirer cette compétence. Réessayez.",
   "skillBurger.list.loadFailed": "Impossible de charger les compétences enregistrées.",
-  "skillBurger.everyChat": "Utiliser dans chaque chat",
-  "skillBurger.everyChatFailed": "Impossible de changer où ce Skill Burger est utilisé. Réessayez.",
   "skillBurger.renameFailed": "Impossible de renommer ce Skill Burger. Réessayez.",
   "skillBurger.menu.aria": "Plus pour {name}",
   "skillBurger.menu.rename": "Renommer…",
-  "skillBurger.card.everyChat": "Chaque chat",
   "skillBurger.page.empty": "Les Skill Burgers de vos bots apparaissent ici.",
   "chat.notice.savedToThread": "Enregistré dans ce fil",
   "memoryPage.thisThread": "Ce fil",
@@ -3978,5 +3975,11 @@
   "skillBurger.detail.reads": "Lit",
   "skillBurger.detail.lastTime": "La dernière fois",
   "skillBurger.detail.call": "Appel",
-  "skillBurger.detail.learnedFrom": "appris de {name}"
+  "skillBurger.detail.learnedFrom": "appris de {name}",
+  "skillBurger.pill.cooking": "En cuisine… {count}",
+  "skillBurger.pill.add": "Ajouter",
+  "skillBurger.pill.running": "En cours… {count}",
+  "skillBurger.pill.stopped": "Arrêté",
+  "skillBurger.pill.addPath": "Ajouter le chemin",
+  "skillBurger.card.madeBy": "Créé par {name}"
 }

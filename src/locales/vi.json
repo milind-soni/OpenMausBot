@@ -6034,12 +6034,9 @@
   "skillBurger.list.removed": "Đã xóa {name}.",
   "skillBurger.list.removeFailed": "Không thể xóa kỹ năng này. Hãy thử lại.",
   "skillBurger.list.loadFailed": "Không thể tải các kỹ năng đã lưu.",
-  "skillBurger.everyChat": "Dùng trong mọi cuộc trò chuyện",
-  "skillBurger.everyChatFailed": "Không thể đổi nơi dùng Skill Burger này. Hãy thử lại.",
   "skillBurger.renameFailed": "Không thể đổi tên Skill Burger này. Hãy thử lại.",
   "skillBurger.menu.aria": "Thêm cho {name}",
   "skillBurger.menu.rename": "Đổi tên…",
-  "skillBurger.card.everyChat": "Mọi cuộc trò chuyện",
   "skillBurger.page.empty": "Skill Burger do bot của bạn tạo sẽ hiện ở đây.",
   "chat.notice.savedToThread": "Đã lưu vào luồng này",
   "memoryPage.thisThread": "Luồng này",
@@ -6068,5 +6065,11 @@
   "skillBurger.detail.reads": "Đọc",
   "skillBurger.detail.lastTime": "Lần trước",
   "skillBurger.detail.call": "Lệnh gọi",
-  "skillBurger.detail.learnedFrom": "học từ {name}"
+  "skillBurger.detail.learnedFrom": "học từ {name}",
+  "skillBurger.pill.cooking": "Đang nấu… {count}",
+  "skillBurger.pill.add": "Thêm",
+  "skillBurger.pill.running": "Đang chạy… {count}",
+  "skillBurger.pill.stopped": "Đã dừng",
+  "skillBurger.pill.addPath": "Thêm nhánh",
+  "skillBurger.card.madeBy": "Do {name} tạo"
 }

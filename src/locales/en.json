@@ -11733,12 +11733,9 @@
   "skillBurger.list.removed": "Removed {name}.",
   "skillBurger.list.removeFailed": "Couldn't remove this skill. Try again.",
   "skillBurger.list.loadFailed": "Couldn't load saved skills.",
-  "skillBurger.everyChat": "Use in every chat",
-  "skillBurger.everyChatFailed": "Couldn’t change where this Skill Burger is used. Try again.",
   "skillBurger.renameFailed": "Couldn’t rename this Skill Burger. Try again.",
   "skillBurger.menu.aria": "More for {name}",
   "skillBurger.menu.rename": "Rename…",
-  "skillBurger.card.everyChat": "Every chat",
   "skillBurger.page.empty": "Skill Burgers your bots make show up here.",
   "skillBurger.run.button": "Run",
   "skillBurger.runName": "Run {name}",
@@ -11763,5 +11760,11 @@
   "skillBurger.detail.reads": "Reads",
   "skillBurger.detail.lastTime": "Last time",
   "skillBurger.detail.call": "Call",
-  "skillBurger.detail.learnedFrom": "learned from {name}"
+  "skillBurger.detail.learnedFrom": "learned from {name}",
+  "skillBurger.pill.cooking": "Cooking… {count}",
+  "skillBurger.pill.add": "Add",
+  "skillBurger.pill.running": "Running… {count}",
+  "skillBurger.pill.stopped": "Stopped",
+  "skillBurger.pill.addPath": "Add path",
+  "skillBurger.card.madeBy": "Made by {name}"
 }
