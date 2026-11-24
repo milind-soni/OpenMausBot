@@ -69,6 +69,62 @@ describe.skipIf(process.platform === "win32")("the image's start-up script keeps
     expect(readFileSync(join(home, ".local", "share", "applications", "example.desktop"), "utf8")).toBe("[Desktop Entry]");
   });
 
+  it("recovers a home copy left incomplete by an interrupted copy instead of deleting it", () => {
+    const dir = scratch();
+    const home = join(dir, "home");
+    const workspace = join(dir, "workspace");
+    // A previous start was killed mid-copy: the workspace copy is non-empty but incomplete.
+    mkdirSync(join(home, ".local", "share", "applications"), { recursive: true });
+    writeFileSync(join(home, ".local", "share", "applications", "only-in-home.desktop"), "home");
+    writeFileSync(join(home, ".local", "share", "bookmarks"), "home bookmarks");
+    mkdirSync(join(workspace, ".desktop-apps", "local", "share"), { recursive: true });
+    writeFileSync(join(workspace, ".desktop-apps", "local", "share", "partial-from-killed-copy"), "partial");
+    runPrepare(prepareScript(dir, workspace), home);
+    const durable = join(workspace, ".desktop-apps", "local");
+    expect(readFileSync(join(durable, "share", "applications", "only-in-home.desktop"), "utf8")).toBe("home");
+    expect(readFileSync(join(durable, "share", "bookmarks"), "utf8")).toBe("home bookmarks");
+    expect(readFileSync(join(durable, "share", "partial-from-killed-copy"), "utf8")).toBe("partial");
+    expect(lstatSync(join(home, ".local")).isSymbolicLink()).toBe(true);
+  });
+
+  it("moves a home copy aside rather than deleting it when the workspace copy differs, and never overwrites a differing workspace file", () => {
+    const dir = scratch();
+    const home = join(dir, "home");
+    const workspace = join(dir, "workspace");
+    mkdirSync(join(home, ".local", "share"), { recursive: true });
+    writeFileSync(join(home, ".local", "share", "bookmarks"), "newer home version");
+    mkdirSync(join(workspace, ".desktop-apps", "local", "share"), { recursive: true });
+    writeFileSync(join(workspace, ".desktop-apps", "local", "share", "bookmarks"), "workspace version");
+    runPrepare(prepareScript(dir, workspace), home);
+    expect(readFileSync(join(workspace, ".desktop-apps", "local", "share", "bookmarks"), "utf8")).toBe("workspace version");
+    expect(lstatSync(join(home, ".local")).isSymbolicLink()).toBe(true);
+    expect(readdirSync(workspace).some((name) => name.startsWith("unmerged-local-"))).toBe(true);
+  });
+
+  it("reads a profile's dangling lock link as copied, so a complete profile is not moved aside", () => {
+    const dir = scratch();
+    const home = join(dir, "home");
+    const workspace = join(dir, "workspace");
+    mkdirSync(join(home, ".config", "google-chrome", "Default"), { recursive: true });
+    writeFileSync(join(home, ".config", "google-chrome", "Default", "Cookies"), "cookies");
+    symlinkSync("old-host-4242", join(home, ".config", "google-chrome", "SingletonLock"));
+    runPrepare(prepareScript(dir, workspace), home);
+    expect(readFileSync(join(workspace, ".browser-profiles", "google-chrome", "Default", "Cookies"), "utf8")).toBe("cookies");
+    expect(lstatSync(join(home, ".config", "google-chrome")).isSymbolicLink()).toBe(true);
+    expect(readdirSync(workspace).filter((name) => name.startsWith("unmerged-"))).toEqual([]);
+  });
+
+  it("keeps a home path that is a regular file instead of deleting it silently", () => {
+    const dir = scratch();
+    const home = join(dir, "home");
+    const workspace = join(dir, "workspace");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, ".mozilla"), "saved file, not a profile");
+    runPrepare(prepareScript(dir, workspace), home);
+    expect(readFileSync(join(workspace, ".browser-profiles", "mozilla", ".mozilla"), "utf8")).toBe("saved file, not a profile");
+    expect(lstatSync(join(home, ".mozilla")).isSymbolicLink()).toBe(true);
+  });
+
   it("keeps a durable profile over the image's empty one and clears the old desktop's Firefox locks", () => {
     const dir = scratch();
     const home = join(dir, "home");

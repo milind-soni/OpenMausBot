@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Search, SquarePen } from "lucide-react";
 
 import { cn } from "@/lib/cn";
@@ -113,13 +113,16 @@ export function BotConversations({ bot }: { bot: Bot }) {
   const hidden = conversations.length - collapsed.length;
   const project = bot.projects?.find((folder) => folder.id === bot.tasks?.find((task) => task.threadId === bot.threadId)?.projectId);
 
-  const closeOnPhone = () => {
-    if (phone) dispatch({ type: "toggleSettings", open: false });
-  };
-  const select = (task: { threadId: string }) => {
-    if (task.threadId !== bot.threadId) openBotThread(dispatch, bot, task.threadId, false);
+  const latest = useRef({ bot, phone });
+  latest.current = { bot, phone };
+  const closeOnPhone = useCallback(() => {
+    if (latest.current.phone) dispatch({ type: "toggleSettings", open: false });
+  }, [dispatch]);
+  const select = useCallback((task: { threadId: string }) => {
+    const current = latest.current.bot;
+    if (task.threadId !== current.threadId) openBotThread(dispatch, current, task.threadId, false);
     closeOnPhone();
-  };
+  }, [dispatch, closeOnPhone]);
   const startNew = () => {
     dispatch({ type: "newTask", botId: bot.id, ...(project ? { projectId: project.id } : {}) });
     closeOnPhone();

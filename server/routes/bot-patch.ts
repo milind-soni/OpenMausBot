@@ -25,6 +25,8 @@ import type { ModelSelection } from "../contracts.ts";
 import type { createApprovalModeSupport } from "../harness-capabilities.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
 import type { hostedModelPolicy } from "../hosted-models.ts";
+import { heldFrom } from "../host/room-reads.ts";
+import { unreadTargetTask } from "../task-record.ts";
 import { MAX_MCP_SERVERS, mcpServerNameError } from "../mcp-registry.ts";
 import type { MemoryUpkeep } from "../memory-upkeep.ts";
 import { phoneAppsFor } from "../phones/access.ts";
@@ -724,6 +726,8 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           (freshBrowserBot.busy || browserRuntime.heldBy(currentBrowserSession(freshBrowserBot.id, freshBrowserBot.browserProfile)))) {
         return json(res, 409, { error: "Stop the bot and release browser control before changing its profile." });
       }
+      // A mark goes out with its hold in one frame, below.
+      delete patch.unread;
       if (Array.isArray(patch.alwaysAllow)) dropRemovedGrants(store, deps.turnBots?.values() ?? [], m[1], patch.alwaysAllow);
       if (profile.patch.soul !== undefined) {
         if (freshBrowserBot) assertTeamComputerChangeIdle(freshBrowserBot, { ...freshBrowserBot, ...patch } as BotRecord);
@@ -734,9 +738,15 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         bot = store.patchBotProfile(m[1], profile.patch);
       } else {
         if (freshBrowserBot) assertTeamComputerChangeIdle(freshBrowserBot, { ...freshBrowserBot, ...patch } as BotRecord);
-        bot = store.patchBot(m[1], patch);
+        bot = Object.keys(patch).length ? store.patchBot(m[1], patch) : store.bot(m[1]) ?? null;
       }
       if (!bot) return json(res, 404, { error: "no such bot" });
+      if (typeof body.unread === "boolean") {
+        // A mark skips a routine run or an archived conversation for the open main one (task-record.ts).
+        const target = unreadTargetTask(bot, store.activeTask(bot.id), body.unread);
+        if (target) store.patchTask(bot.id, target.threadId, { unread: body.unread, heldUnread: body.unread ? heldFrom(store.activePath(target.threadId), store.messagesFor(target.threadId)) : undefined });
+        else if (!bot.tasks?.length) bot = store.patchBot(bot.id, { unread: body.unread }) ?? bot;
+      }
       if (body.applyToAllThreads === true && requestedApprovalMode !== "custom") store.setAllThreadApprovalMode(bot.id, requestedApprovalMode);
       if (body.memoryUpkeep === false || body.memoryEnabled === false) memoryUpkeep.dropBot(bot.id);
       if (body.cacheKeepWarm !== undefined) cacheKeepWarm.refresh();

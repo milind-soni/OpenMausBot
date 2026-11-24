@@ -52,6 +52,7 @@ import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled } from "@/lib/feature-flags";
 import { stateForBot } from "@/lib/mascot";
 import { peerLine, peerPreview, peerRequest } from "@/lib/peer-message"; import { PeerCompactRow, PeerLabel, PeerMessagesContext, PeerOpenedActions } from "./PeerExchange";
+import { lastRequests } from "@/lib/automation-note"; import { automationNoteRow } from "./AutomationNoteRow";
 import { showWorkingDots } from "@/lib/turn-tail";
 import { lastNonReceipt } from "@/lib/receipts";
 import { useTurnLive } from "@/state/turn-status"; import { isLiveReply, StreamingReplyContext, streamedReply, useHasLiveReply, useLiveRow, useLiveTranscriptLayout } from "@/state/live-reply"; import { useTurnNow } from "./NowCard"; import { useThreadRoutineRun } from "@/state/older-routine-runs";
@@ -700,6 +701,8 @@ const MessagesList = memo(function MessagesList({
               return <ScreenFrame threadId={threadId} message={m} />;
             default: {
               if (m.publishedPage || m.template) return m.template ? <TemplateChatCard message={m} botId={botId} threadId={threadId} /> : <PublishedPageCard message={m} />;
+              const note = automationNoteRow(m, transcript);
+              if (note) return note;
               const peer = peerLine(m) ?? peerRequest(m, botId);
               const user = m.role === "user" && !peer;
               if (!user && isPureLeakedSystemHarnessMessage(m.text) && !m.attachments?.length) return null;
@@ -841,10 +844,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
     },
     [bot.id, bot.threadId, dispatch],
   );
-  const [lastUserMessage, lastTypedMessage] = useMemo(() => {
-    const said = messages.filter((m) => m.role === "user" && m.kind === "text" && !peerLine(m));
-    return [said.at(-1), said.findLast((m) => !m.reaction)];
-  }, [messages]);
+  const { answered: lastUserMessage, typed: lastTypedMessage } = useMemo(() => lastRequests(messages), [messages]);
   const lastTypedMessageHasAttachments = useMemo(() => {
     if (!lastTypedMessage?.text) return false;
     const cited = splitTranscriptCitations(lastTypedMessage.text);

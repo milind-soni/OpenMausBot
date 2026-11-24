@@ -16,7 +16,9 @@ const SETTLE_MS = 150;
 
 export interface JobRouteDeps {
   store: Pick<Store, "bot" | "botByThread" | "groupByThread" | "taskByThread" | "groupTaskByThread" | "onChange">;
-  coordinator: Pick<Coordinator, "job">;
+  coordinator: Pick<Coordinator, "job" | "node" | "stopHandoff">;
+  /** Why this reader may not stop this conversation's work (a shared conversation's request is its asker's), or null. */
+  stopRefusal?(auth: RequestAuth, threadId: string): string | null;
   groupThreadIsWorking(groupId: string, threadId: string): boolean;
   viewerFor(auth: RequestAuth): Viewer;
   visibleTo(viewer: Viewer): VisibleSet;
@@ -61,7 +63,35 @@ export function createJobRoutes(deps: JobRouteDeps): RouteHandler {
     });
   };
 
-  return async ({ res, url, path, method, auth, json }) => {
+  /** A hand-off made under this conversation's own turns, deeper ones included; never a turn that runs in it. */
+  const handedOutFrom = (threadId: string, id: string) => {
+    const node = coordinator.node(id);
+    if (!node?.parentId || node.groupId || node.threadId === threadId) return undefined;
+    let parent = coordinator.node(node.parentId);
+    for (let hops = 0; parent && hops < 64; hops++) {
+      if (parent.threadId === threadId) return node;
+      parent = parent.parentId ? coordinator.node(parent.parentId) : undefined;
+    }
+    return undefined;
+  };
+
+  const stop: RouteHandler = async ({ path, method, auth, res, json }) => {
+    const m = /^\/api\/threads\/([\w-]+)\/job\/([\w-]+)\/stop$/.exec(path);
+    if (!m || method !== "POST") return PASS;
+    const [, threadId, id] = m as unknown as [string, string, string];
+    const visible = deps.visibleTo(deps.viewerFor(auth));
+    const node = visible.thread(threadId) ? handedOutFrom(threadId, id) : undefined;
+    if (!node || !visible.thread(node.threadId)) return json(res, 404, { error: "no such hand-off in this conversation" });
+    const notYours = deps.stopRefusal?.(auth, threadId);
+    if (notYours) return json(res, 403, { error: notYours, code: "stop_not_yours" });
+    const outcome = coordinator.stopHandoff(id);
+    if (!outcome) return json(res, 404, { error: "no such hand-off in this conversation" });
+    return json(res, 200, { ok: true, outcome: outcome === "ended" ? "already-ended" : "stopped" });
+  };
+
+  return async (ctx) => {
+    const { res, url, path, method, auth, json } = ctx;
+    if (path.endsWith("/stop")) return stop(ctx);
     const m = /^\/api\/threads\/([\w-]+)\/job$/.exec(path);
     if (!m || method !== "GET") return PASS;
     const threadId = m[1]!;

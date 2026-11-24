@@ -132,7 +132,7 @@ export function createMcpChat(deps: McpChatDeps) {
     const servers = listMcpServers(cfg.mcpServers).map((server) => {
       if (!("url" in server)) return server;
       const auth = mcpOAuth.authState(server.name, server.url);
-      const listed = server.oauth ? { ...server, oauth: { ...server.oauth, redirectUri: mcpOAuthRedirectUri(server.url) } } : server;
+      const listed = server.oauth ? { ...server, oauth: { ...server.oauth, redirectUri: server.oauth.redirectUri ?? mcpOAuthRedirectUri(server.url) } } : server;
       return auth === "none" ? listed : { ...listed, auth };
     }).map(mcpServersHost.listing).map((server) => {
       const managedBy = mcpManagedBy(server.name, server);

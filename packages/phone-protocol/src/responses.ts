@@ -135,6 +135,7 @@ export interface WireModelOption {
   label: string;
   custom?: boolean;
   provider?: string;
+  effortLevels?: readonly string[];
 }
 
 /** One AI engine set up on the server, as GET /api/instances lists it: the fields a phone reads. Each entry carries more

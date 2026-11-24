@@ -1,9 +1,10 @@
 import { serverTransport } from "../../electron/server-address.mjs";
+import { vpsServerId, type BotComputerState } from "../../shared/bot-computers";
 import type { ServerInstall, ServerStatus } from "../../electron/server-status.mjs";
 import type { CompanionState, PhoneDevice } from "./companion-types";
 import type { PublicPhone } from "./phones";
 
-/** What a device is, for its icon and its group in the list. `vm` is a bot's own computer. */
+/** What a device is, for its icon and its group on the map. `vm` is a bot's cloud desktop. */
 export type DeviceKind = "laptop" | "desktop" | "server" | "cloud" | "phone" | "vm";
 /** `unknown`: nothing says how it is right now (a Cloud the Admin runs, a server bots reach over SSH). */
 export type DeviceStatus = "online" | "offline" | "attention" | "unknown";
@@ -20,7 +21,8 @@ export type DeviceSource =
   | { type: "phone-app"; id: string }
   | { type: "session"; id: string }
   | { type: "lent"; id: string }
-  | { type: "vps"; id: string };
+  | { type: "vps"; id: string }
+  | { type: "desktop"; id: string };
 
 export type DeviceAction =
   | { type: "switch"; placeId: string }
@@ -55,6 +57,12 @@ export interface Device {
   home?: true;
   /** This desktop lets that place's bots use it (Share this computer is on). */
   usesThisComputer?: boolean;
+  /** Connected at this moment (a phone on its link now, a place this app is connected to), not merely seen lately. */
+  live?: true;
+  /** The bots that work on it, by id, from `GET /api/computers/bots`. */
+  bots?: string[];
+  /** A cloud desktop's last-known state; absent while nothing says. */
+  desktop?: Exclude<BotComputerState, "none" | "unknown">;
   actions: DeviceAction[];
 }
 
@@ -157,7 +165,7 @@ function fromPlace(entry: SavedPlace, status: ServerStatus | undefined, lends: b
     id: `place:${entry.id}`, kind: entry.home || entry.cloud ? "cloud" : MINI_LABEL.test(entry.name) ? "desktop" : "server", name: entry.name, ...state, route, routes: [route],
     ...(hand && status?.version ? { version: status.version } : {}), ...(hand && entry.origin ? { address: entry.origin } : {}),
     sources: [{ type: "place", id: entry.id }], canRunBots: true, canHostComputer: false, ...(entry.home ? { home: true as const } : {}),
-    ...(lends ? { usesThisComputer: true } : {}), actions,
+    ...(lends ? { usesThisComputer: true } : {}), ...(state.status === "online" ? { live: true as const } : {}), actions,
   };
 }
 
@@ -170,8 +178,9 @@ function phoneRoute(device: PhoneDevice, routes: CompanionState["routes"] | unde
 
 function fromPhone(device: PhoneDevice, connected: ReadonlySet<string>, routes: CompanionState["routes"] | undefined): Device {
   const route = phoneRoute(device, routes);
+  const now = connected.has(device.id) || Boolean(device.route);
   return {
-    id: `phone:${device.id}`, kind: "phone", name: device.name, status: connected.has(device.id) || device.route ? "online" : "offline",
+    id: `phone:${device.id}`, kind: "phone", name: device.name, status: now ? "online" : "offline", ...(now ? { live: true as const } : {}),
     route, routes: [route], lastSeen: device.lastSeenAt, sources: [{ type: "phone", id: device.id }], canRunBots: false, canHostComputer: false,
     actions: [{ type: "remove", source: { type: "phone", id: device.id } }, { type: "manage", page: "phone", anchor: "paired" }],
   };
@@ -179,7 +188,8 @@ function fromPhone(device: PhoneDevice, connected: ReadonlySet<string>, routes: 
 
 function fromPhoneApp(phone: PublicPhone): Device {
   return {
-    id: `phone-app:${phone.key}`, kind: "phone", name: phone.registration.name, status: phone.online ? "online" : "offline", route: "paired", routes: ["paired"],
+    id: `phone-app:${phone.key}`, kind: "phone", name: phone.registration.name, status: phone.online ? "online" : "offline", ...(phone.online ? { live: true as const } : {}),
+    route: "paired", routes: ["paired"],
     lastSeen: phone.seen, version: phone.registration.appVersion, sources: [{ type: "phone-app", id: phone.key }], canRunBots: false, canHostComputer: false,
     actions: [{ type: "remove", source: { type: "phone-app", id: phone.key } }],
   };
@@ -196,15 +206,15 @@ function fromSession(session: SignedInDevice, route: DeviceRoute, now: number): 
 
 function fromLent(computer: LentDevice, route: DeviceRoute): Device {
   return {
-    id: `lent:${computer.id}`, kind: "laptop", name: computer.name, status: computer.online ? "online" : "offline", route, routes: [route],
+    id: `lent:${computer.id}`, kind: "laptop", name: computer.name, status: computer.online ? "online" : "offline", ...(computer.online ? { live: true as const } : {}), route, routes: [route],
     lastSeen: computer.lastSeenAt, sources: [{ type: "lent", id: computer.id }], canRunBots: false, canHostComputer: true, actions: [],
   };
 }
 
 function fromVps({ alias, name }: { alias: string; name?: string }): Device {
   return {
-    id: `vps:${alias}`, kind: "server", name: name?.trim() || alias, status: "unknown", route: "ssh", routes: ["ssh"], sources: [{ type: "vps", id: alias }],
-    canRunBots: false, canHostComputer: true, actions: [{ type: "manage", page: "ai", anchor: "ai-keys" }],
+    id: vpsServerId(alias), kind: "server", name: name?.trim() || alias, status: "unknown", route: "ssh", routes: ["ssh"], sources: [{ type: "vps", id: alias }],
+    canRunBots: false, canHostComputer: true, actions: [],
   };
 }
 
@@ -218,6 +228,7 @@ function join(into: Device, other: Device): Device {
   const seen = Math.max(into.lastSeen ?? 0, other.lastSeen ?? 0);
   return {
     ...into, status, note: status === into.status ? into.note : other.note, routes: [...new Set([...into.routes, ...other.routes])],
+    ...(into.live || other.live ? { live: true as const } : {}),
     ...(seen ? { lastSeen: seen } : {}), version: into.version ?? other.version, address: into.address ?? other.address,
     sources: [...into.sources, ...other.sources], canRunBots: into.canRunBots || other.canRunBots, canHostComputer: into.canHostComputer || other.canHostComputer,
     actions: [...into.actions, ...other.actions.filter((action) => action.type === "remove" || !into.actions.some((mine) => mine.type === action.type))],
@@ -301,18 +312,14 @@ export function privateNetwork(companion: Pick<CompanionState, "routes" | "tailn
   return { state: "ready", name: route.name, shared };
 }
 
-/** A device inside the private network's group on the map: on it now, or reached over it. */
-export const onPrivateNetwork = (device: Device): boolean => device.route === "tailscale";
-
-/** The groups the map draws below this place, in a fixed order, each with its devices; empty groups are left out. */
-export const ROUTE_ORDER: readonly DeviceRoute[] = ["tailscale", "local", "relay", "cloud", "internet", "paired", "ssh"];
-
-export function groupByRoute(devices: readonly Device[]): Array<{ route: DeviceRoute; devices: Device[] }> {
-  return ROUTE_ORDER.map((route) => ({ route, devices: devices.filter((device) => !device.here && device.route === route) }))
-    .filter((group) => group.devices.length > 0);
-}
-
-/** The list's groups under the map: what a person calls them. */
+/** The map's groups, by what a person calls each device. */
 export type DeviceGroup = "computers" | "servers" | "phones";
+export const GROUP_ORDER: readonly DeviceGroup[] = ["phones", "computers", "servers"];
 export const deviceGroup = (device: Device): DeviceGroup =>
   device.kind === "phone" ? "phones" : device.kind === "laptop" || device.kind === "desktop" ? "computers" : "servers";
+
+/** The groups the map draws around this place, in a fixed order; empty groups are left out. */
+export function groupByKind(devices: readonly Device[]): Array<{ group: DeviceGroup; devices: Device[] }> {
+  return GROUP_ORDER.map((group) => ({ group, devices: devices.filter((device) => !device.here && deviceGroup(device) === group) }))
+    .filter((entry) => entry.devices.length > 0);
+}

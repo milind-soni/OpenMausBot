@@ -39,7 +39,8 @@ export interface ThreadRouteDeps {
   store: Pick<Store,
     | "activeLeaf" | "activePath" | "bot" | "botByThread" | "bots" | "groupByThread" | "groupTaskByThread" | "groups" | "messagesFor"
     | "onChange" | "sections" | "taskByThread" | "tasks">;
-  coordinator: Pick<Coordinator, "job">;
+  coordinator: Pick<Coordinator, "job" | "node" | "stopHandoff">;
+  stopRefusal?(auth: RequestAuth, threadId: string): string | null;
   groupThreadIsWorking(groupId: string, threadId: string): boolean;
   /** What people's lines are called in this conversation (replies.ts PersonName). */
   userName(threadId: string): PersonName;
@@ -96,7 +97,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
     const cursor = shown.tasks?.find((task) => task.threadId === threadId)?.lastReadMessageId;
     return { ...shown, ...(tail !== undefined && limit !== undefined && tail < limit ? heldTail((size) => messagePage(threadId, size), tail, limit, cursor) : messagePage(threadId, limit)) };
   };
-  const jobs = createJobRoutes({ store, coordinator: deps.coordinator, groupThreadIsWorking: deps.groupThreadIsWorking, viewerFor, visibleTo, sessions });
+  const jobs = createJobRoutes({ store, coordinator: deps.coordinator, groupThreadIsWorking: deps.groupThreadIsWorking, viewerFor, visibleTo, sessions, ...(deps.stopRefusal ? { stopRefusal: deps.stopRefusal } : {}) });
   const handle = async ({ req, res, url, path, method, auth, json, readBody }: RouteContext): Promise<unknown> => {
     let m: RegExpMatchArray | null = null;
     const member = auth.kind === "session" && auth.session.membershipAuthority === "team" ? auth.session.email : undefined;

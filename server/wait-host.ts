@@ -42,6 +42,15 @@ export function waitContinuesHere(
   return store.messagesFor(threadId).some((message) => message.wait?.status === "fired" && message.wait.id === run.deliveryId);
 }
 
+/** The wait a follow-up's line starts, recorded on that line: only for the turn its own run started. */
+export function waitLineFields(
+  run: Pick<RoutineRun, "id" | "eventSource" | "triggerSource" | "webhookId" | "deliveryId"> | null,
+  originatingRunId: string | undefined,
+): { waitId?: string } {
+  return run && originatingRunId && run.id === originatingRunId && run.eventSource === "wait" && run.triggerSource === "webhook"
+    && run.deliveryId && run.webhookId === `wait:${run.deliveryId}` ? { waitId: run.deliveryId } : {};
+}
+
 interface WaitRunOwner {
   automationRunId?: string;
   messageId?: string;

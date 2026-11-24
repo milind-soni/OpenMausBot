@@ -2615,6 +2615,7 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
    without touching system settings; the welcome flow also reads it to skip
    its view transitions. Mirrors the media block above for its own classes. */
 :root[data-reduced-motion="true"] .animate-rise,
+:root[data-reduced-motion="true"] .animate-link-flow,
 :root[data-reduced-motion="true"] .animate-spot-in,
 :root[data-reduced-motion="true"] .animate-pop-in,
 :root[data-reduced-motion="true"] .animate-pop-out,
