@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, watch, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -53,10 +53,11 @@ export function fakePhone({ mode = "", video = SCRCPY_VIDEO, devices = "", under
         const look = () => {
           const received = existsSync(join(dir, "control.hex")) ? read("control.hex") : "";
           if (received.length < bytes * 2) return;
-          changes.close();
+          clearInterval(polling);
           resolve(received);
         };
-        const changes = watch(dir, look);
+        // macOS fs.watch (FSEvents) can drop a change made just after the watcher is created, so this polls instead.
+        const polling = setInterval(look, 10);
         look();
       }),
     /** More video on the running session's socket; settles once the phone has passed all of it on. */

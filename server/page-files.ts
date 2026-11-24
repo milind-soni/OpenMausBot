@@ -15,7 +15,7 @@ import { constants as fsConstants } from "node:fs";
 import { open, type FileHandle } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname } from "node:path";
-import { pipeline } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 import { PAGE_FILE_TYPES } from "../shared/published-page.ts";
 import type { AppDocs } from "./app-docs.ts";
@@ -105,22 +105,25 @@ export function createPageFiles(deps: { docs: AppDocs; now?: () => number }) {
   const sendVideo = async (req: IncomingMessage, res: ServerResponse, video: PageVideo, type: string, method: string) => {
     const handle = await openRecordedVideo(video);
     if (!handle) return answer(res, 404, "Not found.");
-    const size = video.bytes, headers = { ...SHARED_HEADERS, "content-type": type, "accept-ranges": "bytes" };
-    const part = req.headers.range === undefined ? null : rangeOf(String(req.headers.range), size);
-    if (req.headers.range !== undefined && !part) {
+    try {
+      if (res.destroyed) return;
+      const size = video.bytes, headers = { ...SHARED_HEADERS, "content-type": type, "accept-ranges": "bytes" };
+      const part = req.headers.range === undefined ? null : rangeOf(String(req.headers.range), size);
+      if (req.headers.range !== undefined && !part) {
+        res.writeHead(416, { ...headers, "content-range": `bytes */${size}` });
+        res.end();
+        return;
+      }
+      const start = part?.start ?? 0, end = part?.end ?? size - 1;
+      res.writeHead(part ? 206 : 200, { ...headers, "content-length": String(end - start + 1), ...(part ? { "content-range": `bytes ${start}-${end}/${size}` } : {}) });
+      if (method === "HEAD" || size === 0) {
+        res.end();
+        return;
+      }
+      await pipeline(handle.createReadStream({ start, end }), res);
+    } finally {
       await handle.close().catch(() => {});
-      res.writeHead(416, { ...headers, "content-range": `bytes */${size}` });
-      res.end();
-      return;
     }
-    const start = part?.start ?? 0, end = part?.end ?? size - 1;
-    res.writeHead(part ? 206 : 200, { ...headers, "content-length": String(end - start + 1), ...(part ? { "content-range": `bytes ${start}-${end}/${size}` } : {}) });
-    if (method === "HEAD" || size === 0) {
-      await handle.close().catch(() => {});
-      res.end();
-      return;
-    }
-    pipeline(handle.createReadStream({ start, end }), res, () => {});
   };
 
   return {

@@ -47,9 +47,15 @@ let mutationToken: string | null = null;
 let controlToken = initialControlToken(process.env, Boolean(parentPort));
 let controlTokenReceived = (): void => {};
 const controlReady = controlToken ? Promise.resolve() : new Promise<void>((resolve) => { controlTokenReceived = resolve; });
+type ProviderKeyReply = { status: number; body: unknown };
+const providerKeySaves = new Map<number, (reply: ProviderKeyReply) => void>();
+let providerKeySaveId = 0;
 parentPort?.on("message", ({ data }) => {
   if (!data || typeof data !== "object") return;
   const message = data as Record<string, unknown>;
+  if (message.type === "openmausbot:companion-provider-key-result" && typeof message.status === "number") {
+    return void providerKeySaves.get(message.id as number)?.({ status: message.status, body: message.body });
+  }
   if (message.type === "openmausbot:companion-e2e") return void configureE2E(message);
   if (message.type === "openmausbot:companion-e2e-redial") return void relay?.redial();
   if (message.type !== "openmausbot:companion-mutation-token") return;
@@ -61,6 +67,20 @@ parentPort?.on("message", ({ data }) => {
     controlTokenReceived();
   }
 });
+
+/** A phone's key goes to the desktop app, which saves it the way its own Settings do. */
+const saveProviderKey = (port: NonNullable<typeof parentPort>) => (patch: unknown): Promise<ProviderKeyReply> =>
+  new Promise((resolve) => {
+    const id = ++providerKeySaveId;
+    const done = (reply: ProviderKeyReply) => {
+      clearTimeout(timer);
+      providerKeySaves.delete(id);
+      resolve(reply);
+    };
+    const timer = setTimeout(() => done({ status: 504, body: { error: "The computer took too long to save the key. Try again." } }), 60_000);
+    providerKeySaves.set(id, done);
+    port.postMessage({ type: "openmausbot:companion-provider-key", id, patch });
+  });
 
 /** A typo'd port must not become port 0. */
 const num = (value: string | undefined, fallback: number): number => {
@@ -162,6 +182,7 @@ const proxy = createProxyHandler({
     connected: connectedDevices.open,
     e2eDescriptor: (deviceId) => e2e.descriptor(deviceId),
     e2ePaired: (context, deviceId) => e2e.paired(context, deviceId),
+    saveProviderKey: parentPort ? saveProviderKey(parentPort) : undefined,
   });
 const e2eOrigin = createE2EOrigin((req, res) => proxy(req, res), (req, socket, head) => proxy.upgrade(req, socket, head));
 const companion = createServer((req, res) => proxy(req, res, "lan"));

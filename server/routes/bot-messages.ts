@@ -36,7 +36,7 @@ import { extractSteerImages } from "../turn-images.ts";
 import { followupFacts, helperFollowup, helperFollowupBody, mayFollowUp } from "../helper-followup.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
 import { forgetSendingSession, noteSendingSession } from "../sending-sessions.ts";
-import { noteOwnWindowSend } from "../own-window-sends.ts";
+import { ownWindowSendStarting } from "../own-window-sends.ts";
 import { noteTypedSend } from "../typed-sends.ts";
 import { engineSessionOutdated, startFresh } from "../fresh-start.ts";
 import { parseMentionPicks } from "../../shared/room-mentions.ts";
@@ -349,19 +349,21 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const ownWindowSend = DESKTOP_MANAGED && auth.kind === "loopback" && !auth.companionDevice && sendId && !guarded && !press && !appSent
         && !store.messagesFor(threadId).some((line) => line.sendId === sendId) && !queuedSteeredMessage(bot.id, threadId, sendId);
       if (pressKey) pressesInFlight.set(pressKey, sendId);
+      const ownWindowSettled = ownWindowSend ? ownWindowSendStarting(threadId, sendId, text) : undefined;
       try {
         const receipt = await acceptDirectSend({
           botId: bot.id, threadId, text, sendId, replyTo, sender, trigger, dataContext, ...(app ? { app } : {}),
           personPresent, admin: owners.admin(auth), ...(followUp ? { followUp } : {}),
           ...(mentions?.length && !press && !appSent ? { mentions } : {}),
         }, guardedStart);
-        if (ownWindowSend) noteOwnWindowSend(threadId, sendId, text);
+        ownWindowSettled?.(true);
         press?.settle("queueId" in receipt ? receipt.queueId : undefined);
         appContext?.deliver();
         if (relayed && target && onBehalfOf) relayedReaction(threadId, target.id, onBehalfOf, relayed);
         return json(res, 202, receipt);
       } catch (error) {
         slot?.release();
+        ownWindowSettled?.(false);
         if (notedSession) forgetSendingSession(threadId, sendId!);
         if (error instanceof DirectSendRefused) return json(res, error.status, error.body);
         throw error;

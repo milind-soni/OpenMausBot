@@ -1,5 +1,12 @@
 {
   "title": "Computers",
   "icon": "Monitor",
-  "pages": ["index", "local-computer", "local-vm", "cloud-and-vps", "byo-vps"]
+  "pages": [
+    "index",
+    "local-computer",
+    "lend-to-your-server",
+    "local-vm",
+    "cloud-and-vps",
+    "byo-vps"
+  ]
 }

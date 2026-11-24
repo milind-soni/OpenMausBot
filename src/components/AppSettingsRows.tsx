@@ -18,7 +18,6 @@ import { setShowThreads, useShowThreadsChoice } from "@/lib/thread-preferences";
 import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { SIMPLE_ONLY } from "@/lib/simple-only";
 import { setPinnedCircles, setUniversalPins, usePinnedCircles, useUniversalPins } from "@/lib/sidebar-preferences";
-import { setShowRunCard, useShowRunCard } from "@/lib/run-card-preferences";
 import { parseSendKey, SEND_KEYS, sendKeyLabel, setSendKey, useSendKey } from "@/lib/send-key";
 import { alternateSendLabel, parseFollowUpDefault, setFollowUpDefault, useFollowUpDefault } from "@/lib/follow-up";
 import { effectiveLanguage, setLanguageChoice, useLanguageChoice } from "@/lib/language-preference";
@@ -314,19 +313,6 @@ export function PinnedCirclesRow() {
         checked={enabled}
         aria-label={t("settings.pinnedCircles.title")}
         onClick={() => setPinnedCircles(!enabled)}
-      />
-    </SettingRow>
-  );
-}
-
-export function RunCardRow() {
-  const enabled = useShowRunCard();
-  return (
-    <SettingRow title={t("settings.runCard.rowTitle")} subtitle={t("settings.runCard.line")}>
-      <Switch
-        checked={enabled}
-        aria-label={t("settings.runCard.show")}
-        onClick={() => setShowRunCard(!enabled)}
       />
     </SettingRow>
   );

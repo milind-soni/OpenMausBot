@@ -19,7 +19,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 });
 
-function fixture(options: { owner?: boolean; ownerRefusal?: TurnOwnerRefusal; guest?: boolean; group?: boolean; window?: boolean; pictureRefusal?: string; patchRefusal?: string; automated?: boolean } = {}) {
+function fixture(options: { owner?: boolean; ownerRefusal?: TurnOwnerRefusal; guest?: boolean; group?: boolean; window?: boolean; pictureRefusal?: string; patchRefusal?: string; patchRefusalFor?: (botId: string) => string | null; emptyRegistryBots?: boolean; automated?: boolean } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "app-settings-"));
   dirs.push(dataDir);
   const bots: BotRecord[] = [
@@ -59,10 +59,10 @@ function fixture(options: { owner?: boolean; ownerRefusal?: TurnOwnerRefusal; gu
       Object.assign(cfg, patch);
       return null;
     },
-    bots: () => bots,
+    bots: () => (options.emptyRegistryBots ? [] : bots),
     sections: () => ["Sales"],
     reorderBots: async (botIds) => { bots.sort((a, b) => botIds.indexOf(a.id) - botIds.indexOf(b.id)); return null; },
-    patchBot: async (botId, body) => { if (options.patchRefusal) return options.patchRefusal; botPatches.push({ botId, body }); Object.assign(bots.find((bot) => bot.id === botId)!, body); return null; },
+    patchBot: async (botId, body) => { const refusal = options.patchRefusal ?? options.patchRefusalFor?.(botId); if (refusal) return refusal; botPatches.push({ botId, body }); Object.assign(bots.find((bot) => bot.id === botId)!, body); return null; },
     call: async (route, method, path, body) => { routeCalls.push({ route, method, path, body }); return null; },
     read: async (_route, path) => (path === "/api/skills-library" ? { skills: [{ name: "notes", enabled: false, everyBot: false }] } : null),
     paused: () => [],
@@ -592,5 +592,240 @@ describe("every other setting applies at once with Undo, Full access or not", ()
       { route: "skills", method: "PUT", path: "/api/bots/clive/skills-library", body: { skills: [] } },
       { route: "skills", method: "PUT", path: "/api/bots/clive/skills-library", body: { skills: ["notes"] } },
     ]);
+  });
+});
+
+describe("bulk bot settings (botIds)", () => {
+  it("applies one change across more than WRITE_BUDGET bots as one write and one Undo restoring each bot's prior state", async () => {
+    const fx = fixture();
+    (fx.bots[0] as { browser?: boolean }).browser = true;
+    (fx.bots[1] as { browser?: boolean }).browser = false;
+    for (let i = 3; i <= 12; i += 1) {
+      fx.bots.push({
+        id: `bot-${i}`, name: `Bot ${i}`, color: "green", threadId: `t-${i}`, approvalMode: "ask",
+        browser: i % 2 === 1, modelSelection: { instanceId: "claude", model: "sonnet" },
+      } as unknown as BotRecord);
+    }
+    const result = await fx.set("bots.settings", JSON.stringify({ botIds: "all", browser: true }));
+    expect(result.status).toBe(200);
+    expect(result.body.text).toContain("Built-in browser on for 12 bots");
+    expect(fx.botPatches).toHaveLength(12);
+    expect(fx.botPatches.every((patch) => !("botIds" in patch.body) && patch.body.browser === true)).toBe(true);
+    expect(fx.cards()).toHaveLength(1);
+    expect(fx.cards()[0]!.card).toMatchObject({
+      autoApplied: true, answered: "allow", options: [], subtitle: "Built-in browser on for 12 bots",
+      appSettingRequest: { settingId: "bots.settings", tier: "safe", after: "Built-in browser on for 12 bots" },
+    });
+    // Still counts as only 1 write against WRITE_BUDGET (10).
+    for (let i = 1; i < WRITE_BUDGET; i += 1) {
+      expect((await fx.set("rooms.turnTimeoutMinutes", 10 + i)).status).toBe(200);
+    }
+    expect((await fx.set("rooms.turnTimeoutMinutes", 55)).status).toBe(429);
+
+    expect(await fx.host.undo({ threadId: fx.turn.threadId, requestId: String(fx.cards()[0]!.card.requestId) })).toEqual({ claimed: true, state: "undone" });
+    expect(fx.bots.every((bot, index) => (bot as { browser?: boolean }).browser === (index % 2 === 0))).toBe(true);
+  });
+
+  it("supports explicit botIds lists across approvalModes, color, model, archived and tools with single Undo", async () => {
+    const fx = fixture();
+    fx.bots.push({ id: "plum", name: "Plum", color: "coral", threadId: "t-plum", approvalMode: "edits", modelSelection: { instanceId: "claude", model: "haiku", effort: "high" }, toolsOff: ["email"] } as unknown as BotRecord);
+    (fx.bots[0] as { toolsOff?: string[] }).toolsOff = ["images"];
+
+    expect((await fx.set("bots.color", JSON.stringify({ botIds: ["kiwi", "clive"], color: "teal" }))).status).toBe(200);
+    expect(fx.cards().at(-1)!.card.subtitle).toBe("Make 2 bots (Kiwi, Clive) teal");
+    expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
+    expect(fx.bots.slice(0, 2).map((bot) => bot.color)).toEqual(["green", "blue"]);
+
+    expect((await fx.set("bots.approvalModes", JSON.stringify({ botIds: ["kiwi", "clive"], mode: "edits" }))).status).toBe(200);
+    expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
+    expect(fx.bots.slice(0, 2).map((bot) => bot.approvalMode)).toEqual(["full", "ask"]);
+
+    expect((await fx.set("bots.model", JSON.stringify({ botIds: "all", instanceId: "claude", model: "opus", effort: "low" }))).status).toBe(200);
+    expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
+    expect(fx.bots.map((bot) => bot.modelSelection)).toEqual([
+      { instanceId: "claude", model: "opus" },
+      { instanceId: "claude", model: "sonnet" },
+      { instanceId: "claude", model: "haiku", effort: "high" },
+    ]);
+
+    expect((await fx.set("bots.tools", JSON.stringify({ botIds: ["kiwi", "plum"], turnOff: ["pages"] }))).status).toBe(200);
+    expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
+    expect(fx.bots[0]!.toolsOff).toEqual(["images"]);
+    expect(fx.bots[2]!.toolsOff).toEqual(["email"]);
+
+    expect((await fx.set("bots.archived", JSON.stringify({ botIds: ["clive", "plum"], archived: true }))).status).toBe(200);
+    expect(fx.bots.map((bot) => Boolean(bot.hidden))).toEqual([false, true, true]);
+    expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
+    expect(fx.bots.map((bot) => Boolean(bot.hidden))).toEqual([false, false, false]);
+  });
+
+  it("enforces schema bounds, keeps bots.name single-bot, and retains key-leak and automation guards", async () => {
+    const fx = fixture();
+    for (const [id, payload] of [
+      ["bots.color", { botId: "kiwi", botIds: ["clive"], color: "teal" }],
+      ["bots.color", { color: "teal" }],
+      ["bots.color", { botIds: [], color: "teal" }],
+      ["bots.settings", { botIds: ["kiwi", "clive"] }],
+      ["bots.name", { botIds: ["kiwi", "clive"], name: "Twin" }],
+    ] as const) {
+      expect((await fx.set(id, JSON.stringify(payload))).status, `${id}:${JSON.stringify(payload)}`).toBe(400);
+    }
+    const leak = await fx.set("bots.settings", JSON.stringify({ botIds: "all", apiKey: OPENAI_KEY }));
+    expect(leak.status).toBe(400);
+    expect(leak.body.error).toContain("Never put a key or token in the value");
+
+    const autoFx = fixture({ automated: true });
+    expect((await autoFx.set("bots.settings", JSON.stringify({ botIds: "all", computer: "local" }))).status).toBe(403);
+    expect([fx.cards(), fx.botPatches, autoFx.cards(), autoFx.botPatches]).toEqual([[], [], [], []]);
+  });
+
+  it("refuses unknown explicit botIds, empty all-targets, or total effect refusals without spending budget", async () => {
+    const fx = fixture();
+    expect(await fx.set("bots.settings", JSON.stringify({ botIds: ["kiwi", "ghost"], browser: false }))).toMatchObject({
+      status: 409,
+      body: { error: "No bot has the id ghost. Use list_bots for the ids." },
+    });
+    expect(await fx.set("bots.model", JSON.stringify({ botIds: "all", instanceId: "nowhere", model: "x" }))).toMatchObject({
+      status: 409,
+      body: { error: expect.stringContaining("No engine has the id nowhere") },
+    });
+    fx.bots[0]!.approvalMode = "custom";
+    fx.bots[1]!.approvalMode = "custom";
+    expect((await fx.set("bots.approvalModes", JSON.stringify({ botIds: "all", mode: "ask" }))).status).toBe(409);
+
+    const emptyFx = fixture({ emptyRegistryBots: true });
+    expect((await emptyFx.set("bots.color", JSON.stringify({ botIds: "all", color: "coral" }))).status).toBe(409);
+    expect(fx.cards()).toEqual([]);
+    expect(fx.botPatches).toEqual([]);
+    expect([emptyFx.cards(), emptyFx.botPatches]).toEqual([[], []]);
+    for (let i = 0; i < WRITE_BUDGET; i += 1) {
+      expect((await fx.set("rooms.turnTimeoutMinutes", 10 + i)).status).toBe(200);
+    }
+  });
+
+  it("skips per-bot effect and patchBot refusals without blocking other bots, naming only changed bots on card and Undo", async () => {
+    const fx = fixture();
+    (fx.bots[0] as { defaultBot?: unknown }).defaultBot = { createdAt: 1 };
+    fx.bots.push({ id: "plum", name: "Plum", color: "coral", threadId: "t-plum", approvalMode: "ask", modelSelection: { instanceId: "claude", model: "sonnet" } } as unknown as BotRecord);
+    const archived = await fx.set("bots.archived", JSON.stringify({ botIds: "all", archived: true }));
+    expect(archived.status).toBe(200);
+    expect(archived.body.text).toContain("Kiwi is this place's own bot and is never archived");
+    expect(fx.cards()).toHaveLength(1);
+    expect(fx.cards()[0]!.card.subtitle).toBe("Archive 2 bots (Clive, Plum): they leave the sidebar and keep their chats");
+    expect(fx.botPatches.map((p) => p.botId)).toEqual(["clive", "plum"]);
+    expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
+    expect(fx.botPatches.slice(2).map((p) => p.botId)).toEqual(["clive", "plum"]);
+
+    const customFx = fixture({ patchRefusalFor: (botId) => (botId === "clive" ? "Clive is currently busy." : null) });
+    const color = await customFx.set("bots.color", JSON.stringify({ botIds: ["kiwi", "clive"], color: "coral" }));
+    expect(color.status).toBe(200);
+    expect(color.body.text).toContain("Done: Make Kiwi coral.");
+    expect(color.body.text).toContain("Clive is currently busy.");
+    expect(customFx.cards()).toHaveLength(1);
+    expect(customFx.cards()[0]!.card.subtitle).toBe("Make Kiwi coral");
+    expect(customFx.botPatches).toEqual([{ botId: "kiwi", body: { color: "coral" } }]);
+    expect(await customFx.undo()).toEqual({ claimed: true, state: "undone" });
+    expect(customFx.botPatches).toEqual([{ botId: "kiwi", body: { color: "coral" } }, { botId: "kiwi", body: { color: "green" } }]);
+
+    const allFailed = fixture({ patchRefusal: "busy" });
+    expect(await allFailed.set("bots.color", JSON.stringify({ botIds: ["kiwi", "clive"], color: "coral" }))).toMatchObject({ status: 409 });
+    expect(allFailed.cards()).toEqual([]);
+  });
+
+  it("deduplicates repeated botIds and detects stale state on Undo after a bulk edit", async () => {
+    const fx = fixture();
+    const dedup = await fx.set("bots.color", JSON.stringify({ botIds: ["kiwi", "kiwi"], color: "coral" }));
+    expect(dedup.status).toBe(200);
+    expect(fx.cards()[0]!.card.subtitle).toBe("Make Kiwi coral");
+    expect(fx.botPatches).toEqual([{ botId: "kiwi", body: { color: "coral" } }]);
+    expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
+    expect(fx.botPatches).toEqual([{ botId: "kiwi", body: { color: "coral" } }, { botId: "kiwi", body: { color: "green" } }]);
+
+    expect((await fx.set("bots.color", JSON.stringify({ botIds: "all", color: "teal" }))).status).toBe(200);
+    fx.bots[1]!.color = "coral";
+    expect(await fx.undo()).toMatchObject({ claimed: true, state: "invalid", error: UNDO_STALE, stale: true });
+  });
+
+  it("preserves chiefOfStaff demotion notice in bulk archive card after in-place patchBot mutation", async () => {
+    const fx = fixture();
+    (fx.bots[1] as { chiefOfStaff?: boolean }).chiefOfStaff = true;
+    fx.bots.push({ id: "plum", name: "Plum", color: "coral", threadId: "t-plum", approvalMode: "ask", modelSelection: { instanceId: "claude", model: "sonnet" } } as unknown as BotRecord);
+    const archived = await fx.set("bots.archived", JSON.stringify({ botIds: ["clive", "plum"], archived: true }));
+    expect(archived.status).toBe(200);
+    expect(fx.cards()[0]!.card.subtitle).toBe("Archive 2 bots (Clive, Plum): they leave the sidebar and keep their chats; Clive stops being Chief of Staff");
+  });
+
+  it("releases the write reservation when all batch patchBot calls refuse", async () => {
+    const fx = fixture({ patchRefusal: "busy" });
+    for (let i = 0; i < WRITE_BUDGET + 2; i += 1) {
+      expect((await fx.set("bots.color", JSON.stringify({ botIds: "all", color: "coral" }))).status).toBe(409);
+    }
+    for (let i = 0; i < WRITE_BUDGET; i += 1) {
+      expect((await fx.set("rooms.turnTimeoutMinutes", 10 + i)).status).toBe(200);
+    }
+    expect((await fx.set("rooms.turnTimeoutMinutes", 99)).status).toBe(429);
+  });
+
+  it("detects stale targeted fields in bots.settings Undo without blocking when unrelated fields change", async () => {
+    const fx = fixture();
+    fx.bots[0]!.title = "Old A";
+    fx.bots[1]!.title = "Old B";
+    expect((await fx.set("bots.settings", JSON.stringify({ botIds: "all", title: "Batch" }))).status).toBe(200);
+    // Changing an unrelated field keeps Undo valid.
+    fx.bots[0]!.color = "teal";
+    // Modifying one targeted field must trigger UNDO_STALE instead of clobbering "New B".
+    fx.bots[1]!.title = "New B";
+    expect(await fx.undo()).toMatchObject({ claimed: true, state: "invalid", error: UNDO_STALE, stale: true });
+    expect(fx.bots[0]!.title).toBe("Batch");
+    expect(fx.bots[1]!.title).toBe("New B");
+
+    // Restoring targeted field back to applied state lets Undo succeed cleanly even with the unrelated color edit.
+    fx.bots[1]!.title = "Batch";
+    expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
+    expect(fx.bots[0]!.title).toBe("Old A");
+    expect(fx.bots[1]!.title).toBe("Old B");
+  });
+
+  it("keeps partially completed Undo retryable while still detecting independent edits before retry", async () => {
+    let cliveBusy = false;
+    const fx = fixture({ patchRefusalFor: (botId) => (cliveBusy && botId === "clive" ? "Clive is busy" : null) });
+    fx.bots[0]!.title = "Old A";
+    fx.bots[1]!.title = "Old B";
+    expect((await fx.set("bots.settings", JSON.stringify({ botIds: "all", title: "Batch" }))).status).toBe(200);
+    expect(fx.botPatches).toEqual([
+      { botId: "kiwi", body: { title: "Batch" } },
+      { botId: "clive", body: { title: "Batch" } },
+    ]);
+
+    cliveBusy = true;
+    expect(await fx.undo()).toEqual({ claimed: true, state: "invalid", error: "Clive is busy", status: 409 });
+    // Kiwi reverted; Clive remains at "Batch" with only Clive queued for retry.
+    expect(fx.bots.map((bot) => bot.title)).toEqual(["Old A", "Batch"]);
+
+    // Independent external edit on Clive before retry still triggers UNDO_STALE.
+    cliveBusy = false;
+    fx.bots[1]!.title = "External B";
+    expect(await fx.undo()).toMatchObject({ claimed: true, state: "invalid", error: UNDO_STALE, stale: true });
+
+    // Once Clive matches the applied state again, retry finishes only Clive without re-patching Kiwi.
+    fx.bots[1]!.title = "Batch";
+    expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
+    expect(fx.bots.map((bot) => bot.title)).toEqual(["Old A", "Old B"]);
+    expect(fx.botPatches).toEqual([
+      { botId: "kiwi", body: { title: "Batch" } },
+      { botId: "clive", body: { title: "Batch" } },
+      { botId: "kiwi", body: { title: "Old A" } },
+      { botId: "clive", body: { title: "Old B" } },
+    ]);
+
+    // Also verify read()-based bulk Undo (bots.color) refreshes cleanly on partial failure and finishes on retry.
+    const colorFx = fixture({ patchRefusalFor: (botId) => (cliveBusy && botId === "clive" ? "Clive is busy" : null) });
+    expect((await colorFx.set("bots.color", JSON.stringify({ botIds: "all", color: "coral" }))).status).toBe(200);
+    cliveBusy = true;
+    expect(await colorFx.undo()).toEqual({ claimed: true, state: "invalid", error: "Clive is busy", status: 409 });
+    cliveBusy = false;
+    expect(await colorFx.undo()).toEqual({ claimed: true, state: "undone" });
+    expect(colorFx.bots.map((bot) => bot.color)).toEqual(["green", "blue"]);
+    expect(colorFx.botPatches.filter((patch) => patch.body.color === "green")).toHaveLength(1);
   });
 });

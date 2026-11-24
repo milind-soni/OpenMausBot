@@ -45,6 +45,7 @@ import { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
 import { buildTask, threadTitleFrom, UNTITLED_THREAD, type NewThreadLevel } from "./task-record.ts";
 import { repairLegacyWorkThreads } from "./legacy-work-threads.ts";
 import { createBotFork, createGroupFork } from "./store-forks.ts";
+import { branchLeafFrom } from "../shared/conversation-branch.ts";
 import { createThreadBotIndex } from "./thread-bot-index.ts";
 import { activeGroupTask, groupTaskByThread, groupTasks, migrateGroupTaskRead, mirrorActiveGroupTask, refreshGroupUnread, setGroupTaskRead, syncGroupReadPatch } from "./group-task-state.ts";
 export { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
@@ -127,7 +128,7 @@ export type StoreChange =
   | { type: "message.patch"; threadId: string; message: Message }
   | { type: "thread"; threadId: string; activeLeafId: string }
   | { type: "thread.deleted"; threadId: string }
-  | { type: "bot"; botId: string; /** Only this thread of the bot changed, besides the bot's own fields. */ threadId?: string }
+  | { type: "bot"; botId: string; /** Only this thread of the bot changed, besides the bot's own fields. */ threadId?: string; closedByChanged?: true }
   | { type: "bot.deleted"; botId: string }
   /** The fleet or the rooms were reordered as a whole; the broadcast carries every id in its new place. */
   | { type: "bots.order" } | { type: "groups.order" }
@@ -967,7 +968,7 @@ export class Store {
     return task;
   }
 
-  forkGroupTask(groupId: string, sourceThreadId: string, messageId: string): GroupTaskRecord | null {
+  forkGroupTask(groupId: string, sourceThreadId: string, messageId: string | undefined): GroupTaskRecord | null {
     const group = this.group(groupId);
     const source = this.groupTaskByThread(groupId, sourceThreadId);
     if (!group || !source) return null;
@@ -1104,11 +1105,12 @@ export class Store {
     return this.thread(threadId).activeLeafId;
   }
 
-  activePath(threadId: string): Message[] {
+  activePath(threadId: string, branchLeafId?: string): Message[] {
     const t = this.thread(threadId);
     const byId = new Map(t.messages.map((m) => [m.id, m]));
     const path: Message[] = [];
-    let cur = t.activeLeafId ? byId.get(t.activeLeafId) : undefined;
+    const leafId = branchLeafId ?? t.activeLeafId;
+    let cur = leafId ? byId.get(leafId) : undefined;
     while (cur) {
       path.push(cur);
       cur = cur.parentId ? byId.get(cur.parentId) : undefined;
@@ -1223,18 +1225,7 @@ export class Store {
   setActiveLeaf(threadId: string, messageId: string): string | null {
     const t = this.thread(threadId);
     if (!t.messages.some((m) => m.id === messageId)) return null;
-    const newestChild = new Map<string, Message>();
-    for (const message of t.messages) {
-      if (typeof message.parentId !== "string") continue;
-      const previous = newestChild.get(message.parentId);
-      if (!previous || message.at >= previous.at) newestChild.set(message.parentId, message);
-    }
-    let cur = messageId;
-    for (;;) {
-      const child = newestChild.get(cur);
-      if (!child) break;
-      cur = child.id;
-    }
+    const cur = branchLeafFrom(t.messages, messageId);
     t.activeLeafId = cur;
     mdb.setActiveLeaf(threadId, cur);
     this.emit({ type: "thread", threadId, activeLeafId: cur });
@@ -1272,7 +1263,7 @@ export class Store {
     profile: Partial<
       Pick<
         BotRecord,
-        "name" | "title" | "description" | "soul" | "color" | "mascotExpression" | "mascotBody" | "mascotFaceColor" | "modelSelection" | "section" | "cwd" | "visibility" | "toolScope" | "createdBy" | "reportsTo"
+        "name" | "title" | "description" | "soul" | "color" | "mascotExpression" | "mascotBody" | "mascotFaceColor" | "mascotBodyColor" | "modelSelection" | "section" | "cwd" | "visibility" | "toolScope" | "createdBy" | "reportsTo"
       >
     > = {},
     opts: {
@@ -1294,7 +1285,7 @@ export class Store {
       soul: profile.soul ?? "",
       soulHash: soulHash(profile.soul ?? ""),
       notifications: true,
-      color: profile.color ?? rotationColor(this.bots.length), mascotFaceColor: profile.mascotFaceColor ?? undefined,
+      color: profile.color ?? rotationColor(this.bots.length), mascotFaceColor: profile.mascotFaceColor ?? undefined, mascotBodyColor: profile.mascotBodyColor ?? undefined,
       ...(profile.mascotExpression ? { mascotExpression: profile.mascotExpression } : {}),
       ...(profile.mascotBody ? { mascotBody: profile.mascotBody } : {}),
       ...this.newBotSharing(profile.visibility, newBotOwner(profile)),
@@ -2153,12 +2144,12 @@ export class Store {
     return task;
   }
 
-  forkTask(botId: string, sourceThreadId: string, messageId: string): TaskRecord | null {
+  forkTask(botId: string, sourceThreadId: string, messageId: string | undefined, branchLeafId?: string): TaskRecord | null {
     const bot = this.own(botId);
     const source = this.taskByThread(botId, sourceThreadId);
     if (!bot || !source) return null;
     const sourceView = this.projectBotForTask(botId, sourceThreadId)!;
-    const task = createBotFork(bot, source, this.activePath(sourceThreadId), messageId,
+    const task = createBotFork(bot, source, this.activePath(sourceThreadId, branchLeafId), messageId,
       { mode: approvalModeFor(sourceView), alwaysAllow: sourceView.alwaysAllow ?? [] },
       (created) => this.commitBotChange(bot, "the forked thread", () => { bot.tasks = [created, ...(bot.tasks ?? [])]; }));
     if (task) this.emit({ type: "bot", botId });
@@ -2192,7 +2183,7 @@ export class Store {
       if (closedBy) task.closedBy = structuredClone(closedBy);
       else delete task.closedBy;
     });
-    this.emit({ type: "bot", botId });
+    this.emit({ type: "bot", botId, threadId, closedByChanged: true });
     return task;
   }
 

@@ -27,8 +27,10 @@ until the owner supplies the keys and turns it on (see "Switching it on").
    token changes, and whenever the person changes a notification switch.
 3. **The server registers the token with the control plane**
    (`POST /v1/installations/self/push/register`), using the installation
-   credential it already holds for the hosted transport. The control plane
-   holds the APNs key and the Firebase service account; servers never do.
+   credential it already holds for the hosted transport. A Cloud home, which
+   has none, asks its Admin to relay the same call (see "Cloud homes"). The
+   control plane holds the APNs key and the Firebase service account; servers
+   and the Admin never do.
 4. **Something happens that would notify the person.** The server emits its
    `notify` frame as today. For each registered phone, it checks:
    - is phone push switched on;
@@ -121,11 +123,19 @@ the frames it missed, or the stream closes just as an alert is sent.
 ## Privacy and threat model
 
 **What the control plane learns.** For each registered phone: the installation
-that registered it, the device token, its platform and APNs environment, and
+that registered it (for a Cloud home: the home's machine id), the device token, its platform and APNs environment, and
 when it last got a push. For each send: the kind, the title, the bot's and
 room's names and ids, the thread id and the phone's pairing tag. It never sees
 message text, files or credentials. It logs only the request id, the platform
 and the provider's status and reason, never the token or the payload.
+
+**What the Admin learns (Cloud homes only).** Which of its machines asked, when,
+and the action; and, in memory for the length of the call, the body it
+forwards: the device token, its platform and environment, and for a send the
+same names, ids and title as the control plane. It stores none of it: no token
+in its database or logs (its per-phone limit counts a hash keyed with a random
+key that dies with the process), and it logs only the machine, the action and
+a status.
 
 **What Apple and Google learn.** The same names, ids and title, the device
 token, and when MausBot pushed to the phone. Not the content of any
@@ -134,7 +144,9 @@ conversation.
 **Where tokens are kept.** On the computer or Cloud, in
 `<data dir>/push-devices.json` (mode 0600), beside the other paired-device
 records. In the control plane, in the D1 table `installation_push_devices`
-(token and its SHA-256). The phone app never sends the token anywhere else.
+(token and its SHA-256), or for a Cloud home in `machine_push_devices` (the
+same, keyed by the home's machine id). The phone app never sends the token
+anywhere else.
 `GET /api/push/device` never echoes it.
 
 **Revocation.** A registration ends when:
@@ -147,7 +159,10 @@ records. In the control plane, in the D1 table `installation_push_devices`
 - the same phone pairs again (the token moves to the new pairing);
 - Apple or Google say the token is dead (`410`), which deletes it everywhere;
 - the installation is revoked in the control plane, which deletes all its
-  tokens.
+  tokens;
+- for a Cloud home, the Admin retires or deletes the Cloud: it asks the control
+  plane to delete every token of that machine (`.../push/forget`), and keeps
+  asking until it answers.
 
 Known gap: a phone that removes a computer it cannot reach (the computer is
 off) leaves its registration there until one of the other events happens. The
@@ -157,7 +172,9 @@ nothing, because the computer is no longer saved.
 **Rate limits.** On the server: one push per phone, kind and conversation in
 10 seconds, 30 per phone in 10 minutes. In the control plane: 600 sends per
 installation and 60 per token per hour, 120 registrations per hour, 50 tokens
-per installation.
+per installation; the same per Cloud home, plus 20,000 sends and 6,000
+registrations an hour across every Cloud home together. The Admin applies the
+same per-home and fleet limits before it forwards anything.
 
 **Replay and forgery.** Every relay call needs the installation credential.
 A send reaches only a token that the same installation registered, so a
@@ -169,36 +186,73 @@ duplicate alert at most, replaced on screen by the collapse id. A paired phone
 can register only for itself; a phone that registered somebody else's token
 would only send that person the same names and ids it can already read.
 
+A Cloud home signs each call to its Admin with its own bootstrap secret, over
+the machine id, the action, a timestamp (5 minutes), a nonce (once) and the
+body. The Admin takes the machine id from that signature, never from the body,
+so a compromised home can register and push only under its own machine id,
+which reaches only the tokens its own phones registered; it cannot reach
+another customer's phone. The Admin reaches the control plane with one secret
+shared only between the two. Whoever held that secret could push content-free
+alerts to any Cloud home's registered phones by naming machine ids, bounded by
+the per-token and fleet limits above, but could not read a token back or reach
+an installation's phones. It is rotated without downtime: the control plane
+accepts a previous secret beside the current one.
+
 ## Cloud homes
 
 A desktop has an installation credential once its owner turns on "Use your
 phone anywhere", and `openmausbot serve` has one after `openmausbot account login` or
-from `OMB_INSTALLATION_CREDENTIAL`. A Cloud home has none, so today it cannot
-send.
+from `OMB_INSTALLATION_CREDENTIAL` (or a push-only `OMB_PUSH_CREDENTIAL`). A
+Cloud home has none. So **the Admin relays for its homes**: built, and off
+until switched on.
 
-The server code already reads a push-only credential from
-`OMB_PUSH_CREDENTIAL`, so the smallest change on the home itself is nothing
-but that variable. The open question is who issues it. Installation
-credentials last 90 days and are rotated with an account session, which a
-Cloud home does not have. Two ways:
+- **The home** (`server/phone-push-admin.ts`): when the server runs as a Cloud
+  home and has no installation credential, every relay call goes to its Admin
+  instead, `POST <admin>/api/cloud/machines/push/{register,unregister,send,activity}`,
+  with the very same body, signed with the bootstrap secret it already holds
+  (headers `x-omb-cloud-machine`, `x-omb-cloud-timestamp`, `x-omb-cloud-nonce`,
+  `x-omb-cloud-signature: v1=<HMAC-SHA256 over "omb-phone-push-v1", the machine
+  id, the action, the timestamp, the nonce and the body's SHA-256>`). Same
+  outbox, retries and back-off: `503 push_unavailable`, a `401` or a `404` (an
+  Admin with its switch off, or an older one) leaves it alone for an hour. Still
+  gated by `features.phonePush` / `OMB_PHONE_PUSH`, off by default.
+- **The Admin** checks the signature, takes the machine id from it, checks the
+  body against the control plane's own strict schemas (no field for message
+  text), applies the limits, and forwards the parsed body. Its switch is
+  `OMB_CLOUD_PHONE_PUSH` (off by default); it forwards to
+  `OMB_CLOUD_PUSH_RELAY_URL` with `OMB_CLOUD_PUSH_RELAY_SECRET`. Retiring or
+  deleting a Cloud deletes its tokens at the control plane, switch on or off.
+- **The control plane** has the matching routes,
+  `POST /v1/cloud-homes/<machine id>/push/{register,unregister,send,activity,forget}`
+  (`src/push-cloud-homes.ts`), beside the installation ones and with the same
+  bodies, limits, storage shape (`machine_push_devices`, migration `0019`) and
+  send path, plus a fleet-wide limit. They take only the Admin's secret,
+  `CLOUD_HOME_PUSH_SECRET` (and `CLOUD_HOME_PUSH_SECRET_PREVIOUS` during a
+  rotation), compared in constant time; with neither set they answer
+  `503 push_unavailable`. Nothing changes for installation callers.
 
-1. **Recommended: the Admin relays for its homes.** The home already talks to
-   the Admin with its bootstrap secret (as `/api/cloud/machines/woke` does).
-   Add `POST /api/cloud/machines/push/{register,unregister,send}` to the Admin,
-   signed the same way, with the same strict body as the control plane. The
-   Admin forwards to a matching control-plane route family that it reaches
-   with one Worker secret shared only between the two, keyed by the home's
-   machine id instead of an installation. No credential lives on the home, no
-   90-day rotation, and deleting a home in the Admin deletes its tokens. Cost:
-   a small Admin route, a control-plane route family beside the installation
-   one, and a second relay transport in `server/phone-push.ts`.
-2. The Admin mints an installation per home under a service account and
-   passes it as `OMB_PUSH_CREDENTIAL`. No new code on the home or in the
-   control plane, but the Admin must keep a control-plane account session
-   alive to rotate every home's credential every 90 days.
+The bodies both sides accept and refuse, and the home's signature, are one
+fixture, `cloudflare/control-plane/test/fixtures/cloud-home-push.json`, which
+the Admin holds byte for byte and checks with the same SHA-256.
 
-Neither is built yet. Until one is, a Cloud home answers `push: "no-account"`
-and its phones keep today's behaviour.
+No credential lives on the home beyond the bootstrap secret it already had,
+nothing needs rotating every 90 days, and the Admin keeps no device token.
+
+**Switching it on for Cloud homes**, after steps 1 to 10 of "Switching it on",
+in order:
+
+1. Apply the control plane's migration `0019_cloud_home_push.sql`.
+2. Set the control plane's `CLOUD_HOME_PUSH_SECRET` (random, 32 characters or
+   more) and deploy it.
+3. Ship an Admin image with the relay, then set the same value as the Admin's
+   `OMB_CLOUD_PUSH_RELAY_SECRET`, and `OMB_CLOUD_PUSH_RELAY_URL` to the control
+   plane's origin, and restart the Admin.
+4. Ship a Cloud home image with this code.
+5. Turn phone push on in one test Cloud's home: `features.phonePush: true` in
+   its `config.json` (its owner's `PUT /api/config`; an `OMB_PHONE_PUSH` set by
+   hand in a home's environment is rewritten by the Admin at its next update),
+   then `OMB_CLOUD_PHONE_PUSH` on in the Admin's Cloud operations → Switches.
+6. Run "Test plan on real devices" against that Cloud, then widen.
 
 ## Always-on and the grace period
 
@@ -374,7 +428,8 @@ What the owner provides and does, in order. Nothing here has been done.
     `features.phonePush: true` is in `config.json`, or `OMB_PHONE_PUSH=1` is set
     (`OMB_PHONE_PUSH=0` forces it off). This is the rollout flag: turn it on
     for one machine first, then flip the default in a release.
-11. For Cloud homes, build one of the two options under "Cloud homes".
+11. For Cloud homes, follow "Switching it on for Cloud homes" under "Cloud
+    homes".
 
 Deploy order: migration and secrets, then the control plane, then a server
 with phone push on for one test machine, then a phone build with the switch on,
@@ -418,7 +473,7 @@ has "Use your phone anywhere" on and `features.phonePush: true`.
 - **Nothing arrives if the computer is off or asleep,** or offline. The
   computer is what notices the event and asks for the push; a sleeping Mac
   notices nothing. A Cloud runs all the time, so a Cloud's phones get pushes
-  whenever its bots work (once a Cloud home can send, see "Cloud homes").
+  whenever its bots work (once its Admin relays for it, see "Cloud homes").
 - **No push for other kinds** (mentions, routine failures, waits, notices).
   They arrive as today while the app is connected.
 - **No badge counts from push.** The badge is updated when the app runs.

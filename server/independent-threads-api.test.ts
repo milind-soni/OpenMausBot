@@ -429,7 +429,7 @@ describe("independent bot tasks through the isolated control surface", () => {
     await control(["send", "--bot", botId, "--task", threadId, "--text", "REVIEW_MEMORY_OWNER"]);
     const launched = await dump(models[0]);
     const token = launched.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
-    expect((await internal(token, "POST", "/api/internal/memory", { action: "append", text: "A unique saved fact." })).status).toBe(200);
+    expect((await internal(token, "POST", "/api/internal/memory", { action: "append", text: "A unique saved fact.", scope: "everywhere" })).status).toBe(200);
     for (const text of ["", " \n\t "]) {
       expect((await internal(token, "POST", "/api/internal/memory", { action: "replace", oldText: "unique saved fact", text })).status).toBe(400);
       expect((await api("GET", `/api/bots/${botId}/memory`)).body.text).toBe(`- ${memoryDate()} · from chat "${"t".repeat(60)}…" · A unique saved fact.\n`);
@@ -524,8 +524,8 @@ describe("independent bot tasks through the isolated control surface", () => {
     const tokenB = launchedB.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
     expect(tokenA).not.toBe(tokenB);
     const appended = await Promise.all([
-      internal(tokenA, "POST", "/api/internal/memory", { botId, threadId: taskA, action: "append", text: "A remembers apples." }),
-      internal(tokenB, "POST", "/api/internal/memory", { botId, threadId: taskB, action: "append", text: "B remembers berries." }),
+      internal(tokenA, "POST", "/api/internal/memory", { botId, threadId: taskA, action: "append", text: "A remembers apples.", scope: "everywhere" }),
+      internal(tokenB, "POST", "/api/internal/memory", { botId, threadId: taskB, action: "append", text: "B remembers berries.", scope: "everywhere" }),
     ]);
     expect(appended.map((result) => result.status)).toEqual([200, 200]);
     const memory = (await api("GET", `/api/bots/${botId}/memory`)).body.text;

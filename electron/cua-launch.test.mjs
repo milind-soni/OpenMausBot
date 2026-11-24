@@ -102,7 +102,8 @@ afterEach(async () => {
   rmSync(fixture.home, { recursive: true, force: true });
 });
 
-describe.skipIf(process.platform !== "darwin")("async standalone CUA launch (isolated commands)", () => {
+// Darwin 24 is macOS 15: an older Mac stops at the gate before any of these launches.
+describe.skipIf(process.platform !== "darwin" || Number(os.release().split(".")[0]) < 24)("async standalone CUA launch (isolated commands)", () => {
   it("keeps the event loop responsive and publishes the existing descriptor shape", async () => {
     let ticks = 0;
     const timer = setInterval(() => ticks++, 10);
@@ -265,22 +266,24 @@ describe.skipIf(process.platform !== "darwin")("async standalone CUA launch (iso
   });
 });
 
-it("keeps the too-old-macOS reason when the person retries", async () => {
-  vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
-  vi.spyOn(os, "release").mockReturnValue("21.6.0");
-  try {
-    cua.registerCuaIpc();
-    const retry = fixture.handlers.get("cua:linux-retry");
-    await expect(retry({ senderFrame: { url: "http://127.0.0.1:19777/" } })).resolves.toMatchObject({
-      enabled: false,
-      status: "error",
-      reasonCode: "macos-version-unsupported",
-    });
-    expect(fixture.hosts).toHaveLength(0);
-  } finally {
-    vi.restoreAllMocks();
-  }
-});
+for (const [releaseVersion, macos] of [["21.6.0", "12"], ["23.6.0", "14"]]) {
+  it(`keeps the too-old-macOS reason on macOS ${macos} when the person retries`, async () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+    vi.spyOn(os, "release").mockReturnValue(releaseVersion);
+    try {
+      cua.registerCuaIpc();
+      const retry = fixture.handlers.get("cua:linux-retry");
+      await expect(retry({ senderFrame: { url: "http://127.0.0.1:19777/" } })).resolves.toMatchObject({
+        enabled: false,
+        status: "error",
+        reasonCode: "macos-version-unsupported",
+      });
+      expect(fixture.hosts).toHaveLength(0);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+}
 
 it("does not add blocking subprocess calls to Electron runtime modules", () => {
   const root = dirname(fileURLToPath(import.meta.url));

@@ -212,6 +212,11 @@ export class EventBus {
     });
   }
 
+  /** Nothing of this conversation waits for its log, and no append is under way. */
+  logQuiet(threadId: string): boolean {
+    return !this.pumping && !this.kickScheduled && !this.queued.some((item) => item.event.threadId === threadId);
+  }
+
   private flushDisk(): Promise<void> {
     if (this.queued.length === 0 && !this.pumping && !this.kickScheduled) return Promise.resolve();
     return new Promise((resolve) => {

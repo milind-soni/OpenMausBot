@@ -21,10 +21,25 @@ export const CONTROL_HANDED_BACK =
   "Take a fresh screenshot, then continue the task.";
 export const CONTROL_WAITED =
   "This computer is free now, but this call had to wait for it, so it was NOT performed. " +
-  "Call again: the next call goes through at once. If you meant to click or type from an earlier screenshot, take a fresh one first — the screen may have changed while you waited.";
+  "Call again. If you meant to click or type from an earlier screenshot, take a fresh one first — the screen may have changed while you waited.";
+/** Only when the server knows this turn now holds the computer's seat: a late bridge answer or a wake-up wait proves no hand-over. */
+export const CONTROL_WAITED_HELD =
+  "This computer is free now, but this call had to wait for it, so it was NOT performed. This turn now has this computer. " +
+  "Call again. If you meant to click or type from an earlier screenshot, take a fresh one first — the screen may have changed while you waited.";
+/** The bridge's own answer for a call that sat behind the previous one: nothing says the computer was busy. */
+export const CONTROL_CALL_LATE =
+  "This call waited too long before it could run, so it was NOT performed. " +
+  "Call again. If you meant to click or type from an earlier screenshot, take a fresh one first — the screen may have changed while you waited.";
+export const CONTROL_BUSY_OPENING = "Another thread is using this computer.";
+const NOT_CHECKED = "No screen or app state was checked.";
+/** Another turn holds the seat right now; never says who, since the waiting model may not be allowed to see that thread. */
 export const CONTROL_BUSY =
-  "Another thread is using this computer. This call was not performed. This turn gets the computer as soon as it is free: " +
-  `to keep waiting, take a screenshot (each computer call waits up to ${WAIT_WORDS}) instead of ending your turn.`;
+  `${CONTROL_BUSY_OPENING} This call was not performed. ${NOT_CHECKED} ` +
+  `To check again, take a screenshot (each computer call waits up to ${WAIT_WORDS}) instead of ending your turn.`;
+export const CONTROL_NOT_READY_OPENING = "This computer is not ready for this turn yet";
+export const CONTROL_NOT_READY =
+  `${CONTROL_NOT_READY_OPENING}, so this call was NOT performed. It may still be starting or being prepared; no screen or app state was checked. ` +
+  `To keep waiting, take a screenshot (each computer call waits up to ${WAIT_WORDS}).`;
 export const CONTROL_UNCONFIRMED =
   "OpenMausBot could not confirm that this computer is free, so this call was NOT performed and nothing happened on the screen. " +
   "Retry in a few seconds.";

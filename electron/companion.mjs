@@ -162,6 +162,13 @@ export function setCompanionE2EHooks(hooks) {
   e2eHooks = { ...e2eHooks, ...hooks };
 }
 
+let providerKeySaver = async () => ({ status: 503, body: { error: "This computer cannot save keys right now." } });
+
+/** Main's key save for a phone's `PUT /api/config`: resolves `{ status, body }`, never throws. */
+export function setCompanionProviderKeySaver(save) {
+  providerKeySaver = save;
+}
+
 /** In-memory port only. False when no sidecar runs. */
 export function postCompanionMessage(message) {
   if (!proc) return false;
@@ -255,6 +262,14 @@ async function start({ resourcesPath, harnessPort, mutationToken, hostedUrl = nu
   });
   child.on("message", (message) => {
     if (message?.type === "openmausbot:companion-e2e-token-rejected") e2eHooks.tokenRejected();
+    if (message?.type === "openmausbot:companion-provider-key" && Number.isSafeInteger(message.id)) {
+      void providerKeySaver(message.patch).then((reply) => {
+        try {
+          child.postMessage({ type: "openmausbot:companion-provider-key-result", id: message.id, status: reply.status, body: reply.body });
+        } catch {
+        }
+      });
+    }
   });
   child.stdout?.on("data", (d) => log?.(`[companion] ${String(d).trimEnd()}`));
   child.stderr?.on("data", (d) => log?.(`[companion err] ${String(d).trimEnd()}`));

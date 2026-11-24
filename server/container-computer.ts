@@ -1003,7 +1003,7 @@ export async function containerComputerScreenshot(
 const screenshotStatusCache = new Map<
   string,
   { status: ContainerComputerStatus; expiresAt: number }
->();
+>(); /** The status a Local VM's last screen capture read, however old, and when: never a new one. */ export function lastLocalVmStatus(target: LocalVmTarget): { status: ContainerComputerStatus; at: number } | null { const hit = screenshotStatusCache.get(target.key); return hit ? { status: hit.status, at: hit.expiresAt - SCREENSHOT_STATUS_TTL_MS } : null; }
 
 const containerMcpPath = SPAWNED_PROXIES.containerMcp;
 

@@ -53,6 +53,24 @@ describe("Bitwarden's command line tool, fetched on first use", () => {
     await expect(installBitwardenCli({ dataDir, pin: null })).rejects.toThrow("Bitwarden publishes none");
   });
 
+  it.skipIf(process.platform === "win32")("hands it the server's CA trust settings so a private-CA Vaultwarden connects, and nothing else", async () => {
+    const dir = temp();
+    const tool = join(dir, "bw");
+    writeFileSync(tool, `#!/bin/sh\necho "ca=$NODE_EXTRA_CA_CERTS"\necho "file=$SSL_CERT_FILE"\necho "dir=$SSL_CERT_DIR"\necho "proxy=$OMB_FAKE_SERVER_SECRET"\n`, { mode: 0o755 });
+    const saved = { ca: process.env.NODE_EXTRA_CA_CERTS, file: process.env.SSL_CERT_FILE, dir: process.env.SSL_CERT_DIR };
+    process.env.NODE_EXTRA_CA_CERTS = "/etc/private-ca.pem"; process.env.SSL_CERT_FILE = "/etc/ssl/cert.pem"; delete process.env.SSL_CERT_DIR;
+    process.env.OMB_FAKE_SERVER_SECRET = "never-passed";
+    try {
+      const result = await bitwardenRunner({ executable: async () => tool, appDataDir: join(dir, "account") })(["status"]);
+      expect(result.stdout).toBe("ca=/etc/private-ca.pem\nfile=/etc/ssl/cert.pem\ndir=\nproxy=\n");
+    } finally {
+      delete process.env.OMB_FAKE_SERVER_SECRET;
+      for (const [key, name] of [["ca", "NODE_EXTRA_CA_CERTS"], ["file", "SSL_CERT_FILE"], ["dir", "SSL_CERT_DIR"]] as const) {
+        if (saved[key] === undefined) delete process.env[name]; else process.env[name] = saved[key];
+      }
+    }
+  });
+
   it.skipIf(process.platform === "win32")("runs it as a separate process with secrets in its environment only, and none of the server's own", async () => {
     const dir = temp();
     const tool = join(dir, "bw");

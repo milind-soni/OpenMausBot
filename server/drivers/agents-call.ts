@@ -13,7 +13,7 @@ import { callTriggerTool, TRIGGER_TOOL_NAMES } from "./agents-call-triggers.ts";
 import { catalogProfileFromEnv, fullInputSchema, SHARED_COMPUTER_TOOL_NAMES } from "./agents-catalog.ts";
 import { harnessClientFromEnv } from "./agents-client.ts";
 import type { HarnessClient, Json } from "./agents-client.ts";
-import { memorySearchText } from "./memory-search-text.ts";
+import { memorySavedText, memorySearchText, threadReadText, threadsListText } from "./memory-search-text.ts";
 import { apiAnswer, boundedAgentResult } from "./agents-result.ts";
 import { argumentNames, outOfBounds } from "./agents-schema.ts";
 import { dropBlankArguments } from "./agents-blank-arguments.ts";
@@ -21,7 +21,7 @@ import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.t
 import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.ts";
 import { callWhatChangedTool, WHAT_CHANGED_TOOL } from "./agents-what-changed-tool.ts";
 import { callUsageLimitsTool, USAGE_LIMITS_TOOL } from "./agents-usage-tool.ts";
-import { callThreadPostTool, THREAD_POST_TOOL } from "./agents-thread-post-tool.ts"; import { callListThreadsTool, LIST_THREADS_TOOL } from "./agents-list-threads-tool.ts"; import { callRenameThreadTool, RENAME_THREAD_TOOL } from "./agents-thread-title-tool.ts";
+import { callThreadPostTool, THREAD_POST_TOOL } from "./agents-thread-post-tool.ts"; import { callListThreadsTool, LIST_THREADS_TOOL } from "./agents-list-threads-tool.ts"; import { callRenameThreadTool, RENAME_THREAD_TOOL } from "./agents-thread-title-tool.ts"; import { callWorkflowTool, WORKFLOW_TOOL_NAMES } from "./agents-workflow-tool.ts";
 import { callWaitTool, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts"; import { callCheckBackTool, CHECK_BACK_TOOL_NAMES } from "./agents-check-back-tool.ts";
 import { callBurstTool } from "./agents-burst-tool.ts";
 import { callComputerAskTool, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
@@ -409,6 +409,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   }
   if (name === THREAD_POST_TOOL) return callThreadPostTool(args, context);
   if (name === RENAME_THREAD_TOOL) return callRenameThreadTool(args, context);
+  if (WORKFLOW_TOOL_NAMES.has(name)) return callWorkflowTool(name, args, context);
   if (name === "select_computer") {
     if (args.surface !== undefined && (typeof args.surface !== "string" || !["auto", "cloud", "vm", "local", "browser"].includes(args.surface))) {
       return { text: "Choose auto, cloud, vm, local or browser; omit surface to inspect connected choices.", isError: true };
@@ -745,23 +746,19 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         action: args.action,
         text: args.text,
         oldText: args.old_text,
-        ...(typeof args.until === "string" && args.until.trim() ? { until: args.until.trim() } : {}),
+        ...(typeof args.until === "string" && args.until.trim() ? { until: args.until.trim() } : {}), ...(args.scope === "thread" || args.scope === "everywhere" ? { scope: args.scope } : {}),
       }),
     });
     if (r.error || r.ok !== true) return { text: String(r.error ?? "Memory update was not confirmed."), isError: true };
     if (args.action === "forget") return { text: forgetText(String(args.old_text), r) };
     if (args.action === "prefer") return { text: preferText(r) };
-    const entry = typeof r.entry === "string" && r.entry ? ` Entry: ${r.entry}` : "";
     const moved = Array.isArray(r.moved) ? r.moved.filter((line) => typeof line === "string") : [];
-    const full = r.truncated
-      ? "\nSaved, but the lines that never move out of MEMORY.md (hand-written ones, health and safety facts) fill what loads each session, so the newest entries do not load. Tell the person their saved notes are full, and that they can remove ones they no longer need under What it remembers in your panel."
-      : "";
     const shown = moved.slice(0, MOVED_ENTRIES_SHOWN).map((text) => text.split("\n")[0]);
     const more = moved.length > shown.length ? `\n…and ${moved.length - shown.length} more` : "";
     const movedNote = moved.length
       ? `\nTo stay within what loads each session, moved ${moved.length === 1 ? "1 older entry" : `${moved.length} older entries`} to your archive (session_search finds them):\n${shown.join("\n")}${more}`
       : "";
-    return { text: `Memory updated.${entry}${full}${movedNote}` };
+    return { text: `${memorySavedText(r)}${movedNote}` };
   }
   if (name === "retry_thread") {
     const botId = String(args.bot_id ?? "").trim();
@@ -808,7 +805,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     const q = String(args.query ?? "").trim();
     const since = typeof args.since === "string" ? args.since.trim() : "";
     const until = typeof args.until === "string" ? args.until.trim() : "";
-    if (!q && !since) {
+    if (!q && !since && args.scope !== "threads") {
       return { text: "session_search needs a query (a few content words) or a since span, for example {\"query\":\"site audit broken links\"} or {\"since\":\"2d\"}.", isError: true };
     }
     const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID });
@@ -816,8 +813,8 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (since) query.set("since", since);
     if (until) query.set("until", until);
     if (typeof args.limit === "number" && Number.isFinite(args.limit)) query.set("limit", String(Math.trunc(args.limit)));
-    if (args.scope === "conversations" || args.scope === "memory" || args.scope === "team") query.set("scope", args.scope);
-    const r = await api(`/api/internal/session-search?${query.toString()}`);
+    if (args.scope === "conversations" || args.scope === "memory" || args.scope === "team" || args.scope === "threads") query.set("scope", args.scope);
+    const r = await api(`/api/internal/session-search?${query.toString()}`); if (args.scope === "threads") return { text: threadsListText(q, r) };
     const hits = Array.isArray(r.hits) ? (r.hits as Json[]) : [];
     const memoryHits = Array.isArray(r.memoryHits) ? r.memoryHits.filter(jsonRecord) : [];
     const teamHits = Array.isArray(r.teamHits) ? r.teamHits.filter(jsonRecord) : [];
@@ -852,6 +849,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     };
   }
   if (member === "session_read") {
+    if (args.scope === "threads" && typeof args.thread_id === "string") return { text: threadReadText(await api(`/api/internal/session-search?${new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, scope: "threads", threadId: args.thread_id.trim(), ...(typeof args.message_id === "string" && args.message_id.trim() ? { before: args.message_id.trim() } : {}), ...(typeof args.limit === "number" && Number.isFinite(args.limit) ? { limit: String(Math.trunc(args.limit)) } : {}) }).toString()}`)) };
     const threadId = String(args.thread_id ?? "").trim();
     const messageId = String(args.message_id ?? "").trim();
     if (!threadId || !messageId) {

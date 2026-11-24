@@ -49,6 +49,14 @@ function useRecentMessages(bot: Bot, threads: readonly { threadId: string; updat
   return (threadId) => threadId === bot.threadId ? open : fetched.get(byThread.get(threadId) ?? "");
 }
 
+/** The sidebar's "N more" opens this list with every conversation showing, whether or not the panel is already open. */
+let showAllNext: string | null = null;
+const showAllListeners = new Set<(botId: string) => void>();
+export function showAllConversations(botId: string): void {
+  showAllNext = botId;
+  for (const listener of showAllListeners) listener(botId);
+}
+
 /** Tests only. */
 export function forgetConversationLines(): void {
   fetched.clear();
@@ -61,11 +69,20 @@ export function BotConversations({ bot }: { bot: Bot }) {
   const phone = !useMediaQuery(SIDEBAR_INLINE, true);
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(() => {
+    const asked = showAllNext === bot.id;
+    if (asked) showAllNext = null;
+    return asked;
+  });
+  useEffect(() => {
+    const listener = (botId: string) => { if (botId !== bot.id) return; showAllNext = null; setExpanded(true); };
+    showAllListeners.add(listener);
+    return () => { showAllListeners.delete(listener); };
+  }, [bot.id]);
   const [showArchived, setShowArchived] = useState(false);
   const actions = useMemo(() => {
-    const { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive } = threadRowActions(bot.id, dispatch);
-    return { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive };
+    const { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive, onMemory } = threadRowActions(bot.id, dispatch);
+    return { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive, onMemory };
   }, [bot.id, dispatch]);
 
   const side = useConversationSide(bot);
