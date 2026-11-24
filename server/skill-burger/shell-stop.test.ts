@@ -40,6 +40,8 @@ it.runIf(process.platform === "linux").each(["abort", "overflow", "timeout"])("s
   const wrote = new Promise<string>((resolve) => { written = () => resolve("wrote"); });
   const server = createServer((socket) => {
     held = socket;
+    // The stopped child resets its connection; that reset is the expected outcome, not a test error.
+    socket.on("error", () => {});
     closed = new Promise<void>((resolve) => socket.once("close", () => resolve()));
     let line = "";
     socket.on("data", (chunk) => {
