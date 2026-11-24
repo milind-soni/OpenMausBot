@@ -18,6 +18,7 @@ import { keyEntry, keyForInstance, type KeyId } from "./keys/key-catalog";
 import { openKeySettings } from "./keys/key-focus";
 import { KeyRow, SavedKeyLine } from "./keys/KeyRow";
 import { OllamaStatusLine } from "./OllamaStatusLine";
+import { keyOnlyEngine } from "../../shared/engine-sign-in";
 
 export function needsSignIn(instance: InstanceInfo | undefined): boolean {
   return instance?.snapshot.state === "available" && instance.snapshot.authenticated === false;
@@ -470,8 +471,7 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
 }
 
 export function isApiKeyEngine(instance: InstanceInfo | undefined): boolean {
-  if (!instance || instance.access !== "api" || instance.managed) return false;
-  return instance.driverKind !== "claudeAgent" || Boolean(instance.snapshot.version);
+  return Boolean(instance && keyOnlyEngine(instance));
 }
 
 export function hasSavedApiKey(instance: InstanceInfo): boolean {

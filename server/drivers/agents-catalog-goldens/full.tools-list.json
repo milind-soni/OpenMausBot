@@ -528,7 +528,7 @@
     },
     {
       "name": "list_models",
-      "description": "The ids start_thread's model_selection takes, a short list per engine; current is yours. more counts what search finds. unusable says why not; unavailable engines can't run now. Copy ids exactly.",
+      "description": "The ids start_thread's model_selection takes, a short list per engine; current is yours. more counts what search finds. unusable says why not; unavailable says why and how to connect. Copy ids exactly.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,

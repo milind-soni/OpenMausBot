@@ -196,7 +196,7 @@ export function codexNativeIncomingLogMessage(
 
 export const CodexDriver: ProviderDriver<CodexConfig> = {
   driverKind: DRIVER_KIND,
-  metadata: { displayName: "Codex", supportsMultipleInstances: true },
+  metadata: { displayName: "Codex", supportsMultipleInstances: true, signInAccount: "ChatGPT" },
   install: {
     command: {
       darwin: "npm install -g @openai/codex",
