@@ -9818,7 +9818,7 @@
   "native.role.speech": "Discorso",
   "native.role.startSpeaking": "Inizia a parlare",
   "native.role.stopSpeaking": "Smettila di parlare.",
-  "native.role.reload": "Reload",
+  "native.role.reload": "Ricarica",
   "native.role.forceReload": "Forza di ricarica",
   "native.role.toggleDevTools": "Toggle Strumenti di sviluppo",
   "native.role.actualSize": "Dimensione effettiva",
