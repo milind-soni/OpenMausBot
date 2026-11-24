@@ -705,4 +705,80 @@ describe("Hermes advertised ACP edit modes", () => {
     expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === askTurn.turnId)).toMatchObject({ ok: true });
     expect(Number(readFileSync(launches, "utf8"))).toBe(2);
   });
+
+  it("keeps a same-chunk current_mode_update after session/set_mode and aborts session/prompt when mode drifts", async () => {
+    const rpcLog = join(scratch, "rpc-same-chunk.jsonl");
+    const promptCount = () => existsSync(rpcLog)
+      ? readFileSync(rpcLog, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as { method: string }).filter((e) => e.method === "session/prompt").length
+      : 0;
+    const { instance, recorder } = await create({
+      FAKE_ACP_SESSION_MODES: HERMES_SESSION_MODES,
+      FAKE_ACP_MODE_UPDATE_AFTER_SET_MODE: "default:dont_ask",
+      FAKE_ACP_RPC_APPEND_FILE: rpcLog,
+    });
+
+    const fullTurn = await instance.adapter.sendTurn({
+      threadId: "t-hermes-same-chunk",
+      text: "turn-full",
+      cwd: scratch,
+      approvalMode: "full",
+    });
+    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === fullTurn.turnId)).toMatchObject({ ok: true });
+    expect(promptCount()).toBe(1);
+
+    const askDriftTurn = await instance.adapter.sendTurn({
+      threadId: "t-hermes-same-chunk",
+      text: "turn-ask-drift",
+      cwd: scratch,
+      approvalMode: "ask",
+    });
+    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === askDriftTurn.turnId)).toMatchObject({ ok: false, stopReason: "rpc_error" });
+    expect(recorder.events.some((event) => event.type === "runtime.error" && event.message.includes("changed mode before the prompt"))).toBe(true);
+    expect(promptCount()).toBe(1);
+
+    const askRecoveredTurn = await instance.adapter.sendTurn({
+      threadId: "t-hermes-same-chunk",
+      text: "turn-ask-recover",
+      cwd: scratch,
+      approvalMode: "ask",
+    });
+    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === askRecoveredTurn.turnId)).toMatchObject({ ok: true });
+    expect(promptCount()).toBe(2);
+    expect(modeCalls()).toEqual(["dont_ask", "default", "default"]);
+  });
+
+  it("rechecks currentModeId after configureSession before dispatching session/prompt when mode drifts during set_model", async () => {
+    const rpcLog = join(scratch, "rpc-set-model.jsonl");
+    const promptCount = () => existsSync(rpcLog)
+      ? readFileSync(rpcLog, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as { method: string }).filter((e) => e.method === "session/prompt").length
+      : 0;
+    const { instance, recorder } = await create({
+      FAKE_ACP_SESSION_MODES: HERMES_SESSION_MODES,
+      FAKE_ACP_MODE_UPDATE_ON_SET_MODEL: "dont_ask",
+      FAKE_ACP_RPC_APPEND_FILE: rpcLog,
+    });
+
+    const driftedTurn = await instance.adapter.sendTurn({
+      threadId: "t-hermes-set-model-drift",
+      text: "turn-1",
+      cwd: scratch,
+      approvalMode: "ask",
+      model: "openrouter:qwen/qwen3.8-max",
+    });
+    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === driftedTurn.turnId)).toMatchObject({ ok: false, stopReason: "rpc_error" });
+    expect(recorder.events.some((event) => event.type === "runtime.error" && event.message.includes("changed mode before the prompt"))).toBe(true);
+    expect(promptCount()).toBe(0);
+    expect(modeCalls()).toEqual([]);
+
+    const recoveredTurn = await instance.adapter.sendTurn({
+      threadId: "t-hermes-set-model-drift",
+      text: "turn-2",
+      cwd: scratch,
+      approvalMode: "ask",
+      model: "openrouter:qwen/qwen3.8-max",
+    });
+    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === recoveredTurn.turnId)).toMatchObject({ ok: true });
+    expect(promptCount()).toBe(1);
+    expect(modeCalls()).toEqual(["default"]);
+  });
 });

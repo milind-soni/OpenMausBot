@@ -450,13 +450,14 @@ const support: AcpSupport = {
   pickAuthMethod: () => null,
   authFailure: "continue",
   isAuthenticated: () => true,
-  async configureSession({ request, sessionId, config, turn, sessionModes }) {
+  async configureSession({ request, sessionId, config, turn, sessionModes, expectMode }) {
     if (sessionModes) {
       const modeId = selectAdvertisedMode(sessionModes.availableModes, turn.approvalMode, config.fullAuto);
       if (!modeId) {
         const level = turn.approvalMode ?? (config.fullAuto ? "full" : "ask");
         throw new Error(`Hermes did not advertise an ACP mode for approval level "${level}"`);
       }
+      expectMode?.(modeId);
       if (sessionModes.currentModeId !== modeId) {
         await applySetting(request, "session/set_mode", { sessionId, modeId }, `mode "${modeId}"`);
       }

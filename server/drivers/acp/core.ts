@@ -265,7 +265,7 @@ export interface AcpSupport extends AcpDriverHooks {
      * their argv slugs (Cursor answers `default[]` for the CLI's `auto`). */
     sessionModels: Array<{ modelId?: string; name?: string }>;
     /** Last model acknowledged by session/new/load/set_model, preserved for pooled turns. */
-    currentModelId?: string; sessionModes?: AcpSessionModes;
+    currentModelId?: string; sessionModes?: AcpSessionModes; expectMode?: (modeId: string) => void;
     /** The session's effort, and where a live change to it is recorded. */ currentEffort?: EffortLevel; effortApplied?(effort: EffortLevel | undefined): void;
     /** What this live session last confirmed per config option; absent for a one-shot session. */ applied?: AppliedConfig;
     /** session/new's or session/load's `configOptions`, verbatim. */
@@ -699,7 +699,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           const p = msg.params ?? {};
           if (p._meta?.isReplay === true) return;
           session.commands = advertisedCommands(p.update) ?? session.commands;
-          const updatedModeId = currentModeUpdateId(p.update); if (updatedModeId && (!p.sessionId || p.sessionId === session.sessionId)) { session.sessionConfigResult = withSessionMode(session.sessionConfigResult, updatedModeId); return; }
+          const updatedModeId = currentModeUpdateId(p.update); if (updatedModeId && (!p.sessionId || p.sessionId === session.sessionId)) { session.modeVersion += 1; session.sessionConfigResult = withSessionMode(session.sessionConfigResult, updatedModeId); return; }
           const current = session.current;
           if (support.modelVariants && p.update?.sessionUpdate === "config_option_update") {
             if (current && !current.state.settled && session.sessionId && p.sessionId === session.sessionId) current.receiveModelVariants(p.update);
@@ -807,7 +807,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           sessionKey: null,
           get sessionId() { return acp.sessionId; },
           set sessionId(id: string | null) { acp.sessionId = id; },
-          sessionConfigResult: null,
+          sessionConfigResult: null, modeVersion: 0,
           get initResult() { return host.initResult; },
           set initResult(result: any) { host.initResult = result; },
           get authenticated() { return host.authenticated; },
@@ -998,7 +998,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         let variant = turn.variant;
         let staleProcess = false;
       // Still set if configuring throws: the pooled session may keep an earlier turn's looser mode.
-        let approvalUnconfirmed = false;
+        let approvalUnconfirmed = false, expectedModeId: string | undefined;
         const modelControls = new SessionModelControls({
           selection: support.selectModel, variants: support.modelVariants === true, displayName: support.displayName,
           model: () => cliTurn.model, reportedModel: () => reportedModel,
@@ -1221,11 +1221,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 approvalUnconfirmed = support.sessionScopedApproval === true;
                 await support.configureSession({
                   request: async (method, params, timeoutMs) => {
+                    const modeVersion = session.modeVersion;
                     const result = await request(method, params, timeoutMs ?? SESSION_CONFIG_TIMEOUT).catch((error) => { session.appliedConfig.clear(); throw error; });
-                    if (method === "session/set_model" && params && typeof params === "object" && "modelId" in params && typeof params.modelId === "string") {
-                      session.sessionConfigResult = { ...session.sessionConfigResult, models: { ...session.sessionConfigResult?.models, currentModelId: params.modelId } };
-                    }
-                    if (method === "session/set_mode" && params && typeof params === "object" && "modeId" in params) session.sessionConfigResult = withSessionMode(session.sessionConfigResult, params.modeId);
+                    if (method === "session/set_model" && params && typeof params === "object" && "modelId" in params && typeof params.modelId === "string") session.sessionConfigResult = { ...session.sessionConfigResult, models: { ...session.sessionConfigResult?.models, currentModelId: params.modelId } };
+                    if (method === "session/set_mode" && params && typeof params === "object" && "modeId" in params && session.modeVersion === modeVersion) session.sessionConfigResult = withSessionMode(session.sessionConfigResult, params.modeId);
                     if (method === "session/set_config_option" && Array.isArray(result?.configOptions)) session.sessionConfigResult = { ...session.sessionConfigResult, configOptions: result.configOptions };
                     return result;
                   },
@@ -1236,7 +1235,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   sessionModels: Array.isArray(session.sessionConfigResult?.models?.availableModels) ? session.sessionConfigResult.models.availableModels : [],
                   currentModelId: session.sessionConfigResult?.models?.currentModelId, currentEffort: session.effort, effortApplied: (effort) => { session.effort = effort; }, applied: session.appliedConfig,
                   configOptions: Array.isArray(session.sessionConfigResult?.configOptions) ? session.sessionConfigResult.configOptions : [],
-                  sessionModes: readSessionModes(session.sessionConfigResult) ?? undefined,
+                  sessionModes: readSessionModes(session.sessionConfigResult) ?? undefined, expectMode: (modeId) => { expectedModeId = modeId; },
                   notice: (message) => {
                     if (session.fallbackNotice === message) return;
                     session.fallbackNotice = message;
@@ -1300,6 +1299,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               throw new Error(`${support.displayName} changed variant before the prompt`);
             } const promptOutcome = await support.promptOutcome?.(instanceId, sessionId);
             if (state.settled || state.stopped || session.closing) throw new Error("turn stopped");
+            if (expectedModeId !== undefined && readSessionModes(session.sessionConfigResult)?.currentModeId !== expectedModeId) throw new Error(`${support.displayName} changed mode before the prompt`);
             state.promptSent = true; clock.promptSent(Date.now());
             if (!support.promptUnreachedModel) acknowledge();
             const promptIdleMs = promptIdleTimeoutMs();

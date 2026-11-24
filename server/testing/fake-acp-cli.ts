@@ -678,6 +678,8 @@ async function listMcpTools(entry: AnyMcpEntry, handshake: unknown, hold = false
 }
 let liveSession: string | null = null;
 let idleModeUpdateSent = false;
+let modeUpdateAfterSetModeSent = false;
+let modeUpdateOnSetModelSent = false;
 const openCopies = new Map<string, number>();
 let sessionsOpened = 0;
 let rpcFailure: unknown = null;
@@ -1241,6 +1243,25 @@ function handle(msg: any) {
       configCalls.push({ method: msg.method, params: msg.params });
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.config.json`, JSON.stringify(configCalls, null, 2));
+      }
+      if (msg.method === "session/set_mode" && !modeUpdateAfterSetModeSent && process.env.FAKE_ACP_MODE_UPDATE_AFTER_SET_MODE) {
+        const [trigger, override] = process.env.FAKE_ACP_MODE_UPDATE_AFTER_SET_MODE.split(":");
+        if (trigger && override && msg.params.modeId === trigger) {
+          modeUpdateAfterSetModeSent = true;
+          currentSessionMode = override;
+          const resp = { jsonrpc: "2.0", id: msg.id, result: {} };
+          const notif = { jsonrpc: "2.0", method: "session/update", params: { sessionId: msg.params.sessionId, update: { sessionUpdate: "current_mode_update", currentModeId: override } } };
+          process.stdout.write(`${JSON.stringify(resp)}\n${JSON.stringify(notif)}\n`);
+          break;
+        }
+      }
+      if (msg.method === "session/set_model" && !modeUpdateOnSetModelSent && process.env.FAKE_ACP_MODE_UPDATE_ON_SET_MODEL) {
+        const override = process.env.FAKE_ACP_MODE_UPDATE_ON_SET_MODEL.trim();
+        if (override) {
+          modeUpdateOnSetModelSent = true;
+          currentSessionMode = override;
+          out({ jsonrpc: "2.0", method: "session/update", params: { sessionId: msg.params.sessionId, update: { sessionUpdate: "current_mode_update", currentModeId: override } } });
+        }
       }
       result(msg.id, {});
       break;
