@@ -98,19 +98,33 @@ describe("an Advanced setting found from Simple", () => {
     expect(fx.setAdvancedMode).not.toHaveBeenCalled();
   });
 
-  it("opens a page only Advanced lists with the mark in its header, and clearing the search goes back to Overview", async () => {
+  it("opens a row on a page only Advanced lists with just its section, marked, and clearing the search goes back to Overview", async () => {
     flushSync(() => root.render(createElement(SettingsModal)));
     search("analytics");
     flushSync(() => hit("analytics").click());
     expect(fx.section).toBe("general");
-    await vi.waitFor(() => expect(body().getAttribute("data-settings-page-body")).toBe("general"));
-    expect(header().textContent).toContain("Advanced setting");
+    await vi.waitFor(() => expect(document.querySelector('[data-settings-peek="privacy"]')?.textContent).toContain("Advanced setting"));
+    expect(body().querySelector('[data-settings-block="privacy"]')).not.toBeNull();
+    expect(body().querySelector('[data-settings-block="typing"]')).toBeNull();
+    expect(body().querySelector('[data-settings-block="notifications"]')).toBeNull();
+    expect(header().textContent).not.toContain("Advanced setting");
     expect(document.querySelector('[data-settings-page="general"]')).toBeNull();
     expect(fx.setAdvancedMode).not.toHaveBeenCalled();
 
     search("");
     expect(fx.section).toBe("overview");
-    expect(header().textContent).not.toContain("Advanced setting");
+    expect(document.querySelector("[data-settings-peek]")).toBeNull();
+  });
+
+  it("opens a page only Advanced lists whole, at its Simple level, with the mark beside its title", async () => {
+    flushSync(() => root.render(createElement(SettingsModal)));
+    search("general");
+    flushSync(() => hit("page:general").click());
+    await vi.waitFor(() => expect(body().getAttribute("data-settings-page-body")).toBe("general"));
+    expect(header().textContent).toContain("Advanced setting");
+    for (const block of ["typing", "notifications", "privacy"]) expect(body().querySelector(`[data-settings-block="${block}"]`)).not.toBeNull();
+    expect(document.querySelector("[data-settings-peek]")).toBeNull();
+    expect(fx.setAdvancedMode).not.toHaveBeenCalled();
   });
 
   it("shows only what a link asks for: Decision and extraction, not the rest of AI's Advanced sections", async () => {

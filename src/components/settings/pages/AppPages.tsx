@@ -30,7 +30,7 @@ import { versionLine } from "../settings-context";
 import { useSettingsShell } from "../settings-shell";
 import { PlaceBadge } from "../SettingsNav";
 import { InertRow, useSwitchToComputer } from "../inert";
-import { AdvancedSection } from "../AdvancedSection";
+import { AdvancedPagePart, AdvancedSection } from "../AdvancedSection";
 import { useOtherPlaces } from "../settings-context";
 
 /** A row this page can't change because it lives on This computer: not on the app's own home page (main's home:page). */
@@ -122,26 +122,26 @@ function PlacesFromHere() {
 export function GeneralPage() {
   const { ctx, place, go } = useSettingsShell();
   return <>
-    <SettingsGroup label={t("settings.simple.group.typing")} block="typing">
+    <AdvancedPagePart anchor="typing"><SettingsGroup label={t("settings.simple.group.typing")} block="typing">
       <SettingsRows selectWidth={208}>
         <LanguageRow simple />
         <SendKeyRow simple />
         <FollowUpRow simple />
         {window.ogb?.talkShortcut ? <TalkShortcutRow /> : elsewhere(window.ogb?.talkShortcut, ctx) && ctx.cloud ? <InertRow title={t("settings.search.talk")} control={<span className="text-[13px] leading-5 text-ink-secondary">{t("settings.general.talkOff")}</span>} /> : null}
       </SettingsRows>
-    </SettingsGroup>
-    <SettingsGroup label={t("notifications.title")} block="notifications"
+    </SettingsGroup></AdvancedPagePart>
+    <AdvancedPagePart anchor="notifications"><SettingsGroup label={t("notifications.title")} block="notifications"
       footnote={!ctx.client && <>{t("settings.general.awayEmails")}{" "}<button type="button" className="cursor-pointer text-accent-text hover:underline" onClick={() => go("bots", "about-you")}>{`${place.name} › ${t("settings.page.bots")}`}</button></>}>
       <SettingsRows><NotificationRows simple /></SettingsRows>
-    </SettingsGroup>
+    </SettingsGroup></AdvancedPagePart>
     {ctx.desktop && !ctx.client && (
-      <SettingsGroup label={t("settings.general.startup")} block="startup">
+      <AdvancedPagePart anchor="startup"><SettingsGroup label={t("settings.general.startup")} block="startup">
         <SettingsRows>{window.ogb?.openAtLogin ? <OpenAtLoginRow simple /> : <InertRow title={t("settings.openAtLogin.title")} control={<Switch checked={false} tabIndex={-1} aria-label={t("settings.openAtLogin.title")} />} />}</SettingsRows>
-      </SettingsGroup>
+      </SettingsGroup></AdvancedPagePart>
     )}
-    <SettingsGroup label={t("settings.general.privacy")} block="privacy">
+    <AdvancedPagePart anchor="privacy"><SettingsGroup label={t("settings.general.privacy")} block="privacy">
       <SettingsRows><AnalyticsRow simple /></SettingsRows>
-    </SettingsGroup>
+    </SettingsGroup></AdvancedPagePart>
   </>;
 }
 
