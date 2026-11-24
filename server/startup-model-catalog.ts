@@ -72,7 +72,7 @@ function catalogFrom(value: unknown): ModelCatalog | null {
       ...(typeof option.contextWindow === "number" && Number.isFinite(option.contextWindow)
         ? { contextWindow: option.contextWindow }
         : {}),
-      ...(effortLevels !== undefined ? { effortLevels } : {}),
+      ...(effortLevels?.length ? { effortLevels } : {}),
       ...(variants ? { variants } : {}),
       ...(option.orgBlocked === true ? { orgBlocked: true as const } : {}),
       ...(typeof option.needsCliUpdate === "string" ? { needsCliUpdate: option.needsCliUpdate } : {}),
