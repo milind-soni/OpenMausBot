@@ -226,7 +226,7 @@ function idsFromModelsPayload(payload: unknown, ownedBy?: string): string[] {
     if (typeof id !== "string" || !MODEL_ID.test(id)) return [];
     const low = id.toLowerCase();
     // Our own names for a model's window are that model, not another one to pick.
-    if (low.includes("embed") || low.includes("bge-") || low.includes("nomic") || isContextName(id)) return [];
+    if (isContextName(id) || (!ownedBy && (low.includes("embed") || low.includes("bge-") || low.includes("nomic")))) return [];
     return [id];
   });
 }
@@ -241,10 +241,25 @@ async function timedJson(
   const timer = setTimeout(() => controller.abort(), 1200);
   timer.unref?.();
   try {
-    const response = await fetchImpl(url, {
+    const rapidMlx = host.id === "rapid_mlx";
+    let response = await fetchImpl(url, {
       signal: controller.signal,
-      headers: { Authorization: `Bearer ${hostApiKey(host, env)}` },
+      ...(rapidMlx ? { redirect: "manual" as const } : { headers: { Authorization: `Bearer ${hostApiKey(host, env)}` } }),
     });
+    if (rapidMlx && response.status === 401 && env.RAPID_MLX_API_KEY) {
+      const healthResponse = await fetchImpl(`${anthropicBaseUrl(host)}/health`, { signal: controller.signal, redirect: "manual" });
+      if (!healthResponse.ok) return null;
+      const health: unknown = await healthResponse.json();
+      if (!health || typeof health !== "object" || Array.isArray(health)) return null;
+      const row = health as Record<string, unknown>;
+      if (typeof row.ready !== "boolean" || typeof row.model_loaded !== "boolean" ||
+          typeof row.engine_type !== "string" || !("model_lifecycle" in row)) return null;
+      response = await fetchImpl(url, {
+        signal: controller.signal,
+        redirect: "manual",
+        headers: { Authorization: `Bearer ${env.RAPID_MLX_API_KEY}` },
+      });
+    }
     if (!response.ok) return null;
     return await response.json();
   } catch {
