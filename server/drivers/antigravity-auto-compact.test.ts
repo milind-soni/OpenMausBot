@@ -106,9 +106,9 @@ describe.skipIf(WINDOWS)("the native Antigravity CLI compacting a turn's session
   }, 120_000);
 
   it.each([
-    { second: "fixture-account-model", notices: 0 },
+    { second: "fixture-account-model", notices: 1 },
     { second: "fixture-base-model", notices: 1 },
-  ])("says so $notices time(s) for a turn that collapsed on $second after a first turn on fixture-base-model", async ({ second, notices }) => {
+  ])("says so for a turn that collapsed on $second after a first turn on fixture-base-model, a switch before the prompt included", async ({ second, notices }) => {
     const t = await thread(`model-${second}`, { FAKE_AGY_AUTO_COMPACT: "1", FAKE_AGY_AUTO_COMPACT_AT: "10000" });
     const first = await t.send("first", "fixture-base-model");
     expect(first.done).toMatchObject({ ok: true });

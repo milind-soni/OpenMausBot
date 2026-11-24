@@ -1212,9 +1212,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 if (pick.notice) emit({ ...base(threadId, turnId), type: "runtime.notice", message: pick.notice, text: pick.noticeText });
                 ({ turn: cliTurn, variant, reportedModel } = pick);
                 current.turn = cliTurn;
-                const modelBefore = selectedModel;
                 selectedModel = await modelControls.select((m, p, t, r) => (session.appliedConfig.clear(), request(m, p, t, r)), sessionId, INIT_TIMEOUT);
-                if (modelControls.modelOf(session.sessionConfigResult) !== modelBefore) blindTurn(state);
               }
 
               if (support.configureSession) {

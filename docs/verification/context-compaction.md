@@ -36,7 +36,7 @@ passed the fold point is not folded on its next message. The CLI (1.5.15) also
 compacts a session by itself at a turn's start when it nears the model's limit,
 and tells no one: the turn's own `usage_update` readings after its prompt fall
 below 60% of the turn's peak so far within the same window. A turn that settles
-as a success after such a fall, with no model change and no reading from
+as a success after such a fall, with no model change announced after its prompt and no reading from
 another window during it, adds the same chat note the other engines get, ahead
 of its reply, and, once the host has confirmed the turn's prompt delivered, writes the same boundary as Compact now does, so the fold
 does not replace a session the CLI already shortened. A turn that ends in an
