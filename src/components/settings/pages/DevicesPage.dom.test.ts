@@ -921,7 +921,13 @@ describe("Add a computer's words", () => {
     expect(panel.textContent).toContain("choose ＋ then Connect to another computer, and paste this link.");
     expect(panel.textContent).not.toContain("connects computers too");
     expect($("[data-pair-type-instead] [data-pairing-code]")?.textContent).toBe("7KQ2-M9XD-H4TP");
-    expect($<HTMLDetailsElement>("[data-pair-type-instead]")?.open).toBe(false);
+    const toggle = $<HTMLButtonElement>("[data-pair-type-instead] button[aria-expanded]")!;
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(document.getElementById(toggle.getAttribute("aria-controls")!)?.hidden).toBe(true);
+    expect(document.querySelector("[data-pair-type-instead] details, [data-pair-type-instead] summary")).toBeNull();
+    await click("[data-pair-type-instead] button[aria-expanded]");
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(document.getElementById(toggle.getAttribute("aria-controls")!)?.hidden).toBe(false);
   });
 });
 

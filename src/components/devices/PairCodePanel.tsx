@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Copy, Loader2 } from "lucide-react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { Check, ChevronRight, Copy, Loader2 } from "lucide-react";
 import { productName } from "@/lib/brand";
+import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { readMembership } from "@/lib/membership";
@@ -75,6 +76,8 @@ export function PairCodePanel({ kind, address, onConnected, cloudHome = false, a
   const { session, pairingCodes } = usePairAccess();
   const [scope, setScope] = useState<Scope>("admin");
   const [offer, setOffer] = useState<PairingOffer | null>(null);
+  const [typing, setTyping] = useState(false);
+  const typedId = useId();
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -188,16 +191,22 @@ export function PairCodePanel({ kind, address, onConnected, cloudHome = false, a
         </div>
       )}
       <Waiting connected={connected} />
-      {link && <details data-pair-type-instead="" className="text-[12px] leading-4 text-ink-secondary">
-        <summary className="w-fit cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">{t("devicesPage.addFlow.typeInstead")}</summary>
-        <div className="mt-2 flex flex-col gap-2">
-          <span className="flex flex-col gap-0.5">
-            <span className="text-ink-tertiary">{t("connect.address")}</span>
-            <span data-pairing-address="" className="select-text break-all text-[13px] leading-[18px] text-ink">{link.address}</span>
-          </span>
-          <TypedCode label={t("connect.code")} code={offer.code} expiresAt={offer.expiresAt} />
+      {link && <div data-pair-type-instead="" data-open={typing ? "" : undefined} className="flex flex-col text-[12px] leading-4 text-ink-secondary">
+        <button type="button" aria-expanded={typing} aria-controls={typedId} onClick={() => setTyping(!typing)}
+          className="inline-flex w-fit cursor-pointer items-center gap-1 rounded-sm hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
+          <ChevronRight size={12} aria-hidden="true" className={cn("shrink-0 transition-transform duration-150 motion-reduce:transition-none rtl:-scale-x-100", typing && "rotate-90")} />
+          {t("devicesPage.addFlow.typeInstead")}
+        </button>
+        <div id={typedId} hidden={!typing}>
+          <div className="mt-2 flex flex-col gap-2">
+            <span className="flex flex-col gap-0.5">
+              <span className="text-ink-tertiary">{t("connect.address")}</span>
+              <span data-pairing-address="" className="select-text break-all text-[13px] leading-[18px] text-ink">{link.address}</span>
+            </span>
+            <TypedCode label={t("connect.code")} code={offer.code} expiresAt={offer.expiresAt} />
+          </div>
         </div>
-      </details>}
+      </div>}
       {!link && <TypedCode label={t("connect.code")} code={offer.code} expiresAt={offer.expiresAt} />}
     </div>
   );

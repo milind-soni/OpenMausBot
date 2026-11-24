@@ -5,7 +5,6 @@ import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { cn } from "@/lib/cn";
 import { vpsAliasOfServerId } from "../../../shared/bot-computers";
 import { t } from "@/lib/i18n";
-import { SETTINGS_INLINE_INPUT } from "../SettingsPrimitives";
 import { KEY_FIELD } from "./KeyRow";
 
 type VpsStatus = ConfigStatus["vps"];
@@ -50,33 +49,8 @@ export function limitValue(text: string, range: Range): number | undefined | nul
 }
 const asText = (n: number | undefined) => (n === undefined ? "" : String(n));
 
-export function LimitInput({ label, unit, value, onChange, range, placeholder, disabled, onEnter }: {
-  label: string; unit: string; value: string; onChange: (value: string) => void; range: Range; placeholder: number; disabled: boolean; onEnter: () => void;
-}) {
-  return (
-    <label className="flex shrink-0 items-center gap-1.5 text-[13px] leading-[18px] text-ink-secondary">
-      <input
-        type="number"
-        inputMode="numeric"
-        min={range.min}
-        max={range.max}
-        step={1}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && onEnter()}
-        disabled={disabled}
-        placeholder={String(placeholder)}
-        aria-label={label}
-        aria-invalid={limitValue(value, range) === null}
-        className={cn(SETTINGS_INLINE_INPUT, "w-14 placeholder:text-ink-tertiary")}
-      />
-      {unit}
-    </label>
-  );
-}
-
 /** A labelled field of the editor: its name above, the control under it. */
-function Field({ id, label, wide = false, children }: { id: string; label: string; wide?: boolean; children: ReactNode }) {
+export function Field({ id, label, wide = false, children }: { id: string; label: string; wide?: boolean; children: ReactNode }) {
   return (
     <div className={cn("flex min-w-0 flex-col gap-1", wide && "@min-[22rem]/vps:col-span-2")}>
       <label htmlFor={id} className="text-[12px] leading-4 text-ink-secondary">{label}</label>
@@ -85,7 +59,7 @@ function Field({ id, label, wide = false, children }: { id: string; label: strin
   );
 }
 
-function LimitField({ id, value, onChange, range, placeholder, disabled, onEnter }: {
+export function LimitField({ id, value, onChange, range, placeholder, disabled, onEnter }: {
   id: string; value: string; onChange: (value: string) => void; range: Range; placeholder: number; disabled: boolean; onEnter: () => void;
 }) {
   return (
