@@ -218,7 +218,7 @@ function idsFromModelsPayload(payload: unknown, ownedBy?: string): string[] {
       const row = record as { owned_by?: unknown; capabilities?: unknown };
       if (row.owned_by !== ownedBy) return [];
       // Rapid-MLX also serves embedding and rerank models; only chat models are picks.
-      if (Array.isArray(row.capabilities) && !row.capabilities.includes("text")) return [];
+      if (!Array.isArray(row.capabilities) || !row.capabilities.includes("text")) return [];
     }
     if (typeof record === "string") return MODEL_ID.test(record) ? [record] : [];
     if (!record || typeof record !== "object") return [];
