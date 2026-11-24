@@ -317,6 +317,31 @@ describe("the Chrome launcher", () => {
     await expect(runsLauncher(slow, process.env, 5_000)).rejects.toThrow(/the browser launcher does not run here/);
   });
 
+  it.skipIf(process.platform === "win32")("downloads no second Chrome on the server image: both drivers run the Chrome the image names", async () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-launcher-"));
+    folders.push(root);
+    const imageChrome = join(root, "opt", "openmausbot-browser", "chrome");
+    mkdirSync(dirname(imageChrome), { recursive: true });
+    writeFileSync(imageChrome, "#!/bin/sh\n", { mode: 0o755 });
+    const dataDir = join(root, "data");
+    // The image's ENV (Dockerfile runtime stage), on linux/x64, where Chrome for Testing has a pin to download.
+    const env = { HOME: root, AGENT_BROWSER_EXECUTABLE_PATH: imageChrome };
+    expect(chromeForTestingPin("linux", "x64")).not.toBeNull();
+    const real = chromeHost({ dataDir, env, platform: "linux", arch: "x64", enginePath: () => "/usr/local/bin:/usr/bin:/bin" });
+    const host = { ...real, exists: (path: string) => path.startsWith(root) && existsSync(path), list: (folder: string) => folder.startsWith(root) ? real.list(folder) : [] };
+    const install = vi.fn(async () => { throw new Error("no download on the image"); });
+    const common = { dataDir, env, platform: "linux" as const, arch: "x64", host, install, calibrate: async () => identity("158", "Not_A Brand"), screen: async () => ({ width: 1440, height: 900 }), sidecars: sidecars(), log: () => {}, checkLauncher: async () => {} };
+    // agent-browser's launcher, and OpenMausBot's own driver (server/browser/engines.ts: no wrapper, a managed engine).
+    const agentBrowser = new ChromeLauncher({ ...common, engine: () => ({ managed: true }) });
+    const own = new ChromeLauncher({ ...common, engine: () => ({ managed: true }), wrapper: false });
+    await agentBrowser.ready(headless(agentBrowser.env().AGENT_BROWSER_EXECUTABLE_PATH!));
+    expect(await own.binary()).toMatchObject({ path: imageChrome, source: "named" });
+    expect(agentBrowser.describe()).toMatch(/\(named by OMB_CHROME_PATH or AGENT_BROWSER_EXECUTABLE_PATH\)$/);
+    expect(readFileSync(agentBrowser.path, "utf8")).toContain(imageChrome);
+    expect(install).not.toHaveBeenCalled();
+    expect(existsSync(join(dataDir, "tools", "chrome"))).toBe(false);
+  });
+
   it("changes nothing on OMB_BROWSER_LEGACY_SHELL=1", async () => {
     const machine = mac({ env: { OMB_BROWSER_LEGACY_SHELL: "1", OMB_RESOURCES_PATH: "/Applications/OpenMausBot.app/Contents/Resources" } });
     const calibrate = vi.fn();

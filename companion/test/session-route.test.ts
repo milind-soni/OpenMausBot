@@ -148,7 +148,7 @@ it("keeps the phone app's surface for everyone else", async () => {
   // Not over the encrypted route: a session token on the LAN listener gets no pass-through.
   expect((await send(null, lanPort, "PUT", "/api/config", { authorization: "Bearer omb_sess_abc" })).status).toBe(401);
   // Other routes and other tokens keep the allowlist.
-  expect((await send(await origin.connect(DEVICE), null, "PUT", "/api/config", { authorization: "Bearer phone-token" })).status).toBe(403);
+  expect((await send(await origin.connect(DEVICE), null, "PATCH", "/api/config", { authorization: "Bearer phone-token" })).status).toBe(403);
   expect((await send(await origin.connect(DEVICE), null, "POST", "/api/auth/pair", { authorization: "Bearer phone-token" })).status).not.toBe(200);
   expect(received).toHaveLength(0);
   // The phone app's own allowed route still gets the companion's capability, never the session route's marking.

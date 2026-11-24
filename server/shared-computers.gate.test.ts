@@ -189,8 +189,14 @@ it("features.sharedComputers true brings the whole surface back, for every paire
 
   const listed = await internal("GET", "/api/internal/shared-computers");
   expect(listed.status).toBe(200);
-  // A bot not on This computer is told it is never in this list.
-  expect(listed.body).toEqual({ computers: [], thisComputer: expect.stringContaining("This computer itself is never in this list") });
+  // A bot not on This computer is told it is never in this list. The fixture's Mac is lent, but this conversation was not
+  // started by the person, so the bot gets the reason and a line to pass on instead of an empty list that reads as offline.
+  expect(listed.body).toEqual({
+    computers: [],
+    thisComputer: expect.stringContaining("This computer itself is never in this list"),
+    unavailable: expect.stringContaining("only a conversation the person started themselves"),
+    say: expect.stringContaining("Only a conversation you start yourself"),
+  });
   expect(await api("GET", "/api/shared-computers")).toEqual({ status: 200, body: { computers: [], known: [] } });
 
   expect(await descriptorCapabilities()).toMatchObject({ sharedComputers: true });

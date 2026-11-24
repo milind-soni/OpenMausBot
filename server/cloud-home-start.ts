@@ -13,6 +13,7 @@ import {
 } from "./cloud-home.ts";
 import { procHidepid } from "./bot-box/hidepid.ts";
 import { boxMemory, heapSizeArgs } from "./box-memory.ts";
+import { BROWSER_CGROUP_ENV, prepareBrowserCgroup, spawnInCgroup } from "./browser/memory-cgroup.ts";
 import { clearRecordsFromOtherMachines } from "./data-dir-lease.ts";
 import { OOM_SCORE, protectInit, protectSupervisor, spawnWithOomScore } from "./oom-score.ts";
 import { restartLine, restartPolicy } from "./restart.ts";
@@ -38,12 +39,28 @@ const SERVER_ENV_NAMES = new Set([
   "OMB_CLOUD_ROLE", "OMB_CLOUD_MACHINE_ID", "OMB_CLOUD_ADMIN_URL", "OMB_CLOUD_IMAGE", "OMB_PUBLIC_URL", "OMB_WEBHOOK_PUBLIC_URL",
   "OMB_CLOUD_TEAM_ID", "OMB_CLOUD_TEAM_NAME", "OMB_CLOUD_BOAT_URL", "OMB_CLOUD_VOICE_URL", "OMB_CLOUD_DECIDER_URL", "OMB_CLOUD_AI_URL", "OMB_CLOUD_X_URL", "OMB_CLOUD_HOSTING_URL", "OMB_TTS_DEFAULT_VOICE",
   "OMB_COMPOSIO_BROKER_URL", "OMB_COMPOSIO_BROKER",
+  // Ended engine sessions' prune (server/host/engine-session-sweep.ts), off unless the Admin sets it.
+  "OMB_ENGINE_SESSION_SWEEP",
   // The addresses a home answered at before it moved to another provider, which still forward to it.
   "OMB_CLOUD_LEGACY_ORIGINS",
   // The bot box switch (server/bot-box/detect.ts): the Admin may turn a home's box off for support.
   "OMB_BOT_BOX",
+  // Tool caches into one folder in each bot box's HOME (server/bot-box/tool-caches.ts): off unless the Admin turns it on.
+  "OMB_CACHE_ROOT",
+  // The image's own engine CLIs before older copies in the data folder (server/image-engines.ts), for one test Cloud first.
+  "OMB_IMAGE_ENGINES",
+  // The conversation logs' cap and age limit (server/host/thread-log-sweep.ts), off unless the Admin sets it.
+  "OMB_THREAD_LOG_SWEEP", "OMB_THREAD_LOG_CAP", "OMB_THREAD_LOG_CUT",
   // An ended Cloud started only for its owner's export: the server runs frozen (server/move-freeze.ts).
   "OMB_CLOUD_EXPORT_ONLY",
+  // The idle task workspaces' dependency sweep (server/host/start-upkeep.ts), off unless set: the Admin may turn it on.
+  "OMB_TASK_WORKSPACE_RETENTION",
+  // The delete-time cleanup's switch (server/host/conversation-folder-cleanup.ts): off unless the Admin sets it on.
+  "OMB_CONVERSATION_FOLDER_CLEANUP",
+  // The orphan sweep's switch (server/host/orphan-sweep.ts): off, report or remove, set per home by the Admin.
+  "OMB_ORPHAN_SWEEP", "OMB_ORPHAN_SWEEP_MAX_SHARE",
+  // The full tool results' day-old sweep (server/host/tool-results-sweep.ts), off unless the Admin sets it.
+  "OMB_TOOL_RESULTS_SWEEP",
 ]);
 export function serverEnvironmentAllowed(name: string): boolean {
   return SERVER_ENV_NAMES.has(name) || name.startsWith("LC_");
@@ -435,6 +452,13 @@ export function startCloudHome(processEnv: NodeJS.ProcessEnv = process.env) {
   }
   // Names only, never values: what the server does not get from here.
   if (dropped.length) console.log(`cloud home: not passed to the server: ${dropped.join(", ")}`);
+  // The bots' Chrome under a memory limit the kernel enforces (browser/memory-cgroup.ts); the server is started in its own
+  // leaf beside it. Root only: nothing changes where it can't be set up.
+  const browserLimit = ids && process.platform === "linux" ? prepareBrowserCgroup(env, boxMemory().bytes, ids) : null;
+  if (browserLimit) console.log(`cloud home: ${browserLimit.line}`);
+  const browserGroup = browserLimit?.group ?? null;
+  if (browserGroup) server[BROWSER_CGROUP_ENV] = browserGroup.browsers;
+  const inServerGroup = <T>(start: () => T): T => browserGroup ? spawnInCgroup(browserGroup.server, browserGroup.base, start) : start();
   const children: ChildProcess[] = [];
   let stopping = false, restartTimer: ReturnType<typeof setTimeout> | undefined;
   const stop = (failed: boolean) => {
@@ -457,7 +481,7 @@ export function startCloudHome(processEnv: NodeJS.ProcessEnv = process.env) {
   const policy = restartPolicy();
   const runServer = () => {
     if (stopping) return;
-    watch(spawnWithOomScore(OOM_SCORE.server, () => spawnWithSecrets(process.execPath, [...heapSizeArgs(boxMemory().cgroupLimit, server.NODE_OPTIONS), join(here, "index.js")], server, secrets, ids)), (code, signal) => {
+    watch(inServerGroup(() => spawnWithOomScore(OOM_SCORE.server, () => spawnWithSecrets(process.execPath, [...heapSizeArgs(boxMemory().cgroupLimit, server.NODE_OPTIONS), join(here, "index.js")], server, secrets, ids))), (code, signal) => {
       if (!policy.again(code, stopping, signal)) return false;
       console.warn(`cloud home: ${restartLine(code, policy.delayMs())}`);
       if (policy.delayMs() > 0) restartTimer = setTimeout(runServer, policy.delayMs());
