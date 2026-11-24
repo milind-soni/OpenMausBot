@@ -236,7 +236,7 @@ describe("board dispatcher", () => {
   });
 
   it("frees the bot while its item waits on a person, and takes the item back to work when the person answers", async () => {
-    const { h, dispatcher, board, add, pastQuiet, end, state } = harness();
+    const { h, dispatcher, board, add, pastQuiet, end } = harness();
     const asked = add("Needs a client");
     const other = add("Other");
     pastQuiet();
