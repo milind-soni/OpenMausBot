@@ -5,9 +5,10 @@ import { teamBotName, useTeamPeople } from "@/state/team-people";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { teamMapStatus, type TeamMapSection } from "@/lib/team-map";
+import { teamMapStatus, type TeamMapEdge, type TeamMapSection } from "@/lib/team-map";
 import { COMPUTER_DRAG_TYPE, fitTeams, layoutTeams, orderBots, parseBotOrders, parsePositions, reorderBot, teamSize, zoomAt, type Point, type View } from "@/lib/team-canvas";
 import { bestColumns, polylinePath, teamGeometry, type TeamGeometry } from "@/lib/team-canvas-computers";
+import { botCardBoxes, handoffLines } from "@/lib/team-canvas-handoffs";
 import { teamComputersFor, type ShownFrame } from "@/lib/map-computers";
 import { activityPreview, botEngine } from "@/lib/failed-turn";
 import { computerStepLine } from "@/lib/computer-step";
@@ -85,6 +86,7 @@ function BotCard({ bot, selected, moving, connected, tagged = false, sent, onCom
   </article>;
 }
 
+const NO_EDGES: TeamMapEdge[] = [];
 const NO_COMPUTERS: MapComputer[] = [];
 /** The longest the teams stay hidden while the saved layout and the computers beside them are still on their way. */
 const SETTLE_LIMIT_MS = 1_500;
@@ -98,7 +100,7 @@ function currentActivity(bot: Bot | undefined, instances: ReturnType<typeof useS
   return bot.tasks?.find((task) => task.busy && task.threadId !== bot.threadId && task.title.trim())?.title;
 }
 
-export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemory, onEditTeam, onDeleteTeam, onComputer, onComputerDrop, onTeamComputer, teamComputers = {}, connectedBotIds = [], computers = NO_COMPUTERS, computerFrames = {}, onOpenComputer, taggedBotIds = [], sent, bottomInset = 0, settling = false }: {
+export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemory, onEditTeam, onDeleteTeam, onComputer, onComputerDrop, onTeamComputer, teamComputers = {}, connectedBotIds = [], computers = NO_COMPUTERS, computerFrames = {}, onOpenComputer, taggedBotIds = [], sent, bottomInset = 0, settling = false, edges = NO_EDGES }: {
   sections: TeamMapSection<Bot>[];
   canManage: boolean;
   onMove: (bot: Bot, destination: string) => Promise<boolean | void>;
@@ -124,6 +126,8 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
   bottomInset?: number;
   /** Something that changes the layout, such as the computers drawn beside the bots, is still loading. */
   settling?: boolean;
+  /** Who hands work to whom: each one is drawn as a line between the two cards. */
+  edges?: TeamMapEdge[];
 }) {
   const { state } = useStore();
   const viewport = useRef<HTMLDivElement>(null);
@@ -160,6 +164,7 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
     return { sizes, columns: bestColumns(sizes, { width: Math.round(viewportSize.width / 200) * 200, height: Math.round(viewportSize.height / 200) * 200 }) };
   }, [geometries, sections, viewportSize]);
   const tiles = useMemo(() => layoutTeams(sections, positions, columnsFor), [sections, positions, columnsFor]);
+  const handoffs = useMemo(() => handoffLines(edges, botCardBoxes(sections, tiles, geometries, botOrders)), [edges, sections, tiles, geometries, botOrders]);
   const current = useRef({ view, positions, tiles, selectedId: state.selectedId, settingsOpen: state.settingsOpen, bottomInset });
   current.current = { view, positions, tiles, selectedId: state.selectedId, settingsOpen: state.settingsOpen, bottomInset };
 
@@ -510,6 +515,17 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
           </div>}
         </section>;
       })}
+      {handoffs.length > 0 && <div aria-hidden className="pointer-events-none absolute left-0 top-0">
+        <svg className="absolute left-0 top-0 overflow-visible" width={1} height={1}>
+          {handoffs.map((line) => <path key={line.key} data-handoff-line data-state={line.state} d={line.path} fill="none" strokeLinecap="round"
+            strokeWidth={line.state === "connected" ? 1.5 : 2.25} strokeDasharray={line.state === "connected" ? undefined : "7 5"}
+            className={line.state === "running" ? "animate-link-flow stroke-success/80" : line.state === "queued" ? "stroke-warning/80" : "stroke-ink-secondary/35"} />)}
+          {handoffs.map((line) => line.arrow && <path key={`${line.key}:arrow`} data-handoff-arrow d={line.arrow} className={line.state === "running" ? "fill-success/80" : "fill-warning/80"} />)}
+        </svg>
+        {handoffs.filter((line) => line.state !== "connected").map((line) => <span key={line.key} data-handoff-label style={{ left: line.label.x, top: line.label.y }}
+          className={cn("absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full bg-panel px-2 py-0.5 text-[11px] font-medium shadow-sm ring-1",
+            line.state === "running" ? "text-success ring-success/30" : "text-warning ring-warning/30")}>{line.state === "running" ? t("canvas.edge.running") : t("canvas.edge.queued")}</span>)}
+      </div>}
     </div>
     {dragged && <div className="pointer-events-none absolute z-40 rounded-xl border border-accent/40 bg-card px-4 py-3 text-[13px] shadow-lg" style={{ left: dragged.point.x + 16, top: dragged.point.y + 16 }}>
       <span className="flex items-center gap-2"><BotAvatar bot={dragged.bot} size={24} animated={false} />{dragged.bot.name}</span>
