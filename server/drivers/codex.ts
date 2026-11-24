@@ -1302,7 +1302,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               ...(selection.modelProvider ? { modelProvider: selection.modelProvider } : {}),
               ...approvalParams.thread,
               ...(turn.guestConfined ? { environments: [] } : {}),
-              ephemeral: false,
+              ephemeral: turn.ephemeral === true,
             });
           let started;
           try {

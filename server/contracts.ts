@@ -150,6 +150,9 @@ export interface SendTurnInput {
   resumeCursor?: unknown;
   /** Start without the previous native context or retained process; wins over resumeCursor. */
   sessionReset?: boolean;
+  /** No later turn resumes this session (a room turn that sends the whole conversation each time), so a driver whose engine
+   * can skip saving it does: the engine's own apps list every saved session as the person's history. */
+  ephemeral?: boolean;
   /** Hold the startup ACK until prompt dispatch (Claude: first model activity); a retired transient setup failure or sign-in refusal may reject with TurnNotStartedError. */
   startupRecovery?: boolean;
   /** Given to a driver with `capabilities.engineAdmission`: awaited right before it starts an engine process ("process") or

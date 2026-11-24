@@ -859,6 +859,24 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(turnText(fourth)).toContain("fourth");
   });
 
+  it("saves a conversation's thread but not one no later turn resumes", async () => {
+    await create({ mode: "resume" });
+    const threadStart = async (dumpName: string, threadId: string, ephemeral?: boolean) => {
+      process.env.FAKE_CODEX_DUMP = join(scratch, dumpName);
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId, text: "hello", system: "Stable rules.", systemStable: "Stable rules.", systemVolatile: "Memory: likes quiet hours.",
+        ...(ephemeral === undefined ? {} : { ephemeral }),
+      });
+      await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      const calls = JSON.parse(readFileSync(join(scratch, dumpName), "utf8")).calls as Array<{ method: string; params: Record<string, unknown> }>;
+      return calls.filter((call) => call.method === "thread/start").map((call) => call.params.ephemeral);
+    };
+    // A one-to-one chat resumes its thread next turn, so Codex keeps it.
+    expect(await threadStart("chat.json", "t-chat")).toEqual([false]);
+    // A room turn sends the whole conversation each time and never resumes: nothing is saved, so the Codex app lists nothing.
+    expect(await threadStart("room.json", "t-room", true)).toEqual([true]);
+  });
+
   it("ignores requests received after turn completion", async () => {
     await create({ mode: "late-request" });
     await instance.adapter.sendTurn({ threadId: "t-late-request", text: "finish" });
