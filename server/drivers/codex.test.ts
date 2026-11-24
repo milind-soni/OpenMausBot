@@ -4570,7 +4570,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     ]);
   });
 
-  it("sends effort on turn/start, and omits the key when unset", async () => {
+  it("sends effort (including ultra) on turn/start, and omits the key when unset", async () => {
     await create();
     const dump = join(scratch, "effort.json");
     process.env.FAKE_CODEX_DUMP = dump;
@@ -4581,6 +4581,13 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     const turnStart = seen.calls.find((c: any) => c.method === "turn/start");
     expect(turnStart.params.effort).toBe("xhigh");
+
+    const ultraDump = join(scratch, "effort-ultra.json");
+    process.env.FAKE_CODEX_DUMP = ultraDump;
+    await instance.adapter.sendTurn({ threadId: "t-effort-ultra", text: "hi", effort: "ultra" });
+    await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-effort-ultra");
+    const ultraSeen = JSON.parse(readFileSync(ultraDump, "utf8"));
+    expect(ultraSeen.calls.find((c: any) => c.method === "turn/start").params.effort).toBe("ultra");
   });
 
   it("sends no effort key when the turn has none", async () => {
@@ -4596,7 +4603,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(turnStart.params).not.toHaveProperty("effort");
   });
 
-  it("runs a Fast row on its base model with the Fast tier for that turn only", async () => {
+  it("runs a Fast or Ultrafast row on its base model with that service tier for that turn only", async () => {
     await create();
     const dump = join(scratch, "fast.json");
     process.env.FAKE_CODEX_DUMP = dump;
@@ -4611,6 +4618,24 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(threadStart.params).not.toHaveProperty("serviceTier");
     expect(turnStart.params).toMatchObject({ serviceTierForTurn: "priority", effort: "high" });
     expect(turnStart.params).not.toHaveProperty("serviceTier");
+
+    const ultraDump = join(scratch, "ultrafast.json");
+    process.env.FAKE_CODEX_DUMP = ultraDump;
+    await instance.adapter.sendTurn({ threadId: "t-ultrafast", text: "hi", model: "gpt-6.2-sol+ultrafast" });
+    await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-ultrafast");
+
+    const ultraSeen = JSON.parse(readFileSync(ultraDump, "utf8"));
+    const ultraThreadStart = ultraSeen.calls.find((c: any) => c.method === "thread/start");
+    const ultraTurnStart = ultraSeen.calls.find((c: any) => c.method === "turn/start");
+    expect(ultraThreadStart.params).toMatchObject({
+      model: "gpt-6.2-sol",
+      modelProvider: "openai",
+    });
+    expect(ultraThreadStart.params).not.toHaveProperty("serviceTier");
+    expect(ultraTurnStart.params).toMatchObject({
+      serviceTierForTurn: "ultrafast",
+    });
+    expect(ultraTurnStart.params).not.toHaveProperty("serviceTier");
   });
 
   it("sends no service tier for a plain row", async () => {

@@ -18,10 +18,14 @@ export function useUpdatedOnce(instance: Pick<InstanceInfo, "driverKind" | "auto
   const version = instance.autoUpdated?.version ?? null;
   const [shown, setShown] = useState<string | null>(null);
   useEffect(() => {
-    if (version === null || seen()[instance.driverKind] === version) return;
+    const key = `${instance.driverKind}@${version}`;
+    if (version === null || seen()[key]) {
+      setShown((current) => (current === version ? current : null));
+      return;
+    }
     setShown(version);
     try {
-      localStorage.setItem(SEEN_KEY, JSON.stringify({ ...seen(), [instance.driverKind]: version }));
+      localStorage.setItem(SEEN_KEY, JSON.stringify({ ...seen(), [key]: version }));
     } catch {}
   }, [instance.driverKind, version]);
   return shown;

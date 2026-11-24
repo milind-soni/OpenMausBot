@@ -1,4 +1,5 @@
 import { freeFallback, rankAis } from "../shared/ai-ranking.ts";
+import { offeredEffortLevels } from "../shared/wire.ts";
 import type { EffortLevel, EngineAccess, InstanceConfigMap, ModelCatalog, ModelSelection, ProviderSnapshot } from "./contracts.ts";
 
 export interface SelectableInstance {
@@ -72,8 +73,8 @@ export function selectDefaultModelSelection(
       return { instanceId: "", model: "" };
     }
     const selection = { ...preferred };
-    // A saved effort can outlive driver support: keep the model, let the provider use its default effort.
-    if (selection.effort && !instance.capabilities?.effortLevels?.includes(selection.effort)) delete selection.effort;
+    // A saved effort can outlive driver or per-model support: keep the model, let the provider use its default effort.
+    if (selection.effort && !offeredEffortLevels(instance, selection.model).includes(selection.effort)) delete selection.effort;
     return selection;
   }
   const available = instances.filter((instance) => instance.enabled !== false && instance.snapshot.state === "available" && context.refusal?.(instance) === undefined && defaultModel(instance));

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { accountHint, accountsByApp, withAccountHint } from "./connector-account-hint.ts";
+import { accountHint, accountsByApp, missingAccountHint, withAccountHint } from "./connector-account-hint.ts";
 
 const encode = (value: unknown) => new TextEncoder().encode(typeof value === "string" ? value : JSON.stringify(value));
 const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
@@ -92,6 +92,47 @@ describe("connector account hint", () => {
   it("reads the accounts out of a services inventory", () => {
     const read = accountsByApp({ github: { accounts: [{ id: "github_one", alias: "personal", status: "ACTIVE" }] } });
     expect(read.github?.[0]?.alias).toBe("personal");
+  });
+
+  it("names the usable accounts of a call refused for naming no account", async () => {
+    const noAccount = {
+      jsonrpc: "2.0",
+      id: 11,
+      result: { content: [{ type: "text", text: JSON.stringify({ successful: false, error: JSON.stringify({ message: "Multiple gmail accounts connected. Specify which to use via the 'account' field: work, personal" }) }) }], isError: true },
+    };
+    const out = JSON.parse(decode(await withAccountHint(encode(noAccount), "application/json", ["GMAIL_FETCH_EMAILS"], async () => ({
+      gmail: [
+        { id: "gmail_one", alias: "work", status: "ACTIVE" },
+        { id: "gmail_two", alias: "personal", status: "ACTIVE" },
+      ],
+    }))));
+    expect(out.result.content[1].text).toContain("Gmail refused this because the call named no account");
+    expect(out.result.content[1].text).toContain("2 connected accounts (work, personal)");
+    expect(out.result.content[1].text).toContain("Name one of them in the call's account field");
+  });
+
+  it("names the one usable account when the others cannot run a call", async () => {
+    const hint = missingAccountHint(["GMAIL_FETCH_EMAILS"], {
+      gmail: [
+        { id: "gmail_one", alias: "work", status: "ACTIVE" },
+        { id: "gmail_two", alias: "old", status: "EXPIRED" },
+      ],
+    });
+    expect(hint).toContain("one can run a call (work)");
+    expect(hint).toContain("Name that one in the call's account field");
+  });
+
+  it("leaves a no-account refusal alone when no account of the app can run a call", () => {
+    expect(missingAccountHint(["GMAIL_FETCH_EMAILS"], { gmail: [{ id: "gmail_one", alias: "old", status: "EXPIRED" }] })).toBe("");
+  });
+
+  it("leaves a no-account refusal alone when the batch mixes apps", () => {
+    expect(missingAccountHint(["GMAIL_GET_PROFILE", "GITHUB_CREATE_AN_ISSUE"], accounts)).toBe("");
+  });
+
+  it("leaves an answer that matches neither refusal untouched", async () => {
+    const multi = encode({ jsonrpc: "2.0", id: 12, result: { content: [{ type: "text", text: "Multiple gmail accounts connected. Specify which to use via the 'account' field: work" }], isError: true } });
+    expect(await withAccountHint(multi, "application/json", ["GMAIL_FETCH_EMAILS"], async () => ({}))).toBe(multi);
   });
 
   it("names the app the refusal names, not the first app of the batch", async () => {

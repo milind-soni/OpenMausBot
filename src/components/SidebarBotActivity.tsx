@@ -118,8 +118,16 @@ export function attentionTriggerLabel(count: number): string {
   return count > 0 ? t("attention.titleCount", { count }) : t("attention.title");
 }
 
+const taskHasRunningWork = (task: { activity?: Task["activity"]; busy?: boolean; queued?: boolean }): boolean =>
+  task.activity === "working" || (task.busy === true && task.activity !== "waiting-on-you") || task.queued === true;
+
 export function attentionHasRunningWork(entries: readonly AttentionThread[]): boolean {
-  return entries.some((entry) => entry.task.activity === "working" || (entry.task.busy === true && entry.task.activity !== "waiting-on-you") || entry.task.queued === true);
+  return entries.some((entry) => taskHasRunningWork(entry.task));
+}
+
+export function hasCrossBotRunningWork(bots: Bot[], queued: Record<string, unknown[]>, groups: Group[] = []): boolean {
+  return bots.some((bot) => !bot.hidden && sidebarBotActivityTasks(bot, queued, true).some(taskHasRunningWork))
+    || groups.some((group) => sidebarGroupActivityTasks(group, bots, queued).some(taskHasRunningWork));
 }
 
 export function attentionRowStatus(task: AttentionThread["task"]): { active: boolean; Icon: LucideIcon; colorClass: string; label: string } {

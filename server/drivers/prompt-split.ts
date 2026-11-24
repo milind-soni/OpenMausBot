@@ -88,6 +88,32 @@ export function deletePromptSplitReceipt(scope: string, key: string): void {
   } catch {}
 }
 
+interface SplitTurn {
+  full: boolean;
+  note: string;
+  receipt: PromptSplitReceipt;
+}
+
+function splitTurn(
+  stable: string,
+  volatile: string,
+  previous: PromptSplitReceipt | null,
+  perTurnVolatile: boolean,
+  reAnchorAfterTurns: number,
+): SplitTurn {
+  const fingerprints = promptSplitFingerprints(stable, volatile);
+  const turnsSinceFull = typeof previous?.turnsSinceFull === "number" ? previous.turnsSinceFull : 0;
+  const reAnchor = reAnchorAfterTurns > 0 && previous !== null && turnsSinceFull >= reAnchorAfterTurns;
+  if (previous === null || previous.stable !== fingerprints.stable || reAnchor) {
+    const hadVolatile = previous !== null && previous.volatile !== EMPTY_FINGERPRINT;
+    return { full: true, note: volatileContextNote(volatile, hadVolatile), receipt: { ...fingerprints, turnsSinceFull: 0 } };
+  }
+  const note = previous.volatile === fingerprints.volatile && !perTurnVolatile
+    ? ""
+    : volatileContextNote(volatile, previous.volatile !== EMPTY_FINGERPRINT);
+  return { full: false, note, receipt: { ...fingerprints, turnsSinceFull: turnsSinceFull + 1 } };
+}
+
 /** reAnchorAfterTurns re-sends the full prompt after that many bare turns, for history rewrites no event reports. */
 export function splitSessionPrompt(
   stable: string,
@@ -98,16 +124,22 @@ export function splitSessionPrompt(
   perTurnVolatile = false,
   reAnchorAfterTurns = 0,
 ): { text: string; receipt: PromptSplitReceipt } {
-  const fingerprints = promptSplitFingerprints(stable, volatile);
-  const turnsSinceFull = typeof previous?.turnsSinceFull === "number" ? previous.turnsSinceFull : 0;
-  const reAnchor = reAnchorAfterTurns > 0 && previous !== null && turnsSinceFull >= reAnchorAfterTurns;
-  if (previous === null || previous.stable !== fingerprints.stable || reAnchor) {
-    return { text: fullSystem ? fullSystem + "\n\n" + text : text, receipt: { ...fingerprints, turnsSinceFull: 0 } };
-  }
-  const note = previous.volatile === fingerprints.volatile && !perTurnVolatile
-    ? ""
-    : volatileContextNote(volatile, previous.volatile !== EMPTY_FINGERPRINT);
-  return { text: withContextNote(note, text), receipt: { ...fingerprints, turnsSinceFull: turnsSinceFull + 1 } };
+  const turn = splitTurn(stable, volatile, previous, perTurnVolatile, reAnchorAfterTurns);
+  if (!turn.full) return { text: withContextNote(turn.note, text), receipt: turn.receipt };
+  return { text: fullSystem ? fullSystem + "\n\n" + text : text, receipt: turn.receipt };
+}
+
+/** splitSessionPrompt for an agent that holds the stable half as its session's system prompt: what the turn carries is
+ * the volatile half's note alone, the whole volatile half wherever splitSessionPrompt would send the full prompt. */
+export function splitSessionNote(
+  stable: string,
+  volatile: string,
+  previous: PromptSplitReceipt | null,
+  perTurnVolatile = false,
+  reAnchorAfterTurns = 0,
+): { note: string; receipt: PromptSplitReceipt } {
+  const { note, receipt } = splitTurn(stable, volatile, previous, perTurnVolatile, reAnchorAfterTurns);
+  return { note, receipt };
 }
 
 /** The stable half a per-thread process is keyed on: without the team roster (`systemRoster`), which a warm process takes

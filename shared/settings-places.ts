@@ -23,6 +23,7 @@ export const SETTINGS_PLACES = [
   {"id":"page:vault","path":"Settings → Vault","words":["vault","password","passwords","login","logins","secrets","1password","2fa"]},
   {"id":"page:usage","path":"Settings → Spending","words":["spending","usage","cost","costs","tokens","money","runs","export csv"]},
   {"id":"page:transfer","path":"Settings → Import & export","words":["import","export","backup","backups","restore","grok","grok bot","move from","bring"]},
+  {"id":"page:storage","path":"Settings → Storage","words":["storage","disk","disk space","space","full","free space","volume","what uses space","cache","downloads"],"only":"a MausBot Cloud's Settings, for its owner or admins"},
   {"id":"page:data","path":"Settings → Data","words":["data","storage","attachments","activity","audit"],"advanced":true},
   {"id":"page:people","path":"Settings → People","words":["people","members","invite","roles","bot access","sharing","team"],"only":"a team's or a self-hosted server's Settings, for admins"},
   {"id":"page:installations","path":"Settings → Installations","words":["installations","fleet","clients","tenants"],"only":"a server that manages installations"},

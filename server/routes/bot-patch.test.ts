@@ -13,6 +13,7 @@ import type { RequestAuth } from "../request-auth.ts";
 import { Store, type BotRecord } from "../store.ts";
 import * as vps from "../vps-computer.ts";
 import type { ManagedVpsInventory } from "../vps-computer.ts";
+import { stillHeldUnread } from "../host/room-reads.ts";
 import { createBotPatchRoutes, type BotPatchRouteDeps } from "./bot-patch.ts";
 import { PASS, type RouteContext } from "./table.ts";
 
@@ -554,5 +555,32 @@ describe("PATCH /api/bots/:id mainThreadChoice", () => {
     expect(client.status).toBe(403);
     expect(paired.status).toBe(403);
     expect(store.bot(bot.id)?.mainThreadChoice).toBeUndefined();
+  });
+});
+
+describe("PATCH /api/bots/:id unread", () => {
+  it("holds a mark made right after a reply was inserted mid-history, until a reply written later comes", async () => {
+    const { store, bot, patch } = fixture();
+    const first = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "First answer." });
+    store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "Thanks.", at: 1 });
+    store.insertMessageAfter(bot.threadId, first.id, { role: "bot", kind: "text", text: "A late note under the first answer." });
+    expect((await patch(bot.id, { unread: true })).status).toBe(200);
+    const held = () => stillHeldUnread(store.activePath(bot.threadId), store.taskByThread(bot.id, bot.threadId)?.heldUnread, store.messagesFor(bot.threadId));
+    expect(held(), "the inserted reply was there when the person marked").toBe(true);
+    store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "A new answer.", at: 0 });
+    expect(store.taskByThread(bot.id, bot.threadId)?.heldUnread, "a reply written after it ends it, whatever its clock").toBeUndefined();
+  });
+
+  it("marks the open main conversation, not a routine run on screen", async () => {
+    const { store, bot, patch } = fixture();
+    const openThreadId = bot.threadId;
+    const routine = store.createTask(bot.id, "Daily check", true)!;
+    store.patchTask(bot.id, routine.threadId, { routineRunId: "run-1", unread: false });
+    expect(store.bot(bot.id)!.threadId).toBe(routine.threadId);
+    expect((await patch(bot.id, { unread: true })).status).toBe(200);
+    expect(store.taskByThread(bot.id, routine.threadId)?.unread).toBe(false);
+    expect(store.taskByThread(bot.id, openThreadId)?.unread).toBe(true);
+    expect(store.taskByThread(bot.id, openThreadId)?.heldUnread).toBeDefined();
+    expect(store.bot(bot.id)?.unread).toBe(true);
   });
 });

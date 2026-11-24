@@ -14790,8 +14790,10 @@ describe("message pages", () => {
 });
 
 describe("resumable event stream", () => {
+  // A bot-level field: one numbered frame per change. A conversation's change (an unread mark is one) also sends the
+  // thread's own frame, which would number two.
   const nudge = async (botId: string) => {
-    const res = await api("PATCH", `/api/bots/${botId}`, { unread: true });
+    const res = await api("PATCH", `/api/bots/${botId}`, { mascotExpression: "happy" });
     expect(res.status).toBe(200);
   };
 

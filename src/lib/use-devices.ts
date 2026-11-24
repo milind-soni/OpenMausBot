@@ -3,8 +3,10 @@ import type { ServerStatus } from "../../electron/server-status.mjs";
 import { api } from "@/state/api";
 import { useStoreSelector } from "@/state/store-select";
 import { desktopAppVersion } from "./app-links";
+import { fetchBotComputers, type BotComputerRow } from "./bot-computers";
 import { companionBridge } from "./companion-bridge";
 import type { CompanionState } from "./companion-types";
+import { withBots } from "./device-bots";
 import { buildDevices, type Device, type DeviceSources, type LentDevice, type SignedInDevice } from "./devices";
 import type { PublicPhone } from "./phones";
 import { isOwnerOrAdmin } from "./session";
@@ -29,6 +31,7 @@ export interface DevicesView {
  * link live. `client`: this app drives another computer, which lists its own devices. */
 export function useDevices({ here, client, name, kind }: { here: boolean; client: boolean; name: string; kind: DeviceSources["here"]["kind"] }): DevicesView {
   const vpsConfig = useStoreSelector((state) => state.config?.vps);
+  const bots = useStoreSelector((state) => state.bots);
   const [places, setPlaces] = useState<Places | null>(null);
   const [statuses, setStatuses] = useState<ServerStatus[]>([]);
   const [lending, setLending] = useState<DeviceSources["lending"]>(null);
@@ -36,6 +39,7 @@ export function useDevices({ here, client, name, kind }: { here: boolean; client
   const [phoneApps, setPhoneApps] = useState<PublicPhone[] | null>(null);
   const [sessions, setSessions] = useState<DeviceSources["sessions"]>(null);
   const [lent, setLent] = useState<LentDevice[] | null>(null);
+  const [botRows, setBotRows] = useState<BotComputerRow[] | null>(null);
   const [answered, setAnswered] = useState(false);
   const alive = useRef(true);
 
@@ -54,6 +58,9 @@ export function useDevices({ here, client, name, kind }: { here: boolean; client
       admin ? api<{ phones?: PublicPhone[] }>("/api/phones", { background: true }).then((body) => { if (alive.current) setPhoneApps(body.phones ?? []); }) : undefined,
       admin ? api<{ sessions?: SignedInDevice[]; current?: string | null }>("/api/auth/sessions", { background: true })
         .then((body) => { if (alive.current) setSessions({ sessions: Array.isArray(body.sessions) ? body.sessions : [], current: typeof body.current === "string" ? body.current : null }); }) : undefined,
+      // Which computer each bot works on: an admin route too, read in the background so a sleeping Cloud stays asleep.
+      admin ? fetchBotComputers({ background: true })
+        .then((body) => { if (alive.current) setBotRows(Array.isArray(body.rows) ? body.rows : null); }, () => { if (alive.current) setBotRows(null); }) : undefined,
       // A 404 is a place that lends no computers (the family is off for this request).
       api<{ known?: LentDevice[] }>("/api/shared-computers", { background: true })
         .then((body) => { if (alive.current) setLent(Array.isArray(body.known) ? body.known : []); }, () => { if (alive.current) setLent(null); }),
@@ -75,10 +82,10 @@ export function useDevices({ here, client, name, kind }: { here: boolean; client
     return [...(alias ? [{ alias }] : []), ...servers.map((server) => ({ alias: server.sshAlias, name: server.name }))];
   }, [vpsConfig]);
 
-  const devices = useMemo(() => buildDevices({
+  const devices = useMemo(() => withBots(buildDevices({
     here: { name, kind, version: desktopAppVersion(), desktop: typeof window !== "undefined" && Boolean(window.ogb) },
     places, statuses, lending, companion, phoneApps, sessions, lent, vps,
-  }), [name, kind, places, statuses, lending, companion, phoneApps, sessions, lent, vps]);
+  }), botRows, kind, (botId) => bots.find((bot) => bot.id === botId)?.name ?? null), [name, kind, places, statuses, lending, companion, phoneApps, sessions, lent, vps, botRows, bots]);
 
   return { devices, companion, loaded: answered, refresh: () => void read() };
 }

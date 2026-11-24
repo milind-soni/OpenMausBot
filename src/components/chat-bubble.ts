@@ -1,6 +1,7 @@
 import { cn } from "@/lib/cn";
 import { failedTurnCause } from "@/lib/failed-turn";
 import { isStatusActivity } from "@/lib/activity-runs";
+import { automationNote } from "@/lib/automation-note";
 import { peerLine, peerRequest } from "@/lib/peer-message";
 import { localDay } from "@/lib/transcript-derivations";
 import type { TranscriptItem } from "@/lib/activity-runs";
@@ -50,7 +51,7 @@ export function joinedCorners(side: "start" | "end", join: BubbleJoin): string {
 /** Which bubble group a transcript row belongs to in Simple mode: this bot's words, the person's own words, or none. */
 export function bubbleGroup(message: Message, botId: string): "bot" | "user" | null {
   if (message.kind !== "text" || message.publishedPage || message.template || message.automation || message.helperFollowup) return null;
-  if (message.role === "user") return peerLine(message) ? null : "user";
+  if (message.role === "user") return peerLine(message) || automationNote(message) ? null : "user";
   if (message.role !== "bot" || peerRequest(message, botId)) return null;
   return isPureLeakedSystemHarnessMessage(message.text) && !message.attachments?.length ? null : "bot";
 }

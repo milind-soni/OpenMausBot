@@ -23,6 +23,8 @@ let session: unknown;
 let sessions: Array<{ id: string; label: string; scopes: string[]; lastSeenAt: number }>;
 let openCodes: string[];
 let requests: string[];
+let botRows: unknown[] | "forbidden";
+let config: Record<string, unknown>;
 let bridge: Record<string, ReturnType<typeof vi.fn>>;
 let environments: Record<string, ReturnType<typeof vi.fn>>;
 let go: ReturnType<typeof vi.fn<SettingsShell["go"]>>;
@@ -62,6 +64,8 @@ beforeEach(() => {
   session = { kind: "loopback", trust: "owner" };
   sessions = [];
   openCodes = ["p1"];
+  botRows = [];
+  config = { profile: { email: "ada@example.com" }, managedPolicy: null };
   companion = {
     enabled: true, keepAwake: false, port: 8810, pairing: null,
     devices: [
@@ -80,6 +84,8 @@ beforeEach(() => {
     if (path === "/api/auth/pairing" && init?.method === "POST") return Response.json({ id: "p1", code: "7KQ2-M9XD-H4TP", expiresAt: NOW + 600_000, url: null, hint: null });
     if (path === "/api/auth/pairing") return Response.json({ pairings: openCodes.map((id) => ({ id })) });
     if (path === "/api/phones") return Response.json({ phones: [] });
+    if (path === "/api/computers/bots") return botRows === "forbidden" ? Response.json({ error: "admin only" }, { status: 403 }) : Response.json({ now: NOW, rows: botRows });
+    if (path === "/api/config" && init?.method === "PUT") return Response.json({ notice: "GPU box is no longer used. Its desktops stay on it.", vps: { configured: false, sshAlias: "", servers: [] } });
     if (path === "/api/config") return Response.json({ membership: { authority: "local", pairingCodes: true } });
     return Response.json({ error: "no route" }, { status: 404 });
   }));
@@ -97,35 +103,51 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const BOTS = [{ id: "b1", name: "Scout", color: "green" }, { id: "b2", name: "Writer", color: "purple" }, { id: "b3", name: "Builder", color: "orange" }];
+const gpu = { configured: true, sshAlias: "", servers: [{ name: "GPU box", sshAlias: "gpu" }] };
 const settle = async () => { for (let i = 0; i < 12; i++) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); }); };
 const $ = <T extends Element = HTMLElement>(selector: string) => document.body.querySelector<T & HTMLElement>(selector);
 const click = async (selector: string) => { await act(async () => $(selector)!.click()); await settle(); };
 
 async function render(over: Partial<SettingsShell["ctx"]> = {}) {
   const shell: SettingsShell = { ctx: fullContext({ advanced: false, ...over }), place: { name: "This computer", kind: "computer", color: null, named: false }, page: "devices", anchor: null, go };
-  const state = { ...initialState, config: { profile: { email: "ada@example.com" }, managedPolicy: null } as never };
+  const state = { ...initialState, config: config as never, bots: BOTS as never };
   act(() => root.render(createElement(StoreContext.Provider, { value: { state, dispatch: vi.fn() } as never },
     createElement(SettingsShellContext.Provider, { value: shell }, createElement(DevicesPage)))));
   await settle();
 }
 
 describe("the Devices page", () => {
-  it("draws this computer at the root and one branch per way in, each device with its state", async () => {
+  it("draws this computer as the hub and the rest in plainly named groups, each tile with its state in a mark and words", async () => {
     await render();
-    expect($("[data-device-node=here]")?.textContent).toContain("This computer");
-    expect([...document.querySelectorAll("[data-device-route]")].map((branch) => branch.getAttribute("data-device-route"))).toEqual(["tailscale", "local", "cloud", "internet"]);
-    expect($("[data-device-route=local] [data-device-node='phone:iphone']")?.getAttribute("data-device-status")).toBe("online");
-    expect($("[data-device-route=internet] [data-device-node='place:vps']")?.textContent).toContain("Can’t reach it");
-    expect($("[data-device-route=cloud] [data-device-node='place:home']")?.textContent).toContain("Home");
-    expect($("[data-device-row='phone:pixel']")?.textContent).toContain("Seen");
+    expect($("[data-device-hub] [data-device-node=here]")?.textContent).toContain("This computer");
+    expect([...document.querySelectorAll("[data-device-group]")].map((group) => group.getAttribute("data-device-group"))).toEqual(["phones", "servers"]);
+    expect([...document.querySelectorAll("[data-device-group] h3")].map((heading) => heading.textContent)).toEqual(["Phones", "Clouds and your own servers"]);
+    const iphone = $("[data-device-group=phones] [data-device-node='phone:iphone']")!;
+    expect(iphone.getAttribute("data-device-status")).toBe("online");
+    expect(iphone.querySelector("[data-device-state]")?.textContent).toBe("Online");
+    expect(iphone.querySelector("[data-device-route-chip]")?.textContent).toBe("Same network");
+    expect(iphone.closest("li")?.querySelector("[data-line]")?.getAttribute("data-line")).toBe("live");
+    const pixel = $("[data-device-node='phone:pixel']")!;
+    expect(pixel.textContent).toContain("Seen");
+    expect(pixel.closest("li")?.querySelector("[data-line]")?.getAttribute("data-line")).toBe("away");
+    expect($("[data-device-group=servers] [data-device-node='place:vps']")?.textContent).toContain("Can’t reach it");
+    expect($("[data-device-group=servers] [data-device-node='place:home']")?.textContent).toContain("Home");
+    expect($("[data-device-row]")).toBeNull();
   });
 
-  it("opens a chosen device's card, whose buttons call the actions that already exist", async () => {
+  it("puts the one thing a device needs on its tile", async () => {
+    await render();
+    await click("[data-device-node='place:vps'] ~ * [data-tile-action=retry]");
+    expect(environments.retry).toHaveBeenCalledWith("vps");
+    expect($("[data-device-node='phone:iphone'] ~ * [data-tile-action]")).toBeNull();
+  });
+
+  it("opens a chosen device's card against the map, whose buttons call the actions that already exist, and closes on Escape", async () => {
     await render();
     await click("[data-device-node='place:vps']");
-    expect($("[data-device-card='place:vps']")).not.toBeNull();
-    await click("[data-device-card='place:vps'] [data-device-action=retry]");
-    expect(environments.retry).toHaveBeenCalledWith("vps");
+    expect($("[data-device-node='place:vps']")?.getAttribute("aria-expanded")).toBe("true");
+    expect($("[data-device-map], [data-settings-block=map]")?.contains($("[data-device-card='place:vps']"))).toBe(true);
     await click("[data-device-card='place:vps'] [data-device-action=remove]");
     expect(environments.forget).toHaveBeenCalledWith("vps");
     await click("[data-device-node='phone:pixel']");
@@ -135,6 +157,85 @@ describe("the Devices page", () => {
     await click("[data-device-node='phone:iphone']");
     await click("[data-device-card='phone:iphone'] [data-device-action=manage]");
     expect(go).toHaveBeenCalledWith("phone", "paired");
+    // Settings closes on an Escape that reaches the window unhandled: the map's Escape closes only the card.
+    const reached: boolean[] = [];
+    const onWindow = (event: KeyboardEvent) => reached.push(!event.defaultPrevented);
+    window.addEventListener("keydown", onWindow);
+    act(() => { $("[data-device-card='phone:iphone'] button")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
+    await settle();
+    expect($("[data-device-card]")).toBeNull();
+    await click("[data-device-node='place:vps']");
+    act(() => { $("[data-device-node='place:vps']")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
+    await settle();
+    window.removeEventListener("keydown", onWindow);
+    expect($("[data-device-card]")).toBeNull();
+    expect(reached.filter(Boolean)).toEqual([]);
+  });
+
+  it("opens the card from a tile's Update…, and never closes it from there", async () => {
+    environments.state.mockResolvedValue({ localOrigin: "http://127.0.0.1:8799", remote: false, packaged: true, activeId: "local", environments: [
+      { id: "local", kind: "local", name: "This computer" }, { id: "mini", kind: "remote", name: "Studio Mac mini", origin: "http://mini.tail1.ts.net:8799" },
+    ] });
+    environments.status.mockResolvedValue([{ id: "mini", state: "connected", since: NOW, version: "0.1.170", behind: true, install: "global" }]);
+    await render();
+    await click("[data-device-node='place:mini'] ~ * [data-tile-action=copy-update]");
+    expect($("[data-device-card='place:mini'] [data-device-action=copy-update]")?.textContent).toBe("Copy update command");
+    await click("[data-device-node='place:mini'] ~ * [data-tile-action=copy-update]");
+    expect($("[data-device-card='place:mini']")).not.toBeNull();
+  });
+
+  it("is a set of headed lists of buttons, so the keyboard and a screen reader reach every device", async () => {
+    await render();
+    const nodes = [...document.querySelectorAll<HTMLElement>("[data-device-node]")];
+    expect(nodes.map((node) => node.tagName)).toEqual(nodes.map(() => "BUTTON"));
+    expect(nodes.every((node) => node.tabIndex === 0 && node.getAttribute("aria-label"))).toBe(true);
+    for (const group of document.querySelectorAll("[data-device-group]")) {
+      expect(document.getElementById(group.getAttribute("aria-labelledby")!)?.tagName).toBe("H3");
+      expect(group.querySelector("ul > li [data-device-node]")).not.toBeNull();
+    }
+  });
+
+  it("shows which bots work where, the cloud desktops among the devices, and their names on the card", async () => {
+    config = { ...config, vps: gpu };
+    botRows = [
+      { botId: "b1", kind: "local", computerId: "local", name: null, state: "ready", stateAt: NOW },
+      { botId: "b2", kind: "cloud", computerId: "cloud:b2", name: null, state: "asleep", stateAt: NOW },
+      { botId: "b3", kind: "vps", computerId: "vps:gpu/omb-b3", name: "GPU box", state: "ready", stateAt: NOW, vps: { serverId: "vps:gpu", alias: "gpu", container: "omb-b3" } },
+    ];
+    await render();
+    expect(requests).toContain("GET /api/computers/bots");
+    expect($("[data-device-node=here]")?.getAttribute("aria-label")).toContain("Bots here: Scout");
+    expect($("[data-device-node=here] [data-device-bots]")?.getAttribute("data-device-bots")).toBe("1");
+    const desktop = $("[data-device-group=servers] [data-device-node='cloud:b2']")!;
+    expect(desktop.textContent).toContain("Writer’s cloud desktop");
+    expect(desktop.querySelector("[data-device-state]")?.textContent).toBe("Asleep");
+    await click("[data-device-node='vps:gpu']");
+    expect($("[data-device-card='vps:gpu'] [data-device-bot-names]")?.textContent).toContain("Builder");
+  });
+
+  it("draws no state at all for a cloud desktop whose state nothing knows", async () => {
+    botRows = [{ botId: "b2", kind: "cloud", computerId: "cloud:b2", name: null, state: "unknown", stateAt: null }];
+    await render();
+    expect($("[data-device-node='cloud:b2']")).not.toBeNull();
+    expect($("[data-device-node='cloud:b2'] [data-device-state]")).toBeNull();
+  });
+
+  it("draws no bots when the list is refused", async () => {
+    botRows = "forbidden";
+    await render();
+    expect(document.querySelector("[data-device-bots]")).toBeNull();
+    expect($("[data-device-node='phone:iphone']")).not.toBeNull();
+  });
+
+  it("opens a server bots reach over SSH straight in its editor, and closes with the server's notice once it is removed", async () => {
+    config = { ...config, vps: gpu };
+    await render();
+    await click("[data-device-node='vps:gpu']");
+    expect($<HTMLInputElement>("[data-device-card='vps:gpu'] [data-vps-server=gpu] input")?.value).toBe("GPU box");
+    await click("[data-device-card='vps:gpu'] [data-vps-server=gpu] button[aria-label^='Remove']");
+    expect(requests).toContain("PUT /api/config");
+    expect($("[data-device-card]")).toBeNull();
+    expect($("[role=status]")?.textContent).toContain("GPU box is no longer used");
   });
 
   it("never asks Tailscale on its own, and shows the check's answer and its next step after Set up", async () => {
@@ -157,7 +258,8 @@ describe("the Devices page", () => {
     };
     await render();
     expect($("[data-network-state]")?.textContent).toBe("On");
-    expect($("[data-private-network] [data-device-node='phone:tab']")).not.toBeNull();
+    expect($("[data-device-group=phones] [data-device-node='phone:tab'] [data-device-route-chip]")?.textContent).toBe("Private network");
+    expect($("[data-private-network][data-settings-block=network]")).not.toBeNull();
     expect($("[data-network-line]")?.textContent).toContain("ada.tail1.ts.net");
     expect(bridge.setTailscaleComputers).not.toHaveBeenCalled();
   });
@@ -240,6 +342,7 @@ describe("the Devices page", () => {
     expect(requests).not.toContain("GET /api/auth/sessions");
     expect(requests).not.toContain("GET /api/phones");
     expect(document.querySelector("[data-device-action=remove]")).toBeNull();
+    expect(requests).not.toContain("GET /api/computers/bots");
   });
 
   it("gives a new server one line to run, the sign-in included", async () => {
@@ -251,10 +354,19 @@ describe("the Devices page", () => {
     ]);
   });
 
-  it("reads as a list in a narrow window: every device a full-width row", async () => {
+  it("reads as one column in a narrow window, with the chosen device's card right under its tile", async () => {
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(private readonly report: ResizeObserverCallback) {}
+      observe() { this.report([{ contentRect: { width: 380 } } as ResizeObserverEntry], this as never); }
+      disconnect() {}
+    });
     await render();
-    expect($("[data-device-tree]")?.tagName).toBe("UL");
-    expect($("[data-device-node='phone:iphone']")?.className).toContain("@max-[480px]/map:w-full");
+    expect($("[data-map-layout]")?.getAttribute("data-map-layout")).toBe("narrow");
+    expect($("[data-device-tree]")?.getAttribute("style")).toBeNull();
+    await click("[data-device-node='phone:iphone']");
+    const card = $("[data-device-card='phone:iphone']")!;
+    expect(card.closest("[data-device-group=phones]")).not.toBeNull();
+    expect(card.closest("li")?.previousElementSibling?.querySelector("[data-device-node='phone:iphone']")).not.toBeNull();
   });
 });
 
