@@ -422,6 +422,7 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["DELETE"], path: /^\/api\/groups\/[\w-]+\/queue\/[\w-]+$/ },
   { methods: ["POST"], path: /^\/api\/groups\/[\w-]+\/queue\/[\w-]+\/steer$/ },
   { methods: ["POST"], path: /^\/api\/groups\/[\w-]+\/tasks$/ },
+  { methods: ["GET"], path: /^\/api\/groups\/[\w-]+\/threads\/summary$/ },
   { methods: ["POST"], path: /^\/api\/groups\/[\w-]+\/tasks\/[\w-]+\/forks$/ },
   { methods: ["POST", "PATCH", "DELETE"], path: /^\/api\/groups\/[\w-]+\/tasks\/[\w-]+$/ },
   { methods: ["PATCH"], path: /^\/api\/groups\/[\w-]+$/ }, // display fields only: see clientGroupPatchViolation

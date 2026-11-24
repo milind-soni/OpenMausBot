@@ -6616,6 +6616,8 @@
   "settings.features.skillBurgerLine": "Guarda la ejecución de un bot como pasos que puedes volver a ejecutar",
   "settings.features.threadTabs": "Pestañas de hilos",
   "settings.features.threadTabsLine": "Muestra los hilos de un bot como pestañas sobre el chat",
+  "settings.features.roomFeed": "Feed de la sala",
+  "settings.features.roomFeedLine": "Muestra los hilos de una sala como un solo feed, con el hilo abierto al lado",
   "settings.features.error": "No se pudo guardar. Revisa tu conexión e inténtalo de nuevo.",
   "chat.botExchange.open": "Abrir el intercambio entre {asker} y {helper}",
   "chat.botExchange.teammate": "Un compañero",

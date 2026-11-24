@@ -676,7 +676,7 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
     </section>
   );
 }
-export function GroupView({ group, inForkPanel = false }: { group: Group; inForkPanel?: boolean }) {
+export function GroupView({ group, inForkPanel = false, bare = false }: { group: Group; inForkPanel?: boolean; /** Beside the room's feed: no header or bulletin of its own. */ bare?: boolean }) {
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const composerDockRef = useRef<HTMLDivElement>(null);
@@ -803,7 +803,7 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
       <GlassScrollFrame className="flex-1 [--glass-tint:var(--color-app)]">
       {/* z-[25]: above the room set-up card (z-20), below the GroupCallOverlay (z-30). */}
       <GlassBar edge="top" fade={!advancedMode && !remoteClient} className="z-[25]">
-      <RoomHeader
+      {!bare && <RoomHeader
         group={group}
         members={members}
         simple={simpleHeader}
@@ -814,14 +814,14 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
         onToggleFolder={() => setFolderOpen((open) => !open)}
         onOpenMembers={() => setMembersOpen(true)}
         membersTriggerRef={membersTriggerRef}
-      />
+      />}
 
       {findOpen && <ChatFindBar threadId={group.threadId} inForkPanel={inForkPanel} onClose={() => setFindOpen(false)} />}
       <ChatErrorBanner message={state.error} onDismiss={() => dispatch({ type: "error", message: null })} />
       <ChatNotice notice={state.notice} />
-      {!setupPending && <RoomContextWarnings group={group} members={members} />}{!setupPending && !remoteClient && <RoomChiefAbsent group={group} />}
+      {!setupPending && <RoomContextWarnings group={group} members={members} />}{!setupPending && !remoteClient && !bare && <RoomChiefAbsent group={group} />}
 
-      {!setupPending && !group.dm && !remoteClient && state.config && group.defaultResponder.kind === "auto" && !jevRoomRoutingOn(state.config) && (
+      {!setupPending && !bare && !group.dm && !remoteClient && state.config && group.defaultResponder.kind === "auto" && !jevRoomRoutingOn(state.config) && (
         <div className="w-full px-5">
           <p data-testid="room-jev-off" className="mb-1 px-2 text-[12px] text-ink-secondary">
             {t("room.responder.jevOffHint", { name: defaultResponderName(group, members) ?? t("room.responder.leadFallback") })}{" "}
@@ -838,7 +838,7 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
 
       {!setupPending && !group.dm && <RoomHoldsBanner group={group} members={members} />}
 
-      {!setupPending && !simpleHeader && <RoomBulletin group={group} remoteClient={remoteClient} />}
+      {!setupPending && !simpleHeader && !bare && <RoomBulletin group={group} remoteClient={remoteClient} />}
 
       {!setupPending && folderOpen && !group.dm && (
         <div className="w-full px-5">
