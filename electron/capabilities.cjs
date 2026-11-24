@@ -68,11 +68,11 @@ function linuxLocalControlSupport(platform, env, { hyprlandPlugin } = {}) {
   });
 }
 
-/** macOS 12 and older (Darwin before 22): the driver is built for macOS 13 and fails to load, so it is never tried there. */
+/** macOS 14 and older (Darwin before 24): the driver links ScreenCaptureKit classes added in 14 and 15 and fails to load, so it is never tried there. */
 function macDriverUnsupported(platform, release) {
   const darwinMajor = Number(String(release).split(".")[0]);
-  if (platform !== "darwin" || !darwinMajor || darwinMajor >= 22) return null;
-  return { reasonCode: "macos-version-unsupported", reason: "Local desktop control needs macOS 13 Ventura or later." };
+  if (platform !== "darwin" || !darwinMajor || darwinMajor >= 24) return null;
+  return { reasonCode: "macos-version-unsupported", reason: "Local desktop control needs macOS 15 Sequoia or later." };
 }
 
 /** Computer control's helper is gone, or the system refused to run it: access denied (os error 5), or Windows Security

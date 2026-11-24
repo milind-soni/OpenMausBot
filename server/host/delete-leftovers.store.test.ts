@@ -7,6 +7,7 @@ import type { ModelSelection } from "../contracts.ts";
 import { journalFile } from "../memory-journal.ts";
 import * as mdb from "../message-db.ts";
 import { Store } from "../store.ts";
+import { createConversationFolderCleanup, deleteTimeCleanup } from "./conversation-folder-cleanup.ts";
 import { createDeleteLeftovers, engineSessionFolders, type DeleteLeftoversDeps } from "./delete-leftovers.ts";
 import { memoryLayerRecords } from "./team-member-left.ts";
 
@@ -21,12 +22,11 @@ function put(path: string): string {
   return path;
 }
 
-function fixture(over: Partial<DeleteLeftoversDeps> = {}) {
-  const store = new Store(selection);
+function fixture(over: Partial<Omit<DeleteLeftoversDeps, "store">> & { store?: Store } = {}) {
+  const store = over.store ?? new Store(selection);
   const warnings: string[] = [];
   const leftovers = createDeleteLeftovers({
     dataDir: DATA_DIR,
-    store,
     threadsReferencing: mdb.threadsReferencing,
     keptAttachments: () => new Set(),
     deleteAttachment: (name) => rmSync(join(DATA_DIR, "attachments", name)),
@@ -35,6 +35,7 @@ function fixture(over: Partial<DeleteLeftoversDeps> = {}) {
     defer: () => {},
     warn: (line) => { warnings.push(line); },
     ...over,
+    store,
   });
   const bot = store.createBot({ name: "Scout" });
   const task = store.createTask(bot.id, "Launch post", false)!;
@@ -121,5 +122,62 @@ describe("deleting through the store", () => {
     expect(store.deleteGroup(room.id)).toBe(true);
     leftovers.flush();
     expect(existsSync(upload)).toBe(false);
+  });
+
+  it("with the cleanup switched off (the default, and on every desktop), a delete leaves installs and tool results as before", async () => {
+    const store = new Store(selection);
+    const folders = deleteTimeCleanup({}, true, () => createConversationFolderCleanup({ dataDir: DATA_DIR, records: () => store, drainAfterMs: false, pause: async () => {}, log: () => {} }));
+    expect(folders).toBeUndefined();
+    const { bot, task, leftovers } = fixture({ store, ...(folders ? { folders } : {}) });
+    const own = join(DATA_DIR, "task-workspaces", bot.id, task.threadId);
+    const deps = put(join(own, "site", "node_modules", "react", "index.js"));
+    put(join(own, "site", "node_modules", ".package-lock.json"));
+    put(join(own, "site", "package.json"));
+    const results = put(join(DATA_DIR, "tool-results", task.threadId, "r.txt"));
+    expect(store.deleteTask(bot.id, task.threadId)).not.toBeNull();
+    leftovers.flush();
+    await new Promise((done) => setTimeout(done, 0));
+    expect([existsSync(deps), existsSync(results)]).toEqual([true, true]);
+    expect(existsSync(join(DATA_DIR, ".removing"))).toBe(false);
+  });
+
+  it("takes a deleted conversation's installs and tool results, never while a fork still works in its folder", async () => {
+    const store = new Store(selection);
+    const folders = createConversationFolderCleanup({ dataDir: DATA_DIR, records: () => store, drainAfterMs: false, pause: async () => {}, log: () => {} });
+    const { bot, task, leftovers } = fixture({ store, folders });
+    const own = join(DATA_DIR, "task-workspaces", bot.id, task.threadId);
+    store.pinTaskCwd(bot.id, task.threadId, own, { privateOnly: true });
+    const said = store.appendMessage(task.threadId, { role: "user", kind: "text", text: "build it" });
+    const fork = store.forkTask(bot.id, task.threadId, said.id)!;
+    const made = put(join(own, "site", "index.html"));
+    const deps = put(join(own, "site", "node_modules", "react", "index.js"));
+    put(join(own, "site", "node_modules", ".package-lock.json"));
+    put(join(own, "site", "package.json"));
+    const results = put(join(DATA_DIR, "tool-results", task.threadId, "r.txt"));
+    expect(store.deleteTask(bot.id, task.threadId)).not.toBeNull();
+    leftovers.flush();
+    await folders.idle();
+    expect(existsSync(results)).toBe(false);
+    expect(existsSync(deps)).toBe(true);
+    expect(store.deleteTask(bot.id, fork.threadId)).not.toBeNull();
+    leftovers.flush();
+    await folders.idle();
+    expect(existsSync(deps)).toBe(false);
+    expect(existsSync(made)).toBe(true);
+  });
+
+  it("takes a deleted bot's conversation folders' installs and keeps their files", async () => {
+    const store = new Store(selection);
+    const folders = createConversationFolderCleanup({ dataDir: DATA_DIR, records: () => store, drainAfterMs: false, pause: async () => {}, log: () => {} });
+    const { bot, task, leftovers } = fixture({ store, folders });
+    const made = put(join(DATA_DIR, "task-workspaces", bot.id, task.threadId, "result.txt"));
+    const deps = put(join(DATA_DIR, "task-workspaces", bot.id, "deleted-earlier", "node_modules", "x.js"));
+    put(join(DATA_DIR, "task-workspaces", bot.id, "deleted-earlier", "node_modules", ".modules.yaml"));
+    put(join(DATA_DIR, "task-workspaces", bot.id, "deleted-earlier", "package.json"));
+    expect(store.deleteBot(bot.id)).toBe(true);
+    leftovers.flush();
+    await folders.idle();
+    expect(existsSync(deps)).toBe(false);
+    expect(existsSync(made)).toBe(true);
   });
 });

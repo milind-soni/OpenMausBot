@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { botDropPlace, planBotDrop, stepBot, stepKey, unusedName, type BotLists } from "./sidebar-bot-drop";
+import { botDropPlace, planBotDrop, savedPlacement, stepBot, stepKey, unusedName, type BotLists } from "./sidebar-bot-drop";
 
 const lists: BotLists = new Map([
   ["", ["atlas", "bea", "cleo"]],
@@ -65,5 +65,27 @@ describe("a new department's name", () => {
   it("is the plain name until a department has it, then the first free number", () => {
     expect(unusedName("New department", ["Work"])).toBe("New department");
     expect(unusedName("New department", ["New department", "New department 2", "New department 4"])).toBe("New department 3");
+  });
+});
+
+describe("saving a move made among the rows as drawn, working or waiting bots first", () => {
+  const floating = (...ids: string[]) => (id: string) => ids.includes(id);
+
+  it("keeps the saved order when nothing floats", () => {
+    expect(savedPlacement(["atlas", "bea", "cleo"], ["cleo", "atlas", "bea"], "cleo", floating())).toEqual(["cleo", "atlas", "bea"]);
+    expect(savedPlacement(["dodo", "echo"], ["dodo", "bea", "echo"], "bea", floating())).toEqual(["dodo", "bea", "echo"]);
+  });
+
+  it("puts a bot dropped above a working one first among the bots that do not float", () => {
+    // Saved charlie, pepper, bravo, alpha; alpha works, so it is drawn first. Bravo dropped above it goes first of the rest.
+    expect(savedPlacement(["charlie", "pepper", "bravo", "alpha"], ["bravo", "alpha", "charlie", "pepper"], "bravo", floating("alpha")))
+      .toEqual(["bravo", "charlie", "pepper", "alpha"]);
+  });
+
+  it("moves a working bot no further than its drawn neighbours ask, and never stores the drawn order", () => {
+    expect(savedPlacement(["a2", "i1", "b", "i2", "i3"], ["a2", "i1", "i2", "b", "i3"], "b", floating("a2", "b"))).toEqual(["a2", "i1", "i2", "b", "i3"]);
+    expect(savedPlacement(["atlas", "bea", "cleo"], ["cleo", "bea", "atlas"], "atlas", floating("cleo"))).toEqual(["bea", "atlas", "cleo"]);
+    // Two working bots swap: their order among themselves is the person's.
+    expect(savedPlacement(["i1", "a1", "i2", "a2"], ["a2", "a1", "i1", "i2"], "a2", floating("a1", "a2"))).toEqual(["i1", "a2", "a1", "i2"]);
   });
 });
