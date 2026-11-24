@@ -7200,7 +7200,6 @@
   "devices.route.setUp": "설정",
   "devices.pair.pickOne": "연결 방법을 하나 이상 고르세요.",
   "devices.pair.done": "완료",
-  "devices.reach.wifi": "같은 Wi-Fi에서",
   "devices.reach.https": "{app} 웹 주소로",
   "devices.reach.relay": "{app}을 통해 어디서나",
   "devices.reach.line": "이 컴퓨터에 연결: {ways}.",
@@ -7432,8 +7431,6 @@
   "devicesPage.detail.version": "버전",
   "devicesPage.detail.lastSeen": "마지막 접속",
   "devicesPage.detail.bots": "봇",
-  "devicesPage.detail.runsBots": "자체 봇이 있음",
-  "devicesPage.detail.hostsComputer": "봇이 작업할 수 있음",
   "devicesPage.detail.reachesBots": "이곳의 봇과 대화함",
   "devicesPage.action.copyUpdate": "업데이트 명령 복사",
   "devicesPage.action.manage": "관리",
@@ -7873,5 +7870,8 @@
   "skillBurger.pill.running": "실행 중… {count}",
   "skillBurger.pill.stopped": "멈춤",
   "skillBurger.pill.addPath": "경로 추가",
-  "skillBurger.card.madeBy": "{name}이(가) 만듦"
+  "skillBurger.card.madeBy": "{name}이(가) 만듦",
+  "settings.nav.phoneConnected": "휴대폰이 연결되어 있어요",
+  "settings.nav.phoneNeedsYou": "휴대폰을 확인해야 해요",
+  "devices.reach.sameWifi": "같은 Wi-Fi에서"
 }

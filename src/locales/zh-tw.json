@@ -9614,7 +9614,6 @@
   "devices.route.setUp": "設定",
   "devices.pair.pickOne": "請至少選擇一種方式。",
   "devices.pair.done": "完成",
-  "devices.reach.wifi": "在同一個 Wi-Fi 上",
   "devices.reach.https": "透過它的 {app} 網址",
   "devices.reach.relay": "透過 {app} 隨處",
   "devices.reach.line": "可連到這台電腦：{ways}。",
@@ -9998,8 +9997,6 @@
   "devicesPage.detail.version": "版本",
   "devicesPage.detail.lastSeen": "上次活動",
   "devicesPage.detail.bots": "機器人",
-  "devicesPage.detail.runsBots": "有自己的機器人",
-  "devicesPage.detail.hostsComputer": "機器人可以在上面工作",
   "devicesPage.detail.reachesBots": "與這裡的機器人通訊",
   "devicesPage.action.copyUpdate": "複製更新指令",
   "devicesPage.action.manage": "管理",
@@ -10464,5 +10461,8 @@
   "skillBurger.pill.running": "執行中… {count}",
   "skillBurger.pill.stopped": "已停止",
   "skillBurger.pill.addPath": "加入路徑",
-  "skillBurger.card.madeBy": "由 {name} 建立"
+  "skillBurger.card.madeBy": "由 {name} 建立",
+  "settings.nav.phoneConnected": "有一部手機已連線",
+  "settings.nav.phoneNeedsYou": "有一部手機需要你處理",
+  "devices.reach.sameWifi": "在同一個 Wi-Fi 上"
 }

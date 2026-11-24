@@ -6621,7 +6621,6 @@
   "devices.route.setUp": "Skonfiguruj",
   "devices.pair.pickOne": "Wybierz co najmniej jeden sposób.",
   "devices.pair.done": "Gotowe",
-  "devices.reach.wifi": "w tej samej sieci Wi-Fi",
   "devices.reach.https": "pod jego adresem internetowym {app}",
   "devices.reach.relay": "wszędzie przez {app}",
   "devices.reach.line": "Łączy się z tym komputerem {ways}.",
@@ -6854,8 +6853,6 @@
   "devicesPage.detail.version": "Wersja",
   "devicesPage.detail.lastSeen": "Ostatnia aktywność",
   "devicesPage.detail.bots": "Boty",
-  "devicesPage.detail.runsBots": "Ma własne boty",
-  "devicesPage.detail.hostsComputer": "Boty mogą na nim pracować",
   "devicesPage.detail.reachesBots": "Rozmawia z botami tutaj",
   "devicesPage.action.copyUpdate": "Kopiuj polecenie aktualizacji",
   "devicesPage.action.manage": "Zarządzaj",
@@ -7345,5 +7342,8 @@
   "skillBurger.pill.running": "Trwa… {count}",
   "skillBurger.pill.stopped": "Zatrzymano",
   "skillBurger.pill.addPath": "Dodaj ścieżkę",
-  "skillBurger.card.madeBy": "Utworzone przez {name}"
+  "skillBurger.card.madeBy": "Utworzone przez {name}",
+  "settings.nav.phoneConnected": "Telefon jest połączony",
+  "settings.nav.phoneNeedsYou": "Telefon wymaga uwagi",
+  "devices.reach.sameWifi": "w tej samej sieci Wi-Fi"
 }

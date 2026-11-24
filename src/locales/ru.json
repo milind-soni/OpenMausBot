@@ -6682,7 +6682,6 @@
   "devices.route.setUp": "Настроить",
   "devices.pair.pickOne": "Выберите хотя бы один способ.",
   "devices.pair.done": "Готово",
-  "devices.reach.wifi": "в той же Wi-Fi",
   "devices.reach.https": "по его веб-адресу {app}",
   "devices.reach.relay": "откуда угодно через {app}",
   "devices.reach.line": "Подключается к этому компьютеру {ways}.",
@@ -6915,8 +6914,6 @@
   "devicesPage.detail.version": "Версия",
   "devicesPage.detail.lastSeen": "Последняя активность",
   "devicesPage.detail.bots": "Боты",
-  "devicesPage.detail.runsBots": "Есть свои боты",
-  "devicesPage.detail.hostsComputer": "Боты могут на нём работать",
   "devicesPage.detail.reachesBots": "Общается с ботами здесь",
   "devicesPage.action.copyUpdate": "Скопировать команду обновления",
   "devicesPage.action.manage": "Управлять",
@@ -7399,5 +7396,8 @@
   "skillBurger.pill.running": "Выполняется… {count}",
   "skillBurger.pill.stopped": "Остановлено",
   "skillBurger.pill.addPath": "Добавить путь",
-  "skillBurger.card.madeBy": "Создано: {name}"
+  "skillBurger.card.madeBy": "Создано: {name}",
+  "settings.nav.phoneConnected": "Телефон подключён",
+  "settings.nav.phoneNeedsYou": "Телефону нужно ваше внимание",
+  "devices.reach.sameWifi": "в той же Wi-Fi"
 }

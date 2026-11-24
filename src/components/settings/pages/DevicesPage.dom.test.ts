@@ -12,7 +12,7 @@ import { initialState, StoreContext } from "@/state/store";
 import { fullContext, resolveSettingsTarget, searchSettings } from "../settings-index";
 import { SettingsShellContext, type SettingsShell } from "../settings-shell";
 import { DevicesPage, nextNetworkStep, tailscaleDownload } from "./DevicesPage";
-import { overrideDeviceMap } from "../../devices/DeviceMap";
+import { overrideDeviceMap, SHOW_DEVICE_MAP } from "../../devices/DeviceMap";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const NOW = Date.now();
@@ -276,8 +276,16 @@ describe("the Devices page", () => {
     expect(requests.some((request) => request.startsWith("DELETE /api/phones"))).toBe(true);
     await click("[data-device-node='place:vps']");
     expect([...document.querySelectorAll("[data-device-details='place:vps'] [data-device-action=remove]")].map((one) => one.textContent)).toEqual(["Remove from this app", "Sign it out"]);
-    expect($("[data-device-details='place:vps'] [data-device-removes]")?.lastElementChild?.textContent).toBe("Sign it out");
-    expect($("[data-device-details='place:vps'] [data-device-remove-hint]")?.textContent).toContain("ends the sign-in");
+    // Each says what it undoes right under itself, and in its title.
+    const explained = [...document.querySelectorAll("[data-device-details='place:vps'] [data-device-removes] > div")].map((stack) => {
+      const button = stack.querySelector("[data-device-action=remove]")!;
+      return [button.textContent, stack.querySelector("[data-device-remove-hint]")?.textContent, button.getAttribute("title")];
+    });
+    expect(explained).toEqual([
+      ["Remove from this app", "Forgets it in this app.", "Forgets it in this app."],
+      ["Sign it out", "Ends the sign-in it uses to reach this computer.", "Ends the sign-in it uses to reach this computer."],
+    ]);
+    expect($("[data-device-details='place:vps'] .text-end")).toBeNull();
     await click("[data-device-details='place:vps'] [data-device-action=remove]");
     expect(environments.forget).toHaveBeenCalledWith("vps");
     expect(requests).not.toContain("DELETE /api/auth/sessions/s-vps");
@@ -314,7 +322,7 @@ describe("the Devices page", () => {
     const nodes = [...document.querySelectorAll<HTMLElement>("[data-device-node]")];
     expect(nodes.map((node) => node.tagName)).toEqual(nodes.map(() => "BUTTON"));
     expect(nodes.every((node) => node.tabIndex === 0 && node.getAttribute("aria-label") && node.hasAttribute("aria-expanded"))).toBe(true);
-    expect(nodes.map((node) => node.getAttribute("data-device-node"))).toEqual(["here", "phone:iphone", "phone:pixel", "place:home", "place:vps"]);
+    expect(nodes.map((node) => node.getAttribute("data-device-node"))).toEqual(["here", "phone:iphone", "phone:pixel", "place:vps", "place:home"]);
   });
 
   it("shows which bots use each device, and their names in its details", async () => {
@@ -395,6 +403,7 @@ describe("Add a device, in the page", () => {
   it("opens from Add a device, from each group and from search's anchor, and never puts a layer over Settings", async () => {
     await render();
     expect($("[data-settings-block=add] [data-add-device]")).not.toBeNull();
+    expect($("[data-settings-block=here] [data-add-device]"), "You're here has no Add of its own").toBeNull();
     for (const [opener, step] of [["[data-add-device]", "choose"], ["[data-add-group=phones]", "phone"], ["[data-add-group=computers]", "computer"], ["[data-add-group=servers]", "choose"]] as const) {
       await click(opener);
       expect($("[data-add-panel]")?.getAttribute("data-add-step")).toBe(step);
@@ -483,7 +492,7 @@ describe("Add a device, in the page", () => {
     await render();
     await click("[data-add-group=phones]");
     expect($("[data-add-panel] [data-pair-turn-on]")).not.toBeNull();
-    expect($("[data-add-panel] [role=radiogroup]")).not.toBeNull();
+    expect(document.querySelectorAll("[data-add-panel] [role=group] input[type=checkbox]")).toHaveLength(2);
     expect($("[data-pair-dialog]")).toBeNull();
     expect(layers()).toBe(0);
     expect(requests).not.toContain("POST /api/auth/pairing");
@@ -636,7 +645,8 @@ describe("phones and how they reach this computer, on Devices", () => {
     install();
     await render();
     const blocks = [...document.querySelectorAll("section[data-settings-block]")].map((section) => section.getAttribute("data-settings-block"));
-    expect(blocks).toEqual(["add", "phones", "reach", "group-computers", "group-servers", "always-on", "other-places"]);
+    expect(blocks).toEqual(["here", "phones", "reach", "group-computers", "group-servers", "always-on", "other-places"]);
+    expect($("[data-settings-block=add]")?.compareDocumentPosition($("[data-settings-block=here]")!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect($("[data-settings-block=phones] [data-add-group=phones]")?.hasAttribute("data-phone-pairing-action")).toBe(true);
   });
 
@@ -776,12 +786,27 @@ describe("Your other computers, on the private network row", () => {
     companion = { ...companion, routes: { ...companion.routes!, tailscale: { on: true, since: NOW, name: "ada.tail1.ts.net", computers: false } } };
     await render();
     const row = $("[data-private-network]")!;
-    expect($("[data-network-state]")?.textContent).toBe("Your other computers can’t connect yet");
+    expect($("[data-network-state]")?.textContent).toBe("On for your phones. Your other computers can’t connect yet.");
+    expect(row.querySelector("[data-network-line]"), "one sentence for the status").toBeNull();
     expect(row.querySelector("label")?.textContent).toBe("Let my other computers connect");
     expect(row.textContent).not.toMatch(/tailnet|\.ts\.net|\bhost\b/);
+    const off = $<HTMLButtonElement>("[data-network-phones-off]")!;
+    expect(off.tagName).toBe("BUTTON");
+    expect(off.className).toContain("ui-button ui-button-sm");
+    expect(off.textContent).toBe("Turn Tailscale off");
+    expect(document.getElementById(off.getAttribute("aria-describedby")!)?.textContent).toBe("Phones stop reaching this computer through Tailscale.");
     await click("[data-network-phones-off]");
     expect(bridge.setTailscale).toHaveBeenCalledWith(false);
     expect(bridge.setTailscaleComputers).not.toHaveBeenCalled();
+  });
+
+  it("keeps a Tailscale problem's own words and next step while Tailscale is still on for phones", async () => {
+    install("signed-out");
+    companion = { ...companion, routes: { ...companion.routes!, tailscale: { on: true, since: NOW, name: "ada.tail1.ts.net", computers: false } } };
+    await render();
+    await click("[data-network-share]");
+    expect($("[data-network-state]")?.textContent).toBe("Signed out");
+    expect($("[data-network-line]")?.textContent).toContain("sign in");
   });
 
   it("is the one place Tailscale is turned on or off: How your phone reaches it has no switch of its own", async () => {
@@ -978,21 +1003,32 @@ describe("Add a computer's words", () => {
     expect($("[data-add-network-why]")?.textContent).toContain("only through Tailscale");
   });
 
-  it("gives the link first, with the address and code folded under it", async () => {
+  it("gives the link first, says how to get it across, and shows the address and code to type, unfolded", async () => {
     await render();
     await click("[data-network-action]");
     await click("[data-add-group=computers]");
     const panel = $("[data-pair-panel=computer]")!;
     expect(panel.textContent).toContain("choose ＋ then Connect to another computer, and paste this link.");
     expect(panel.textContent).not.toContain("connects computers too");
-    expect($("[data-pair-type-instead] [data-pairing-code]")?.textContent).toBe("7KQ2-M9XD-H4TP");
-    const toggle = $<HTMLButtonElement>("[data-pair-type-instead] button[aria-expanded]")!;
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    expect(document.getElementById(toggle.getAttribute("aria-controls")!)?.hidden).toBe(true);
-    expect(document.querySelector("[data-pair-type-instead] details, [data-pair-type-instead] summary")).toBeNull();
-    await click("[data-pair-type-instead] button[aria-expanded]");
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
-    expect(document.getElementById(toggle.getAttribute("aria-controls")!)?.hidden).toBe(false);
+    expect($("[data-pair-send-link]")?.textContent).toBe("Send the link to yourself (for example by email or chat), or type the address and code.");
+    const typed = $("[data-pair-type-instead]")!;
+    expect(typed.textContent).toContain("Or type this on the other computer:");
+    expect(typed.querySelector("[data-pairing-address]")?.textContent).toBe("http://ada.tail1.ts.net:8799");
+    expect(typed.querySelector("[data-pairing-code]")?.textContent).toBe("7KQ2-M9XD-H4TP");
+    expect(typed.closest("[hidden]")).toBeNull();
+    expect(panel.querySelector("[aria-expanded], details, summary")).toBeNull();
+  });
+
+  it("reads step 2 as getting the other computer ready and step 3 as the action, and says once why Tailscale", async () => {
+    await render();
+    await click("[data-network-action]");
+    await click("[data-add-group=computers]");
+    expect([...document.querySelectorAll("[data-step]")].map((step) => step.getAttribute("data-step-state"))).toEqual(["done", "prep", "now"]);
+    expect($("[data-step='2']")?.textContent).toContain("On the other computer, install MausBot and Tailscale");
+    expect($("[data-add-install-why]")?.textContent).toContain("another computer reaches this one only through Tailscale");
+    expect($("[data-add-network-why]")).toBeNull();
+    expect($("[data-step='3'] [data-copy-link]")?.className).toContain("ui-button-primary");
+    expect($("[data-step='2'] .ui-button-primary")).toBeNull();
   });
 });
 
@@ -1045,8 +1081,80 @@ describe("a server bots reach over SSH, in its details", () => {
   });
 });
 
+describe("the top line", () => {
+  it("names what needs the person in its own status words, and a name opens that row with focus on it", async () => {
+    companion = { ...companion, routes: { wifi: off, relay: off, tailscale: off, https: off } };
+    await render();
+    const line = $("[data-devices-attention]")!;
+    expect([...line.querySelectorAll("[data-attention-device]")].map((item) => item.getAttribute("data-attention-device")))
+      .toEqual(["phone:iphone", "phone:pixel", "place:vps"]);
+    expect(line.querySelector("[data-attention-device='place:vps']")?.textContent).toBe("Hetzner box: Can’t reach it");
+    expect(line.querySelector("[data-attention-device='phone:pixel']")?.textContent).toBe("Pixel 9: Can’t reach it: no way in is on");
+    expect(line.compareDocumentPosition($("[data-add-device]")!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    await click("[data-attention-device='place:vps'] button");
+    await wait(20);
+    expect($("[data-device-details='place:vps']")).not.toBeNull();
+    expect(document.activeElement).toBe($("[data-device-node='place:vps']"));
+    expect(layers()).toBe(0);
+  });
+
+  it("holds only Add a device while nothing needs the person", async () => {
+    vpsState = "connected";
+    await render();
+    expect($("[data-devices-attention]")).toBeNull();
+    expect($("[data-settings-block=add]")?.textContent).toBe("Add a device");
+    expect($("[data-settings-block=add] [data-add-device]")?.className).toContain("ui-button-primary");
+  });
+
+  it("puts the rows that need the person first in each group, the rest in their own order", async () => {
+    saved = [...saved, { id: "nas", kind: "remote", name: "Attic box", origin: "https://attic.example.com" }];
+    environments.status.mockImplementation(async () => [
+      { id: "vps", state: "cantReach", since: NOW, version: "0.1.180", behind: false, install: "docker" },
+      { id: "nas", state: "connected", since: NOW, version: "0.1.180", behind: false, install: "docker" },
+    ]);
+    await render();
+    expect([...document.querySelectorAll("[data-settings-block=group-servers] [data-device-node]")].map((node) => node.getAttribute("data-device-node")))
+      .toEqual(["place:vps", "place:home", "place:nas"]);
+  });
+});
+
+describe("Add a phone's ways in", () => {
+  it("lets the person pick both ways, turns on each one picked, then shows the code", async () => {
+    companion = { ...companion, routes: { wifi: off, relay: off, tailscale: off, https: off } };
+    await render();
+    await click("[data-add-group=phones]");
+    const box = (route: string) => $<HTMLInputElement>(`[data-route-card=${route}] input[type=checkbox]`)!;
+    expect(box("relay").checked, "signed in: Anywhere is picked").toBe(true);
+    expect(box("wifi").checked).toBe(false);
+    await act(async () => box("relay").click());
+    expect($<HTMLButtonElement>("[data-pair-turn-on]")?.disabled, "at least one way").toBe(true);
+    await act(async () => box("wifi").click());
+    await act(async () => box("relay").click());
+    expect(box("wifi").checked && box("relay").checked).toBe(true);
+    await click("[data-pair-turn-on]");
+    expect(bridge.setRoute.mock.calls).toEqual([["wifi", true], ["relay", true]]);
+    expect($("[data-pair-turn-on]")).toBeNull();
+  });
+});
+
 describe("the map above the list", () => {
   afterEach(() => overrideDeviceMap(null));
+
+  it("is off unless asked for", async () => {
+    expect(SHOW_DEVICE_MAP).toBe(false);
+    await render();
+    expect($("[data-settings-block=map]")).toBeNull();
+    expect($("[data-settings-block=here] h3")?.textContent).toBe("You’re here");
+  });
+
+  it("says You're here once, on its hub, explains its lines and keeps its third column short", async () => {
+    overrideDeviceMap(true);
+    await render();
+    expect($("[data-settings-block=here] h3")).toBeNull();
+    expect($("[data-map-legend]")?.textContent).toBe("Solid: connected now · Dashed: away");
+    expect([...document.querySelectorAll("[data-map-group] > span[id]")].map((label) => label.textContent)).toEqual(["Phones", "Clouds and servers"]);
+    expect($("[data-map-node='place:vps'] .truncate")).toBeNull();
+  });
 
   it("opens a node's row below, with its details open and focus on its row, and nothing over the page", async () => {
     overrideDeviceMap(true);
@@ -1054,7 +1162,7 @@ describe("the map above the list", () => {
     const map = $("[data-settings-block=map]")!;
     expect(map.getAttribute("role")).toBe("group");
     expect(map.getAttribute("aria-label")).toBe("Your devices and how they connect");
-    expect(map.compareDocumentPosition($("[data-settings-block=add]")!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(map.compareDocumentPosition($("[data-settings-block=here]")!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect([...map.querySelectorAll("[data-map-node]")].map((node) => node.getAttribute("data-map-node")))
       .toEqual(["here", "phone:iphone", "phone:pixel", "place:home", "place:vps"]);
     expect(map.querySelector("[data-map-node='place:vps']")?.getAttribute("aria-label")).toBe("Hetzner box, Your own server, Can’t reach it, Over the internet");

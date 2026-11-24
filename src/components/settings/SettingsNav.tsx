@@ -101,6 +101,12 @@ function IdentityRow({ page, current, badge, name, line, onOpen, narrow }: {
   );
 }
 
+/** The mark beside Devices: a phone connected (green) or one that needs the person (amber), said in words too. */
+function PageDot({ dot }: { dot: "success" | "warning" }) {
+  const label = t(dot === "success" ? "settings.nav.phoneConnected" : "settings.nav.phoneNeedsYou");
+  return <span role="img" aria-label={label} title={label} data-settings-dot={dot} className={cn("size-1.5 shrink-0 rounded-full", dot === "success" ? "bg-success" : "bg-warning")} />;
+}
+
 function PageItem({ page, label, current, dot, onOpen }: { page: SettingsPage; label: string; current: boolean; dot?: "success" | "warning" | null; onOpen: () => void }) {
   const Icon = page.icon;
   return (
@@ -111,7 +117,7 @@ function PageItem({ page, label, current, dot, onOpen }: { page: SettingsPage; l
         <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap [grid-area:1/1]">{label}</span>
         <span aria-hidden="true" className="invisible h-0 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-medium [grid-area:1/1]">{label}</span>
       </span>
-      {dot && <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", dot === "success" ? "bg-success" : "bg-warning")} />}
+      {dot && <PageDot dot={dot} />}
     </button>
   );
 }
@@ -212,7 +218,7 @@ export function SettingsNav({ ctx, place, pages, current, query, hits, keyHits, 
                     className="flex h-11 w-full cursor-pointer items-center gap-2 rounded-lg px-2 text-left text-[14px] leading-5 text-ink hover:bg-menu-hover">
                     <span className="flex w-6 shrink-0 justify-center">{page.icon && <page.icon size={16} aria-hidden="true" className="text-ink-secondary" />}</span>
                     <span className="min-w-0 flex-1 truncate">{t(page.labelKey)}</span>
-                    {dot(page.id) && <span aria-hidden="true" className={cn("size-1.5 rounded-full", dot(page.id) === "success" ? "bg-success" : "bg-warning")} />}
+                    {dot(page.id) && <PageDot dot={dot(page.id)!} />}
                     <ChevronRight size={14} aria-hidden="true" className="text-ink-tertiary rtl:-scale-x-100" />
                   </button>
                 ) : (

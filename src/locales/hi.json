@@ -3111,7 +3111,6 @@
   "devices.route.setUp": "सेट अप करें",
   "devices.pair.pickOne": "कम से कम एक तरीका चुनें।",
   "devices.pair.done": "हो गया",
-  "devices.reach.wifi": "एक ही Wi-Fi पर",
   "devices.reach.https": "उसके {app} वेब पते पर",
   "devices.reach.relay": "{app} के ज़रिए कहीं से भी",
   "devices.reach.line": "इस कंप्यूटर तक पहुँचता है {ways}।",
@@ -3357,8 +3356,6 @@
   "devicesPage.detail.version": "वर्शन",
   "devicesPage.detail.lastSeen": "आख़िरी बार देखा गया",
   "devicesPage.detail.bots": "बॉट",
-  "devicesPage.detail.runsBots": "इसके अपने बॉट हैं",
-  "devicesPage.detail.hostsComputer": "बॉट इस पर काम कर सकते हैं",
   "devicesPage.detail.reachesBots": "यहाँ के बॉट से बात करता है",
   "devicesPage.action.copyUpdate": "अपडेट कमांड कॉपी करें",
   "devicesPage.action.manage": "प्रबंधित करें",
@@ -3909,5 +3906,8 @@
   "skillBurger.pill.running": "चल रहा है… {count}",
   "skillBurger.pill.stopped": "रुका",
   "skillBurger.pill.addPath": "रास्ता जोड़ें",
-  "skillBurger.card.madeBy": "{name} ने बनाया"
+  "skillBurger.card.madeBy": "{name} ने बनाया",
+  "settings.nav.phoneConnected": "एक फ़ोन जुड़ा है",
+  "settings.nav.phoneNeedsYou": "एक फ़ोन को आपकी ज़रूरत है",
+  "devices.reach.sameWifi": "एक ही Wi-Fi पर"
 }

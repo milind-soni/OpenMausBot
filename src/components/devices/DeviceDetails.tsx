@@ -11,7 +11,7 @@ import { OwnServerLink } from "../PlaceAddSheet";
 import { updateCommand } from "../ServerList";
 import { needOf, useBotsOn } from "./device-parts";
 import { CommandRow } from "./PairCodePanel";
-import { kindLabel, routeLabel } from "./device-words";
+import { kindLabel, routeList } from "./device-words";
 
 export function actionLabel(action: DeviceAction, device?: Device): string {
   switch (action.type) {
@@ -57,19 +57,23 @@ export function Detail({ label, children }: { label: string; children: ReactNode
   );
 }
 
-export function ActionButton({ device, action, onAction, main = false }: { device: Device; action: DeviceAction; onAction: (device: Device, action: DeviceAction) => void; main?: boolean }) {
+export function ActionButton({ device, action, onAction, main = false, hint }: { device: Device; action: DeviceAction; onAction: (device: Device, action: DeviceAction) => void; main?: boolean; hint?: string }) {
   return (
     <button type="button" data-device-action={action.type} data-danger={action.type === "remove" ? "" : undefined} onClick={() => onAction(device, action)}
-      aria-label={`${actionLabel(action, device)}: ${device.name}`} className={action.type === "remove" ? "ui-button shrink-0 text-danger!" : main ? "ui-button ui-button-primary shrink-0" : "ui-button shrink-0"}>{actionLabel(action, device)}</button>
+      aria-label={`${actionLabel(action, device)}: ${device.name}`} title={hint} className={action.type === "remove" ? "ui-button shrink-0 text-danger!" : main ? "ui-button ui-button-primary shrink-0" : "ui-button shrink-0"}>{actionLabel(action, device)}</button>
   );
 }
+type RemoveAction = Extract<DeviceAction, { type: "remove" }>;
 /** What it needs first, then the harmless actions; apart from them, Remove (one for a phone, which takes its pairing and its app). */
-function orderActions(device: Device): { lead: DeviceAction[]; removes: DeviceAction[] } {
+function orderActions(device: Device): { lead: DeviceAction[]; removes: RemoveAction[] } {
   const need = needOf(device);
-  const removes = device.actions.filter((action) => action.type === "remove");
+  const removes = device.actions.filter((action): action is RemoveAction => action.type === "remove");
   const rest = device.actions.filter((action) => action.type !== "remove" && action !== need);
   return { lead: [...(need ? [need] : []), ...rest], removes: device.kind === "phone" ? removes.slice(0, 1) : removes };
 }
+
+const removeHint = (action: RemoveAction) =>
+  t(action.source.type === "session" ? "devicesPage.action.signOutHintShort" : "devicesPage.action.removeHereHint");
 
 const actionKey = (action: DeviceAction) => `${action.type}:${"source" in action ? action.source.id : ""}`;
 
@@ -81,7 +85,7 @@ function BotsDetail({ device }: { device: Device }) {
       {bots.map((bot) => <li key={bot.id} className="flex min-w-0 items-baseline gap-1.5 text-ink"><span className="self-center"><BotAvatar bot={bot} size={16} /></span><span className="break-words">{bot.name}</span></li>)}
     </ul>;
   }
-  return <>{device.canRunBots ? t("devicesPage.detail.runsBots") : device.canHostComputer ? t("devicesPage.detail.hostsComputer") : t("devicesPage.detail.reachesBots")}</>;
+  return <>{device.canRunBots ? t("devicesPage.detail.runsOwnBots") : device.canHostComputer ? t("devicesPage.detail.botsWorkOnIt") : t("devicesPage.detail.reachesBots")}</>;
 }
 
 /**
@@ -100,6 +104,7 @@ export function DeviceDetails({ device, onAction, onRemoved, now, pairing, onPai
   const update = device.actions.find((action) => action.type === "copy-update");
   const pairAgain = device.actions.find((action) => action.type === "pair-again");
   const { lead, removes } = orderActions(device);
+  const explained = removes.length > 1 && device.kind !== "phone" && signsIn(device);
   const actions = lead.filter((action) => action.type !== "copy-update");
   const act = (chosen: Device, action: DeviceAction) => (action.type === "pair-again" ? onPairing(true) : onAction(chosen, action));
   const vps = vpsOf(device);
@@ -112,7 +117,7 @@ export function DeviceDetails({ device, onAction, onRemoved, now, pairing, onPai
     <div className="flex flex-col gap-4">
       <dl className="flex flex-col gap-2">
         <Detail label={t("devicesPage.detail.type")}>{kindLabel(device.kind)}</Detail>
-        {!device.here && device.routes.length > 0 && <Detail label={t("devicesPage.detail.connectedBy")}>{device.routes.map(routeLabel).join(", ")}</Detail>}
+        {!device.here && device.routes.length > 0 && <Detail label={t("devicesPage.detail.connectedBy")}>{routeList(device.routes)}</Detail>}
         {device.address && <Detail label={t("devicesPage.detail.address")}><span className="select-text break-all font-mono text-[12px]">{device.address}</span></Detail>}
         {device.version && <Detail label={t("devicesPage.detail.version")}>{device.version}</Detail>}
         {device.lastSeen && device.status !== "online" && <Detail label={t("devicesPage.detail.lastSeen")}>{lastSeen(device.lastSeen, now)}</Detail>}
@@ -141,11 +146,19 @@ export function DeviceDetails({ device, onAction, onRemoved, now, pairing, onPai
         : (actions.length > 0 || removes.length > 0) && <div className="flex flex-col gap-2">
           <div data-device-actions="" className="flex flex-wrap items-center gap-2">
             {actions.map((action) => <ActionButton key={actionKey(action)} device={device} action={action} main={action === need} onAction={act} />)}
-            {removes.length > 0 && <span data-device-removes="" className="ms-auto flex flex-wrap justify-end gap-2">
+            {removes.length > 0 && !explained && <span data-device-removes="" className="ms-auto flex flex-wrap justify-end gap-2">
               {removes.map((action) => <ActionButton key={actionKey(action)} device={device} action={action} onAction={act} />)}
             </span>}
           </div>
-          {removes.length > 1 && device.kind !== "phone" && signsIn(device) && <p data-device-remove-hint="" className="text-end text-[12px] leading-4 text-ink-tertiary">{t("devicesPage.action.signOutHint")}</p>}
+          {explained && <div data-device-removes="" className="flex flex-wrap items-start gap-x-6 gap-y-3 pt-1">
+            {removes.map((action) => {
+              const hint = removeHint(action);
+              return <div key={actionKey(action)} className="flex max-w-[16rem] flex-col items-start gap-1">
+                <ActionButton device={device} action={action} onAction={act} hint={hint} />
+                <p data-device-remove-hint={action.source.type} className="text-[12px] leading-4 text-ink-tertiary">{hint}</p>
+              </div>;
+            })}
+          </div>}
         </div>}
     </div>
   );

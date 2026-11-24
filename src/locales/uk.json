@@ -3547,7 +3547,6 @@
   "devices.route.setUp": "Налаштувати",
   "devices.pair.pickOne": "Виберіть принаймні один спосіб.",
   "devices.pair.done": "Готово",
-  "devices.reach.wifi": "у тій самій Wi-Fi",
   "devices.reach.https": "за його вебадресою {app}",
   "devices.reach.relay": "звідусіль через {app}",
   "devices.reach.line": "Під'єднується до цього комп'ютера {ways}.",
@@ -3792,8 +3791,6 @@
   "devicesPage.detail.version": "Версія",
   "devicesPage.detail.lastSeen": "Остання поява",
   "devicesPage.detail.bots": "Боти",
-  "devicesPage.detail.runsBots": "Має власних ботів",
-  "devicesPage.detail.hostsComputer": "Боти можуть на ньому працювати",
   "devicesPage.detail.reachesBots": "Спілкується з ботами тут",
   "devicesPage.action.copyUpdate": "Копіювати команду оновлення",
   "devicesPage.action.manage": "Керувати",
@@ -4329,5 +4326,8 @@
   "skillBurger.pill.running": "Виконується… {count}",
   "skillBurger.pill.stopped": "Зупинено",
   "skillBurger.pill.addPath": "Додати шлях",
-  "skillBurger.card.madeBy": "Створено: {name}"
+  "skillBurger.card.madeBy": "Створено: {name}",
+  "settings.nav.phoneConnected": "Телефон під’єднано",
+  "settings.nav.phoneNeedsYou": "Телефону потрібна ваша увага",
+  "devices.reach.sameWifi": "у тій самій Wi-Fi"
 }

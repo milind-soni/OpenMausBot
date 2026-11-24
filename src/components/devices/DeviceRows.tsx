@@ -1,5 +1,5 @@
-import { useEffect, useId, useRef, type ReactNode } from "react";
-import { Check, ChevronRight, Waypoints, X } from "lucide-react";
+import { Fragment, useEffect, useId, useRef, type ReactNode } from "react";
+import { Check, ChevronRight, CircleAlert, Waypoints, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { Device, DeviceAction, DeviceGroup, PrivateNetwork } from "@/lib/devices";
@@ -85,8 +85,11 @@ export interface NetworkShare {
 }
 
 /** The private network on this computer: its state, the whole next step in words, and the one control for it. */
-function NetworkRow({ network, line, action, secondary, share }: { network: PrivateNetwork; line: string; action: NetworkAction | null; secondary?: ReactNode; share?: NetworkShare | null }) {
+function NetworkRow({ network, line, action, secondary, share }: { network: PrivateNetwork; line: string | null; action: NetworkAction | null; secondary?: ReactNode; share?: NetworkShare | null }) {
   const shareLabel = t("devicesPage.network.shareSwitch");
+  const offHint = useId();
+  const mark = networkMark(network);
+  const phonesOnly = network.state === "ready" && !network.shared && Boolean(share?.onPhonesOff);
   return (
     <div data-settings-block="computers" className="contents">
       <div data-settings-block="network" data-private-network="" className="flex scroll-mt-4 flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
@@ -95,15 +98,12 @@ function NetworkRow({ network, line, action, secondary, share }: { network: Priv
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="flex flex-wrap items-center gap-x-2 text-[14px] leading-5 text-ink">
               {t("devicesPage.network.title")}
-              <span data-network-state={network.state} className={cn("flex items-center gap-1.5 text-[13px] leading-[18px]", networkMark(network) === "attention" ? "text-ink" : "text-ink-secondary")}>
-                <StatusMark status={networkMark(network)} />{networkShort(network)}
+              <span data-network-state={network.state} aria-live="polite" className={cn("flex min-w-0 items-start gap-1.5 text-[13px] leading-[18px]", mark === "attention" ? "text-ink" : "text-ink-secondary")}>
+                {mark !== "unknown" && <span className="flex h-[18px] shrink-0 items-center"><StatusMark status={mark} /></span>}
+                <span className="min-w-0">{phonesOnly ? t("devicesPage.network.short.phonesOnly") : networkShort(network)}</span>
               </span>
             </span>
-            <span data-network-line={network.state} aria-live="polite" className="text-[13px] leading-[18px] text-ink-secondary">{line}</span>
-            {share?.onPhonesOff && <span data-network-phones="" className="flex flex-wrap items-center gap-x-2 text-[13px] leading-[18px] text-ink-secondary">
-              {t("devicesPage.network.phonesStill")}
-              <button type="button" data-network-phones-off="" className="settings-quiet -ms-1.5 cursor-pointer" disabled={share.busy} onClick={share.onPhonesOff}>{t("devicesPage.network.phonesOff")}</button>
-            </span>}
+            {line && <span data-network-line={network.state} aria-live="polite" className="text-[13px] leading-[18px] text-ink-secondary">{line}</span>}
           </div>
         </div>
         {(action || secondary || share) && (
@@ -119,23 +119,27 @@ function NetworkRow({ network, line, action, secondary, share }: { network: Priv
             </label>}
           </span>
         )}
+        {share?.onPhonesOff && <div data-network-phones="" className="flex basis-full flex-wrap items-center gap-x-3 gap-y-1 ps-11">
+          <button type="button" data-network-phones-off="" className="ui-button ui-button-sm shrink-0" aria-describedby={offHint} disabled={share.busy} onClick={share.onPhonesOff}>{t("devicesPage.network.turnOff")}</button>
+          <span id={offHint} className="text-[12px] leading-4 text-ink-tertiary">{t("devicesPage.network.turnOffHint")}</span>
+        </div>}
       </div>
     </div>
   );
 }
 
 /** This place first: its row (open like any other) and, on This computer, the private network under it (`network`, or
- * `pending` while it is still being read). */
-export function HereSection({ device, mark, network, pending = false, opened, onAction, onAdd, now, more }: {
-  device: Device; mark: ReactNode; opened: Opened; onAction: (device: Device, action: DeviceAction) => void; onAdd: () => void; now: number;
-  network: { network: PrivateNetwork; line: string; action: NetworkAction | null; secondary?: ReactNode; share?: NetworkShare | null } | null;
+ * `pending` while it is still being read). `titled: false` leaves out "You're here" where the map above already says it. */
+export function HereSection({ device, mark, network, pending = false, opened, onAction, now, more, titled = true }: {
+  device: Device; mark: ReactNode; opened: Opened; onAction: (device: Device, action: DeviceAction) => void; now: number;
+  network: { network: PrivateNetwork; line: string | null; action: NetworkAction | null; secondary?: ReactNode; share?: NetworkShare | null } | null;
   pending?: boolean;
   /** more rows of this place's own, under it */
   more?: ReactNode;
+  titled?: boolean;
 }) {
   return (
-    <SettingsGroup label={t("devicesPage.here.section")} block="add"
-      actions={<button type="button" data-add-device="" onClick={onAdd} className="ui-button ui-button-primary ui-button-sm">{t("devicesPage.add")}</button>}>
+    <SettingsGroup label={titled ? t("devicesPage.here.section") : undefined} block="here">
       <SettingsRows icons>
         <DeviceRow device={device} mark={mark} opened={opened} onAction={onAction} now={now} />
         {network && <NetworkRow {...network} />}
@@ -143,6 +147,42 @@ export function HereSection({ device, mark, network, pending = false, opened, on
       </SettingsRows>
       {!network && pending && <span data-settings-block="network" className="contents"><span data-settings-block="computers" className="contents" /></span>}
     </SettingsGroup>
+  );
+}
+
+/**
+ * The page's top line: what needs the person, by name, while anything does (each name opens its row), and Add a device,
+ * the page's one primary button, at its end. With nothing needing the person, the line holds the button alone.
+ */
+export function DevicesTopLine({ needing, now, onOpen, onAdd }: { needing: readonly Device[]; now: number; onOpen: (id: string) => void; onAdd: () => void }) {
+  return (
+    <div data-settings-block="add" className="flex scroll-mt-4 flex-wrap items-center gap-x-4 gap-y-2 px-4">
+      {needing.length > 0 && (
+        <p data-devices-attention="" className="flex min-w-[min(100%,16rem)] flex-1 items-start gap-1.5 text-[13px] leading-[18px] text-ink-secondary">
+          <span className="flex h-[18px] shrink-0 items-center"><CircleAlert size={14} aria-hidden="true" className="text-warning" /></span>
+          <span className="min-w-0">
+            {needing.map((device, index) => {
+              const [before = "", after = ""] = t("devicesPage.attention.item", { status: statusText(device, now) }).split("{name}");
+              // A button is an atomic inline: the punctuation after it would wrap alone unless it is held to it.
+              const [, glue = "", rest = ""] = /^(\S*)([\s\S]*)$/.exec(after) ?? [];
+              return <Fragment key={device.id}>
+                {index > 0 && <span aria-hidden="true" className="text-ink-tertiary">{" · "}</span>}
+                <span data-attention-device={device.id}>
+                  {before}
+                  <span className="whitespace-nowrap">
+                    <button type="button" onClick={() => onOpen(device.id)}
+                      className="cursor-pointer whitespace-normal rounded-sm text-start font-medium text-accent-text hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">{device.name}</button>
+                    {glue}
+                  </span>
+                  {rest}
+                </span>
+              </Fragment>;
+            })}
+          </span>
+        </p>
+      )}
+      <button type="button" data-add-device="" onClick={onAdd} className="ui-button ui-button-primary ui-button-sm ms-auto shrink-0">{t("devicesPage.add")}</button>
+    </div>
   );
 }
 

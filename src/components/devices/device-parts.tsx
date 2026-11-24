@@ -26,6 +26,10 @@ export const routeOf = (device: Device): string | null => {
 /** What the mark shows: a device that can't be reached or needs a step is marked as needing the person, even while away. */
 export const markOf = (device: Device): Device["status"] => (device.note && device.note !== "reconnecting" ? "attention" : device.status);
 
+export const needsPerson = (device: Device) => markOf(device) === "attention";
+/** The devices that need the person first; the rest keep their order. */
+export const needsFirst = (devices: readonly Device[]): Device[] => [...devices.filter(needsPerson), ...devices.filter((device) => !needsPerson(device))];
+
 /** "● Online · Same network": the state in a mark and words, then how it connects, in one line that wraps. */
 export function StatusLine({ device, now, className }: { device: Device; now: number; className?: string }) {
   const words = statusText(device, now);

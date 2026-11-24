@@ -5409,7 +5409,6 @@
   "devices.route.setUp": "Kur",
   "devices.pair.pickOne": "En az bir yol seçin.",
   "devices.pair.done": "Bitti",
-  "devices.reach.wifi": "aynı Wi-Fi'da",
   "devices.reach.https": "{app} web adresinden",
   "devices.reach.relay": "{app} üzerinden her yerden",
   "devices.reach.line": "Bu bilgisayara ulaşır: {ways}.",
@@ -5652,8 +5651,6 @@
   "devicesPage.detail.version": "Sürüm",
   "devicesPage.detail.lastSeen": "Son görülme",
   "devicesPage.detail.bots": "Botlar",
-  "devicesPage.detail.runsBots": "Kendi botları var",
-  "devicesPage.detail.hostsComputer": "Botlar üzerinde çalışabilir",
   "devicesPage.detail.reachesBots": "Buradaki botlarla konuşur",
   "devicesPage.action.copyUpdate": "Güncelleme komutunu kopyala",
   "devicesPage.action.manage": "Yönet",
@@ -6144,5 +6141,8 @@
   "skillBurger.pill.running": "Çalışıyor… {count}",
   "skillBurger.pill.stopped": "Durdu",
   "skillBurger.pill.addPath": "Yol ekle",
-  "skillBurger.card.madeBy": "{name} tarafından yapıldı"
+  "skillBurger.card.madeBy": "{name} tarafından yapıldı",
+  "settings.nav.phoneConnected": "Bir telefon bağlı",
+  "settings.nav.phoneNeedsYou": "Bir telefonun ilgilenmenize ihtiyacı var",
+  "devices.reach.sameWifi": "aynı Wi-Fi'da"
 }

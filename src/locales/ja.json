@@ -7528,7 +7528,6 @@
   "devices.route.setUp": "設定する",
   "devices.pair.pickOne": "接続方法を 1 つ以上選んでください。",
   "devices.pair.done": "完了",
-  "devices.reach.wifi": "同じ Wi-Fi で",
   "devices.reach.https": "{app} の Web アドレスで",
   "devices.reach.relay": "{app} 経由でどこからでも",
   "devices.reach.line": "このコンピューターに接続できます: {ways}。",
@@ -7759,8 +7758,6 @@
   "devicesPage.detail.version": "バージョン",
   "devicesPage.detail.lastSeen": "最終アクセス",
   "devicesPage.detail.bots": "ボット",
-  "devicesPage.detail.runsBots": "独自のボットがあります",
-  "devicesPage.detail.hostsComputer": "ボットが作業できます",
   "devicesPage.detail.reachesBots": "ここのボットと通信します",
   "devicesPage.action.copyUpdate": "アップデートコマンドをコピー",
   "devicesPage.action.manage": "管理",
@@ -8183,5 +8180,8 @@
   "skillBurger.pill.running": "実行中… {count}",
   "skillBurger.pill.stopped": "停止",
   "skillBurger.pill.addPath": "手順を追加",
-  "skillBurger.card.madeBy": "{name} が作成"
+  "skillBurger.card.madeBy": "{name} が作成",
+  "settings.nav.phoneConnected": "スマホが接続されています",
+  "settings.nav.phoneNeedsYou": "スマホの対応が必要です",
+  "devices.reach.sameWifi": "同じ Wi-Fi で"
 }

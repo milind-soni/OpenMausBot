@@ -11,11 +11,12 @@ import type { CompanionState } from "@/lib/companion-types";
 import { api } from "@/state/api";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { AddDevicePanel, lastInputWasKeys, withinPage, type AddKind } from "../../devices/AddDevicePanel";
-import { DevicesNotice, GroupSection, HereSection, type NetworkAction, type NetworkShare, type Opened } from "../../devices/DeviceRows";
+import { DevicesNotice, DevicesTopLine, GroupSection, HereSection, type NetworkAction, type NetworkShare, type Opened } from "../../devices/DeviceRows";
 import { PhoneCodeInline } from "../../devices/CodeCard";
 import { DeviceMap, deviceMapShown } from "../../devices/DeviceMap";
 import { usePairAccess } from "../../devices/PairCodePanel";
 import { ComputerNameMore, OtherPlacesSection, PairWithCloudRow, PhoneAppFacts, ServerPhoneNotes } from "../../devices/PhoneSections";
+import { needsFirst, needsPerson } from "../../devices/device-parts";
 import { networkLine } from "../../devices/device-words";
 import { AlwaysOnHomeSection } from "../../AlwaysOnHomeSection";
 import { PhoneControls } from "../../PairedPhones";
@@ -238,10 +239,11 @@ export function DevicesPage() {
 
   const here = devices.find((device) => device.here)!;
   const mark = place.kind === "computer" ? <SettingsMark><Laptop /></SettingsMark> : <PlaceBadge place={place} size={28} />;
-  const groups = groupByKind(devices, { all: true });
+  const groups = groupByKind(devices, { all: true }).map((entry) => ({ ...entry, devices: needsFirst(entry.devices) }));
+  const needing = groups.flatMap((entry) => entry.devices.filter(needsPerson));
   const now = Date.now();
   const onAction = (device: Device, action: DeviceAction) => void act(device, action);
-  const openFromMap = (id: string) => {
+  const openRow = (id: string) => {
     setNotice(null);
     setPairing(false);
     setOpen(id);
@@ -274,13 +276,15 @@ export function DevicesPage() {
   const startPhone = (ask: PairAsk) => startAdding("phone", PHONES_ADD, ask);
   const error = failure ?? (ctx.here ? c.error ?? state?.error ?? null : null);
   const noticeLine = notice && <DevicesNotice text={notice.text} onDismiss={() => setNotice(null)} />;
+  const mapShown = deviceMapShown();
   return <>
     {state && <RouteNotices c={c} notices={state.notices ?? []} />}
     {error && <p role="alert" className="px-4 text-[13px] leading-[18px] text-danger">{error}</p>}
     {notice && !notice.group && noticeLine}
-    {deviceMapShown() && <DeviceMap devices={devices} mark={mark} network={network} loaded={loaded} onOpen={openFromMap} now={now} />}
-    <HereSection device={here} mark={mark} opened={opened} onAction={onAction} onAdd={() => startAdding(null, "[data-add-device]")} now={now}
-      network={network && { network, line: blocked ?? networkLine(network), action: network.state === "ready" ? null : networkAction, secondary, share }} pending={ctx.here}
+    <DevicesTopLine needing={needing} now={now} onOpen={openRow} onAdd={() => startAdding(null, "[data-add-device]")} />
+    {mapShown && <DeviceMap devices={devices} mark={mark} network={network} loaded={loaded} onOpen={openRow} now={now} />}
+    <HereSection device={here} mark={mark} opened={opened} onAction={onAction} now={now} titled={!mapShown}
+      network={network && { network, line: blocked ?? (network.state === "ready" && !network.shared ? null : networkLine(network)), action: network.state === "ready" ? null : networkAction, secondary, share }} pending={ctx.here}
       more={!ctx.here && ctx.advanced && !ctx.cloud && access.pairingCodes === true && canPairDevices(access.session) ? <ComputerNameMore /> : null} />
     {groups.map((entry) => {
       const phones = entry.group === "phones";
@@ -299,6 +303,6 @@ export function DevicesPage() {
       ? <AlwaysOnHomeSection c={c} state={state} blocked={blocked} onAddPhone={() => startPhone(null)}
         onAddComputer={() => startAdding("computer", "[data-always-on-add-computer]")} onConnect={() => startAdding("server", "[data-always-on-connect]")} />
       : <span data-settings-block="always-on" className="contents" />)}
-    <OtherPlacesSection />
+    <OtherPlacesSection devices={devices} />
   </>;
 }

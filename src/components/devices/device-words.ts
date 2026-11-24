@@ -19,6 +19,14 @@ const ROUTE: Record<DeviceRoute, LocaleKey> = {
 };
 export const routeLabel = (route: DeviceRoute): string => t(ROUTE[route], { app: productName() });
 
+const ROUTE_INLINE: Partial<Record<DeviceRoute, LocaleKey>> = {
+  local: "devicesPage.routeInline.sameWifi", tailscale: "devicesPage.routeInline.tailscale", relay: "devicesPage.routeInline.anywhere",
+  internet: "devicesPage.routeInline.overInternet", paired: "devicesPage.routeInline.pairedCode", ssh: "devicesPage.routeInline.secureLogin",
+};
+/** "Same Wi-Fi, paired with a code": only the first way starts with a capital. */
+export const routeList = (routes: readonly DeviceRoute[]): string =>
+  routes.map((route, index) => (index > 0 && ROUTE_INLINE[route] ? t(ROUTE_INLINE[route], { app: productName() }) : routeLabel(route))).join(", ");
+
 const GROUP: Record<DeviceGroup, LocaleKey> = { computers: "devicesPage.group.computers", servers: "devicesPage.group.servers", phones: "devicesPage.group.phonesTablets" };
 export const groupLabel = (group: DeviceGroup): string => t(GROUP[group]);
 
@@ -34,7 +42,7 @@ export function statusText(device: Device, now = Date.now()): string {
   if (device.kind === "vm") return device.desktop ? t(DESKTOP[device.desktop]) : "";
   if (device.status === "online") return t("devicesPage.status.online");
   if (device.status === "offline") return device.lastSeen ? t("devicesPage.status.seen", { when: lastSeen(device.lastSeen, now) }) : t("devicesPage.status.offline");
-  if (device.route === "ssh") return t("devicesPage.status.sshBots");
+  if (device.route === "ssh") return "";
   if (device.kind === "cloud") return device.home ? t("devicesPage.status.homeCloud", { app: productName() }) : t("devicesPage.status.runBy", { app: productName() });
   return device.home ? t("servers.homeTag") : t("devicesPage.status.unknown");
 }

@@ -5409,7 +5409,6 @@
   "devices.route.setUp": "Thiết lập",
   "devices.pair.pickOne": "Hãy chọn ít nhất một cách.",
   "devices.pair.done": "Xong",
-  "devices.reach.wifi": "trên cùng Wi-Fi",
   "devices.reach.https": "qua địa chỉ web {app}",
   "devices.reach.relay": "ở bất kỳ đâu qua {app}",
   "devices.reach.line": "Kết nối tới máy tính này {ways}.",
@@ -5652,8 +5651,6 @@
   "devicesPage.detail.version": "Phiên bản",
   "devicesPage.detail.lastSeen": "Hoạt động lần cuối",
   "devicesPage.detail.bots": "Bot",
-  "devicesPage.detail.runsBots": "Có bot riêng",
-  "devicesPage.detail.hostsComputer": "Bot có thể làm việc trên máy này",
   "devicesPage.detail.reachesBots": "Trò chuyện với các bot ở đây",
   "devicesPage.action.copyUpdate": "Sao chép lệnh cập nhật",
   "devicesPage.action.manage": "Quản lý",
@@ -6144,5 +6141,8 @@
   "skillBurger.pill.running": "Đang chạy… {count}",
   "skillBurger.pill.stopped": "Đã dừng",
   "skillBurger.pill.addPath": "Thêm nhánh",
-  "skillBurger.card.madeBy": "Do {name} tạo"
+  "skillBurger.card.madeBy": "Do {name} tạo",
+  "settings.nav.phoneConnected": "Một điện thoại đang kết nối",
+  "settings.nav.phoneNeedsYou": "Một điện thoại cần bạn",
+  "devices.reach.sameWifi": "trên cùng Wi-Fi"
 }
