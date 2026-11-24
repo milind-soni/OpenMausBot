@@ -1,4 +1,6 @@
 // Full app, real routes and fake provider in one disposable home.
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -84,6 +86,13 @@ try {
       const { task } = await api("POST", `/api/bots/${pepper.id}/tasks/${pepper.threadId}/forks`, { latest: true });
       return task.threadId;
     });
+  } else if (process.argv.includes("--check-pane-close")) {
+    const { default: electron } = await import("electron");
+    const script = fileURLToPath(new URL("./testing/workspace-pane-close.cjs", import.meta.url));
+    await promisify(execFile)("xvfb-run", ["-a", "-s", "-screen 0 1600x1000x24", electron,
+      "--ozone-platform=x11", "--force-device-scale-factor=1", `--user-data-dir=${join(fixture.info.dataDir, "electron")}`,
+      script, ui.previewUrl + "?frame=1"]);
+    console.log("Pane close passed with native Electron pointer input");
   } else await parkUntilSignal();
 } finally {
   await ui?.close();

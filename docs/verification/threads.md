@@ -52,6 +52,19 @@ check also verifies step sizing and independent list scrolling when run with
 `--long-activity`. It controls when the fake replies finish and saves screenshots of the drop
 preview, the three-pane Stop scenario and the filled grid beside the server log.
 
+### Close a split pane in Electron
+
+On Linux with Xvfb, xauth and xdotool installed, run:
+
+```sh
+node --experimental-strip-types scripts/verify-threads.ts --check-pane-close
+```
+
+The fixture opens a frameless Electron window on a disposable X display.
+It clicks the × on each side of a split, checks the surviving draft and
+reopens the closed conversation from the sidebar to check its history.
+It also closes an empty pane beside a draft.
+
 ## Check the real UI
 
 1. Expand Pepper and open Triage Gmail. Confirm its conversation and model.
