@@ -215,7 +215,7 @@ export function GroupSection({ group, devices, addLabel, onAdd, opened, onAction
 }) {
   return (
     <SettingsGroup label={groupLabel(group)} block={block} wrapActions
-      actions={addLabel && <button type="button" data-add-group={group} data-phone-pairing-action={group === "phones" ? "" : undefined} onClick={onAdd} className="settings-quiet cursor-pointer">{addLabel}</button>}>
+      actions={addLabel && devices.length > 0 && <button type="button" data-add-group={group} data-phone-pairing-action={group === "phones" ? "" : undefined} onClick={onAdd} className="settings-quiet cursor-pointer">{addLabel}</button>}>
       {notes}
       {notice}
       <SettingsRows icons>
@@ -225,7 +225,7 @@ export function GroupSection({ group, devices, addLabel, onAdd, opened, onAction
           : <SettingsEmptyRow>
             <span className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-3 gap-y-2">
               <span data-devices-empty={group}>{t(EMPTY[group])}</span>
-              {addLabel && <button type="button" data-add-empty={group} onClick={onAdd} className="ui-button ui-button-sm shrink-0">{addLabel}</button>}
+              {addLabel && <button type="button" data-add-empty={group} data-add-group={group} data-phone-pairing-action={group === "phones" ? "" : undefined} onClick={onAdd} className="ui-button ui-button-sm shrink-0">{addLabel}</button>}
             </span>
           </SettingsEmptyRow>}
       </SettingsRows>

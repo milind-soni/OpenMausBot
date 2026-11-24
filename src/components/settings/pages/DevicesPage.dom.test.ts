@@ -381,17 +381,23 @@ describe("the Devices page", () => {
     expect(new Set(edges).size).toBe(1);
   });
 
-  it("offers each empty group's own Add in its card, and keeps the group's quiet action beside a title that may wrap", async () => {
+  it("offers each empty group's own Add once, in its card, and a group with devices its quiet action beside a title that may wrap", async () => {
     saved = [{ id: "local", kind: "local", name: "This computer" }];
     companion = { ...companion, devices: [], connectedDeviceIds: [] };
     await render();
     expect([...document.querySelectorAll("[data-add-empty]")].map((one) => [one.getAttribute("data-add-empty"), one.textContent]))
       .toEqual([["phones", "Add a phone"], ["computers", "Add a computer"], ["servers", "Add a Cloud or own server"]]);
     expect($("[data-add-empty=computers]")?.closest("[data-settings-empty]")?.querySelector("[data-devices-empty=computers]")).not.toBeNull();
-    expect($("[data-add-group=computers]")?.className).toContain("settings-quiet");
-    expect($("[data-add-group=servers]")?.closest("[data-settings-actions]")?.parentElement?.className).toContain("flex-wrap");
+    expect(document.querySelectorAll("[data-add-group=computers]")).toHaveLength(1);
+    expect($("[data-settings-actions] [data-add-group]")).toBeNull();
     await click("[data-add-empty=computers]");
     expect($("[data-add-panel]")?.getAttribute("data-add-step")).toBe("computer");
+  });
+
+  it("puts a group's quiet Add beside its title while it has devices", async () => {
+    await render();
+    expect($("[data-add-group=phones]")?.className).toContain("settings-quiet");
+    expect($("[data-add-group=phones]")?.closest("[data-settings-actions]")?.parentElement?.className).toContain("flex-wrap");
   });
 
   it("gives a phone's own switches the page's switch-row type", async () => {
