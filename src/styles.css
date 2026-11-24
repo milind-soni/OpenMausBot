@@ -3906,7 +3906,8 @@ button:disabled.bg-danger {
    the chat is a card set into it, its top corners rounded where it meets the band (the right one square while a panel
    sits beside the chat). A hairline in the frame's edge colour runs along the card's top, round its corners and down
    the sidebar's side. The open tab's ground is the card's and slides between tabs; its foot curves out into the band.
-   Separators sit only between two closed tabs, neither under the pointer. */
+   Separators sit only between two closed tabs, neither under the pointer. Every control in the band is 32px tall on
+   the sidebar buttons' centre line, 10px apart as the sidebar's are, and the band's end inset mirrors the sidebar's. */
 @media (min-width: 768px) {
   [data-chathead-tabs] {
     --chat-card-radius: var(--radius-xl);
@@ -3926,7 +3927,12 @@ button:disabled.bg-danger {
   [data-chathead-tabs] [data-chathead-identity] { grid-column: 2; justify-self: stretch; align-self: stretch; -webkit-app-region: drag !important; }
   [data-chathead-tabs] [data-chathead-identity] > :not([data-thread-tabs], [data-chathead-status]) { display: none; }
   [data-chathead-tabs="advanced"] [data-chathead-identity] { margin-inline-start: 8px; }
-  [data-chathead-tabs] [data-chathead-controls] { grid-column: 3; margin-inline-start: 8px; }
+  [data-chathead-tabs] [data-chathead-controls] { grid-column: 3; margin-inline-start: 8px; gap: 10px; }
+  [data-chathead-tabs="simple"] { height: 48px; padding-inline-end: 16px; }
+  [data-chathead-tabs="advanced"] { height: 42px; padding-inline-end: 8px; }
+  [data-chathead-tabs] [data-chathead-controls] :is(.size-9, .h-9, [data-model-pill]) { height: 32px; }
+  [data-chathead-tabs] [data-chathead-controls] .size-9 { width: 32px; }
+  [data-chathead-tabs] [data-chathead-controls] .min-w-9 { min-width: 32px; }
 }
 .thread-tab-indicator {
   --tab-foot: 10px;

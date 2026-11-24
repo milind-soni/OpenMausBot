@@ -144,7 +144,7 @@ function Strip({ bot, tabs }: { bot: Bot; tabs: ThreadTab[] }) {
     <div data-thread-tabs={bot.id} data-panel-beside={panelBeside ? "" : undefined} className="flex h-full min-w-0 flex-1 items-end max-md:hidden">
       <button type="button" data-thread-tabs-bot aria-label={t("chat.openProfileAria", { name: bot.name })} title={t("chat.openBotPanel")} aria-expanded={panelOpen}
         onClick={() => dispatch({ type: "toggleSettings", open: !panelOpen })}
-        className="mb-0.5 flex h-8 max-w-40 shrink-0 items-center gap-1.5 rounded-lg ps-1.5 pe-2.5 text-[13px] font-medium leading-[18px] text-ink outline-none transition-colors duration-[120ms] hover:bg-ink/[0.06] active:bg-ink/[0.08] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none">
+        className="mb-0.5 flex h-8 max-w-40 shrink-0 items-center gap-1.5 rounded-full ps-1.5 pe-2.5 text-[13px] font-medium leading-[18px] text-ink outline-none transition-colors duration-[120ms] hover:bg-ink/[0.06] active:bg-ink/[0.08] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none">
         <BotAvatar bot={bot} size={20} />
         <span dir="auto" className="min-w-0 truncate">{bot.name}</span>
       </button>
@@ -195,7 +195,7 @@ function Strip({ bot, tabs }: { bot: Bot; tabs: ThreadTab[] }) {
       </div>
       {canWrite && (
         <button type="button" data-thread-tabs-new aria-label={t("task.newShort")} title={t("task.newShort")} onClick={() => dispatch({ type: "newTask", botId: bot.id })}
-          className="-ms-0.5 mb-1 flex size-7 shrink-0 items-center justify-center rounded-full text-ink-secondary transition-colors duration-[120ms] hover:bg-ink/[0.06] hover:text-ink active:bg-ink/[0.08] motion-reduce:transition-none">
+          className="mb-0.5 flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary transition-colors duration-[120ms] hover:bg-ink/[0.06] hover:text-ink active:bg-ink/[0.08] motion-reduce:transition-none">
           <Plus size={16} aria-hidden="true" />
         </button>
       )}
