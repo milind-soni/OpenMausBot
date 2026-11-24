@@ -4,9 +4,9 @@
 // environment or arguments.
 import type { GithubSignIn } from "./sign-in.ts";
 
-let current: Pick<GithubSignIn, "token" | "reportAuthFailure"> | null = null;
+let current: Pick<GithubSignIn, "token" | "reportAuthFailure" | "signedIn"> | null = null;
 
-export function provideGithubSignIn(signIn: Pick<GithubSignIn, "token" | "reportAuthFailure"> | null): void {
+export function provideGithubSignIn(signIn: Pick<GithubSignIn, "token" | "reportAuthFailure" | "signedIn"> | null): void {
   current = signIn;
 }
 
@@ -19,4 +19,9 @@ export function githubToken(audience?: string | null): Promise<string | null> {
 /** A git or GitHub call made with that token was refused (401): the next status asks GitHub again. */
 export function reportGithubAuthFailure(audience?: string | null): void {
   current?.reportAuthFailure(audience);
+}
+
+/** Whether `audience` has a sign-in, from disk only (GithubSignIn.signedIn): false with none provided. */
+export function githubSignedIn(audience?: string | null): boolean {
+  return current ? current.signedIn(audience) : false;
 }

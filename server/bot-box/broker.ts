@@ -28,6 +28,20 @@ export interface BrokerGrant {
   mcpServer?: string;
   /** With `mcpServer`: the connected app that refusal points the bot to instead. */
   mcpApp?: McpServerApp;
+  /** A grant that answers its requests itself once the token is checked (the github grant, broker-github.ts): it adds
+   * its credential per request and checks what is sent. `headers` and `upstream` are then only its description. */
+  serve?(request: BrokerServeRequest): void;
+}
+
+/** What a grant's own `serve` gets: the request below `/b/<token>/<grant>`, and that prefix (for a Location header). */
+export interface BrokerServeRequest {
+  req: IncomingMessage;
+  res: ServerResponse;
+  path: string;
+  query: string;
+  prefix: string;
+  /** The broker's upstream request function (a test seam), or none for node's own. */
+  request?: typeof httpRequest;
 }
 
 export interface BrokerToken {
@@ -45,6 +59,20 @@ const CREDENTIAL_HEADERS = new Set(["authorization", "x-api-key", "x-goog-api-ke
 const HOP_BY_HOP = new Set(["connection", "keep-alive", "transfer-encoding", "te", "trailer", "upgrade", "proxy-connection", "host"]);
 const TOKEN = /^omb_t0_[a-f0-9]{48}$/;
 const GRANT = /^[a-z][a-z0-9_-]{0,63}$/;
+
+/** A client's request headers as the broker forwards them: no hop-by-hop header and no credential the client sent. */
+export function forwardableHeaders(headers: IncomingMessage["headers"]): Record<string, string | string[]> {
+  const out: Record<string, string | string[]> = {};
+  for (const [name, value] of Object.entries(headers)) if (value !== undefined && !HOP_BY_HOP.has(name) && !CREDENTIAL_HEADERS.has(name)) out[name] = value;
+  return out;
+}
+
+/** An upstream's answer headers as the broker relays them: no hop-by-hop header. */
+export function relayableHeaders(headers: IncomingMessage["headers"]): Record<string, string | string[]> {
+  const out: Record<string, string | string[]> = {};
+  for (const [name, value] of Object.entries(headers)) if (value !== undefined && !HOP_BY_HOP.has(name)) out[name] = value;
+  return out;
+}
 
 export interface CredentialBrokerOptions {
   socketPath: string;
@@ -101,7 +129,7 @@ export function openCredentialBroker(options: CredentialBrokerOptions): Promise<
     for (const name of Object.keys(input.grants)) if (!GRANT.test(name)) throw new Error(`Not a grant name: ${name.slice(0, 40)}`);
     const token = `${BROKER_TOKEN_PREFIX}${randomBytes(24).toString("hex")}`;
     const expiresAt = now() + (input.ttlMs ?? (bound === "process" ? BROKER_PROCESS_TTL_MS : BROKER_THREAD_TTL_MS));
-    const grants = Object.fromEntries(Object.entries(input.grants).map(([name, grant]) => [name, { upstream: grant.upstream, headers: { ...grant.headers }, ...(grant.mcpServer ? { mcpServer: grant.mcpServer } : {}), ...(grant.mcpApp ? { mcpApp: { ...grant.mcpApp } } : {}) }]));
+    const grants = Object.fromEntries(Object.entries(input.grants).map(([name, grant]) => [name, { upstream: grant.upstream, headers: { ...grant.headers }, ...(grant.mcpServer ? { mcpServer: grant.mcpServer } : {}), ...(grant.mcpApp ? { mcpApp: { ...grant.mcpApp } } : {}), ...(grant.serve ? { serve: grant.serve } : {}) }]));
     tokens.set(hashToken(token).toString("hex"), { hash: hashToken(token), botId: input.botId ?? null, threadId: input.threadId ?? null, expiresAt, grants, bound });
     return { token, botId: input.botId ?? null, threadId: input.threadId ?? null, expiresAt, grants };
   };
@@ -124,17 +152,18 @@ export function openCredentialBroker(options: CredentialBrokerOptions): Promise<
     const [, token = "", grant = "", path = "", query = ""] = match;
     const verdict = lookup(token, grant);
     if (!verdict.ok) return refuse(verdict.status, verdict.error);
+    if (verdict.grant.serve) {
+      stats.forwarded += 1;
+      return verdict.grant.serve({ req, res, path, query, prefix: `/b/${token}/${grant}`, ...(requestFn ? { request: requestFn } : {}) });
+    }
     const upstream = upstreamUrl(verdict.grant.upstream, path, query);
     if (!upstream) return refuse(502, "bad_upstream");
-    const headers: Record<string, string | string[]> = {};
-    for (const [name, value] of Object.entries(req.headers)) if (value !== undefined && !HOP_BY_HOP.has(name) && !CREDENTIAL_HEADERS.has(name)) headers[name] = value;
+    const headers = forwardableHeaders(req.headers);
     for (const [name, value] of Object.entries(verdict.grant.headers)) headers[name.toLowerCase()] = value;
     headers.host = upstream.host;
     const send = requestFn ?? (upstream.protocol === "https:" ? httpsRequest : httpRequest);
     const relay = (answer: IncomingMessage) => {
-      const out: Record<string, string | string[]> = {};
-      for (const [name, value] of Object.entries(answer.headers)) if (value !== undefined && !HOP_BY_HOP.has(name)) out[name] = value;
-      res.writeHead(answer.statusCode ?? 502, out);
+      res.writeHead(answer.statusCode ?? 502, relayableHeaders(answer.headers));
       answer.pipe(res);
     };
     const mcpServer = req.method === "POST" ? verdict.grant.mcpServer : undefined;

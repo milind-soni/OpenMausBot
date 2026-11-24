@@ -83,6 +83,10 @@ export interface GithubSignIn {
   token(audience?: string | null): Promise<string | null>;
   /** A git or GitHub call with this audience's token was refused: the next status asks GitHub again. */
   reportAuthFailure(audience?: string | null): void;
+  /** Whether `audience` has a sign-in to ask token() for, answered from disk without running gh or asking GitHub: for a
+   * spawn that must decide at once whether to set git up (server/github/git-access.ts). It may say yes for a sign-in
+   * GitHub no longer accepts; token() is still the answer. */
+  signedIn(audience?: string | null): boolean;
   /** A member who left a Team Cloud: their sign-in folder and pasted token go. */
   forgetPerson(person: string): void;
 }
@@ -441,6 +445,15 @@ export function createGithubSignIn(deps: GithubSignInDeps): GithubSignIn {
     reportAuthFailure(audienceIn) {
       const audience = resolve(audienceIn);
       if (audience) of(audience).stale = true;
+    },
+    signedIn(audienceIn) {
+      const audience = resolve(audienceIn);
+      if (!audience) return false;
+      try {
+        return ownSignedIn(audience) || deps.vault.githubToken(audience) !== null || (!deps.team && deps.tools.personal() !== null);
+      } catch {
+        return false;
+      }
     },
     forgetPerson(person) {
       if (!AUDIENCE.test(person) || person === OWNER) return;
