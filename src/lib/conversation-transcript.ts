@@ -2,6 +2,7 @@ import { loadFullThread } from "@/state/message-history";
 import { optimisticMessageId } from "@/state/optimistic-send";
 import { visibleMessages } from "@/state/snapshot-navigation";
 import { formatTranscriptMarkdown, type ExportTranscriptOptions } from "./export-transcript";
+import { t } from "./i18n";
 
 interface ConversationTranscriptOptions extends ExportTranscriptOptions {
   threadId: string;
@@ -37,7 +38,7 @@ export function conversationTranscript({ threadId, hasMore, activeLeafId, ...opt
       const parent = options.messages[0]?.parentId;
       if (parent && !aliases.has(parent)) boundary = thread.messages.findIndex((message) => message.id === parent);
     }
-    if (boundary < 0) throw new Error("The conversation history at export time is no longer available");
+    if (boundary < 0) throw new Error(t("chat.export.historyGone"));
     // A later confirmation may replace its optimistic row, but cannot extend the history boundary.
     const confirmedIds = new Set(aliases.values());
     const history = thread.messages.filter((message, index) => index <= boundary || confirmedIds.has(message.id));
@@ -46,7 +47,7 @@ export function conversationTranscript({ threadId, hasMore, activeLeafId, ...opt
       ...[...held.values()].filter((message) => !loaded.has(message.id))];
     const leaf = activeLeafId ? aliases.get(activeLeafId) ?? activeLeafId : activeLeafId;
     if (leaf && !messages.some((message) => message.id === leaf)) {
-      throw new Error("The selected conversation branch is no longer available");
+      throw new Error(t("chat.export.branchGone"));
     }
     return formatTranscriptMarkdown({ ...options, messages: visibleMessages({ messages, activeLeafId: leaf }) });
   });

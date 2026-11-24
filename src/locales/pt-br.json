@@ -2610,6 +2610,8 @@
   "chat.export.download": "Baixar como .md",
   "chat.export.copyConversation": "Copiar conversa",
   "chat.export.downloadConversation": "Baixar conversa",
+  "chat.export.historyGone": "O histórico da conversa no momento da exportação não está mais disponível",
+  "chat.export.branchGone": "O ramo selecionado da conversa não está mais disponível",
   "chat.usage.menu": "Uso",
   "chat.conversationWith": "Conversa com {name}",
   "chat.showEarlier": "Ver mensagens anteriores (mais {count})",

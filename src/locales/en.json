@@ -2796,6 +2796,8 @@
   "chat.export.download": "Download as .md",
   "chat.export.copyConversation": "Copy conversation",
   "chat.export.downloadConversation": "Download conversation",
+  "chat.export.historyGone": "The conversation history at export time is no longer available",
+  "chat.export.branchGone": "The selected conversation branch is no longer available",
   "chat.usage.menu": "Usage",
   "chat.conversationWith": "Conversation with {name}",
   "chat.showEarlier": "Show earlier messages ({count} more)",
