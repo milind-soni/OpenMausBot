@@ -79,7 +79,7 @@ describe("AG Grid component lifecycle", () => {
     if (selected) {
       const cell = host.querySelector<HTMLElement>('.ag-row[row-index="1"] .ag-cell')!;
       flushSync(() => cell.click());
-      expect(host.querySelector('.ag-row[row-index="1"]')?.getAttribute("aria-selected")).toBe("true");
+      await vi.waitFor(() => expect(host.querySelector('.ag-row[row-index="1"]')?.getAttribute("aria-selected")).toBe("true"));
     }
     const viewport = host.querySelector('[data-testid="data-grid-viewport"]')!;
     flushSync(() => viewport.dispatchEvent(new KeyboardEvent("keydown", { key: "c", [modifier]: true, bubbles: true, cancelable: true })));
