@@ -80,6 +80,7 @@ import { useBotListDrawer } from "@/hooks/use-bot-list-drawer";
 import { usePhoneBack } from "@/hooks/use-phone-back";
 import { useRememberedSidePanel } from "@/hooks/use-remembered-side-panel";
 import { closeSidePanels } from "@/lib/page-open";
+import { phoneBackStep, phoneBackSteps } from "@/lib/phone-back";
 import { useDesktopNotificationOpens, useExternalChatLinks } from "@/hooks/use-external-chat-links"; import { useNewBotFromOtherPlace } from "@/lib/places-together";
 import { useUsageSnapshot } from "@/hooks/use-usage-snapshot";
 import { useReadShownChatOnFocus } from "@/hooks/use-read-shown-chat";
@@ -192,8 +193,13 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const panelOpen = anySidePanel(sidePanels);
   // On a phone, back closes the open list or side panel, and from a chat picked in the list goes back to the list.
   const phoneLayout = useMediaQuery(PHONE_LAYOUT, false);
-  usePhoneBack(phoneLayout, drawerBackSteps + (panelOpen ? 1 : 0), () => {
-    if (drawerOpen || !panelOpen) return drawerBack();
+  const calendarFocus = state.activeView === "routines" && state.routinesFocus.view === "calendar";
+  const backPlace = { calendar: calendarFocus, drawerOpen, panelOpen, appsPage: state.pluginsOpen, drawerSteps: drawerBackSteps };
+  usePhoneBack(phoneLayout, phoneBackSteps(backPlace), () => {
+    const step = phoneBackStep(backPlace);
+    if (step === "calendar") return dispatch({ type: "showRoutines", view: "list", botId: state.routinesFocus.botId });
+    if (step === "apps-page") dispatch({ type: "togglePlugins", open: false });
+    if (step !== "panels") return drawerBack();
     closeSidePanels(dispatch);
     dispatch({ type: "toggleNotifications", open: false });
     dispatch({ type: "closeForkPanel" });
@@ -204,7 +210,6 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const collapseSidebar = sidebarFoldsForPanel(sidePanels, { wide: sidebarAndPanelFit, narrow: sidebarAndNarrowPanelFit });
   // Open beside a panel below 1280, the sidebar keeps to 280 so the chat keeps its 440; Simple's bot panel never moves it.
   const sidebarBesidePanel = anySidePanel(panelsMovingSidebar(sidePanels)) && !sidebarAndPanelFit;
-  const calendarFocus = state.activeView === "routines" && state.routinesFocus.view === "calendar";
   const notificationTray = notificationFeed && !calendarFocus;
 
   const noEngines =

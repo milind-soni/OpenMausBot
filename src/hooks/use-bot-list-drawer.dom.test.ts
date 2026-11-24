@@ -140,3 +140,12 @@ it("keeps no step when the list is closed without going anywhere", async () => {
   await press('[data-row="close"]');
   expect(backSteps()).toBe(0);
 });
+
+it("comes back from the apps page reached from the list, and stays open as the page closes", async () => {
+  await press('[aria-label="Open bot list"]');
+  await show({ ...START, pluginsOpen: true });
+  expect(backSteps()).toBe(1);
+  await press("[data-back]");
+  await show(START);
+  expect(expanded(), "closing the apps page is not going somewhere").toBe("true");
+});

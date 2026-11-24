@@ -22,21 +22,34 @@ function Stack() {
 }
 
 const show = (enabled: boolean, steps: number) => act(async () => root.render(h(Shell, { enabled, steps })));
-const pop = () => act(async () => { window.dispatchEvent(new PopStateEvent("popstate")); });
+/** The browser's history: one state per entry, and where the page is now. */
+let entries: unknown[] = [null];
+const pop = () => act(async () => { window.dispatchEvent(new PopStateEvent("popstate", { state: entries[above] ?? null })); });
 /** The phone's back button: the browser leaves the top entry, then tells the page. */
 const pressBack = async () => {
   above = Math.max(0, above - 1);
   await pop();
 };
+/** The browser's Forward: back onto the entry above, if there is one. */
+const pressForward = async () => {
+  above = Math.min(entries.length - 1, above + 1);
+  await pop();
+};
 
 beforeEach(async () => {
   above = 0;
+  entries = [null];
   back.mockReset();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  vi.spyOn(window.history, "pushState").mockImplementation(() => { above += 1; });
+  vi.spyOn(window.history, "state", "get").mockImplementation(() => entries[above] ?? null);
+  vi.spyOn(window.history, "replaceState").mockImplementation((state: unknown) => { entries[above] = state; });
+  vi.spyOn(window.history, "pushState").mockImplementation((state: unknown) => {
+    above += 1;
+    entries = [...entries.slice(0, above), state];
+  });
   vi.spyOn(window.history, "go").mockImplementation((delta = 0) => {
     above = Math.max(0, above + delta);
-    queueMicrotask(() => window.dispatchEvent(new PopStateEvent("popstate")));
+    queueMicrotask(() => window.dispatchEvent(new PopStateEvent("popstate", { state: entries[above] ?? null })));
   });
   container = document.createElement("div");
   document.body.append(container);
@@ -92,4 +105,25 @@ it("takes every entry away when the window grows past the phone layout", async (
   expect(above).toBe(0);
   await pop();
   expect(back).not.toHaveBeenCalled();
+});
+
+it("does not count Forward onto an entry it stepped back from as a back press", async () => {
+  await act(async () => root.render(h(Stack)));
+  await pressBack();
+  expect(container.textContent).toBe("1");
+  await pressForward();
+  expect(back, "Forward is not a step back").toHaveBeenCalledTimes(1);
+  expect(container.textContent).toBe("1");
+  expect(above, "the entry Forward reached is taken away again").toBe(1);
+  await pressBack();
+  expect(back).toHaveBeenCalledTimes(2);
+  expect(container.textContent, "the next back press still steps back").toBe("0");
+});
+
+it("still steps back once onto an entry whose state the app replaced", async () => {
+  await act(async () => root.render(h(Stack)));
+  entries[1] = null;
+  await pressBack();
+  expect(back).toHaveBeenCalledTimes(1);
+  expect(container.textContent).toBe("1");
 });

@@ -37,7 +37,14 @@ export function useBotListDrawer(place: DrawerPlace) {
   const leave = useCallback(() => setState((s) => (s.open ? { open: false, fromList: true, first: false } : s)), []);
   useEffect(() => {
     leave();
-  }, [place.selectedId, place.view, place.pluginsOpen, place.settingsOpen, leave]);
+  }, [place.selectedId, place.view, leave]);
+  // Opening the apps page or a bot's settings goes somewhere; closing one (as back does from it) does not.
+  useEffect(() => {
+    if (place.pluginsOpen) leave();
+  }, [place.pluginsOpen, leave]);
+  useEffect(() => {
+    if (place.settingsOpen) leave();
+  }, [place.settingsOpen, leave]);
   useEffect(() => {
     if (acted.current) leave();
   }, [place.botThread, place.groupThread, leave]);
