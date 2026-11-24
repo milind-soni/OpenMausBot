@@ -18,20 +18,19 @@ import { acpDiscoveryProblem } from "./custom-model-catalog.ts";
 import { decodeInjectId } from "../local-inject.ts";
 import { DeviceAuthController, deviceAuthInstanceSurface, type DeviceSignIn } from "../device-auth.ts";
 import { AcpBrowserAuth, acpBrowserAuthInstanceSurface, type AcpBrowserSignInSpec } from "./browser-auth.ts";
-import { deletePromptSplitReceipt, writePromptSplitReceipt } from "../prompt-split.ts";
+import { commitPromptSplitReceipt, deletePromptSplitReceipt, type PendingPromptSplitReceipt } from "../prompt-split.ts";
 import { liveSessionKey, sessionSystem, turnPrompt } from "./session-system.ts";
-import type { PromptSplitReceipt } from "../prompt-split.ts";
 import { boxAudienceKey, describeSpawnFailure, execCli, killCliTree, sharedBoxScope, spawnCli } from "../../procs.ts"; import { stopEngineTree, stopEngineTrees } from "../../engine-stop.ts";
-import { applyOneShotEnv, runAcpOneShot } from "./background-text.ts"; import type { AcpBackgroundWork } from "./background-work.ts";
+import { applyOneShotEnv, oneShotTurnModel, runAcpOneShot } from "./background-text.ts"; import type { AcpBackgroundWork } from "./background-work.ts";
 import { acpCapabilities } from "./capabilities.ts"; import { readAcpMediaLinks } from "./media-links.ts";
 import { acpNativeLogMessage } from "./tool-log.ts";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
 import { formatQuietLimit, lastSeenPhrase, LIMIT_WORDS, promptIdleTimeoutMs, type LogSignal } from "./quiet-status.ts"; import { startAcpQuietWatch } from "./quiet-watch.ts"; import { AppliedConfig } from "./applied-config.ts"; import { modelRefused, roomForReadBeside, startupRefresh } from "./startup-refresh.ts"; import { stderrFailureOf, watchStderrFailure, type StderrFailure } from "./harness-failure.ts"; import { timed, turnStartClock, type TurnStartClock } from "../../perf/turn-starts.ts";
-import { acpMissingSession } from "./rpc-error.ts";
+import { acpMissingSession, retryTransient } from "./rpc-error.ts";
 import { readSessionReport } from "./session-reports.ts";
 import { promptTokenUsage } from "./prompt-usage.ts";
 import { advertisedCommands, turnAnswers, turnSteering, type AcpSteerSupport } from "./steer.ts";
-import { pickSessionModel, SessionModelControls, type AcpModelSelection } from "./session-model-controls.ts";
+import { pickSessionModel, SessionModelControls, type AcpModelSelection } from "./session-model-controls.ts"; import { currentModeUpdateId, readSessionModes, withSessionMode, type AcpSessionModes } from "./session-modes.ts";
 import { notThisCli, versionFromProbe } from "./version-probe.ts"; import { engineHomes } from "../../engine-homes/engine-homes.ts"; import { apiKeyAccount } from "./api-key-account.ts";
 
 export function skipSubscriptionAuthForLocalInject(model: string | undefined): boolean {
@@ -67,7 +66,7 @@ import { acpToolEndEvents } from "./tool-items.ts";
 import { AcpHost } from "./host.ts"; import { LiveSwitchRefused, SignInRequests, type AcpDriverHooks } from "./driver-hooks.ts";
 import { exitBeforeResult } from "./exit-report.ts"; import { readNodeVersion } from "./node-version.ts";
 import { decodeAcpConfig } from "./config-decode.ts";
-import { endTurn, trackAssistantImage, trackAssistantWords, trackThoughtAfterTool, trackRunningTool, trackToolEndShown, type AcpAskFinish, type AcpSession, type AcpTurn } from "./turn-state.ts";
+import { endTurn, receiveText, trackAssistantImage, trackAssistantWords, trackThoughtAfterTool, trackRunningTool, trackToolEndShown, type AcpAskFinish, type AcpSession, type AcpTurn } from "./turn-state.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
 import { noticeFailure } from "../../chat-notices.ts";
 import { armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose, type ColdStartCost } from "../session-idle.ts";
@@ -156,7 +155,7 @@ export interface AcpSupport extends AcpDriverHooks {
    * confirms it; an approval change never respawns the process. */
   sessionScopedApproval?: boolean;
   /** False when this engine cannot run memory upkeep's one-shot text call cleanly; oneShotFolder holds a one-shot's folder. */
-  backgroundText?: false; oneShotFolder?(): Promise<string>; /** Work the agent goes on with after its turn: ended at Stop and when it wakes a turn between ours. */ backgroundWork?: AcpBackgroundWork;
+  backgroundText?: false; oneShotFolder?(): Promise<string>; oneShotModel?(model: string, env: Record<string, string | undefined>, models: ModelCatalog): string | undefined; /** Work the agent goes on with after its turn: ended at Stop and when it wakes a turn between ours. */ backgroundWork?: AcpBackgroundWork;
   /** Mutate the child env in place. `instanceEnvironment` tells a key put there on purpose from one
    *  riding along in the server's own env. */
   transformEnv?(
@@ -266,7 +265,7 @@ export interface AcpSupport extends AcpDriverHooks {
      * their argv slugs (Cursor answers `default[]` for the CLI's `auto`). */
     sessionModels: Array<{ modelId?: string; name?: string }>;
     /** Last model acknowledged by session/new/load/set_model, preserved for pooled turns. */
-    currentModelId?: string;
+    currentModelId?: string; sessionModes?: AcpSessionModes; expectMode?: (modeId: string) => void;
     /** The session's effort, and where a live change to it is recorded. */ currentEffort?: EffortLevel; effortApplied?(effort: EffortLevel | undefined): void;
     /** What this live session last confirmed per config option; absent for a one-shot session. */ applied?: AppliedConfig;
     /** session/new's or session/load's `configOptions`, verbatim. */
@@ -700,6 +699,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           const p = msg.params ?? {};
           if (p._meta?.isReplay === true) return;
           session.commands = advertisedCommands(p.update) ?? session.commands;
+          const updatedModeId = currentModeUpdateId(p.update); if (updatedModeId && (!p.sessionId || p.sessionId === session.sessionId)) { session.modeVersion += 1; session.sessionConfigResult = withSessionMode(session.sessionConfigResult, updatedModeId); return; }
           const current = session.current;
           if (support.modelVariants && p.update?.sessionUpdate === "config_option_update") {
             if (current && !current.state.settled && session.sessionId && p.sessionId === session.sessionId) current.receiveModelVariants(p.update);
@@ -739,12 +739,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 if (support.resendsReasoningReply && messageId && messageId === current.state.textMessageId
                     && isHermesReasoningReplay(delta, current.state.text)) break;
                 current.state.textMessageId = messageId;
-                current.state.text += delta;
+                const streamed = receiveText(current.state, delta, support.replyFailure);
                 const trimmed = current.state.text.trimStart();
-                if (!trimmed.startsWith("<SYSTEM_MESSAGE") &&
+                if (streamed && !trimmed.startsWith("<SYSTEM_MESSAGE") &&
                     !trimmed.startsWith("The following is a <SYSTEM_MESSAGE") &&
                     !trimmed.startsWith("<SYSTEM_NOTIFICATION")) {
-                  emit({ ...base(threadId, current.turnId), type: "content.delta", streamKind: "assistant_text", delta });
+                  emit({ ...base(threadId, current.turnId), type: "content.delta", streamKind: "assistant_text", delta: streamed });
                 }
               }
               break;
@@ -807,7 +807,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           sessionKey: null,
           get sessionId() { return acp.sessionId; },
           set sessionId(id: string | null) { acp.sessionId = id; },
-          sessionConfigResult: null,
+          sessionConfigResult: null, modeVersion: 0,
           get initResult() { return host.initResult; },
           set initResult(result: any) { host.initResult = result; },
           get authenticated() { return host.authenticated; },
@@ -986,7 +986,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         ): Promise<any> =>
           timed(clock, method, signIn.refused(session.host) ?? session.acp.request(method, params, timeoutMs, receive, idleMs, idleMessage));
 
-        const state: AcpTurn["state"] = { settled: false, promptSent: false, text: "", textMessageId: null, producedItem: false, repliedText: false, startupActivity: false, stopped: false, toolsSinceShown: false, thoughtSinceTool: false, usagePeak: null, usageLast: null, usageCompacted: false, cancelling: false };
+        const state: AcpTurn["state"] = { settled: false, promptSent: false, text: "", textMessageId: null, producedItem: false, repliedText: false, startupActivity: false, stopped: false, toolsSinceShown: false, thoughtSinceTool: false, usagePeak: null, usageLast: null, usageCompacted: false, failedChunk: null, cancelling: false };
         let acknowledge = () => {};
         let rejectStartup = (_error: TurnNotStartedError) => {};
         const startupAck = turn.startupRecovery ? new Promise<{ turnId: string }>((resolve, reject) => {
@@ -998,7 +998,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         let variant = turn.variant;
         let staleProcess = false;
       // Still set if configuring throws: the pooled session may keep an earlier turn's looser mode.
-        let approvalUnconfirmed = false;
+        let approvalUnconfirmed = false, expectedModeId: string | undefined;
         const modelControls = new SessionModelControls({
           selection: support.selectModel, variants: support.modelVariants === true, displayName: support.displayName,
           model: () => cliTurn.model, reportedModel: () => reportedModel,
@@ -1059,7 +1059,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         session.current = current;
 
         (async () => {
-          let pendingSplitReceipt: { key: string; receipt: PromptSplitReceipt; previous: PromptSplitReceipt | null } | null = null;
+          let pendingSplitReceipt: PendingPromptSplitReceipt | null = null;
           try {
             const handshake = async (): Promise<boolean> => {
               for (const child of retiring.get(threadId) ?? []) {
@@ -1096,7 +1096,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 const methodId = support.pickAuthMethod(methods, spawnEnv);
                 if (methodId) {
                   try {
-                    await session.host.once("authenticate", () => request("authenticate", { methodId }, INIT_TIMEOUT));
+                    await session.host.once("authenticate", () => retryTransient(request, "authenticate", { methodId }, INIT_TIMEOUT));
                     session.authenticated = true;
                   } catch (error) {
                     const failed = signIn.authenticateFailed(error, support.authFailure); if (failed) throw failed;
@@ -1222,10 +1222,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 approvalUnconfirmed = support.sessionScopedApproval === true;
                 await support.configureSession({
                   request: async (method, params, timeoutMs) => {
+                    const modeVersion = session.modeVersion;
                     const result = await request(method, params, timeoutMs ?? SESSION_CONFIG_TIMEOUT).catch((error) => { session.appliedConfig.clear(); throw error; });
-                    if (method === "session/set_model" && params && typeof params === "object" && "modelId" in params && typeof params.modelId === "string") {
-                      session.sessionConfigResult = { ...session.sessionConfigResult, models: { ...session.sessionConfigResult?.models, currentModelId: params.modelId } };
-                    }
+                    if (method === "session/set_model" && params && typeof params === "object" && "modelId" in params && typeof params.modelId === "string") session.sessionConfigResult = { ...session.sessionConfigResult, models: { ...session.sessionConfigResult?.models, currentModelId: params.modelId } };
+                    if (method === "session/set_mode" && params && typeof params === "object" && "modeId" in params && session.modeVersion === modeVersion) session.sessionConfigResult = withSessionMode(session.sessionConfigResult, params.modeId);
                     if (method === "session/set_config_option" && Array.isArray(result?.configOptions)) session.sessionConfigResult = { ...session.sessionConfigResult, configOptions: result.configOptions };
                     return result;
                   },
@@ -1233,13 +1233,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   env: spawnEnv,
                   config: turnConfig,
                   turn: cliTurn,
-                  sessionModels: Array.isArray(session.sessionConfigResult?.models?.availableModels)
-                    ? session.sessionConfigResult.models.availableModels
-                    : [],
+                  sessionModels: Array.isArray(session.sessionConfigResult?.models?.availableModels) ? session.sessionConfigResult.models.availableModels : [],
                   currentModelId: session.sessionConfigResult?.models?.currentModelId, currentEffort: session.effort, effortApplied: (effort) => { session.effort = effort; }, applied: session.appliedConfig,
-                  configOptions: Array.isArray(session.sessionConfigResult?.configOptions)
-                    ? session.sessionConfigResult.configOptions
-                    : [],
+                  configOptions: Array.isArray(session.sessionConfigResult?.configOptions) ? session.sessionConfigResult.configOptions : [],
+                  sessionModes: readSessionModes(session.sessionConfigResult) ?? undefined, expectMode: (modeId) => { expectedModeId = modeId; },
                   notice: (message) => {
                     if (session.fallbackNotice === message) return;
                     session.fallbackNotice = message;
@@ -1287,6 +1284,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               throw new Error(`${support.displayName} changed variant before the prompt`);
             } const promptOutcome = await support.promptOutcome?.(instanceId, sessionId);
             if (state.settled || state.stopped || session.closing) throw new Error("turn stopped");
+            if (expectedModeId !== undefined && readSessionModes(session.sessionConfigResult)?.currentModeId !== expectedModeId) throw new Error(`${support.displayName} changed mode before the prompt`);
             state.promptSent = true; clock.promptSent(Date.now());
             if (!support.promptUnreachedModel) acknowledge();
             const promptIdleMs = promptIdleTimeoutMs();
@@ -1306,26 +1304,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             const harnessFailed = stderrFailureOf(session.host); if (harnessFailed) throw harnessFailed;
             const steersOut = current.steering?.promptAnswered();
             if (steersOut && !state.stopped) { current.flushAssistantText(); await steersOut; }
-            if (pendingSplitReceipt) {
-              // session/prompt resolving is the acceptance boundary: a rejected prompt leaves no receipt.
-              if (state.usageCompacted) {
-                deletePromptSplitReceipt(DRIVER_KIND, pendingSplitReceipt.key);
-              } else {
-                const previousLastUsed = typeof pendingSplitReceipt.previous?.lastUsed === "number"
-                  ? pendingSplitReceipt.previous.lastUsed
-                  : undefined;
-                const lastUsed = state.usageLast ?? previousLastUsed;
-                writePromptSplitReceipt(
-                  DRIVER_KIND,
-                  pendingSplitReceipt.key,
-                  {
-                    ...pendingSplitReceipt.receipt,
-                    ...(lastUsed === undefined ? {} : { lastUsed }),
-                    ...(state.usagePeak === null ? {} : { peakUsed: state.usagePeak }),
-                  },
-                );
-              }
-            }
+            const failure = state.failedChunk?.failure;
+            // session/prompt resolving is the acceptance boundary: a rejected or reported-failed prompt leaves no receipt.
+            if (pendingSplitReceipt && !failure) commitPromptSplitReceipt(DRIVER_KIND, pendingSplitReceipt, { compacted: state.usageCompacted, last: state.usageLast, peak: state.usagePeak });
             const answers = turnAnswers(support.steer, result, current.steering?.replies);
             if (current.steering?.failure !== undefined && !state.stopped) throw current.steering.failure;
             const runOf = (answer: unknown) => support.steer && "run" in support.steer ? support.steer.run?.(answer) : undefined;
@@ -1337,6 +1318,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             }
             const final = answers.at(-1);
             const reason = final?.stopReason, reported = await promptOutcome?.(final); if (reported) throw reported;
+            if (failure && reason === "end_turn") { flushAssistantText(); throw new Error(failure); }
             if (reason === "end_turn") settle(threadId, session, true, null);
             else if (reason === "cancelled" || state.stopped) settle(threadId, session, true, "cancelled");
             else {
@@ -1449,8 +1431,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const authenticated = await support.isAuthenticated(env, config, instanceId, instanceEnvNames(input.environment, env)); return { state: "available", version: probe.version, authenticated, ...apiKeyAccount(env, support.credentialEnv, authenticated) };
       };
 
-    /** Memory upkeep's one-shot: a fresh process and session, no MCP servers, an empty folder, and
-     * every tool, file or permission request refused. */
+    /** Memory upkeep's one-shot: a fresh process and session, no MCP servers, an empty folder, every tool/permission refused. */
       const generateMemoryText = async (prompt: string, options: TextGenerationOptions = {}): Promise<string> => {
         if (startupModelRefresh) await startupModelRefresh;
         const turnConfig: AcpConfig = { ...config, fullAuto: false };
@@ -1460,8 +1441,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         }
         const cwd = mkdtempSync(join(await support.oneShotFolder?.() ?? tmpdir(), "omb-acp-memory-"));
         try {
-          const turn = { threadId: `memory-text-${newId()}`, text: prompt, approvalMode: "ask", cwd } as SendTurnInput;
-          const model = applyOneShotEnv(support, env, options, catalog.models, { fullAuto: false, cwd, threadId: turn.threadId, mcpServers: [] });
+          const turnModel = oneShotTurnModel(support, env, options, catalog.models);
+          const turn = { threadId: `memory-text-${newId()}`, text: prompt, approvalMode: "ask", cwd, ...(turnModel ? { model: turnModel } : {}) } as SendTurnInput;
+          const model = applyOneShotEnv(support, env, options, catalog.models, { fullAuto: false, cwd, threadId: turn.threadId, mcpServers: [], ...(turnModel ? { model: turnModel } : {}) });
           const launch: { command: string; args?: string[]; env?: Record<string, string | undefined>; ro?: readonly string[] } = support.resolveCommand ? await support.resolveCommand(env, turnConfig, instanceId) : { command: turnConfig.cli };
           const spawnEnv = launch.env ?? env;
           return await runAcpOneShot({
@@ -1472,9 +1454,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             env: spawnEnv,
             cwd,
             prompt,
-            defaultModel: catalog.models.default, model,
+            defaultModel: turnModel ?? catalog.models.default, model, ...(turnModel ? { configuredModel: turnModel } : {}),
             pickAuthMethod: (methods) => support.skipsAuthenticate?.(instanceId) ? null : support.pickAuthMethod(methods, spawnEnv),
-            authRequired: !support.skipsAuthenticate?.(instanceId) && (support.authFailure === "fail-request" ? "if-requested" : support.authFailure === "fail"),
+            authRequired: turnModel && skipSubscriptionAuthForLocalInject(options.model ?? options.fallback?.model) ? false : !support.skipsAuthenticate?.(instanceId) && (support.authFailure === "fail-request" ? "if-requested" : support.authFailure === "fail"),
             loginNote: support.loginNote, signInRefused: support.skipsAuthenticate?.(instanceId) && support.signInRequest ? (error) => { const refused = support.signInRequest!.rpcError(error, instanceId); if (refused) support.signInRequest!.required(instanceId); return refused; } : undefined,
             clientCapabilitiesMeta: support.clientCapabilitiesMeta,
             ...(support.configureSession ? {
