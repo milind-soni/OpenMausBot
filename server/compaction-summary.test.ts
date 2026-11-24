@@ -203,3 +203,17 @@ it("says it is summarizing from the start of a summary until it is written, fail
   await draftSummary(history, { signal: new AbortController().signal, onSummarizing, generateText: () => Promise.reject(new Error("helper down")) });
   expect(seen).toEqual([true, false, true, false, true, false]);
 });
+
+it("forwards threadId to generateText when compacting a conversation thread", async () => {
+  const received: Array<{ threadId?: string }> = [];
+  const summary = await draftSummary(history, {
+    signal: new AbortController().signal,
+    threadId: "thr-compact-1",
+    generateText: async (_prompt, options) => {
+      received.push({ threadId: options?.threadId });
+      return "Thread summary.";
+    },
+  });
+  expect(summary).toContain("Thread summary.");
+  expect(received).toEqual([{ threadId: "thr-compact-1" }]);
+});

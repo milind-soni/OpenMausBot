@@ -58,6 +58,10 @@ const MAX_HEADER_NAME_LENGTH = 128;
 const MAX_HEADER_VALUE_LENGTH = 2048;
 const HEADER_TOKEN_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 const CONTROL_CHARS = /\p{Cc}/u;
+const hasNonByteChar = (value: string): boolean => {
+  for (let i = 0; i < value.length; i++) if (value.charCodeAt(i) > 0xff) return true;
+  return false;
+};
 const PLACEHOLDER_RE = /\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
 const PLACEHOLDER_TEST = /\{[A-Za-z_][A-Za-z0-9_]*\}/;
 const KNOWN_VARS = new Set<string>(RUNTIME_HEADER_VARIABLES);
@@ -102,8 +106,8 @@ function validateHeaderName(raw: unknown): string {
 
 function validateHeaderValue(raw: unknown, name: string): string {
   if (typeof raw !== "string") throw new CustomHeaderValidationError(`Header "${name}" value must be a string.`);
-  if (CONTROL_CHARS.test(raw)) {
-    throw new CustomHeaderValidationError(`Header "${name}" value cannot contain CR, LF, or control characters.`);
+  if (CONTROL_CHARS.test(raw) || hasNonByteChar(raw)) {
+    throw new CustomHeaderValidationError(`Header "${name}" value cannot contain CR, LF, control characters, or characters above U+00FF.`);
   }
   const value = raw.trim();
   if (!value) throw new CustomHeaderValidationError(`Header "${name}" value cannot be empty.`);
@@ -255,8 +259,8 @@ export function resolveCustomHeaders(
       }
       continue;
     }
-    if (CONTROL_CHARS.test(value)) {
-      throw new CustomHeaderError(`Cannot send custom header "${rule.name}": resolved value contains unsafe control characters.`);
+    if (CONTROL_CHARS.test(value) || hasNonByteChar(value)) {
+      throw new CustomHeaderError(`Cannot send custom header "${rule.name}": resolved value contains unsafe control characters or characters above U+00FF.`);
     }
     resolved[rule.name] = value;
   }

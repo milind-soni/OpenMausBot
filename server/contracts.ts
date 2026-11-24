@@ -590,6 +590,8 @@ export interface TextGenerationUsage {
 
 export interface TextGenerationOptions {
   signal?: AbortSignal;
+  /** Optional conversation thread identifier for one-shot calls tied to a thread (e.g. compaction summaries). */
+  threadId?: string;
   onUsage?: (usage: TextGenerationUsage) => void;
   /** One of this instance's models instead of the driver's quick-call choice: the helper model setting, and the setup
    * card's quick model (side-jobs.ts). */

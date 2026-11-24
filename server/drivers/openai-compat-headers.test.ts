@@ -44,7 +44,7 @@ describe("OpenAI-compatible custom headers config & resolution", () => {
       headers: [{ name: "X-Thread", value: "{threadId}" }, { name: "x-thread", value: "{botId}" }],
     })).toThrow(/duplicate/i);
 
-    for (const badValue of ["", "   ", "val\r\nX-Inject: 1", "val\nnext", "val\0zero", "{unknownVar}", "prefix-{thredId}"]) {
+    for (const badValue of ["", "   ", "val\r\nX-Inject: 1", "val\nnext", "val\0zero", "東京", "em—dash", "{unknownVar}", "prefix-{thredId}"]) {
       expect(() => decodeCustomHeaders({ enabled: true, headers: [{ name: "X-Ok", value: badValue }] })).toThrow(CustomHeaderValidationError);
     }
   });
@@ -75,6 +75,8 @@ describe("OpenAI-compatible custom headers config & resolution", () => {
     expect(() => resolveCustomHeaders(on, { turnId: "turn-1", providerInstanceId: "openai-compat-1" }))
       .toThrow(CustomHeaderError);
     expect(() => resolveCustomHeaders(on, { threadId: "t1\r\nInject: 1", turnId: "turn-1", providerInstanceId: "p1" }))
+      .toThrow(CustomHeaderError);
+    expect(() => resolveCustomHeaders(on, { threadId: "thr-東京", turnId: "turn-1", providerInstanceId: "p1" }))
       .toThrow(CustomHeaderError);
   });
 

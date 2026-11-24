@@ -1417,10 +1417,12 @@ describe("opt-in custom OpenAI-compatible request headers", () => {
       expect(completed.some((e) => JSON.stringify(e).includes("gw-secret-token-xyz"))).toBe(false);
       expect(completed.some((e) => JSON.stringify(e).includes("[redacted]"))).toBe(true);
 
-      // 3. Non-streaming generateText without threadId fails cleanly when {threadId} is required, never sending an empty header
+      // 3. Non-streaming generateText without threadId fails cleanly when {threadId} is required, and succeeds when compaction passes threadId
       const countBeforeFail = seenRequests.length;
       await expect(onInst.generateText!("summarize")).rejects.toThrow(/threadId/);
       expect(seenRequests).toHaveLength(countBeforeFail);
+      await expect(onInst.generateText!("summarize", { threadId: "thread-compact" })).resolves.toBe("non-stream ok");
+      expect(seenRequests.at(-1)!.headers["x-maus-thread-id"]).toBe("thread-compact");
 
       // Non-streaming generateText with optional {threadId} omits it cleanly and still sends static/{providerInstanceId} headers
       const optInst = await OpenAICompatDriver.create({

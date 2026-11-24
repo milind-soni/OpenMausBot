@@ -906,7 +906,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               threadId: turn.threadId, turnId, model,
               usage, hasUsage, failure, toolCalls: seenCalls.size,
               task: turn.text, updates: deliveredAsides,
-              messages: request ? messages.slice(messages.indexOf(request) + 1) : [],
+              messages: request ? messages.slice(messages.indexOf(request) + 1).map((msg) => JSON.parse(JSON.stringify(msg, (_key, part) => typeof part === "string" ? safeText(part) : part))) : [],
             });
             if (handoffPath) emit({ ...base(turn.threadId, turnId), type: "cap.exhausted", handoffPath, reason: continuable });
           }
@@ -974,13 +974,14 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         return () => listeners.delete(listener);
       },
     },
-    generateText: async (prompt, { signal, onUsage, model: named, checkModel } = {}) => {
+    generateText: async (prompt, { signal, onUsage, model: named, checkModel, threadId } = {}) => {
       const model = named ?? options.generateModel?.() ?? options.models().default;
       signal?.throwIfAborted();
       checkModel?.(model);
-      const headerSecrets = customHeaderSecrets(options.customHeaders, { providerInstanceId: input.instanceId });
+      const headerContext: RuntimeHeaderContext = { ...(threadId ? { threadId } : {}), providerInstanceId: input.instanceId };
+      const headerSecrets = customHeaderSecrets(options.customHeaders, headerContext);
       try {
-        const { text, reasoning, toolCalls } = await complete([{ role: "user", content: prompt }], model, false, signal, undefined, [], onUsage, undefined, undefined, { providerInstanceId: input.instanceId });
+        const { text, reasoning, toolCalls } = await complete([{ role: "user", content: prompt }], model, false, signal, undefined, [], onUsage, undefined, threadId, headerContext);
         if (toolCalls.length) throw new ChatProtocolError("provider returned tool calls to a text-only helper");
         return maskCustomSecrets(text.trim() ? text : reasoning, headerSecrets);
       } catch (error) {

@@ -456,6 +456,46 @@ describe("a server's reply wait", () => {
       method: "PATCH", headers: { "content-type": "application/json" },
       body: JSON.stringify({ customHeaders: { enabled: true, headers: [] } }),
     })).status).toBe(403);
+
+    const inheritedCfg = {
+      openaiCompat: {
+        url: "https://gw.example/v1",
+        customHeaders: {
+          enabled: true,
+          headers: [{ name: "X-Workspace-Secret", value: "ws-secret-value-123", required: true, secret: true }],
+        },
+      },
+      instances: { openaiCompat: { driver: "openai-compat", config: {} } },
+    };
+    const inheritedPersisted: Array<Record<string, { driver: string; config?: Record<string, unknown> }>> = [];
+    const inheritedSrv = await serve({
+      cfg: inheritedCfg as unknown as AppConfig,
+      persistProviderInstance: async (_id: string, instances: typeof inheritedPersisted[number]) => {
+        inheritedPersisted.push(structuredClone(instances));
+        (inheritedCfg as { instances: unknown }).instances = instances;
+      },
+    });
+    await inheritedSrv.call("PATCH", "/api/instances/openaiCompat", { replyWaitMinutes: 15 });
+    expect(inheritedPersisted.at(-1)!.openaiCompat!.config).toEqual({ replyWaitMinutes: 15 });
+    await inheritedSrv.call("PATCH", "/api/instances/openaiCompat", {
+      customHeaders: {
+        enabled: true,
+        headers: [
+          { name: "X-Workspace-Secret", keepExisting: true, secret: true },
+          { name: "X-Maus-Thread-ID", value: "{threadId}" },
+        ],
+      },
+    });
+    expect(inheritedPersisted.at(-1)!.openaiCompat!.config).toMatchObject({
+      replyWaitMinutes: 15,
+      customHeaders: {
+        enabled: true,
+        headers: [
+          { name: "X-Workspace-Secret", value: "ws-secret-value-123", required: true, secret: true },
+          { name: "X-Maus-Thread-ID", value: "{threadId}", required: true, secret: false },
+        ],
+      },
+    });
   });
 });
 

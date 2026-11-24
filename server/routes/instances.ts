@@ -27,7 +27,7 @@ import {
   withClaudeBedrockInfo,
 } from "../claude-bedrock.ts";
 import { updateClaudeCli } from "../claude-update.ts";
-import { persistableInstanceConfigs, saveConfig, withInstanceCli, type AppConfig } from "../config.ts";
+import { instanceConfigs, persistableInstanceConfigs, saveConfig, withInstanceCli, type AppConfig } from "../config.ts";
 import { addEndpoint, addEndpointSchema, changeEndpointAddress, endpointBaseUrl, endpointModelsReadable, isAddedEndpoint, localServerAlreadyAdded, withEndpointUrls } from "../openai-compat-endpoints.ts";
 import { CustomHeaderValidationError, mergeCustomHeadersPatch } from "../drivers/openai-compat-headers.ts";
 import { findOllama, probeOllama } from "../drivers/ollama.ts";
@@ -536,10 +536,13 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           if (!ownerOrAdmin(auth)) return json(res, 403, { error: "Only the owner or an admin can configure custom headers." });
           if (entry.driver !== "openai-compat") return json(res, 400, { error: "Custom request headers are available for OpenAI-compatible instances only." });
           const { customHeaders: previous, ...rest } = (entry.config ?? {}) as Record<string, unknown>;
+          const effectivePrevious = previous ?? (isAddedEndpoint(instanceId, entry)
+            ? undefined
+            : (instanceConfigs(cfg)[instanceId]?.config as { customHeaders?: unknown } | undefined)?.customHeaders);
           try {
             entry.config = body.customHeaders === null
               ? rest
-              : { ...rest, customHeaders: mergeCustomHeadersPatch(body.customHeaders, previous) };
+              : { ...rest, customHeaders: mergeCustomHeadersPatch(body.customHeaders, effectivePrevious) };
           } catch (error) {
             if (error instanceof CustomHeaderValidationError) return json(res, 400, { error: error.message });
             throw error;
