@@ -15,7 +15,9 @@ export function threadTitleFrom(title?: string): string {
 export function unreadTargetTask(bot: BotRecord, active: TaskRecord | undefined, unread: boolean | undefined): TaskRecord | undefined {
   if (unread !== true) return active && !active.routineRunId ? active : undefined;
   if (active && !active.routineRunId && active.archivedAt === undefined) return active;
-  const fallbackId = mainThread(bot.tasks ?? [], bot.threadId, bot.mainThreadChoice);
+  // The main thread as saved for the bot: the one kept for it under its current choice, else that choice.
+  const kept = bot.mainThreadKept?.id && bot.mainThreadKept.under === bot.mainThreadChoice ? bot.mainThreadKept.id : bot.mainThreadChoice;
+  const fallbackId = mainThread(bot.tasks ?? [], kept);
   return bot.tasks?.find((task) => task.threadId === fallbackId && !task.routineRunId && task.archivedAt === undefined);
 }
 
