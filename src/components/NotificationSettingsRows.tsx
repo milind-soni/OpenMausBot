@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
+import { previewAppSound, SOUND_STYLES, type SoundChoice } from "@/lib/app-sounds";
 import { t } from "@/lib/i18n";
 import {
   setFinishedNotifications,
   setNotificationFeed,
-  setNotificationSounds,
+  setSoundChoice,
   useFinishedNotifications,
   useNotificationFeed,
-  useNotificationSounds,
+  useSoundChoice,
 } from "@/lib/notification-preferences";
 import { requestNotificationPermission } from "@/lib/notify";
+import { Select } from "./Select";
 import { SettingRow, Switch } from "./SettingsPrimitives";
 
 export function NotificationRows({ simple = false }: { simple?: boolean }) {
@@ -64,15 +66,26 @@ export function DeviceNotificationsRow({ simple = false }: { simple?: boolean })
   );
 }
 
+const SOUND_CHOICES: readonly SoundChoice[] = [...SOUND_STYLES, "off"];
+
 export function NotificationSoundsRow({ simple = false }: { simple?: boolean }) {
-  const enabled = useNotificationSounds();
+  const choice = useSoundChoice();
   return (
-    <SettingRow title={t("settings.notificationSounds.title")} subtitle={t(simple ? "settings.simple.notificationSounds" : "settings.notificationSounds.subtitle")}>
-      <Switch
-        checked={enabled}
-        aria-label={t("settings.notificationSounds.play")}
-        onClick={() => setNotificationSounds(!enabled)}
-      />
+    <SettingRow title={t("settings.appSounds.title")} subtitle={t(simple ? "settings.simple.appSounds" : "settings.appSounds.subtitle")}>
+      <Select size="sm" className="w-full max-w-[240px]"
+        value={choice}
+        aria-label={t("settings.appSounds.choose")}
+        onChange={(event) => {
+          const next = SOUND_CHOICES.find((one) => one === event.target.value);
+          if (!next) return;
+          setSoundChoice(next);
+          if (next !== "off") previewAppSound(next);
+        }}
+      >
+        {SOUND_CHOICES.map((one) => (
+          <option key={one} value={one}>{t(`settings.appSounds.${one}`)}</option>
+        ))}
+      </Select>
     </SettingRow>
   );
 }

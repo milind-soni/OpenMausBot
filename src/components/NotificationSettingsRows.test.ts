@@ -3,17 +3,18 @@ import { act, createElement, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
-import { DeviceNotificationsRow } from "./NotificationSettingsRows";
+import { DeviceNotificationsRow, NotificationSoundsRow } from "./NotificationSettingsRows";
 
-const fixture = vi.hoisted(() => ({ optedIn: true, setFinishedNotifications: vi.fn() }));
+const fixture = vi.hoisted(() => ({ optedIn: true, setFinishedNotifications: vi.fn(), setSoundChoice: vi.fn(), previewAppSound: vi.fn() }));
 vi.mock("@/lib/notification-preferences", () => ({
-  useNotificationSounds: () => true,
-  setNotificationSounds: vi.fn(),
+  useSoundChoice: () => "click",
+  setSoundChoice: fixture.setSoundChoice,
   useNotificationFeed: () => false,
   setNotificationFeed: vi.fn(),
   useFinishedNotifications: () => fixture.optedIn,
   setFinishedNotifications: fixture.setFinishedNotifications,
 }));
+vi.mock("@/lib/app-sounds", () => ({ SOUND_STYLES: ["click", "glass", "retro"], previewAppSound: fixture.previewAppSound }));
 
 let root: Root | undefined;
 let container: HTMLDivElement;
@@ -104,4 +105,21 @@ it("ignores hidden pages and stops listening once unmounted", async () => {
   await resume("visibilitychange");
   await resume("focus");
   expect(readPermission).not.toHaveBeenCalled();
+});
+
+it("saves a sound style and plays a sample of it, but plays nothing when switched off", async () => {
+  await act(async () => root!.render(createElement(NotificationSoundsRow)));
+  const picker = container.querySelector("select")!;
+  expect(picker.value).toBe("click");
+  expect([...picker.options].map((option) => option.textContent)).toEqual(["Click", "Glass", "Retro", "Off"]);
+  const pick = async (value: string) => {
+    picker.value = value;
+    await act(async () => picker.dispatchEvent(new Event("change", { bubbles: true })));
+  };
+  await pick("retro");
+  expect(fixture.setSoundChoice).toHaveBeenCalledWith("retro");
+  expect(fixture.previewAppSound).toHaveBeenCalledWith("retro");
+  await pick("off");
+  expect(fixture.setSoundChoice).toHaveBeenLastCalledWith("off");
+  expect(fixture.previewAppSound).toHaveBeenCalledOnce();
 });
