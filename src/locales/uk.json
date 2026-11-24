@@ -4254,12 +4254,9 @@
   "skillBurger.list.removed": "{name} вилучено.",
   "skillBurger.list.removeFailed": "Не вдалося вилучити навичку. Спробуйте ще раз.",
   "skillBurger.list.loadFailed": "Не вдалося завантажити збережені навички.",
-  "skillBurger.everyChat": "Використовувати в кожному чаті",
-  "skillBurger.everyChatFailed": "Не вдалося змінити, де використовується цей Skill Burger. Спробуйте ще раз.",
   "skillBurger.renameFailed": "Не вдалося перейменувати цей Skill Burger. Спробуйте ще раз.",
   "skillBurger.menu.aria": "Більше для {name}",
   "skillBurger.menu.rename": "Перейменувати…",
-  "skillBurger.card.everyChat": "Кожен чат",
   "skillBurger.page.empty": "Тут з’являються Skill Burger ваших ботів.",
   "chat.notice.savedToThread": "Збережено в цій гілці",
   "memoryPage.thisThread": "Ця гілка",
@@ -4300,5 +4297,11 @@
   "chat.botExchange.gone": "Цей обмін не можна зупинити звідси.",
   "chat.botExchange.stopFailed": "Не вдалося зупинити. Перевірте з’єднання і спробуйте ще раз.",
   "chat.botExchange.waiting": "{helper} ще не почав. Чекає своєї черги.",
-  "chat.botExchange.unknown": "Незрозуміло, які повідомлення з розмови з {helper} належать до цього обміну, тому жодне не показано."
+  "chat.botExchange.unknown": "Незрозуміло, які повідомлення з розмови з {helper} належать до цього обміну, тому жодне не показано.",
+  "skillBurger.pill.cooking": "Готується… {count}",
+  "skillBurger.pill.add": "Додати",
+  "skillBurger.pill.running": "Виконується… {count}",
+  "skillBurger.pill.stopped": "Зупинено",
+  "skillBurger.pill.addPath": "Додати шлях",
+  "skillBurger.card.madeBy": "Створено: {name}"
 }

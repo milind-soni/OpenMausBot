@@ -18,6 +18,9 @@ export function runText(envelope: Json): string {
   const error = envelope.error as Json | undefined;
   const defaults = Array.isArray(envelope.defaults) ? (envelope.defaults as Json[]).map((one) => `${String(one.name)} = ${JSON.stringify(one.value)}`) : [];
   const reused = defaults.length ? [`The request didn't give ${defaults.length > 1 ? "these inputs" : "this input"}, so the run used the saved ${defaults.length > 1 ? "values" : "value"}: ${defaults.join("; ")}. Tell the person.`, ""] : [];
+  if (error?.type === "needs_connection") {
+    return [String(error.message), "", "Offer the person a connection for it the usual way (your connected-apps tools show them a Connect card), then run the Skill Burger again once it's connected. Don't do its steps by hand meanwhile."].join("\n");
+  }
   if (error) {
     const goOn = typeof error.resumeToken === "string" ? ` Once the cause is fixed, call run_workflow with resume ${JSON.stringify(error.resumeToken)} to go on from that step.` : "";
     return [...reused, `The Skill Burger stopped: ${String(error.message)}`, ...lines, "", `Nothing after that step ran, and no step is tried twice by itself. Tell the person what failed; don't redo the step by hand unless they ask.${goOn}`].join("\n");
