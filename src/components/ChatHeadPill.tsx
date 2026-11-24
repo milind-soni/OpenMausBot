@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { Bot } from "@/state/store"; import { useStoreSelector } from "@/state/store-select";
 import { awayFromMainThread } from "@/state/thread-navigation";
+import { useThreadTabsShown } from "./ThreadTabStrip";
 import { BotAvatar } from "./Avatar";
 import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated";
 import { sidebarBotActivityTasks } from "./SidebarBotActivity";
@@ -47,6 +48,7 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
   const conversation = !awayFromMainThread(bot, false) ? (privacy?.kind === "shared" ? t("task.sharedChat") : null)
     : !title || title === UNTITLED ? t("task.untitledChat") : localizedTaskTitle(title);
   const label = t("chat.openProfileAria", { name: bot.name });
+  const tabsName = useThreadTabsShown(bot.id);
   return (
     <button
       type="button"
@@ -63,8 +65,8 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
       <span dir="auto" className="min-w-0 truncate text-[14px] font-medium leading-5">{bot.name}</span>
       {conversation && (
         <>
-          <ChevronRight size={12} aria-hidden="true" className="shrink-0 text-ink-tertiary" />
-          <span data-chathead-conversation dir="auto" className="min-w-0 max-w-[180px] truncate text-[14px] font-medium leading-5 text-ink-secondary">{conversation}</span>
+          <ChevronRight size={12} aria-hidden="true" className={cn("shrink-0 text-ink-tertiary", tabsName && "md:hidden")} />
+          <span data-chathead-conversation dir="auto" className={cn(tabsName && "md:hidden", "min-w-0 max-w-[180px] truncate text-[14px] font-medium leading-5 text-ink-secondary")}>{conversation}</span>
         </>
       )}
       {privacyLabel && (

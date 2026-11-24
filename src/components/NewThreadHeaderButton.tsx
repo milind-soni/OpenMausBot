@@ -2,11 +2,11 @@ import { Plus } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { useStoreDispatch } from "@/state/store-select";
-import { useHeaderPlusGivesWay } from "./ThreadTabStrip";
+import { useThreadTabsShown } from "./ThreadTabStrip";
 
 export function NewThreadHeaderButton({ botId }: { botId: string }) {
   const dispatch = useStoreDispatch();
-  const givesWay = useHeaderPlusGivesWay(botId);
+  const givesWay = useThreadTabsShown(botId);
   return (
     <button
       type="button"

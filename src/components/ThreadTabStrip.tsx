@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type WheelEvent as ReactWheelEvent } from "react";
 import { Pin, Plus, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -7,18 +7,19 @@ import { localizedTaskTitle } from "@/lib/task-title";
 import { useFeature } from "@/lib/use-feature";
 import type { Bot } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
-import { useCaptionChrome } from "./DesktopCapabilities";
+import { useCaptionChrome, useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 import { reducedMotion } from "./MenuMotion";
 import { botShowsTabs, neighbourOf, openTabId, showsTabs, threadTabs, type ThreadTab } from "./thread-tabs";
 import { useTabMotion } from "./thread-tab-motion";
 import { UndoToast, useUndoToast } from "./UndoToast";
 
-const TAB = "thread-tab group/tab relative flex h-7 min-w-24 max-w-42 items-center rounded-t-xl ps-3 pe-1 text-[13px] leading-[18px] outline-none transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
+const TAB = "thread-tab group/tab relative flex h-7 min-w-24 max-w-42 shrink items-center rounded-t-xl ps-3 pe-1 text-[13px] leading-[18px] outline-none transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
 const CLOSE = "pointer-events-none ms-1 flex size-5 shrink-0 items-center justify-center rounded-full text-ink-tertiary opacity-0 transition-opacity duration-[120ms] hover:bg-ink/[0.08] hover:text-ink group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-focus-within/tab:pointer-events-auto group-focus-within/tab:opacity-100 touch:pointer-events-auto touch:opacity-100 motion-reduce:transition-none";
 const FADE = 24;
 
-/** Whether the strip shows for this bot, so the chat header leaves New thread to the strip in windows wide enough for it. */
-export function useHeaderPlusGivesWay(botId: string): boolean {
+/** Whether the strip shows for this bot: the chat header then leaves New thread and the open thread's name to it, in
+ * windows wide enough for the strip. */
+export function useThreadTabsShown(botId: string): boolean {
   const on = useFeature("threadTabs");
   const shown = useStoreSelector((state) => botShowsTabs(state.bots.find((bot) => bot.id === botId), state.newChat));
   return on && shown;
@@ -45,6 +46,8 @@ function edgeFade(element: HTMLElement): string | undefined {
 function Strip({ bot, tabs }: { bot: Bot; tabs: ThreadTab[] }) {
   const dispatch = useStoreDispatch();
   const { dragProps } = useCaptionChrome();
+  const { capabilities } = useDesktopCapabilities();
+  const underCaptionButtons = capabilities.windowChrome === "win-caption" && !windowFramed(capabilities);
   const scroller = useRef<HTMLDivElement>(null);
   const { shown, entering } = useTabMotion(tabs, scroller);
   const active = openTabId(bot);
@@ -118,6 +121,10 @@ function Strip({ bot, tabs }: { bot: Bot; tabs: ThreadTab[] }) {
       if (next) focusTab(next);
     }
   };
+  const scrollSideways = (event: ReactWheelEvent<HTMLDivElement>) => {
+    if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+    event.currentTarget.scrollLeft += event.deltaY;
+  };
   const onAuxClick = (event: ReactMouseEvent, tab: ThreadTab) => {
     if (event.button !== 1 || !canWrite) return;
     event.preventDefault();
@@ -125,8 +132,8 @@ function Strip({ bot, tabs }: { bot: Bot; tabs: ThreadTab[] }) {
   };
 
   return (
-    <div data-thread-tabs={bot.id} {...dragProps} className="relative z-[1] flex h-9 shrink-0 items-end bg-panel max-md:hidden">
-      <div ref={scroller} role="tablist" aria-label={t("task.namedList", { name: bot.name })} onKeyDown={onKey} onScroll={measure}
+    <div data-thread-tabs={bot.id} {...dragProps} className={cn("thread-strip relative z-[1] flex h-9 shrink-0 items-end max-md:hidden", underCaptionButtons && "pe-36")}>
+      <div ref={scroller} role="tablist" aria-label={t("task.namedList", { name: bot.name })} onKeyDown={onKey} onScroll={measure} onWheel={scrollSideways}
         style={{ maskImage: fade, WebkitMaskImage: fade }}
         className="flex min-w-0 items-end overflow-x-auto overflow-y-hidden px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {shown.map((tab) => {
@@ -138,7 +145,7 @@ function Strip({ bot, tabs }: { bot: Bot; tabs: ThreadTab[] }) {
               data-entering={entering.has(tab.threadId) ? "" : undefined} data-leaving={tab.leaving ? "" : undefined} aria-hidden={tab.leaving || undefined}
               onClick={() => { if (renaming !== tab.threadId) open(tab); }} onDoubleClick={() => startRename(tab)}
               onMouseDown={(event) => { if (event.button === 1) event.preventDefault(); }} onAuxClick={(event) => onAuxClick(event, tab)}
-              className={cn(TAB, selected ? "shrink-0 text-ink" : "shrink cursor-default text-ink-secondary hover:text-ink")}>
+              className={cn(TAB, selected ? "text-ink" : "cursor-default text-ink-secondary hover:text-ink")}>
               {renaming === tab.threadId ? (
                 <input autoFocus dir="auto" value={draft} maxLength={80} aria-label={t("task.renameAria")}
                   onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDraft(event.target.value)}
@@ -168,7 +175,7 @@ function Strip({ bot, tabs }: { bot: Bot; tabs: ThreadTab[] }) {
       </div>
       {canWrite && (
         <button type="button" data-thread-tabs-new aria-label={t("task.newShort")} title={t("task.newShort")} onClick={() => dispatch({ type: "newTask", botId: bot.id })}
-          className="mb-0.5 ms-0.5 flex size-7 shrink-0 items-center justify-center rounded-full text-ink-secondary transition-colors duration-[120ms] hover:bg-ink/[0.06] hover:text-ink active:bg-ink/[0.08] motion-reduce:transition-none">
+          className="ms-0.5 flex size-7 shrink-0 items-center justify-center rounded-full text-ink-secondary transition-colors duration-[120ms] hover:bg-ink/[0.06] hover:text-ink active:bg-ink/[0.08] motion-reduce:transition-none">
           <Plus size={16} aria-hidden="true" />
         </button>
       )}

@@ -3898,8 +3898,9 @@ button:disabled.bg-danger {
 .burger-fold > ol { overflow: hidden auto; }
 @media (prefers-reduced-motion: reduce) { .burger-fold { transition: none; } }
 :root[data-reduced-motion="true"] .burger-fold { transition: none; }
-/* Thread tabs: the open tab is the chat's own ground, so it runs into the chat below, and its foot curves out into the
+/* Thread tabs: the strip is the chat's ground with a touch of ink, and the open tab is the chat's own ground, so it runs into the chat below, and its foot curves out into the
    strip on both sides. Separators sit between closed tabs only, and give way under the pointer. */
+.thread-strip { background-color: color-mix(in srgb, var(--color-ink) 4%, var(--color-app)); }
 .thread-tab[aria-selected="true"] { background: var(--color-app); }
 .thread-tab[aria-selected="true"]::before,
 .thread-tab[aria-selected="true"]::after {
