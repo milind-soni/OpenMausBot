@@ -18,6 +18,14 @@ export function installWorkspaceWindows({ primary, canOpenPlace, places, profile
     for (const view of views.values()) if (matches(view)) view.win.destroy();
   }
 
+  function stopIfUnused(context) {
+    if (!context?.owner) return;
+    for (const view of views.values()) {
+      if (view.context === context) return;
+    }
+    context.owner.controller.abort();
+  }
+
   function server(dir, name, profile) {
     const current = servers.get(dir);
     if (current) return current.ready;
@@ -41,10 +49,11 @@ export function installWorkspaceWindows({ primary, canOpenPlace, places, profile
       runtime.allowSession(browser);
       const context = { dir, name, origin: runtime.origin, browser, owner };
       owner.context = context;
+      const websocketOrigin = runtime.origin.replace(/^http:/, "ws:");
       browser.webRequest.onBeforeSendHeaders((request, answer) => {
         const target = new URL(request.url);
         const ours = views.get(request.webContentsId)?.context === context && owner.context === context && !controller.signal.aborted;
-        const destination = target.origin === runtime.origin || target.origin === runtime.origin.replace(/^http:/, "ws:");
+        const destination = target.origin === runtime.origin || target.origin === websocketOrigin;
         answer({ requestHeaders: ours && destination ? { ...request.requestHeaders, [auth.DESKTOP_MUTATION_HEADER]: runtime.token } : request.requestHeaders });
       });
       return context;
@@ -84,7 +93,7 @@ export function installWorkspaceWindows({ primary, canOpenPlace, places, profile
     win.setMenu(null);
     win.once("closed", () => {
       views.delete(id);
-      if (context.owner && ![...views.values()].some(other => other.context === context)) context.owner.controller.abort();
+      stopIfUnused(context);
     });
     view.loaded = win.loadURL(url.href);
     try {
@@ -120,9 +129,7 @@ export function installWorkspaceWindows({ primary, canOpenPlace, places, profile
     }
     const context = dir === runningDir() ? primary() : await server(dir, place.name, place.profile);
     try { return await open(context, null, null); }
-    finally {
-      if (context?.owner && ![...views.values()].some(view => view.context === context)) context.owner.controller.abort();
-    }
+    finally { stopIfUnused(context); }
   }
   handle("workspace-window:place", openPlace);
 

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import test from "node:test";
 
-import { installServerSessions, reportOwnListeners, reserveProfilePort, targetsServer } from "./server-session.mjs";
+import { installServerSessions, reportOwnListeners, reserveProfilePort } from "./server-session.mjs";
 
 const SERVER_PORT = 48799;
 
@@ -49,7 +49,7 @@ test("the app window's own requests to the server carry the owner header on http
 test("no session but the app window's may reach the server, in any spelling of this machine", async () => {
   const { defaultSession, created } = install();
   const viewer = created(fakeSession());
-  for (const host of ["127.0.0.1", "127.1.2.3", "localhost", "app.localhost", "[::1]", "[::ffff:127.0.0.1]", "0.0.0.0"]) {
+  for (const host of ["127.0.0.1", "127.1.2.3", "2130706433", "localhost", "app.localhost", "[::1]", "[::ffff:127.0.0.1]", "0.0.0.0"]) {
     for (const scheme of ["http", "ws", "https", "wss"]) {
       assert.equal(await request(viewer, `${scheme}://${host}:${SERVER_PORT}/api/bots`), true, `${scheme} ${host}`);
     }
@@ -68,7 +68,6 @@ test("every session main creates gets the guard before it loads anything", () =>
   assert.equal(main.indexOf("installServerSessions({", install + 1), -1);
   assert.ok(main.indexOf("await showStartPlace();", install) > install, "installed before the first window");
   assert.doesNotMatch(main, /onBeforeSendHeaders/, "the owner header is added in one place");
-  assert.equal(targetsServer(`http://2130706433:${SERVER_PORT}/`, SERVER_PORT), true);
 });
 
 test("the server hears about every port this app listens on, and about new ones as they open", async () => {
@@ -85,17 +84,31 @@ test("the server hears about every port this app listens on, and about new ones 
   }
 });
 
-test("each profile server admits only its own session while its port is reserved", async () => {
+test("profile requests follow their port reservation as workspaces open and close", async (t) => {
   const { defaultSession, created } = install();
   const first = created(fakeSession()), second = created(fakeSession());
-  const port = SERVER_PORT + 1, url = `ws://127.0.0.1:${port}/`;
-  const reservation = reserveProfilePort(port);
-  try {
-    assert.equal(await request(first, url), true);
-    reservation.allow(first);
-    assert.equal(await request(first, url), false);
-    assert.equal(await request(second, url), true);
-    assert.equal(await request(defaultSession, url), true);
-    assert.equal(await request(first, `http://127.0.0.1:${SERVER_PORT}/`), true);
-  } finally { reservation.release(); }
+  const http = reserveProfilePort(80);
+  const https = reserveProfilePort(443);
+  t.after(() => { http.release(); https.release(); });
+
+  assert.equal(await request(first, "ws://localhost/"), true);
+  http.allow(first);
+  https.allow(second);
+  for (const [url, owner, other] of [
+    ["ws://127.0.0.1/", first, second],
+    ["http://[::1]:80/", first, second],
+    ["wss://app.localhost/", second, first],
+    ["https://2130706433:443/", second, first],
+  ]) {
+    assert.equal(await request(owner, url), false, url);
+    assert.equal(await request(other, url), true, url);
+    assert.equal(await request(defaultSession, url), true, url);
+  }
+  for (const url of ["http://example.com:80/", "ftp://localhost:80/", "invalid URL"]) {
+    assert.equal(await request(second, url), false, url);
+  }
+  assert.equal(await request(first, `http://127.0.0.1:${SERVER_PORT}/`), true);
+  http.release();
+  assert.equal(await request(second, "http://localhost/"), false);
+  assert.equal(await request(first, "https://localhost/"), true);
 });
