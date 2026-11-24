@@ -1,7 +1,7 @@
 // The Mac driver's watch as cua.mjs wires it: a real start, a socket that stops answering, and a real restart. Nothing here can
 // start the operator's own driver: attachStandalone stops at the app it can't find, and no child process exists to launch.
 import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import os, { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -68,7 +68,8 @@ afterEach(async () => {
 });
 const pause = (ms = 60) => new Promise((resolve) => setTimeout(resolve, ms));
 
-describe.skipIf(process.platform !== "darwin")("the Mac driver dies after it started", () => {
+// Darwin 24 is macOS 15: an older Mac stops at the gate before any of this.
+describe.skipIf(process.platform !== "darwin" || Number(os.release().split(".")[0]) < 24)("the Mac driver dies after it started", () => {
   it("leaves a driver that answers alone", async () => {
     await cua.startCua();
     await pause();
