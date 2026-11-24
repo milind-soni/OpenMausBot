@@ -383,6 +383,7 @@ async function computeVpsComputerStatus(
   cfg: AppConfig,
   botId: string,
   runner: VpsCommandRunner,
+  requireEnvironmentLabel = false,
 ): Promise<VpsComputerStatus> {
   const alias = vpsSshAlias(cfg);
   const status = emptyStatus(botId, alias);
@@ -459,7 +460,7 @@ async function computeVpsComputerStatus(
     status.managed =
       labels?.[VPS_MANAGED_LABEL] === "1" &&
       labels?.[VPS_CONTAINER_LABEL] === status.container_name &&
-      (environmentLabel === undefined || environmentLabel === vpsEnvironmentId());
+      ((!requireEnvironmentLabel && environmentLabel === undefined) || environmentLabel === vpsEnvironmentId());
     if (status.managed && status.container_id) raisePidsLimit(status.container_id, detail?.HostConfig?.PidsLimit, run);
     status.network = hasNoPublishedPorts(detail?.HostConfig, detail?.NetworkSettings?.Networks) ? "private" : "unsafe";
     status.mounts = hasNoHostMounts(detail ?? {}) ? "none" : "unsafe";
@@ -957,6 +958,7 @@ export async function vpsComputerAction(
   cfg: AppConfig,
   botId: string,
   runner: VpsCommandRunner = defaultRunner,
+  shouldStop?: () => boolean,
 ): Promise<VpsComputerStatus> {
   cfg = snapshotVpsConfig(cfg);
   const alias = vpsSshAlias(cfg);
@@ -967,8 +969,9 @@ export async function vpsComputerAction(
   const operation = async () => {
     invalidateVpsStatus(key);
     try {
-      const before = await computeVpsComputerStatus(cfg, botId, runner);
+      const before = await computeVpsComputerStatus(cfg, botId, runner, Boolean(shouldStop));
       if (!before.daemonUp) throw Object.assign(new Error(before.problem ?? "Docker over SSH is not reachable"), { status: 409 });
+      if (action === "stop" && shouldStop && (before.container !== "running" || !before.managed || !shouldStop())) return before;
       if (action === "provision" && before.ready) return before;
       if (action !== "provision" || before.container !== "running") stopDesktopTunnel(botId);
       const run = (args: string[], timeoutMs = 2 * 60_000) => runner(vpsDockerArgs(alias, args), { timeoutMs });

@@ -35,6 +35,7 @@ import type { AppConfig } from "./config.ts";
 import {
   VPS_CONTAINER_LABEL,
   VPS_ENVIRONMENT_LABEL,
+  vpsEnvironmentId,
   VPS_IMAGE,
   VPS_MANAGED_LABEL,
   VPS_VIEWER_LABEL,
@@ -517,6 +518,29 @@ describe("VPS computer", () => {
     expect(stopped.container).toBe("stopped");
     expect(stop.calls.some(({ args }) => args[2] === "stop" && args[3] === CONTAINER_ID)).toBe(true);
     expect(stop.calls.some(({ args }) => ["rm", "system", "reboot", "shutdown"].includes(args[2]!))).toBe(false);
+  });
+
+  it("leaves the desktop running when work arrives during idle-stop inspection", async () => {
+    const fake = fixture({ environmentId: vpsEnvironmentId() });
+    const result = await vpsComputerAction("stop", CONFIG, BOT_ID, fake.runner, () => false);
+    expect(result.container).toBe("running");
+    expect(fake.calls.some(({ args }) => ["stop", "rm"].includes(args[2]!))).toBe(false);
+  });
+
+  it("restarts the same container after an unattended idle stop", async () => {
+    const fake = fixture({ environmentId: vpsEnvironmentId() });
+    const stopped = await vpsComputerAction("stop", CONFIG, BOT_ID, fake.runner, () => true);
+    expect(stopped.container).toBe("stopped");
+    const resumed = await vpsComputerAction("provision", CONFIG, BOT_ID, fake.runner);
+    expect(resumed.ready).toBe(true);
+    expect(resumed.container_id).toBe(CONTAINER_ID);
+    expect(fake.calls.some(({ args }) => ["rm", "run"].includes(args[2]!))).toBe(false);
+  });
+
+  it.each([null, "another-installation"])("leaves an unverified idle desktop running (%s)", async environmentId => {
+    const fake = fixture({ environmentId });
+    await vpsComputerAction("stop", CONFIG, BOT_ID, fake.runner, () => true);
+    expect(fake.calls.some(({ args }) => ["stop", "rm"].includes(args[2]!))).toBe(false);
   });
 
   it("serializes concurrent provisioning for the same bot", async () => {

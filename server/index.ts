@@ -435,7 +435,7 @@ import { loopGuardSettings } from "./host/loop-guard.ts"; import { createUnatten
 import { claudeUserSkillsEnabled } from "./turn-settings.ts";
 import { addHeldSecretScrubber, redactSecretsInText, scrubHeldSecrets } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
-import { vpsConfigForBot, vpsSshAliasForBot } from "./vps-hosts.ts"; import { vpsContainerExec } from "./vps-exec.ts";
+import { vpsAliasesInPlay, vpsConfigForBot, vpsSshAliasForBot } from "./vps-hosts.ts"; import { vpsContainerExec } from "./vps-exec.ts";
 import { ROUTINE_RESTARTED, RoutineManager, type Routine, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts"; import { routineModelRefusal, routineThreadModel, type RoutineModelChecks } from "./routine-input.ts"; import { routineHistoryFor, routineRunsFor } from "./routine-run-window.ts"; import { routineRunLimits } from "./routine-run-limits.ts"; import { runTurnLive } from "./routine-turn-live.ts"; import { batchSaves, flushLaterSaves } from "./save-batch.ts"; import { restartCutStop } from "./memory-freeze-restart.ts";
 import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
 import { BROWSER_UPLOAD_TOOL, browserRuntimeEnv } from "./browser-runtime.ts";
@@ -5592,7 +5592,7 @@ function vpsThreadStarted(botId: string, threadId: string): void {
 function vpsThreadEnded(botId: string, threadId: string): void {
   const threads = activeVpsThreads.get(botId);
   if (!threads) return;
-  threads.delete(threadId);
+  if (threads.delete(threadId)) vpsIdles.get(botId)?.touch();
   if (!threads.size) activeVpsThreads.delete(botId);
 }
 const boatLifecycleBusyBots = new Set<string>();
@@ -5605,6 +5605,34 @@ const computerProviderConfigTransitions = new Set<RemoteComputerProvider>();
 const localVmIdleMs = () => localVmIdleTimeoutMinutes(cfg) * 60_000;
 const LOCAL_VM_DESKTOP_WAIT_MS = 90_000;
 const localVmIdles = new Map<string, ComputerIdleTimer>();
+const vpsIdles = new Map<string, ComputerIdleTimer>();
+
+function touchVpsIdle(bot: BotRecord): void {
+  const alias = vpsSshAliasForBot(cfg, bot);
+  if (!alias) return;
+  const id = bot.id;
+  vpsIdles.get(id)?.cancel();
+  const current = () => {
+    const owner = store.bot(id);
+    return owner && vpsSshAliasForBot(cfg, owner) === alias && vpsIdles.get(id) === timer;
+  };
+  const inUse = () => activeVpsThreads.has(id) || botHasActiveTurn(id) || Boolean(routines?.activeRunForBot(id))
+    || sharedVm.snapshot(id).held || Boolean(vps.vpsDesktopConnection(id)) || computerPreviews.has(id)
+    || computerProviderConfigTransitions.has("vps");
+  const timer: ComputerIdleTimer = new ComputerIdleTimer(localVmIdleMs(), () => inUse() || boatLifecycleBusyBots.has(id), async () => {
+    if (!current()) return;
+    const release = claimBotComputerLifecycle(id);
+    try {
+      const status = await vps.vpsComputerAction("stop", { vps: { sshAlias: alias } }, id, undefined, () => Boolean(current()) && !inUse());
+      if (status.container === "running") return "busy";
+    } finally {
+      release();
+    }
+  });
+  vpsIdles.set(id, timer);
+  timer.touch();
+}
+
 const meetingsHost = createMeetingsHost({ cfg, dataDir: DATA_DIR, store, startTurn: (botId, text, opts) => startTurn(botId, text, opts), threadBusy, power: () => cloudComputerPower, computerOwner: (bot) => botComputerControlKey(bot), routines: () => routines, log: (line) => console.warn(line) }, () => ({ personName: personNameIn, sendsFreely: (botId, threadId) => roomTurnLevels.forRequest(threadId, botId, () => sourceApprovalMode(botId, threadId)) === "full", outbound: () => outboundHold, markOutside: (threadId) => outsideLineage.mark(threadId), folder: (botId, threadId) => messageFileRootsForThread(botId, threadId).filter((root) => root !== ATTACHMENTS_DIR)[0] ?? null })); const cloudComputerPower = createCloudComputerPower({
   cfg, owners: managedBoatOwners, broadcast, log: line => console.warn(line), routines: () => routines?.listRoutines() ?? [], wakeTimedOut: (owner, boxId, ctx) => boatRecovery.wakeTimedOut(owner, boxId, ctx),
   routineComputer: routine => { const bot = store.bot(routine.botId); return bot && turnProvider(bot, routine.runOn) === "box" ? botComputerControlKey(bot) : null; },
@@ -5793,6 +5821,7 @@ async function mountBotVps(
   const vpsResource = `computer:vps:${vpsSshAliasForBot(cfg, bot)}:${bot.id}`;
   const remote = await (opts.start ? vps.vpsComputerAction("provision", botVpsConfig, bot.id) : vps.inspectVpsForAuto(botVpsConfig, bot.id));
   if (!remote?.ready || !remote.sshAlias) return { problem: remote?.problem ?? null, reachable: remote?.daemonUp === true, outdated: vpsDesktopOutdated(remote) };
+  touchVpsIdle(bot);
   const targetCfg = { ...cfg, vps: { sshAlias: remote.sshAlias } };
   const vpsMcp = vps.vpsComputerMcp(targetCfg, bot.id, remote.container_id ?? undefined);
   const vpsControl = controlIntegration(bot.id, owner.threadId, owner.generation);
@@ -6211,6 +6240,13 @@ function releaseLocalVmThread(threadId: string): void {
   if (localVmActiveThreads.get(target.key) === threadId) localVmActiveThreads.delete(target.key);
   localVmThreadTargets.delete(threadId);
 }
+
+void vps.listManagedVpsComputers(cfg, store.bots.map(bot => ({ botId: bot.id, name: bot.name, inUse: false })), undefined, vpsAliasesInPlay(cfg, store.bots)).then(inventory => {
+  for (const instance of inventory.instances) {
+    const bot = instance.ownerBotId && store.bot(instance.ownerBotId);
+    if (bot && instance.state === "running" && instance.vpsAlias === vpsSshAliasForBot(cfg, bot) && !vpsIdles.has(bot.id)) touchVpsIdle(bot);
+  }
+}).catch(error => console.warn("Could not recover VPS idle timers", error));
 
 void recoverLocalVms({ // at once: a queued or channel turn sent as the server listens finds a running VM
   mode: localVmMode(cfg), seats: localVmMaxInstances(cfg), bots: store.bots, seen: localVmSeen,
@@ -12211,7 +12247,7 @@ const postiz = createPostiz({ cfg: () => cfg, mcpOAuth, persistMcpServers: persi
   sharedComputers, sharedComputerControl, closeBrowser, browserEngineSwitched,
   hostedModels: Boolean(hostedModels),
   cloudHome: Boolean(CLOUD_HOME), cloudTeam: CLOUD_TEAM !== null, sharedMembership,
-  lendingEnabled: () => lendingEnabled() || ownerLends(), providerConfigs, localVmIdleMs, localVmIdles, localVmActiveThreads, localVmLifecycleBusy,
+  lendingEnabled: () => lendingEnabled() || ownerLends(), providerConfigs, localVmIdleMs, localVmIdles: { *values() { yield* localVmIdles.values(); yield* vpsIdles.values(); } }, localVmActiveThreads, localVmLifecycleBusy,
   localVmImageBusy: { get: () => localVmImageBusy },
   localVmModeChangeBusy: { set: (busy) => { localVmModeChangeBusy = busy; } },
   localVmModeChanging: sharedVm.modeChanging,
@@ -14975,11 +15011,18 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (m[2] === "join") {
             const remote = auth.kind !== "loopback";
             const result = await vps.vpsComputerJoin(vpsConfigForBot(cfg, bot), botId, undefined, remote);
+            touchVpsIdle(bot);
             return json(res, 200, { ...result, joinUrl: remote
               ? desktopViewerUrl(`vps/${botId}`, bot.threadId) : result.joinUrl });
           }
           const action = m[2] === "provision" ? "provision" : m[2] === "remove" ? "remove" : "stop";
-          return json(res, 200, await vps.vpsComputerAction(action, vpsConfigForBot(cfg, bot), botId));
+          const status = await vps.vpsComputerAction(action, vpsConfigForBot(cfg, bot), botId);
+          if (status.container === "running") touchVpsIdle(bot);
+          else {
+            vpsIdles.get(botId)?.cancel();
+            vpsIdles.delete(botId);
+          }
+          return json(res, 200, status);
         } finally {
           releaseComputerLifecycle();
           if (joinSettled) {
@@ -15198,6 +15241,7 @@ const gracefulShutdown = createGracefulShutdown({
       desktopViewer.closeAll();
       upgrades.close();
       for (const idle of localVmIdles.values()) idle.cancel();
+      for (const idle of vpsIdles.values()) idle.cancel();
       cloudComputerPower.close(); boatRecovery.close();
       vps.closeAllVpsDesktopTunnels();
       watchdog.stop();
