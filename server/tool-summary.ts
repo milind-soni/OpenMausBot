@@ -10,10 +10,15 @@ export function toolDetailPreview(value: unknown): string | undefined {
   const ERROR_KEY = /^error/i;
   const ERROR_TEXT_MAX = 500;
   const errorText = (value: unknown): string => {
+    let parsed = value;
+    if (typeof value === "string" && /^\s*[[{]/.test(value)) {
+      try { parsed = JSON.parse(value); }
+      catch {}
+    }
     let text: string;
-    if (typeof value === "string") text = value;
+    if (typeof parsed === "string") text = parsed;
     else {
-      try { text = JSON.stringify(redactSecrets(value)) ?? ""; }
+      try { text = JSON.stringify(redactSecrets(parsed)) ?? ""; }
       catch { return "[error not serializable]"; }
     }
     // Redact before the cut, like commandSummary, so a sliced credential cannot slip through.
@@ -59,10 +64,10 @@ export function toolDetailPreview(value: unknown): string | undefined {
     const entries = Object.entries(item);
     const result: Record<string, unknown> = Object.create(null);
     for (const [key, child] of entries.slice(0, 40)) {
-      result[key] = ERROR_KEY.test(key) && isErrorValue(child)
-        ? errorText(child)
-        : /token|secret|password|passwd|cookie|authorization|api.?key|(^|[_.-])keys?$/i.test(key)
+      result[key] = /token|secret|password|passwd|cookie|authorization|api.?key|(^|[_.-])keys?$/i.test(key)
         ? "[redacted]"
+        : ERROR_KEY.test(key) && isErrorValue(child)
+        ? errorText(child)
         : /^(data|base64|blob)$/i.test(key) && typeof child === "string"
           ? "[binary content omitted]"
           : bounded(child, depth + 1);

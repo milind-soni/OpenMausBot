@@ -51,6 +51,9 @@ describe("toolDetailPreview", () => {
     const long = JSON.parse(toolDetailPreview({ ok: false, error: `${"cause ".repeat(200)}` })!);
     expect(long.error.length).toBeLessThanOrEqual(500);
     expect(toolDetailPreview({ ok: false, error: `boom ghp_${"a".repeat(36)}` })).not.toContain("ghp_");
+    expect(toolDetailPreview({ ok: false, error: { message: "denied", password: "tiny" } })).not.toContain("tiny");
+    expect(toolDetailPreview({ ok: false, error: JSON.stringify({ message: "denied", password: "tiny" }) })).not.toContain("tiny");
+    expect(toolDetailPreview({ ok: false, errorToken: "tiny" })).not.toContain("tiny");
   });
   it("scrubs structured JSON inside native text results without changing ordinary prose", () => {
     const preview = toolDetailPreview([{ type: "text", text: JSON.stringify({ message: "request completed", password: "tiny", headers: { Cookie: "sid=x" }, env: [{ name: "API_KEY", value: "small" }] }) }]);
