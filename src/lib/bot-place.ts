@@ -87,3 +87,8 @@ export function useBotWhere(botId: string): BotWhere | null {
 export function usePlaceMarkVariant(): "hover" | "faint" {
   return useSyncExternalStore(subscribe, () => variant, () => "hover");
 }
+
+/** The one list is on: rows carry places. */
+export function useBotPlaces(): boolean {
+  return useSyncExternalStore(subscribe, () => known.size > 0, () => false);
+}

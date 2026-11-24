@@ -10,7 +10,7 @@ import { PlacesRail } from "@/components/PlacesRail";
 import { BotListItem, botRowProps, Sidebar } from "@/components/Sidebar";
 import { setAdvancedMode } from "@/lib/interface-mode";
 import { loadLocale } from "@/lib/i18n";
-import { setBotPlaces, type BotWhere, type Place } from "@/lib/bot-place";
+import { placeMark, setBotPlaces, type BotWhere, type Place } from "@/lib/bot-place";
 import { applySkinChoice, SKIN_IDS, type SkinId } from "@/lib/skins";
 import { initialState, StoreContext, type AppState, type Bot, type Message } from "@/state/store";
 import "./styles.css";
@@ -104,7 +104,7 @@ Object.assign(window, { ogb: {
 setBotPlaces(today ? null : where, variant);
 
 function storeValue(bots: Bot[], selectedId: string | null): { state: AppState; dispatch: () => void; flushBotPatches: () => Promise<null>; refreshInstances: () => Promise<void>; refreshModels: () => Promise<void> } {
-  const state: AppState = { ...initialState, bots, selectedId, activeView: "chat", connected: true,
+  const state: AppState = { ...initialState, bots, selectedId: selectedId ?? "", activeView: "chat", connected: true,
     config: { ...initialState.config, profile: { name: "Sam", email: "", aboutMe: "" } } as AppState["config"] };
   return { state, dispatch: () => {}, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
 }
@@ -144,7 +144,8 @@ const SHEET: Array<{ label: string; place: BotWhere; bot: Bot; hover?: boolean }
   const asleepCloud: Place = { ...cloud, health: "asleep" };
   const offMac: Place = { ...computer, name: "Sam's MacBook", health: "offline", here: false };
   const studio: Place = { key: "studio", device: "desktop", name: "Studio Mac", health: "ready" };
-  const as = (id: string, name: string) => ({ ...base(id), id: `sheet-${name}`, name });
+  let next = 0;
+  const as = (id: string, name: string) => ({ ...base(id), id: `sheet-${next++}-${id}`, name });
   return [
     { label: "Idle, lives on this computer", place: { home: computer }, bot: botOf(as("git-tasks", "Git Tasks")) },
     { label: "Idle, lives on My Cloud", place: { home: cloud }, bot: botOf(as("scout", "Scout")) },
@@ -177,6 +178,7 @@ function Sheet() {
             <div key={entry.bot.id} className="rounded-2xl border border-hairline/60 bg-panel p-3">
               <div className="mb-2 px-1 text-[12px] font-medium text-ink-secondary">{entry.label}</div>
               <div className={entry.hover ? "preview-hover" : undefined} data-sheet-hover={entry.hover ? "" : undefined}><BotListItem {...rowFor(entry.bot)} /></div>
+              <div className="mt-1 px-1 text-[12px] text-ink-tertiary">Tooltip and screen reader: “{placeMark(entry.bot, entry.place).label}”{placeMark(entry.bot, entry.place).shows === "always" ? " · always shown" : " · on hover"}</div>
             </div>
           ))}
         </div>
@@ -192,4 +194,48 @@ window.fetch = async (input, init) => {
   return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
 };
 
-createRoot(document.getElementById("root")!).render(<StrictMode>{view === "sheet" ? <Sheet /> : <Window />}</StrictMode>);
+/** Before and after side by side: each column is the real page in a frame of its own (each with its own bridges), cut to
+ * the list and enlarged. A pointer target over the hovered column lets the picture tool rest the pointer on that row. */
+const COMPARE: Record<string, Array<{ label: string; state: string; hover?: string }>> = {
+  "1": [{ label: "Today: two groups, rail of places", state: "today" }, { label: "Proposed: one list, at rest", state: "idle" }, { label: "Proposed: pointer on Scout", state: "idle", hover: "scout" }],
+  "2": [{ label: "Today: My Cloud asleep", state: "today-asleep" }, { label: "Proposed: My Cloud asleep", state: "asleep" }, { label: "Proposed: hand-off in progress", state: "handoff" }],
+  "3": [{ label: "Today: the ＋ asks where", state: "today-plus" }, { label: "Proposed: one New bot, place at its end", state: "plus" }, { label: "Proposed: working on My Cloud", state: "working" }],
+  "4": [{ label: "Proposed: seen from My Cloud, the MacBook off", state: "computer-off" }, { label: "Variant B: faint icon on every row", state: "idle&variant=faint" }, { label: "Variant A: icon on hover only", state: "idle" }],
+};
+const SCALE = 1.15;
+
+function Compare() {
+  const columns = COMPARE[params.get("set") ?? "1"] ?? COMPARE["1"]!;
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const frames = [...document.querySelectorAll<HTMLIFrameElement>("iframe[data-compare]")];
+      if (!frames.every((frame) => frame.contentDocument?.body?.dataset.previewReady)) return;
+      clearInterval(timer);
+      frames.forEach((frame, index) => {
+        const row = columns[index]?.hover ? frame.contentDocument!.querySelector(`[data-sidebar-bot-row="${columns[index]!.hover}"]`) : null;
+        if (!row) return;
+        const outer = frame.getBoundingClientRect(), inner = row.getBoundingClientRect();
+        const target = document.getElementById("hover-target")!;
+        Object.assign(target.style, { left: `${outer.left + inner.left * SCALE}px`, top: `${outer.top + inner.top * SCALE}px`, width: `${inner.width * SCALE}px`, height: `${inner.height * SCALE}px` });
+      });
+      document.body.dataset.previewReady = "1";
+    }, 200);
+    return () => clearInterval(timer);
+  }, [columns]);
+  return (
+    <div className="flex h-dvh gap-4 overflow-hidden bg-app p-4 text-ink" data-preview="compare">
+      {columns.map((column) => (
+        <div key={column.label + column.state} className="flex min-w-0 flex-1 flex-col">
+          <div className="mb-2 text-[14px] font-semibold">{column.label}</div>
+          <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-hairline/60">
+            <iframe data-compare="" title={column.label} src={`/unified-sidebar-preview.html?state=${column.state}&skin=${skin}`}
+              style={{ width: 800, height: `${100 / SCALE}%`, transform: `scale(${SCALE})`, transformOrigin: "top left", border: 0 }} />
+          </div>
+        </div>
+      ))}
+      <div id="hover-target" className="pointer-events-none fixed" />
+    </div>
+  );
+}
+
+createRoot(document.getElementById("root")!).render(<StrictMode>{view === "sheet" ? <Sheet /> : view === "compare" ? <Compare /> : <Window />}</StrictMode>);
