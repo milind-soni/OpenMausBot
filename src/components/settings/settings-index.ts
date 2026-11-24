@@ -51,8 +51,8 @@ const notClient = (ctx: SettingsContext) => !ctx.client;
 const adminPage = (ctx: SettingsContext) => !ctx.client && !(ctx.team && !ctx.admin);
 /** A page Simple mode leaves out: its everyday rows show elsewhere in Simple (Overview, This app, Plan & billing). */
 const advancedOnly = (when: (ctx: SettingsContext) => boolean) => (ctx: SettingsContext) => ctx.advanced && when(ctx);
-/** Simple mode's twelve entries: the place (Overview, Devices, Phone & devices, AI, Vault, Spending, Import & export, and Storage
- * on a Cloud), Your account (Plan & billing) and This app (Appearance, Features). Advanced adds You and your bots, Desktops & browser,
+/** Simple mode's twelve entries: the place (Overview, Devices, Phone & devices, AI, Vault, Spending, Import & export, Storage
+ * on a Cloud, and Features), Your account (Plan & billing) and This app (Appearance). Advanced adds You and your bots, Desktops & browser,
  * Data and General. */
 export const ADVANCED_PAGES: readonly SettingsPageId[] = ["bots", "desktops", "data", "general"];
 
@@ -83,6 +83,8 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     synonyms: ["people", "members", "invite", "roles", "bot access", "sharing", "team"] },
   { id: "installations", owner: "place", labelKey: "settings.section.workspaces", icon: Server, when: (ctx) => !ctx.client && ctx.installations,
     synonyms: ["installations", "fleet", "clients", "tenants"] },
+  { id: "features", owner: "place", labelKey: "settings.page.features", icon: ToggleRight, when: () => true,
+    synonyms: ["features", "turn off", "turn on", "hide", "skill burger", "skill burgers", "mascot", "animations", "thread notes", "tabs", "thread tabs"] },
   { id: "account", owner: "account", labelKey: "settings.page.account", when: () => true,
     synonyms: ["account", "sign in", "log in", "log out", "sign out", "email", "organization", "mausbot cloud"] },
   { id: "plan", owner: "account", labelKey: "settings.page.plan", icon: CreditCard, when: (ctx) => !ctx.client && ctx.plan,
@@ -93,8 +95,6 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     synonyms: ["general", "language", "typing", "send", "enter", "notifications", "sounds", "startup", "login", "analytics", "privacy", "talk"] },
   { id: "appearance", owner: "app", labelKey: "settings.section.appearance", icon: Palette, when: () => true,
     synonyms: ["appearance", "theme", "skin", "looks", "dark mode", "light mode", "font", "chat width", "layout", "threads", "pins"] },
-  { id: "features", owner: "app", labelKey: "settings.page.features", icon: ToggleRight, when: () => true,
-    synonyms: ["features", "turn off", "turn on", "hide", "skill burger", "skill burgers", "mascot", "animations", "thread notes", "tabs", "thread tabs"] },
 ];
 
 export const OWNERS: readonly SettingsOwner[] = ["place", "account", "app"];
@@ -256,8 +256,8 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "layout", page: "appearance", anchor: "appearance", labelKey: "settings.appearance.layout", advanced: true, synonyms: ["show your computers", "rail", "window frame", "title bar", "threads", "tools layout", "pinned", "circles", "universal pins", "pinned panels"] },
   { id: "skill-burger-switch", page: "features", anchor: "features", labelKey: "settings.features.skillBurger", when: (ctx) => !ctx.client && !(ctx.team && !ctx.admin), topFor: ["skill burger", "skill burgers"], synonyms: ["burger", "saved runs", "workflows"] },
   { id: "thread-tabs", page: "features", anchor: "features", labelKey: "settings.features.threadTabs", when: (ctx) => !ctx.client && !(ctx.team && !ctx.admin), synonyms: ["tabs", "threads"] },
-  { id: "thread-notes", page: "features", anchor: "features", labelKey: "settings.features.threadNotes", synonyms: ["saved to this thread", "notes", "memory line"] },
-  { id: "mascot-motion", page: "features", anchor: "features", labelKey: "settings.features.mascotMotion", topFor: ["mascot", "animations"], synonyms: ["motion", "still", "moving"] },
+  { id: "thread-notes", page: "features", anchor: "this-device", labelKey: "settings.features.threadNotes", synonyms: ["saved to this thread", "notes", "memory line"] },
+  { id: "mascot-motion", page: "features", anchor: "this-device", labelKey: "settings.features.mascotMotion", topFor: ["mascot", "animations"], synonyms: ["motion", "still", "moving"] },
   { id: "apps", page: "overview", labelKey: "settings.search.apps", jump: "apps", synonyms: ["apps", "gmail", "slack", "calendar", "notion", "connect app", "integrations"] },
   { id: "bot-settings", page: "overview", labelKey: "settings.search.bot", jump: "bot", synonyms: ["approvals", "safety", "routines", "memory", "bot's notifications"] },
   { id: "shortcuts", page: "app", labelKey: "sidebar.menu.shortcuts", jump: "shortcuts", synonyms: ["keyboard shortcuts", "hotkeys", "cheat sheet"] },

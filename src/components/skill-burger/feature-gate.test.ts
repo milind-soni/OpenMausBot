@@ -1,5 +1,6 @@
 // Settings → Features: Skill Burger off takes its chat card, its menu entries, its page and the bot panel's saved list
-// away; thread notes off takes the "Saved to this thread" line away. Nothing saved is touched, so on brings it all back.
+// away; thread notes off takes the "Saved to this thread" line away; mascot animations off holds mascots still. Nothing
+// saved is touched, so on brings it all back.
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -69,5 +70,18 @@ describe("the thread notes switch", () => {
     expect(line()).toBe("");
     setDeviceFeature("threadNotes", true);
     expect(line()).toContain("Saved to this thread");
+  });
+});
+
+describe("the mascot animations switch", () => {
+  it("holds mascots still while off, as reduced motion does, and lets them move again once on", async () => {
+    const { useMascotStill } = await import("../mascot-clock");
+    const Probe = () => createElement("i", null, String(useMascotStill()));
+    const still = () => renderToStaticMarkup(createElement(Probe));
+    expect(still()).toBe("<i>false</i>");
+    setDeviceFeature("mascotMotion", false);
+    expect(still()).toBe("<i>true</i>");
+    setDeviceFeature("mascotMotion", true);
+    expect(still()).toBe("<i>false</i>");
   });
 });

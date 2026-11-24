@@ -25,7 +25,7 @@ const PEOPLE = {
 
 describe("the pages", () => {
   it("lists the place's pages, then Your account, then This app, in one fixed order", () => {
-    expect(ids(fullContext())).toEqual([...PLACE_PAGES, "account", "plan", "app", "general", "appearance", "features"]);
+    expect(ids(fullContext())).toEqual([...PLACE_PAGES, "features", "account", "plan", "app", "general", "appearance"]);
   });
 
   it.each(Object.entries(PEOPLE))("keeps the same place pages, in the same order, for %s", (who, ctx) => {
@@ -36,7 +36,7 @@ describe("the pages", () => {
 
   it.each(["local only", "This computer, with My Cloud", "My Cloud's page in the desktop window", "My Cloud in a browser (owner)"] as const)(
     "shows Simple's eleven entries for %s", (who) => {
-      expect(ids({ ...PEOPLE[who], advanced: false })).toEqual(["overview", "devices", "phone", "ai", "vault", "usage", "transfer", "account", "plan", "app", "appearance", "features"]);
+      expect(ids({ ...PEOPLE[who], advanced: false })).toEqual(["overview", "devices", "phone", "ai", "vault", "usage", "transfer", "features", "account", "plan", "app", "appearance"]);
     });
 
   it("is shorter in Simple: the four Advanced pages come back in Advanced, in place", () => {
@@ -112,7 +112,7 @@ describe("the pages", () => {
   });
 
   it("drops the place's pages and Plan & billing for a paired client, which keeps This app", () => {
-    expect(ids(fullContext({ client: true }))).toEqual(["overview", "account", "app", "general", "appearance", "features"]);
+    expect(ids(fullContext({ client: true }))).toEqual(["overview", "features", "account", "app", "general", "appearance"]);
   });
 });
 

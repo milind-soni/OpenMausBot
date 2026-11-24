@@ -321,7 +321,7 @@ function HitRow({ ctx, place, hit, query, onHit }: { ctx: SettingsContext; place
 
 const PAGE_OWNER: Record<SettingsPageId, SettingsOwner> = {
   overview: "place", devices: "place", phone: "place", ai: "place", bots: "place", desktops: "place", vault: "place", usage: "place", transfer: "place", storage: "place",
-  data: "place", people: "place", installations: "place", account: "account", plan: "account", app: "app", general: "app", appearance: "app", features: "app",
+  data: "place", people: "place", installations: "place", account: "account", plan: "account", app: "app", general: "app", appearance: "app", features: "place",
 };
 
 const PAGE_KEY: Partial<Record<SettingsPageId, Parameters<typeof t>[0]>> = {

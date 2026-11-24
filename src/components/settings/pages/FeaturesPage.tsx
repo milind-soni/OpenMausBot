@@ -54,14 +54,20 @@ const DeviceFeatureRow = ({ name }: { name: DeviceFeature }) => <FeatureRow name
 export function FeaturesPage() {
   const { ctx } = useSettingsShell();
   const placeSwitches = !ctx.client && !(ctx.team && !ctx.admin);
-  return (
-    <SettingsGroup block="features">
+  return <>
+    {placeSwitches && (
+      <SettingsGroup block="features">
+        <SettingsRows>
+          <PlaceFeatureRow name="skillBurger" />
+          <PlaceFeatureRow name="threadTabs" />
+        </SettingsRows>
+      </SettingsGroup>
+    )}
+    <SettingsGroup label={t("settings.account.onThisDevice")} block="this-device">
       <SettingsRows>
-        {placeSwitches && <PlaceFeatureRow name="skillBurger" />}
-        {placeSwitches && <PlaceFeatureRow name="threadTabs" />}
         <DeviceFeatureRow name="threadNotes" />
         <DeviceFeatureRow name="mascotMotion" />
       </SettingsRows>
     </SettingsGroup>
-  );
+  </>;
 }
