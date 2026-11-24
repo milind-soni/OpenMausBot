@@ -3937,6 +3937,7 @@
   "accounts.removeBodyAntigravity": "이 계정과 로그인 정보를 {app}에서 제거해요. 다른 Antigravity 계정은 연결된 채로 남아요.",
   "accounts.addClaude": "다른 Claude 계정 추가",
   "accounts.addChatgpt": "다른 ChatGPT 계정 추가",
+  "accounts.chatgptDeviceHint": "코드를 입력하기 전에 ChatGPT에 여기서 사용할 계정이 표시되는지 확인하세요. 다른 계정이 표시되면 먼저 그곳에서 계정을 전환하세요.",
   "accounts.nameLabel": "계정 이름",
   "accounts.namePlaceholder": "업무",
   "accounts.addSubmit": "추가하고 로그인",

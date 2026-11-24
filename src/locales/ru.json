@@ -3683,6 +3683,7 @@
   "accounts.removeBodyAntigravity": "Аккаунт и его вход будут удалены из {app}. Ваши другие аккаунты Antigravity останутся подключёнными.",
   "accounts.addClaude": "Добавить ещё один аккаунт Claude",
   "accounts.addChatgpt": "Добавить ещё один аккаунт ChatGPT",
+  "accounts.chatgptDeviceHint": "Прежде чем вводить код, проверьте, что ChatGPT показывает нужный здесь аккаунт. Если показан другой, сначала переключите аккаунт там.",
   "accounts.nameLabel": "Название аккаунта",
   "accounts.namePlaceholder": "Работа",
   "accounts.addSubmit": "Добавить и войти",

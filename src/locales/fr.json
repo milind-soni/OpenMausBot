@@ -1464,6 +1464,7 @@
   "engines.claudeUpdated": "Claude mis à jour — {version}",
   "engines.updatedTo": "Mis à jour vers {version}",
   "engines.account.signInHint": "Exécutez exactement cette commande dans un terminal sur l’ordinateur qui exécute {app}, terminez la connexion Claude CLI, puis cliquez sur « Vérifier le compte ». Si vous consultez {app} à distance, exécutez-la là-bas, pas sur cet appareil.",
+  "accounts.chatgptDeviceHint": "Avant de saisir le code, vérifiez que ChatGPT affiche le compte voulu ici. S'il en affiche un autre, changez d'abord de compte dans ChatGPT.",
   "engines.none": "Aucune application de fournisseur de modèles détectée pour l’instant.",
   "remote.pairing.tailscale.title": "Appairage via Tailscale",
   "remote.pairing.tailscale.subtitle": "Appairage privé via le tailnet partagé par l'hôte et l'appareil à associer.",

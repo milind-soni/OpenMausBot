@@ -4135,6 +4135,7 @@
   "accounts.removeBodyAntigravity": "このアカウントとそのサインイン情報を {app} から削除します。他の Antigravity アカウントは接続されたままです。",
   "accounts.addClaude": "別のClaudeアカウントを追加",
   "accounts.addChatgpt": "別のChatGPTアカウントを追加",
+  "accounts.chatgptDeviceHint": "コードを入力する前に、ChatGPT にここで使いたいアカウントが表示されているか確認してください。別のアカウントが表示されている場合は、先にそちらでアカウントを切り替えてください。",
   "accounts.nameLabel": "アカウント名",
   "accounts.namePlaceholder": "仕事用",
   "accounts.addSubmit": "追加してサインイン",

@@ -4852,6 +4852,7 @@
   "accounts.addChatgpt": "Aggiungi un altro account ChatGPT",
   "accounts.addChatgptWorkspaceNote": "Le organizzazioni ChatGPT Business ed Enterprise possono impedire di aggiungere un account qui (OpenAI mostra 3p_delegated_access_policy_denied).",
   "accounts.chatgptSharedSetupNote": "I bot che usano questi account condividono anche la tua configurazione Codex: config.toml, abilità e plugin, ma non le tue istruzioni (AGENTS.md).",
+  "accounts.chatgptDeviceHint": "Prima di inserire il codice, controlla che ChatGPT mostri l'account che vuoi qui. Se ne mostra un altro, cambia prima account lì.",
   "accounts.nameLabel": "Nome account",
   "accounts.namePlaceholder": "Lavoro",
   "accounts.addSubmit": "Aggiungi e accedi",

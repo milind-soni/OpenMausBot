@@ -4365,7 +4365,8 @@
       "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
       "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
       "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
-      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27",
+      "accounts.chatgptDeviceHint": "ac45a424f79364c07f769cf0f1274a6be3b2732690bac2a8ee4ecc03b1e6933d"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -11001,7 +11002,8 @@
       "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
       "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
       "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
-      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27",
+      "accounts.chatgptDeviceHint": "ac45a424f79364c07f769cf0f1274a6be3b2732690bac2a8ee4ecc03b1e6933d"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -15042,7 +15044,8 @@
       "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
       "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
       "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
-      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27",
+      "accounts.chatgptDeviceHint": "ac45a424f79364c07f769cf0f1274a6be3b2732690bac2a8ee4ecc03b1e6933d"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -18935,7 +18938,8 @@
       "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
       "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
       "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
-      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27",
+      "accounts.chatgptDeviceHint": "ac45a424f79364c07f769cf0f1274a6be3b2732690bac2a8ee4ecc03b1e6933d"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -27105,7 +27109,8 @@
       "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
       "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
       "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
-      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27",
+      "accounts.chatgptDeviceHint": "ac45a424f79364c07f769cf0f1274a6be3b2732690bac2a8ee4ecc03b1e6933d"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -38990,7 +38995,8 @@
       "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
       "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
       "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
-      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27",
+      "accounts.chatgptDeviceHint": "ac45a424f79364c07f769cf0f1274a6be3b2732690bac2a8ee4ecc03b1e6933d"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -49352,7 +49358,8 @@
       "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
       "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
       "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
-      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27",
+      "accounts.chatgptDeviceHint": "ac45a424f79364c07f769cf0f1274a6be3b2732690bac2a8ee4ecc03b1e6933d"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -59801,7 +59808,8 @@
       "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
       "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
       "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
-      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27",
+      "accounts.chatgptDeviceHint": "ac45a424f79364c07f769cf0f1274a6be3b2732690bac2a8ee4ecc03b1e6933d"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -64114,7 +64122,8 @@
       "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
       "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
       "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
-      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27",
+      "accounts.chatgptDeviceHint": "ac45a424f79364c07f769cf0f1274a6be3b2732690bac2a8ee4ecc03b1e6933d"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -70245,7 +70254,8 @@
       "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
       "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
       "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
-      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27",
+      "accounts.chatgptDeviceHint": "ac45a424f79364c07f769cf0f1274a6be3b2732690bac2a8ee4ecc03b1e6933d"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -76376,7 +76386,8 @@
       "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
       "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
       "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
-      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27",
+      "accounts.chatgptDeviceHint": "ac45a424f79364c07f769cf0f1274a6be3b2732690bac2a8ee4ecc03b1e6933d"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -83708,7 +83719,8 @@
       "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
       "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
       "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
-      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27",
+      "accounts.chatgptDeviceHint": "ac45a424f79364c07f769cf0f1274a6be3b2732690bac2a8ee4ecc03b1e6933d"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -91094,7 +91106,8 @@
       "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
       "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
       "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
-      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27",
+      "accounts.chatgptDeviceHint": "ac45a424f79364c07f769cf0f1274a6be3b2732690bac2a8ee4ecc03b1e6933d"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -102898,7 +102911,8 @@
       "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
       "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
       "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
-      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27",
+      "accounts.chatgptDeviceHint": "ac45a424f79364c07f769cf0f1274a6be3b2732690bac2a8ee4ecc03b1e6933d"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -110758,7 +110772,8 @@
       "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
       "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
       "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
-      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27",
+      "accounts.chatgptDeviceHint": "ac45a424f79364c07f769cf0f1274a6be3b2732690bac2a8ee4ecc03b1e6933d"
     }
   }
 }

@@ -2975,6 +2975,7 @@
   "accounts.removeBodyChatgpt": "Bu işlem hesabın oturumunu kapatır ve hesabı {app}'tan kaldırır.",
   "accounts.addClaude": "Başka bir Claude hesabı ekle",
   "accounts.addChatgpt": "Başka bir ChatGPT hesabı ekle",
+  "accounts.chatgptDeviceHint": "Kodu girmeden önce ChatGPT'nin burada istediğiniz hesabı gösterdiğini kontrol edin. Başka bir hesap gösteriyorsa önce orada hesap değiştirin.",
   "accounts.nameLabel": "Hesap adı",
   "accounts.namePlaceholder": "İş",
   "accounts.addSubmit": "Ekle ve giriş yap",

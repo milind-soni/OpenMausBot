@@ -3321,6 +3321,7 @@
   "accounts.removeBodyChatgpt": "Esto cierra la sesión de la cuenta y la quita de {app}.",
   "accounts.addClaude": "Añadir otra cuenta de Claude",
   "accounts.addChatgpt": "Añadir otra cuenta de ChatGPT",
+  "accounts.chatgptDeviceHint": "Antes de introducir el código, comprueba que ChatGPT muestra la cuenta que quieres aquí. Si muestra otra, cambia de cuenta allí primero.",
   "accounts.nameLabel": "Nombre de la cuenta",
   "accounts.namePlaceholder": "Trabajo",
   "accounts.addSubmit": "Añadir e iniciar sesión",

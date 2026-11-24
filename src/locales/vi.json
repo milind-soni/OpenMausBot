@@ -2975,6 +2975,7 @@
   "accounts.removeBodyChatgpt": "Thao tác này đăng xuất tài khoản và gỡ tài khoản khỏi {app}.",
   "accounts.addClaude": "Thêm tài khoản Claude khác",
   "accounts.addChatgpt": "Thêm tài khoản ChatGPT khác",
+  "accounts.chatgptDeviceHint": "Trước khi nhập mã, hãy kiểm tra ChatGPT đang hiển thị đúng tài khoản bạn muốn dùng ở đây. Nếu đó là tài khoản khác, hãy chuyển tài khoản ở đó trước.",
   "accounts.nameLabel": "Tên tài khoản",
   "accounts.namePlaceholder": "Công việc",
   "accounts.addSubmit": "Thêm và đăng nhập",
