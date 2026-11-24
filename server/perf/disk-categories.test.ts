@@ -24,6 +24,8 @@ describe("storage categories", () => {
       ["attachments/a.png", "attachments"], ["attachment-originals/a", "attachments"], ["box-uploads/b/t/f", "attachments"], ["browser-uploads/f", "attachments"],
       ["tool-results/t/r.json", "attachments"], ["meetings/m/rec.wav", "attachments"], ["browser/downloads/abc/file.zip", "attachments"],
       ["sync/lent/f", "synced"], ["sync/trash/123", "trash"], ["sync/uploads/part", "temp"], ["engine-homes/.held/old", "trash"],
+      ["engine-homes/member-0123456789abcdef/cache/uv/x", "caches"], ["engine-homes/member-0123456789abcdef/cache/huggingface/token", "other"],
+      ["engine-homes/member-0123456789abcdef/.claude/x", "engine_state"],
       [".backups/job/staged/data", "backups"], ["doctor-backups/2026/x", "backups"],
       ["browser/profiles/abc/Default/Cookies", "browser_profiles"], ["browser/profiles/abc/Default/Login Data", "browser_profiles"],
       ["browser/profiles/abc/Local State", "browser_profiles"], ["browser/workspace-id", "browser_profiles"], ["agent-browser-profiles/abc/Default/Cookies", "browser_profiles"],
@@ -65,6 +67,9 @@ describe("storage categories", () => {
       [".config/gh/hosts.yml", "settings"], [".omb-cloud-home.json", "settings"], [".omb-edge/caddy/x", "settings"],
       ["Synced/Desktop/a.txt", "synced"], [".local/share/Trash/files/x", "trash"],
       ["lost+found/x", "other"], ["acme-merger/plan.md", "other"], [".local/lib/x", "other"],
+      // The tools' cache folder (bot-box/tool-caches.ts): its own folders only; a token or a bot's file there is not a cache.
+      ["cache/npm/_cacache/x", "caches"], ["cache/bun/x.tgz", "caches"], ["cache/go-build/00/a-d", "other"], ["cache/ms-playwright/chromium-1/chrome", "other"],
+      ["cache/huggingface/hub/models--o--m/x", "caches"], ["cache/huggingface/token", "other"], ["cache/my-notes.md", "other"],
     ];
     for (const [path, expected] of cases) expect([path, category("home", path)]).toEqual([path, expected]);
   });
