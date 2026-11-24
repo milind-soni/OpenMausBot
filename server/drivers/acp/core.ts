@@ -923,7 +923,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           return { turnId };
         }
 
-        requireRunning();
+        requireRunning(); if (active.has(threadId)) throw new Error("a turn is already running on this thread");
         const spawnArgs = support.spawnArgs(turnConfig, cliTurn);
         const spawnEnv = launch.env ?? env;
       // The child env is part of the spawn contract, hashed so secrets never sit in the key.

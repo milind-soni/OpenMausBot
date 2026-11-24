@@ -635,6 +635,8 @@ it.skipIf(process.platform === "win32")("folds when the native CLI answers /comp
   const rowsBefore = f.usageRows().length;
   await f.compact();
   await expect.poll(() => f.usageRows().length).toBeGreaterThanOrEqual(rowsBefore + 1);
+  expect(f.usageRows()[rowsBefore]).toMatchObject({ instanceId: "antigravity", driverKind: "antigravityAgent", output: 20, input: expect.any(Number) });
+  expect(f.usageRows()[rowsBefore]!.input).toBeGreaterThan(0);
   expect(await f.engineRows()).toHaveLength(0);
   await antigravityFoldedToNewSession(f, session, 1);
 }, { FAKE_AGY_COMPACT: "reply" }), 120_000);

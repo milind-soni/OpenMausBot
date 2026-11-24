@@ -210,6 +210,40 @@ describe("an ACP agent's own compaction of a live session", () => {
     }
   });
 
+  it("bounds the failure check that follows an answer a Stop had already asked to cancel", async () => {
+    let answer: ((result: unknown) => void) | undefined;
+    const { deps, active } = setup(({ heard, reply }) => { answer = (result) => { heard({ sessionUpdate: "usage_update", used: 950 }); reply(result); }; });
+    deps.promptOutcome = async () => () => new Promise(() => {});
+    vi.useFakeTimers();
+    try {
+      const stop = new AbortController();
+      const compacting = acpCompactSession(deps)("thread", { session: SESSION, signal: stop.signal });
+      await vi.advanceTimersByTimeAsync(0);
+      stop.abort();
+      await vi.advanceTimersByTimeAsync(0);
+      answer!(RESULT);
+      let result: unknown;
+      void compacting.then((value) => { result = value; });
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(result).toMatchObject({ ok: false, reason: "stopped", usage: { input: 900 } });
+      expect(active.has("thread")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still reports a compaction the check accepts within the grace after a Stop", async () => {
+    let answer: ((result: unknown) => void) | undefined;
+    const { deps } = setup(({ heard, reply }) => { answer = (result) => { heard({ sessionUpdate: "usage_update", used: 950 }); reply(result); }; });
+    deps.promptOutcome = async () => async () => undefined;
+    const stop = new AbortController();
+    const compacting = acpCompactSession(deps)("thread", { session: SESSION, signal: stop.signal });
+    await vi.waitFor(() => expect(answer).toBeDefined());
+    stop.abort();
+    answer!(RESULT);
+    expect(await compacting).toMatchObject({ ok: true, usage: { input: 900 } });
+  });
+
   it("does not send /compact to a process a signal ended", async () => {
     const { deps, session, acp } = setup(() => {});
     (session.child as unknown as { signalCode: string }).signalCode = "SIGKILL";

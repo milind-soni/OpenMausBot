@@ -120,8 +120,13 @@ export function acpCompactSession(deps: AcpCompactDeps) {
       if (ending.kind !== "answered") return fail("stopped");
       const { result } = ending;
       const usage = promptTokenUsage(result);
-      const interruptedAfter = new Promise<"stopped" | "gone" | "timeout">((resolve) => { onInterrupt = resolve; if (timedOut) resolve("timeout"); });
-      const reported = await Promise.race([Promise.resolve(check?.(result)).catch(() => undefined), interruptedAfter]);
+      let stopGrace: ReturnType<typeof setTimeout> | undefined;
+      const interruptedAfter = new Promise<"stopped" | "gone" | "timeout">((resolve) => {
+        onInterrupt = resolve;
+        if (timedOut) resolve("timeout");
+        else if (stopRequested) { stopGrace = setTimeout(() => resolve("stopped"), CANCEL_GRACE_MS); stopGrace.unref?.(); }
+      });
+      const reported = await Promise.race([Promise.resolve(check?.(result)).catch(() => undefined), interruptedAfter]).finally(() => clearTimeout(stopGrace));
       if (reported === "stopped" || reported === "gone" || reported === "timeout") {
         keep = reported === "stopped" && !counted.replied;
         return failSent(reported === "stopped" ? "stopped" : reported === "gone" ? "the agent exited during compaction" : "timed out", result);
