@@ -123,7 +123,7 @@ describe("draftWorkflow", () => {
     const forward = draft.workflow.steps[1]!;
     expect(forward).toMatchObject({ kind: "app", app: "gmail", tool: "GMAIL_FORWARD_MESSAGE" });
     expect(forward.kind === "app" && forward.args).toEqual({
-      message_id: { $step: "s1", path: "data.results.0.response.data.messages.0.id" },
+      message_id: { $step: "s1", path: "messages.0.id" },
       recipient_email: { $arg: "recipient" },
     });
   });

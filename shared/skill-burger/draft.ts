@@ -52,10 +52,25 @@ function parsedOutput(layer: BurgerLayer): unknown {
   if (!layer.output) return undefined;
   let value: unknown;
   try { value = JSON.parse(layer.output); } catch { return layer.output; }
-  // One tool of a multi-app call answers in its own slot of the shared result.
+  if (layer.kind !== "app" || layer.replay !== "exact") return value;
+  const frame = isRecord(value) && isRecord(value.result) ? value.result : value;
+  const content = Array.isArray(frame) ? frame : isRecord(frame) && Array.isArray(frame.content) ? frame.content : undefined;
+  const part = content?.find((one) => isRecord(one) && one.type === "text" && "text" in one);
+  if (isRecord(part)) {
+    value = part.text;
+    if (typeof value === "string") {
+      try { value = JSON.parse(value); } catch { return value; }
+    }
+  }
+  if (layer.tool.includes(".")) return value;
   const index = /#(\d+)$/.exec(layer.id)?.[1];
   const results = isRecord(value) && isRecord(value.data) && Array.isArray(value.data.results) ? value.data.results : undefined;
-  return index !== undefined && results ? results[Number(index)] : value;
+  if (results) {
+    const result = index !== undefined ? results[Number(index)] : results.find((one) => isRecord(one) && one.tool_slug === layer.tool) ?? (results.length === 1 ? results[0] : undefined);
+    const response = isRecord(result) && isRecord(result.response) ? result.response : undefined;
+    return response && "data" in response ? response.data : value;
+  }
+  return isRecord(value) && "data" in value ? value.data : value;
 }
 
 /** Where `target` sits in `value`, as a dotted path; "" for the value itself. */
