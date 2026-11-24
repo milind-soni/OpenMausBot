@@ -2,6 +2,7 @@
 // The openmausbot headless verbs for verifying an isolated fixture. A verb that
 // changes something never runs on a server it merely found.
 import { spawn, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
@@ -286,12 +287,13 @@ export function verificationServerArgs(childEnv: NodeJS.ProcessEnv): string[] {
   ];
 }
 
-function signedInFakeAntigravity(dataDir: string): string {
+function signedInFakeAntigravity(dataDir: string, instanceId: string): string {
   const executable = join(dataDir, "fake-antigravity", "antigravity");
   mkdirSync(dirname(executable), { recursive: true });
   writeFileSync(executable, fakeAntigravityScript(), { mode: 0o755 });
-  mkdirSync(join(dataDir, "fake-antigravity-keyring"), { recursive: true });
-  writeFileSync(join(dataDir, "fake-antigravity-keyring", "shared"), "{}\n", { mode: 0o600 });
+  const profile = join(dataDir, "providers", "antigravity", createHash("sha256").update(instanceId).digest("hex"), "antigravity-acp");
+  mkdirSync(profile, { recursive: true });
+  writeFileSync(join(profile, "antigravity-oauth-token"), "{}\n", { mode: 0o600 });
   return executable;
 }
 
@@ -362,9 +364,9 @@ export async function launchVerificationServer(
         environment: Object.fromEntries(Object.entries(parentEnv).filter(([key, value]) => key.startsWith("FAKE_CODEX_") && value)),
       } } : {}),
       ...(extraProviders.includes("antigravity") ? { antigravity: {
-        driver: "antigravityAgent", displayName: "Verification Antigravity", config: { cli: signedInFakeAntigravity(dataDir), fullAuto: false },
+        driver: "antigravityAgent", displayName: "Verification Antigravity", config: { cli: signedInFakeAntigravity(dataDir, "antigravity"), fullAuto: false },
         environment: { ...Object.fromEntries(Object.entries(parentEnv).filter(([key, value]) => key.startsWith("FAKE_AGY_") && value)),
-          FAKE_AGY_LOG: join(dataDir, "fake-antigravity.log"), FAKE_AGY_KEYRING: join(dataDir, "fake-antigravity-keyring"), FAKE_AGY_KEYRING_SHARED: "1" },
+          FAKE_AGY_LOG: join(dataDir, "fake-antigravity.log"), FAKE_AGY_KEYRING: "" },
       } } : {}),
       ...(extraProviders.includes("cline") ? { cline: {
         driver: "clineAgent", displayName: "Verification Cline",
