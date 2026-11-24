@@ -140,7 +140,7 @@ function ownerPredatesThisBoot(owner) {
 /** The only liveness question this module should ever ask about a record. `parentPid`: the pid of the process that started
  * this one, when the record is that parent's own (a delegated child checking the lease it was handed). */
 function ownerIsAlive(owner, parentPid = null) {
-  return !ownerPredatesThisBoot(owner) && processIsAlive(owner.pid) && (!creationTimeNeeded(process.platform, owner.pid, parentPid) || ownerIdentityMatches(owner));
+  return !ownerPredatesThisBoot(owner) && processIsAlive(owner.pid) && ownerIdentityMatches(owner, parentPid);
 }
 
 /**
@@ -467,13 +467,13 @@ function cimHasPid(pid) {
 }
 
 /** Pids are reused within a boot: a process that started at another moment, or after the lease, is not its owner. */
-function ownerIdentityMatches(owner) {
+function ownerIdentityMatches(owner, parentPid = null) {
   if (process.platform === "linux") {
     if (!Number.isSafeInteger(owner.start) || typeof owner.ns !== "string" || owner.ns !== pidNamespace()) return true;
     const started = processStartTicks(owner.pid);
     return started === null || started === owner.start;
   }
-  if (process.platform !== "win32") return true;
+  if (process.platform !== "win32" || !creationTimeNeeded(process.platform, owner.pid, parentPid)) return true;
   return windowsCreationFitsLease(processCreationTimeMs(owner.pid), owner.createdAt);
 }
 

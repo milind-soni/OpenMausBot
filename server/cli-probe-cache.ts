@@ -14,8 +14,8 @@ import { basename, dirname, isAbsolute, join } from "node:path";
 import type { ExecFileOptions } from "node:child_process";
 
 import { writeFileAtomic } from "./atomic.ts";
-import { findCliCandidates, resolveCliSpawn, splitCliString } from "./env-path.ts";
-import { execCli } from "./procs.ts";
+import { findCliCandidates, splitCliString } from "./env-path.ts";
+import { execCli, outsideBoxOptions, resolveCli } from "./procs.ts";
 
 export const PROBE_CACHE_FILE = "engine-probes.json";
 const KEPT = 64;
@@ -32,25 +32,32 @@ export function probeCacheFile(env: NodeJS.ProcessEnv = process.env): string | n
   return env.OMB_DESKTOP_PARENT === "1" && env.OMB_USER_DATA && isAbsolute(env.OMB_USER_DATA) ? join(env.OMB_USER_DATA, PROBE_CACHE_FILE) : null;
 }
 
-/** The file a probe of `cli` actually runs (a Windows .cmd shim's script, not the shim), or null when it is not one whose
- * answer may be kept. */
-export function probedProgram(cli: string, path: string, platform: NodeJS.Platform = process.platform): string | null {
+/** The file a probe of `cli` actually runs, found the way execCli finds it (procs.ts): on Windows a shim or #! script
+ * becomes Node plus the script, so the script; elsewhere a bare name is looked up on the PATH the probe runs with. Null
+ * when it is not a file whose answer may be kept. */
+export function probedProgram(cli: string, opts: ExecFileOptions): string | null {
   if (splitCliString(cli).length !== 1) return null;
-  const found = findCliCandidates(cli, path)[0];
-  if (!found) return null;
-  let file = found;
-  if (platform === "win32" && /\.(?:cmd|bat)$/i.test(found)) {
-    const resolved = resolveCliSpawn(found, []);
-    const script = resolved.args[0];
-    if (resolved.command === found || !script || !isAbsolute(script)) return null;
-    file = script;
+  let command: string, rest: string[], env: NodeJS.ProcessEnv;
+  try {
+    ({ command, args: rest } = resolveCli(cli, []));
+    env = outsideBoxOptions(command, opts).env ?? process.env;
+  } catch {
+    return null;
   }
+  const file = rest.length
+    ? rest.find((arg) => isAbsolute(arg) && isFile(arg))
+    : /[\\/]/.test(command) ? command : findCliCandidates(command, String(env.PATH ?? env.Path ?? ""))[0];
+  if (!file) return null;
   let real: string;
   try { real = realpathSync(file); } catch { return null; }
   const name = basename(real).toLowerCase().replace(/\.(?:exe|cmd|bat|ps1)$/, "");
   if (SHIM_PROGRAMS.has(name) || real.toLowerCase().split(/[\\/]/).includes("shims")) return null;
-  if (/\.(?:ps1|sh)$/i.test(real) || shellScript(real)) return null;
+  if (/\.(?:ps1|sh|cmd|bat)$/i.test(real) || shellScript(real)) return null;
   return real;
+}
+
+function isFile(path: string): boolean {
+  try { return statSync(path).isFile(); } catch { return false; }
 }
 
 function shellScript(file: string): boolean {
@@ -107,7 +114,7 @@ export function createCliProbeCache(options: { file: string | null; appVersion: 
     } catch {}
   };
   const exec: ExecCli = (cli, args, opts, cb) => {
-    const program = options.file && args.length === 1 && CACHED_ARGS.has(args[0]!) ? probedProgram(cli, String((opts.env ?? process.env).PATH ?? ""), platform) : null;
+    const program = options.file && args.length === 1 && CACHED_ARGS.has(args[0]!) ? probedProgram(cli, opts) : null;
     const key = program ? probeKey(program, args, options.appVersion, platform) : null;
     const kept = key ? loaded().get(key) : undefined;
     if (kept) {

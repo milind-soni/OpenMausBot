@@ -71,7 +71,7 @@ test("a handed host identity is taken only when well formed, and is removed from
   assert.equal(consumeHostIdentity({}), null);
 });
 
-test("Windows matches a live pid to a record by its creation time, except for the parent that handed this process the record", () => {
+test("only Windows asks a live pid's creation time, and never for the parent that handed this process the record", () => {
   assert.equal(creationTimeNeeded("win32", 4242, null), true);
   assert.equal(creationTimeNeeded("win32", 4242, 77), true);
   assert.equal(creationTimeNeeded("win32", 4242, 4242), false);

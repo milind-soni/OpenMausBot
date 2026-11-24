@@ -1,7 +1,9 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+
+const windows = process.platform === "win32";
 
 import { createCliProbeCache, probeCacheFile, probedProgram } from "./cli-probe-cache.ts";
 
@@ -17,7 +19,7 @@ function place() {
 }
 
 function program(bin: string, name: string, body = "#!/usr/bin/env node\nconsole.log('1.0.0');\n"): string {
-  const path = join(bin, name);
+  const path = join(bin, windows ? `${name}.exe` : name);
   writeFileSync(path, body);
   chmodSync(path, 0o755);
   return path;
@@ -34,6 +36,9 @@ function runner(answer: (args: string[]) => { err?: Error; stdout: string; stder
   return { run, calls };
 }
 
+/** On Windows a program on a PATH needs its extension, and execCli resolves a bare name on the app's own PATH: these
+ * tests name the program by its full path there. */
+const cliFor = (bin: string, name: string) => (windows ? join(bin, `${name}.exe`) : name);
 const ask = (exec: ReturnType<typeof createCliProbeCache>["exec"], cli: string, args: string[], path: string) =>
   new Promise<{ err: Error | null; stdout: string; stderr?: string }>((resolve) => exec(cli, args, { env: { PATH: path } }, (err, stdout, stderr) => resolve({ err, stdout, stderr })));
 
@@ -51,15 +56,15 @@ describe("engine probe answers kept between desktop starts", () => {
     program(bin, "engine");
     const first = runner((args) => ({ stdout: args[0] === "--help" ? "usage: engine --autocompact\n" : "1.0.0\n" }));
     const cache = createCliProbeCache({ file, appVersion: "0.1.180", run: first.run });
-    expect(await ask(cache.exec, "engine", ["--version"], bin)).toEqual({ err: null, stdout: "1.0.0\n", stderr: "" });
-    expect(await ask(cache.exec, "engine", ["--version"], bin)).toEqual({ err: null, stdout: "1.0.0\n", stderr: "" });
-    expect(await ask(cache.exec, "engine", ["--help"], bin)).toMatchObject({ stdout: "usage: engine --autocompact\n" });
-    expect(await ask(cache.exec, "engine", ["--help"], bin)).toMatchObject({ stdout: "usage: engine --autocompact\n" });
+    expect(await ask(cache.exec, cliFor(bin, "engine"), ["--version"], bin)).toEqual({ err: null, stdout: "1.0.0\n", stderr: "" });
+    expect(await ask(cache.exec, cliFor(bin, "engine"), ["--version"], bin)).toEqual({ err: null, stdout: "1.0.0\n", stderr: "" });
+    expect(await ask(cache.exec, cliFor(bin, "engine"), ["--help"], bin)).toMatchObject({ stdout: "usage: engine --autocompact\n" });
+    expect(await ask(cache.exec, cliFor(bin, "engine"), ["--help"], bin)).toMatchObject({ stdout: "usage: engine --autocompact\n" });
     expect(first.calls).toEqual([["--version"], ["--help"]]);
 
     const next = runner();
     const restarted = createCliProbeCache({ file, appVersion: "0.1.180", run: next.run });
-    expect(await ask(restarted.exec, "engine", ["--version"], bin)).toMatchObject({ stdout: "1.0.0\n" });
+    expect(await ask(restarted.exec, cliFor(bin, "engine"), ["--version"], bin)).toMatchObject({ stdout: "1.0.0\n" });
     expect(next.calls).toEqual([]);
   });
 
@@ -70,17 +75,17 @@ describe("engine probe answers kept between desktop starts", () => {
     utimesSync(path, npmTime, npmTime);
     const counted = runner();
     const cache = createCliProbeCache({ file, appVersion: "0.1.180", run: counted.run });
-    await ask(cache.exec, "engine", ["--version"], bin);
+    await ask(cache.exec, cliFor(bin, "engine"), ["--version"], bin);
     // Same size and modification time npm gives every file, but a new file: still asked again.
     rmSync(path);
     utimesSync(program(bin, "engine"), npmTime, npmTime);
-    await ask(cache.exec, "engine", ["--version"], bin);
+    await ask(cache.exec, cliFor(bin, "engine"), ["--version"], bin);
     expect(counted.calls).toHaveLength(2);
     program(bin, "engine", "#!/usr/bin/env node\nconsole.log('2.0.0');\n");
-    await ask(cache.exec, "engine", ["--version"], bin);
+    await ask(cache.exec, cliFor(bin, "engine"), ["--version"], bin);
     expect(counted.calls).toHaveLength(3);
     const upgraded = createCliProbeCache({ file, appVersion: "0.1.181", run: counted.run });
-    await ask(upgraded.exec, "engine", ["--version"], bin);
+    await ask(upgraded.exec, cliFor(bin, "engine"), ["--version"], bin);
     expect(counted.calls).toHaveLength(4);
   });
 
@@ -90,20 +95,20 @@ describe("engine probe answers kept between desktop starts", () => {
     let answer: { err?: Error; stdout: string } = { err: new Error("exit 1"), stdout: "" };
     const counted = runner(() => answer);
     const cache = createCliProbeCache({ file, appVersion: "1", run: counted.run });
-    expect((await ask(cache.exec, "engine", ["--version"], bin)).err?.message).toBe("exit 1");
+    expect((await ask(cache.exec, cliFor(bin, "engine"), ["--version"], bin)).err?.message).toBe("exit 1");
     answer = { stdout: "  \n" };
-    await ask(cache.exec, "engine", ["--version"], bin);
+    await ask(cache.exec, cliFor(bin, "engine"), ["--version"], bin);
     answer = { stdout: "Logged in\n" };
-    await ask(cache.exec, "engine", ["auth", "status"], bin);
-    await ask(cache.exec, "engine", ["auth", "status"], bin);
-    await ask(cache.exec, "missing", ["--version"], bin);
-    await ask(cache.exec, "missing", ["--version"], bin);
-    await ask(cache.exec, "engine", ["--version"], bin);
-    await ask(cache.exec, "engine", ["--version"], bin);
+    await ask(cache.exec, cliFor(bin, "engine"), ["auth", "status"], bin);
+    await ask(cache.exec, cliFor(bin, "engine"), ["auth", "status"], bin);
+    await ask(cache.exec, cliFor(bin, "missing"), ["--version"], bin);
+    await ask(cache.exec, cliFor(bin, "missing"), ["--version"], bin);
+    await ask(cache.exec, cliFor(bin, "engine"), ["--version"], bin);
+    await ask(cache.exec, cliFor(bin, "engine"), ["--version"], bin);
     expect(counted.calls).toHaveLength(7);
   });
 
-  it("does not keep a shell script or a version manager's shim, whose file stays while the version it runs changes", () => {
+  it.skipIf(windows)("does not keep a shell script or a version manager's shim, whose file stays while the version it runs changes", () => {
     const { root, bin } = place();
     program(bin, "viaShell", "#!/bin/bash\nexec real-engine \"$@\"\n");
     program(bin, "viaEnvShell", "#!/usr/bin/env -S bash -e\nexec real-engine \"$@\"\n");
@@ -114,13 +119,13 @@ describe("engine probe answers kept between desktop starts", () => {
     program(shims, "other");
     program(bin, "native", "\u007fELF binary");
     program(bin, "node-cli");
-    expect(probedProgram("viaShell", bin)).toBeNull();
-    expect(probedProgram("viaEnvShell", bin)).toBeNull();
-    expect(probedProgram("engine", bin)).toBeNull();
-    expect(probedProgram("other", shims)).toBeNull();
-    expect(probedProgram("engine --flag", bin)).toBeNull();
-    expect(probedProgram("native", bin)).toMatch(/native$/);
-    expect(probedProgram("node-cli", bin)).toMatch(/node-cli$/);
+    expect(probedProgram("viaShell", { env: { PATH: bin } })).toBeNull();
+    expect(probedProgram("viaEnvShell", { env: { PATH: bin } })).toBeNull();
+    expect(probedProgram("engine", { env: { PATH: bin } })).toBeNull();
+    expect(probedProgram("other", { env: { PATH: shims } })).toBeNull();
+    expect(probedProgram("engine --flag", { env: { PATH: bin } })).toBeNull();
+    expect(probedProgram("native", { env: { PATH: bin } })).toMatch(/native$/);
+    expect(probedProgram("node-cli", { env: { PATH: bin } })).toMatch(/node-cli$/);
   });
 
   it("runs every probe where nothing may be kept", async () => {
@@ -128,8 +133,17 @@ describe("engine probe answers kept between desktop starts", () => {
     program(bin, "engine");
     const counted = runner();
     const cache = createCliProbeCache({ file: null, appVersion: "1", run: counted.run });
-    await ask(cache.exec, "engine", ["--version"], bin);
-    await ask(cache.exec, "engine", ["--version"], bin);
+    await ask(cache.exec, cliFor(bin, "engine"), ["--version"], bin);
+    await ask(cache.exec, cliFor(bin, "engine"), ["--version"], bin);
     expect(counted.calls).toHaveLength(2);
+  });
+
+  it.runIf(windows)("keeps an npm .cmd shim's answer under the script it runs, not the shim", () => {
+    const { bin } = place();
+    const script = join(bin, "node_modules", "engine", "bin", "engine.js");
+    mkdirSync(join(bin, "node_modules", "engine", "bin"), { recursive: true });
+    writeFileSync(script, "console.log('1.0.0');\n");
+    writeFileSync(join(bin, "engine.cmd"), '@ECHO off\r\n"%~dp0\\node_modules\\engine\\bin\\engine.js" %*\r\n');
+    expect(probedProgram(join(bin, "engine.cmd"), {})?.toLowerCase()).toBe(realpathSync(script).toLowerCase());
   });
 });
