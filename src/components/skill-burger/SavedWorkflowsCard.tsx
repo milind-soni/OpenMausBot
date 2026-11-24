@@ -63,7 +63,7 @@ export function SavedWorkflowsCard({ botId, threadId }: { botId: string; threadI
         const listId = `skill-burger-${skill.everyChat ? "every" : "bot"}-${skill.name}`;
         return (
           <div key={key} data-panel-row={`skill-burger:${skill.name}`}>
-            <div className="flex min-h-[46px] items-start gap-3 px-3.5 py-[10px]">
+            <div className="flex min-h-[46px] flex-wrap items-start gap-3 px-3.5 py-[10px]">
               <MiniBurger skill={skill} size="sm" />
               <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                 <button
@@ -78,10 +78,8 @@ export function SavedWorkflowsCard({ botId, threadId }: { botId: string; threadI
                 </button>
                 <EveryChatToggle compact skill={skill} />
               </div>
-              <span data-panel-action={`run-skill-burger:${skill.name}`} className="contents">
-                <RunWithInputs skill={skill} iconOnly onRun={(inputs) => runBurgerIn(dispatch, { id: botId, threadId }, skill.name, inputs)}
-                  className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-ink/[0.05] hover:text-ink" />
-              </span>
+              <RunWithInputs skill={skill} iconOnly panelAction={`run-skill-burger:${skill.name}`} onRun={(inputs) => runBurgerIn(dispatch, { id: botId, threadId }, skill.name, inputs)}
+                className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-ink/[0.05] hover:text-ink" />
               <TrashButton data-panel-action={`remove-skill-burger:${skill.name}`} label={t("skillBurger.list.remove", { name: skill.name })} onClick={() => void remove(skill)} />
             </div>
             <ol id={listId} hidden={!expanded} aria-label={t("skillBurger.layers")} className="flex flex-col gap-1 px-3.5 pb-3">

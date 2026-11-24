@@ -5,12 +5,12 @@
 import { z } from "zod";
 
 import { draftFromLayers, draftWorkflow } from "../../shared/skill-burger/draft.ts";
-import { askOf, burgerLayers, BURGER_MIN_LAYERS, type RunMessage } from "../../shared/skill-burger/layers.ts";
+import { askOf, burgerLayers, burgerWorthy, type RunMessage } from "../../shared/skill-burger/layers.ts";
 import { cleanSummary, summaryPrompt } from "../../shared/skill-burger/summary.ts";
 import { caseName, type Workflow } from "../../shared/skill-burger/format.ts";
 import { applyDecisions, decisionsPrompt, parseDecisions, type Decisions } from "../../shared/skill-burger/decisions.ts";
 import { applyChoices, draftView } from "../../shared/skill-burger/draft-view.ts";
-import { applyEdit, editUndo, replaceStep } from "./edit.ts";
+import { applyEdit, editUndo, insertFix } from "./edit.ts";
 import type { RunHistory } from "./history.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "../routes/table.ts";
@@ -61,7 +61,7 @@ const patchBody = z.union([
   // Undo of a change to the steps: the id that change returned.
   z.object({ undo: z.string().min(1).max(64), botId: id.optional() }).strict(),
 ]);
-/** "Update the burger with this fix": what the bot did to get past a failed step replaces that step. */
+/** "Update the burger with this fix": what the bot did to get past a failed step goes in just before that step. */
 const fixBody = z.object({ botId: id.optional(), runBotId: id, threadId: z.string().min(1).max(200), run: z.string().min(1).max(64), step: z.string().min(1).max(48) }).strict();
 /** One tap's "Add the path": the steps the bot did by judgement for a case nobody had saved, after the run handed it over. */
 const pathBody = z.object({ botId: id.optional(), runBotId: id, threadId: z.string().min(1).max(200), run: z.string().min(1).max(64), decide: z.string().min(1).max(40), case: caseName }).strict();
@@ -142,7 +142,7 @@ export function createSkillBurgerRoutes(deps: SkillBurgerRouteDeps): RouteHandle
       const messages = deps.messages(threadId);
       const layers = burgerLayers(messages).filter((layer) => layer.status === "done");
       const ask = askOf(messages);
-      if (layers.length < BURGER_MIN_LAYERS || !ask || !deps.summarize) return json(res, 200, { summary: null });
+      if (!burgerWorthy(layers) || !ask || !deps.summarize) return json(res, 200, { summary: null });
       const draft = drafted(messages);
       const words = botWords(messages);
       const [reply, decided] = await Promise.all([
@@ -200,7 +200,7 @@ export function createSkillBurgerRoutes(deps: SkillBurgerRouteDeps): RouteHandle
       const layers = fixLayers(deps.messages(threadId), run);
       if (!layers.length) return json(res, 422, { error: "The bot did nothing to fix it that could be saved." });
       const fix = draftFromLayers(layers, askOf(deps.messages(threadId)) ?? "", found.workflow.summary, deps.teammate ? { teammate: deps.teammate } : {}).steps;
-      const next = replaceStep(found.workflow, step, fix);
+      const next = insertFix(found.workflow, step, fix);
       if ("error" in next) return json(res, 422, next);
       const saved = replaceWorkflowSkill({ place: placeOf(botId), name: burger, workflow: next, sha256, root: deps.root });
       if ("stale" in saved) return stale();

@@ -19,7 +19,7 @@ describe("the card's view of a finished run", () => {
     expect(send!.asked![0]!.text).toContain("QA round 1 for https://mausbot.com");
     expect(send!.back!.map((one) => [one.who, one.round])).toEqual([["Kiwi", 1], ["Rio", 1], ["Miso", 1], ["Rio", 2], ["Miso", 2]]);
     expect(review).toMatchObject({ kind: "ai", exact: false, needs: ["s1"] });
-    expect(view.outcome).toMatch(/^\*\*Verdict:\*\*/);
+    expect(view.outcome).toBe("**Verdict:** nothing serious; every finding names the URL it checked. (Trimmed from a real run.)");
   });
 });
 

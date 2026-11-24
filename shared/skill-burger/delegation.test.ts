@@ -47,7 +47,7 @@ describe("a delegation run", () => {
     expect(delegation.rounds.map((calls) => calls.map((call) => call.bots.map((bot) => bot.name).join("+")))).toEqual([["Kiwi", "Rio", "Miso"], ["Rio", "Miso"]]);
     expect(delegation.rounds[0]![0]!.doneWhen).toBe("3 findings, each naming the URL checked, with evidence.");
     expect(delegation.replies.map((reply) => [reply.name, reply.round])).toEqual([["Kiwi", 1], ["Rio", 1], ["Miso", 1], ["Rio", 2], ["Miso", 2]]);
-    expect(delegation.replies[0]!.text).toContain("Kiwi");
+    expect(delegation.replies[0]!.text).toContain("Kiwi: 3 findings");
   });
 
   it("saves one delegate step that can be remapped, with the site as an input, and the review as an AI step", () => {
@@ -67,10 +67,22 @@ describe("a delegation run", () => {
     expect(send.review?.example).toMatch(/^Rio: /);
     expect(review).toMatchObject({ kind: "ai", deterministic: false, input: { $step: "s1", path: "text" } });
     // The replies are this run's results: shown on the card, never written into the workflow.
-    expect(JSON.stringify(draft.workflow)).not.toContain("Scope:** I checked the homepage");
+    expect(JSON.stringify(draft.workflow)).not.toContain("each with the URL checked and evidence");
     const md = renderWorkflowSkillMd("qa-test", draft.workflow);
     expect(md).toContain("Teammates: Kiwi (Accessibility tester), Rio (Performance tester) and Miso (Content and links tester) each get their part at once");
     expect(md).toContain("Done when: 3 findings");
+  });
+
+  it("stays a running step while a teammate hasn't replied, whatever the lead said meanwhile", () => {
+    // Cut the run just before the second round's replies: the lead's "sent them back" text must not read as its verdict.
+    const cut = run.slice(0, run.findIndex((message) => message.roomRequest?.phase === "result" && run.slice(0, run.indexOf(message)).filter((one) => one.roomRequest?.phase === "result").length === 3));
+    const layers = burgerLayers(cut);
+    expect(layers.map((layer) => [layer.kind, layer.status])).toEqual([["delegate", "running"]]);
+    expect(draftWorkflow(cut)).toBeNull();
+  });
+
+  it("is no card for fetches alone", () => {
+    expect(draftWorkflow([ask("look at two feeds"), bash("curl -s https://example.com/a.json"), bash("curl -s https://example.com/b.json")])).toBeNull();
   });
 
   it("is one step, not one per call, and not a second step for the second round", () => {

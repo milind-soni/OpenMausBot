@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { workflowSchema, type Workflow } from "../../shared/skill-burger/format.ts";
 import type { RunMessage } from "../../shared/skill-burger/layers.ts";
-import { replaceStep } from "./edit.ts";
+import { insertFix } from "./edit.ts";
 import { createRunHistory } from "./history.ts";
 import { createRunStates } from "./run-state.ts";
 import { fillPrompt, type RunEnvelope, type RunState } from "./runner.ts";
@@ -18,7 +18,7 @@ const bash = (command: string): RunMessage => ({ id: `m${++n}`, role: "bot", kin
 const runCall = (output: string): RunMessage => ({ id: `m${++n}`, role: "bot", kind: "activity", tool: { name: "mcp__agents__run_workflow", ok: true, itemId: `t${n}`, input: "{}", output } });
 
 describe("keeping a fix", () => {
-  it("takes what the bot did between the failed step and going on, and puts it in that step's place", () => {
+  it("takes what the bot did between the failed step and going on, and puts it just before that step", () => {
     const messages = [
       { id: "u", role: "user", kind: "text", text: "/make-csv" },
       runCall('The Skill Burger stopped: "Convert" failed: in2csv: command not found. Once the cause is fixed, call run_workflow with resume "run-1"'),
@@ -33,12 +33,14 @@ describe("keeping a fix", () => {
       { id: "s2", kind: "shell", label: "Convert", run: "in2csv a.json > done.csv" },
       { id: "s3", kind: "shell", label: "Archive", run: "cp done.csv archive/", stdin: { $step: "s2" } },
     ]);
-    const fixed = replaceStep(workflow, "s2", [
+    // Going on from the failed step ran it again and it worked: the fix goes before it, and the step stays.
+    const fixed = insertFix(workflow, "s2", [
       { id: "s1", kind: "shell", label: "Install csvkit", run: "python3 -m venv .venv && .venv/bin/pip install csvkit" },
-      { id: "s2", kind: "shell", label: "Convert", run: ".venv/bin/in2csv a.json > done.csv" },
+      { id: "s2", kind: "shell", label: "Put it on PATH", run: "ln -sf .venv/bin/in2csv ./in2csv", stdin: { $step: "s1" } },
     ]) as Workflow;
-    expect(fixed.steps.map((step) => step.id)).toEqual(["s1", "s2_fix1", "s2_fix2", "s3"]);
-    expect(fixed.steps[3]).toMatchObject({ stdin: { $step: "s2_fix2" } });
+    expect(fixed.steps.map((step) => step.id)).toEqual(["s1", "s2_fix1", "s2_fix2", "s2", "s3"]);
+    expect(fixed.steps[2]).toMatchObject({ stdin: { $step: "s2_fix1" } });
+    expect(fixed.steps[4]).toMatchObject({ stdin: { $step: "s2" } });
     expect(workflowSchema.safeParse(fixed).success).toBe(true);
   });
 
@@ -69,10 +71,15 @@ describe("a burger's run history", () => {
 describe("a turn resumed by teammates' replies", () => {
   it("finds the run in that chat waiting on them, and nothing elsewhere", () => {
     const states = createRunStates(mkdtempSync(join(tmpdir(), "burger-states-")));
-    const state = { id: "0d5c3a52-9a2e-4b55-8f1e-1d4c6f7a8b9c", name: "qa", botId: "lead", threadId: "t1", sha256: "x", workflow: wf([{ id: "s1", kind: "shell", label: "x", run: "true" }]), args: {}, results: {}, waiting: { step: "s1", type: "teammates" }, createdAt: Date.now() } as RunState;
+    const state = {
+      id: "0d5c3a52-9a2e-4b55-8f1e-1d4c6f7a8b9c", name: "qa", botId: "lead", threadId: "t1", sha256: "x", workflow: wf([{ id: "s1", kind: "shell", label: "x", run: "true" }]), args: {}, results: {},
+      waiting: { step: "s1", type: "teammates" }, delegation: { step: "s1", round: 1, who: {}, replies: {}, requests: [{ part: "Kiwi", botId: "kiwi", name: "Kiwi", requestId: "h-1" }] }, createdAt: Date.now(),
+    } as RunState;
     states.save(state);
-    expect(states.waitingIn("t1")?.id).toBe(state.id);
-    expect(states.waitingIn("t2")).toBeNull();
+    expect(states.waitingIn("t1", ["h-1", "h-9"])?.id).toBe(state.id);
+    // Replies to other hand-offs in the same chat are not this run's.
+    expect(states.waitingIn("t1", ["h-9"])).toBeNull();
+    expect(states.waitingIn("t2", ["h-1"])).toBeNull();
     expect(fillPrompt("Review what came back for {site} ({other})", { site: "https://example.org" })).toBe("Review what came back for https://example.org ({other})");
   });
 });

@@ -477,13 +477,16 @@ function joinDelegations(layers: BurgerLayer[], round: Map<string, number>, repl
       const reply = request.requestId ? replies.get(request.requestId) : undefined;
       return reply ? [{ ...reply, name: reply.name || request.name, round: index + 1 }] : [];
     })));
+    // A teammate still working: the step is still going, whatever the bot said meanwhile.
+    const open = layer.delegation.rounds.flat().some((call) => call.requests.some((request) => request.requestId && !replies.has(request.requestId)));
+    if (open && layer.status === "done") layer.status = "running";
   }
   return out;
 }
 
 /** A run that handed work out ends with the bot's own review of what came back: a layer the AI does again next time. */
 function withReview(layers: BurgerLayer[], run: readonly RunMessage[]): BurgerLayer[] {
-  if (!layers.some((layer) => layer.kind === "delegate")) return layers;
+  if (!layers.some((layer) => layer.kind === "delegate") || layers.some((layer) => layer.kind === "delegate" && layer.status === "running")) return layers;
   let lastReply = -1;
   run.forEach((message, index) => { if (message.roomRequest?.phase === "result") lastReply = index; });
   if (lastReply < 0) return layers;
@@ -498,3 +501,6 @@ function withReview(layers: BurgerLayer[], run: readonly RunMessage[]): BurgerLa
 
 /** A burger shows for a run of two real steps or more. */
 export const BURGER_MIN_LAYERS = 2;
+
+/** A run worth a burger: two steps or more, and not only fetches (looking things up changes nothing). */
+export const burgerWorthy = (layers: readonly BurgerLayer[]) => layers.length >= BURGER_MIN_LAYERS && layers.some((layer) => !layer.read);

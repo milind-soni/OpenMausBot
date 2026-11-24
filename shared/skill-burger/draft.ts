@@ -7,7 +7,7 @@
 import { redactSecretsInText } from "../redact.ts";
 import { DELEGATE_MAX_ROUNDS, textLine, type Workflow, type WorkflowRef, type WorkflowStep, type WorkflowTeammate, type WorkflowText } from "./format.ts";
 import { appMeta, BARE_READ } from "./apps.ts";
-import { askOf, askTextOf, burgerLayers, type BurgerLayer, type RunMessage } from "./layers.ts";
+import { askOf, askTextOf, burgerLayers, burgerWorthy, type BurgerLayer, type RunMessage } from "./layers.ts";
 
 const PIPE_MIN = 6;
 const ARG_MIN = 3;
@@ -364,7 +364,7 @@ export interface WorkflowDraft { workflow: Workflow; layers: BurgerLayer[] }
 /** The run since the person's last ask as a workflow, or null when it has fewer than two finished steps. */
 export function draftWorkflow(messages: readonly RunMessage[], options: DraftOptions = {}): WorkflowDraft | null {
   const layers = burgerLayers(messages).filter((layer) => layer.status === "done");
-  if (layers.length < 2) return null;
+  if (!burgerWorthy(layers)) return null;
   const ask = askOf(messages) ?? "";
   const summary = (options.summary?.trim() || ask || layers.map(layerLabel).join(", ")).replace(/\s+/g, " ").slice(0, 160);
   return { workflow: draftFromLayers(layers, askTextOf(messages) ?? ask, summary, options), layers };

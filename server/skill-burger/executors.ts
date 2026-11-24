@@ -140,7 +140,6 @@ export function createExecutors(context: ExecutorContext): StepExecutors {
     async delegate(input) {
       const answer = await context.internal("agents", "/api/internal/coordinate-bots", {
         botIds: input.botIds, message: input.message, ...(input.doneWhen ? { done_when: input.doneWhen } : {}), ...(input.rework ? { rework: true } : {}), ...(input.consult ? { consult: true } : {}),
-        reason: "A saved Skill Burger step",
       }, input.signal);
       const receipts = (Array.isArray(answer.body.receipts) ? answer.body.receipts : []).map(record).flatMap((receipt) => (
         receipt && typeof receipt.botId === "string" && typeof receipt.requestId === "string" ? [{ botId: receipt.botId, name: String(receipt.botName ?? receipt.botId), requestId: receipt.requestId }] : []));

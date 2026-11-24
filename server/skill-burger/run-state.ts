@@ -28,15 +28,17 @@ export function createRunStates(dir: string, now: () => number = Date.now) {
       writeFileAtomic(file(state.id), JSON.stringify(state), { mode: 0o600 });
       sweep();
     },
-    /** The newest run in `threadId` paused on teammates' replies, if any: its resume names it so the bot goes on with it. */
-    waitingIn(threadId: string): RunState | null {
+    /** The newest run in `threadId` paused on the teammates' replies to `handoffs`, if any: the turn those replies resume
+     * is pointed back into it. A run waiting on other hand-offs, or abandoned, is never named. */
+    waitingIn(threadId: string, handoffs: readonly string[]): RunState | null {
       let newest: RunState | null = null;
       try {
         for (const name of readdirSync(dir)) {
           if (!name.endsWith(".json") || name === "history.json") continue;
           try {
             const seen = JSON.parse(readFileSync(join(dir, name), "utf8")) as RunState;
-            if (seen.threadId === threadId && seen.waiting?.type === "teammates" && now() - seen.createdAt <= RUN_STATE_TTL_MS && (!newest || seen.createdAt > newest.createdAt)) newest = seen;
+            const ours = seen.delegation?.requests.some((request) => handoffs.includes(request.requestId));
+            if (seen.threadId === threadId && seen.waiting?.type === "teammates" && ours && now() - seen.createdAt <= RUN_STATE_TTL_MS && (!newest || seen.createdAt > newest.createdAt)) newest = seen;
           } catch {
             // Not a run's file.
           }

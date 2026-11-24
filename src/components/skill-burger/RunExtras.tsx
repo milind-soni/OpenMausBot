@@ -59,7 +59,7 @@ export function RunHistory({ name, everyChat, botId, threadId, refreshKey }: { n
     return () => { current = false; };
   }, [name, refreshKey]);
   if (!runs?.length) return null;
-  const fixed = runs.find((run) => run.threadId === threadId && run.status === "ok" && run.fixedBy);
+  const fixed = runs.find((run) => run.threadId === threadId && run.status !== "failed" && run.fixedBy);
   const keep = async () => {
     if (!fixed?.fixedBy || kept === "saving") return;
     setKept("saving");

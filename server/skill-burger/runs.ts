@@ -140,8 +140,8 @@ export function createSkillBurgerRuns(deps: { dataDir: string; root?: string; ho
       : Promise.resolve(PASS);
 
   /** For a turn the teammates' replies resume: the line that sends it back into the run it paused for them. */
-  const waitingNote = (threadId: string): string | null => {
-    const waiting = states.waitingIn(threadId);
+  const waitingNote = (threadId: string, handoffs: readonly string[]): string | null => {
+    const waiting = states.waitingIn(threadId, handoffs);
     return waiting ? `These replies are for the Skill Burger "${waiting.name}": first call run_workflow with resume ${JSON.stringify(waiting.id)} and response "back", then do what it says.` : null;
   };
 

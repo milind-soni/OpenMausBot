@@ -10,11 +10,13 @@ import { readBurgerWorkflow, type SavedWorkflow } from "@/lib/skill-burger";
 
 const FIELD = "w-full min-w-0 rounded-md border border-hairline/60 bg-card px-2 py-1 text-[13px] text-ink outline-none focus:border-accent";
 
-export function RunWithInputs({ skill, onRun, className, iconOnly }: {
+export function RunWithInputs({ skill, onRun, className, iconOnly, panelAction }: {
   skill: SavedWorkflow;
   onRun: (inputs: Record<string, string>) => void;
   className: string;
   iconOnly?: boolean;
+  /** The bot panel's name for this action, on the button itself. */
+  panelAction?: string;
 }) {
   const [values, setValues] = useState<Record<string, string> | null>(null);
   const open = async () => {
@@ -33,7 +35,7 @@ export function RunWithInputs({ skill, onRun, className, iconOnly }: {
   return (
     <>
       <button type="button" onClick={() => void open()} aria-expanded={skill.args.length ? Boolean(values) : undefined}
-        aria-label={t("skillBurger.runName", { name: skill.summary })} title={t("skillBurger.run.button")} data-run-burger={skill.name} className={className}>
+        aria-label={t("skillBurger.runName", { name: skill.summary })} title={t("skillBurger.run.button")} data-run-burger={skill.name} {...(panelAction ? { "data-panel-action": panelAction } : {})} className={className}>
         <CirclePlay size={14} aria-hidden="true" />{iconOnly ? null : t("skillBurger.run.button")}
       </button>
       {values && (

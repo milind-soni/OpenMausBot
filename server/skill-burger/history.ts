@@ -62,8 +62,10 @@ export function createRunHistory(dir: string, now: () => number = Date.now) {
           ...(envelope.defaults?.length ? { defaults: envelope.defaults.map((one) => one.name) } : before?.defaults ? { defaults: before.defaults } : {}),
           ...(before?.fixedBy ? { fixedBy: before.fixedBy } : {}),
         };
-        // A run that went on from its failed step and finished was fixed in its chat: the card can offer to keep the fix.
-        if (before?.status === "failed" && status === "ok") record.fixedBy = before.failed?.step ?? "";
+        // A run that went on from its failed step, and that step then worked, was fixed in its chat: the card can offer to
+        // keep the fix, whether or not the run has finished since.
+        const failedBefore = before?.failed?.step;
+        if (failedBefore && steps.find((step) => step.id === failedBefore)?.state === "done") record.fixedBy = failedBefore;
         ledger[context.name] = [record, ...runs.filter((one) => one.run !== envelope.run)].slice(0, RUNS_KEPT);
         write(ledger);
       } catch {
