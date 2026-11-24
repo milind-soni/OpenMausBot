@@ -811,7 +811,7 @@ export function Composer({
         )}
         {!showSend && (busy && mayStop && !locked ? (
           <button type="button" onClick={interruptTurn} aria-label={t("chat.stopTurn")} title={t("chat.stop")}
-            className="flex size-8 shrink-0 items-center justify-center rounded-full bg-black text-white">
+            className="flex size-8 shrink-0 items-center justify-center rounded-full bg-composer-action text-composer-action-ink">
             <Square size={11} fill="currentColor" aria-hidden="true" />
           </button>
         ) : bot && !group && <CallButton bot={bot} placement="composer" inverse />)}

@@ -177,7 +177,7 @@
 @media (pointer: fine) { .table-plate .table-action { width: 24px; height: 24px; min-width: 24px; min-height: 24px; } }
 
 @theme {
-  --color-composer-action: #1c1c1c;
+  --color-composer-action: #000;
   --color-composer-action-ink: #fff;
   --animate-panel-in: panel-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-sheet-in: sheet-in 0.26s cubic-bezier(0.22, 1, 0.36, 1);
