@@ -5,7 +5,8 @@
 //  &skin=midnight|daylight&advanced=1&page=<Settings page id>&long=1 (long names)&connect=ok (a server link connects)
 //  &join=phone|computer (a new device signs in a few seconds after a code shows)&tailscale=…|not-running|needs-permission
 //  &code=1 (a phone code still open) &notice=1 (an update kept Same Wi-Fi on) &retired=1 (an older phone app's link ended)
-//  &home=on|off (Always-on home on this computer)
+//  &home=on|off (Always-on home on this computer) &vps=default (a default SSH server too; page=ai&advanced=1 shows the
+//  Self-hosted VPS panel under AI's computers)
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { SettingsModal } from "@/components/SettingsModal";
@@ -140,7 +141,8 @@ const ANSWERS: Record<string, unknown> = {
 };
 const config = {
   profile: { name: "Ada", email: "ada@example.com" }, membership: { authority: "local", pairingCodes: true }, managedPolicy: null,
-  vps: { configured: full, sshAlias: "", servers: full ? [{ name: "GPU box", sshAlias: "gpu" }, ...(ten ? [{ name: "Render farm", sshAlias: "farm" }] : [])] : [] },
+  vps: { configured: full, sshAlias: params.get("vps") === "default" ? "studio-gpu" : "", memoryGb: 8, cpus: 4,
+    servers: full ? [{ name: "GPU box", sshAlias: "gpu" }, ...(ten ? [{ name: "Render farm", sshAlias: "farm" }] : [])] : [] },
   ...(place === "cloud" ? { cloudHome: true } : {}),
 };
 ANSWERS["/api/config"] = config;

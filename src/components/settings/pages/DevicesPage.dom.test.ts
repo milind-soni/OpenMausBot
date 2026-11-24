@@ -35,6 +35,7 @@ let lendWish: ReturnType<typeof vi.fn>;
 let phoneApps: unknown[];
 let saved: Array<{ id: string; kind: string; name: string; origin?: string; home?: boolean }>;
 let account: Record<string, unknown>;
+let vpsState: string;
 let alwaysOn: Record<string, unknown> | null;
 
 const reply = async () => companion;
@@ -56,7 +57,7 @@ function install(tailscaleProblem?: CompanionState["tailscaleProblem"]) {
   ];
   environments = {
     state: vi.fn(async () => ({ localOrigin: "http://127.0.0.1:8799", remote: false, packaged: true, activeId: "local", environments: [...saved] })),
-    status: vi.fn(async () => [{ id: "vps", state: "cantReach", since: NOW, version: "0.1.180", behind: false, install: "docker" }]),
+    status: vi.fn(async () => [{ id: "vps", state: vpsState, since: NOW, version: "0.1.180", behind: false, install: "docker" }]),
     switch: vi.fn(async () => {}), forget: vi.fn(async () => {}), retry: vi.fn(async () => {}),
   };
   workspaces = {
@@ -87,6 +88,7 @@ beforeEach(() => {
   botRows = [];
   config = { profile: { email: "ada@example.com" }, managedPolicy: null };
   account = { available: true, status: "ready", email: "ada@example.com" };
+  vpsState = "cantReach";
   alwaysOn = null;
   companion = {
     enabled: true, keepAwake: false, port: 8810, pairing: null,
@@ -252,6 +254,7 @@ describe("the Devices page", () => {
   });
 
   it("closes the open details on an Escape pressed with focus nowhere, as after Pair again's Cancel", async () => {
+    vpsState = "signedOut";
     await render();
     await click("[data-device-node='place:vps']");
     await click("[data-device-details='place:vps'] [data-device-action=pair-again]");
@@ -262,6 +265,7 @@ describe("the Devices page", () => {
   });
 
   it("pairs a saved server again inside its details, with nothing over the page", async () => {
+    vpsState = "signedOut";
     await render();
     await click("[data-device-node='place:vps']");
     await click("[data-device-details='place:vps'] [data-device-action=pair-again]");
@@ -517,7 +521,7 @@ describe("Add a device, in the page", () => {
     expect(requests).not.toContain("POST /api/auth/pairing");
   });
 
-  it("adds your own server in two steps: the line to run, then Connect to a server's own form with its lend switch, and confirms it", async () => {
+  it("adds your own server in two steps: the line to run, then Connect to another computer's own form with its lend switch, and confirms it", async () => {
     await render();
     await click("[data-add-device]");
     await click("[data-add-kind=server]");
@@ -869,5 +873,103 @@ describe("Settings sends every old phone address to its block on Devices", () =>
       .toMatchObject({ page: "devices", anchor: "more-ways" });
     await render({}, { anchor: "more-ways" });
     expect($("[data-settings-disclosure=more-ways]")).not.toBeNull();
+  });
+});
+
+describe("one way back for each kind of trouble", () => {
+  const actionsOf = (id: string) => [...document.querySelectorAll(`[data-device-details='${id}'] [data-device-action]`)].map((one) => one.getAttribute("data-device-action"));
+  it("offers only Try again while a server can't be reached, and says to check it is on", async () => {
+    await render();
+    expect($("[data-device-row='place:vps'] [data-row-action=retry]")?.textContent).toBe("Try again");
+    await click("[data-device-node='place:vps']");
+    expect(actionsOf("place:vps")).toContain("retry");
+    expect(actionsOf("place:vps")).not.toContain("pair-again");
+    expect($("[data-device-details='place:vps'] [data-device-unreachable]")?.textContent).toBe("Check that Hetzner box is on and online, then choose Try again.");
+  });
+
+  it("offers only Pair again once its sign-in is gone", async () => {
+    vpsState = "signedOut";
+    await render();
+    expect($("[data-device-row='place:vps'] [data-row-action]")?.getAttribute("data-row-action")).toBe("pair-again");
+    await click("[data-device-node='place:vps']");
+    expect(actionsOf("place:vps")).toContain("pair-again");
+    expect(actionsOf("place:vps")).not.toContain("retry");
+  });
+
+  it("offers neither while it is online", async () => {
+    vpsState = "connected";
+    await render();
+    expect($("[data-device-row='place:vps'] [data-row-action]")).toBeNull();
+    await click("[data-device-node='place:vps']");
+    expect(actionsOf("place:vps").filter((type) => type === "retry" || type === "pair-again")).toEqual([]);
+  });
+});
+
+describe("Add a computer's words", () => {
+  it("says why the private network is needed before it is on", async () => {
+    install("signed-out");
+    await render();
+    await click("[data-add-group=computers]");
+    expect($("[data-add-network-why]")?.textContent).toContain("only through Tailscale");
+  });
+
+  it("gives the link first, with the address and code folded under it", async () => {
+    await render();
+    await click("[data-network-action]");
+    await click("[data-add-group=computers]");
+    const panel = $("[data-pair-panel=computer]")!;
+    expect(panel.textContent).toContain("choose ＋ then Connect to another computer, and paste this link.");
+    expect(panel.textContent).not.toContain("connects computers too");
+    expect($("[data-pair-type-instead] [data-pairing-code]")?.textContent).toBe("7KQ2-M9XD-H4TP");
+    expect($<HTMLDetailsElement>("[data-pair-type-instead]")?.open).toBe(false);
+  });
+});
+
+describe("the inline server form's one error", () => {
+  const openForm = async () => { await render(); await click("[data-add-device]"); await click("[data-add-kind=server]"); };
+  it("puts an address problem under the address, with no code field until the server is found", async () => {
+    await openForm();
+    workspaces.probe.mockImplementation(async () => ({ outcome: "problem", problem: "unreachable", host: "maus.example.org" }));
+    await type("[data-own-server-link]", "https://maus.example.org");
+    await wait(500);
+    const problem = $("[data-connect-problem]")!;
+    expect(problem.getAttribute("data-connect-problem")).toBe("address");
+    expect(document.querySelectorAll("[data-connect-problem]")).toHaveLength(1);
+    const field = $<HTMLInputElement>("[data-own-server-link]")!;
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+    expect(field.getAttribute("aria-describedby")).toBe(problem.id);
+    expect(field.className).not.toContain("shadow-[inset_0_0_0_1px_var(--color-danger)]");
+    expect($("[data-own-server-code]")).toBeNull();
+  });
+
+  it("asks for the code once the server is found, and puts a code problem under the code", async () => {
+    await openForm();
+    workspaces.probe.mockImplementation(async (_address: string, code: string) => (code
+      ? { outcome: "problem", problem: "oldCode", host: "maus.example.org" }
+      : { outcome: "found", label: "Garage NUC", version: "0.1.180", transport: "https" }));
+    await type("[data-own-server-link]", "https://maus.example.org");
+    await wait(500);
+    expect($("[data-own-server-code]")).not.toBeNull();
+    await type("[data-own-server-code]", "123456");
+    await wait(500);
+    expect($("[data-connect-problem]")?.getAttribute("data-connect-problem")).toBe("code");
+    expect($("[data-own-server-code]")?.getAttribute("aria-invalid")).toBe("true");
+    expect($("[data-own-server-link]")?.hasAttribute("aria-invalid")).toBe(false);
+  });
+});
+
+describe("a server bots reach over SSH, in its details", () => {
+  it("labels every field, says its SSH name and what the limits do, and keeps Remove apart in red", async () => {
+    config = { ...config, vps: gpu };
+    await render();
+    await click("[data-device-node='vps:gpu']");
+    const editor = $("[data-device-details='vps:gpu'] [data-vps-server=gpu]")!;
+    const labels = [...editor.querySelectorAll("label")].map((label) => label.textContent);
+    expect(labels).toEqual(["Name", "Memory for each bot (GB)", "Processor cores for each bot"]);
+    for (const label of editor.querySelectorAll("label")) expect(document.getElementById(label.htmlFor)?.tagName).toBe("INPUT");
+    expect(editor.querySelector("[data-vps-ssh-name]")?.textContent).toBe("SSH name: gpu");
+    expect(editor.querySelector("[data-vps-limits-line]")?.textContent).toContain("Left empty, it gets 4 GB and 2 cores.");
+    expect(editor.querySelector("button[data-danger]")?.textContent).toBe("Remove");
+    expect($("[data-device-details='vps:gpu']")?.textContent).not.toContain("Name and limits");
   });
 });

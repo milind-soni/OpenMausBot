@@ -50,7 +50,7 @@ export function pairingBlock(input: {
   const scanInvite = input.phone === "android" && Boolean(input.inviteUrl);
   lines.push(`Link           ${input.link}`);
   lines.push("");
-  lines.push("  Desktop app   ＋ → Connect to a server, paste the link");
+  lines.push("  Desktop app   ＋ → Connect to another computer, paste the link");
   lines.push(scanInvite ? "  Phone         scan this with the MausBot app" : "  Phone         scan with your camera or the MausBot app");
   lines.push("");
   lines.push(qrToString(scanInvite ? input.inviteUrl! : input.link));

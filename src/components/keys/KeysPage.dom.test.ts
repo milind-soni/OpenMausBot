@@ -548,7 +548,19 @@ describe("Self-hosted VPS servers", () => {
   const status = (vps: Record<string, unknown>) => ({ ...fx.config, vps: { configured: true, memoryGb: 4, cpus: 2, servers: [], ...vps } });
   const rowFor = (alias: string) => host.querySelector<HTMLElement>(`[data-vps-server="${alias}"]`)!;
   const aliases = () => [...host.querySelectorAll<HTMLElement>("[data-vps-server]")].map((element) => element.dataset.vpsServer);
-  const field = (label: string) => host.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
+  // An editor's fields carry their own visible labels inside a group named for the server; the add row's carry aria-labels.
+  const labelled = (scope: ParentNode | null, text: string) => {
+    const label = [...(scope?.querySelectorAll("label") ?? [])].find((one) => one.textContent === text);
+    return (label ? document.getElementById(label.htmlFor) : null) as HTMLInputElement;
+  };
+  const group = (name: string) => host.querySelector<HTMLElement>(`[data-vps-server][aria-label="${name}"]`);
+  const field = (label: string): HTMLInputElement => {
+    const limit = /^(.+) (memory \(GB\)|CPU cores)$/.exec(label);
+    if (limit && group(limit[1]!)) return labelled(group(limit[1]!), limit[2] === "CPU cores" ? "Processor cores for each bot" : "Memory for each bot (GB)");
+    const name = /^(.+) server name$/.exec(label);
+    if (name) return labelled(rowFor(name[1]!), "Name");
+    return host.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`) ?? labelled(host, label === "Self-hosted VPS SSH config alias" ? "SSH name" : label);
+  };
   const button = (scope: ParentNode, text: string) => [...scope.querySelectorAll<HTMLButtonElement>("button")].find((candidate) => candidate.textContent === text)!;
   const lastBody = () => JSON.parse((fx.api.mock.lastCall![1] as RequestInit).body as string);
   const echo = (base: Record<string, unknown>) => async (_path: string, init: RequestInit) => {

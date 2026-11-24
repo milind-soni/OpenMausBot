@@ -58,7 +58,7 @@ Use a disposable workspace on the host.
    `*:8799`.
 4. On the host, choose **Pair a computer** under the switch. Expect the dialog to show the address `http://$NAME:8799`
    with the code, and **Copy link** to copy a link that starts with `http://$NAME:8799/pair#code=`.
-5. On the client, choose ＋ → Connect to a server and paste the link. Expect the found line to say Tailscale. Connect,
+5. On the client, choose ＋ → Connect to another computer and paste the link. Expect the found line to say Tailscale. Connect,
    then send a message and wait for a reply.
 6. From the client, check the refusals:
    - `curl -i -H 'Host: evil.example.com' http://$IP:8799/api/health` answers 421.

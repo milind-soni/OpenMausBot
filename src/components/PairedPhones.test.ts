@@ -16,8 +16,8 @@ describe("paired phones", () => {
   it("keeps browser access separately off until granted, including old sidecar snapshots", () => {
     for (const browserControlAccess of [undefined, false, true]) {
       const markup = row(phone({ browserControlAccess }), state());
-      expect(markup.match(/<button[^>]*aria-label="Browser control access for Ada"[^>]*>/)?.[0]).toContain(`aria-checked="${browserControlAccess === true}"`);
-      expect(markup.match(/<button[^>]*aria-label="Computer view access for Ada"[^>]*>/)?.[0]).toContain('aria-checked="true"');
+      expect(markup.match(/<button[^>]*aria-label="See and use your bots’ browser from Ada"[^>]*>/)?.[0]).toContain(`aria-checked="${browserControlAccess === true}"`);
+      expect(markup.match(/<button[^>]*aria-label="See and use your bots’ desktops from Ada"[^>]*>/)?.[0]).toContain('aria-checked="true"');
     }
   });
 

@@ -63,7 +63,7 @@ describe("app_settings show_card", () => {
     expect(messages).toEqual([{ id: "m1", threadId: "t-kiwi", role: "bot", kind: "text", text: SETTINGS_CARDS["other-computers"].text, settingsCard: { id: "other-computers" } }]);
     expect(answer.body).toEqual({ text: expect.stringMatching(/^Card shown: Your other computers\. Your other computers is on now\. Only the user can change it; you cannot, and you never see what the card shows\./) });
     expect(String(answer.body.text)).toContain("if the card shows a switch, turn it on there; otherwise open MausBot on that computer, Settings → Devices");
-    expect(String(answer.body.text)).toContain("Connect to a server");
+    expect(String(answer.body.text)).toContain("Connect to another computer");
   });
 
   it("never tells the bot the setting is off: the server knows on, or cannot tell (off, or on with nothing answering)", async () => {

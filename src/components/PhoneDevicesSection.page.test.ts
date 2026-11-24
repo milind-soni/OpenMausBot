@@ -41,7 +41,7 @@ describe("How your phone reaches this computer", () => {
   it("with nothing paired and no way in on, folds the ways in into one row that says Add a phone turns them on", () => {
     const html = page(true);
     expect(html).toContain("How your phone reaches this computer");
-    expect(html).toContain("Pair a phone turns these on for you. Change them here later.");
+    expect(html).toContain("Add a phone turns these on for you. Change them here later.");
     expect(html).toContain("data-reach-fold");
     expect(html).not.toContain('data-route-row="wifi"');
     expect(html).toContain('data-settings-block="more-ways"');

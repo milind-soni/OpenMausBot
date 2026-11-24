@@ -70,12 +70,12 @@ export function PhoneControls({ device, c, onPairAgain, onChanged }: { device: P
       )}
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-[13px] leading-[18px] text-ink">{t("remote.devices.allowView")}</div>
-          <div className="text-[12px] leading-4 text-ink-secondary">{t("remote.devices.allowViewDetail")}</div>
+          <div className="text-[13px] leading-[18px] text-ink">{t("remote.devices.desktopsTitle")}</div>
+          <div className="text-[12px] leading-4 text-ink-secondary">{t("remote.devices.desktopsLine")}</div>
         </div>
         <Switch
           checked={device.cloudDesktopAccess}
-          aria-label={t("remote.devices.viewAria", { name: device.name })}
+          aria-label={t("remote.devices.desktopsAria", { name: device.name })}
           disabled={c.busy}
           data-phone-cloud-desktop=""
           onClick={() => act((companion) => companion.cloudDesktop(device.id, !device.cloudDesktopAccess))}
@@ -83,12 +83,12 @@ export function PhoneControls({ device, c, onPairAgain, onChanged }: { device: P
       </div>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-[13px] leading-[18px] text-ink">{t("remote.devices.allowBrowser")}</div>
-          <div className="text-[12px] leading-4 text-ink-secondary">{t("remote.devices.allowBrowserDetail")}</div>
+          <div className="text-[13px] leading-[18px] text-ink">{t("remote.devices.browserTitle")}</div>
+          <div className="text-[12px] leading-4 text-ink-secondary">{t("remote.devices.browserLine")}</div>
         </div>
         <Switch
           checked={device.browserControlAccess === true}
-          aria-label={t("remote.devices.browserAria", { name: device.name })}
+          aria-label={t("remote.devices.browserUseAria", { name: device.name })}
           disabled={c.busy}
           data-phone-browser=""
           onClick={() => act((companion) => companion.browserControl(device.id, !device.browserControlAccess))}

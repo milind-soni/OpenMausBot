@@ -30,7 +30,7 @@ switch step 2 turns on for you.
 
 ## Connect the client
 
-1. On the client, choose **＋** at the end of the rail, then **Connect to a server**.
+1. On the client, choose **＋** at the end of the rail, then **Connect to another computer**.
 2. Paste the link. Or type the address and the code in their two boxes.
 3. The sheet names the host it found and says it is on Tailscale. Choose **Connect to** and the host's name.
 

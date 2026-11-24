@@ -178,7 +178,7 @@ export function PairCodePanel({ kind, address, onConnected, cloudHome = false, a
   }
   return (
     <div className="flex flex-col gap-3" data-pair-panel={kind}>
-      <p className="text-[13px] leading-[18px] text-ink-secondary">{t("devicesPage.addFlow.computerPasteLink", { app: productName() })}</p>
+      <p className="text-[13px] leading-[18px] text-ink-secondary">{t("devicesPage.addFlow.computerPasteOther", { app: productName() })}</p>
       {link && (
         <div className="flex flex-col items-start gap-1.5">
           <button type="button" onClick={copy} data-copy-link="" data-pair-link={link.link} className="ui-button ui-button-primary">
@@ -187,8 +187,18 @@ export function PairCodePanel({ kind, address, onConnected, cloudHome = false, a
           {address && hostName(link.link) && <span className="text-[12px] leading-4 text-ink-tertiary">{t("devicesPage.addFlow.linkOpens", { host: hostName(link.link)! })}</span>}
         </div>
       )}
-      <TypedCode label={t("devicesPage.addFlow.ifAsked")} code={offer.code} expiresAt={offer.expiresAt} />
       <Waiting connected={connected} />
+      {link && <details data-pair-type-instead="" className="text-[12px] leading-4 text-ink-secondary">
+        <summary className="w-fit cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">{t("devicesPage.addFlow.typeInstead")}</summary>
+        <div className="mt-2 flex flex-col gap-2">
+          <span className="flex flex-col gap-0.5">
+            <span className="text-ink-tertiary">{t("connect.address")}</span>
+            <span data-pairing-address="" className="select-text break-all text-[13px] leading-[18px] text-ink">{link.address}</span>
+          </span>
+          <TypedCode label={t("connect.code")} code={offer.code} expiresAt={offer.expiresAt} />
+        </div>
+      </details>}
+      {!link && <TypedCode label={t("connect.code")} code={offer.code} expiresAt={offer.expiresAt} />}
     </div>
   );
 }

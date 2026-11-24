@@ -82,7 +82,7 @@ export function ServerList({ saved, busy, sharingOffered, ownServers = [], appVe
   }, [bridge, saved]);
   const statusOf = (id: string) => statuses.find((status) => status.id === id);
   const pairAgain = (entry: Entry) => setSheet({ address: entry.origin!, locked: true, title: t("servers.pairAgainTitle", { name: entry.name }) });
-  const editAddress = (entry: Entry) => setSheet({ address: entry.origin!.replace(/^http:/, "https:"), locked: false, title: t("connect.title") });
+  const editAddress = (entry: Entry) => setSheet({ address: entry.origin!.replace(/^http:/, "https:"), locked: false, title: t("connect.otherTitle") });
   const rows: Entry[] = [{ id: "local", name: t("place.local"), kind: "local" }, ...saved.environments.filter((entry) => entry.kind !== "local")];
   return <>
     <SettingsRows icons>
@@ -118,8 +118,8 @@ export function ServerList({ saved, busy, sharingOffered, ownServers = [], appVe
           {showUpdate && <div className="pl-11"><UpdateNote name={entry.name} status={status!} appVersion={appVersion!} onHide={() => setHidden((list) => [...list, `${entry.id}:${status!.version}`])} /></div>}
         </div>;
       })}
-      <SettingsLinkRow title={t("connect.title")} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Plus size={18} aria-hidden="true" /></span>}
-        onClick={() => { if (!busy) setSheet({ address: "", locked: false, title: t("connect.title") }); }} data={{ "data-server-connect": "" }} />
+      <SettingsLinkRow title={t("connect.otherTitle")} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Plus size={18} aria-hidden="true" /></span>}
+        onClick={() => { if (!busy) setSheet({ address: "", locked: false, title: t("connect.otherTitle") }); }} data={{ "data-server-connect": "" }} />
     </SettingsRows>
     {sheet && <RailSheet focusKey={sheet.locked ? "pair-again" : "connect"} onClose={() => setSheet(null)}>
       <OwnServerLink onBack={null} onConnected={() => setSheet(null)} start={sheet} />

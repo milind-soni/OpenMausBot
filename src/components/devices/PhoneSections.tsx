@@ -91,7 +91,7 @@ export function PhoneAppFacts({ phone }: { phone: PublicPhone }) {
   const chips = phoneAppChips(phone);
   if (!chips.length) return null;
   return (
-    <Detail label={t("remote.phones.title")}>
+    <Detail label={t("devicesPage.detail.phoneShares")}>
       <span data-phone-app-chips="" className="flex flex-wrap gap-1.5">
         {chips.map((cap) => <span key={cap} className="rounded-full bg-control px-2 py-0.5 text-[11px] text-ink-secondary">{t(`botAccess.phone.cap.${cap}`)}</span>)}
       </span>

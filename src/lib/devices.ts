@@ -161,7 +161,8 @@ function fromPlace(entry: SavedPlace, status: ServerStatus | undefined, lends: b
   if (hand && entry.origin) {
     if (state.note === "unreachable") actions.push({ type: "retry", placeId: entry.id });
     if (state.note === "update") actions.push({ type: "copy-update", install: status?.install ?? null });
-    actions.push({ type: "pair-again", placeId: entry.id, address: entry.origin });
+    // One way back per case: Try again while it can't be reached, Pair again only once its sign-in is gone or unsafe.
+    if (state.note === "signed-out" || state.note === "insecure") actions.push({ type: "pair-again", placeId: entry.id, address: entry.origin });
     actions.push({ type: "copy-address", address: entry.origin });
   }
   if (!entry.home) actions.push({ type: "remove", source: { type: "place", id: entry.id } });

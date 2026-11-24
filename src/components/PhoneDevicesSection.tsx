@@ -366,7 +366,7 @@ export function ReachSection({ c, state, simple, moreWaysAsked, managedBy, onPai
   const moreOpen = moreOpenAsked ?? (tailscaleOn || httpsOn || moreWaysPeek);
   if (!(showRoutes || state.devices.length > 0 || anyRoute || moreWaysAsked)) {
     return (
-      <SettingsGroup block="reach" footnote={t("phone.reach.foot")}>
+      <SettingsGroup block="reach" footnote={t("phone.reach.footAdd")}>
         <SettingsRows>
           <SettingsLinkRow title={t("phone.reach.title")} value={t("devices.route.off")} onClick={() => setShowRoutes(true)} data={{ "data-reach-fold": "" }} />
         </SettingsRows>
@@ -387,7 +387,7 @@ export function ReachSection({ c, state, simple, moreWaysAsked, managedBy, onPai
         <div data-settings-block="more-ways" className="contents">
           {moreWays && <SettingsFoldRow id="more-ways" title={t("devices.moreWays")} value={moreWaysPeek ? <AdvancedSettingTag /> : undefined} open={moreOpen} onToggle={() => setMoreOpen(!moreOpen)}>
             <SettingRow title="Tailscale" subtitle={<>{t("remote.tailscaleSwitch.short", { app: productName() })}{" "}<LearnMore href={TAILSCALE_HELP} /></>}
-              message={tailscaleStatus.kind !== "off" ? <span data-tailscale-status={tailscaleStatus.kind} aria-live="polite">{tailscaleStatus.title}{tailscaleStatus.detail ? ` ${tailscaleStatus.detail}` : ""}</span> : undefined}>
+              message={tailscaleStatus.kind !== "off" ? <span data-tailscale-status={tailscaleStatus.kind} aria-live="polite"><span className="block">{tailscaleStatus.title}</span>{tailscaleStatus.detail && <span className="block">{tailscaleStatus.detail}</span>}</span> : undefined}>
               <span data-route-row="tailscale" className="contents">
                 {tailscaleStatus.kind === "not-installed" && <a href="https://tailscale.com/download" target="_blank" rel="noreferrer" className="ui-button">{t("remote.tailscale.getIt")}</a>}
                 {tailscaleOn && tailscaleStatus.kind !== "error" && tailscaleStatus.kind !== "not-installed" && (

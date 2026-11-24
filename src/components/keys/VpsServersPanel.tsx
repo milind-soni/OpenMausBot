@@ -24,7 +24,7 @@ export function VpsConnection() {
         {t("keys.vps.descAfter")}
       </p>
       <p className="text-[12px] leading-4 text-ink-secondary">{t("keys.vps.anyMachine")}</p>
-      {defaultAlias ? <VpsServerEditor alias={defaultAlias} onRemoved={setNotice} /> : <AddDefault onNotice={setNotice} />}
+      {defaultAlias ? <VpsServerEditor alias={defaultAlias} onRemoved={setNotice} hint={false} /> : <AddDefault onNotice={setNotice} />}
       {notice && <div role="status" className="text-[12px] leading-4 text-ink-secondary">{notice}</div>}
       <VpsServers />
       <p className="text-[12px] leading-4 text-ink-secondary">{t("keys.vps.limitsHint")}</p>
@@ -94,7 +94,7 @@ function VpsServers() {
     <div data-vps-servers className="mt-2 flex flex-col gap-2">
       <div className="text-[13px] text-ink">{t("keys.vps.servers.title")}</div>
       <p className="text-[12px] leading-4 text-ink-secondary">{t("keys.vps.servers.hint")}</p>
-      {servers.map((server) => <VpsServerEditor key={server.sshAlias} alias={server.sshAlias} />)}
+      {servers.map((server) => <VpsServerEditor key={server.sshAlias} alias={server.sshAlias} hint={false} />)}
       <div className="flex flex-wrap items-center gap-2">
         <input
           type="text"

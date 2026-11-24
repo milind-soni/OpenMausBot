@@ -127,7 +127,7 @@ export interface AddDeviceProps {
 /**
  * Add a device, in the page: what kind, then that kind's few steps, numbered, with the next one always in view, and a
  * confirmation once the new device shows up. Back (or Escape) goes up one step and then to the list. Nothing opens over
- * Settings: a phone on This computer gets its own steps, a server Connect to a server's own form.
+ * Settings: a phone on This computer gets its own steps, a server Connect to another computer's own form.
  */
 export function AddDevicePanel(props: AddDeviceProps) {
   const { here, cloud, devices, network, networkAction, tailnetAddress, start, onBack, onConnected, phoneSteps, canConnectServer, onGetCloud, onCheck, checking = false, setSub } = props;
@@ -205,7 +205,10 @@ export function AddDevicePanel(props: AddDeviceProps) {
               ? <p className={BODY}>{t("devicesPage.addFlow.computerCloud", { app: productName() })}</p>
               : <Steps>
                 {here && network && <Step n={1} title={t("devicesPage.addFlow.networkFirst")} state={networkReady ? "done" : "now"}>
-                  {!networkReady && <NetworkStep network={network} action={stepAction} waiting={Boolean(shared && !tailnetAddress)} onCheck={onCheck} checking={checking} />}
+                  {!networkReady && <>
+                    <p data-add-network-why="" className={BODY}>{t("devicesPage.addFlow.networkWhy", { app: productName() })}</p>
+                    <NetworkStep network={network} action={stepAction} waiting={Boolean(shared && !tailnetAddress)} onCheck={onCheck} checking={checking} />
+                  </>}
                 </Step>}
                 <Step n={here && network ? 2 : 1} title={t(here && network ? "devicesPage.addFlow.installBoth" : "devicesPage.addFlow.installStep", { app: productName() })} state={!here || networkReady ? "now" : "later"}>
                   {here && network && <p className={BODY}>{t("devicesPage.addFlow.installBothLine")}</p>}
@@ -227,7 +230,7 @@ export function AddDevicePanel(props: AddDeviceProps) {
               <Step n={2} title={t("devicesPage.addFlow.pasteLink")}>
                 {canConnectServer
                   ? <OwnServerLink inline onBack={null} onConnected={onConnected} />
-                  : <p className={BODY}>{t("devicesPage.addFlow.serverDesktop", { app: productName() })}</p>}
+                  : <p className={BODY}>{t("devicesPage.addFlow.serverDesktopOther", { app: productName() })}</p>}
               </Step>
             </Steps>}
             {kind === "cloud" && onGetCloud && (
