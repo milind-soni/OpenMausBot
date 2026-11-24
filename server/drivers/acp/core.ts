@@ -18,7 +18,8 @@ import { acpDiscoveryProblem } from "./custom-model-catalog.ts";
 import { decodeInjectId } from "../local-inject.ts";
 import { DeviceAuthController, deviceAuthInstanceSurface, type DeviceSignIn } from "../device-auth.ts";
 import { AcpBrowserAuth, acpBrowserAuthInstanceSurface, type AcpBrowserSignInSpec } from "./browser-auth.ts";
-import { deletePromptSplitReceipt, promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt } from "../prompt-split.ts";
+import { deletePromptSplitReceipt, writePromptSplitReceipt } from "../prompt-split.ts";
+import { liveSessionKey, sessionSystem, turnPrompt } from "./session-system.ts";
 import type { PromptSplitReceipt } from "../prompt-split.ts";
 import { boxAudienceKey, describeSpawnFailure, execCli, killCliTree, sharedBoxScope, spawnCli } from "../../procs.ts"; import { stopEngineTree, stopEngineTrees } from "../../engine-stop.ts";
 import { applyOneShotEnv, runAcpOneShot } from "./background-text.ts"; import type { AcpBackgroundWork } from "./background-work.ts";
@@ -956,7 +957,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const pooled = sessions.get(threadId);
         let session: AcpSession;
         if (pooled && !pooled.dead && !pooled.closing && pooled.contractKey === contractKey && !stderrFailureOf(pooled.host)
-            && (!support.restartOnMcpChange || pooled.sessionKey === sessionKey)) {
+            && (!support.restartOnMcpChange || pooled.sessionKey === liveSessionKey(sessionKey, sessionSystem(support, pooled.initResult, instanceId, turn)))) {
           stopIdleClose(`${instanceId}\0${threadId}`, pooled.idleTimer); // busy again: no longer idle
           pooled.idleTimer = null;
           session = pooled;
@@ -1088,7 +1089,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   INIT_TIMEOUT,
                 ));
               }
-              if (!skipSubscriptionAuthForLocalInject(turn.model) && !session.authenticated) {
+              if (!skipSubscriptionAuthForLocalInject(turn.model) && !session.authenticated && !support.skipsAuthenticate?.(instanceId)) {
                 const methods: Array<{ id?: string }> = Array.isArray(session.initResult?.authMethods)
                   ? session.initResult.authMethods
                   : [];
@@ -1116,13 +1117,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             };
             let runtimeAcceptsImages = await handshake();
             let init = session.initResult;
+            const heldSystem = () => sessionSystem(support, init, instanceId, turn);
 
             await backgroundEnds.get(threadId); const cursor = turn.sessionReset ? null : support.backgroundWork ? support.backgroundWork.resumeCursor(turn.resumeCursor, session.sessionId, session) : typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
             let promptTurn = turn;
             let rebuiltFromReplay = false;
             for (;;) {
               const liveSessionId = session.sessionId;
-              if (liveSessionId !== null && session.sessionKey === sessionKey && (cursor === null || cursor === liveSessionId)) {
+              if (liveSessionId !== null && session.sessionKey === liveSessionKey(sessionKey, heldSystem()) && (cursor === null || cursor === liveSessionId)) {
                 break;
               }
               const selectionParams = narrowsNativeTools(turn.toolScope)
@@ -1134,13 +1136,13 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                     link: session.acp, sessionId: cursor, quietMs: support.loadReplayQuietMs?.(turn), replayed: () => session.sessionConfigResult ?? {},
                     send: (receive) => request(
                       support.resumeMethod === "resume" ? "session/resume" : "session/load",
-                      { sessionId: cursor, cwd, mcpServers: support.mcpServersFromLaunch ? [] : acpSessionMcpServers(mcpServers, ownMcp, init), ...selectionParams, ...support.sessionSetupParams?.(init) },
+                      { sessionId: cursor, cwd, mcpServers: support.mcpServersFromLaunch ? [] : acpSessionMcpServers(mcpServers, ownMcp, init), ...selectionParams, ...support.sessionSetupParams?.(init, heldSystem()) },
                       support.sessionSetupTimeoutMs ?? LOAD_SESSION_TIMEOUT, receive),
                     receive: (result) => {
                       if (result) {
                         loaded = true;
                         session.sessionId = cursor;
-                        session.sessionKey = sessionKey;
+                        session.sessionKey = liveSessionKey(sessionKey, heldSystem());
                         receiveModelVariants(result, true);
                       }
                     },
@@ -1177,9 +1179,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 promptTurn = { ...turn, text: recovery.text };
                 rebuiltFromReplay = recovery.replayed;
               }
-              await request("session/new", { cwd, mcpServers: support.mcpServersFromLaunch ? [] : acpSessionMcpServers(mcpServers, ownMcp, init), ...selectionParams, ...support.sessionSetupParams?.(init) }, support.sessionSetupTimeoutMs ?? NEW_SESSION_TIMEOUT, (result) => {
+              await request("session/new", { cwd, mcpServers: support.mcpServersFromLaunch ? [] : acpSessionMcpServers(mcpServers, ownMcp, init), ...selectionParams, ...support.sessionSetupParams?.(init, heldSystem()) }, support.sessionSetupTimeoutMs ?? NEW_SESSION_TIMEOUT, (result) => {
                 session.sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
-                session.sessionKey = sessionKey;
+                session.sessionKey = liveSessionKey(sessionKey, heldSystem());
                 receiveModelVariants(result, true);
               });
               break;
@@ -1268,24 +1270,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               throw error;
             }
             emitSessionStarted();
-            const halves = promptHalves(turn);
-            let promptInput = promptTurn;
-            if (halves.stable !== null) {
-              const receiptKey = JSON.stringify([threadId, sessionId]);
-              const previousReceipt = readPromptSplitReceipt(DRIVER_KIND, receiptKey);
-              state.usagePeak = previousReceipt?.peakUsed ?? previousReceipt?.lastUsed ?? null;
-              const composed = splitSessionPrompt(
-                halves.stable,
-                halves.volatile,
-                previousReceipt,
-                promptTurn.system,
-                promptTurn.text,
-                Boolean(turn.mentionTurn),
-                ACP_PROMPT_RE_ANCHOR_TURNS,
-              );
-              promptInput = { ...promptTurn, system: "", text: composed.text };
-              pendingSplitReceipt = { key: receiptKey, receipt: composed.receipt, previous: previousReceipt };
-            }
+            const { input: promptInput, note: contextNote, split } = turnPrompt(DRIVER_KIND, { threadId, sessionId }, turn, promptTurn, heldSystem(), ACP_PROMPT_RE_ANCHOR_TURNS);
+            if (split) { state.usagePeak = split.previous?.peakUsed ?? split.previous?.lastUsed ?? null; pendingSplitReceipt = split; }
             const text = support.buildPromptText
               ? support.buildPromptText(promptInput)
               : promptInput.system
@@ -1307,7 +1293,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             const quiet = startQuietWatch(threadId, session, current);
             const result = await request(
               "session/prompt",
-              { sessionId, prompt: [{ type: "text", text: text + media.note }, ...imageBlocks, ...media.blocks] },
+              { sessionId, prompt: [{ type: "text", text: text + media.note }, ...imageBlocks, ...media.blocks, ...(contextNote ? [{ type: "text", text: contextNote }] : [])] },
               undefined,
               undefined,
               promptIdleMs,
@@ -1480,16 +1466,16 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           const spawnEnv = launch.env ?? env;
           return await runAcpOneShot({
             displayName: support.displayName,
-            spawn: spawnCli, kill: killCliTree, box: { allowEnv: instanceEnvNames(input.environment, spawnEnv), ro: launch.ro },
+            spawn: (...args) => { const child = spawnCli(...args); support.processStarted?.(child, instanceId); return child; }, kill: killCliTree, box: { allowEnv: instanceEnvNames(input.environment, spawnEnv), ro: launch.ro },
             command: launch.command,
             argv: [...(launch.args ?? []), ...support.spawnArgs(turnConfig, turn)],
             env: spawnEnv,
             cwd,
             prompt,
             defaultModel: catalog.models.default, model,
-            pickAuthMethod: (methods) => support.pickAuthMethod(methods, spawnEnv),
-            authRequired: support.authFailure === "fail-request" ? "if-requested" : support.authFailure === "fail",
-            loginNote: support.loginNote,
+            pickAuthMethod: (methods) => support.skipsAuthenticate?.(instanceId) ? null : support.pickAuthMethod(methods, spawnEnv),
+            authRequired: !support.skipsAuthenticate?.(instanceId) && (support.authFailure === "fail-request" ? "if-requested" : support.authFailure === "fail"),
+            loginNote: support.loginNote, signInRefused: support.skipsAuthenticate?.(instanceId) && support.signInRequest ? (error) => { const refused = support.signInRequest!.rpcError(error, instanceId); if (refused) support.signInRequest!.required(instanceId); return refused; } : undefined,
             clientCapabilitiesMeta: support.clientCapabilitiesMeta,
             ...(support.configureSession ? {
               configure: ({ request, sessionId, session }) => support.configureSession!({

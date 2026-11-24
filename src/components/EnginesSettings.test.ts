@@ -163,16 +163,17 @@ describe("Settings → Engines → setup cards", () => {
     expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain(note);
   });
 
-  it("shows the actual Google account email with an honest fallback", () => {
+  it("shows the actual Google account email, and only that it is signed in with Google when the email is not known", () => {
     vi.stubGlobal("window", {});
     fixture.bots = [];
     const instance: InstanceInfo = { instanceId: "google-work", driverKind: "antigravityAgent", displayName: "Work", cliDefault: "agy_acp_server", snapshot: { state: "available", authenticated: true, account: { email: "work@example.test" } }, models: { default: "gemini", options: [] } };
     fixture.instances = [instance];
     expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain("work@example.test");
     delete instance.snapshot.account;
-    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain("account email unavailable");
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain("Signed in with Google");
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("unavailable");
     instance.snapshot.authenticated = false;
-    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("account email unavailable");
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("Signed in with Google");
   });
 
   it("offers removal for an added Antigravity account only", () => {

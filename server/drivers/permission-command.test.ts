@@ -1,4 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, beforeEach, describe, expect, it, onTestFinished } from "vitest";
 
 import { bindSafetyFloor } from "../safety-floor-gate.ts";
 
@@ -87,7 +91,8 @@ describe("the never-list on an ACP request", () => {
   });
 
   it("takes a request for a file edit only when it is one, inside the folder", () => {
-    const root = process.cwd();
+    const root = mkdtempSync(join(tmpdir(), "omb-edit-within-"));
+    onTestFinished(() => rmSync(root, { recursive: true, force: true }));
     const inside = { kind: "edit", locations: [{ path: `${root}/notes.md` }] };
     expect(acpFileEditWithin(inside, root)).toBe(true);
     expect(acpFileEditWithin(inside, undefined)).toBe(false);
@@ -98,5 +103,33 @@ describe("the never-list on an ACP request", () => {
     expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/../x` }] }, root)).toBe(false);
     expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/a\0b` }] }, root)).toBe(false);
     expect(acpFileEditWithin({ kind: "edit", locations: [{}] }, root)).toBe(false);
+  });
+
+  it.skipIf(process.platform === "win32")("asks for a folder, and for a path that goes through any link, one that climbs out of the folder or one it cannot follow", () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "omb-edit-root-")));
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), "omb-edit-outside-")));
+    try {
+      mkdirSync(join(outside, "deep"));
+      symlinkSync(join(outside, "deep"), join(root, "link"));
+      expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/link/../x` }] }, root)).toBe(false);
+      expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/x` }] }, root)).toBe(true);
+      symlinkSync(join(outside, "not-yet"), join(root, "dangling"));
+      expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/dangling` }] }, root)).toBe(false);
+      expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/dangling/x` }] }, root)).toBe(false);
+      expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/new-folder/x` }] }, root)).toBe(true);
+      writeFileSync(join(root, "file.txt"), "");
+      expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/file.txt/x` }] }, root)).toBe(false);
+      expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/file.txt` }] }, root)).toBe(true);
+      mkdirSync(join(root, "sub"));
+      expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/sub` }] }, root)).toBe(false);
+      expect(acpFileEditWithin({ kind: "edit", locations: [{ path: "/dev/null" }] }, "/dev")).toBe(false);
+      symlinkSync(join(root, "file.txt"), join(root, "alias"));
+      expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/alias` }] }, root)).toBe(false);
+      symlinkSync(join(root, "sub"), join(root, "inner"));
+      expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/inner/x` }] }, root)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 });

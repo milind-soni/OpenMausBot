@@ -1,5 +1,5 @@
-// One Google sign-in at a time for an Antigravity account: the pinned runtime's own `authenticate`, or the native
-// CLI's `--login`.
+// One Google sign-in at a time for an Antigravity account on the pinned runtime, run by its own `authenticate`. The native
+// CLI signs in through `acp --login` (antigravity-native-login.ts).
 //
 // Adapted from pingdotgg/t3code@b9bc03869e, MIT License, Copyright (c) 2026
 // T3 Tools Inc. (full text in third_party/t3-code/LICENSE); modified:
@@ -7,25 +7,14 @@
 //     321-333, 434-480 (the sign-in's phases, its fixed failure lines, expiry,
 //     and one accepted redirect per sign-in), on promises instead of fibers;
 //     the link is returned by `start` and the redirect can go through a
-//     relay into a boxed runtime;
-//   - apps/server/src/provider/Drivers/AntigravityDriver.ts:422-494 and
-//     apps/server/src/provider/AntigravityAuth.ts:330-345, 540-568 at
-//     38067630229 (the native CLI's `--login`: a separate process that prints
-//     Google's link and reads the code the Antigravity page shows on stdin,
-//     with no display so it opens no browser here).
+//     relay into a boxed runtime.
 import { randomUUID } from "node:crypto";
-import { stat } from "node:fs/promises";
-import { join } from "node:path";
 
 import { botBox } from "../bot-box/box.ts";
 import type { ProviderAuthenticationStart, ProviderAuthenticationStatus } from "../contracts.ts";
-import { killCliTree, spawnCli } from "../procs.ts";
 import {
   AntigravityAcpClient,
   STARTUP_TIMEOUT_MS,
-  antigravityLaunchArgs,
-  antigravityLoginResponse,
-  authorizationUrlFromLine,
   forwardAntigravityCallback,
   parseAntigravityAuthorizationUrl,
   validateAntigravityCallbackUrl,
@@ -34,7 +23,6 @@ import {
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
 
 const AUTH_TIMEOUT_MS = 5 * 60_000;
-const LOGIN_LINE_MAX_CHARS = 64 * 1024;
 
 const EXPIRED = "Google sign-in expired. Start sign-in again.";
 const CANCELLED = "Google sign-in was cancelled.";
@@ -43,7 +31,6 @@ const NOT_APPROVED = "Google sign-in was not approved. Start sign-in again.";
 const NOT_ELIGIBLE = "Google requires an eligible Antigravity subscription for this account.";
 const NOT_DELIVERED = "Could not deliver the sign-in response. If Google already finished in your browser, wait a moment. Otherwise send it again.";
 const ALREADY_SENT = "The sign-in response was already sent. Wait for Google to finish.";
-const NOT_A_CODE = "Paste the code from the Antigravity page, or that page's full address.";
 
 class SignInExpired extends Error {}
 
@@ -81,12 +68,7 @@ export class AntigravityAuthController {
     this.onSignedIn = onSignedIn;
   }
 
-  /** The native CLI signs in through `--login`; the pinned runtime through `authenticate` and its loopback listener. */
-  start(runtime: AntigravityRuntime, profile: AntigravityProfile): Promise<ProviderAuthenticationStart> {
-    return runtime.harnessPath === null ? this.startCodeLogin(runtime, profile) : this.startLoopback(runtime, profile);
-  }
-
-  private async startLoopback(runtime: AntigravityRuntime, profile: AntigravityProfile): Promise<ProviderAuthenticationStart> {
+  async start(runtime: AntigravityRuntime, profile: AntigravityProfile): Promise<ProviderAuthenticationStart> {
     this.cancel();
     let foundUrl!: (value: ReturnType<typeof parseAntigravityAuthorizationUrl>) => void;
     let failUrl!: (error: Error) => void;
@@ -138,98 +120,6 @@ export class AntigravityAuthController {
       return { phase: "waiting", flowId: flow.id, authorizationUrl: outcome.request.authorizationUrl, expiresAt: new Date(flow.expiresAt).toISOString() };
     } catch (error) {
       closeAll();
-      throw error;
-    }
-  }
-
-  /** `agy acp --login`: Google's link on its output, then the code the Antigravity page shows on its input. It needs no
-   * listener here, so a sign-in from another computer and one inside a bot box work the same way. */
-  private async startCodeLogin(runtime: AntigravityRuntime, profile: AntigravityProfile): Promise<ProviderAuthenticationStart> {
-    this.cancel();
-    // Without a display it prints the link only, instead of opening a browser on this machine.
-    const { DISPLAY: _display, WAYLAND_DISPLAY: _wayland, ...env } = profile.environment;
-    const child = spawnCli(
-      runtime.executablePath,
-      [...antigravityLaunchArgs(runtime, profile.directory), "--login"],
-      { cwd: profile.directory, env, stdio: ["pipe", "pipe", "pipe"], box: { ro: [join(profile.directory, "omb-skills")] } },
-      "bot",
-    );
-    let foundUrl!: (value: ReturnType<typeof parseAntigravityAuthorizationUrl>) => void;
-    const urlPromise = new Promise<ReturnType<typeof parseAntigravityAuthorizationUrl>>((resolveUrl) => { foundUrl = resolveUrl; });
-    const exited = new Promise<number | null>((resolveExit) => {
-      child.once("close", (code) => resolveExit(code));
-      child.once("error", () => resolveExit(null));
-    });
-    // Nothing the CLI prints reaches the person or a log: only a Google link is taken out of it.
-    const watch = (stream: NodeJS.ReadableStream) => {
-      let buffer = "";
-      stream.setEncoding("utf8");
-      stream.on("data", (chunk: string) => {
-        const lines = (buffer + chunk).split("\n");
-        buffer = lines.pop() ?? "";
-        if (buffer.length > LOGIN_LINE_MAX_CHARS) buffer = "";
-        for (const raw of lines) {
-          const line = raw.replace(/\r$/u, "").trim();
-          const candidate = line.startsWith("https://accounts.google.com/") ? line : authorizationUrlFromLine(line);
-          if (!candidate) continue;
-          try { foundUrl(parseAntigravityAuthorizationUrl(candidate, "code")); } catch {}
-        }
-      });
-    };
-    watch(child.stdout!);
-    watch(child.stderr!);
-    const stop = () => {
-      try { child.stdin?.end(); } catch {}
-      void killCliTree(child).catch(() => false);
-    };
-    try {
-      const outcome = await raceStartup([
-        urlPromise.then((request) => ({ kind: "url" as const, request })),
-        exited.then((code) => ({ kind: "exit" as const, code })),
-      ]);
-      if (outcome.kind === "exit") {
-        // Exiting at once with success means it found a sign-in it could use.
-        if (outcome.code === 0 && await signInFile(profile)) {
-          this.onSignedIn();
-          return { phase: "succeeded", flowId: null, authorizationUrl: null, expiresAt: null };
-        }
-        throw new Error("Antigravity could not start Google sign-in. Start sign-in again.");
-      }
-      const expiresAt = Date.now() + AUTH_TIMEOUT_MS;
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const finished = new Promise<void>((resolveFinished, reject) => {
-        timer = setTimeout(() => reject(new SignInExpired()), AUTH_TIMEOUT_MS);
-        timer.unref?.();
-        void exited.then(async (code) => {
-          if (code === 0 && await signInFile(profile)) resolveFinished();
-          else reject(new Error("The Antigravity CLI did not finish the sign-in."));
-        });
-      }).finally(() => clearTimeout(timer));
-      const pending = { redirectUri: outcome.request.redirectUri, state: outcome.request.state };
-      const flow: AuthFlow = {
-        id: randomUUID(),
-        completed: this.settle(() => flow, finished).finally(stop),
-        pending,
-        expiresAt,
-        callbackSent: false,
-        accept: (pasted) => {
-          const response = antigravityLoginResponse(pending, pasted);
-          if (response === undefined) throw new Error(NOT_A_CODE);
-          return response;
-        },
-        send: (accepted) => new Promise<void>((resolveWrite, reject) => {
-          child.stdin!.write(`${accepted}\n`, (error) => error ? reject(error) : resolveWrite());
-        }),
-        close: stop,
-      };
-      flow.completed.catch(() => {});
-      this.flow = flow;
-      return {
-        phase: "waiting", flowId: flow.id, authorizationUrl: outcome.request.authorizationUrl,
-        expiresAt: new Date(flow.expiresAt).toISOString(), pasteCode: true,
-      };
-    } catch (error) {
-      stop();
       throw error;
     }
   }
@@ -292,11 +182,6 @@ export class AntigravityAuthController {
     if (!flow || !this.end(flow, "cancelled", CANCELLED)) return;
     flow.close();
   }
-}
-
-async function signInFile(profile: AntigravityProfile): Promise<boolean> {
-  const info = await stat(profile.tokenPath).catch(() => null);
-  return info !== null && info.isFile() && info.size > 0;
 }
 
 async function raceStartup<A, B>(outcomes: [Promise<A>, Promise<B>]): Promise<A | B> {
