@@ -100,3 +100,33 @@ it("leaves observations, including both tab-list forms, out of a replay", async 
   expect(h.workflow.steps.map((step) => step.kind)).toEqual(["browser", "file"]);
   expect(h.note()).toBe("finished");
 });
+
+it.each([
+  ["agent_browser_tabs", { action: "list" }],
+  ["agent_browser_tab_list", {}],
+] as const)("writes a fresh summary after observing only %s", async (name, args) => {
+  const root = mkdtempSync(join(tmpdir(), "burger-tab-summary-"));
+  folders.push(root);
+  const example = "The old browser session has several documentation tabs open. ".repeat(4);
+  const draft = draftWorkflow([
+    { id: "ask", role: "user", kind: "text", text: "List the open tabs and save a short summary" },
+    browser("tabs", name, args),
+    activity("summary", "Write", { file_path: "summary.txt", content: example }),
+    activity("done", "Write", { file_path: "done.txt", content: "finished" }),
+  ])!;
+  const saved = saveWorkflowSkill({ root, name: "tab-summary", origin: "lead", botIds: ["lead"], workflow: draft.workflow });
+  if ("error" in saved) throw new Error(saved.error);
+  const found = readWorkflowSkill("tab-summary", root)!;
+  const states = join(root, "states");
+  const deps: RunDeps = {
+    exec: createExecutors({ botId: "lead", cwd: root, internal: async () => { throw new Error("the observation is repeated by the handed AI step"); } }),
+    save: (state) => createRunStates(states).save(state), events: { started() {}, ended() {} },
+  };
+  const first = await startRun({ name: "tab-summary", botId: "lead", threadId: "tabs", sha256: saved.sha256, workflow: found.workflow }, deps);
+  expect(first.requiresInput).toMatchObject({ type: "ai_step", example, prompt: expect.stringContaining("what you read or look at now") });
+  expect(existsSync(join(root, "summary.txt"))).toBe(false);
+  const state = createRunStates(states).take(first.run, "lead")!;
+  expect(await resumeRun(state, "Only the current support tab remains open.", deps)).toMatchObject({ status: "ok" });
+  expect(readFileSync(join(root, "summary.txt"), "utf8")).toBe("Only the current support tab remains open.");
+  expect(readFileSync(join(root, "done.txt"), "utf8")).toBe("finished");
+});

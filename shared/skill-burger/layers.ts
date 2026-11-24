@@ -92,6 +92,7 @@ const FILE_WRITE = new Set(["Write", "write_file", "create_file"]);
 const FILE_EDIT = new Set(["Edit", "MultiEdit", "NotebookEdit", "edit", "apply_patch", "str_replace_based_edit_tool"]);
 const BROWSER_OPEN = /(?:^|_)(?:navigate|open|open_url|goto|tab_new)$/;
 const BROWSER_LOOK = /(?:^|_)(?:snapshot|screenshot|read|get_text|status|tab_list|wait|console|network|evaluate_read)$/;
+const browserLook = (bare: string, input: Record<string, unknown> | undefined) => BROWSER_LOOK.test(bare) || (/(?:^|_)tabs$/.test(bare) && input?.action === "list");
 /** A status row the app writes as an activity: a lowercase word, a colon, then words, never a tool name. */
 const STATUS_ROW = /^[a-z]+: \S/;
 const COORDINATE = /(?:^|__)coordinate_bots$/;
@@ -298,7 +299,7 @@ function layersIn(message: RunMessage, live: ReadonlySet<string>): RawLayer[] {
     return layer ? [layer] : [];
   }
   if (/browser/i.test(server ?? "") || /^(?:agent_)?browser_/.test(bare)) {
-    if (BROWSER_LOOK.test(bare) || (/(?:^|_)tabs$/.test(bare) && input?.action === "list")) return [];
+    if (browserLook(bare, input)) return [];
     const url = text(input?.url);
     if (BROWSER_OPEN.test(bare) && url) {
       let host = url;
@@ -396,7 +397,7 @@ function looked(message: RunMessage): boolean {
   const tool = message.tool;
   if (message.kind !== "activity" || !tool?.name || isServerRow(message) || tool.ok === false) return false;
   const { bare } = splitName(tool.name);
-  return BROWSER_LOOK.test(bare) || /^(?:Read|WebFetch|read_file|view)$/.test(bare) || bare === "Bash" || bare === "shell";
+  return browserLook(bare, parse(tool.input)) || /^(?:Read|WebFetch|read_file|view)$/.test(bare) || bare === "Bash" || bare === "shell";
 }
 
 /** The run since the person's last ask, as layers. */
