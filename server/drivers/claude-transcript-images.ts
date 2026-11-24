@@ -211,20 +211,20 @@ function fold(options: FoldOptions): FoldResult {
   // Only a row that lost an image is written anew; every other line stays byte for byte as the CLI wrote it.
   const out = parsed.map((entry) => (entry.slots.some((slot) => changed.has(slot)) ? JSON.stringify(entry.row) : entry.line)).join("\n");
 
-  const temp = writeBeside(file, out, stat.mode);
+  const temps: string[] = [];
   try {
+    const temp = writeBeside(file, out, stat.mode);
+    temps.push(temp);
     const backup = writeBeside(file, original, stat.mode);
-    renameSync(backup, `${file}${FOLD_BACKUP_SUFFIX}`);
-    // The CLI may have written while this ran: then nothing is replaced, and the next resume looks again.
+    temps.push(backup);
+    // The CLI may have written while this ran: then nothing is replaced, not even the last backup, and the next resume
+    // looks again.
     const now = statSync(file);
-    if (now.size !== Buffer.byteLength(original) || stampOf(now) !== stampOf(stat)) {
-      unlinkSync(temp);
-      return { total: slots.length, folded: 0, skipped: "changed" };
-    }
+    if (now.size !== Buffer.byteLength(original) || stampOf(now) !== stampOf(stat)) return { total: slots.length, folded: 0, skipped: "changed" };
+    renameSync(backup, `${file}${FOLD_BACKUP_SUFFIX}`);
     renameSync(temp, file);
-  } catch (error) {
-    try { unlinkSync(temp); } catch { /* renamed, or already gone */ }
-    throw error;
+  } finally {
+    for (const left of temps) try { unlinkSync(left); } catch { /* renamed into place, or already gone */ }
   }
   counted.set(file, { stamp: stampOf(statSync(file)), total: slots.length - folded });
   return { total: slots.length, folded };
