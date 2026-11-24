@@ -4,6 +4,7 @@ import { api, MESSAGE_PAGE_SIZE, visibleMessages, type Action, type AppState, ty
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import type { SearchHit } from "@/lib/search-hit";
 import { t } from "@/lib/i18n";
+import { reducedMotion } from "@/lib/onboarding";
 
 const FLASH_CLASSES = ["ring-2", "ring-accent/70", "rounded-2xl", "transition-shadow"];
 
@@ -138,7 +139,7 @@ export function useFocusMessage(threadId: string, ready: boolean, rootRef?: RefO
         if (tries++ < 20) retryTimer = setTimeout(attempt, 100);
         return;
       }
-      const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+      const behavior = reducedMotion() ? "auto" : "smooth";
       target.classList.add(...FLASH_CLASSES);
       // A reply split into bubbles and table cards has several text roots; a quoted reply's text is not the message's.
       const found = row.querySelectorAll<HTMLElement>(".chat-md, .chat-text");
@@ -156,13 +157,13 @@ export function useFocusMessage(threadId: string, ready: boolean, rootRef?: RefO
         }
         scrollFrame = requestAnimationFrame(() => {
           const scroller = rootRef?.current ?? target?.closest<HTMLElement>(".overflow-y-auto");
-          if (!scroller) { target?.scrollIntoView({ block: "center", behavior: "instant" }); return; }
+          if (!scroller) { target?.scrollIntoView({ block: "center", behavior }); return; }
           const match = range.getBoundingClientRect();
           const viewport = scroller.getBoundingClientRect();
-          scroller.scrollTo({ top: scroller.scrollTop + match.top + match.height / 2 - viewport.top - viewport.height / 2, behavior: "instant" });
+          scroller.scrollTo({ top: scroller.scrollTop + match.top + match.height / 2 - viewport.top - viewport.height / 2, behavior });
         });
       } else {
-        target.scrollIntoView({ block: "center", behavior: focus.matchText?.trim() ? "instant" : reducedMotion ? "auto" : "smooth" });
+        target.scrollIntoView({ block: "center", behavior });
       }
       // `consumed` is deliberately not a dependency, so this flash survives the bookkeeping update.
       dispatch({ type: "focusMessageConsumed", nonce: focus.nonce });

@@ -29,6 +29,7 @@ beforeEach(() => {
   vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
   vi.stubGlobal("cancelAnimationFrame", vi.fn());
   vi.stubGlobal("document", {
+    documentElement: { dataset: {} },
     querySelector: () => ({ lastElementChild: target }),
     createTreeWalker: () => {
       let available = true;
@@ -76,7 +77,13 @@ describe("search match highlighting", () => {
   });
 });
 
-it("centers a match in a later bubble without starting a competing row scroll", () => {
+it.each([
+  { systemReduced: false, appReduced: false, behavior: "smooth" },
+  { systemReduced: true, appReduced: false, behavior: "auto" },
+  { systemReduced: false, appReduced: true, behavior: "auto" },
+])("centers a later match with $behavior scrolling and no competing row scroll", ({ systemReduced, appReduced, behavior }) => {
+  vi.stubGlobal("window", { matchMedia: () => ({ matches: systemReduced }) });
+  if (appReduced) document.documentElement.dataset.reducedMotion = "true";
   const first = { data: "first bubble", length: 12 };
   const second = { data: "second bubble", length: 13 };
   const bubble = { ...target };
@@ -103,5 +110,11 @@ it("centers a match in a later bubble without starting a competing row scroll", 
   expect(bubble.scrollIntoView).not.toHaveBeenCalled();
   const [frame] = vi.mocked(requestAnimationFrame).mock.calls[0]!;
   frame(0);
-  expect(scroller.scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 300, behavior: "instant" });
+  expect(scroller.scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 300, behavior });
+});
+
+it("scrolls smoothly to the message when its searchable text is not rendered", () => {
+  vi.stubGlobal("window", { matchMedia: () => ({ matches: false }) });
+  focus("unrendered tool name");
+  expect(target.scrollIntoView).toHaveBeenCalledExactlyOnceWith({ block: "center", behavior: "smooth" });
 });
