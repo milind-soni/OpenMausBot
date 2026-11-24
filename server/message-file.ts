@@ -268,7 +268,7 @@ function utf8Prefix(value: string, maximumBytes: number): string {
 }
 
 /** Below common 255-byte name limits, with room for the app's temporary-file suffix. */
-function boundedDisplayName(value: string, maximumBytes = 180): string {
+export function boundedDisplayName(value: string, maximumBytes = 180): string {
   if (Buffer.byteLength(value) <= maximumBytes) return value;
   const extension = extname(value);
   const extensionBytes = Buffer.byteLength(extension);
