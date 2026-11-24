@@ -24,6 +24,7 @@ import { AccountsSheet, switchNote } from "./AccountMenu";
 import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 import { MENU_ROW, MENU_SHEET } from "./menu-recipe";
 import { PlaceAddSheet } from "./PlaceAddSheet";
+import { OpenWorkspaceWindowAction } from "./OpenWorkspaceWindowAction";
 import { SwatchRadios } from "./SwatchRadios";
 
 /** Tiles before ⋯ opens the searchable list of every place. */
@@ -247,6 +248,7 @@ function ListedMenu({ place, top, onClose }: { place: RailPlace; top: number; on
       <PlaceMark place={place} size={22} />
       <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{name}</span>
     </div>
+    {(place.kind === "computer" || (place.kind === "server" && place.opens && place.forget)) && <OpenWorkspaceWindowAction placeId={place.id} onOpened={onClose} />}
     {place.renames && <div className="px-0.5 pt-1"><RenameRow current={place.name} save={(next) => renamePlace(place.id, next)} onSaved={onClose} /></div>}
     {paint && <>
       <p className="px-2 pt-1 text-[12px] text-ink-secondary">{t("placeLook.title")}</p>
@@ -346,6 +348,7 @@ function LocalMenu({ place, top, onClose }: { place: RailPlace; top: number; onC
       <PlaceMark place={place} size={22} />
       <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{name}</span>
     </div>
+    <OpenWorkspaceWindowAction placeId={place.id} onOpened={onClose} />
     <div className="px-0.5 pt-1"><RenameRow current={computerName(place)} save={(next) => editLocal(place.id, { name: next })} onSaved={onClose} /></div>
     <p className="px-2 pt-1 text-[12px] text-ink-secondary">{t("placeLook.title")}</p>
     <div className="px-2 pb-1.5 pt-0.5" data-rail-local-color>

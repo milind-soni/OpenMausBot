@@ -770,7 +770,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
   );
   useEffect(() => setFindOpen(false), [bot.threadId]);
   useChatFindRequests(bot.threadId, findOpen, setFindOpen);
-  useChatFindShortcut(inForkPanel, state.forkPanelOpen, setFindOpen);
+  useChatFindShortcut(inForkPanel, state.forkPanelOpen, setFindOpen, bot.threadId);
 
   const { messages: allMessages, activeLeafId } = bot;
   const messages = useMemo(() => visibleMessages({ messages: allMessages, activeLeafId }), [allMessages, activeLeafId]), chatMessages = useMemo(() => chatActivityMessages(messages, advanced, activity, bot.pinnedMessageId), [advanced, activity, messages, bot.pinnedMessageId]);
@@ -1061,7 +1061,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
       {findOpen && <ChatFindBar threadId={bot.threadId} inForkPanel={inForkPanel} onClose={() => setFindOpen(false)} />}
 
       <ChatErrorBanner message={state.error} onDismiss={() => dispatch({ type: "error", message: null })} />
-      <ChatNotice notice={state.notice} />
+      <ChatNotice notice={state.notice?.threadId && state.notice.threadId !== bot.threadId ? null : state.notice} />
       <UnreadContextOverlay messages={chatMessages} windowedMessages={windowedMessages} unreadMessageId={unreadDivider.messageId} scrollRef={scrollRef} visitKey={`${bot.id}:${bot.threadId}:${openedAt}`} onJump={(messageId) => dispatch({ type: "focusMessage", threadId: bot.threadId, messageId })} />
       <PinnedSignInSlot cards={pinnedSignIns} />
 

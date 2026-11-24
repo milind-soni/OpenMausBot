@@ -91,7 +91,7 @@ async function isDesktopAppRefusal(response) {
   return typeof error === "string" && DESKTOP_APP_REFUSAL.test(error);
 }
 
-async function describe(origin, fetchImpl, timeoutMs) {
+export async function describeServer(origin, fetchImpl, timeoutMs = 6_000) {
   let response;
   try {
     response = await fetchImpl(`${origin}${DESCRIPTOR}`, { redirect: "error", cache: "no-store", credentials: "omit", signal: AbortSignal.timeout(timeoutMs) });
@@ -122,7 +122,7 @@ export async function probeServer({ address, code = "", fetch: fetchImpl, ownEnv
   for (const origin of parsed.candidates) {
     const { host, hostname } = new URL(origin);
     const loopback = isLoopbackHost(hostname);
-    const found = await describe(origin, fetchImpl, timeoutMs);
+    const found = await describeServer(origin, fetchImpl, timeoutMs);
     if (!found.ok) {
       const kind = found.kind === "noRoute" ? "unreachable" : found.kind;
       // macOS 15 blocks an app from the local network until the person allows it, and the request then just fails.

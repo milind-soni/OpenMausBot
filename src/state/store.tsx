@@ -1,10 +1,11 @@
+import { MAX_PANES } from "./pane-layout";
 import { cloudAsleep, onCloudPower } from "../lib/cloud-power";
 import { api, ApiError, retryRequest, snapshotArrays } from "./api"; import { serverFetch } from "@/lib/relay-server";
 import { capHeldInBackground, loadOlderPage, MESSAGE_PAGE_SIZE, olderThanHeld, reduceOlderMessages, reduceTrimHeldMessages } from "./message-history";
 import { readChatSnapshot } from "./chat-snapshot";
 import { followHeldTails, noteAppPagePatch } from "./held-tails";
 export { MESSAGE_PAGE_SIZE } from "./message-history";
-import { addForkOptimistic, reduceForkPanel, removeForkOptimistic, runForkEffect, type ForkPanelAction, type ForkPanelState } from "./fork-panel";
+import { threadPanel, updatePanel, type WorkspacePanes, addForkOptimistic, reduceForkPanel, removeForkOptimistic, runForkEffect, type ForkPanelAction, type ForkPanelState } from "./fork-panel";
 import { use, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createAppStore } from "./app-store"; import { readOneBot } from "./bot-read"; import { sameJson } from "./same-json"; import { forgetSharedSession } from "@/lib/session-reuse"; import { StoreContext, StoreSourceContext } from "./store-context";
 import { flushSync } from "react-dom";
@@ -525,6 +526,7 @@ export interface AppState {
   botCreationPending: boolean;
   computerOpen: boolean;
   inspectorOpen: boolean;
+  workspacePanes?: WorkspacePanes | null;
   forkPanel: ForkPanelState | null;
   activityOpen: boolean;
   /** Shared across bots. Unpinned, it closes on a chat switch and when another side panel opens; pinned, it stays open. */
@@ -822,7 +824,7 @@ function patchGroupCard(state: AppState, groupId: string, messageId: string, pat
 }
 
 function cardMessages(state: AppState, botId: string, groupId?: string, threadId?: string): Message[] | undefined {
-  const panel = state.forkPanel;
+  const panel = threadPanel(state, threadId);
   if (threadId && panel?.threadId === threadId && panel.kind === (groupId ? "group" : "bot") && panel.ownerId === (groupId ?? botId)) {
     return panel.messages;
   }
@@ -831,9 +833,9 @@ function cardMessages(state: AppState, botId: string, groupId?: string, threadId
 }
 
 function patchThreadCard(state: AppState, action: { botId: string; messageId: string; threadId?: string; groupId?: string }, patch: Partial<OptionCardData>): AppState {
-  const panel = state.forkPanel;
+  const panel = threadPanel(state, action.threadId);
   if (action.threadId && panel?.threadId === action.threadId && panel.kind === (action.groupId ? "group" : "bot") && panel.ownerId === (action.groupId ?? action.botId)) {
-    return { ...state, forkPanel: { ...panel, messages: withPatchedCard(panel.messages, action.messageId, patch) } };
+    return updatePanel(state, { ...panel, messages: withPatchedCard(panel.messages, action.messageId, patch) });
   }
   if (action.groupId) {
     const group = state.groups.find((candidate) => candidate.id === action.groupId);
@@ -843,16 +845,15 @@ function patchThreadCard(state: AppState, action: { botId: string; messageId: st
   return !action.threadId || bot?.threadId === action.threadId ? patchCard(state, action.botId, action.messageId, patch) : state;
 }
 
-function openOnboardingCard(bot: Bot): Message | undefined {
-  return bot.messages.find(
+function openOnboardingCard(state: AppState, botId: string, threadId?: string): Message | undefined {
+  return cardMessages(state, botId, undefined, threadId)?.find(
     (message) => message.kind === "options" && message.card && !message.card.requestId && !message.card.dismissed,
   );
 }
 
-function dismissOnboardingCard(state: AppState, botId: string): AppState {
-  const bot = state.bots.find((candidate) => candidate.id === botId);
-  const quiz = bot ? openOnboardingCard(bot) : undefined;
-  return quiz ? patchCard(state, botId, quiz.id, { dismissed: true }) : state;
+function dismissOnboardingCard(state: AppState, botId: string, threadId?: string): AppState {
+  const quiz = openOnboardingCard(state, botId, threadId);
+  return quiz ? patchThreadCard(state, { botId, threadId, messageId: quiz.id }, { dismissed: true }) : state;
 }
 
 export const CLOUD_LINK_SETTINGS = { type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true } as const satisfies Action;
@@ -940,6 +941,7 @@ function reduceApp(state: AppState, action: Action): AppState {
       };
     case "showChat":
       return state.activeView === "chat" ? state : { ...state, activeView: "chat" };
+    case "presetPanes": case "movePane": case "focusPane": case "resizePane": case "closePane": case "closeWorkspacePanes":
     case "forkMessage": case "openForkPanel": case "forkPanelLoaded": case "forkPanelLoadFailed":
     case "forkPanelMessage": case "forkPanelActive": case "closeForkPanel":
       return reduceForkPanel(state, action);
@@ -1623,7 +1625,7 @@ function reduceApp(state: AppState, action: Action): AppState {
     }
     case "send": {
       const animated = addForkOptimistic(withMascotMotion(
-        dismissOnboardingCard(state, action.botId),
+        dismissOnboardingCard(state, action.botId, action.threadId),
         action.botId,
         "working",
       ), action);
@@ -2196,6 +2198,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (runNewChat(action)) return;
       if (action.type === "taskSwitched") action = { ...action, bot: withTaskWrites(action.bot) as Bot };
       if (action.type === "botPatched") action = { ...action, bot: withTaskWrites(action.bot) };
+      if (action.type === "forkMessage" && Object.keys(store.getState().workspacePanes?.panels ?? {}).length >= MAX_PANES - 1) {
+        const message = t("chat.panesFull");
+        if (action.onError) action.onError(message);
+        else showError(new Error(message));
+        return;
+      }
       if (action.type === "openForkPanel" && !action.loadId) action = { ...action, loadId: randomUuid() };
       if ((action.type === "send" || action.type === "sendGroup" || action.type === "editMessage") && !action.sendId) action = { ...action, sendId: randomUuid() };
       const botBeforeUpdate =
@@ -2235,10 +2243,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       })();
       const quizBeforeSend = (() => {
         if (action.type !== "send") return undefined;
-        return botBeforeSend ? openOnboardingCard(botBeforeSend) : undefined;
+        return openOnboardingCard(stateRef.current, action.botId, action.threadId);
       })();
       const threadOf = (s: AppState) => { const bot = s.bots.find((b) => b.id === s.selectedId); return s.groups.find((g) => g.id === s.selectedId)?.threadId ?? bot?.switchingTo ?? bot?.threadId; }, previousOpened = threadOf(store.getState());
-      if (action.type === "notice" && action.notice?.threadId !== undefined && action.notice.threadId !== previousOpened) return;
+      if (action.type === "notice" && action.notice?.threadId !== undefined && action.notice.threadId !== previousOpened && !threadPanel(store.getState(), action.notice.threadId)) return;
       if (
         action.type !== "cancelQueued" &&
         action.type !== "cancelGroupQueued" &&
@@ -2349,12 +2357,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             });
           break;
         case "send": {
-          if (quizBeforeSend) persistCard(action.botId, quizBeforeSend.id, { dismissed: true });
+          if (quizBeforeSend) persistCard(action.botId, quizBeforeSend.id, { dismissed: true }, action.threadId);
           const threadId =
             action.threadId ?? stateRef.current.bots.find((bot) => bot.id === action.botId)?.threadId;
           const sendId = action.sendId ?? randomUuid();
           const arrived = () => {
-            const panel = stateRef.current.forkPanel;
+            const panel = threadPanel(stateRef.current, threadId);
             return sendArrived(panel?.kind === "bot" && panel.ownerId === action.botId && panel.threadId === threadId
               ? panel.messages : stateRef.current.bots.find((bot) => bot.id === action.botId && bot.threadId === threadId)?.messages, sendId);
           };
@@ -2594,7 +2602,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             action.threadId ?? stateRef.current.groups.find((group) => group.id === action.groupId)?.threadId;
           const sendId = action.sendId ?? randomUuid();
           const arrived = () => {
-            const panel = stateRef.current.forkPanel;
+            const panel = threadPanel(stateRef.current, threadId);
             return sendArrived(panel?.kind === "group" && panel.ownerId === action.groupId && panel.threadId === threadId
               ? panel.messages : stateRef.current.groups.find((group) => group.id === action.groupId && group.threadId === threadId)?.messages, sendId);
           };
@@ -2763,6 +2771,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "forkMessage": case "openForkPanel": {
+          if (action.type === "openForkPanel" && threadPanel(store.getState(), action.threadId)?.loadId !== action.loadId) break;
           runForkEffect(action, dispatch, rawDispatch, showError);
           break;
         }

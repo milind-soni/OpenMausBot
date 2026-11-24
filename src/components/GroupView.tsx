@@ -698,7 +698,7 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
   const closeMembers = useCallback(() => setMembersOpen(false), []);
   useEffect(() => setFindOpen(false), [group.threadId]);
   useChatFindRequests(group.threadId, findOpen, setFindOpen);
-  useChatFindShortcut(inForkPanel, Boolean(state.forkPanel), setFindOpen);
+  useChatFindShortcut(inForkPanel, Boolean(state.forkPanel), setFindOpen, group.threadId);
 
   const members = useMemo(
     () => group.memberIds.map((id) => state.bots.find((b) => b.id === id)).filter((b): b is Bot => Boolean(b)),
@@ -818,7 +818,7 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
 
       {findOpen && <ChatFindBar threadId={group.threadId} inForkPanel={inForkPanel} onClose={() => setFindOpen(false)} />}
       <ChatErrorBanner message={state.error} onDismiss={() => dispatch({ type: "error", message: null })} />
-      <ChatNotice notice={state.notice} />
+      <ChatNotice notice={state.notice?.threadId && state.notice.threadId !== group.threadId ? null : state.notice} />
       {!setupPending && <RoomContextWarnings group={group} members={members} />}{!setupPending && !remoteClient && <RoomChiefAbsent group={group} />}
 
       {!setupPending && !group.dm && !remoteClient && state.config && group.defaultResponder.kind === "auto" && !jevRoomRoutingOn(state.config) && (

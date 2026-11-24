@@ -86,7 +86,7 @@ export const SETTINGS_PLACES = [
   {"id":"together","path":"Settings → Plan & billing → This computer and My Cloud together","words":["together","one list","both places","cloud bots","sidebar"]},
   {"id":"this-week","path":"Settings → Plan & billing → This week","words":["usage","weekly","limits","cloud desktop hours","voice replies"]},
   {"id":"updates","path":"Settings → This app → Updates","words":["update","version","check for updates","release"],"only":"the desktop app"},
-  {"id":"your-computers","path":"Settings → This app → Your computers","words":["servers","connect to a server","environments","switch"],"only":"the desktop app"},
+  {"id":"your-computers","path":"Settings → This app → Your computers","words":["servers","connect to a server","environments","switch"],"advanced":true,"only":"the desktop app"},
   {"id":"help","path":"Settings → This app → Help","words":["help center","feedback","diagnostics","logs","tour","welcome tour"]},
   {"id":"language","path":"Settings → General → Language","words":["language","translate"],"advanced":true,"simplePath":"Settings → This app → Language"},
   {"id":"send-key","path":"Settings → General → Send messages with","words":["enter","return","shift+enter","new line","keyboard"],"advanced":true},

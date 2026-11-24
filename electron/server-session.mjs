@@ -15,16 +15,33 @@ function loopbackHost(hostname) {
   return isIP(bare) === 6 && (bare === "::1" || /^::ffff:7f[0-9a-f]{2}:/.test(bare));
 }
 
-/** Whether `url` names this machine's server port, in any spelling that reaches it. */
-export function targetsServer(url, serverPort) {
-  try {
-    const target = new URL(url);
-    if (!["http:", "https:", "ws:", "wss:"].includes(target.protocol) || !loopbackHost(target.hostname)) return false;
-    const port = Number(target.port || (target.protocol === "https:" || target.protocol === "wss:" ? 443 : 80));
-    return port === serverPort;
-  } catch {
-    return false;
-  }
+const profileSessions = new Map();
+const savedOrigins = new WeakMap();
+
+export function restrictSessionToOrigin(browser, origin) {
+  savedOrigins.set(browser, origin);
+}
+
+function outsideSavedOrigin(url, browser) {
+  const origin = savedOrigins.get(browser);
+  if (!origin) return false;
+  const target = URL.parse(url);
+  if (target?.protocol === "blob:" || target?.protocol === "data:") return false;
+  return target?.origin.replace(/^ws(s?):/, "http$1:") !== origin;
+}
+
+export function reserveProfilePort(port) {
+  if (profileSessions.has(port)) throw new Error("The workspace port is already in use.");
+  profileSessions.set(port, null);
+  return { allow: browser => profileSessions.set(port, browser), release: () => profileSessions.delete(port) };
+}
+
+function otherServer(url, browser, primaryPort) {
+  const target = URL.parse(url);
+  if (!target || !["http:", "https:", "ws:", "wss:"].includes(target.protocol) || !loopbackHost(target.hostname)) return false;
+  const port = Number(target.port || (target.protocol === "https:" || target.protocol === "wss:" ? 443 : 80));
+  const owner = profileSessions.get(port);
+  return port === primaryPort || (owner !== undefined && owner !== browser);
 }
 
 /**
@@ -32,6 +49,9 @@ export function targetsServer(url, serverPort) {
  * JavaScript, on http: and ws: alike, so a shell using curl cannot impersonate the person at the desktop.
  */
 export function installServerSessions({ app, defaultSession, serverPort, ownerToken }) {
+  defaultSession.webRequest.onBeforeRequest((details, callback) => callback({
+    cancel: profileSessions.size > 0 && otherServer(details.url, defaultSession),
+  }));
   defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
     const token = ownerToken();
     let owns = false;
@@ -44,17 +64,18 @@ export function installServerSessions({ app, defaultSession, serverPort, ownerTo
   });
   app.on("session-created", (created) => {
     if (created === defaultSession) return;
-    created.webRequest.onBeforeRequest((details, callback) => callback({ cancel: targetsServer(details.url, serverPort()) }));
+    created.webRequest.onBeforeRequest((details, callback) => callback({ cancel: outsideSavedOrigin(details.url, created) || otherServer(details.url, created, serverPort()) }));
   });
 }
 
 const ownPorts = new Set();
-let reportTo = null;
+const subscribers = new Set();
 
 function report() {
-  try {
-    reportTo?.postMessage({ type: "openmausbot:own-listeners", ports: [...ownPorts] });
-  } catch {}
+  const message = { type: "openmausbot:own-listeners", ports: [...ownPorts] };
+  for (const proc of subscribers) {
+    try { proc.postMessage(message); } catch { subscribers.delete(proc); }
+  }
 }
 
 subscribe("tracing:net.server.listen:asyncEnd", ({ server }) => {
@@ -67,6 +88,7 @@ subscribe("tracing:net.server.listen:asyncEnd", ({ server }) => {
 /** Tells a server that has just become ready which ports this app listens on, and tells it again as more open. */
 export function reportOwnListeners(proc, ports = []) {
   for (const port of ports) ownPorts.add(port);
-  reportTo = proc;
+  if (!subscribers.has(proc)) proc.once?.("exit", () => subscribers.delete(proc));
+  subscribers.add(proc);
   report();
 }

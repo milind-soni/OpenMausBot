@@ -1,4 +1,7 @@
-import { memo, useEffect, useRef, useState, type Dispatch, type ReactNode } from "react";
+import { startPaneDrag } from "@/lib/workspace-pane-drag";
+import { WorkspaceChatContext, FocusedWorkspaceThread } from "@/state/workspace-chat-context";
+import { useSelectThreadPane, OpenPaneActions } from "./OpenPaneActions";
+import { memo, useContext, useEffect, useRef, useState, type Dispatch, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Archive, ArchiveRestore, BellOff, Brain, Check, ChevronRight, Clock, Clock3, FolderInput, Link2, Link2Off, Loader2, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Star, Trash2 } from "lucide-react";
 import type { Action, AppState, BotProject, Task } from "@/state/store";
@@ -294,7 +297,11 @@ const sameFields = <T extends object>(a: T, b: T): boolean => {
 const sameThreadRow = ({ task: previousTask, ...previous }: ThreadRowProps, { task, ...next }: ThreadRowProps): boolean =>
   sameFields(previousTask, task) && sameFields(previous, next);
 
-export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, current, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSnooze, onLink, onRefreshPermissions, onMemory, activityLabel: liveActivity, now, selectMode = false, checked = false, onToggleSelect, panel = false, preview, main = false }: ThreadRowProps) {
+export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, current: selected, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSnooze, onLink, onRefreshPermissions, onMemory, activityLabel: liveActivity, now, selectMode = false, checked = false, onToggleSelect, panel = false, preview, main = false }: ThreadRowProps) {
+  const selectPane = useSelectThreadPane(ownerId);
+  const canDrag = Boolean(useContext(WorkspaceChatContext));
+  const focused = useContext(FocusedWorkspaceThread);
+  const current = focused ? focused === task.threadId : selected;
   const activityLabel = useHeldText(liveActivity);
   // Simple mode's menu keeps what a person needs for a conversation; Advanced adds the rest.
   const advanced = useAdvancedMode();
@@ -327,7 +334,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
   const archived = isArchived(task);
   const snoozed = isSnoozed(task);
   const tickable = isTickable(task);
-  const choose = (event: React.MouseEvent) => { if (!selectMode) onSelect(task); else if (tickable) onToggleSelect?.(task, event.shiftKey); };
+  const choose = (event: React.MouseEvent) => { if (!selectMode) { if (!selectPane(task.threadId)) onSelect(task); } else if (tickable) onToggleSelect?.(task, event.shiftKey); };
   const contextMenu = (event: React.MouseEvent) => { event.preventDefault(); if (!selectMode) openMenu(event.clientX, event.clientY); };
   const openMenu = (x: number, y: number) => setMenu({ left: Math.max(8, Math.min(x, window.innerWidth - 228)), top: Math.max(8, Math.min(y, window.innerHeight - 230)) });
   const startRename = () => { if (task.sharedChat) return; finishing.current = false; setDraft(task.title); setRenaming(true); setMenu(null); };
@@ -383,6 +390,8 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
         onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDraft(event.target.value)} onBlur={() => finishRename(true)}
         onKeyDown={(event) => { if (imeComposing(event.nativeEvent)) { event.stopPropagation(); return; } if (event.key === "Enter") { event.preventDefault(); finishRename(true); } else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finishRename(false); } }}
         dir="auto" className="m-1 min-w-0 flex-1 rounded border border-accent/50 bg-inset px-2 py-1 text-[13px] text-ink outline-none" /> : <button
+        draggable={canDrag && !selectMode}
+        onDragStart={(event) => { event.stopPropagation(); startPaneDrag(event, ownerId, task.threadId); }}
         type="button" data-sidebar-thread-row={task.threadId} aria-current={current ? "page" : undefined} data-look="sidebar-thread"
         title={[displayTitle, updatedStamp, status, closed ? t("task.closed") : null, archived ? t("task.archived") : null, snoozed ? t("task.snoozed") : null, task.unread ? t("task.unread") : null].filter(Boolean).join(" · ")}
         {...(selectMode ? { role: "checkbox", "aria-checked": checked, "aria-disabled": !tickable, "aria-label": t("task.bulk.rowCheck", { title: displayTitle }) } : {})}
@@ -421,6 +430,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
     {menuMotion.shown && menuMotion.value && createPortal(<div ref={menuRef} data-thread-overlay role="group" aria-label={t("task.actions", { title: displayTitle })} style={menuMotion.value}
       className={cn("fixed z-50 max-h-[calc(100vh-16px)] w-[220px] overflow-y-auto", MENU_SHEET, menuMotion.className)} {...menuMotion.exitProps}
       onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setMenu(null); actionRef.current?.focus(); } }}>
+      <OpenPaneActions ownerId={ownerId} threadId={task.threadId} onClose={() => setMenu(null)} />
       {advanced && <button type="button" onClick={copyLink} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Link2 size={16} />{t("task.copyLink")}</button>}
       {advanced && webLink && <button type="button" onClick={() => { setMenu(null); void copyText(webLink); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Link2 size={16} />{t("task.copyLink")} (HTTP{webLink.startsWith("https:") ? "S" : ""})</button>}
       {!task.sharedChat && <button type="button" onClick={startRename} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Pencil size={16} />{t("task.renameAria")}</button>}

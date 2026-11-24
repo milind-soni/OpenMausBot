@@ -99,7 +99,7 @@ is never a place again. The rail then shows This Mac (This PC on Windows and
 Linux) first, beside My Cloud: a separate place on this computer, with its own
 bots. A click starts it fresh in a folder of its own beside the data folder
 (`~/.openmausbot-profiles/default`, a profile by its stable id; more profiles
-would be more folders there), on the same address, one server at a time, as a
+would be more folders there), on the same address, using the main window’s server, as a
 local environment switch does. Nothing moves either way, the frozen copy keeps
 its marker and its bots, and the move's code never reaches the profile. A line
 on its page says the bots from before are on My Cloud and that an older copy
@@ -137,7 +137,7 @@ in the Server menu where there is no rail yet). It asks a name (Work, then
 Personal, then Workspace 2 and on) and a colour, then opens it fresh: another
 profile under `~/.openmausbot-profiles/<id>`, listed with its name, colour and
 creation time in `~/.openmausbot-profiles/profiles.json` (This Mac, `default`,
-is its first entry, kept as it was). One runs at a time: opening another waits
+is its first entry, kept as it was). In the main window, switching to another waits
 for the work under way in the one that runs (as the move waits for it, at most
 a minute, the circle saying so), then stops it as a quit does and starts the
 next. Once My Cloud is home every workspace is on the rail; with no home the
@@ -229,3 +229,21 @@ The sidebar's button for the rail, with the rail shown and hidden
 This is not production qualification: the places and the purchase are the
 preview's fixtures, and no Admin, browser checkout or desktop window is
 involved.
+
+## Two workspace windows
+
+In a packaged desktop build, right-click a saved server or local workspace in the
+rail and choose **Open in new window**. Repeat for another workspace to use both
+at once. Choosing the action again focuses its existing window.
+
+Run both cases against an unpacked build on a graphical desktop:
+
+```sh
+node scripts/verify-workspace-windows.mjs release/linux-unpacked/openmausbot
+node scripts/verify-workspace-windows.mjs release/linux-unpacked/openmausbot --saved-servers
+```
+
+The fixture opens two workspaces, runs a fake bot in each, checks their separate
+histories, then closes and reopens one while using the other. The saved-server case
+also checks cookie isolation for two servers on the same host. Add `--check-tiling`
+on an isolated Hyprland desktop to verify that the native windows occupy separate tiles.

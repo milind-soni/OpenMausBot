@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { FocusedWorkspaceThread } from "@/state/workspace-chat-context";
 import { ClipboardPaste, File as FileIcon, Image as ImageIcon, LoaderCircle, MessageSquareText, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import {
@@ -43,6 +45,8 @@ export function ComposerAttachments({
   onPendingChange?: (pending: boolean) => void;
   uploadImage: (file: File) => Promise<Attachment | null>;
 }) {
+  const inWorkspace = useContext(FocusedWorkspaceThread) !== null;
+  const anchor = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
   const [preview, setPreview] = useState<PreviewImage | null>(null);
   // dragenter/dragleave fire once per element crossed, so the overlay tracks depth.
@@ -96,26 +100,28 @@ export function ComposerAttachments({
       }
     };
 
-    window.addEventListener("dragenter", onEnter);
-    window.addEventListener("dragleave", onLeave);
-    window.addEventListener("dragover", onOver);
-    window.addEventListener("drop", onDrop);
+    const pane = inWorkspace && anchor.current?.closest<HTMLElement>("[data-pane-id]");
+    const target = pane || document.documentElement;
+    target.addEventListener("dragenter", onEnter);
+    target.addEventListener("dragleave", onLeave);
+    target.addEventListener("dragover", onOver);
+    target.addEventListener("drop", onDrop);
     return () => {
-      window.removeEventListener("dragenter", onEnter);
-      window.removeEventListener("dragleave", onLeave);
-      window.removeEventListener("dragover", onOver);
-      window.removeEventListener("drop", onDrop);
+      target.removeEventListener("dragenter", onEnter);
+      target.removeEventListener("dragleave", onLeave);
+      target.removeEventListener("dragover", onOver);
+      target.removeEventListener("drop", onDrop);
     };
-  }, []);
+  }, [inWorkspace]);
 
   return (
-    <>
-      {dragging && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-10">
+    <div className="contents" ref={anchor}>
+      {dragging && createPortal(
+        <div className={cn(inWorkspace ? "absolute" : "fixed", "pointer-events-none inset-0 z-50 flex items-center justify-center bg-black/45 p-10")}>
           <div className="rounded-2xl border-2 border-dashed border-accent/70 bg-panel/90 px-8 py-6 text-[14px] font-medium text-ink shadow-2xl">
             {t("composer.dropToAttach")}
           </div>
-        </div>
+        </div>, inWorkspace ? anchor.current?.closest("[data-pane-id]") ?? document.body : document.body
       )}
 
       {notice && (
@@ -213,7 +219,7 @@ export function ComposerAttachments({
         </div>
       )}
       {preview && <AttachmentPreviewDialog image={preview} onClose={() => setPreview(null)} />}
-    </>
+    </div>
   );
 }
 

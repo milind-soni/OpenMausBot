@@ -1,4 +1,5 @@
-import { useEffect, useSyncExternalStore, type Dispatch, type SetStateAction } from "react";
+import { FocusedWorkspaceThread } from "@/state/workspace-chat-context";
+import { useContext, useEffect, useSyncExternalStore, type Dispatch, type SetStateAction } from "react";
 
 // The find bar belongs to ChatView, but the chat's ⋯ menu can sit outside it (the bot panel's top bar in Simple
 // mode). A request names its thread, so a menu left over from another chat never opens this one's bar.
@@ -37,17 +38,19 @@ export function useChatFindRequests(threadId: string, open: boolean, setOpen: Di
   }, [threadId, open]);
 }
 
-export function useChatFindShortcut(inForkPanel: boolean, panelOpen: boolean, setOpen: Dispatch<SetStateAction<boolean>>): void {
+export function useChatFindShortcut(inForkPanel: boolean, panelOpen: boolean, setOpen: Dispatch<SetStateAction<boolean>>, threadId?: string): void {
+  const focused = useContext(FocusedWorkspaceThread);
+  const handlesFind = focused ? focused === threadId : inForkPanel === panelOpen;
   useEffect(() => {
     const onFind = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f" && inForkPanel === panelOpen) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f" && handlesFind) {
         event.preventDefault();
         setOpen(true);
       }
     };
     window.addEventListener("keydown", onFind);
     return () => window.removeEventListener("keydown", onFind);
-  }, [inForkPanel, panelOpen, setOpen]);
+  }, [handlesFind, setOpen]);
 }
 
 function subscribe(watch: () => void) {

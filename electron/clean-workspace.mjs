@@ -47,13 +47,13 @@ export function cleanWorkspaceConfig(language = null, now = new Date()) {
  * @param {{
  *   dataDir(): string,
  *   running(): string | null,
- *   swap(dir: string): Promise<{ ok: boolean }>,
+ *   swap(dir: string, options?: { showLocal?: boolean }): Promise<{ ok: boolean }>,
  *   allowed?(): boolean,
  *   changed?(): void,
  *   log?(line: string): void,
  *   fs?: typeof nodeFs,
  * }} deps `dataDir`: this computer's own data folder, the frozen copy's. `running`: the folder its server runs on now.
- * `swap`: starts the server on that folder instead, and moves the window to its page. `changed`: the clean workspace started or
+ * `swap`: starts the server on that folder instead, and shows its page unless the caller is opening another place. `changed`: the clean workspace started or
  * ended, so whatever depends on it (lending) looks again.
  */
 export function createCleanWorkspace({ dataDir, running, swap, allowed = () => true, changed = () => {}, log = () => {}, fs = nodeFs, t = nativeText.englishText.t }) {
@@ -86,15 +86,15 @@ export function createCleanWorkspace({ dataDir, running, swap, allowed = () => t
     try { fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify(cleanWorkspaceConfig(language)), { mode: 0o600, flag: "wx" }); }
     catch (error) { if (error?.code !== "EEXIST") throw error; }
   }
-  async function swapTo(dir) {
+  async function swapTo(dir, options) {
     swapping = true;
-    const done = await swap(dir).catch((error) => ({ ok: false, error })).finally(() => { swapping = false; });
+    const done = await swap(dir, options).catch((error) => ({ ok: false, error })).finally(() => { swapping = false; });
     if (done?.ok !== true) { log(`clean workspace: could not start on ${dir} (${done?.error?.message ?? done?.error ?? "no answer"})`); return false; }
     changed();
     return true;
   }
   /** The frozen copy's server again; true once it is the one running. */
-  const leave = () => inTurn(() => (active() ? swapTo(dataDir()) : true));
+  const leave = (options) => inTurn(() => (active() ? swapTo(dataDir(), options) : true));
   /** This computer's freeze marker, as the frozen copy's own server would say it. */
   function marker() {
     const text = readOwn("moved.json");
@@ -112,6 +112,10 @@ export function createCleanWorkspace({ dataDir, running, swap, allowed = () => t
     /** The id of the profile that runs, or null. */
     profile,
     ownCopy,
+    prepare(id) {
+      if (!allowed() || held > 0 || (id ? !PROFILE_ID.test(id) : marker().frozen)) throw new Error("Workspace unavailable");
+      if (id) seed(profileDir(dataDir(), id));
+    },
     marker,
     /** Opens the clean workspace; true once it runs. False when it can't, and the window says why as before. A named local
      * environment the person chose is no frozen copy, so it stays, and so does a profile. */

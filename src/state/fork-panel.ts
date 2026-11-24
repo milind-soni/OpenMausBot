@@ -1,3 +1,4 @@
+import { emptyPane, paneIds, placePane, presetLayout, type PaneEdge, type PanePreset, firstPane, MAIN_PANE, replacePane, resizePane, type PaneLayout, type SplitDirection } from "./pane-layout";
 import { api } from "./api";
 import { loadFullThread } from "./message-history";
 import { optimisticMessageId, optimisticUserMessage } from "./optimistic-send";
@@ -15,37 +16,128 @@ export interface ForkPanelState {
   focusComposer?: boolean;
 }
 
+export interface WorkspacePanes {
+  layout: PaneLayout;
+  focused: string;
+  panels: Record<string, ForkPanelState>;
+}
+
+export function threadPanel(state: Pick<AppState, "forkPanel" | "workspacePanes">, id?: string) {
+  if (!id) return null;
+  return state.workspacePanes?.panels[id] ?? (state.forkPanel?.threadId === id ? state.forkPanel : null);
+}
+
+export function updatePanel(state: AppState, panel: ForkPanelState): AppState {
+  const panes = state.workspacePanes;
+  if (panes?.panels[panel.threadId]) return { ...state, workspacePanes: {
+    ...panes, panels: { ...panes.panels, [panel.threadId]: panel },
+  } };
+  return { ...state, forkPanel: panel };
+}
+
 export type ForkPanelAction =
+  | { type: "presetPanes"; preset: PanePreset }
+  | { type: "movePane"; source: string; target: string; edge: PaneEdge | "fill" }
+  | { type: "focusPane"; id: string }
+  | { type: "resizePane"; divider: string; ratio: number }
+  | { type: "closePane"; id: string; promote?: string }
+  | { type: "closeWorkspacePanes" }
   | { type: "forkMessage"; kind: "bot" | "group"; ownerId: string; threadId: string; messageId?: string; branchLeafId?: string; onSuccess?: () => void; onError?: (message: string) => void }
-  | { type: "openForkPanel"; kind: "bot" | "group"; ownerId: string; threadId: string; loadId?: string; focusComposer?: boolean }
+  | { type: "openForkPanel"; kind: "bot" | "group"; ownerId: string; threadId: string; loadId?: string; focusComposer?: boolean; split?: SplitDirection | "replace"; target?: string; edge?: PaneEdge | "fill" }
   | { type: "forkPanelLoaded"; threadId: string; loadId: string; messages: Message[]; activeLeafId: string | null }
   | { type: "forkPanelLoadFailed"; threadId: string; loadId: string }
   | { type: "forkPanelMessage"; threadId: string; message: Message; patch?: true }
   | { type: "forkPanelActive"; threadId: string; activeLeafId: string }
   | { type: "closeForkPanel" };
 
+export function workspaceLayout(state: Pick<AppState, "workspacePanes" | "forkPanel">): PaneLayout {
+  return state.workspacePanes?.layout ?? (state.forkPanel
+    ? { direction: "beside", ratio: 0.5, first: MAIN_PANE, second: state.forkPanel.threadId } : MAIN_PANE);
+}
+
+function workspacePanels(state: AppState): WorkspacePanes["panels"] {
+  return state.workspacePanes?.panels ?? (state.forkPanel ? { [state.forkPanel.threadId]: state.forkPanel } : {});
+}
+
 export function reduceForkPanel(state: AppState, action: ForkPanelAction): AppState {
   switch (action.type) {
     case "forkMessage": return state;
-    case "openForkPanel":
-      return { ...state, settingsOpen: false, computerOpen: false, inspectorOpen: false, activityOpen: false,
-        forkPanel: { kind: action.kind, ownerId: action.ownerId, threadId: action.threadId, messages: [], activeLeafId: null,
-          loading: true, loadId: action.loadId ?? "", loadFailed: false, focusComposer: action.focusComposer } };
+    case "presetPanes": {
+      const layout = presetLayout(workspaceLayout(state), action.preset);
+      if (!layout) return state;
+      const panels = workspacePanels(state);
+      const previous = state.workspacePanes?.focused;
+      const focused = previous && paneIds(layout).includes(previous) ? previous : MAIN_PANE;
+      return { ...state, forkPanel: null, workspacePanes: { layout, focused, panels } };
+    }
+    case "movePane": {
+      const previous = workspaceLayout(state);
+      if (!paneIds(previous).includes(action.source)) return state;
+      const layout = placePane(previous, action.source, action.target, action.edge);
+      return layout ? { ...state, forkPanel: null, workspacePanes: { panels: workspacePanels(state), layout, focused: action.source } } : state;
+    }
+    case "closeWorkspacePanes": return { ...state, workspacePanes: null };
+    case "focusPane": {
+      const panes = state.workspacePanes;
+      return panes && panes.focused !== action.id ? { ...state, workspacePanes: { ...panes, focused: action.id } } : state;
+    }
+    case "resizePane": {
+      const panes = state.workspacePanes;
+      return panes ? { ...state, workspacePanes: { ...panes, layout: resizePane(panes.layout, action.divider, action.ratio) } } : state;
+    }
+    case "closePane": {
+      const panes = state.workspacePanes;
+      if (!panes) return state;
+      let layout = replacePane(panes.layout, action.id, null);
+      if (layout && action.promote) layout = replacePane(layout, action.promote, MAIN_PANE);
+      if (!layout || layout === MAIN_PANE) return { ...state, workspacePanes: null };
+      const panels = { ...panes.panels };
+      delete panels[action.promote ?? action.id];
+      const focused = panes.focused === action.id || panes.focused === action.promote ? firstPane(layout) : panes.focused;
+      return { ...state, workspacePanes: { layout, panels, focused } };
+    }
+    case "openForkPanel": {
+      const panel: ForkPanelState = { kind: action.kind, ownerId: action.ownerId, threadId: action.threadId, messages: [],
+        activeLeafId: null, loading: true, loadId: action.loadId ?? "", loadFailed: false, focusComposer: action.focusComposer };
+      const closed = { ...state, settingsOpen: false, computerOpen: false, inspectorOpen: false, activityOpen: false };
+      if (!action.split && !action.edge && !state.workspacePanes) return { ...closed, forkPanel: panel, workspacePanes: null };
+      const panes = state.workspacePanes;
+      const anchor = action.target ?? panes?.focused ?? MAIN_PANE;
+      const panels = { ...workspacePanels(state), [action.threadId]: panel };
+      let layout = workspaceLayout(state);
+      if (!panes?.panels[action.threadId]) {
+        if (!paneIds(layout).includes(anchor)) return state;
+        if (action.split === "replace" && !emptyPane(anchor)) {
+          if (anchor === MAIN_PANE) return state;
+          delete panels[anchor];
+          layout = replacePane(layout, anchor, action.threadId)!;
+        } else {
+          const vacancy = !action.split && !action.edge ? paneIds(layout).find(emptyPane) : undefined;
+          const target = vacancy ?? anchor;
+          const edge = action.edge ?? (emptyPane(target) ? "fill" : action.split === "below" ? "bottom" : "right");
+          const next = placePane(layout, action.threadId, target, edge);
+          if (!next) return state;
+          layout = next;
+        }
+      }
+      return { ...closed, forkPanel: null, workspacePanes: { layout, focused: action.threadId, panels } };
+    }
     case "forkPanelLoaded": {
-      const panel = state.forkPanel;
+      const panel = threadPanel(state, action.threadId);
       if (panel?.threadId !== action.threadId || panel.loadId !== action.loadId) return state;
       const live = new Map(panel.messages.map((message) => [message.id, message]));
       const loaded = new Set(action.messages.map((message) => message.id));
       const messages = [...action.messages.map((message) => live.get(message.id) ?? message),
         ...panel.messages.filter((message) => !loaded.has(message.id))];
-      return { ...state, forkPanel: { ...panel, messages, activeLeafId: panel.activeLeafId ?? action.activeLeafId,
-        loading: false, loadFailed: false } };
+      return updatePanel(state, { ...panel, messages, activeLeafId: panel.activeLeafId ?? action.activeLeafId,
+        loading: false, loadFailed: false });
     }
-    case "forkPanelLoadFailed":
-      return state.forkPanel?.threadId === action.threadId && state.forkPanel.loadId === action.loadId
-        ? { ...state, forkPanel: { ...state.forkPanel, loading: false, loadFailed: true } } : state;
+    case "forkPanelLoadFailed": {
+      const panel = threadPanel(state, action.threadId);
+      return panel && panel.loadId === action.loadId ? updatePanel(state, { ...panel, loading: false, loadFailed: true }) : state;
+    }
     case "forkPanelMessage": {
-      const panel = state.forkPanel;
+      const panel = threadPanel(state, action.threadId);
       if (panel?.threadId !== action.threadId) return state;
       const optimisticId = action.message.sendId ? optimisticMessageId(action.message.sendId) : null;
       const replacedOptimistic = optimisticId && panel.messages.some((message) => message.id === optimisticId);
@@ -56,11 +148,12 @@ export function reduceForkPanel(state: AppState, action: ForkPanelAction): AppSt
       const activeLeafId = replacedOptimistic && panel.activeLeafId === optimisticId ? action.message.id
         : !action.patch && !panel.loading && !existing && (action.message.parentId ?? null) === panel.activeLeafId
           ? action.message.id : panel.activeLeafId;
-      return { ...state, forkPanel: { ...panel, messages, activeLeafId } };
+      return updatePanel(state, { ...panel, messages, activeLeafId });
     }
-    case "forkPanelActive":
-      return state.forkPanel?.threadId === action.threadId
-        ? { ...state, forkPanel: { ...state.forkPanel, activeLeafId: action.activeLeafId } } : state;
+    case "forkPanelActive": {
+      const panel = threadPanel(state, action.threadId);
+      return panel ? updatePanel(state, { ...panel, activeLeafId: action.activeLeafId }) : state;
+    }
     case "closeForkPanel":
       return state.forkPanel ? { ...state, forkPanel: null } : state;
   }
@@ -68,28 +161,26 @@ export function reduceForkPanel(state: AppState, action: ForkPanelAction): AppSt
 
 type ForkSend = Extract<Action, { type: "send" | "sendGroup" }>;
 export function addForkOptimistic(state: AppState, action: ForkSend): AppState {
-  const panel = state.forkPanel;
   const kind = action.type === "send" ? "bot" : "group";
   const ownerId = action.type === "send" ? action.botId : action.groupId;
-  const selectedThreadId = action.type === "send"
-    ? state.bots.find((bot) => bot.id === ownerId)?.threadId
-    : state.groups.find((group) => group.id === ownerId)?.threadId;
+  const owners = kind === "bot" ? state.bots : state.groups;
+  const panel = threadPanel(state, action.threadId ?? owners.find((owner) => owner.id === ownerId)?.threadId);
   if (!panel || panel.kind !== kind || panel.ownerId !== ownerId || !action.sendId ||
-    (action.threadId ?? selectedThreadId) !== panel.threadId || panel.messages.some((message) => message.sendId === action.sendId)) return state;
+    panel.messages.some((message) => message.sendId === action.sendId)) return state;
   const message = optimisticUserMessage(action.text, action.sendId, action.replyToId, panel.activeLeafId,
     action.type === "sendGroup" ? action.mode ?? "chat" : undefined);
-  return { ...state, forkPanel: { ...panel, messages: [...panel.messages, message], activeLeafId: message.id } };
+  return updatePanel(state, { ...panel, messages: [...panel.messages, message], activeLeafId: message.id });
 }
 
 export function removeForkOptimistic(state: AppState, action: Extract<Action, { type: "optimisticMessageRemoved" }>): AppState {
-  const panel = state.forkPanel;
+  const panel = threadPanel(state, action.threadId);
   const optimisticId = optimisticMessageId(action.sendId);
   if (panel?.threadId !== action.threadId || !panel.messages.some((message) => message.id === optimisticId)) return state;
   const optimistic = panel.messages.find((message) => message.id === optimisticId)!;
-  return { ...state, forkPanel: { ...panel,
+  return updatePanel(state, { ...panel,
     messages: panel.messages.filter((message) => message.id !== optimisticId),
     activeLeafId: panel.activeLeafId === optimisticId
-      ? action.restoreLeafId ?? optimistic.parentId ?? null : panel.activeLeafId } };
+      ? action.restoreLeafId ?? optimistic.parentId ?? null : panel.activeLeafId });
 }
 
 type ForkEffect = Extract<Action, { type: "forkMessage" | "openForkPanel" }>;

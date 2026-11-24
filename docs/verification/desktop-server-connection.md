@@ -26,18 +26,17 @@ It checks:
 - Desktop companion mode still sends a normalized six-digit code through
   `desktop-remote:pair`.
 - The 390px layout has no horizontal document overflow.
-- The hosted-workspace form accepts a hostname/address or pairing link and an
-  optional name. Cancellation retains input; confirmed connections preserve
-  the existing list and exclude the pairing code from saved connection data.
+- The hosted-workspace form looks up the address or pairing link and shows the
+  server's name. A cancelled request retains the input. Connecting adds the
+  named server and keeps the pairing code out of the saved list.
 - The production native menu's Connect item requests Settings; its saved
   workspace items dispatch fixed IDs. Settings can switch connections and
   cancel or confirm forgetting just one saved connection.
-- The local app opens Servers as a top-level Settings page, even
-  before local provider onboarding. Native requests also clear stale Settings
-  searches, so the requested page actually becomes visible.
-- A page outside the declared local origin receives no saved-list/mutation
-  bridge or Node access. Its workspace bridge contains only `state` (current
-  name, not the list) and `menu` (the user selects in Electron's native menu).
+- The local app opens **Settings → This app → Your computers** from Simple
+  mode. A native request clears an active Settings search.
+- The hosted renderer exposes the expected workspace methods. The fixture also
+  checks that the local environment, companion, computer-sharing and Node
+  interfaces are absent.
 - Computer access starts off, selected folders start read-only, cancelled
   confirmation grants nothing, and Stop sharing immediately updates the state.
 - With the feature flag absent, no sharing controls appear, including through
@@ -52,7 +51,8 @@ It checks:
 The printed evidence directory retains `receipt.json`, `electron.log`, and
 desktop/narrow/in-app screenshots. Successful cleanup removes only the
 temporary home, profile and server data. Expected fake IPC rejection messages
-appear in the log.
+appear in the log. The fixture blocks external icon requests from the app
+shell and fails on any other external request.
 
 This verifies actual renderer/preload dispatch, with fixture IPC handlers
 substituting native confirmation, server persistence and navigation. It does
@@ -61,23 +61,23 @@ connector portion does prove a real pairing exchange and cookie-authenticated
 registration; filesystem and MCP execution are covered below.
 Native menu items are selected programmatically; this is not a physical
 mouse/keyboard test of the operating system's popup.
-The existing production handler still performs native confirmation and opens
-the server's pairing page; its URL/state helpers are checked separately with
-`node --test electron/environments.node-test.mjs`. Do not report this offline
+The server sheet names the server on its Connect button. The separate pairing-link
+handler asks for native confirmation. Run `node --test electron/environments.node-test.mjs`
+for the URL and saved-state helpers. Do not report this offline
 smoke as an authenticated connection to a customer's server.
 
 ## User flow
 
-In a desktop build with this feature, choose the server dropdown above the
-sidebar search → **Connect to a server…**, or open **Settings →
-Servers**. Enter the server's HTTPS address or full pairing link and an
-optional name. Confirm the host in the native dialog, then complete pairing or
-email sign-in on that server. To generate an owner link without the CLI's
+Choose **Connect to a server** from the server menu, or open **Settings →
+This app → Your computers** in Advanced mode. Enter the server's HTTPS address
+and pairing code, or paste the full pairing link. Check the server name on the
+Connect button, select it, and complete pairing or email sign-in on the server.
+To generate an owner link without the CLI's
 phone wizard, run `npx openmausbot pair --label "My desktop"` on the server.
 Treat this link as a secret. Existing limited-access links retain their limits.
 
 Select **This computer** or a saved hosted workspace to switch. Each origin
-keeps its own session, bots, chats, provider credentials and settings. **Forget**
+keeps its own session, bots, chats, provider credentials and settings. **Remove**
 signs this desktop out and removes its saved connection, not the server's bots
 or data. The server must remain running independently.
 

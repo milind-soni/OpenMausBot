@@ -64,6 +64,13 @@ The build creates:
 
 The AppImage uses a static runtime and does not require the legacy `libfuse2` package.
 
+## Open two workspaces side by side
+
+In the desktop app, right-click a saved server or local workspace in the left rail
+and choose **Open in new window**. You can leave the first workspace in the main
+window or open a separate window for each. On Omarchy, Hyprland tiles these like
+other app windows. Choosing the action again brings that workspace window forward.
+
 ## Install and run
 
 Install a downloaded Debian package with APT so its desktop dependencies are resolved:

@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 
 const require = createRequire(import.meta.url);
-const { normalizeUnreadCount, parseWindowState, resolveWindowState } = require("./window-state.cjs");
+const { minimumWindowBounds, normalizeUnreadCount, parseWindowState, resolveWindowState } = require("./window-state.cjs");
 
 const primary = { x: 0, y: 0, width: 1920, height: 1080 };
 const left = { x: -1600, y: 0, width: 1600, height: 900 };
@@ -23,13 +23,18 @@ describe("desktop window state", () => {
     ).toEqual({ bounds: { x: -1500, y: 40, width: 1200, height: 760 }, maximized: true });
   });
 
-  it("centers an off-screen window on the primary display and clamps its size", () => {
+  it.each([
+    ["desktop", {}, 620],
+    ["Hyprland", { XDG_CURRENT_DESKTOP: "Hyprland", HYPRLAND_INSTANCE_SIGNATURE: "fixture" }, 480],
+  ])("centers an off-screen window and clamps its height to the %s minimum", (_session, env, height) => {
     expect(
       resolveWindowState(
         { bounds: { x: 7000, y: 7000, width: 4000, height: 200 }, maximized: false },
         [primary, left],
+        undefined,
+        minimumWindowBounds("linux", env),
       ),
-    ).toEqual({ bounds: { x: 0, y: 230, width: 1920, height: 620 }, maximized: false });
+    ).toEqual({ bounds: { x: 0, y: (primary.height - height) / 2, width: 1920, height }, maximized: false });
   });
 
   it("uses safe default dimensions when there is no saved state", () => {
@@ -37,6 +42,15 @@ describe("desktop window state", () => {
       bounds: { width: 1040, height: 760 },
       maximized: false,
     });
+  });
+
+  it("reopens a narrow Hyprland tile at its saved size", () => {
+    const env = { XDG_CURRENT_DESKTOP: "Hyprland", HYPRLAND_INSTANCE_SIGNATURE: "fixture" };
+    const minimum = minimumWindowBounds("linux", env);
+    const bounds = { x: 20, y: 20, width: 480, height: 540 };
+    expect(resolveWindowState({ bounds }, [primary], undefined, minimum).bounds).toEqual(bounds);
+    expect(minimumWindowBounds("linux", {})).toEqual({ width: 840, height: 620 });
+    expect(minimumWindowBounds("win32", env)).toEqual({ width: 840, height: 620 });
   });
 
   it("bounds native unread counts", () => {

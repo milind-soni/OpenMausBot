@@ -1,3 +1,4 @@
+import { threadPanel } from "@/state/fork-panel";
 import { use, useContext, useMemo, useSyncExternalStore } from "react";
 
 import type { AppState, Message } from "@/state/store";
@@ -9,7 +10,8 @@ const noSubscription = () => () => {};
 const NONE: ReadonlyMap<string, EditSource> = new Map();
 
 function threadMessages(state: AppState, threadId: string): readonly Message[] | null {
-  if (state.forkPanel?.threadId === threadId) return state.forkPanel.messages;
+  const panel = threadPanel(state, threadId);
+  if (panel) return panel.messages;
   return state.bots.find((bot) => bot.threadId === threadId)?.messages ?? state.groups.find((group) => group.threadId === threadId)?.messages ?? null;
 }
 

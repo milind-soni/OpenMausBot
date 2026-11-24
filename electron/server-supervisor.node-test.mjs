@@ -438,6 +438,7 @@ function switchFixture(t, { startResults = [], releaseLeaseThrows = false, stopU
     runningDataDir: null,
     serverProc: null,
     SERVER_PORT: 8799,
+    workspaceWindows: { holds: () => false },
     serverSupervisor: {
       calls: [],
       pause() { this.calls.push("pause"); },
