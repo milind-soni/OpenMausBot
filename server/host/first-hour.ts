@@ -269,7 +269,7 @@ export function createFirstHour(deps: FirstHourDeps) {
   const movedIn = (): boolean => {
     if (!state) return false;
     if (state.movedInAt) return true;
-    if (state.offeredAt || !arrivals().length) return false;
+    if (state.offeredAt || now() - state.startedAt > FIRST_DAY_MS || !arrivals().length) return false;
     mark({ movedInAt: now() });
     return true;
   };
@@ -395,7 +395,9 @@ export function createFirstHour(deps: FirstHourDeps) {
     }
     mark({ lookTries: tries, lookFailure: failure, lookSkipped: "failed", lookRetryAt: undefined });
     const w = words();
-    if (!deps.threadBusy(bot.id, threadId)) say(bot, threadId, w.lookLater(w.list((state.apps ?? []).map((app) => APP_NAME[app])), state.apps?.length ?? 0));
+    // A paused, held or gone bot has its own notice: "ask me later" would only be refused again.
+    const lasting = miss.code !== undefined && LASTING.has(miss.code);
+    if (!lasting && !deps.threadBusy(bot.id, threadId)) say(bot, threadId, w.lookLater(w.list((state.apps ?? []).map((app) => APP_NAME[app])), state.apps?.length ?? 0));
     soon(afterLook);
   }
 

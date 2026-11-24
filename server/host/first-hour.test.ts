@@ -163,6 +163,19 @@ describe("a new Cloud the person's own bots came to", () => {
     b.stop();
   });
 
+  it("changes nothing for a bot that comes after the first day", () => {
+    const s = setup();
+    const fh = s.make();
+    fh.begin();
+    s.advance(25 * HOUR);
+    s.store.createBot({ name: "Coder" }, { seedMessages: false });
+    fh.arrived();
+    fh.tick();
+    fh.stop();
+    expect(s.texts()[0]).toMatch(/^Hi! I'm MausBot/u);
+    expect(fh.health()!.ms.movedIn).toBeUndefined();
+  });
+
   it("changes nothing for a bot made after the inbox was offered", async () => {
     const s = setup();
     const fh = s.make();
@@ -371,7 +384,8 @@ describe("a new Cloud's first hour", () => {
     paused.world.refuse = Object.assign(new Error("MausBot is paused."), { status: 409, code: "bot_paused" });
     await paused.answer(first);
     expect(first.health()).toMatchObject({ look: "failed", lookFailure: "start", lookTries: 1 });
-    expect(paused.texts().some((text) => text?.startsWith("Gmail is connected, but I couldn't take my first look"))).toBe(true);
+    expect(paused.world.turns).toHaveLength(1);
+    expect(paused.texts().some((text) => text?.includes("first look"))).toBe(false);
     const failing = setup({ connected: { gmail: true } });
     const second = failing.make();
     second.begin();
