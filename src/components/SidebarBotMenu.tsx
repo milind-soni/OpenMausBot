@@ -22,7 +22,6 @@ import { submenuIntent, type SubmenuIntent } from "@/lib/submenu-intent";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useMoveToMyCloud } from "./MoveToMyCloud";
 import { useMoveToTeam } from "./MoveToTeam";
-import type { MenuState } from "./Sidebar";
 import { departmentNames, moveBotsToSection, useMayMoveBots } from "./bot-sections";
 import { openBotSettings } from "./bot-panel/panel-link";
 import { OpenWindowAction } from "./OpenWindowAction";
@@ -30,6 +29,12 @@ import { botOpensTo } from "@/state/thread-navigation";
 import { isArchived } from "./SidebarThreadRow";
 
 type Flyout = "more" | "move";
+
+export interface MenuState {
+  botId: string;
+  x: number;
+  y: number;
+}
 
 export function BotContextMenu({
   menu,

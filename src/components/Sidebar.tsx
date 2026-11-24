@@ -87,7 +87,7 @@ import { useShowThreads } from "@/lib/thread-preferences";
 import { useBotUnread } from "./unread-notice";
 import { attentionHasRunningWork, attentionJumpAction, attentionUnpinAction, crossBotAttentionThreads, crossBotPinnedThreads, runningRoutineRun, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
 import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
-import { BotContextMenu } from "./SidebarBotMenu";
+import { BotContextMenu, type MenuState } from "./SidebarBotMenu";
 export { BotContextMenu };
 import { AvatarActivityDot, AvatarCornerDot, RowDot, RowStatusText, rowSelectedSurface, rowSurface } from "./SidebarRowMarkers";
 
@@ -125,11 +125,7 @@ function sectionLabel(id: string): string {
   return key ? t(key) : sidebarSectionLabel(id);
 }
 
-export interface MenuState {
-  botId: string;
-  x: number;
-  y: number;
-}
+export type { MenuState } from "./SidebarBotMenu";
 
 export function openBotContextMenu(onMenu: (menu: MenuState) => void, botId: string, event: React.MouseEvent) {
   event.preventDefault();

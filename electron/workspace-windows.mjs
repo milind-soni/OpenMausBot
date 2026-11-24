@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { BrowserWindow, ipcMain, session, utilityProcess } from "electron";
+import { app, BrowserWindow, ipcMain, session, utilityProcess } from "electron";
 import auth from "./desktop-server-auth.cjs";
 import { waitForChildExit } from "./server-child-launch.mjs";
 import { startProfileServer } from "./profile-server.mjs";
@@ -10,7 +10,7 @@ const preload = fileURLToPath(new URL("./chat-window-preload.cjs", import.meta.u
 const validId = value => typeof value === "string" && value.length > 0 && value.length <= 256;
 const focus = win => { if (win.isMinimized()) win.restore(); win.show(); win.focus(); };
 
-export function installWorkspaceWindows({ primary, canOpenPlace, places, savedOrigin, profileDir, prepareProfile, dataDir, runningDir, switching, resourcesPath, userData, environment, bounds, icon, log }) {
+export function installWorkspaceWindows({ primary, canOpenPlace, places, savedOrigin, profileDir, prepareProfile, dataDir, runningDir, switching, environment, bounds, icon, log }) {
   const servers = new Map();
   const saved = new Map();
   const views = new Map();
@@ -45,7 +45,7 @@ export function installWorkspaceWindows({ primary, canOpenPlace, places, savedOr
     };
     servers.set(dir, owner);
     owner.ready = (async () => {
-      const runtime = await startProfileServer({ dir, resourcesPath, userData: userData(), env: environment(),
+      const runtime = await startProfileServer({ dir, resourcesPath: process.resourcesPath, userData: app.getPath("userData"), env: environment(),
         fork: (...args) => utilityProcess.fork(...args), prepare: () => prepareProfile(profile),
         onStarted: stopped => { owner.stopped = stopped; }, onExit: release, signal: controller.signal, log });
       controller.signal.throwIfAborted();
@@ -78,7 +78,7 @@ export function installWorkspaceWindows({ primary, canOpenPlace, places, savedOr
     if (current?.origin === origin) return current.ready;
     const context = { savedId: id, origin, name };
     saved.set(id, context);
-    context.ready = createSavedWindowSession(origin, resourcesPath).then(runtime => {
+    context.ready = createSavedWindowSession(origin, process.resourcesPath).then(runtime => {
       Object.assign(context, runtime);
       if (quitting || saved.get(id) !== context || savedOrigin(id) !== origin) {
         stopIfUnused(context);
