@@ -9143,6 +9143,7 @@
   "shortcuts.new-thread": "Iniciar uma nova conversa com o bot selecionado",
   "shortcuts.jump-bot": "Ir para o bot 1–9 da lista",
   "shortcuts.switch-bot": "Ir para o bot anterior / seguinte",
+  "shortcuts.switch-thread": "Ir para a conversa seguinte / anterior do bot",
   "shortcuts.find-conversation": "Buscar na conversa",
   "shortcuts.send-message": "Enviar mensagem",
   "shortcuts.new-line": "Inserir uma nova linha sem enviar",
