@@ -10,6 +10,7 @@ import { SIDEBAR_AND_PANEL_FIT } from "./use-media-query";
 export interface FilePreview {
   kind: "html" | "markdown" | "table" | "changes";
   path: string;
+  shownPath?: string;
   name: string;
   message: { threadId: string; messageId: string };
   /** For "changes": the person's file this one is an edit of, in the message that attached it. */
