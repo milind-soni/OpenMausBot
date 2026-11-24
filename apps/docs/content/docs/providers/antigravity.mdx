@@ -39,22 +39,19 @@ Antigravity uses the same MausBot approval cards as other ACP engines. Connected
 
 The normal mode asks before protected actions. Full access maps to Antigravity's native `yolo` mode, but native questions still wait for a person instead of being guessed automatically.
 
-## Google Antigravity CLI or Classic runtime
+## Google Antigravity CLI
 
-MausBot runs Antigravity on one of two runtimes, chosen for each Antigravity account under **Runs on** on its card in Settings:
+MausBot runs Antigravity on Google's native CLI (1.5 or later): one program of about 220 MB on a Mac and 275 MB on Linux, which starts much faster than the packaged 1.4.3 runtime MausBot used before (the Classic runtime, about 400 MB on a Mac and 1 GB on Linux).
 
-- **Google Antigravity CLI**: Google's native CLI (1.5 or later). One program of about 220 MB on a Mac and 275 MB on Linux, which starts much faster.
-- **Classic runtime**: the packaged 1.4.3 runtime MausBot has used so far, about 400 MB on a Mac and 1 GB on Linux.
-
-A new install takes the Google Antigravity CLI. A computer that already has the Classic runtime keeps it, and nothing changes for its accounts until you choose the CLI under **Runs on**. The two runtimes keep their Google sign-ins in different files, so an account signs in with Google once more the first time it runs on the other one; switching back finds its earlier sign-in.
+A new install takes the Google Antigravity CLI. A computer that already has the Classic runtime keeps it, and an account signed in on it keeps working, with no new sign-in after an update. Its card in Settings offers **Switch to Google Antigravity CLI**: the switch installs the CLI for that account and is one way, and the CLI keeps its Google sign-in in a different file, so you sign in with Google once more.
 
 To move an account to the CLI:
 
-1. Choose **Google Antigravity CLI** under **Runs on**, then **Install Google Antigravity CLI** if the card offers it. The CLI comes from Google's update channel, checked against the SHA-512 that channel names.
+1. Select **Switch to Google Antigravity CLI** on its card (or, on a new install, **Install Google Antigravity CLI**). The CLI comes from Google's update channel, checked against the SHA-512 that channel names.
 2. Select **Sign in with Google** and sign in in your browser. Google's page then shows a code: paste it, or the full address of that page, into the card and select **Send code**.
 3. Send a bot on that account a message and check that it answers.
 
 MausBot updates the CLI itself (a few minutes after it starts, then once a day), keeps its release folder read-only, turns the CLI's own self-update off, and starts it so that each account keeps its sign-in in its own folder: two accounts can be two Google accounts, and a sign-in of the Antigravity CLI in a terminal is neither used nor signed out. The CLI always runs in its `default` mode and MausBot answers its requests by the bot's approval level. The Classic runtime stays on disk.
 
-A server or Cloud started with `OMB_ANTIGRAVITY_NATIVE_CLI=1` in its environment runs the CLI for every account that has not chosen a runtime, even where the Classic runtime is installed: the engine updater installs the CLI there while no bot is working. An account set to **Classic runtime** keeps it. The setting is read when MausBot starts.
+A server or Cloud started with `OMB_ANTIGRAVITY_NATIVE_CLI=1` in its environment runs the CLI for every account whose CLI path names no runtime, even where the Classic runtime is installed: the engine updater installs the CLI there while no bot is working. An account whose CLI path is `agy_acp_server` keeps the Classic runtime. The setting is read when MausBot starts.
 
