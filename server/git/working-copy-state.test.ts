@@ -8,7 +8,8 @@ import {
 } from "./working-copy-state.ts";
 
 const made: string[] = [];
-afterEach(() => { for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+// Retries: on Windows a stopped git (or the stand-in that never answers) can hold its folder for a moment after taskkill.
+afterEach(() => { for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }); });
 
 function scratch(): string {
   const dir = mkdtempSync(join(tmpdir(), "wcs-"));
@@ -207,7 +208,9 @@ describe("workingCopyState: what it judges", () => {
     commit(dir, "b.txt", "b");
     const bare = join(scratch(), "backup.git");
     git(scratch(), "init", "-q", "--bare", bare);
-    git(dir, "remote", "add", "origin/backup", bare);
+    // Newer git refuses `git remote add origin/backup` next to origin; a bot can still write the config by hand.
+    git(dir, "config", "remote.origin/backup.url", bare);
+    git(dir, "config", "remote.origin/backup.fetch", "+refs/heads/*:refs/remotes/origin/backup/*");
     git(dir, "push", "-q", "origin/backup", "main");
     expect(git(dir, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/backup")).toContain("refs/remotes/origin/backup/main");
     expect((await workingCopyState(dir)).state).toBe("unknown");
