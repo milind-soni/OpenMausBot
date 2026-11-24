@@ -1000,7 +1000,7 @@
   "settings.notificationFeed.subtitle": "Pencerenin sağ kenarında, okunmuş olsun olmasın her bottan gelen son 500 bildirimi tutan bir zil göster.",
   "settings.notificationFeed.show": "Bildirim akışını göster",
   "settings.reportNotifications.title": "Zamanlanmış rapor bildirimleri",
-  "settings.reportNotifications.subtitle": "Bir rutin zamanlanmış çalışmasını bitirdiğinde burada bildirim göster. Yalnızca raporlar için bunu açık bırak ve üstteki anahtarı kapat.",
+  "settings.reportNotifications.subtitle": "Bir rutin zamanlanmış çalışmasını bitirdiğinde burada bildirim göster. Yalnızca raporlar için önce üstteki anahtarı kapat, sonra bunu aç.",
   "settings.reportNotifications.show": "Zamanlanmış raporları bildir",
   "notifications.title": "Bildirimler",
   "notifications.railUnread": "Bildirimler, {count} okunmamış",

@@ -1721,7 +1721,7 @@
   "settings.notificationFeed.subtitle": "在視窗右側顯示一個鈴鐺，保留所有機器人最近 500 則通知，不論是否已讀。",
   "settings.notificationFeed.show": "顯示通知動態",
   "settings.reportNotifications.title": "排程報告通知",
-  "settings.reportNotifications.subtitle": "例行工作完成一次排程執行時，在這裡顯示通知。保持此項開啟並關閉上面的開關，即可只收到報告。",
+  "settings.reportNotifications.subtitle": "例行工作完成一次排程執行時，在這裡顯示通知。若只想收到報告，請先關閉上面的開關，再開啟此項。",
   "settings.reportNotifications.show": "排程報告時通知我",
   "notifications.title": "通知",
   "notifications.railUnread": "通知，{count} 則未讀",

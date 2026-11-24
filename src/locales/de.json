@@ -4035,7 +4035,7 @@
   "settings.newBotEffort.title": "Aufwand für neue Bots",
   "settings.notificationFeed.show": "Mitteilungsfeed zeigen",
   "settings.reportNotifications.title": "Benachrichtigungen zu geplanten Berichten",
-  "settings.reportNotifications.subtitle": "Hier eine Benachrichtigung zeigen, wenn eine Routine einen geplanten Lauf beendet. Lass dies an und schalte den Schalter oben aus, um nur Berichte zu sehen.",
+  "settings.reportNotifications.subtitle": "Hier eine Benachrichtigung zeigen, wenn eine Routine einen geplanten Lauf beendet. Um nur Berichte zu sehen, schalte zuerst den Schalter oben aus und dann diesen ein.",
   "settings.reportNotifications.show": "Bei geplanten Berichten benachrichtigen",
   "settings.notificationFeed.title": "Mitteilungsfeed",
   "settings.notificationSounds.play": "Mitteilungstöne",

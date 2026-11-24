@@ -1796,7 +1796,7 @@
   "settings.notificationFeed.subtitle": "Mostra um sino na borda direita da janela com as últimas 500 notificações de todos os bots, lidas ou não.",
   "settings.notificationFeed.show": "Mostrar o feed de notificações",
   "settings.reportNotifications.title": "Notificações de relatórios agendados",
-  "settings.reportNotifications.subtitle": "Mostrar uma notificação aqui quando uma rotina termina uma execução agendada. Deixe isto ligado e desligue a opção acima para ver só os relatórios.",
+  "settings.reportNotifications.subtitle": "Mostrar uma notificação aqui quando uma rotina termina uma execução agendada. Para ver só os relatórios, desligue primeiro a opção acima e depois ligue esta.",
   "settings.reportNotifications.show": "Notificar sobre relatórios agendados",
   "notifications.title": "Notificações",
   "notifications.railUnread": "Notificações, não lidas: {count}",

@@ -122,3 +122,14 @@ it("turns scheduled report notices on and off by themselves, only once the brows
   expect(toggle().disabled).toBe(true);
   expect(requestPermission).not.toHaveBeenCalled();
 });
+
+it("lets the report switch be used as soon as the device switch gets the browser's permission", async () => {
+  permission = "default";
+  await act(async () => root!.render(createElement(StrictMode, null, createElement("div", null, createElement(DeviceNotificationsRow), createElement(ReportNotificationsRow)))));
+  const [device, report] = container.querySelectorAll<HTMLButtonElement>('[role="switch"]');
+  expect(report.disabled).toBe(true);
+  await act(async () => device.click());
+  expect(requestPermission).toHaveBeenCalledOnce();
+  expect(report.disabled).toBe(false);
+  expect(report.getAttribute("aria-checked")).toBe("true");
+});

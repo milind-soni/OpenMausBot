@@ -3626,7 +3626,7 @@
   "settings.newBotEffort.title": "नए बॉट्स के लिए प्रयास",
   "settings.notificationFeed.show": "सूचना फ़ीड दिखाएँ",
   "settings.reportNotifications.title": "निर्धारित रिपोर्ट की सूचनाएँ",
-  "settings.reportNotifications.subtitle": "जब कोई रूटीन अपना निर्धारित रन पूरा करे, तो यहाँ सूचना दिखाएँ। सिर्फ़ रिपोर्ट के लिए इसे चालू रखें और ऊपर वाला स्विच बंद करें।",
+  "settings.reportNotifications.subtitle": "जब कोई रूटीन अपना निर्धारित रन पूरा करे, तो यहाँ सूचना दिखाएँ। सिर्फ़ रिपोर्ट के लिए पहले ऊपर वाला स्विच बंद करें, फिर इसे चालू करें।",
   "settings.reportNotifications.show": "निर्धारित रिपोर्ट पर सूचित करें",
   "settings.notificationFeed.title": "सूचना फ़ीड",
   "settings.notificationSounds.play": "सूचना ध्वनियाँ",

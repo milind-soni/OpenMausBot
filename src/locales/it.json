@@ -1975,7 +1975,7 @@
   "settings.notificationFeed.subtitle": "Mostra una campanella sul bordo destro della finestra con le ultime 500 notifiche di ogni bot, lette o no.",
   "settings.notificationFeed.show": "Mostra l'elenco notifiche",
   "settings.reportNotifications.title": "Notifiche dei report pianificati",
-  "settings.reportNotifications.subtitle": "Mostra una notifica qui quando una routine termina un'esecuzione pianificata. Lascia questa attiva e disattiva l'opzione sopra per vedere solo i report.",
+  "settings.reportNotifications.subtitle": "Mostra una notifica qui quando una routine termina un'esecuzione pianificata. Per vedere solo i report, disattiva prima l'opzione sopra, poi attiva questa.",
   "settings.reportNotifications.show": "Avvisami dei report pianificati",
   "notifications.title": "Notifiche",
   "notifications.railUnread": "Notifiche, {count} non lette",

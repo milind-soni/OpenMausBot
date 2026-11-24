@@ -1290,7 +1290,7 @@
   "settings.notificationFeed.subtitle": "Muestra una campana en el borde derecho de la ventana que guarda las últimas 500 notificaciones de todos los bots, leídas o no.",
   "settings.notificationFeed.show": "Mostrar el panel de notificaciones",
   "settings.reportNotifications.title": "Notificaciones de informes programados",
-  "settings.reportNotifications.subtitle": "Mostrar una notificación aquí cuando una rutina termina una ejecución programada. Deja esto activado y desactiva la opción de arriba para ver solo los informes.",
+  "settings.reportNotifications.subtitle": "Mostrar una notificación aquí cuando una rutina termina una ejecución programada. Para ver solo los informes, desactiva primero la opción de arriba y luego activa esta.",
   "settings.reportNotifications.show": "Notificarme de informes programados",
   "notifications.title": "Notificaciones",
   "notifications.railUnread": "Notificaciones, {count} sin leer",

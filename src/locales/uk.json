@@ -4057,7 +4057,7 @@
   "settings.newBotEffort.title": "Зусилля для нових ботів",
   "settings.notificationFeed.show": "Показувати стрічку сповіщень",
   "settings.reportNotifications.title": "Сповіщення про планові звіти",
-  "settings.reportNotifications.subtitle": "Показувати тут сповіщення, коли рутина завершує плановий запуск. Залиште це ввімкненим і вимкніть перемикач вище, щоб бачити лише звіти.",
+  "settings.reportNotifications.subtitle": "Показувати тут сповіщення, коли рутина завершує плановий запуск. Щоб бачити лише звіти, спершу вимкніть перемикач вище, а потім увімкніть цей.",
   "settings.reportNotifications.show": "Сповіщати про планові звіти",
   "settings.notificationFeed.title": "Стрічка сповіщень",
   "settings.notificationSounds.play": "Звуки сповіщень",

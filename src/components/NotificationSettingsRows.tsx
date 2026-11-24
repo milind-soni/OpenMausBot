@@ -26,6 +26,12 @@ export function NotificationRows({ simple = false }: { simple?: boolean }) {
 
 const currentPermission = (): NotificationPermission => (typeof Notification !== "undefined" ? Notification.permission : "default");
 
+/** Every mounted row, so a permission one row asked for reaches the others at once. */
+const permissionRows = new Set<(permission: NotificationPermission) => void>();
+const publishPermission = (permission: NotificationPermission) => {
+  for (const row of permissionRows) row(permission);
+};
+
 /** The person may change the site permission elsewhere, so it is read again whenever the app comes back. */
 function useNotificationPermission() {
   const [permission, setPermission] = useState(currentPermission);
@@ -33,14 +39,16 @@ function useNotificationPermission() {
     const refresh = () => {
       if (document.visibilityState === "visible") setPermission(currentPermission());
     };
+    permissionRows.add(setPermission);
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", refresh);
     return () => {
+      permissionRows.delete(setPermission);
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
     };
   }, []);
-  return [permission, setPermission] as const;
+  return [permission, publishPermission] as const;
 }
 
 /** A browser shows nothing until it is asked from a click. */

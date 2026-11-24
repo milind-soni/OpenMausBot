@@ -1000,7 +1000,7 @@
   "settings.notificationFeed.subtitle": "Hiển thị biểu tượng chuông ở cạnh phải cửa sổ, lưu giữ 500 thông báo gần nhất từ mọi bot, dù đã đọc hay chưa.",
   "settings.notificationFeed.show": "Hiển thị bảng tin thông báo",
   "settings.reportNotifications.title": "Thông báo báo cáo theo lịch",
-  "settings.reportNotifications.subtitle": "Hiện thông báo ở đây khi một tác vụ định kỳ chạy xong theo lịch. Bật mục này và tắt công tắc phía trên để chỉ nhận báo cáo.",
+  "settings.reportNotifications.subtitle": "Hiện thông báo ở đây khi một tác vụ định kỳ chạy xong theo lịch. Để chỉ nhận báo cáo, hãy tắt công tắc phía trên trước, rồi bật mục này.",
   "settings.reportNotifications.show": "Thông báo cho tôi về báo cáo theo lịch",
   "notifications.title": "Thông báo",
   "notifications.railUnread": "Thông báo, {count} chưa đọc",

@@ -1594,7 +1594,7 @@
   "settings.notificationFeed.subtitle": "ウィンドウの右端にベルを表示し、すべてのボットの直近500件の通知を、既読・未読を問わず保持します。",
   "settings.notificationFeed.show": "通知フィードを表示",
   "settings.reportNotifications.title": "スケジュールされたレポートの通知",
-  "settings.reportNotifications.subtitle": "ルーティンが予定された実行を終えたときに、ここに通知を表示します。これをオンにして上のスイッチをオフにすると、レポートだけ通知されます。",
+  "settings.reportNotifications.subtitle": "ルーティンが予定された実行を終えたときに、ここに通知を表示します。レポートだけ通知するには、先に上のスイッチをオフにしてから、これをオンにします。",
   "settings.reportNotifications.show": "スケジュールされたレポートを通知する",
   "notifications.title": "通知",
   "notifications.railUnread": "通知、未読{count}件",

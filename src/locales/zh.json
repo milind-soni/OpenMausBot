@@ -1834,7 +1834,7 @@
   "settings.notificationFeed.subtitle": "在窗口右边缘显示一个铃铛，保留所有机器人的最近 500 条通知，无论是否已读。",
   "settings.notificationFeed.show": "显示通知列表",
   "settings.reportNotifications.title": "定时报告通知",
-  "settings.reportNotifications.subtitle": "例行任务完成一次定时运行时，在这里显示通知。保持此项开启并关闭上面的开关，即可只收到报告。",
+  "settings.reportNotifications.subtitle": "例行任务完成一次定时运行时，在这里显示通知。若只想收到报告，请先关闭上面的开关，再开启此项。",
   "settings.reportNotifications.show": "定时报告时通知我",
   "notifications.title": "通知",
   "notifications.railUnread": "通知，{count} 条未读",

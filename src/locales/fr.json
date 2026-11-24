@@ -3774,7 +3774,7 @@
   "settings.newBotEffort.title": "Effort des nouveaux bots",
   "settings.notificationFeed.show": "Afficher le fil de notifications",
   "settings.reportNotifications.title": "Notifications des rapports planifiés",
-  "settings.reportNotifications.subtitle": "Afficher une notification ici quand une routine termine une exécution planifiée. Laissez ceci activé et désactivez l'option du dessus pour ne voir que les rapports.",
+  "settings.reportNotifications.subtitle": "Afficher une notification ici quand une routine termine une exécution planifiée. Pour ne voir que les rapports, désactivez d'abord l'option du dessus, puis activez celle-ci.",
   "settings.reportNotifications.show": "M'avertir des rapports planifiés",
   "settings.notificationFeed.title": "Fil de notifications",
   "settings.notificationSounds.play": "Sons de notification",

@@ -1511,7 +1511,7 @@
   "settings.notificationFeed.subtitle": "창 오른쪽 가장자리에 종 모양 아이콘을 보여 줘요. 읽었든 안 읽었든 모든 봇의 최근 알림 500개를 보관해요.",
   "settings.notificationFeed.show": "알림 피드 표시",
   "settings.reportNotifications.title": "예약된 보고서 알림",
-  "settings.reportNotifications.subtitle": "루틴이 예약된 실행을 마치면 여기에 알림을 표시해요. 이 설정을 켜고 위 스위치를 끄면 보고서 알림만 받아요.",
+  "settings.reportNotifications.subtitle": "루틴이 예약된 실행을 마치면 여기에 알림을 표시해요. 보고서 알림만 받으려면 먼저 위 스위치를 끄고 이 설정을 켜세요.",
   "settings.reportNotifications.show": "예약된 보고서 알림 받기",
   "notifications.title": "알림",
   "notifications.railUnread": "알림, 읽지 않음 {count}개",

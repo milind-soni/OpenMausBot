@@ -1975,7 +1975,7 @@
   "settings.notificationFeed.subtitle": "Show a bell on the right edge of the window that keeps the last 500 notifications from every bot, read or not.",
   "settings.notificationFeed.show": "Show the notification feed",
   "settings.reportNotifications.title": "Scheduled report notifications",
-  "settings.reportNotifications.subtitle": "Show a notification here when a routine finishes a scheduled run. Keep this on and turn the switch above off to hear only about reports.",
+  "settings.reportNotifications.subtitle": "Show a notification here when a routine finishes a scheduled run. To hear only about reports, turn the switch above off first, then turn this one on.",
   "settings.reportNotifications.show": "Notify me about scheduled reports",
   "notifications.title": "Notifications",
   "notifications.railUnread": "Notifications, {count} unread",

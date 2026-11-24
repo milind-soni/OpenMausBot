@@ -1442,7 +1442,7 @@
   "settings.notificationFeed.subtitle": "Pokazuj dzwonek na prawej krawędzi okna, który przechowuje ostatnie 500 powiadomień od każdego bota, przeczytanych lub nie.",
   "settings.notificationFeed.show": "Pokaż kanał powiadomień",
   "settings.reportNotifications.title": "Powiadomienia o zaplanowanych raportach",
-  "settings.reportNotifications.subtitle": "Pokazuj tu powiadomienie, gdy rutyna zakończy zaplanowane uruchomienie. Zostaw to włączone i wyłącz przełącznik powyżej, aby widzieć tylko raporty.",
+  "settings.reportNotifications.subtitle": "Pokazuj tu powiadomienie, gdy rutyna zakończy zaplanowane uruchomienie. Aby widzieć tylko raporty, najpierw wyłącz przełącznik powyżej, a potem włącz ten.",
   "settings.reportNotifications.show": "Powiadamiaj o zaplanowanych raportach",
   "notifications.title": "Powiadomienia",
   "notifications.railUnread": "Powiadomienia, nieprzeczytane: {count}",
