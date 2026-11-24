@@ -23,13 +23,18 @@ describe("desktop window state", () => {
     ).toEqual({ bounds: { x: -1500, y: 40, width: 1200, height: 760 }, maximized: true });
   });
 
-  it("centers an off-screen window on the primary display and clamps its size", () => {
+  it.each([
+    ["desktop", {}, 620],
+    ["Hyprland", { XDG_CURRENT_DESKTOP: "Hyprland", HYPRLAND_INSTANCE_SIGNATURE: "fixture" }, 480],
+  ])("centers an off-screen window and clamps its height to the %s minimum", (_session, env, height) => {
     expect(
       resolveWindowState(
         { bounds: { x: 7000, y: 7000, width: 4000, height: 200 }, maximized: false },
         [primary, left],
+        undefined,
+        minimumWindowBounds("linux", env),
       ),
-    ).toEqual({ bounds: { x: 0, y: 230, width: 1920, height: 620 }, maximized: false });
+    ).toEqual({ bounds: { x: 0, y: (primary.height - height) / 2, width: 1920, height }, maximized: false });
   });
 
   it("uses safe default dimensions when there is no saved state", () => {

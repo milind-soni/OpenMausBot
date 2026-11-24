@@ -128,7 +128,10 @@ describe("main.mjs's use of the system proxy", () => {
     expect(start).toBeGreaterThan(-1);
     expect(launch).toContain("if (desktopShutdownStarted)");
     expect(launch).not.toMatch(/\bawait\b/);
-    expect(launch).toContain("...systemProxy.latest()");
+    expect(launch).toContain("...desktopServerEnvironment()");
+    const environment = source.match(/^function desktopServerEnvironment\(\) \{[\s\S]*?^\}/m)?.[0];
+    expect(environment).toContain("...systemProxy.latest()");
+    expect(environment).not.toMatch(/\bawait\b/);
   });
 
   it("keeps the last lookup until the next refresh, and starts empty", async () => {
