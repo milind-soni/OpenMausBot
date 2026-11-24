@@ -2,7 +2,8 @@
 // sign-in request or a finished reply would reach a phone that holds no live event stream, this asks the push relay in
 // the hosted control plane to wake it, with the installation credential this server already has; a Cloud home, which has
 // none, asks its Admin to relay instead (phone-push-admin.ts). The push is content-free: kind, a title from names alone,
-// opaque ids. Off unless `features.phonePush` (or OMB_PHONE_PUSH=1).
+// opaque ids. On unless `features.phonePush: false` (or OMB_PHONE_PUSH=0). Nothing leaves this server until a paired phone
+// registers: with no registered phone there is no relay call, no timer and no connection.
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
@@ -64,11 +65,13 @@ const TITLES: Record<PushKind, ServerLineKey> = {
   done: "server.notify.done",
 };
 
-/** On only when switched on: OMB_PHONE_PUSH=1 or 0 wins over `features.phonePush` in config.json. */
+/** On for every desktop, Cloud home (My Cloud and Team Cloud) and server unless switched off: OMB_PHONE_PUSH=0 or 1 wins
+ * over `features.phonePush` in config.json, and `features.phonePush: false` turns it off. Both are an operator's kill
+ * switch; there is no setting for it. */
 export function phonePushEnabled(cfg: { features?: { phonePush?: boolean } }, env: NodeJS.ProcessEnv = process.env): boolean {
   if (env[PHONE_PUSH_ENV] === "1") return true;
   if (env[PHONE_PUSH_ENV] === "0") return false;
-  return cfg.features?.phonePush === true;
+  return cfg.features?.phonePush !== false;
 }
 
 const kindsSchema = z.array(z.enum(PUSH_KINDS)).max(PUSH_KINDS.length);
@@ -299,11 +302,12 @@ export class PhonePush {
   /**
    * A `notify` frame left this server as frame `seq`. Each registered phone that holds no live stream, wants this kind
    * and would have been shown the frame (`reaches`, the event stream's own audience rule) gets a push queued. Never
-   * throws, and does nothing at all while switched off.
+   * throws, and does nothing at all while switched off or with no account to push as (the phone's registration is kept,
+   * and a later send registers it with the relay first).
    */
   offer(frame: { notification: unknown; seq: number }, reaches: (key: string) => boolean): void {
     try {
-      if (!this.devices.length || !this.options.enabled()) return;
+      if (!this.devices.length || this.status() !== "on") return;
       const notification = pushableOf(frame.notification);
       if (!notification || !isPushKind(notification.kind)) return;
       const push = phonePushNotification(notification, this.options.room(notification));

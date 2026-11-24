@@ -250,6 +250,7 @@ describe("CI outputs", () => {
       "server/cloud-team-owners.e2e.test.ts",
       "server/cloud-team-people.e2e.test.ts",
       "server/cloud-team-per-person.e2e.test.ts",
+      "server/cloud-team-phone-push.e2e.test.ts",
       "server/cloud-team-phones.e2e.test.ts",
       "server/cloud-team-pictures.e2e.test.ts",
       "server/cloud-team-presence.e2e.test.ts",

@@ -194,6 +194,9 @@ Closed-app alerts for the phone app, on iPhone through APNs and on Android
 through Firebase Cloud Messaging (HTTP v1). The design, the threat model and
 the switch-on steps are in `docs/phone-push.md`; the harness side is
 `server/phone-push.ts`, its wire types `packages/phone-protocol/src/phone-push.ts`.
+Every desktop, server and Cloud home has phone push on by default ("Who gets
+it" in that document) and calls these routes only for a phone that paired and
+registered; one with no paired phone never calls them.
 Apple accepts pushes for an App Store or TestFlight build only when they are
 signed with the publishing team's key, and Google only from a service account
 of the Firebase project the Android build is registered in. So the project's
