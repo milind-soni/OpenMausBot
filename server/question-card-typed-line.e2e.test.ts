@@ -1,20 +1,13 @@
-import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
-import { launchVerificationServer, runControlOmb, verificationServerEnvironment } from "../scripts/control-omb.ts";
-import { waitForExit } from "./testing/cleanup.ts";
+import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
+import { CARD_SETTLE_MS } from "./host/ask-cards.ts";
 
 const POLL = { timeout: 30_000, interval: 100 };
-/** The verdicts recorded for one request; showing its card is not one. */
-const verdicts = (dataDir: string, requestId: string): string[] => (existsSync(join(dataDir, "decisions"))
-  ? readdirSync(join(dataDir, "decisions")).flatMap((file) => readFileSync(join(dataDir, "decisions", file), "utf8").split("\n").filter(Boolean)) : [])
-  .map((line) => JSON.parse(line) as { requestId?: string; decision?: string })
-  .filter((row) => row.requestId === requestId && row.decision !== "card-shown").map((row) => row.decision ?? "");
 type Row = { id: string; role: string; kind: string; text?: string; replyToId?: string;
   card?: { requestId?: string; answered?: string; answeredText?: string; dismissed?: boolean } };
 
@@ -45,6 +38,8 @@ it("in the bot's own chat, a line typed while its ask_user card waits answers th
     await control("send", "--bot", bot.id, "--task", threadId, "--text", "ASK-ME");
     await expect.poll(async () => Boolean(await openCard(threadId)), POLL).toBe(true);
     const card = (await openCard(threadId))!;
+    // The person reads the card before typing: a card that opened as they typed leaves the line to the usual send.
+    await new Promise((resolve) => setTimeout(resolve, CARD_SETTLE_MS + 100));
 
     const send = { text: "what time is it?", threadId, sendId: randomUUID() };
     const typed = await api("POST", `/api/bots/${bot.id}/messages`, send);
@@ -70,67 +65,7 @@ it("in the bot's own chat, a line typed while its ask_user card waits answers th
   }
 }, 120_000);
 
-it.each([
-  ["asks again", {}],
-  ["answers without asking", { FAKE_ACP_QUESTION_ONCE: "1" }],
-])("in the bot's own chat, a line typed while an ACP card of set options waits closes it without an error, and runs as the next turn, which %s", async (_next, nextTurn) => {
-  const fixture = await launchVerificationServer();
-  const { dataDir, url, logPath } = fixture.info;
-  const { api, messages, openCard, control } = client(url);
-  const dump = join(dataDir, "acp-dump");
-  const rpcFile = join(dataDir, "rpc.jsonl");
-  let server: ChildProcess | undefined;
-  try {
-    // Only the repository's fake ACP CLI, added while the fixture is stopped; never the person's CLI or home.
-    await waitForExit(fixture.child, { signal: "SIGTERM" });
-    const configPath = join(dataDir, "config.json");
-    const config = JSON.parse(readFileSync(configPath, "utf8"));
-    config.instances.opencodeGo = {
-      driver: "opencodeGo", displayName: "Set options fixture",
-      config: { cli: fileURLToPath(new URL("./testing/fake-acp-cli.ts", import.meta.url)) },
-      environment: { FAKE_ACP_MODE: "question", FAKE_ACP_HOLD_ON_CANCELLED: "1", FAKE_ACP_MODELS: "fixture/question",
-        FAKE_ACP_DUMP: dump, FAKE_ACP_DUMP_PROMPT: "1", FAKE_ACP_RPC_APPEND_FILE: rpcFile, ...nextTurn },
-    };
-    writeFileSync(configPath, JSON.stringify(config));
-    const log = openSync(logPath, "a", 0o600);
-    server = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("./index.ts", import.meta.url))], {
-      cwd: fileURLToPath(new URL("..", import.meta.url)),
-      env: verificationServerEnvironment({}, dataDir, Number(new URL(url).port)), stdio: ["ignore", log, log],
-    });
-    closeSync(log);
-    await expect.poll(async () => {
-      try { return (await fetch(url + "/api/health", { signal: AbortSignal.timeout(1_000) })).ok; } catch { return false; }
-    }, { timeout: 20_000 }).toBe(true);
-
-    const { bot } = await control("new-bot", "--name", "Picker");
-    const threadId = bot.activeTaskId as string;
-    await api("PATCH", `/api/bots/${bot.id}/tasks/${threadId}`, { modelSelection: { instanceId: "opencodeGo", model: "fixture/question" } });
-    const prompted = () => existsSync(`${dump}.prompt.json`) ? readFileSync(`${dump}.prompt.json`, "utf8") : "";
-    const calls = () => existsSync(rpcFile) ? readFileSync(rpcFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line).method as string) : [];
-
-    await control("send", "--bot", bot.id, "--task", threadId, "--text", "pick a color");
-    await expect.poll(async () => Boolean(await openCard(threadId)), POLL).toBe(true);
-    const card = (await openCard(threadId))!;
-
-    const send = { text: "what time is it?", threadId, sendId: randomUUID() };
-    const typed = await api("POST", `/api/bots/${bot.id}/messages`, send);
-    expect(typed.status).toBe(202);
-    await expect.poll(() => prompted().includes("what time is it?"), POLL).toBe(true);
-    expect(calls()).toContain("session/cancel");
-    await expect.poll(async () => (await messages(threadId)).find((row) => row.id === card.id)?.card, POLL)
-      .toMatchObject({ answered: "unavailable", dismissed: true });
-    const rows = await messages(threadId);
-    expect(JSON.stringify(rows)).not.toContain("isn't one of the choices");
-    expect(verdicts(dataDir, card.card!.requestId!)).toEqual([]);
-    expect((await api("POST", `/api/bots/${bot.id}/messages`, send)).status).toBe(202);
-    expect((await messages(threadId)).filter((row) => row.role === "user" && row.text === "what time is it?")).toHaveLength(1);
-  } finally {
-    if (server) await waitForExit(server, { signal: "SIGTERM" });
-    await fixture.close();
-  }
-}, 120_000);
-
-it("in the bot's own chat, a line typed while Claude's own question of several parts waits closes it, and is steered into the turn", async () => {
+it("in the bot's own chat, a line typed while Claude's own question of several parts waits leaves the card open, and is steered into the turn", async () => {
   const logs = mkdtempSync(join(tmpdir(), "typed-line-"));
   const steerLog = join(logs, "steered.jsonl");
   const fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_MODE: "hang", FAKE_CLAUDE_STEER_LOG: steerLog });
@@ -156,14 +91,16 @@ it("in the bot's own chat, a line typed while Claude's own question of several p
     ] } }) + "\n");
     await expect.poll(async () => (await openCard(threadId))?.card?.requestId, POLL).toBe(requestId);
     const card = (await openCard(threadId))!;
+    await new Promise((resolve) => setTimeout(resolve, CARD_SETTLE_MS + 100));
 
+    // A card of several parts takes taps, not one line: the line is a message, and the card waits for its taps.
     const typed = await api("POST", `/api/bots/${bot.id}/messages`, { text: "what time is it?", threadId, sendId: randomUUID() });
     expect(typed).toMatchObject({ status: 202, body: { steered: true } });
-    await expect.poll(() => replies.split("\n").filter(Boolean).map((line) => JSON.parse(line)).find((reply) => reply.id === requestId), POLL)
-      .toMatchObject({ behavior: "deny" });
     await expect.poll(() => existsSync(steerLog) ? readFileSync(steerLog, "utf8") : "", POLL).toContain("what time is it?");
-    expect((await messages(threadId)).find((row) => row.id === card.id)?.card, "closed without an answer, not denied").toMatchObject({ answered: "unavailable", dismissed: true });
-    expect(verdicts(fixture.info.dataDir, requestId)).toEqual([]);
+    expect(replies.split("\n").filter(Boolean).map((line) => JSON.parse(line)).find((reply) => reply.id === requestId)).toBeUndefined();
+    const rows = await messages(threadId);
+    expect(rows.find((row) => row.id === card.id)?.card).not.toHaveProperty("answered");
+    expect(rows.find((row) => row.role === "user" && row.text === "what time is it?")?.replyToId).toBeUndefined();
   } finally {
     socket?.destroy();
     await fixture.close();

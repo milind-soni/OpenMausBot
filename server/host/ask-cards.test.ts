@@ -1,11 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { RequestOutcome, RuntimeEvent } from "../contracts.ts";
 import type { HandoffView } from "../coordinator.ts";
 import type { Notification } from "../notify.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { BotRecord, Message } from "../store.ts";
-import { askToolName, closeCard, createAskCards, settleRequestCard, type AskCardsDeps } from "./ask-cards.ts";
+import { askToolName, CARD_SETTLE_MS, createAskCards, type AskCardsDeps } from "./ask-cards.ts";
 
 const AUTH = { kind: "session", scopes: ["client"], session: { id: "s", email: "cleo@acme.test" } } as unknown as RequestAuth;
 const QUESTION = "What wording should the new footer text use?";
@@ -23,13 +22,11 @@ function world(options: { inboxThread?: string; live?: string[]; privateThreads?
     messagesFor: rows,
     activePath: rows,
     appendMessage: (threadId: string, message: Omit<Message, "id" | "at">) => {
-      written.push(message);
       const full = { id: `m${++ids}`, at: 1_000 + ids, ...message } as Message;
       threads.set(threadId, [...rows(threadId), full]);
       return full;
     },
     patchMessage: (threadId: string, id: string, patch: Partial<Message>) => {
-      written.push(patch);
       const list = rows(threadId);
       const at = list.findIndex((message) => message.id === id);
       list[at] = { ...list[at]!, ...patch };
@@ -45,11 +42,11 @@ function world(options: { inboxThread?: string; live?: string[]; privateThreads?
   const nodes = new Map<string, HandoffView>();
   const answered: Array<{ id: string; text: string }> = [];
   const notified: Notification[] = [];
-  const answers: Array<{ threadId: string; requestId: string; message?: string; behavior?: "close" }> = [];
+  const answers: Array<{ threadId: string; requestId: string; message: string }> = [];
   const live = new Set(options.live ?? []);
-  const written: unknown[] = [];
   let refuse: { status: number; error: string } | null = null;
   let afterAnswer: (() => void) | null = null;
+  let clock = 0;
   const deps: AskCardsDeps = {
     store: store as unknown as AskCardsDeps["store"],
     node: (id) => nodes.get(id),
@@ -60,14 +57,13 @@ function world(options: { inboxThread?: string; live?: string[]; privateThreads?
     live: (_threadId, requestId) => live.has(requestId),
     answerCard: vi.fn(async (input) => {
       if (refuse) return { ok: false as const, ...refuse };
-      answers.push({ threadId: input.threadId, requestId: input.requestId, ...(input.behavior === "close" ? { behavior: "close" as const }
-        : { message: input.message }) });
+      answers.push({ threadId: input.threadId, requestId: input.requestId, message: input.message });
       live.delete(input.requestId);
       afterAnswer?.();
       return { ok: true as const };
     }),
     answeredIn: (threadId, requestId) => (threadId === "inbox" && requestId.startsWith("req") ? "work" : threadId),
-    now: () => 0,
+    now: () => clock,
     answerNode: (id, text) => {
       const parked = nodes.get(id);
       if (!parked || parked.status !== "waiting") return false;
@@ -86,8 +82,10 @@ function world(options: { inboxThread?: string; live?: string[]; privateThreads?
   };
   nodes.set("root", { id: "root", rootId: "root", threadId: "inbox", botId: "scout" } as HandoffView);
   const say = (threadId: string, text: string) => store.appendMessage(threadId, { role: "bot", kind: "text", text });
-  return { cards, store, rows, notified, answers, answered, node, say, deps, written, open: (requestId: string) => live.add(requestId),
-    refuse: (value: typeof refuse) => { refuse = value; }, afterAnswer: (value: typeof afterAnswer) => { afterAnswer = value; } };
+  return { cards, store, rows, notified, answers, answered, node, say, deps, open: (requestId: string) => live.add(requestId),
+    refuse: (value: typeof refuse) => { refuse = value; }, afterAnswer: (value: typeof afterAnswer) => { afterAnswer = value; },
+    /** Moves the clock past every card shown so far, as when the person reads a card before typing. */
+    settle: () => { clock = Math.max(clock, ...[...threads.values()].flat().map((row) => row.at)) + CARD_SETTLE_MS; } };
 }
 
 describe("a teammate's NEEDS INPUT question", () => {
@@ -359,6 +357,7 @@ describe("a typed line answers a question card", () => {
   it("answers the card its turn waits on in the bot's own chat with exactly the person's words", async () => {
     const w = world({ live: ["req-1"] });
     const asked = question(w, "chat");
+    w.settle();
     const result = await w.cards.typed(AUTH, "chat", "What time is it?", undefined, { sendId: "send-3" });
     expect(w.answers).toEqual([{ threadId: "chat", requestId: "req-1", message: "What time is it?" }]);
     expect(result).toMatchObject({ status: 202, message: { role: "user", text: "What time is it?", replyToId: asked.id, sendId: "send-3" } });
@@ -367,74 +366,72 @@ describe("a typed line answers a question card", () => {
   it("files a structured question's answer under its text, as an answer typed on the card would be", async () => {
     const w = world({ live: ["req-1"] });
     question(w, "chat", { questionRequest: { version: 1, questions: [{ question: "Should I?", options: [{ label: "Yes" }, { label: "No" }] }] } });
+    w.settle();
     await w.cards.typed(AUTH, "chat", "Not yet", undefined, {});
     expect(w.answers).toEqual([{ threadId: "chat", requestId: "req-1", message: "The user answered your questions.\n\nQ: Should I?\nA: Not yet" }]);
   });
 
-  it("closes a card that takes no words in the bot's own chat and leaves the line to be sent as the next message", async () => {
-    for (const card of [{ fixedOptions: true }, { questionRequest: { version: 1 as const, questions: [{ question: "A?", options: [{ label: "x" }] }, { question: "B?", options: [{ label: "y" }] }] } }]) {
+  it("never touches a card in the bot's own chat that only takes a tap: the line goes on to the usual send", async () => {
+    const several = { questionRequest: { version: 1 as const, questions: [{ question: "A?", options: [{ label: "x" }] }, { question: "B?", options: [{ label: "y" }] }] } };
+    for (const card of [{ fixedOptions: true }, several]) {
       const w = world({ live: ["req-1"] });
-      question(w, "chat", card);
+      const asked = question(w, "chat", card);
+      w.settle();
       expect(await w.cards.typed(AUTH, "chat", "Something else first", undefined, {})).toBeNull();
-      expect(w.answers).toEqual([{ threadId: "chat", requestId: "req-1", behavior: "close" }]);
-      expect(w.rows("chat").filter((row) => row.role === "user")).toEqual([]);
+      expect(await w.cards.typed(AUTH, "chat", "Something else first", asked, {})).toBeNull();
+      expect(w.deps.answerCard).not.toHaveBeenCalled();
+      expect(w.rows("chat")).toEqual([asked]);
     }
   });
 
-  it("leaves a card it could not close as it is, and the line to the usual send", async () => {
+  it("leaves a line to the usual send when its card opened as the person typed, unless the line replies to that card", async () => {
     const w = world({ live: ["req-1"] });
-    const asked = question(w, "chat", { fixedOptions: true });
-    w.refuse({ status: 403, error: "This question is Ben's to answer." });
-    expect(await w.cards.typed(AUTH, "chat", "Something else first", undefined, {})).toBeNull();
-    expect(w.deps.answerCard).toHaveBeenCalledWith(expect.objectContaining({ requestId: "req-1", behavior: "close" }));
-    expect(w.rows("chat")).toEqual([asked]);
+    const asked = question(w, "chat");
+    expect(await w.cards.typed(AUTH, "chat", "And the header too", undefined, { sendId: "send-8" })).toBeNull();
+    expect(w.answers).toEqual([]);
+    const replied = await w.cards.typed(AUTH, "chat", "The footer only", asked, { sendId: "send-10" });
+    expect(replied).toMatchObject({ status: 202, message: { text: "The footer only", replyToId: asked.id } });
+    expect(w.answers).toEqual([{ threadId: "chat", requestId: "req-1", message: "The footer only" }]);
   });
 
   it("gives a send tried again the line it wrote, and touches no card it finds open then", async () => {
-    for (const next of [{ fixedOptions: true }, {}]) {
-      const w = world({ live: ["req-1"] });
-      question(w, "chat");
-      const first = await w.cards.typed(AUTH, "chat", "What time is it?", undefined, { sendId: "send-4" });
-      question(w, "chat", { requestId: "req-2", ...next });
-      w.open("req-2");
-      const again = await w.cards.typed(AUTH, "chat", "What time is it?", undefined, { sendId: "send-4" });
-      expect(again).toEqual({ status: 202, message: first!.message });
-      expect(w.answers.map((answer) => answer.requestId)).toEqual(["req-1"]);
-      expect(await w.cards.typed(AUTH, "chat", "Something else", undefined, { sendId: "send-4" }), "other words go on to be refused").toBeNull();
-      expect(w.answers).toHaveLength(1);
-      expect(w.rows("chat").filter((row) => row.role === "user")).toHaveLength(1);
-    }
+    const w = world({ live: ["req-1"] });
+    question(w, "chat");
+    w.settle();
+    const first = await w.cards.typed(AUTH, "chat", "What time is it?", undefined, { sendId: "send-4" });
+    question(w, "chat", { requestId: "req-2" });
+    w.open("req-2");
+    w.settle();
+    const again = await w.cards.typed(AUTH, "chat", "What time is it?", undefined, { sendId: "send-4" });
+    expect(again).toEqual({ status: 202, message: first!.message });
+    expect(w.answers.map((answer) => answer.requestId)).toEqual(["req-1"]);
+    expect(await w.cards.typed(AUTH, "chat", "Something else", undefined, { sendId: "send-4" }), "other words go on to be refused").toBeNull();
+    expect(w.answers).toHaveLength(1);
+    expect(w.rows("chat").filter((row) => row.role === "user")).toHaveLength(1);
   });
 
   it("answers once when the same send arrives twice at the same time", async () => {
     const w = world({ live: ["req-1"] });
     question(w, "chat");
+    w.settle();
     const [one, two] = await Promise.all([1, 2].map(() => w.cards.typed(AUTH, "chat", "What time is it?", undefined, { sendId: "send-5" })));
     expect(two?.message?.id).toBe(one?.message?.id);
     expect(w.answers).toHaveLength(1);
   });
 
-  it("closes one card when the same send arrives twice at once and a new card opens before its line is written", async () => {
+  it("answers one card when the same send arrives twice at once and a new card opens before its line is written", async () => {
     const w = world({ live: ["req-1"] });
-    question(w, "chat", { fixedOptions: true });
+    question(w, "chat");
+    w.settle();
     w.afterAnswer(() => {
       w.afterAnswer(null);
-      question(w, "chat", { requestId: "req-2", fixedOptions: true });
+      question(w, "chat", { requestId: "req-2" });
       w.open("req-2");
+      w.settle();
     });
-    const tries = await Promise.all([1, 2].map(() => w.cards.typed(AUTH, "chat", "Something else first", undefined, { sendId: "send-6" })));
-    expect(tries).toEqual([null, null]);
+    const tries = await Promise.all([1, 2].map(() => w.cards.typed(AUTH, "chat", "What time is it?", undefined, { sendId: "send-6" })));
+    expect(tries[1]?.message?.id).toBe(tries[0]?.message?.id);
     expect(w.answers.map((answer) => answer.requestId)).toEqual(["req-1"]);
-  });
-
-  it("lets a send whose close was refused try again", async () => {
-    const w = world({ live: ["req-1"] });
-    question(w, "chat", { fixedOptions: true });
-    w.refuse({ status: 409, error: "The request is no longer open." });
-    expect(await w.cards.typed(AUTH, "chat", "Something else first", undefined, { sendId: "send-7" })).toBeNull();
-    w.refuse(null);
-    expect(await w.cards.typed(AUTH, "chat", "Something else first", undefined, { sendId: "send-7" })).toBeNull();
-    expect(w.answers).toEqual([{ threadId: "chat", requestId: "req-1", behavior: "close" }]);
   });
 
   it("leaves a line in the bot's own chat to the usual send while two question cards wait there", async () => {
@@ -442,6 +439,7 @@ describe("a typed line answers a question card", () => {
       const w = world({ live: ["req-1", "req-2"] });
       const first = question(w, "chat");
       question(w, "chat", { requestId: "req-2", ...second });
+      w.settle();
       expect(await w.cards.typed(AUTH, "chat", "What time is it?", undefined, {})).toBeNull();
       expect(await w.cards.typed(AUTH, "chat", "What time is it?", first, {})).toBeNull();
       expect(w.answers).toEqual([]);
@@ -451,10 +449,12 @@ describe("a typed line answers a question card", () => {
   it("leaves a line in the bot's own chat to the usual send when no turn waits on its card, it is Stop, it replies to another line or carries a file", async () => {
     const idle = world();
     question(idle, "chat");
+    idle.settle();
     expect(await idle.cards.typed(AUTH, "chat", "Take the second one", undefined, {})).toBeNull();
     const busy = world({ live: ["req-1"] });
     question(busy, "chat");
     const other = busy.say("chat", "I checked.");
+    busy.settle();
     expect(await busy.cards.typed(AUTH, "chat", "stop", undefined, {})).toBeNull();
     expect(await busy.cards.typed(AUTH, "chat", "Thanks", other, {})).toBeNull();
     expect(await busy.cards.typed(AUTH, "chat", 'Look <attached-image path="a.png" />', undefined, {})).toBeNull();
@@ -474,6 +474,7 @@ describe("a typed line answers a question card", () => {
     for (const refusal of [{ status: 403, error: "This question is Ben's to answer." }, { status: 409, error: "This card was already answered." }]) {
       const w = world({ live: ["req-1"] });
       const asked = question(w, "chat");
+      w.settle();
       w.refuse(refusal);
       expect(await w.cards.typed(AUTH, "chat", "What time is it?", undefined, { sendId: "send-9" })).toBeNull();
       expect(w.deps.answerCard).toHaveBeenCalledWith(expect.objectContaining({ requestId: "req-1", behavior: "answer" }));
@@ -573,151 +574,6 @@ describe("the chip in the conversation that handed the work on", () => {
     desk.cards.showWaitingOnCardChip("inbox", { kind: "password", messageId: "c1", label: "API key" }, asker);
     desk.cards.showWaitingOnCardChip("work", { kind: "question", messageId: "c2", label: "Which?" }, asker);
     expect(desk.rows("inbox")).toEqual([]);
-  });
-});
-
-describe("closing a card the person moved past", () => {
-  type Resolved = Extract<RuntimeEvent, { type: "request.resolved" }>;
-  /** Question cards in one chat, the live link of each, and an engine that takes a decline only once released. `resolve`
-   * stands in for the request.resolved handler: it settles the card through the link, then drops the link. */
-  const server = () => {
-    const rows: Message[] = [], live = new Map<string, string>(), closing = new Map<string, Promise<RequestOutcome>>(), pending = new Set<string>();
-    const store = {
-      messagesFor: () => rows,
-      patchMessage: (_threadId: string, id: string, patch: Partial<Message>) => {
-        const at = rows.findIndex((row) => row.id === id);
-        rows[at] = { ...rows[at]!, ...patch };
-        return rows[at]!;
-      },
-    } as unknown as Parameters<typeof closeCard>[0]["store"];
-    const ask = (requestId: string) => {
-      rows.push({ id: `m-${requestId}`, at: rows.length, role: "bot", kind: "options",
-        card: { title: "Which?", subtitle: "Which?", requestId, requestType: "question", options: [], fixedOptions: true } } as Message);
-      live.set(`chat:${requestId}`, `m-${requestId}`);
-      pending.add(requestId);
-    };
-    const card = (requestId: string) => rows.find((row) => row.id === `m-${requestId}`)!.card!;
-    const resolve = (requestId: string, behavior: Resolved["behavior"], source: Resolved["source"]) => {
-      pending.delete(requestId);
-      const messageId = live.get(`chat:${requestId}`);
-      if (!messageId) return;
-      settleRequestCard(store, { type: "request.resolved", eventId: `e-${requestId}`, provider: "claude", createdAt: "0", threadId: "chat", requestId, behavior, source }, messageId);
-      live.delete(`chat:${requestId}`);
-    };
-    let release!: () => void;
-    const held = new Promise<void>((done) => { release = done; });
-    const declines: string[] = [];
-    // `source` is what the engine reports for its own decline: the Claude broker says user, ACP of set options says system.
-    const decline = (requestId: string, options: { hold?: boolean; source?: Resolved["source"] } = {}) => async (): Promise<RequestOutcome> => {
-      if (options.hold) await held;
-      if (!pending.has(requestId)) return "unavailable";
-      declines.push(requestId);
-      resolve(requestId, "deny", options.source ?? "user");
-      return "rejected";
-    };
-    const close = (requestId: string, take: () => Promise<RequestOutcome>) =>
-      closeCard({ store, threadId: "chat", requestId, live, closing, decline: take });
-    // A newer question closes the older cards no turn waits on and nobody answered, as askedAgain does.
-    const askedAgain = (requestId: string) => {
-      for (const row of rows) {
-        if (row.card?.requestId && row.card.requestId !== requestId && !row.card.answered && !live.has(`chat:${row.card.requestId}`)) {
-          row.card = { ...row.card, answered: "unavailable", dismissed: true };
-        }
-      }
-    };
-    return { live, closing, declines, ask, askedAgain, card, resolve, release, decline, close };
-  };
-
-  it("reads closed without an answer once the engine took the decline, whatever source the engine reported", async () => {
-    for (const source of ["user", "system"] as const) {
-      const s = server();
-      s.ask("req-1");
-      expect(await s.close("req-1", s.decline("req-1", { source }))).toBe("rejected");
-      expect(s.card("req-1"), source).toMatchObject({ answered: "unavailable", dismissed: true });
-      expect([...s.live.keys()]).toEqual([]);
-      expect(s.closing.size).toBe(0);
-    }
-  });
-
-  it("delivers one decline for two sends that close the same request, and never reads as a refusal", async () => {
-    const s = server();
-    s.ask("req-1");
-    const first = s.close("req-1", s.decline("req-1", { hold: true }));
-    const second = s.close("req-1", async () => "unavailable");
-    s.release();
-    expect(await Promise.all([first, second])).toEqual(["rejected", "rejected"]);
-    expect(s.declines).toEqual(["req-1"]);
-    expect(s.card("req-1")).toMatchObject({ answered: "unavailable", dismissed: true });
-    expect(s.closing.size).toBe(0);
-  });
-
-  it("keeps an explicit refusal that wins while the decline is on its way, even when a newer question opens meanwhile", async () => {
-    const s = server();
-    s.ask("req-1");
-    const closing = s.close("req-1", s.decline("req-1", { hold: true }));
-    await Promise.resolve();
-    s.resolve("req-1", "deny", "user");
-    s.ask("req-2");
-    s.askedAgain("req-2");
-    s.release();
-    expect(await closing).toBe("unavailable");
-    expect(s.card("req-1")).toMatchObject({ answered: "deny", dismissed: false });
-  });
-
-  it("takes no second answer for a question refused while the decline is on its way", async () => {
-    const s = server();
-    s.ask("req-1");
-    const closing = s.close("req-1", s.decline("req-1", { hold: true }));
-    await Promise.resolve();
-    s.resolve("req-1", "deny", "user");
-    expect(s.card("req-1"), "settled before the close returns").toMatchObject({ answered: "deny", dismissed: false });
-    s.release();
-    expect(await closing).toBe("unavailable");
-    expect(s.card("req-1")).toMatchObject({ answered: "deny", dismissed: false });
-  });
-
-  it("keeps a tap, Stop or the turn ending that wins while the decline is on its way, and the next card closes", async () => {
-    const wins: Record<string, (s: ReturnType<typeof server>) => void> = {
-      tap: (s) => s.resolve("req-1", "answer", "user"),
-      stop: (s) => { s.live.clear(); s.resolve("req-1", "deny", "system"); },
-      "turn end": (s) => s.resolve("req-1", "deny", "system"),
-    };
-    for (const [name, win] of Object.entries(wins)) {
-      const s = server();
-      s.ask("req-1");
-      const closing = s.close("req-1", s.decline("req-1", { hold: true }));
-      await Promise.resolve();
-      win(s);
-      s.release();
-      expect(await closing, name).toBe("unavailable");
-      if (name === "tap") expect(s.card("req-1")).toMatchObject({ answered: "answer", dismissed: false });
-      else expect(s.card("req-1").answered, `${name}: open for a late answer`).toBeUndefined();
-      expect([...s.live.keys()], name).toEqual([]);
-      s.ask("req-2");
-      expect([...s.live.keys()], `${name}: the next card is the only one waiting`).toEqual(["chat:req-2"]);
-      expect(await s.close("req-2", s.decline("req-2", { source: "system" }))).toBe("rejected");
-      expect(s.card("req-2"), name).toMatchObject({ answered: "unavailable", dismissed: true });
-    }
-  });
-
-  it("stays open and live for a tap when the engine did not take the decline, or delivering it failed", async () => {
-    for (const take of [async () => "unavailable" as const, async (): Promise<"rejected"> => { throw new Error("broker gone"); }]) {
-      const s = server();
-      s.ask("req-1");
-      expect(await s.close("req-1", take)).toBe("unavailable");
-      expect(s.card("req-1").answered).toBeUndefined();
-      expect(s.live.get("chat:req-1")).toBe("m-req-1");
-      expect(s.closing.size).toBe(0);
-      s.resolve("req-1", "answer", "user");
-      expect(s.card("req-1")).toMatchObject({ answered: "answer" });
-    }
-  });
-
-  it("delivers nothing for a card no turn waits on", async () => {
-    const s = server();
-    const take = vi.fn(async () => "rejected" as const);
-    expect(await s.close("req-1", take)).toBe("unavailable");
-    expect(take).not.toHaveBeenCalled();
   });
 });
 

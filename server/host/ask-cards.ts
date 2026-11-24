@@ -10,7 +10,7 @@ import { allowsTool, type ToolIdentity } from "../../shared/tool-scope.ts";
 import type { PersonWait } from "../../shared/person-wait.ts";
 import type { OptionCardData } from "../../shared/wire.ts";
 import { noticeTool, type ChatNoticeKey } from "../chat-notices.ts";
-import type { RequestOutcome, RuntimeEvent } from "../contracts.ts";
+import type { RuntimeEvent } from "../contracts.ts";
 import type { HandoffView } from "../coordinator.ts";
 import { buildNotification, type Notification } from "../notify.ts";
 import type { RequestAuth } from "../request-auth.ts";
@@ -25,8 +25,10 @@ const OPEN_QUESTION = "needs-input-";
 const DAY_MS = 24 * 60 * 60_000;
 const NEEDS_INPUT_LINE = /^needs input:/i;
 const hasAttachment = (text: string): boolean => text.includes("<attached-image") || text.includes("<attached-file");
-/** How long a send that answered or closed a card keeps it from touching another, while its line is not yet written. */
+/** How long a send that answered a card keeps it from touching another, while its line is not yet written. */
 const SPENT_SEND_MS = 60_000;
+/** A card younger than this opened while the person was still typing: their line is not its answer. */
+export const CARD_SETTLE_MS = 1_500;
 type Typed = { status: number; message?: Message; error?: string } | null;
 
 export interface AskCardsDeps {
@@ -45,7 +47,7 @@ export interface AskCardsDeps {
   /** The parked node's next turn carries the person's answer. */
   answerNode(id: string, text: string): boolean;
   /** Answers a card as a tap on it would, with the same checks on who may answer, through an inbox copy too. */
-  answerCard(input: { auth: RequestAuth; threadId: string; requestId: string; behavior: "answer" | "close"; message?: string }): Promise<{ ok: true } | { ok: false; status: number; error: string }>;
+  answerCard(input: { auth: RequestAuth; threadId: string; requestId: string; behavior: "answer"; message: string }): Promise<{ ok: true } | { ok: false; status: number; error: string }>;
   /** The conversation a card in `threadId` was asked in: an inbox copy's original. */
   answeredIn(threadId: string, requestId: string): string;
   now?: () => number;
@@ -79,44 +81,10 @@ export function resolvedCard(card: OptionCardData, resolved: Resolved): OptionCa
   return { ...card, answered: resolved.behavior, dismissed: persistent ? false : resolved.source !== "user", ...(resolved.source === "timeout" && !persistent ? { expired: true } : {}) };
 }
 
-/** Settles a card as its request resolved, the moment it resolves: a decline a close sent included, which the close's
- * own outcome then turns into closed without an answer. */
+/** Settles a card as its request resolved, the moment it resolves. */
 export function settleRequestCard(store: CardStore, resolved: Resolved, messageId: string): void {
   const card = store.messagesFor(resolved.threadId).find((message) => message.id === messageId)?.card;
   if (card && !card.answered && shouldSettleRequestCard(card, resolved.source)) store.patchMessage(resolved.threadId, messageId, { card: resolvedCard(card, resolved) });
-}
-
-/** Declines a question the person moved past without an answer, once per request however many sends close it. An
- * outcome other than `unavailable` means the engine took this decline, so the refusal the card may already show was the
- * close's: it reads closed without an answer, whatever source the engine reported. Otherwise a tap, an explicit decline,
- * Stop or the turn ending came first and settled the card as usual; a decline that never landed leaves the card and the
- * request alone. */
-export function closeCard(input: { store: CardStore; threadId: string; requestId: string; live: ReadonlyMap<string, string>;
-  closing: Map<string, Promise<RequestOutcome>>; decline: () => Promise<RequestOutcome> }): Promise<RequestOutcome> {
-  const key = `${input.threadId}:${input.requestId}`;
-  const running = input.closing.get(key);
-  if (running) return running;
-  const messageId = input.live.get(key);
-  if (!messageId) return Promise.resolve("unavailable");
-  const close = async (): Promise<RequestOutcome> => {
-    let outcome: RequestOutcome;
-    try {
-      outcome = await input.decline();
-    } catch {
-      outcome = "unavailable";
-    } finally {
-      input.closing.delete(key);
-    }
-    const card = input.store.messagesFor(input.threadId).find((message) => message.id === messageId)?.card;
-    if (outcome !== "unavailable" && card && (!card.answered || card.answered === "deny")) {
-      const { answeredBy: _refuser, ...open } = card;
-      input.store.patchMessage(input.threadId, messageId, { card: { ...open, answered: "unavailable", dismissed: true } });
-    }
-    return outcome;
-  };
-  const outcome = Promise.resolve().then(close);
-  input.closing.set(key, outcome);
-  return outcome;
 }
 
 /** The reply up to its NEEDS INPUT line; empty when the line is the whole reply. */
@@ -352,9 +320,10 @@ export function createAskCards(deps: AskCardsDeps) {
   }
 
   /** A person's line answers an inbox copy it replies to, or the question card the bot's turn waits on, as a tap would.
-   * In the bot's own chat that is the one question card a turn waits on there, and one that takes no words closes
-   * instead, the line going on as the next message. Null leaves the line to be sent (steered or queued) as usual. Tries
-   * of one send run one after another, and one that answered or closed a card touches no other. */
+   * In the bot's own chat that is the one question card a turn waits on there, when it takes words and was already
+   * showing as the person typed. A card that only takes a tap is left to be tapped: the line never closes it. Null leaves
+   * the line to be sent (steered or queued) as usual. Tries of one send run one after another, and one that answered a
+   * card touches no other. */
   const typing = new Map<string, Promise<Typed>>();
   const spent = new Map<string, number>();
   function typed(auth: RequestAuth, threadId: string, text: string, target: Message | undefined,
@@ -386,13 +355,9 @@ export function createAskCards(deps: AskCardsDeps) {
     const handedOn = Boolean(delegator && delegator.threadId !== threadId);
     const waiting = thread.filter((message) => !message.inbox && liveCardKind(message.card) === "question" && deps.live(threadId, message.card!.requestId!));
     const only = waiting.length === 1 ? waiting[0]! : undefined;
-    const ownChat = !handedOn && !hasAttachment(text) && Boolean(only) && (!target || target.id === only!.id);
-    if (ownChat && !answerableInWords(only!.card)) {
-      // Closed or not, the line goes on as the next message, steered into the waiting turn or queued behind it.
-      if (key) spent.set(key, now());
-      if (!(await deps.answerCard({ auth, threadId, requestId: only!.card!.requestId!, behavior: "close" })).ok) spent.delete(key);
-      return null;
-    }
+    // A reply to the card means it whatever its age; otherwise a card that opened while the line was typed is not its question.
+    const ownChat = !handedOn && !hasAttachment(text) && only !== undefined && answerableInWords(only.card)
+      && (target ? target.id === only.id : now() - only.at >= CARD_SETTLE_MS);
     const asked = target
       ? answerableInWords(target.card) ? target : undefined
       : ownChat ? only
