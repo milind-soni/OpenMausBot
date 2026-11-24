@@ -17,6 +17,7 @@ import { DATA_ROUTES, type DataSheet, type DataTable } from "../../shared/data-s
 import type { NotificationLogEntry } from "../../shared/notification";
 import { isNotificationFeedAction, reduceNotificationFeed, type NotificationFeedAction } from "./notification-feed";
 import { bumpThreadUpdatedAt, mergeTaskStamps, rewindThreadUpdatedAt } from "./thread-stamps";
+import { toggleBotSettings } from "./bot-settings";
 import { botOpensTo, closeTrayUnlessShown, closeUnpinnedTray, openBot, openThread, visibleNotificationThread, withRememberedTrayPin } from "./thread-navigation";
 import { patchGroupTask } from "./thread-edits"; import { unreadBeyondFrame, wholeBotFrame } from "./bot-thread-frame";
 import type { EngineInstall } from "./engine-install";
@@ -1357,26 +1358,8 @@ function reduceApp(state: AppState, action: Action): AppState {
           : state),
         error: action.message,
       };
-    case "toggleSettings": {
-      if (action.botId !== undefined && !state.bots.some((bot) => bot.id === action.botId && !bot.hidden)) return state;
-      const selectedId = action.fromPane ? state.selectedId : action.botId ?? state.selectedId;
-      const open = action.open ?? (action.botId !== undefined || !state.settingsOpen);
-      const freshOpen = open && !state.settingsOpen;
-      const named = action.section !== undefined;
-      return {
-        ...state,
-        selectedId,
-        settingsOpen: open,
-        settingsPaneBotId: action.fromPane && open ? action.botId
-          : open && state.settingsOpen && !action.botId ? state.settingsPaneBotId : undefined,
-        activityOpen: open ? false : state.activityOpen,
-        botSettingsSection: action.section ?? state.botSettingsSection,
-        botSettingsExpandAccordion: open ? named || (freshOpen && state.botSettingsSectionStored) : false,
-        botSettingsExpandRemembered: open ? !named && freshOpen && state.botSettingsSectionStored : false,
-        botSettingsSectionStored: named || state.botSettingsSectionStored,
-        appSettingsOpen: open ? false : state.appSettingsOpen,
-      };
-    }
+    case "toggleSettings":
+      return toggleBotSettings(state, action);
     case "togglePlugins": {
       const open = action.open ?? !state.pluginsOpen;
       return {
