@@ -4,12 +4,14 @@
 //   - the app's pinned copy (gh-release.ts), downloaded and checked on the first sign-in that needs it.
 // Security: gh keeps a sign-in in the OS credential store under one name whatever its config folder, and its login and
 // logout delete entries there. OpenMausBot's own runs therefore get a private HOME (macOS finds no login keychain
-// through it), no D-Bus session (no Linux secret service) and `--insecure-storage`, so the token is only ever in the
-// private config folder; and they never run `gh auth logout` (sign-in.ts deletes the folder instead). Windows'
-// Credential Manager cannot be redirected: there OpenMausBot signs in only while the person's own gh has no working
-// sign-in, so the most it can remove is an entry that already did not work.
+// through it), a D-Bus session address that leads nowhere (godbus uses a set address as it is, and without one it would
+// find /run/user/<uid>/bus by the uid: the person's Secret Service) and `--insecure-storage`, so the token is only ever
+// in the private config folder; and they never run `gh auth logout` (sign-in.ts deletes the folder instead). Windows'
+// Credential Manager cannot be redirected: there sign-in.ts starts a sign-in only when the person's own gh positively
+// has none and Credential Manager holds no gh entry (windowsGhCredentials).
 import { spawn, execFile, type ChildProcess } from "node:child_process";
-import { relative, isAbsolute } from "node:path";
+import { homedir } from "node:os";
+import { delimiter, isAbsolute, join, relative } from "node:path";
 
 import { stripWorkspaceCredentialEnv } from "../credential-env.ts";
 import { installStandaloneEngine, standaloneCurrentVersion, standaloneRoot, type StandaloneInstallOptions } from "../engine-standalone.ts";
@@ -48,6 +50,22 @@ export interface GhTools {
   install(): Promise<string>;
   spawn(file: string, args: readonly string[], env: Record<string, string>): GhChild;
   run(file: string, args: readonly string[], env: Record<string, string>, timeoutMs?: number): Promise<GhRun>;
+  /** Windows only: the gh entries in the person's Credential Manager (`cmdkey /list`), null when it could not be read. */
+  windowsGhCredentials(): Promise<string[] | null>;
+}
+
+/** Where GitHub CLI's own Windows installers put gh, which a server started before the install may not have on PATH:
+ * the MSI, WinGet's links and scoop's shims. */
+export function windowsGhDirs(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string[] {
+  const localAppData = env.LOCALAPPDATA ?? join(home, "AppData", "Local");
+  return [join(env.ProgramFiles ?? "C:\\Program Files", "GitHub CLI"), join(localAppData, "Microsoft", "WinGet", "Links"), join(env.SCOOP ?? join(home, "scoop"), "shims")];
+}
+
+/** gh's Credential Manager targets in `cmdkey /list` output: `gh:github.com:<login>`, `gh:_refreshable:github.com:...`. */
+export function ghCredentialTargets(output: string): string[] {
+  const found = new Set<string>();
+  for (const match of output.matchAll(/Target:\s*(?:LegacyGeneric:target=)?(gh:(?:_refreshable:)?github\.com\S*)/giu)) found.add(match[1]!);
+  return [...found];
 }
 
 /** gh's `auth login` for OpenMausBot's own sign-in. */
@@ -76,8 +94,10 @@ export function ownGhEnv(folders: { home: string; config: string }, base: NodeJS
     XDG_DATA_HOME: `${folders.home}/.local/share`,
     XDG_STATE_HOME: `${folders.home}/.local/state`,
     XDG_CACHE_HOME: `${folders.home}/.cache`,
-    // godbus looks for $XDG_RUNTIME_DIR/bus when no session address is set: a private folder holds none.
     XDG_RUNTIME_DIR: `${folders.home}/.run`,
+    // A session bus address that leads nowhere: godbus takes a set address as it is, so the keyring is simply unavailable.
+    // Unset, it would find the person's session bus at /run/user/<uid>/bus by the uid and reach their Secret Service.
+    DBUS_SESSION_BUS_ADDRESS: `unix:path=${folders.home}/.run/no-bus`,
     GH_NO_UPDATE_NOTIFIER: "1",
     GH_NO_EXTENSION_UPDATE_NOTIFIER: "1",
     GH_TELEMETRY: "false",
@@ -125,7 +145,8 @@ export function createGhTools(options: GhToolsOptions): GhTools {
     personal() {
       if (!options.personalAllowed()) return null;
       const own = standaloneRoot(options.dataDir);
-      return findCliCandidates("gh").find((path) => !inside(own, path)) ?? null;
+      const path = process.platform === "win32" ? [augmentedPath(), ...windowsGhDirs()].join(delimiter) : augmentedPath();
+      return findCliCandidates("gh", path).find((found) => !inside(own, found)) ?? null;
     },
     version(file) {
       let known = versions.get(file);
@@ -147,5 +168,10 @@ export function createGhTools(options: GhToolsOptions): GhTools {
       return child as unknown as GhChild;
     },
     run,
+    async windowsGhCredentials() {
+      const system = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? "C:\\Windows";
+      const result = await run(join(system, "System32", "cmdkey.exe"), ["/list"], { SystemRoot: system, PATH: process.env.PATH ?? "" });
+      return result.code === 0 ? ghCredentialTargets(result.stdout) : null;
+    },
   };
 }

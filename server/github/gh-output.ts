@@ -125,6 +125,19 @@ export function hostsFileLogin(text: string): string | null {
   return null;
 }
 
+/** The token gh's config file holds for github.com with `--insecure-storage` (`oauth_token:` under the host), or null. */
+export function hostsFileToken(text: string): string | null {
+  let inHost = false;
+  for (const line of plain(text).split("\n")) {
+    if (/^\S/u.test(line)) inHost = /^github\.com:\s*$/u.test(line);
+    else if (inHost) {
+      const match = /^ {4}oauth_token:\s*(\S+)\s*$/u.exec(line);
+      if (match) return tokenFrom(match[1]!);
+    }
+  }
+  return null;
+}
+
 /** What `gh auth token` printed, when it looks like a GitHub token and nothing else. */
 export function tokenFrom(stdout: string): string | null {
   const token = stdout.trim();

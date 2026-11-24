@@ -17,7 +17,7 @@ import { join } from "node:path";
 import type { GithubSignInLast, GithubSignInSource, GithubSignInStatus } from "../../shared/github-sign-in.ts";
 import type { VaultStore } from "../vault-store.ts";
 import { GH_SIGN_IN_FLOOR, loginArgs, ownGhEnv, personalGhEnv, type GhChild, type GhTools } from "./gh-cli.ts";
-import { hostsFileLogin, loginFailure, parseDeviceCode, parseScopes, parseStatusJson, parseStatusText, plain, tokenFrom, versionAtLeast, type GhAccount } from "./gh-output.ts";
+import { hostsFileLogin, hostsFileToken, loginFailure, parseDeviceCode, parseScopes, parseStatusJson, parseStatusText, plain, tokenFrom, versionAtLeast, type GhAccount } from "./gh-output.ts";
 
 /** GitHub's device codes last 15 minutes (its `expires_in`, 900 s); gh does not print it. */
 export const DEVICE_CODE_TTL_MS = 15 * 60_000;
@@ -69,6 +69,8 @@ export interface GithubSignInDeps {
   vault: Pick<VaultStore, "githubToken" | "setGithubToken">;
   fetchImpl?: typeof fetch;
   now?: () => number;
+  /** Tests only: the platform whose credential-store rules apply. */
+  platform?: NodeJS.Platform;
   /** A token just read, so held-secret redaction masks it wherever text reaches a bot or a transcript. */
   remember?(token: string): void;
 }
@@ -134,7 +136,10 @@ export function createGithubSignIn(deps: GithubSignInDeps): GithubSignIn {
     return own && versionAtLeast(await deps.tools.version(own), GH_SIGN_IN_FLOOR) ? own : null;
   };
   /** A gh for OpenMausBot's own sign-in folder: the one that signed it in this run, the person's own, or the pinned copy. */
-  const ownGh = async (audience: string): Promise<string> => of(audience).attempt?.gh ?? (await personalForLogin()) ?? deps.tools.pinnedReady() ?? deps.tools.install();
+  /** A gh for OpenMausBot's own sign-in folder, never a download: only Start installs. The pinned copy is checked again
+   * (installStandaloneEngine's reuse path) only when its folder names the pinned version, so a newer pin waits for Start. */
+  const ownGh = async (audience: string): Promise<string | null> => of(audience).attempt?.gh ?? (await personalForLogin()) ?? deps.tools.pinnedReady()
+    ?? (deps.tools.pinnedOnDisk() ? await deps.tools.install().catch(() => null) : null);
   const ownEnv = (audience: string) => {
     const folders = githubFolders(deps.dataDir, audience);
     for (const folder of [folders.config, folders.home, join(folders.home, ".run")]) mkdirSync(folder, { recursive: true, mode: 0o700 });
@@ -169,6 +174,7 @@ export function createGithubSignIn(deps: GithubSignInDeps): GithubSignIn {
     const login = ownLogin(audience) ?? null;
     try {
       const file = await ownGh(audience);
+      if (!file) return { state: "signed-in", login: login ?? "unknown", source: "mausbot", scopes: [], checkedAt: null };
       const env = ownEnv(audience);
       const account = await ghAccount(file, env);
       // The config file is there, so an answer gh could not give is not a refusal: shown as signed in, unchecked.
@@ -237,8 +243,23 @@ export function createGithubSignIn(deps: GithubSignInDeps): GithubSignIn {
     return last && status.state !== "signed-in" ? { ...status, last } : status;
   };
 
-  async function status(audienceIn: string, options: { check?: boolean } = {}): Promise<GithubSignInStatus> {
-    const audience = must(audienceIn);
+  /** Status calls of one audience that overlap share one answer, so parallel asks never each start gh. */
+  const asking = new Map<string, Promise<GithubSignInStatus>>();
+  function status(audienceIn: string, options: { check?: boolean } = {}): Promise<GithubSignInStatus> {
+    let audience: string;
+    try {
+      audience = must(audienceIn);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    const running = asking.get(audience);
+    if (running) return running;
+    const answer = readStatus(audience, options).finally(() => asking.delete(audience));
+    asking.set(audience, answer);
+    return answer;
+  }
+
+  async function readStatus(audience: string, options: { check?: boolean }): Promise<GithubSignInStatus> {
     const live = current(audience);
     if (live) return withLast(audience, live);
     const state = of(audience);
@@ -340,6 +361,15 @@ export function createGithubSignIn(deps: GithubSignInDeps): GithubSignIn {
         state.known = theirs;
         throw new GithubSignInError(409, `GitHub is already signed in on this computer as ${theirs.login}, with your own GitHub CLI.`);
       }
+      // Windows' Credential Manager is one store whatever gh's folder (gh-cli.ts), so there only a positive "none" will do:
+      // their gh saying signed out, or no gh entry there at all. A refused sign-in of theirs (401) is not enough either:
+      // its entry, under the same login, would be what our new sign-in resolves to.
+      if ((deps.platform ?? process.platform) === "win32" && !deps.team && theirs !== "signed-out") {
+        const entries = theirs === null ? await deps.tools.windowsGhCredentials() : null;
+        if (theirs !== null || entries === null || entries.length > 0) {
+          throw new GithubSignInError(409, "This computer's Windows Credential Manager already holds a GitHub CLI sign-in, which signing in here could change. Paste a GitHub token instead, or sign in again with your own GitHub CLI.");
+        }
+      }
       const file = (await personalForLogin()) ?? deps.tools.pinnedReady();
       if (file) {
         const version = await deps.tools.version(file);
@@ -362,7 +392,7 @@ export function createGithubSignIn(deps: GithubSignInDeps): GithubSignIn {
       if (state.attempt === attempt) state.attempt = null;
       throw error;
     }
-    return withLast(audience, current(audience) ?? (await status(audience)));
+    return withLast(audience, current(audience) ?? (await readStatus(audience, {})));
   }
 
   function stopAttempt(audience: string): void {
@@ -377,7 +407,7 @@ export function createGithubSignIn(deps: GithubSignInDeps): GithubSignIn {
   async function cancel(audienceIn: string): Promise<GithubSignInStatus> {
     const audience = must(audienceIn);
     stopAttempt(audience);
-    return status(audience);
+    return readStatus(audience, {});
   }
 
   async function saveToken(audienceIn: string, raw: string): Promise<GithubSignInStatus> {
@@ -401,7 +431,7 @@ export function createGithubSignIn(deps: GithubSignInDeps): GithubSignIn {
     stopAttempt(audience);
     const ours = ownSignedIn(audience) || existsSync(githubFolders(deps.dataDir, audience).root) || deps.vault.githubToken(audience) !== null;
     if (!ours) {
-      const shown = await status(audience);
+      const shown = await readStatus(audience, {});
       if (shown.state !== "signed-out" && "source" in shown && shown.source === "cli") {
         throw new GithubSignInError(409, "This sign-in is your own GitHub CLI's. Sign out there with `gh auth logout`.");
       }
@@ -413,7 +443,7 @@ export function createGithubSignIn(deps: GithubSignInDeps): GithubSignIn {
     rmSync(githubFolders(deps.dataDir, audience).root, { recursive: true, force: true });
     if (deps.vault.githubToken(audience)) deps.vault.setGithubToken(audience, null);
     Object.assign(of(audience), { known: undefined, stale: false, last: undefined });
-    return status(audience);
+    return readStatus(audience, {});
   }
 
   async function token(audienceIn?: string | null): Promise<string | null> {
@@ -426,7 +456,10 @@ export function createGithubSignIn(deps: GithubSignInDeps): GithubSignIn {
     try {
       if (ownSignedIn(audience)) {
         // gh renews an expiring sign-in itself when asked for its token.
-        const result = await deps.tools.run(await ownGh(audience), ["auth", "token", "--hostname", "github.com"], ownEnv(audience));
+        const file = await ownGh(audience);
+        // No gh to ask (a newer pin not yet installed): the token gh saved in its own file, as gh itself would read it.
+        if (!file) return remember(hostsFileToken(readFileSync(hostsFile(audience), "utf8")));
+        const result = await deps.tools.run(file, ["auth", "token", "--hostname", "github.com"], ownEnv(audience));
         return remember(result.code === 0 ? tokenFrom(result.stdout) : null);
       }
       const saved = deps.vault.githubToken(audience);

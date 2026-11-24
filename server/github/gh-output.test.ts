@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { hostsFileLogin, loginFailure, parseDeviceCode, parseGhVersion, parseScopes, parseStatusJson, parseStatusText, tokenFrom, VERIFICATION_URL, versionAtLeast } from "./gh-output.ts";
+import { hostsFileLogin, hostsFileToken, loginFailure, parseDeviceCode, parseGhVersion, parseScopes, parseStatusJson, parseStatusText, tokenFrom, VERIFICATION_URL, versionAtLeast } from "./gh-output.ts";
 
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8");
 
@@ -88,6 +88,9 @@ describe("GitHub CLI's output", () => {
 
   it("reads the login from gh's config file, and a token only when it looks like one", () => {
     expect(hostsFileLogin(fixture("constructed/hosts.yml.txt"))).toBe("octo-fixture");
+    const saved = ["gho", "y".repeat(36)].join("_");
+    expect(hostsFileToken(fixture("constructed/hosts.yml.txt").replaceAll("TOKEN", saved))).toBe(saved);
+    expect(hostsFileToken("gitlab.com:\n    oauth_token: x\n")).toBeNull();
     expect(hostsFileLogin("gitlab.com:\n    user: someone\n")).toBeNull();
     const token = ["gho", "x".repeat(36)].join("_");
     expect(tokenFrom(`${token}\n`)).toBe(token);
