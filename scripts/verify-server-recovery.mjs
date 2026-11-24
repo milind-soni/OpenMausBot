@@ -112,7 +112,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
           OMB_DATA_DIR: dataDir, OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(webhookPort),
           OMB_STATIC_DIR: join(output, "ui"), OMB_DESKTOP_PARENT: "1",
           ...lease.utilityServerLeaseEnvironment(),
-          FAKE_CLAUDE_MODE: "hang", FAKE_CLAUDE_PROMPTS: join(home, "prompts.jsonl"),
+          FAKE_CLAUDE_MODE: children.length ? "happy" : "hang", FAKE_CLAUDE_PROMPTS: join(home, "prompts.jsonl"),
           FAKE_CLAUDE_DUMP: join(home, "fake.json"),
         },
       });
@@ -169,7 +169,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
 
     if (scenario === "recover") {
       const { bot } = await control("create_bot", { name: "Recovery fixture" });
-      await control("send_bot_message", { bot_id: bot.id, task_id: bot.activeTaskId, text: "Do not replay this interrupted fixture turn." });
+      await control("send_bot_message", { bot_id: bot.id, task_id: bot.activeTaskId, text: "Finish this recovery fixture turn." });
       await until(() => existsSync(join(home, "fake.json")), "fake engine accepted the turn");
       fakePid = JSON.parse(readFileSync(join(home, "fake.json"), "utf8")).pid;
       const prompts = readFileSync(join(home, "prompts.jsonl"), "utf8");
@@ -190,18 +190,21 @@ if (process.versions.electron && process.argv.includes(flag)) {
       await until(() => active && active.pid !== initialPid, "replacement PID verified");
       const replacementPid = active.pid;
       assert.equal(JSON.parse(readFileSync(join(dataDir, ".openmausbot-server-child/openmausbot-server.lease"), "utf8")).pid, replacementPid);
-      const wait = await control("wait_for_conversation", { target_type: "bot", target_id: bot.id, task_id: bot.activeTaskId, timeout_seconds: 2 });
+      const wait = await control("wait_for_conversation", { target_type: "bot", target_id: bot.id, task_id: bot.activeTaskId, timeout_seconds: 15 });
       assert.equal(wait.target.busy, false);
       const messages = await control("get_bot_messages", { bot_id: bot.id, task_id: bot.activeTaskId, limit: 10 });
       assert.equal(messages.messages.filter((message) => message.role === "user").length, 1);
-      await sleep(1200);
-      assert.equal(readFileSync(join(home, "prompts.jsonl"), "utf8"), prompts, "recovery must not resend the turn");
+      assert.ok(messages.messages.some(message => message.role === "bot" && message.text === "hello from fake claude"), "replacement completed the original conversation");
+      const ledger = readFileSync(join(home, "prompts.jsonl"), "utf8").trim().split("\n");
+      assert.equal(ledger.length, 2, "only one continuation after restart");
+      assert.equal(ledger[0], prompts.trim());
+      assert.match(ledger[1], /OpenMausBot restarted while your previous turn here was running/);
       assert.equal((await approval.request(active, bot.id, "ask")).approvalMode, "ask");
       await control("create_bot", { name: "Replacement accepts fresh authorized writes" });
       const refused = await fetch(`${url}/api/bots`, { method: "POST", headers: { "content-type": "application/json" }, body: '{"name":"Must refuse"}' });
       assert.equal(refused.status, 403, "replacement remains fail-closed without the private token");
       finalReceipt = { passed: true, scenario, url, initialPid, replacementPid, commands,
-        checks: ["PID verified replacement", "same port", "unchanged parent lease", "replacement child lease", "immediate unavailable", "pending approval rejected", "new approval accepted", "private mutation capability restored", "unauthorized write refused", "interrupted turn retained once, not replayed"],
+        checks: ["PID verified replacement", "same port", "unchanged parent lease", "replacement child lease", "immediate unavailable", "pending approval rejected", "new approval accepted", "private mutation capability restored", "unauthorized write refused", "one user message, one marked continuation"],
         limitation: "Headless fixture uses the production supervisor, probe, lease, approval protocol and built server, not the complete desktop bootstrap or renderer. The inert hung engine is explicitly reaped by the fixture." };
     } else {
       process.kill(initialPid, "SIGKILL");

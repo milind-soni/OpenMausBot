@@ -24,9 +24,9 @@ server:
   the replacement's delegated child lease, and authenticated mutations.
   The old child's pending approval must reject; a new approval must succeed.
   The shared control surface records `wait` and bounded `messages` results,
-  while the fake engine's prompt ledger proves the interrupted turn was not
-  resent. The intentionally hung fake engine is explicitly reaped by its exact
-  fixture-recorded PID.
+  and the transcript retains one user message. The fake engine's ledger records
+  the original prompt followed by exactly one continuation carrying the
+  restart instructions. The fixture reaps the hung engine by its recorded PID.
 - Quit through Electron's actual `before-quit` event during the first backoff.
   Wait beyond that retry deadline and verify no replacement was spawned.
 - Crash the initial child and every replacement. Verify exactly three retries
@@ -42,5 +42,4 @@ fork a sibling when a child cannot be reaped.
 Limits: this is an owned-child smoke, not a complete packaged desktop or
 renderer test. It does not prove native failure-dialog presentation, renderer
 draft preservation, or real provider/computer-helper cleanup after SIGKILL.
-An interrupted turn remains interrupted; recovery does not synthesize a reply.
-Existing routine scheduling and persisted delegation policies are unchanged.
+The replacement fake engine completes the interrupted turn.
