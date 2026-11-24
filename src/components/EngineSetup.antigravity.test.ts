@@ -118,18 +118,16 @@ it("names Google on the sign-in card, never another provider", () => {
   expect(host.textContent).not.toContain("Mistral");
 });
 
-it("says on the sign-in card of an account that runs the native CLI, whatever its path, that its sign-in is the one the Antigravity CLI shares, and not on the pinned runtime's", () => {
+// The app starts the native CLI so each account keeps its own sign-in, as on the pinned runtime.
+it("says each account has its own Google account on the sign-in card, on either runtime", () => {
   vi.stubGlobal("ogb", { platform: "linux", remoteClient: { active: false } });
   const store = { state: { config: {} }, dispatch: vi.fn(), refreshInstances: vi.fn(async () => {}), refreshModels: vi.fn(async () => {}) } as unknown as ReturnType<typeof useStore>;
   const render = (instance: InstanceInfo) => flushSync(() => root.render(createElement(BotEditorStore, { value: store, children: createElement(EngineSetup, { instance }) })));
-  render({ ...antigravity, cli: "antigravity", snapshot: { ...antigravity.snapshot, nativeCli: true } });
-  expect(host.textContent).toContain("Antigravity CLI keeps one sign-in on this computer");
-  expect(host.textContent).not.toContain("has its own Google account");
-  render({ ...antigravity, cli: "agy", snapshot: { ...antigravity.snapshot, nativeCli: true } });
-  expect(host.textContent).toContain("Antigravity CLI keeps one sign-in on this computer");
-  render({ ...antigravity, cli: "agy" });
-  expect(host.textContent).toContain("has its own Google account");
-  expect(host.textContent).not.toContain("keeps one sign-in");
+  for (const instance of [{ ...antigravity, cli: "antigravity", snapshot: { ...antigravity.snapshot, nativeCli: true as const } }, { ...antigravity, cli: "agy" }]) {
+    render(instance);
+    expect(host.textContent).toContain("has its own Google account");
+    expect(host.textContent).not.toContain("keeps one sign-in");
+  }
 });
 
 it("describes and labels the install as Google's Antigravity CLI, unless the path asks for the pinned runtime alone", () => {
