@@ -300,6 +300,7 @@ describe("acpPromptSteering", () => {
         await vi.advanceTimersByTimeAsync(0);
         await ended;
         expect(refused).not.toHaveBeenCalled();
+        expect(steering.failure).toBeUndefined();
         expect(sent).toEqual(["use pytest"]);
       } finally {
         vi.useRealTimers();

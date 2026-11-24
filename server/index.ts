@@ -7212,7 +7212,9 @@ async function acceptDirectSend(
           signInSettle.answerInChat(botId, threadId);
           let requeued = false; const requeue = (note?: string) => { if (!requeued) void queueSteeredMessage(current.id, threadId, text, { prompt: note ? `${queuedPrompt}\n\n${note}` : queuedPrompt, rowId: message.id, first: true, queuedAt: message.at, replyToId: replyTo?.id, dataContext, sender, trigger, via, callId, mentions, aheadOfOthers: runOwners.askerFirst(threadId) }); requeued = true; };
           refusedLate = () => { store.patchMessage(threadId, message.id, { steered: undefined }); try { requeue(); } catch (error) { console.warn("steer: could not queue a steer the agent turned down", error); store.appendMessage(threadId, { role: "bot", kind: "activity", tool: failedNoticeTool("chat.notice.unreadMessage") }); } };
-          if (personsOwn) personFirst.wait(threadId, { requeue });
+          // An unconfirmed steer may already be in the turn: person-first would stop that turn and run the words a second time.
+          if (steered === "indeterminate") store.appendMessage(threadId, { role: "bot", kind: "activity", tool: failedNoticeTool("chat.notice.steerUnconfirmed") });
+          else if (personsOwn) personFirst.wait(threadId, { requeue });
           return { ok: true as const, steered: true as const, threadId, message };
         }
         if (!current.busy) {

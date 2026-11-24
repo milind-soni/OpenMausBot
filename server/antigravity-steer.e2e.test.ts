@@ -1,10 +1,11 @@
 // POSIX-gated like the other CLI e2es: the fake is a shebang script.
 import { spawn, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { antigravityCliTokenPath } from "./drivers/antigravity-acp.ts";
@@ -15,19 +16,22 @@ const FAKE_ACP = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
 const PORT = workerPort(19900, 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const posixOnly = describe.skipIf(process.platform === "win32");
+const PERSON_FIRST_MS = 1_000;
+/** The server runs as the desktop app's, so each message is the person's own: the sender person-first puts first. */
+const OWNER = randomBytes(32).toString("base64url");
 
 posixOnly("Antigravity CLI steer through the message route", () => {
   let child: ChildProcess;
   let home: string, tools: string;
   // One Antigravity instance per test, each with its own gates and log.
-  const NAMES = ["agy", "agyLate", "agyLateFull", "agyQueue", "agyQueueFull", "agyRoom"];
+  const NAMES = ["agy", "agyLate", "agyLateFull", "agyQueue", "agyQueueFull", "agyRoom", "agyLost"];
   const cli = (name: string) => ({ finishGate: join(tools, `${name}.finish`), rejectGate: join(tools, `${name}.reject`), rpc: join(tools, `${name}.rpc.jsonl`) });
   let stderr = "";
 
   const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
     const res = await fetch(`${BASE}${path}`, {
       method,
-      headers: body ? { "content-type": "application/json" } : undefined,
+      headers: { ...(body ? { "content-type": "application/json" } : {}), "x-openmausbot-desktop-owner": OWNER, origin: BASE },
       body: body ? JSON.stringify(body) : undefined,
     });
     return { status: res.status, body: await res.json() };
@@ -63,14 +67,15 @@ posixOnly("Antigravity CLI steer through the message route", () => {
         FAKE_ACP_AUTH_METHOD: "oauth-personal", FAKE_ACP_MODELS: "gemini-3.8-flash", FAKE_ACP_MODES: "default,plan",
         FAKE_ACP_AGENT_NAME: "Antigravity ACP Server", FAKE_ACP_VERSION: "1.5.15", FAKE_ACP_AGENT_VERSION: "1.5.15",
         FAKE_ACP_MODE: "antigravity-steer", FAKE_ACP_GATE_FILE: cli(name).finishGate, FAKE_ACP_RPC_APPEND_FILE: cli(name).rpc,
-        FAKE_ACP_STEER_FAIL: "asking-late", FAKE_ACP_STEER_FAIL_GATE: cli(name).rejectGate,
+        ...(name === "agyLost" ? { FAKE_ACP_STEER_FAIL: "lost", FAKE_ACP_STEER_TOOL: "sleep 600" }
+          : { FAKE_ACP_STEER_FAIL: "asking-late", FAKE_ACP_STEER_FAIL_GATE: cli(name).rejectGate }),
       },
       config: { cli: executable, fullAuto: true },
     });
     writeFileSync(join(data, "config.json"), JSON.stringify({ instances: Object.fromEntries(NAMES.map((name) => [name, instance(name)])) }));
-    child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
+    child = spawn(process.execPath, ["--import", pathToFileURL(join(SERVER_DIR, "testing", "desktop-parent.mjs")).href, join(SERVER_DIR, "index.ts")], {
       cwd: join(SERVER_DIR, ".."),
-      env: { ...(process.env.PATH ? { PATH: process.env.PATH } : {}), HOME: home, USERPROFILE: home, OMB_PORT: String(PORT), OMB_ANTIGRAVITY_NATIVE_CLI: "1" },
+      env: { ...(process.env.PATH ? { PATH: process.env.PATH } : {}), HOME: home, USERPROFILE: home, OMB_PORT: String(PORT), OMB_ANTIGRAVITY_NATIVE_CLI: "1", OMB_PERSON_FIRST_MS: String(PERSON_FIRST_MS), OMB_TEST_DESKTOP_OWNER_TOKEN: OWNER, OMB_DESKTOP_PARENT: "1" },
       stdio: ["ignore", "pipe", "pipe"],
     });
     child.stderr!.on("data", (c) => (stderr += c));
@@ -272,5 +277,35 @@ posixOnly("Antigravity CLI steer through the message route", () => {
     expect(typed.map((m: any) => m.text)).toEqual(["Build the report.", "Use pytest."]);
     expect(typed.some((m: any) => m.steered)).toBe(false);
     expect(calls("agyRoom", "session/prompt.held")).toBe(0);
+  }, 60_000);
+
+  it("a steer the CLI took in but never confirmed, sent during a long tool call, reaches the CLI once and says so in the thread", async () => {
+    const created = (await api("POST", "/api/bots")).body.bot;
+    expect((await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "agyLost", model: "gemini-3.8-flash" } })).status).toBe(200);
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "Build the report." })).status).toBe(202);
+    await waitFor(async () => (await getBot(created.id)).busy === true && calls("agyLost", "session/prompt") === 1
+      && (await getBot(created.id)).messages.some((m: any) => m.kind === "activity" && JSON.stringify(m.tool ?? {}).includes("sleep 600")), "the long tool call");
+
+    const answer = await api("POST", `/api/bots/${created.id}/messages`, { text: "Use pytest." });
+    expect(answer.status).toBe(202);
+    expect(answer.body).toMatchObject({ ok: true, steered: true });
+    expect(calls("agyLost", "session/prompt.steer")).toBe(1);
+    await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.tool?.nameCode === "chat.notice.steerUnconfirmed"), "the unconfirmed notice");
+    // Past the person-first wait, so a stop and a second run it would make have started.
+    await new Promise((r) => setTimeout(r, PERSON_FIRST_MS * 3));
+    let bot = await getBot(created.id);
+    expect(bot.busy).toBe(true);
+    expect(bot.messages.some((m: any) => m.kind === "activity" && /to answer you first/.test(JSON.stringify(m.tool ?? {})))).toBe(false);
+    expect(calls("agyLost", "session/prompt")).toBe(2);
+    expect(calls("agyLost", "session/cancel")).toBe(0);
+
+    writeFileSync(cli("agyLost").finishGate, "finish");
+    await waitFor(async () => !(await getBot(created.id)).busy, "the turn to end");
+    bot = await getBot(created.id);
+    const typed = bot.messages.filter((m: any) => m.role === "user" && m.kind === "text");
+    expect(typed.map((m: any) => m.text)).toEqual(["Build the report.", "Use pytest."]);
+    expect(typed[1].steered).toBe(true);
+    expect(bot.messages.filter((m: any) => m.tool?.nameCode === "chat.notice.steerUnconfirmed")).toHaveLength(1);
+    expect(calls("agyLost", "session/prompt")).toBe(2);
   }, 60_000);
 });

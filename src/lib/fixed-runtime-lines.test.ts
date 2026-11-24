@@ -82,6 +82,7 @@ describe("fixed runtime notices", () => {
     ["chat.notice.acpEmpty", { provider: "Grok" }, "Grok finished without replying.", "Grok terminou sem responder."],
     ["chat.notice.piSessionSlow", undefined, "Pi is taking longer than usual to start this conversation's session. The turn goes on when Pi answers. Press Stop to cancel it.", "Clique em “Parar” para cancelar."],
     ["chat.notice.unreadMessage", undefined, "This turn ended before the model read a message sent while it ran. Send that message again.", "Envie essa mensagem novamente."],
+    ["chat.notice.steerUnconfirmed", undefined, "The model did not confirm it got this message, so it was not sent again. If the reply leaves it out, send it again.", "O modelo não confirmou que recebeu esta mensagem"],
   ] as const)("persists and renders %s", (key, params, english, portuguese) => {
     const failed = noticeFailure(key, params);
     expect(failed.message).toBe(english);

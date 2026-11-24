@@ -173,9 +173,11 @@ export function acpPromptSteering(running: () => boolean, send: (text: string) =
     const decide = (verdict: SteerOutcome) => { if (outcome === undefined) report(outcome = verdict); return outcome; };
     const reply = send(guidance);
     // The CLI also answers the carrying prompt when that run ends on its own, and only then rejects the steer.
+    // Only a steer that carries the turn answers for it: one that failed before that leaves the turn to its own prompt.
     track(reply, (error) => {
+      if (outcome !== "steered") return true;
       if (!takeOver!.rejected(error)) return false;
-      if (outcome === "steered") late.refused();
+      late.refused();
       return true;
     });
     // A reply that comes before the carrying prompt's answer only ends a stopped turn: the agent never took the steer.

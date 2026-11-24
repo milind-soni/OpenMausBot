@@ -102,6 +102,7 @@ export const CHAT_NOTICE = {
   "chat.notice.unaskedStop": "The AI's request was cut off before it finished, and nobody stopped it (it said only \"{said}\"). Send the message again to try once more.",
   "chat.notice.piSessionSlow": "Pi is taking longer than usual to start this conversation's session. The turn goes on when Pi answers. Press Stop to cancel it.",
   "chat.notice.unreadMessage": "This turn ended before the model read a message sent while it ran. Send that message again.",
+  "chat.notice.steerUnconfirmed": "The model did not confirm it got this message, so it was not sent again. If the reply leaves it out, send it again.",
   "chat.notice.codexUnsupportedOne": "Codex could not run the tool {tools} (\"unsupported call\"): the AI provider sent the call back without the tool's app name, so it never reached the tool. Pick a model for this bot whose provider handles tool calls fully.",
   "chat.notice.codexUnsupportedMany": "Codex could not run the tools {tools} (\"unsupported call\"): the AI provider sent the call back without the tool's app name, so it never reached the tool. Pick a model for this bot whose provider handles tool calls fully.",
   "chat.notice.codexUnsupportedMore": "Codex could not run the tools {tools} and {count} more (\"unsupported call\"): the AI provider sent the call back without the tool's app name, so it never reached the tool. Pick a model for this bot whose provider handles tool calls fully.",
