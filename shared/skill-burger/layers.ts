@@ -451,8 +451,9 @@ function joinDelegations(layers: BurgerLayer[], round: Map<string, number>, repl
   for (const layer of layers) {
     if (layer.kind !== "delegate" || !layer.delegation) { out.push(layer); continue; }
     const call = layer.delegation.rounds[0]![0]!;
+    const sameMode = (one: BurgerLayer) => Boolean(one.delegation?.rounds[0]?.[0]?.consult) === Boolean(call.consult);
     const last = out[out.length - 1];
-    if (last?.kind === "delegate" && last.delegation && round.get(last.id) === round.get(layer.id)) {
+    if (last?.kind === "delegate" && last.delegation && sameMode(last) && round.get(last.id) === round.get(layer.id)) {
       const rounds = last.delegation.rounds;
       rounds[rounds.length - 1]!.push(call);
       out[out.length - 1] = { ...last, words: [...new Set([...last.words.split(", "), ...layer.words.split(", ")])].join(", "), status: last.status === "failed" ? layer.status : last.status };
@@ -460,7 +461,7 @@ function joinDelegations(layers: BurgerLayer[], round: Map<string, number>, repl
       continue;
     }
     const ids = call.bots.map((bot) => bot.id ?? bot.name);
-    const earlier = [...out].reverse().find((one) => one.kind === "delegate" && ids.every((id) => botsOf(one).has(id)));
+    const earlier = [...out].reverse().find((one) => one.kind === "delegate" && sameMode(one) && ids.every((id) => botsOf(one).has(id)));
     if (earlier?.delegation && round.get(earlier.id) !== round.get(layer.id)) {
       const rounds = earlier.delegation.rounds;
       const lastRoundAt = round.get(`${earlier.id}#last`) ?? round.get(earlier.id);
