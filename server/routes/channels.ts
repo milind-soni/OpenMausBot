@@ -443,7 +443,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
             const queued = queuedChannelMessage(group.id, threadId, sendId);
             if (queued) {
               if (
-                queued.text !== text ||
+                (queued.text !== text && queued.text !== deps.boardAddressed?.(group.id, threadId, text)) ||
                 queued.replyToId !== replyTo?.id ||
                 queued.mode !== channelMode
               ) {

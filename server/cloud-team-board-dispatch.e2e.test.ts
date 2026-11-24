@@ -148,6 +148,29 @@ it("an ask waits on the person who made the item, reaches their inbox, and their
   expect(answers.every((line) => line.from?.botId === writer.id), "Reviewer, the room's default, never answered").toBe(true);
 }, hostTimeout(120_000));
 
+it("an answer from the person's inbox, which starts no turn by itself, brings the item back to the bot that asked", async () => {
+  parts({
+    "The Hall": [update({ move: "done", text: "Booked The Hall." })],
+    "Zeta venue": [update({ move: "ask", text: "Which venue should I book?" })],
+  });
+  const zeta = await add(mira, { groupId: launch.id, title: "Zeta venue", forBotId: writer.id });
+  await settled(zeta.threadId, "needs_person");
+  type Inbox = { botId: string; threadId: string; rows: Array<{ id: string; text: string; origin?: { threadId: string } }> };
+  let inbox: Inbox | null = null;
+  await until(async () => {
+    inbox = (await team.as(mira, "GET", "/api/inbox")).body as Inbox;
+    return inbox.rows.some((row) => row.origin?.threadId === zeta.threadId);
+  }, "Mira's inbox line");
+  const line = inbox!.rows.find((row) => row.origin?.threadId === zeta.threadId)!;
+  const answered = await team.as(mira, "POST", `/api/bots/${inbox!.botId}/messages`, { text: "The Hall, please.", threadId: inbox!.threadId, replyToId: line.id });
+  expect(answered.status, JSON.stringify(answered.body)).toBe(202);
+  await settled(zeta.threadId, "done");
+  expect(await item(zeta.threadId)).toMatchObject({ result: "Booked The Hall.", attempts: 1 });
+  const boardLines = (await messages(mira, zeta.threadId)).filter((row) => row.sender?.name === "Board");
+  expect(boardLines).toHaveLength(2);
+  expect(boardLines[1]!.text).toMatch(/^@Writer .*The Hall, please\./s);
+}, hostTimeout(120_000));
+
 it("board_add from a lead makes a thread and an item each, with needs, and a bad batch makes nothing", async () => {
   parts({ "Delta two": [update({ move: "done", text: "Two done." })], "Delta one": [update({ move: "done", text: "One done." })] });
   const bearer = await team.capability(lead.id, launch.threadId);
