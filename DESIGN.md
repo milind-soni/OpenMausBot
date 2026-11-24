@@ -55,7 +55,7 @@ where they belong instead of adding new places.
   the behaviour automatic with a good default. An optional field on something
   the person sets up is fine. One exception: **Settings → Features**, a short
   list of plain on/off switches for whole features some people don't want
-  (Skill Burger, thread tabs, thread notes, mascot animations). It's there so
+  (Skill Burger, thread tabs). It's there so
   Simple mode can turn off one feature at a time without switching to
   Advanced. A switch goes there only when its off state is clean: the feature
   is hidden whole, and nothing the person made is lost.

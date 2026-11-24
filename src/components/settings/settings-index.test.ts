@@ -112,7 +112,7 @@ describe("the pages", () => {
   });
 
   it("drops the place's pages and Plan & billing for a paired client, which keeps This app", () => {
-    expect(ids(fullContext({ client: true }))).toEqual(["overview", "features", "account", "app", "general", "appearance"]);
+    expect(ids(fullContext({ client: true }))).toEqual(["overview", "account", "app", "general", "appearance"]);
   });
 });
 

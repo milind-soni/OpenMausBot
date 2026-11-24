@@ -1,12 +1,11 @@
 // Settings → Features: Skill Burger off takes its chat card, its menu entries, its page and the bot panel's saved list
-// away; thread notes off takes the "Saved to this thread" line away; mascot animations off holds mascots still. Nothing
-// saved is touched, so on brings it all back.
+// away. Nothing saved is touched, so on brings it all back.
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
-import type { Message } from "@/state/store";
+import { skillBurgerEnabled, threadTabsEnabled } from "@/lib/feature-flags";
 
 const fixture = vi.hoisted(() => ({ config: {} as Record<string, unknown>, items: [] as Array<{ key: string }> }));
 vi.mock("@/state/store", async (importOriginal) => ({
@@ -21,13 +20,8 @@ vi.mock("../UpdateIndicator", () => ({ UpdateIndicator: () => null }));
 vi.mock("../SidebarPopoverMenu", () => ({ SidebarPopoverMenu: ({ items }: { items: Array<{ key: string }> }) => { fixture.items = items; return null; } }));
 
 const { SidebarPhoneBar } = await import("../SidebarPhoneBar");
-const { StatusActivityRow } = await import("../StatusActivityRow");
-const { setDeviceFeature } = await import("@/lib/feature-switches");
 
-const storage = new Map<string, string>();
 beforeEach(() => {
-  storage.clear();
-  vi.stubGlobal("localStorage", { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value) });
   fixture.config = {};
   fixture.items = [];
   setLocale("en");
@@ -40,6 +34,13 @@ const phoneTools = () => {
 };
 
 describe("the Skill Burger switch", () => {
+  it("is on, and thread tabs off, until the place's config.json says otherwise", () => {
+    expect(skillBurgerEnabled(null)).toBe(true);
+    expect(skillBurgerEnabled({ features: { skillBurger: false } })).toBe(false);
+    expect(threadTabsEnabled(null)).toBe(false);
+    expect(threadTabsEnabled({ features: { threadTabs: true } })).toBe(true);
+  });
+
   it("shows Skill Burgers in the tools menu by default, hides it while off, and brings it back on", () => {
     expect(phoneTools()).toContain("skill-burgers");
     fixture.config = { features: { skillBurger: false } };
@@ -57,31 +58,5 @@ describe("the Skill Burger switch", () => {
     for (const path of ["../ChatView.tsx", "../../App.tsx", "../SidebarProfileMenu.tsx", "../bot-panel/pages.tsx"]) {
       expect(source(path), path).toContain('skillBurger = useFeature("skillBurger")');
     }
-  });
-});
-
-describe("the thread notes switch", () => {
-  const saved = { id: "m1", role: "bot", kind: "activity", at: "2026-11-24T10:00:00.000Z", text: "", tool: { name: "notice: Saved to this thread", nameCode: "chat.notice.savedToThread", ok: true } } as unknown as Message;
-  const line = () => renderToStaticMarkup(createElement(StatusActivityRow, { message: saved }));
-
-  it("shows the Saved to this thread line by default, hides it while off, and brings it back on", () => {
-    expect(line()).toContain("data-saved-to-thread");
-    setDeviceFeature("threadNotes", false);
-    expect(line()).toBe("");
-    setDeviceFeature("threadNotes", true);
-    expect(line()).toContain("Saved to this thread");
-  });
-});
-
-describe("the mascot animations switch", () => {
-  it("holds mascots still while off, as reduced motion does, and lets them move again once on", async () => {
-    const { useMascotStill } = await import("../mascot-clock");
-    const Probe = () => createElement("i", null, String(useMascotStill()));
-    const still = () => renderToStaticMarkup(createElement(Probe));
-    expect(still()).toBe("<i>false</i>");
-    setDeviceFeature("mascotMotion", false);
-    expect(still()).toBe("<i>true</i>");
-    setDeviceFeature("mascotMotion", true);
-    expect(still()).toBe("<i>false</i>");
   });
 });

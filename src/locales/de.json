@@ -4338,9 +4338,5 @@
   "settings.features.skillBurgerLine": "Speichert den Lauf eines Bots als Schritte, die du erneut ausführen kannst",
   "settings.features.threadTabs": "Thread-Tabs",
   "settings.features.threadTabsLine": "Zeigt die Threads eines Bots als Tabs über dem Chat",
-  "settings.features.threadNotes": "Thread-Notizen",
-  "settings.features.threadNotesLine": "Zeigt, was ein Bot sich zu jedem Thread notiert",
-  "settings.features.mascotMotion": "Maskottchen-Animationen",
-  "settings.features.mascotMotionLine": "Lässt die Maskottchen der Bots sich bewegen, während sie arbeiten",
   "settings.features.error": "Das konnte nicht gespeichert werden. Prüfe deine Verbindung und versuche es erneut."
 }

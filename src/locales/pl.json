@@ -7306,9 +7306,5 @@
   "settings.features.skillBurgerLine": "Zapisuje przebieg pracy bota jako kroki, które można uruchomić ponownie",
   "settings.features.threadTabs": "Karty wątków",
   "settings.features.threadTabsLine": "Pokazuje wątki bota jako karty nad czatem",
-  "settings.features.threadNotes": "Notatki wątku",
-  "settings.features.threadNotesLine": "Pokazuje, co bot notuje w każdym wątku",
-  "settings.features.mascotMotion": "Animacje maskotki",
-  "settings.features.mascotMotionLine": "Pozwala maskotkom botów poruszać się podczas pracy",
   "settings.features.error": "Nie udało się zapisać. Sprawdź połączenie i spróbuj ponownie."
 }

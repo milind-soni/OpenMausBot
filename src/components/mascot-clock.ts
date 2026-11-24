@@ -1,6 +1,5 @@
 import { useSyncExternalStore } from "react";
 
-import { useDeviceFeature } from "@/lib/feature-switches";
 import { FRAME_SLACK_MS, FULL_FRAME_MS } from "./mascot-motion";
 
 export type MascotFrame = (now: number) => number;
@@ -171,12 +170,6 @@ const readReducedMotion = () => globalThis.window?.matchMedia?.(REDUCED_MOTION).
 
 export function usePrefersReducedMotion(): boolean {
   return useSyncExternalStore(subscribeReducedMotion, readReducedMotion, () => false);
-}
-
-/** Mascots hold still when the system asks for less motion or the person turned Mascot animations off. */
-export function useMascotStill(): boolean {
-  const reduced = usePrefersReducedMotion();
-  return !useDeviceFeature("mascotMotion") || reduced;
 }
 
 const written = new WeakMap<Element, Map<string, string>>();

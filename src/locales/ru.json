@@ -7360,9 +7360,5 @@
   "settings.features.skillBurgerLine": "Сохраняет работу бота как шаги, которые можно запустить снова",
   "settings.features.threadTabs": "Вкладки веток",
   "settings.features.threadTabsLine": "Показывает ветки бота вкладками над чатом",
-  "settings.features.threadNotes": "Заметки ветки",
-  "settings.features.threadNotesLine": "Показывает, что бот записывает для каждой ветки",
-  "settings.features.mascotMotion": "Анимации маскота",
-  "settings.features.mascotMotionLine": "Маскоты ботов двигаются, пока боты работают",
   "settings.features.error": "Не удалось сохранить. Проверьте подключение и попробуйте ещё раз."
 }

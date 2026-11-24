@@ -11500,9 +11500,5 @@
   "settings.features.skillBurgerLine": "Salva l'esecuzione di un bot come passaggi da rieseguire",
   "settings.features.threadTabs": "Schede dei thread",
   "settings.features.threadTabsLine": "Mostra i thread di un bot come schede sopra la chat",
-  "settings.features.threadNotes": "Note del thread",
-  "settings.features.threadNotesLine": "Mostra cosa annota un bot per ogni thread",
-  "settings.features.mascotMotion": "Animazioni della mascotte",
-  "settings.features.mascotMotionLine": "Lascia che le mascotte dei bot si muovano mentre lavorano",
   "settings.features.error": "Impossibile salvare. Controlla la connessione e riprova."
 }

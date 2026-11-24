@@ -173,7 +173,7 @@ export function RoutinesPage({ bot, derived }: PageContext) {
  * memory, its topic files included, with the lines they saved to the team's memory. */
 export function MemoryPage({ bot }: PageContext) {
   const memory = useMemoryDoc(bot);
-  const memoryOn = bot.memoryEnabled !== false, threadNotes = useFeature("threadNotes");
+  const memoryOn = bot.memoryEnabled !== false;
   const teamSaved = useTeamMemoryEntries(bot.id, memory.mine && memoryOn && !bot.defaultBot?.person, memory.docs);
   if (!memoryOn) return <Card><NoteRow>{t("botPanel.library.memoryOff", { name: bot.name })}</NoteRow></Card>;
   if (memory.error) return <Card><NoteRow tone="warn">{t("botPanel.library.memoryError")}</NoteRow></Card>;
@@ -184,7 +184,7 @@ export function MemoryPage({ bot }: PageContext) {
   return (
     <div key={`${bot.id}:${bot.threadId}`} data-panel-memory="" className="flex flex-col gap-4 px-1 pt-2">
       {!memory.mine && <MemoryReviewNotice bot={bot} />}
-      {threadNotes && thread && (thread.scoped || thread.text.trim()) && (
+      {thread && (thread.scoped || thread.text.trim()) && (
         <MemoryText attr="thread" label={t("memoryPage.thisThread")} doc={thread} placeholder={t("memoryPage.empty")}
           save={(text, hash) => saveThreadNotes(bot.id, bot.threadId, text, hash)} />
       )}

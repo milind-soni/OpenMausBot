@@ -11815,9 +11815,5 @@
   "settings.features.skillBurgerLine": "Save a bot's run as steps you can run again",
   "settings.features.threadTabs": "Thread tabs",
   "settings.features.threadTabsLine": "Show a bot's threads as tabs above the chat",
-  "settings.features.threadNotes": "Thread notes",
-  "settings.features.threadNotesLine": "Show what a bot notes down for each thread",
-  "settings.features.mascotMotion": "Mascot animations",
-  "settings.features.mascotMotionLine": "Let bots' mascots move while they work",
   "settings.features.error": "Couldn't save that. Check your connection and try again."
 }

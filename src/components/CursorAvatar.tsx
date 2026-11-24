@@ -19,7 +19,7 @@ import {
   BLEND_OMEGA, COMPACT_MASCOT_PX, FRAME_SLACK_MS, GLYPH_EASE_MS, HOVER_BLINK_MS, MOTION, PoseBlend, REST_POSE, VIEW_SPAN, blinkOpenness, bodyPose,
   bodyTransform, faceTravelUnits, frameFloorMs, loopSeed, morphUnitsPerMs, nextFrameAt, nextMascotFrame, poseTransform, restPose, type BodyMotion,
 } from "./mascot-motion"
-import { mascotClock, put, useMascotStill, type MascotTicket } from "./mascot-clock"
+import { mascotClock, put, usePrefersReducedMotion, type MascotTicket } from "./mascot-clock"
 
 export { MOTION, bodyTransform, type BodyMotion }
 export {
@@ -594,7 +594,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
     const ticket = useRef<MascotTicket | null>(null)
     const wake = () => ticket.current?.wake(nextFrameAt(performance.now(), frameFloorMs(engine.current.props.sizePx, engine.current.hovered)))
 
-    const reduced = useMascotStill()
+    const reduced = usePrefersReducedMotion()
     const motionStrength = motion ?? (reduced ? 0 : 1)
     const paint = `url(#${uid}-grad)`
     const sizePx = typeof size === 'number' ? size : 160
