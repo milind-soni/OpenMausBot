@@ -13,6 +13,7 @@ import {
 } from "./cloud-home.ts";
 import { procHidepid } from "./bot-box/hidepid.ts";
 import { boxMemory, heapSizeArgs } from "./box-memory.ts";
+import { BROWSER_CGROUP_ENV, prepareBrowserCgroup, spawnInCgroup } from "./browser/memory-cgroup.ts";
 import { clearRecordsFromOtherMachines } from "./data-dir-lease.ts";
 import { OOM_SCORE, protectInit, protectSupervisor, spawnWithOomScore } from "./oom-score.ts";
 import { restartLine, restartPolicy } from "./restart.ts";
@@ -453,6 +454,13 @@ export function startCloudHome(processEnv: NodeJS.ProcessEnv = process.env) {
   }
   // Names only, never values: what the server does not get from here.
   if (dropped.length) console.log(`cloud home: not passed to the server: ${dropped.join(", ")}`);
+  // The bots' Chrome under a memory limit the kernel enforces (browser/memory-cgroup.ts); the server is started in its own
+  // leaf beside it. Root only: nothing changes where it can't be set up.
+  const browserLimit = ids && process.platform === "linux" ? prepareBrowserCgroup(env, boxMemory().bytes, ids) : null;
+  if (browserLimit) console.log(`cloud home: ${browserLimit.line}`);
+  const browserGroup = browserLimit?.group ?? null;
+  if (browserGroup) server[BROWSER_CGROUP_ENV] = browserGroup.browsers;
+  const inServerGroup = <T>(start: () => T): T => browserGroup ? spawnInCgroup(browserGroup.server, browserGroup.base, start) : start();
   const children: ChildProcess[] = [];
   let stopping = false, restartTimer: ReturnType<typeof setTimeout> | undefined;
   const stop = (failed: boolean) => {
@@ -475,7 +483,7 @@ export function startCloudHome(processEnv: NodeJS.ProcessEnv = process.env) {
   const policy = restartPolicy();
   const runServer = () => {
     if (stopping) return;
-    watch(spawnWithOomScore(OOM_SCORE.server, () => spawnWithSecrets(process.execPath, [...heapSizeArgs(boxMemory().cgroupLimit, server.NODE_OPTIONS), join(here, "index.js")], server, secrets, ids)), (code, signal) => {
+    watch(inServerGroup(() => spawnWithOomScore(OOM_SCORE.server, () => spawnWithSecrets(process.execPath, [...heapSizeArgs(boxMemory().cgroupLimit, server.NODE_OPTIONS), join(here, "index.js")], server, secrets, ids))), (code, signal) => {
       if (!policy.again(code, stopping, signal)) return false;
       console.warn(`cloud home: ${restartLine(code, policy.delayMs())}`);
       if (policy.delayMs() > 0) restartTimer = setTimeout(runServer, policy.delayMs());
