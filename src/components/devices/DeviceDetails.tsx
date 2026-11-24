@@ -1,5 +1,6 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BotAvatar } from "@/components/Avatar";
+import { productName } from "@/lib/brand";
 import { t } from "@/lib/i18n";
 import { lastSeen } from "@/lib/pairing-time";
 import type { Device, DeviceAction } from "@/lib/devices";
@@ -8,8 +9,8 @@ import { VpsServerEditor } from "../keys/VpsServerEditor";
 import { LendComputerSwitch } from "../LendComputerSwitch";
 import { OwnServerLink } from "../PlaceAddSheet";
 import { updateCommand } from "../ServerList";
-import { CommandLine } from "../SettingsPrimitives";
 import { needOf, useBotsOn } from "./device-parts";
+import { CommandRow } from "./PairCodePanel";
 import { kindLabel, routeLabel } from "./device-words";
 
 export function actionLabel(action: DeviceAction): string {
@@ -46,7 +47,7 @@ function Detail({ label, children }: { label: string; children: ReactNode }) {
 export function ActionButton({ device, action, onAction }: { device: Device; action: DeviceAction; onAction: (device: Device, action: DeviceAction) => void }) {
   return (
     <button type="button" data-device-action={action.type} data-danger={action.type === "remove" ? "" : undefined} onClick={() => onAction(device, action)}
-      aria-label={`${actionLabel(action)}: ${device.name}`} className={action.type === "remove" ? "ui-button ms-auto shrink-0" : "ui-button shrink-0"}>{actionLabel(action)}</button>
+      aria-label={`${actionLabel(action)}: ${device.name}`} className={action.type === "remove" ? "ui-button ms-auto shrink-0 text-danger!" : "ui-button shrink-0"}>{actionLabel(action)}</button>
   );
 }
 /** Harmless actions first, then one Remove, which takes every way the device is joined here. */
@@ -62,7 +63,7 @@ function BotsDetail({ device }: { device: Device }) {
   const bots = useBotsOn(device);
   if (bots.length) {
     return <ul data-device-bot-names="" className="flex flex-wrap gap-x-3 gap-y-1">
-      {bots.map((bot) => <li key={bot.id} className="flex min-w-0 items-center gap-1.5 text-ink"><BotAvatar bot={bot} size={16} /><span className="break-words">{bot.name}</span></li>)}
+      {bots.map((bot) => <li key={bot.id} className="flex min-w-0 items-baseline gap-1.5 text-ink"><span className="self-center"><BotAvatar bot={bot} size={16} /></span><span className="break-words">{bot.name}</span></li>)}
     </ul>;
   }
   return <>{device.canRunBots ? t("devicesPage.detail.runsBots") : device.canHostComputer ? t("devicesPage.detail.hostsComputer") : t("devicesPage.detail.reachesBots")}</>;
@@ -85,6 +86,9 @@ export function DeviceDetails({ device, onAction, onRemoved, now, pairing, onPai
   const vps = vpsOf(device);
   const lend = lendsHere(device);
   const [version] = useState(() => window.ogb?.app?.version ?? "");
+  const pairForm = useRef<HTMLDivElement>(null);
+  // Pair again keeps the device it is for in view: the row's own name sits right above its form.
+  useEffect(() => { if (pairing) pairForm.current?.closest("[data-device-row]")?.scrollIntoView?.({ block: "start" }); }, [pairing]);
   return (
     <div className="flex flex-col gap-4">
       <dl className="flex flex-col gap-2">
@@ -98,8 +102,8 @@ export function DeviceDetails({ device, onAction, onRemoved, now, pairing, onPai
       </dl>
       {update?.type === "copy-update" && (
         <div data-device-update="" className="flex flex-col gap-1.5">
-          <p className="text-[13px] leading-[18px] text-ink">{t("devicesPage.update.run", { name: device.name })}</p>
-          <CommandLine command={updateCommand(update.install, version)} copyLabel={t("devicesPage.action.copyUpdate")} />
+          <p className="text-[13px] leading-[18px] text-ink">{t("devicesPage.update.runPlain", { name: device.name, app: productName() })}</p>
+          <CommandRow label="" command={updateCommand(update.install, version)} />
         </div>
       )}
       {device.usesThisComputer && !lend && <p className="text-[13px] leading-[18px] text-ink-secondary">{t("servers.share.on", { name: device.name })}</p>}
@@ -111,8 +115,8 @@ export function DeviceDetails({ device, onAction, onRemoved, now, pairing, onPai
         <VpsServerEditor serverId={vps} onRemoved={onRemoved} />
       </div>}
       {pairing && pairAgain?.type === "pair-again"
-        ? <div data-device-pair-again="" className="flex flex-col gap-3">
-          <p className="text-[13px] font-medium leading-[18px] text-ink">{t("servers.pairAgainTitle", { name: device.name })}</p>
+        ? <div ref={pairForm} data-device-pair-again="" className="flex flex-col gap-3">
+          <p className="text-[13px] font-semibold leading-[18px] text-ink">{t("servers.pairAgainTitle", { name: device.name })}</p>
           <OwnServerLink inline onBack={null} onConnected={() => onPairing(false, true)} start={{ address: pairAgain.address, locked: true, title: "" }}
             aside={<button type="button" className="ui-button" data-pair-again-cancel="" onClick={() => onPairing(false)}>{t("common.cancel")}</button>} />
         </div>

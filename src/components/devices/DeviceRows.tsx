@@ -93,10 +93,10 @@ function NetworkRow({ network, line, action, secondary }: { network: PrivateNetw
       </div>
       {(action || secondary) && (
         <span className="flex shrink-0 items-center gap-2 ps-11 @min-[480px]/rows:ps-0">
-          {secondary}
           {action && (action.href
             ? <a href={action.href} target="_blank" rel="noreferrer" className="ui-button ui-button-sm" data-network-action="">{action.label}</a>
             : <button type="button" className="ui-button ui-button-sm" data-network-action="" disabled={action.busy} onClick={action.run}>{action.label}</button>)}
+          {secondary}
         </span>
       )}
     </div>

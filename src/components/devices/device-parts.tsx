@@ -13,7 +13,8 @@ export function StatusMark({ status }: { status: Device["status"] }) {
   if (status === "attention") return <CircleAlert size={14} aria-hidden="true" className="shrink-0 text-warning" />;
   if (status === "online") return <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-success" />;
   if (status === "offline") return <span aria-hidden="true" className="size-2 shrink-0 rounded-full border border-ink-tertiary" />;
-  return null;
+  // Nothing checks it live (a Cloud run for the person, a machine bots reach over SSH): a quiet filled dot.
+  return <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-ink-tertiary/50" />;
 }
 
 /** How it connects, after its state; a Cloud leaves it out, and a cloud desktop says what it is instead. */
@@ -30,7 +31,7 @@ export function StatusLine({ device, now, className }: { device: Device; now: nu
   const mark = markOf(device);
   return (
     <span data-device-state={mark} className={cn("flex min-w-0 items-start gap-1.5 text-[13px] leading-[18px]", className)}>
-      {mark !== "unknown" && <span className="flex h-[18px] w-2 shrink-0 items-center justify-center"><StatusMark status={mark} /></span>}
+      <span className="flex h-[18px] w-3.5 shrink-0 items-center"><StatusMark status={mark} /></span>
       <span className="min-w-0">
         {words && <span className={mark === "attention" ? "text-ink" : "text-ink-secondary"}>{words}</span>}
         {words && route && <span aria-hidden="true" className="text-ink-tertiary @max-[479px]/rows:hidden">{" · "}</span>}
@@ -63,7 +64,7 @@ export function BotsOn({ bots }: { bots: ReturnType<typeof useBotsOn> }) {
   if (bots.length === 0) return null;
   return <span className="flex shrink-0 items-center gap-1.5">
     <BotFaces bots={bots} />
-    <span aria-hidden="true" className="text-[12px] leading-4 text-ink-tertiary tabular-nums">{t(bots.length === 1 ? "devicesPage.bots.oneHere" : "devicesPage.bots.countHere", { count: bots.length })}</span>
+    <span aria-hidden="true" className="text-[12px] leading-4 text-ink-tertiary tabular-nums">{t(bots.length === 1 ? "devicesPage.bots.oneUses" : "devicesPage.bots.countUse", { count: bots.length })}</span>
   </span>;
 }
 

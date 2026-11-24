@@ -30,7 +30,7 @@ function CommandLine({ command, inline = false }: { command: string; inline?: bo
   const { state, copy } = useCopyFeedback(command);
   if (inline) {
     return <span className="flex items-center gap-1">
-      <code className="min-w-0 rounded-md bg-ink/[0.05] px-2 py-1 font-mono text-[12px] text-ink">{command}</code>
+      <code className="min-w-0 flex-1 rounded-lg bg-ink/[0.05] px-3 py-2 font-mono text-[12px] leading-4 text-ink">{command}</code>
       <button type="button" onClick={copy} aria-label={t(state === "copied" ? "connect.copied" : "connect.copy")} title={t("connect.copy")} className="ui-icon-button shrink-0">
         {state === "copied" ? <Check size={14} aria-hidden="true" className="text-success" /> : <Copy size={14} aria-hidden="true" />}
       </button>
@@ -131,7 +131,7 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
     <label className="flex flex-col gap-1.5 text-[13px] font-medium text-ink">{t("connect.address")}
       <input data-autofocus={start?.locked ? undefined : true} data-own-server-link value={address} disabled={busy} readOnly={start?.locked === true} onChange={(event) => { if (!start?.locked) typeAddress(event.target.value, (event.nativeEvent as InputEvent).inputType === "insertFromPaste"); }}
         placeholder={t("connect.addressPlaceholder")} autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false} aria-invalid={Boolean(shownProblem) || undefined}
-        className={inline ? cn(SETTINGS_INPUT, "font-normal") : "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] font-normal text-ink outline-none focus:border-accent/50"} />
+        className={inline ? cn(SETTINGS_INPUT, "font-normal aria-[invalid=true]:shadow-[inset_0_0_0_1px_var(--color-danger)]") : "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] font-normal text-ink outline-none focus:border-accent/50"} />
     </label>
     {shownProblem && inline && <p ref={problemLine} role="alert" data-connect-problem className="-mt-2 text-[13px] leading-[18px] text-danger">{shownProblem}
     </p>}
@@ -144,7 +144,7 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
     {showCode && <label className="flex flex-col gap-1.5 text-[13px] font-medium text-ink">{t("connect.code")}
       <input ref={codeField} data-autofocus={start?.locked ? true : undefined} data-own-server-code value={code} disabled={busy} onChange={(event) => { setCode(event.target.value); setFailure(null); }}
         placeholder={inline ? t("connect.codeFromServer") : "7KQ2-M9XD-H4TP"} autoCapitalize="characters" autoCorrect="off" autoComplete="off" spellCheck={false}
-        className={inline ? cn(SETTINGS_INPUT, "font-mono font-normal") : "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[14px] font-normal text-ink outline-none focus:border-accent/50"} />
+        className={inline ? cn(SETTINGS_INPUT, "font-mono font-normal placeholder:font-sans") : "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[14px] font-normal text-ink outline-none focus:border-accent/50"} />
       <span className="flex flex-col gap-1 text-[12px] font-normal text-ink-secondary">{t("connect.noCode")}<CommandLine command={PAIR_COMMAND} inline={inline} /></span>
     </label>}
     {/* The question after pairing lives here: on, a server of the person's own may use this computer once paired. */}

@@ -25,7 +25,7 @@ export function CommandRow({ label, command }: { label: string; command: string 
   const { state, copy } = useCopyFeedback(command);
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-[12px] leading-4 text-ink-secondary">{label}</span>
+      {label && <span className="text-[12px] leading-4 text-ink-secondary">{label}</span>}
       <div className="flex min-w-0 items-start gap-2 rounded-lg bg-ink/[0.05] py-1 ps-3 pe-1">
         <code data-server-command="" className="min-w-0 flex-1 select-text py-1.5 font-mono text-[12px] leading-4 text-ink [overflow-wrap:anywhere]">{command}</code>
         <button type="button" onClick={copy} aria-label={state === "failed" ? t("common.copyFailed") : t("devicesPage.addFlow.copyCommand")} title={t("devicesPage.addFlow.copyCommand")} className="ui-icon-button shrink-0">

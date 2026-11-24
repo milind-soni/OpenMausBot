@@ -178,7 +178,7 @@ export function AddDevicePanel(props: AddDeviceProps) {
           <SettingsLinkRow leading={<SettingsMark><Smartphone /></SettingsMark>} title={t("devicesPage.add.phone")} subtitle={t("devicesPage.add.phoneLine", { app: productName() })} onClick={() => choose("phone")} data={{ "data-add-kind": "phone" }} />
           <SettingsLinkRow leading={<SettingsMark><Laptop /></SettingsMark>} title={t("devicesPage.add.computer")} subtitle={t("devicesPage.add.computerLine")} onClick={() => choose("computer")} data={{ "data-add-kind": "computer" }} />
           <SettingsLinkRow leading={<SettingsMark><Server /></SettingsMark>} title={t("devicesPage.add.server")} subtitle={t("devicesPage.add.serverLine")} onClick={() => choose("server")} data={{ "data-add-kind": "server" }} />
-          {onGetCloud && <SettingsLinkRow leading={<SettingsMark><Cloud /></SettingsMark>} title={t("devicesPage.add.cloud")} subtitle={t("devicesPage.add.cloudLine")} onClick={() => choose("cloud")} data={{ "data-add-kind": "cloud" }} />}
+          {onGetCloud && <SettingsLinkRow leading={<SettingsMark><Cloud /></SettingsMark>} title={t("devicesPage.add.cloud")} subtitle={t("devicesPage.add.cloudAlwaysOn")} onClick={() => choose("cloud")} data={{ "data-add-kind": "cloud" }} />}
         </SettingsRows>
       )}
       {kind && (
@@ -203,7 +203,7 @@ export function AddDevicePanel(props: AddDeviceProps) {
                 </Step>
               </Steps>)}
             {kind === "server" && <Steps>
-              <Step n={1} title={t("devicesPage.addFlow.serverRun")}>
+              <Step n={1} title={t("devicesPage.addFlow.serverRunTerminal")}>
                 <CommandRow label={t("devicesPage.addFlow.serverAnywhere")} command={SERVER_COMMANDS.anywhere} />
                 <CommandRow label={t("devicesPage.addFlow.serverPrivate")} command={SERVER_COMMANDS.tailscale} />
                 <p className="text-[12px] leading-4 text-ink-secondary">{t("devicesPage.addFlow.serverHow")}</p>

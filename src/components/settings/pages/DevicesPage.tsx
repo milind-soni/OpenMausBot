@@ -30,7 +30,8 @@ export function tailscaleDownload(platform: string | undefined): string {
 export function nextNetworkStep(network: PrivateNetwork | null, run: { check: () => void }, opts: { busy: boolean; blocked: boolean; platform?: string }): NetworkAction | null {
   if (!network || opts.blocked) return null;
   switch (network.state) {
-    case "unknown": return { label: t("devicesPage.network.setUp"), run: run.check, busy: opts.busy };
+    case "unknown": return { label: t("devicesPage.network.setUpTailscale"), run: run.check, busy: opts.busy };
+    case "needs-approval": return { label: t("devicesPage.network.approveIn"), href: TAILSCALE_ADMIN };
     case "not-installed": return { label: t("remote.tailscale.getIt"), href: tailscaleDownload(opts.platform) };
     case "ready": return network.shared ? null : { label: t("devicesPage.network.allow"), run: run.check, busy: opts.busy };
     default: return { label: t("remote.checkAgain"), run: run.check, busy: opts.busy };
@@ -158,8 +159,7 @@ export function DevicesPage() {
   // At most one quiet button beside the next step: ask again after installing, open the admin console, or manage.
   const secondary = !network || blocked ? null
     : networkAction?.href ? <button type="button" className="settings-quiet cursor-pointer" disabled={c.busy} onClick={() => void check()}>{c.busy ? t("common.checking") : t("remote.checkAgain")}</button>
-    : network.state === "needs-approval" ? <a className="settings-quiet" href={TAILSCALE_ADMIN} target="_blank" rel="noreferrer">{t("devicesPage.network.approveIn")}</a>
-    : network.state === "ready" && network.shared ? <button type="button" className="settings-quiet cursor-pointer" onClick={() => go("phone", "computers")}>{t("devicesPage.action.manage")}</button> : null;
+    : network.state === "ready" && network.shared ? <button type="button" className="ui-button ui-button-sm" onClick={() => go("phone", "computers")}>{t("devicesPage.network.manageIn")}</button> : null;
   return <>
     {failure && <p role="alert" className="px-4 text-[13px] leading-[18px] text-danger">{failure}</p>}
     {notice && <p role="status" data-devices-notice="" className="px-4 text-[13px] leading-[18px] text-ink-secondary">{notice}</p>}

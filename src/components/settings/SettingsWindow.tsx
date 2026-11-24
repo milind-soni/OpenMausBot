@@ -148,7 +148,9 @@ export function SettingsWindow() {
   // Narrow header: the back label and the centred page title share 48 px of height; when the pair can't fit (half the
   // width each side of the centre), the back button keeps only its chevron.
   const compactBack = narrow && typeof window !== "undefined"
-    && window.innerWidth / 2 - 16 - (30 + (sub?.back ?? t("settings.title")).length * 7) < ((sub?.title ?? pageLabel(page, place, ctx.desktop)).length * 9) / 2;
+    && (sub
+      ? window.innerWidth / 2 - 16 - (30 + sub.back.length * 6.5) < (sub.title.length * 8.5) / 2
+      : window.innerWidth / 2 - 16 - (30 + t("settings.title").length * 7) < (pageLabel(page, place, ctx.desktop).length * 9) / 2);
   const closeButton = (
     <button type="button" onClick={close} aria-label={t("settings.close")} title={`${t("settings.close")} (${shortcutLabel("close-panel")})`}
       className={cn("ui-icon-button z-20 size-8 shrink-0 cursor-pointer rounded-full text-ink-secondary hover:bg-menu-hover hover:text-ink", !narrow && "absolute right-3 top-3")}>
