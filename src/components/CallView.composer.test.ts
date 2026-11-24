@@ -199,6 +199,16 @@ describe("composer call button", () => {
     expect(renderToStaticMarkup(createElement(() => CallButton({ bot, placement: "composer" })))).toContain('aria-label="Call mode"');
   });
 
+  it("keeps the inverse composer button opaque when hovered", () => {
+    renderToStaticMarkup(createElement(() => {
+      const element = CallButton({ bot, placement: "composer", inverse: true }) as ReactElement<Parameters<typeof CallTargetButton>[0]>;
+      const button = findButton(CallTargetButton(element.props))!;
+      expect(button.props.className).toContain("bg-composer-action text-composer-action-ink");
+      expect(button.props.className).not.toContain("hover:opacity-");
+      return null;
+    }));
+  });
+
   it("drops the bot's colour for the red hang-up during a call", () => {
     fixture.onCall = "pepper";
     let tree: ReactNode = null;

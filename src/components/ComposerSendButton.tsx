@@ -17,7 +17,7 @@ export function ComposerSendButton({ label, title, disabled, onSend }: {
       className={cn(
         "flex shrink-0 items-center justify-center rounded-full disabled:cursor-default",
         "size-8 max-md:size-9",
-        "bg-composer-action text-composer-action-ink hover:opacity-90",
+        "bg-composer-action text-composer-action-ink",
       )}
     >
       <ArrowUp size={16} strokeWidth={1.75} absoluteStrokeWidth />

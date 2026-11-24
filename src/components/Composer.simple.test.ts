@@ -142,6 +142,7 @@ describe("the composer", () => {
     const send = sendButton()!;
     expect(send.className.split(" ")).toContain("size-8");
     expect(send.className).toContain("bg-composer-action text-composer-action-ink");
+    expect(send.className).not.toContain("hover:opacity-");
     restoreComposerDraft(`group:${room.id}:${room.threadId}`, { text: "hello room", attachments: [] });
     render({ group: room, members: [bot, peer] });
     expect(sendButton()!.className).toContain("bg-composer-action text-composer-action-ink");
