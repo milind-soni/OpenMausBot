@@ -555,7 +555,7 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, versionEve
   let running = fx.desktopDataDir;
   const clean = profiles ? createCleanWorkspace({
     dataDir: () => fx.desktopDataDir, running: () => running,
-    swap: async (dir: string) => {
+    swap: async (dir: string, { showLocal = true } = {}) => {
       // A workspace's first config as the app writes it, with the fixture's AIs only, so nothing on this machine's PATH is used.
       const config = join(dir, "config.json");
       if (dir !== fx.desktopDataDir && existsSync(config)) {
@@ -565,8 +565,10 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, versionEve
       await fx.relaunch({ kill: false, ...(dir === fx.desktopDataDir ? {} : { dataDir: dir }) });
       running = dir;
       persist(environments.withActive(envState, environments.LOCAL_ID));
-      homeRef?.cancel();
-      await win.loadURL(`${localOrigin}/`).catch(() => {});
+      if (showLocal) {
+        homeRef?.cancel();
+        await win.loadURL(`${localOrigin}/`).catch(() => {});
+      }
       return { ok: true };
     },
     changed: () => lending?.cloudChanged(),

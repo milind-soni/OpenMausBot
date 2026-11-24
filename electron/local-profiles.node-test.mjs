@@ -16,10 +16,16 @@ function computer(t, { home = "cloud", frozen = home === "cloud" } = {}) {
   mkdirSync(dataDir, { recursive: true });
   if (frozen) writeFileSync(join(dataDir, "moved.json"), JSON.stringify({ v: 1, at: 1, cloud: "https://omb-t-1.fly.dev" }));
   let clock = 1_000;
-  const w = { dataDir, running: dataDir, swaps: [], home, shown: null, onScreen: "cloud", busy: [], trashed: [], trashFails: false, changes: 0, logs: [], waits: 0, remembered: [] };
+  const w = { dataDir, running: dataDir, swaps: [], localPages: [], home, shown: null, onScreen: "cloud", busy: [], trashed: [], trashFails: false, changes: 0, logs: [], waits: 0, remembered: [] };
   w.now = () => clock;
   w.clean = createCleanWorkspace({ dataDir: () => dataDir, running: () => w.running,
-    swap: async (dir) => { w.swaps.push(dir); await new Promise((resolve) => setImmediate(resolve)); w.running = dir; w.onScreen = "local"; return { ok: true }; } });
+    swap: async (dir, { showLocal = true } = {}) => {
+      w.swaps.push(dir);
+      await new Promise((resolve) => setImmediate(resolve));
+      w.running = dir;
+      if (showLocal) { w.localPages.push(dir); w.onScreen = "local"; }
+      return { ok: true };
+    } });
   w.registry = createProfileRegistry({ dataDir: () => dataDir, now: w.now, random: () => "abc123" });
   w.profiles = createLocalProfiles({ registry: w.registry, clean: w.clean, dataDir: () => dataDir, home: () => w.home,
     window: {
@@ -240,6 +246,7 @@ test("removing the workspace on screen: the window goes to My Cloud and its serv
   assert.deepEqual(await w.profiles.remove("work"), { outcome: "removed" });
   assert.equal(w.running, w.dataDir, "stopped before anything was removed");
   assert.equal(w.onScreen, "cloud");
+  assert.ok(!w.localPages.includes(w.dataDir), "the frozen copy cannot redirect the window away from My Cloud");
   assert.deepEqual(w.trashed, [profileDir(w.dataDir, "work")]);
   assert.deepEqual(w.registry.list().map((entry) => entry.id), ["default"]);
   assert.deepEqual(await w.profiles.remove("work"), { outcome: "gone" });

@@ -245,8 +245,9 @@ export function createLocalProfiles({ registry, clean, dataDir, home, window: sh
       try {
         turn++;
         if (running() === id) {
-          if (!(await clean.leave()) || running() === id) return { outcome: "failed" };
-          if (home() === "cloud") await shown.showCloud();
+          const openCloud = home() === "cloud";
+          if (!(await clean.leave({ showLocal: !openCloud })) || running() === id) return { outcome: "failed" };
+          if (openCloud) await shown.showCloud();
         }
         const dir = profileDir(dataDir(), id);
         try {
