@@ -112,6 +112,10 @@ export function createCleanWorkspace({ dataDir, running, swap, allowed = () => t
     /** The id of the profile that runs, or null. */
     profile,
     ownCopy,
+    prepare(id) {
+      if (!allowed() || held > 0 || (id ? !PROFILE_ID.test(id) : marker().frozen)) throw new Error("Workspace unavailable");
+      if (id) seed(profileDir(dataDir(), id));
+    },
     marker,
     /** Opens the clean workspace; true once it runs. False when it can't, and the window says why as before. A named local
      * environment the person chose is no frozen copy, so it stays, and so does a profile. */

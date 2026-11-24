@@ -861,6 +861,8 @@
   "rail.removeFailed": "It wasn't removed. Check your connection and try again.",
   "rail.addAny": "Add a place for your bots",
   "rail.searchAny": "Find a place",
+  "workspace.openWindow": "Open in new window",
+  "workspace.windowFailed": "Couldn't open the window. Try again.",
   "rail.local": "New workspace on this computer",
   "rail.localSub": "A separate place on this computer, with its own bots, chats and files.",
   "rail.localPreview": "On this computer",

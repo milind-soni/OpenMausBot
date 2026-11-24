@@ -1,11 +1,30 @@
 import { X } from "lucide-react";
-import { useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { currentTaskBot, useStore } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { ChatView } from "./ChatView";
 import { GroupView } from "./GroupView";
 
-export function ForkPanel() {
+export function ChatWindow({ owner, thread }: { owner: string; thread: string }) {
+  const { state, dispatch } = useStore();
+  const kind = state.bots.some(bot => bot.id === owner) ? "bot" : state.groups.some(group => group.id === owner) ? "group" : null;
+  const panel = state.forkPanel;
+  useEffect(() => {
+    if (kind && (panel?.threadId !== thread || panel.ownerId !== owner)) dispatch({ type: "openForkPanel", kind, ownerId: owner, threadId: thread });
+  }, [dispatch, kind, owner, thread, panel?.threadId, panel?.ownerId]);
+  const profile = (kind === "bot" ? state.bots : state.groups).find(entry => entry.id === owner);
+  const title = profile?.tasks?.find(task => task.threadId === thread)?.title;
+  const name = profile?.name;
+  useEffect(() => {
+    if (name) document.title = title ? `${title} · ${name}` : name;
+  }, [name, title]);
+  return <div className="h-dvh bg-app" data-chat-window={thread}>
+    {panel?.threadId === thread && panel.ownerId === owner ? <ForkPanel standalone />
+      : <p className="p-4 text-sm text-ink-secondary">{t(state.hydrated && !kind ? "chat.forkUnavailable" : "chat.loadingFork")}</p>}
+  </div>;
+}
+
+export function ForkPanel({ standalone = false }: { standalone?: boolean }) {
   const { state, dispatch } = useStore();
   const panel = state.forkPanel;
   const asideRef = useRef<HTMLElement>(null);
@@ -29,11 +48,11 @@ export function ForkPanel() {
     turnStartedAt: null, pinnedCwd: groupTask.pinnedCwd, pinnedMessageId: groupTask.pinnedMessageId } : null;
 
   return (
-    <aside ref={asideRef} tabIndex={panel.focusComposer ? -1 : undefined} aria-label={t("chat.forkPanel")} className="relative flex h-full w-[min(48vw,640px)] min-w-[360px] flex-col border-l border-hairline bg-app">
+    <aside ref={asideRef} tabIndex={panel.focusComposer ? -1 : undefined} aria-label={(standalone && task?.title) || t("chat.forkPanel")} className={standalone ? "flex h-full flex-col bg-app" : "relative flex h-full w-[min(48vw,640px)] min-w-[360px] flex-col border-l border-hairline bg-app"}>
       <div className="flex items-center justify-between border-b border-hairline px-4 py-2 text-sm font-medium text-ink">
         <span className="truncate">{task?.title ?? t("chat.forkPanel")}</span>
-        <button type="button" aria-label={t("chat.closeForkPanel")} className="rounded p-1 text-ink-secondary hover:bg-raised hover:text-ink"
-          onClick={() => dispatch({ type: "closeForkPanel" })}><X size={16} /></button>
+        {!standalone && <button type="button" aria-label={t("chat.closeForkPanel")} className="rounded p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          onClick={() => dispatch({ type: "closeForkPanel" })}><X size={16} /></button>}
       </div>
       <div className="min-h-0 flex-1">
         {panel.loading ? <p className="p-4 text-sm text-ink-secondary">{t("chat.loadingFork")}</p>

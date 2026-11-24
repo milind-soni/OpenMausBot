@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import test from "node:test";
 
-import { installServerSessions, reportOwnListeners, targetsServer } from "./server-session.mjs";
+import { installServerSessions, reportOwnListeners, reserveProfilePort, targetsServer } from "./server-session.mjs";
 
 const SERVER_PORT = 48799;
 
@@ -58,7 +58,7 @@ test("no session but the app window's may reach the server, in any spelling of t
     assert.equal(await request(viewer, url), false, url);
   }
   created(defaultSession);
-  assert.equal(defaultSession.hooks.request, undefined, "the app window's own session is never cancelled");
+  assert.equal(await request(defaultSession, `http://127.0.0.1:${SERVER_PORT}/`), false);
 });
 
 test("every session main creates gets the guard before it loads anything", () => {
@@ -83,4 +83,19 @@ test("the server hears about every port this app listens on, and about new ones 
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+test("each profile server admits only its own session while its port is reserved", async () => {
+  const { defaultSession, created } = install();
+  const first = created(fakeSession()), second = created(fakeSession());
+  const port = SERVER_PORT + 1, url = `ws://127.0.0.1:${port}/`;
+  const reservation = reserveProfilePort(port);
+  try {
+    assert.equal(await request(first, url), true);
+    reservation.allow(first);
+    assert.equal(await request(first, url), false);
+    assert.equal(await request(second, url), true);
+    assert.equal(await request(defaultSession, url), true);
+    assert.equal(await request(first, `http://127.0.0.1:${SERVER_PORT}/`), true);
+  } finally { reservation.release(); }
 });

@@ -28,6 +28,15 @@ CUA supply-chain work is tracked in [issue #113](https://github.com/milind-soni/
 [issue #79](https://github.com/milind-soni/OpenMausBot/issues/79), and guarded GNOME/Wayland support in
 [issue #109](https://github.com/milind-soni/OpenMausBot/issues/109).
 
+## Work side by side on Omarchy
+
+Right-click a local workspace in the left rail and choose **Open in new window**.
+Each workspace can run its own bots while both windows are open. Right-click
+a bot or an individual chat in the sidebar and choose the same action to open
+that conversation in a separate tile. Opening it again focuses its window.
+Closing the last window for an independently opened workspace stops its server.
+Its conversations are available the next time you open it.
+
 ## Download packages
 
 Choose one Ubuntu 24.04 x86_64 package from the latest release:

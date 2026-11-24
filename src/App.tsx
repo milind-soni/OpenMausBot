@@ -22,7 +22,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { HandoffExchangeHost } from "@/components/HandoffExchange";
 import { GroupView } from "@/components/GroupView";
-import { ForkPanel } from "@/components/ForkPanel";
+import { ChatWindow, ForkPanel } from "@/components/ForkPanel";
 import { SIDEBAR_AND_BOT_PANEL_FIT, SIDEBAR_AND_NARROW_PANEL_FIT, SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQuery } from "@/lib/use-media-query";
 import { anySidePanel, botPanelFloats, panelsMovingSidebar, sidebarFoldsForPanel, type OpenSidePanels } from "@/lib/sidebar-fold";
 import { preloadConnectedApps } from "@/lib/connected-apps";
@@ -527,6 +527,12 @@ function Application() {
     initAnalytics();
   }, []);
   const viewer = useWelcomeViewer();
+  const params = new URLSearchParams(window.location.search);
+  const thread = window.ombChatWindow && params.get("chatWindow");
+  const owner = params.get("owner");
+  if (thread && owner) return <DesktopCapabilitiesProvider><StoreProvider resumeChat={false}>
+    <ThreadRefsProvider><ChatWindow owner={owner} thread={thread} /></ThreadRefsProvider>
+  </StoreProvider></DesktopCapabilitiesProvider>;
   return (
     <DesktopCapabilitiesProvider>
       <StoreProvider>

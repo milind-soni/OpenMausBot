@@ -25,6 +25,8 @@ import { useMoveToTeam } from "./MoveToTeam";
 import type { MenuState } from "./Sidebar";
 import { departmentNames, moveBotsToSection, useMayMoveBots } from "./bot-sections";
 import { openBotSettings } from "./bot-panel/panel-link";
+import { OpenWindowAction } from "./OpenWindowAction";
+import { botOpensTo } from "@/state/thread-navigation";
 import { isArchived } from "./SidebarThreadRow";
 
 type Flyout = "more" | "move";
@@ -296,7 +298,7 @@ export function BotContextMenu({
       () => dispatch({ type: "updateBot", botId: bot.id, patch: { mainThreadChoice: bot.threadId } }),
       bot.mainThreadId === bot.threadId ? { disabled: true, hint: t("sidebar.bot.simple.isMainThread") } : undefined,
     );
-    const threads = [divider("threads"), newThread, viewThreads, setMain];
+    const threads = [divider("threads"), <OpenWindowAction key="window" menuItem target={{ bot: bot.id, thread: botOpensTo(bot, showThreads) }} onOpened={onClose} />, newThread, viewThreads, setMain];
     const moreRow = flyoutButton("more", moreRef, <MoreHorizontal size={16} className="text-ink-secondary" />, t("sidebar.bot.more"));
     const leave = bot.defaultBot ? [<HideDefaultBotItem key="hide" bot={bot} onDone={onClose} className={MENU_ITEM} />, ...(member ? [] : [<DemoteDefaultBotItem key="demote" bot={bot} onDone={onClose} className={MENU_ITEM} />])] : member ? ownDelete() : [
       item(<Archive size={16} className="text-ink-secondary" />, t("sidebar.bot.archive"), () => onArchive(bot), { disabled: archiveBlocked, hint: archiveHint }),
@@ -390,6 +392,7 @@ export function BotContextMenu({
       style={{ top: shown.y, left: shown.x }}
       className={cn("fixed z-40 max-h-[calc(100dvh-16px)] w-max min-w-[198px] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain", MENU_SHEET, motion.className)} {...motion.exitProps}
     >
+      <OpenWindowAction menuItem target={{ bot: bot.id, thread: botOpensTo(bot, showThreads) }} onOpened={onClose} />
       {showThreads && <>
         {item(<SquarePen size={16} className="text-ink-secondary" />, t("task.newShort"), () => dispatch({ type: "newTask", botId: bot.id }))}
         {admin && item(<FolderOpen size={16} className="shrink-0 text-ink-secondary" />, t("task.folder.new"), () => onNewTaskFolder(bot.id))}

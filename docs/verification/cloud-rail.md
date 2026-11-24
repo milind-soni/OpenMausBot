@@ -118,6 +118,7 @@ with no Cloud see no change.
 node --test electron/clean-workspace.node-test.mjs electron/home-window-profile.node-test.mjs electron/home-window-clean.node-test.mjs electron/cloud-rail.node-test.mjs electron/lending-target.node-test.mjs electron/start-place.node-test.mjs electron/home-places.node-test.mjs
 pnpm exec vitest run src/components/PlacesRail.test.ts src/components/HomeLine.test.ts
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/rail-profile-ui.e2e.test.ts
+node scripts/verify-workspace-windows.mjs release/linux-unpacked/openmausbot
 ```
 
 `scripts/testing/rail-profile-ui.e2e.test.ts` runs main's own handlers in a
@@ -137,7 +138,7 @@ in the Server menu where there is no rail yet). It asks a name (Work, then
 Personal, then Workspace 2 and on) and a colour, then opens it fresh: another
 profile under `~/.openmausbot-profiles/<id>`, listed with its name, colour and
 creation time in `~/.openmausbot-profiles/profiles.json` (This Mac, `default`,
-is its first entry, kept as it was). One runs at a time: opening another waits
+is its first entry, kept as it was). Switching workspaces in the main window waits
 for the work under way in the one that runs (as the move waits for it, at most
 a minute, the circle saying so), then stops it as a quit does and starts the
 next. Once My Cloud is home every workspace is on the rail; with no home the
@@ -152,6 +153,7 @@ and a server of the person's own its server mark.
 node --test electron/local-profiles.node-test.mjs electron/cloud-rail.node-test.mjs electron/environments.node-test.mjs
 pnpm exec vitest run src/components/PlacesRail.test.ts src/components/PlaceAddSheet.test.ts src/components/HomeLine.test.ts src/components/WindowPlaceTitle.test.ts
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/rail-profile-ui.e2e.test.ts
+node scripts/verify-workspace-windows.mjs release/linux-unpacked/openmausbot
 ```
 
 The UI test walks every path through the real pages: ＋ with Escape, Close and

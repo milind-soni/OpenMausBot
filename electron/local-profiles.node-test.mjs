@@ -28,6 +28,7 @@ function computer(t, { home = "cloud", frozen = home === "cloud" } = {}) {
       showCloud: async () => { w.shown = null; w.onScreen = "cloud"; },
     },
     showLocal: () => { w.onScreen = "local"; }, onLocal: () => w.onScreen === "local",
+    focusWindow: dir => w.focused === dir, holdsWindow: dir => w.held === dir,
     busy: async () => w.busy[0] ?? null,
     trash: async (dir) => { if (w.trashFails) throw new Error("no Trash here"); w.trashed.push(dir); rmSync(dir, { recursive: true, force: true }); },
     reserved: () => "This Mac", remember: (place) => w.remembered.push(place), changed: () => { w.changes++; }, log: (line) => w.logs.push(line), now: w.now,
@@ -303,4 +304,18 @@ test("the workspace that opened is the place the next launch opens; one that did
   assert.equal(await local.profiles.open("work"), true);
   assert.equal(await local.profiles.computer(), true);
   assert.deepEqual(local.remembered, [{ profile: "work" }, null]);
+});
+
+test("a separately opened local workspace keeps its server and folder while a window uses it", async t => {
+  const w = computer(t, { home: "local" });
+  w.registry.create({ name: "Work" });
+  w.held = profileDir(w.dataDir, "work");
+  assert.equal(await w.profiles.open("work"), false);
+  assert.deepEqual(await w.profiles.remove("work"), { outcome: "failed" });
+  w.focused = w.held;
+  assert.equal(await w.profiles.open("work"), true);
+  assert.deepEqual(w.swaps, []);
+  assert.deepEqual(w.trashed, []);
+  w.held = w.focused = null;
+  assert.deepEqual(await w.profiles.remove("work"), { outcome: "removed" });
 });
