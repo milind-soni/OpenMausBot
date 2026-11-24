@@ -149,6 +149,43 @@ describe("notification sounds preference", () => {
   });
 });
 
+describe("sound style preference", () => {
+  it("reads the earlier on/off values: a saved \"0\" stays off, anything else plays the default style", async () => {
+    const preference = await import("./notification-preferences");
+    expect(preference.parseSoundChoice("0")).toBe("off");
+    for (const value of ["1", null, undefined, "", "broken"]) expect(preference.parseSoundChoice(value)).toBe("click");
+    for (const style of ["click", "glass", "retro"] as const) expect(preference.parseSoundChoice(style)).toBe(style);
+    local.setItem(preference.NOTIFICATION_SOUNDS_KEY, "0");
+    expect(preference.readSoundChoice()).toBe("off");
+    expect(preference.useSoundChoice()).toBe("off");
+  });
+
+  it("saves a style under the same key, so the on/off switch reads it as on", async () => {
+    let preference = await import("./notification-preferences");
+    preference.setSoundChoice("glass");
+    expect(local.getItem(preference.NOTIFICATION_SOUNDS_KEY)).toBe("glass");
+    expect(preference.notificationSoundsEnabled()).toBe(true);
+    vi.resetModules();
+    preference = await import("./notification-preferences");
+    expect(preference.readSoundChoice()).toBe("glass");
+    preference.setSoundChoice("off");
+    expect(local.getItem(preference.NOTIFICATION_SOUNDS_KEY)).toBe("0");
+    expect(preference.notificationSoundsEnabled()).toBe(false);
+  });
+
+  it("keeps a chosen style when the on/off switch is turned on again, and starts at the default after off", async () => {
+    const preference = await import("./notification-preferences");
+    preference.setSoundChoice("retro");
+    local.setItem.mockClear();
+    preference.setNotificationSounds(true);
+    expect(local.setItem).not.toHaveBeenCalled();
+    expect(preference.readSoundChoice()).toBe("retro");
+    preference.setNotificationSounds(false);
+    preference.setNotificationSounds(true);
+    expect(preference.readSoundChoice()).toBe("click");
+  });
+});
+
 describe("notification feed preference", () => {
   it("defaults off, persists a choice, and leaves the sounds choice alone", async () => {
     let preference = await import("./notification-preferences");

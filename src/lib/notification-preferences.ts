@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { DEFAULT_SOUND_STYLE, SOUND_STYLES, type SoundChoice } from "./app-sounds/render";
 import { windowPrefChanged } from "./window-pref-changes";
 
 export const NOTIFICATION_SOUNDS_KEY = "omb-notification-sounds";
@@ -6,7 +7,7 @@ export const NOTIFICATION_FEED_KEY = "omb-notification-feed";
 export const FINISHED_NOTIFICATIONS_KEY = "omb-finished-notifications";
 export const NOTIFICATION_TRAY_PINNED_KEY = "omb-notification-tray-pinned";
 
-let sessionChoice: boolean | undefined;
+let sessionChoice: SoundChoice | undefined;
 let feedSessionChoice: boolean | undefined;
 let finishedSessionChoice: boolean | undefined;
 const listeners = new Set<() => void>();
@@ -19,13 +20,27 @@ function storage(): Storage | undefined {
   }
 }
 
-export function notificationSoundsEnabled(): boolean {
-  if (sessionChoice !== undefined) return sessionChoice;
+/** The stored value is "0" for off, a style's name, or anything else for the default style: a value saved as "1" or
+ * "0" by the earlier on/off switch reads the same. */
+export function parseSoundChoice(value: string | null | undefined): SoundChoice {
+  if (value === "0") return "off";
+  return SOUND_STYLES.find((style) => style === value) ?? DEFAULT_SOUND_STYLE;
+}
+
+function storedSoundValue(): string | null | undefined {
   try {
-    return storage()?.getItem(NOTIFICATION_SOUNDS_KEY) !== "0";
+    return storage()?.getItem(NOTIFICATION_SOUNDS_KEY);
   } catch {
-    return true;
+    return undefined;
   }
+}
+
+export function readSoundChoice(): SoundChoice {
+  return sessionChoice ?? parseSoundChoice(storedSoundValue());
+}
+
+export function notificationSoundsEnabled(): boolean {
+  return readSoundChoice() !== "off";
 }
 
 function notify() {
@@ -54,11 +69,10 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-export function setNotificationSounds(enabled: boolean): void {
-  sessionChoice = enabled;
+function saveSoundValue(choice: SoundChoice, value: string): void {
+  sessionChoice = choice;
   try {
     const local = storage();
-    const value = enabled ? "1" : "0";
     local?.setItem(NOTIFICATION_SOUNDS_KEY, value);
     if (local?.getItem(NOTIFICATION_SOUNDS_KEY) === value) sessionChoice = undefined;
   } catch {
@@ -67,8 +81,22 @@ export function setNotificationSounds(enabled: boolean): void {
   windowPrefChanged();
 }
 
+export function setSoundChoice(choice: SoundChoice): void {
+  saveSoundValue(choice, choice === "off" ? "0" : choice);
+}
+
+/** Turning sounds on keeps a style already chosen. */
+export function setNotificationSounds(enabled: boolean): void {
+  if (enabled && readSoundChoice() !== "off") return;
+  saveSoundValue(enabled ? DEFAULT_SOUND_STYLE : "off", enabled ? "1" : "0");
+}
+
 export function useNotificationSounds(): boolean {
   return useSyncExternalStore(subscribe, notificationSoundsEnabled, () => true);
+}
+
+export function useSoundChoice(): SoundChoice {
+  return useSyncExternalStore(subscribe, readSoundChoice, () => DEFAULT_SOUND_STYLE);
 }
 
 export function notificationFeedEnabled(): boolean {
