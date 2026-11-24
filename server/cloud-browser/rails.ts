@@ -16,8 +16,8 @@ export const CLOUD_BROWSER_BACKOFF_MS = 15 * 60_000;
 
 /** Why a browser session opened in the home instead: names only, for the log and the health report. */
 export type HomeReason =
-  | "lever" | "team" | "not-eligible" | "not-set-up" | "busy" | "lent-connection"
-  | "budget" | "minutes-used" | "sandbox-full" | "backoff" | "account-limit" | "hours-used" | "at-once" | "no-route" | "start-failed" | "unreachable";
+  | "lever" | "team" | "not-eligible" | "own-key" | "not-set-up" | "busy" | "lent-connection"
+  | "old-relay" | "unavailable" | "budget" | "minutes-used" | "sandbox-full" | "backoff" | "account-limit" | "hours-used" | "at-once" | "no-route" | "start-failed" | "unreachable";
 
 interface Day {
   day: string;
@@ -40,6 +40,10 @@ interface State extends Day {
   noRouteDay: string | null;
   /** Since when the sandbox was woken here and not yet let sleep; 0 when asleep. */
   awakeSince: number;
+  /** The Cloud's relay does not know the browser sandbox: nothing is started before this. */
+  oldRelayUntil: number;
+  /** The relay said no browser sandbox may start (the fleet's day spent, switched off): nothing is started before this. */
+  unavailableUntil: number;
   /** Since when the operator lever has kept every browser in the home; 0 when it does not. */
   leverSince: number;
 }
@@ -69,7 +73,7 @@ export function createCloudBrowserRails(options: CloudBrowserRailsOptions) {
   const awakeCapMs = (options.awakeMinutes ?? CLOUD_BROWSER_DAILY_AWAKE_MINUTES) * 60_000;
   const file = join(options.dataDir, "cloud-browser", "rails.json");
   const fresh = (day: string): Day => ({ day, resumes: 0, awakeMs: 0, computer: 0, home: 0, fallbacks: {} });
-  let state: State = { ...fresh(utcDay(now())), failuresInRow: 0, backoffUntil: 0, accountUntil: 0, hoursUntil: 0, noRouteDay: null, awakeSince: 0, leverSince: 0 };
+  let state: State = { ...fresh(utcDay(now())), failuresInRow: 0, backoffUntil: 0, accountUntil: 0, hoursUntil: 0, noRouteDay: null, awakeSince: 0, leverSince: 0, oldRelayUntil: 0, unavailableUntil: 0 };
   try {
     const saved = JSON.parse(readFileSync(file, "utf8")) as Partial<State>;
     const number = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0);
@@ -81,6 +85,7 @@ export function createCloudBrowserRails(options: CloudBrowserRailsOptions) {
       accountUntil: number(saved.accountUntil), hoursUntil: number(saved.hoursUntil),
       noRouteDay: typeof saved.noRouteDay === "string" ? saved.noRouteDay : null,
       awakeSince: number(saved.awakeSince), leverSince: number(saved.leverSince),
+      oldRelayUntil: number(saved.oldRelayUntil), unavailableUntil: number(saved.unavailableUntil),
     };
   } catch {
     // None yet, or unreadable: a fresh day. The holds it may have had end by the next day anyway.
@@ -110,6 +115,8 @@ export function createCloudBrowserRails(options: CloudBrowserRailsOptions) {
     /** Why no start may be sent for a browser now, or null. `resume`: this open needs one (the computer is stopped). */
     refusal(resume: boolean): HomeReason | null {
       const current = today(), at = now();
+      if (at < current.oldRelayUntil) return "old-relay";
+      if (at < current.unavailableUntil) return "unavailable";
       if (at < current.accountUntil) return "account-limit";
       if (at < current.hoursUntil) return "hours-used";
       if (at < current.backoffUntil) return "backoff";
@@ -188,6 +195,19 @@ export function createCloudBrowserRails(options: CloudBrowserRailsOptions) {
       current.backoffUntil = Math.max(current.backoffUntil, now() + CLOUD_BROWSER_BACKOFF_MS);
       save();
     },
+    /** An Admin from before the browser sandbox: asked again in a week. */
+    oldRelay(): void {
+      today().oldRelayUntil = now() + 7 * 24 * 60 * 60_000;
+      save();
+    },
+    /** The relay's no, until its `resetsAt` (else the next UTC day): the fleet's starts, this Cloud's, or switched off. */
+    unavailable(reason: string, resetsAt: string | null): HomeReason {
+      const current = today();
+      const limit = resetsAt ? { reason: "too_many_starts" as const, resetsAt } : undefined;
+      current.unavailableUntil = liftsAt(limit, now());
+      save();
+      return reason === "cloud_minutes" ? "minutes-used" : reason === "cloud_starts" ? "budget" : "unavailable";
+    },
     noRoute(): void {
       const current = today();
       current.noRouteDay = current.day;
@@ -204,7 +224,8 @@ export function createCloudBrowserRails(options: CloudBrowserRailsOptions) {
         awakeMinutes: Math.floor(awakeToday(current) / 60_000),
         awakeMinutesCap: Math.round(awakeCapMs / 60_000),
         fallbacks: { ...current.fallbacks },
-        held: awakeToday(current) >= awakeCapMs ? "minutes-used" as const : at < current.accountUntil ? "account-limit" as const : at < current.hoursUntil ? "hours-used" as const
+        held: at < current.oldRelayUntil ? "old-relay" as const : at < current.unavailableUntil ? "unavailable" as const
+          : awakeToday(current) >= awakeCapMs ? "minutes-used" as const : at < current.accountUntil ? "account-limit" as const : at < current.hoursUntil ? "hours-used" as const
           : at < current.backoffUntil ? "backoff" as const : current.noRouteDay === current.day ? "no-route" as const : null,
       };
     },

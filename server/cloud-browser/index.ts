@@ -8,15 +8,11 @@ import { randomBytes } from "node:crypto";
 import { cloudFailureOf } from "../boat-limit.ts";
 import { CloudBrowserDoors, dialable, probeDoor, type DoorTarget } from "./door.ts";
 import { createCloudBrowserRails, type CloudBrowserRails, type HomeReason } from "./rails.ts";
-import {
-  BROWSER_SANDBOX_CHROMES, BROWSER_SANDBOX_OWNER, COMPUTER_DOOR_PORT, launchAnswer, launchCommand, profileKey, quitCommand, QUIT_ALL_COMMAND,
-  OldRelay, StaysHome, wakeSandbox, type ComputerOps,
-} from "./remote.ts";
+import { BROWSER_SANDBOX_CHROMES, BROWSER_SANDBOX_OWNER, COMPUTER_DOOR_PORT, OldRelay, profileKey, StaysHome, wakeSandbox, type ComputerOps } from "./remote.ts";
 
 /** A browser in the sandbox with no activity this long is closed; the sandbox sleeps once none is left. */
 export const CLOUD_BROWSER_IDLE_MS = 3 * 60_000;
 const SWEEP_MS = 30_000;
-const LAUNCH_MS = 25_000;
 const LEVER_CLEANUP_GAP_MS = 60 * 60_000;
 
 export const cloudBrowserLever = (env: NodeJS.ProcessEnv = process.env): boolean => env.OMB_CLOUD_BROWSER?.trim() === "home";
@@ -50,6 +46,17 @@ export interface OpenRequest {
 
 export type Opened = { cdpUrl: string } | { home: HomeReason };
 
+/** The relay says no browser sandbox may start now (the fleet's or this Cloud's day spent, or switched off). */
+class Unavailable extends Error {
+  readonly reason: string;
+  readonly resetsAt: string | null;
+  constructor(reason: string, resetsAt: string | null) {
+    super(reason);
+    this.reason = reason;
+    this.resetsAt = resetsAt;
+  }
+}
+
 export function createCloudBrowser(deps: CloudBrowserDeps) {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((line: string) => console.warn(line));
@@ -59,6 +66,8 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
   const sessions = new Map<string, string>();
   /** Bots whose browser is being opened now. */
   const opening = new Set<string>();
+  /** A session's open under way: a second call for the same session waits on it, so one session never splits in two. */
+  const pendingSessions = new Map<string, Promise<Opened>>();
   const closing = new Set<string>();
   /** One wake of the sandbox at a time, shared by every bot opening meanwhile. */
   let waking: Promise<{ id: string; started: boolean }> | null = null;
@@ -98,9 +107,17 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
     rails.asleep();
   }
 
+  /** Asked once before a start: an Admin that cannot mark the sandbox as the browser's gets no box at all. */
+  async function allowed(ops: ComputerOps): Promise<void> {
+    const said = await ops.probe();
+    if (said.kind === "old-relay") throw new OldRelay();
+    if (said.kind === "unavailable") throw new Unavailable(said.reason, said.resetsAt);
+  }
+
   async function wake(ops: ComputerOps): Promise<{ id: string; started: boolean }> {
     waking ??= wakeSandbox(ops, {
       mayStart: () => rails.refusal(true) === null,
+      allowed: () => allowed(ops),
       starting: () => rails.resumed(),
       ...(deps.pollMs ? { pollMs: deps.pollMs } : {}),
     }).finally(() => { waking = null; });
@@ -116,17 +133,17 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
   async function launch(request: OpenRequest, ops: ComputerOps): Promise<Opened> {
     const key = profileKey(request.botId);
     let box: { id: string; started: boolean } | null = null;
-    const quit = async () => { if (box) await ops.run(box.id, quitCommand(key), 10_000).catch(() => undefined); };
+    const quit = async () => { if (box) await ops.quit(box.id, key).catch(() => undefined); };
     try {
       box = await wake(ops);
       const secret = randomBytes(24).toString("hex");
-      const answer = launchAnswer(await ops.run(box.id, launchCommand(key, secret), LAUNCH_MS));
+      const answer = await ops.launch(box.id, key, secret);
       if (!answer.chrome) {
         rails.failed();
         await quit();
         return home(request, "start-failed");
       }
-      const relay = await ops.host(box.id, COMPUTER_DOOR_PORT).catch(() => null) ?? answer.url;
+      const relay = await ops.host(box.id, COMPUTER_DOOR_PORT).catch(() => null);
       const url = relay ? dialable(relay) : null;
       if (!url) {
         rails.noRoute();
@@ -147,7 +164,8 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
       return { cdpUrl };
     } catch (error) {
       if (error instanceof StaysHome) return home(request, error.reason);
-      if (error instanceof OldRelay) { rails.noRoute(); return home(request, "no-route"); }
+      if (error instanceof OldRelay) { rails.oldRelay(); return home(request, "old-relay"); }
+      if (error instanceof Unavailable) return home(request, rails.unavailable(error.reason, error.resetsAt));
       await quit();
       return home(request, refused(error));
     }
@@ -169,9 +187,17 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
   }
 
   /** Where the session's browser opens: in the sandbox (`cdpUrl`, the engine's address for it), or in the home. */
-  async function open(request: OpenRequest): Promise<Opened> {
+  function open(request: OpenRequest): Promise<Opened> {
     const live = doors.url(request.session);
-    if (live) return { cdpUrl: live };
+    if (live) return Promise.resolve({ cdpUrl: live });
+    const pending = pendingSessions.get(request.session);
+    if (pending) return pending;
+    const decided = decide(request).finally(() => pendingSessions.delete(request.session));
+    pendingSessions.set(request.session, decided);
+    return decided;
+  }
+
+  async function decide(request: OpenRequest): Promise<Opened> {
     if (cloudBrowserLever(deps.env)) { leverCleanup(); return home(request, "lever"); }
     rails.lever(false);
     if (request.refusal) return home(request, request.refusal);
@@ -201,7 +227,7 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
       doors.close(session);
       sessions.delete(session);
       const ops = deps.ops();
-      if (ops && boxId) await ops.run(boxId, bots().size > 0 ? quitCommand(profileKey(botId)) : QUIT_ALL_COMMAND, 10_000).catch(() => undefined);
+      if (ops && boxId) await ops.quit(boxId, bots().size > 0 ? profileKey(botId) : null).catch(() => undefined);
       letSleep();
       log(`browser ${session}: closed in the Cloud's browser sandbox after ${Math.round(CLOUD_BROWSER_IDLE_MS / 60_000)} minutes unused`);
     } finally {

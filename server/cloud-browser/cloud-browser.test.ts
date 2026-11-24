@@ -1,21 +1,18 @@
-// The Cloud's browser sandbox, against a fake provider (testing/fake-computer.ts): no real provider is called and no
-// billable resource is made.
-import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer, type Server } from "node:http";
+// The Cloud's browser sandbox, against a fake Admin relay and provider (testing/fake-computer.ts): no real provider is
+// called and no billable resource is made.
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import WebSocket, { WebSocketServer } from "ws";
+import WebSocket from "ws";
 
 import type { AppConfig } from "../config.ts";
 import { ComputerIdleTimer } from "../computer-idle.ts";
+import { DOWNLOAD_NOTE, downloadNote, LOCAL_SCHEME_REFUSAL, localSchemeRefusal } from "./guards.ts";
 import { CLOUD_BROWSER_IDLE_MS, createCloudBrowser, type CloudBrowserDeps } from "./index.ts";
 import { CLOUD_BROWSER_BACKOFF_MS, createCloudBrowserRails } from "./rails.ts";
-import {
-  BROWSER_SANDBOX_CHROMES, BROWSER_SANDBOX_OWNER, browserSandboxCreateBody, COMPUTER_BROWSER_DIR, doorSource, launchCommand, profileKey, providerOps, quitCommand, QUIT_ALL_COMMAND,
-} from "./remote.ts";
-import { OWN_KEY, RELAY_TOKEN, startFakeComputer, type FakeComputer } from "./testing/fake-computer.ts";
+import { BROWSER_SANDBOX_CHROMES, BROWSER_SANDBOX_OWNER, browserSandboxCreateBody, profileKey, providerOps } from "./remote.ts";
+import { RELAY_KEY, RELAY_TOKEN, startFakeComputer, type FakeComputer } from "./testing/fake-computer.ts";
 
 let fake: FakeComputer;
 let dir: string;
@@ -27,10 +24,10 @@ let browsers: ReturnType<typeof createCloudBrowser>[];
 
 beforeEach(async () => {
   fake = await startFakeComputer();
-  vi.stubEnv("OMB_BOAT_API", `${fake.base}/api/v1`);
+  // MausBot Cloud's included credential, pointed at the fake relay: the only way a browser sandbox is ever made.
+  vi.stubEnv("OMB_CLOUD_BOAT_URL", `${fake.base}/api/v1`);
+  vi.stubEnv("OMB_CLOUD_BOAT_TOKEN", RELAY_KEY);
   vi.stubEnv("OMB_CLOUD_BROWSER", undefined);
-  vi.stubEnv("OMB_CLOUD_BOAT_URL", undefined);
-  vi.stubEnv("OMB_CLOUD_BOAT_TOKEN", undefined);
   dir = mkdtempSync(join(tmpdir(), "cloud-browser-"));
   clock = Date.UTC(2026, 10, 24, 10, 0, 0);
   used = [];
@@ -48,11 +45,10 @@ afterEach(async () => {
 
 function browser(overrides: Partial<CloudBrowserDeps> & { budget?: number; awakeMinutes?: number } = {}) {
   const now = () => clock;
-  const cfg = { box: { token: OWN_KEY } } as AppConfig;
   const { budget, awakeMinutes, ...rest } = overrides;
   const created = createCloudBrowser({
     dataDir: dir,
-    ops: () => providerOps(() => cfg),
+    ops: () => providerOps(() => ({}) as AppConfig),
     used: (owner, windowMs) => { used.push([owner, windowMs]); },
     closeEngine: async (closed) => { engineClosed.push(closed); },
     held: () => held,
@@ -86,6 +82,7 @@ const urlOf = (opened: { cdpUrl: string } | { home: string }): string => {
   if (!("cdpUrl" in opened)) throw new Error(`expected the sandbox, got ${opened.home}`);
   return opened.cdpUrl;
 };
+const deletes = () => fake.requests.filter((one) => one.method === "DELETE");
 
 describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () => {
   it("opens there and carries every action over one held connection, through the relay's token and the door's secret", async () => {
@@ -104,7 +101,8 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     }
     const before = fake.requests.length;
     await act(cdpUrl, 3);
-    expect(fake.requests.length, "no provider call per action").toBe(before);
+    expect(fake.requests.length, "no relay call per action").toBe(before);
+    expect(fake.requests.filter((one) => one.path.endsWith("/commands")), "no shell command is ever sent").toEqual([]);
     expect(cloud.busy(BROWSER_SANDBOX_OWNER)).toBe(true);
     expect(cloud.busy("scout"), "never a bot's own computer").toBe(false);
     expect(cloud.report()).toMatchObject({ sessions: { sandbox: 1, home: 0 }, resumes: 0 });
@@ -117,39 +115,80 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     expect(cloud.dialed("bot-scout")).toBe(0);
   });
 
-  it("makes the sandbox the first time a bot needs a browser: small, no environment, named, one start", async () => {
+  it("two calls opening one session at once share the one open: a session never splits across two browsers", async () => {
+    fake.state = "archived";
+    const cloud = browser();
+    const [first, second] = await Promise.all([cloud.open(request()), cloud.open(request())]);
+    expect(urlOf(second)).toBe(urlOf(first));
+    expect(fake.launches()).toBe(1);
+    expect(fake.resumes()).toBe(1);
+    expect(cloud.report().sessions).toEqual({ sandbox: 1, home: 0 });
+  });
+
+  it("asks the relay before making anything, and makes the sandbox the first time a bot needs a browser: small, marked as the browser's, named, one start", async () => {
     fake.exists = false;
     const cloud = browser();
     urlOf(await cloud.open(request()));
-    expect(fake.creates()).toBe(1);
-    const create = fake.requests.find((one) => one.method === "POST" && one.path === "/api/v1/sandboxes");
-    expect(create?.body).toEqual({ ttlSeconds: 7200, noEnv: true, type: "small" });
+    const probe = fake.requests.findIndex((one) => one.path.endsWith("/browser-sandbox"));
+    const create = fake.requests.findIndex((one) => one.method === "POST" && one.path === "/api/v1/sandboxes");
+    expect(probe).toBeGreaterThan(-1);
+    expect(probe).toBeLessThan(create);
+    expect(fake.requests[create]?.body).toEqual({ noEnv: true, type: "small", purpose: "browser" });
+    expect(browserSandboxCreateBody()).toEqual({ noEnv: true, type: "small", purpose: "browser" });
     expect(fake.requests.find((one) => one.method === "PATCH")?.body?.name).toMatch(/^ogb-[a-f0-9]{12}-browser-[a-f0-9]{6}$/);
     expect(cloud.report().resumes).toBe(1);
-    // Through the Cloud's relay the create says what it is, so the plan's computers and hours never count it.
-    expect(browserSandboxCreateBody(true)).toEqual({ ttlSeconds: 7200, noEnv: true, type: "small", purpose: "browser" });
   });
 
-  it("through the Cloud's relay, keeps a sandbox only when the relay knows it is the browser's, and deletes one an older relay made", async () => {
-    vi.stubEnv("OMB_CLOUD_BOAT_URL", `${fake.base}/api/v1`);
-    vi.stubEnv("OMB_CLOUD_BOAT_TOKEN", OWN_KEY);
+  it("on an Admin from before the browser sandbox, makes nothing at all and stays in the home for a week", async () => {
     fake.exists = false;
-    fake.knowsPurpose = false;
-    const viaRelay = browser({ ops: () => providerOps(() => ({}) as AppConfig) });
-    expect(await viaRelay.open(request())).toEqual({ home: "no-route" });
-    expect(fake.requests.find((one) => one.method === "POST" && one.path === "/api/v1/sandboxes")?.body).toMatchObject({ purpose: "browser" });
-    expect(fake.requests.filter((one) => one.method === "DELETE")).toHaveLength(1);
-    expect(fake.exists).toBe(false);
-    expect(await viaRelay.open(request()), "no second create that day").toEqual({ home: "no-route" });
+    fake.oldRelay = true;
+    const cloud = browser();
+    expect(await cloud.open(request())).toEqual({ home: "old-relay" });
+    expect(fake.creates()).toBe(0);
+    clock += 6 * 24 * 60 * 60_000;
+    const asked = fake.requests.length;
+    expect(await cloud.open(request())).toEqual({ home: "old-relay" });
+    expect(fake.requests.length).toBe(asked);
+    clock += 24 * 60 * 60_000;
+    fake.oldRelay = false;
+    urlOf(await cloud.open(request()));
+  });
+
+  it("deletes at once a box a create made without the browser's mark", async () => {
+    fake.exists = false;
+    // The probe answers, but the create comes back unmarked (an Admin rolled back between the two).
+    const realProbe = providerOps(() => ({}) as AppConfig);
+    const ops = { ...realProbe, probe: async () => { fake.oldRelay = true; return { kind: "available" as const, boxId: null }; } };
+    const guarded = browser({ ops: () => ops });
+    expect(await guarded.open(request())).toEqual({ home: "old-relay" });
     expect(fake.creates()).toBe(1);
+    expect(deletes()).toHaveLength(1);
+    expect(fake.exists).toBe(false);
   });
 
-  it("through a relay that knows the browser sandbox, makes it and opens there", async () => {
-    vi.stubEnv("OMB_CLOUD_BOAT_URL", `${fake.base}/api/v1`);
-    vi.stubEnv("OMB_CLOUD_BOAT_TOKEN", OWN_KEY);
-    fake.exists = false;
-    urlOf(await browser({ ops: () => providerOps(() => ({}) as AppConfig) }).open(request()));
-    expect(fake.requests.filter((one) => one.method === "DELETE")).toEqual([]);
+  it("holds every start while the relay says the fleet's browser starts are spent, until its reset, without one start sent", async () => {
+    fake.state = "archived";
+    fake.available = false;
+    fake.unavailableReason = "fleet_starts";
+    fake.unavailableUntil = new Date(Date.UTC(2026, 10, 25)).toISOString();
+    const cloud = browser();
+    expect(await cloud.open(request())).toEqual({ home: "unavailable" });
+    expect(await cloud.open(request())).toEqual({ home: "unavailable" });
+    expect(fake.resumes() + fake.creates()).toBe(0);
+    expect(fake.requests.filter((one) => one.path.endsWith("/browser-sandbox"))).toHaveLength(1);
+    expect(cloud.report().held).toBe("unavailable");
+    clock = Date.UTC(2026, 10, 25, 0, 0, 1);
+    fake.available = true;
+    urlOf(await cloud.open(request()));
+  });
+
+  it("replaces a sandbox the provider reports broken: deleted first, a fresh one made and counted", async () => {
+    fake.state = "error";
+    const cloud = browser();
+    urlOf(await cloud.open(request()));
+    expect(deletes()).toHaveLength(1);
+    expect(fake.creates()).toBe(1);
+    expect(cloud.report().resumes).toBe(1);
   });
 
   it("wakes a stopped sandbox with exactly one resume, then reads only", async () => {
@@ -161,6 +200,12 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     expect(cloud.report().resumes).toBe(1);
   });
 
+  it("an awake sandbox needs no start and no question to the relay", async () => {
+    urlOf(await browser().open(request()));
+    expect(fake.requests.filter((one) => one.path.endsWith("/browser-sandbox"))).toEqual([]);
+    expect(fake.resumes() + fake.creates()).toBe(0);
+  });
+
   it("gives each bot its own profile and Chrome, carries up to three at once, and keeps a fourth in the home", async () => {
     fake.state = "archived";
     const cloud = browser();
@@ -169,23 +214,8 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     expect(fake.resumes(), "bots opening together share one wake").toBe(1);
     for (const [i, bot] of bots.slice(0, 3).entries()) expect(await act(urlOf(opened[i]!), 1)).toEqual([`echo:${profileKey(bot)}:{"id":0}`]);
     expect(new Set(fake.profiles())).toEqual(new Set(bots.slice(0, 3).map(profileKey)));
+    expect(profileKey("scout")).toMatch(/^[a-f0-9]{16}$/);
     expect(await cloud.open(request("fourth"))).toEqual({ home: "sandbox-full" });
-  });
-
-  it("keeps one profile per bot on the sandbox's disk, clearing a lock only when no Chrome of its own runs", () => {
-    const key = profileKey("scout");
-    expect(key).not.toBe(profileKey("writer"));
-    const command = launchCommand(key, "a".repeat(48));
-    expect(command).toContain(`K="$D/${key}"; P="$K/profile"`);
-    expect(command).toContain('--user-data-dir="$P"');
-    const guard = command.indexOf('if ! pgrep -f -- "--user-data-dir=$P"'), clear = command.indexOf('rm -f "$P/SingletonLock"');
-    expect(guard).toBeGreaterThan(-1);
-    expect(clear).toBeGreaterThan(guard);
-    expect(command).toMatch(/env -i HOME="\$HOME" PATH="[^"]+" setsid nohup "\$B"/);
-    expect(quitCommand(key)).toContain(`P="${COMPUTER_BROWSER_DIR}/${key}/profile"`);
-    expect(QUIT_ALL_COMMAND).toContain(`pkill -TERM -f -- "--user-data-dir=$D/"`);
-    expect(() => launchCommand("../../etc", "a".repeat(48))).toThrow();
-    expect(() => launchCommand(key, "not hex; rm -rf /")).toThrow();
   });
 
   it("reuses a bot's profile after the sandbox slept", async () => {
@@ -213,11 +243,11 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     expect(engineClosed, "a browser a turn holds stays").toEqual([]);
     held = false;
     await cloud.close("bot-writer");
-    expect(fake.requests.at(-1)?.command, "the other bot's Chrome keeps running").toBe(quitCommand(profileKey("writer")));
+    expect(fake.quits().at(-1), "the other bot's Chrome keeps running").toBe(`quit:${profileKey("writer")}`);
     expect(used.at(-1)).toEqual([BROWSER_SANDBOX_OWNER, CLOUD_BROWSER_IDLE_MS]);
     await cloud.closeIdle();
     expect(engineClosed).toEqual(["bot-writer", "bot-scout"]);
-    expect(fake.requests.at(-1)?.command).toBe(QUIT_ALL_COMMAND);
+    expect(fake.quits().at(-1)).toBe("quit-all");
     expect(cloud.busy(BROWSER_SANDBOX_OWNER)).toBe(false);
     expect(used.at(-1)).toEqual([BROWSER_SANDBOX_OWNER, 1_000]);
   });
@@ -299,7 +329,7 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     urlOf(await cloud.open(request()));
   });
 
-  it("treats the relay's busy answer, or the provider's own 429, as the account's limit for the day", async () => {
+  it("treats the relay's busy answer as the account's limit for the day", async () => {
     fake.state = "archived";
     fake.startStatus = 429;
     fake.startBody = { ok: false, code: "rate_limited", message: "Cloud computers are busy right now." };
@@ -309,28 +339,23 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     expect(fake.resumes()).toBe(1);
   });
 
-  it("a session the caller rules out (a shared profile, another person's) makes no provider call", async () => {
+  it("a session the caller rules out (a shared profile, another person's, a person's own key) makes no relay call", async () => {
     const cloud = browser();
     expect(await cloud.open(request("scout", "not-eligible"))).toEqual({ home: "not-eligible" });
     expect(fake.requests).toEqual([]);
   });
 
-  it("with no way to reach the door's port, stays in the home for the rest of the day without another start", async () => {
-    fake.hostRoute = false;
+  it("with no protected way to reach the door's port, stays in the home for the rest of the day without another start", async () => {
+    fake.unprotected = true;
     fake.state = "archived";
     const cloud = browser();
     expect(await cloud.open(request())).toEqual({ home: "no-route" });
-    expect(fake.quits()).toBe(1);
+    expect(fake.upgrades, "an unprotected URL is never dialed").toEqual([]);
+    expect(fake.quits()).toEqual([`quit:${profileKey("scout")}`]);
     expect(used.at(-1)).toEqual([BROWSER_SANDBOX_OWNER, 1_000]);
     const asked = fake.requests.length;
     expect(await cloud.open(request())).toEqual({ home: "no-route" });
     expect(fake.requests.length).toBe(asked);
-  });
-
-  it("uses the URL the sandbox printed when the provider's port route is refused", async () => {
-    fake.hostRoute = false;
-    fake.printUrl = true;
-    urlOf(await browser().open(request()));
   });
 
   it("a Chrome that does not start counts as a failure and opens in the home", async () => {
@@ -339,7 +364,7 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     expect(fake.upgrades).toEqual([]);
   });
 
-  it("OMB_CLOUD_BROWSER=home keeps every browser in the home without one provider call, and deletes the sandbox after a day of it", async () => {
+  it("OMB_CLOUD_BROWSER=home keeps every browser in the home without one relay call, and deletes the sandbox after a day of it", async () => {
     vi.stubEnv("OMB_CLOUD_BROWSER", "home");
     const cloud = browser();
     expect(await cloud.open(request())).toEqual({ home: "lever" });
@@ -348,9 +373,9 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     clock += 24 * 60 * 60_000 + 1;
     cloud.report();
     await vi.waitFor(() => expect(fake.exists).toBe(false));
-    expect(fake.requests.filter((one) => one.method === "DELETE")).toHaveLength(1);
+    expect(deletes()).toHaveLength(1);
     cloud.report();
-    expect(fake.requests.filter((one) => one.method === "DELETE"), "at most once an hour").toHaveLength(1);
+    expect(deletes(), "at most once an hour").toHaveLength(1);
   });
 
   it("a sandbox an earlier run left awake gets its idle window on the Admin's first health poll, not at start", async () => {
@@ -385,57 +410,23 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
   });
 });
 
-describe("the sandbox's door, run as it runs there", () => {
-  let chrome: Server;
-  let folder: string;
-  afterEach(() => { chrome?.close(); rmSync(folder, { recursive: true, force: true }); });
-
-  it("lets a request with a profile's secret through to that profile's Chrome as a local DevTools connection, and nothing else", async () => {
-    folder = mkdtempSync(join(tmpdir(), "door-"));
-    const seen: Array<{ url: string | undefined; host: string | undefined; origin: string | undefined }> = [];
-    const wss = new WebSocketServer({ noServer: true });
-    chrome = createServer();
-    chrome.on("upgrade", (req, socket, head) => {
-      seen.push({ url: req.url, host: req.headers.host, origin: req.headers.origin });
-      wss.handleUpgrade(req, socket, head, (ws) => ws.on("message", (data) => ws.send(`chrome:${String(data)}`)));
-    });
-    await new Promise<void>((resolve) => chrome.listen(0, "127.0.0.1", resolve));
-    const chromePort = (chrome.address() as { port: number }).port;
-    const key = profileKey("scout"), secret = "b".repeat(48);
-    mkdirSync(join(folder, key, "profile"), { recursive: true });
-    writeFileSync(join(folder, key, "secret"), secret);
-    writeFileSync(join(folder, key, "profile", "DevToolsActivePort"), `${chromePort}\n/devtools/browser/abc-123\n`);
-    writeFileSync(join(folder, "door.mjs"), doorSource());
-    const probe = createServer();
-    await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
-    const doorPort = (probe.address() as { port: number }).port;
-    await new Promise<void>((resolve) => probe.close(() => resolve()));
-    const door = spawn(process.execPath, [join(folder, "door.mjs"), folder, String(doorPort)], { stdio: "ignore" });
-    try {
-      const open = async (path: string) => {
-        for (let tries = 0; ; tries++) {
-          const socket = new WebSocket(`ws://127.0.0.1:${doorPort}${path}`, { headers: { Origin: "https://evil.example", Host: "sandbox-39231.on.example" } });
-          try {
-            await new Promise<void>((resolve, reject) => { socket.once("open", () => resolve()); socket.once("error", reject); });
-            return socket;
-          } catch (error) {
-            if (tries > 40 || !String(error).includes("ECONNREFUSED")) throw error;
-            await new Promise((resolve) => setTimeout(resolve, 50));
-          }
-        }
-      };
-      const socket = await open(`/${key}/${secret}?_token=t`);
-      const answer = new Promise<string>((resolve) => socket.once("message", (data) => resolve(String(data))));
-      socket.send("hello");
-      expect(await answer).toBe("chrome:hello");
-      socket.close();
-      expect(seen).toEqual([{ url: "/devtools/browser/abc-123", host: `127.0.0.1:${chromePort}`, origin: undefined }]);
-      await expect(open(`/${key}/${"c".repeat(48)}`)).rejects.toThrow(/404/);
-      await expect(open(`/${profileKey("writer")}/${secret}`)).rejects.toThrow(/404/);
-      expect(seen).toHaveLength(1);
-    } finally {
-      door.kill();
+describe("what a browser in the sandbox is kept from", () => {
+  it("never opens a file, the browser's own pages or another local scheme, however the call names it", () => {
+    for (const url of ["file:///home/user/.omb-browser/", " FILE:///etc/passwd", "chrome://settings", "view-source:https://a.example", "devtools://devtools", "chrome-extension://x/y"]) {
+      expect(localSchemeRefusal({ name: "agent_browser_open", arguments: { url } }), url).toBe(LOCAL_SCHEME_REFUSAL);
     }
+    expect(localSchemeRefusal({ name: "agent_browser_tab_new", arguments: { options: { url: "file:///tmp/x" } } })).toBe(LOCAL_SCHEME_REFUSAL);
+    expect(localSchemeRefusal({ name: "agent_browser_open", arguments: { url: "https://example.com/file:x" } })).toBeNull();
+    expect(localSchemeRefusal({ name: "agent_browser_snapshot", arguments: {} })).toBeNull();
+  });
+
+  it("says once, in the call's answer, that a download was not kept", () => {
+    const answer = { content: [{ type: "text", text: "Navigation failed: net::ERR_ABORTED" }] };
+    const noted = downloadNote(answer) as { content: Array<{ text: string }> };
+    expect(noted.content.at(-1)?.text).toBe(DOWNLOAD_NOTE);
+    expect(downloadNote(noted)).toBe(noted);
+    const page = { content: [{ type: "text", text: "button \"Download the app\"" }] };
+    expect(downloadNote(page), "a page's own words are not a download").toBe(page);
   });
 });
 

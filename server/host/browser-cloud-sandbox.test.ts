@@ -10,7 +10,8 @@ import { BrowserUploadRefusal } from "../browser-upload.ts";
 import { REDDIT_REFUSAL } from "../browser/egress/reddit.ts";
 import { DATA_DIR, type AppConfig } from "../config.ts";
 import type { Store } from "../store.ts";
-import { OWN_KEY, startFakeComputer, type FakeComputer } from "../cloud-browser/testing/fake-computer.ts";
+import { RELAY_KEY, startFakeComputer, type FakeComputer } from "../cloud-browser/testing/fake-computer.ts";
+import { LOCAL_SCHEME_REFUSAL } from "../cloud-browser/guards.ts";
 import { CLOUD_BROWSER_NO_UPLOAD, createBrowserHost, type BrowserHostDeps } from "./browser.ts";
 
 vi.mock("../browser-engine.ts", async (original) => {
@@ -39,7 +40,8 @@ beforeEach(async () => {
   // Each test starts the day afresh: the rails keep their counts in the data folder.
   rmSync(join(DATA_DIR, "cloud-browser"), { recursive: true, force: true });
   fake = await startFakeComputer();
-  vi.stubEnv("OMB_BOAT_API", `${fake.base}/api/v1`);
+  vi.stubEnv("OMB_CLOUD_BOAT_URL", `${fake.base}/api/v1`);
+  vi.stubEnv("OMB_CLOUD_BOAT_TOKEN", RELAY_KEY);
   vi.stubEnv("OMB_CLOUD_BROWSER", undefined);
   vi.mocked(browserEngineStatus).mockReturnValue({ kind: "ready", binaryPath: "/usr/local/bin/agent-browser", version: "0.37.0", managed: false });
   vi.spyOn(BrowserRuntime.prototype, "agentRpc").mockImplementation(async (_session, _spec, _method, _params, beforeDispatch) => {
@@ -56,8 +58,8 @@ afterEach(async () => {
   await fake.close();
 });
 
-function setup({ desktop = false, cloudBrowser = true }: { desktop?: boolean; cloudBrowser?: boolean } = {}) {
-  const cfg = { features: { browser: true }, box: { token: OWN_KEY } } as unknown as AppConfig;
+function setup({ desktop = false, cloudBrowser = true, ownKey = false }: { desktop?: boolean; cloudBrowser?: boolean; ownKey?: boolean } = {}) {
+  const cfg = { features: { browser: true }, ...(ownKey ? { box: { token: "boat_persons-own-key" } } : {}) } as unknown as AppConfig;
   const bots = [{ id: botId, name: botId, browser: true }];
   const used: Array<[string, number]> = [];
   const deps: BrowserHostDeps = {
@@ -93,6 +95,9 @@ describe("a personal Cloud's bot browser opens in the Cloud's browser sandbox", 
     expect((await host.currentBrowserSpec(botId, undefined))?.spec.env.AGENT_BROWSER_CDP).toBe(browser.spec.env.AGENT_BROWSER_CDP);
     expect((await host.browserIntegration(botId, undefined, undefined, "team", { opening: OPEN }))?.spec.env.AGENT_BROWSER_CDP).toBe(browser.spec.env.AGENT_BROWSER_CDP);
     expect(fake.launches()).toBe(1);
+    // Files and the browser's own pages are never opened there: every bot's Chrome there runs as one user.
+    expect(await host.browserRuntime.agentRpc(browser.session, browser.spec, "tools/call", { name: OPEN, arguments: { url: "file:///home/user/.omb-browser/" } }))
+      .toEqual({ isError: true, content: [{ type: "text", text: LOCAL_SCHEME_REFUSAL }] });
     // Reddit stays refused in the sandbox, as in the home.
     expect(await host.browserRuntime.agentRpc(browser.session, browser.spec, "tools/call", { name: OPEN, arguments: { url: "https://www.reddit.com/" } }))
       .toEqual({ isError: true, content: [{ type: "text", text: REDDIT_REFUSAL }] });
@@ -101,6 +106,14 @@ describe("a personal Cloud's bot browser opens in the Cloud's browser sandbox", 
     expect(host.cloudBrowserBusy("browser")).toBe(true);
     expect(host.cloudBrowserBusy(botId)).toBe(false);
     expect(host.cloudBrowserReport()).toMatchObject({ sessions: { sandbox: 1, home: 0 } });
+  });
+
+  it("a Cloud on the person's own provider key never gets a sandbox: it would bill their key with no cap", async () => {
+    const { host } = setup({ ownKey: true });
+    const browser = await host.browserIntegration(botId, undefined, undefined, "team", { opening: OPEN });
+    expect(browser?.spec.env.AGENT_BROWSER_CDP).toBeUndefined();
+    expect(fake.requests).toEqual([]);
+    expect(host.cloudBrowserReport()).toMatchObject({ fallbacks: { "own-key": 1 } });
   });
 
   it("a closing call never opens the sandbox", async () => {
