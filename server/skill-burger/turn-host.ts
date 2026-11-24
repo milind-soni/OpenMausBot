@@ -17,7 +17,9 @@ export interface BurgerHostDeps {
   browser(turn: CallingTurn): Promise<{ env?: Record<string, string | undefined> } | null>;
   /** The chat's event bus, with the engine of the turn that is running in the thread. */
   publish(threadId: string, event: Record<string, unknown>): void;
-  mayEditEveryChat(): boolean;
+  mayEditBurgers(): boolean;
+  /** The apps this turn's bot is connected to, or null when that can't be told. */
+  connectedApps?(turn: CallingTurn): Promise<readonly string[] | null>;
 }
 
 /** The run's view of the calling turn: `authorization` is the agents bearer the tool call came with. */
@@ -37,7 +39,8 @@ export function burgerTurn(host: BurgerHostDeps, turn: CallingTurn, authorizatio
     botId: turn.botId,
     threadId: turn.threadId,
     cwd: host.cwd(turn.botId, turn.threadId),
-    mayEditEveryChat: host.mayEditEveryChat(),
+    mayEditBurgers: host.mayEditBurgers(),
+    ...(host.connectedApps ? { connected: () => host.connectedApps!(turn) } : {}),
     publish: (event: StepEvent) => host.publish(turn.threadId, { eventId: randomUUID(), createdAt: new Date().toISOString(), threadId: turn.threadId, itemType: "tool", ...event }),
     async internal(kind, path, body, signal) {
       if (kind === "agents") {

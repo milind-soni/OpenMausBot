@@ -15,6 +15,7 @@ import { AvatarImageGenerator } from "../AvatarImageGenerator";
 import { AvatarFraming, OrganizationAvatarIcons, RESET_MASCOT_PATCH, useAvatarImage, type AvatarPatch } from "../avatar-editing";
 import { Segmented } from "./rows";
 import { MascotFaceColorPicker } from "../MascotFaceColorPicker";
+import { MascotMaterialPicker } from "../MascotMaterialPicker";
 import { MascotBodyColorSwatch } from "../MascotBodyColorSwatch";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useBotsApartFromTurns } from "@/state/apart-from-turns";
@@ -91,7 +92,7 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
         !showsImage && body === id ? "bg-ink/[0.08] ring-[1.5px] ring-inset ring-ink/25" : "hover:bg-ink/[0.05]",
       )}
     >
-      <MausAvatar color={bot.color} faceColor={bot.mascotFaceColor} bodyColor={bot.mascotBodyColor} bodyId={id} size={40} animated={false} trackPointer={false} />
+      <MausAvatar color={bot.color} faceColor={bot.mascotFaceColor} material={bot.mascotMaterial} bodyColor={bot.mascotBodyColor} bodyId={id} size={40} animated={false} trackPointer={false} />
     </button>
   );
 
@@ -184,6 +185,7 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
               />
             </div>
             <MascotFaceColorPicker bot={bot} disabled={busy} onPatch={pickMascot} />
+            <MascotMaterialPicker bot={bot} disabled={busy} onPatch={pickMascot} />
             <button
               type="button"
               data-avatar-more

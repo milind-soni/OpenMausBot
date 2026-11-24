@@ -1,4 +1,5 @@
 import { redactSecretsInText } from "../../redact.ts";
+import { classifyError } from "../retry.ts";
 
 /** The vendor's own message and the method we called, before redaction or any attached detail. */
 const vendorFailures = new WeakMap<object, { message: string; method: string }>();
@@ -34,6 +35,23 @@ export function acpRpcError(value: any, method: string): Error {
     // -32603 is JSON-RPC's internal error; invalid params, unsupported methods and auth refusals keep the session.
     acpSessionFailure: value?.code === -32603,
   });
+}
+
+/** A transient transport blip (an SSL EOF behind a proxy, a reset) during a one-shot setup request
+ * (authenticate, session/new) is retried once before the failure propagates: classifyError decides,
+ * so an auth refusal, an invalid request or a timeout (which would double the wait) never retries. */
+export async function retryTransient<T>(request: (method: string, params: unknown, timeoutMs?: number) => Promise<T>,
+  method: string, params: unknown, timeoutMs?: number, attempts = 2): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await request(method, params, timeoutMs);
+    } catch (error) {
+      if (attempt >= attempts) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      if ((error as any)?.acpSignInRequired === true || /\btimed out\b/.test(message)) throw error;
+      if (!classifyError({ text: message }).transient) throw error;
+    }
+  }
 }
 
 /** The provider rejected this resume id. A bare invalidParams (a bad model or config) is not this. */

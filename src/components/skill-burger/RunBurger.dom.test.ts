@@ -40,11 +40,11 @@ const render = async (messages: RunMessage[], busy = false) => {
 };
 const card = () => host.querySelector<HTMLElement>("[data-skill-burger]");
 const rows = () => [...host.querySelectorAll("[data-burger-layer]")].map((row) => `${row.getAttribute("data-status")} ${row.textContent?.replace(/\s+/g, " ").trim()}`);
-const button = (text: string) => [...host.querySelectorAll("button")].find((node) => node.textContent?.includes(text));
+const button = (text: string) => [...host.querySelectorAll("button")].find((node) => node.textContent?.includes(text) || node.title.includes(text));
 
 beforeEach(() => {
   fixture.api.mockReset();
-  fixture.api.mockImplementation(async (path: string) => (path.includes("?runner=") ? { workflow, everyChat: false } : {}));
+  fixture.api.mockImplementation(async (path: string) => (path.includes("?runner=") ? { workflow } : {}));
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -78,6 +78,19 @@ it("cooks the running step, greys the case not taken and a skipped step, and end
   expect(button("Add the")).toBeUndefined();
 });
 
+it("keeps the run a closed pill while it runs, after it ends and when it fails, until someone taps it", async () => {
+  const folded = () => host.querySelector(".burger-fold")?.getAttribute("data-folded");
+  await render([ask, step("s1", "done"), step("d1")], true);
+  expect(folded()).toBe("true");
+  expect(host.querySelector("[data-burger-pill]")?.textContent).toContain("Running… 1");
+  await render([ask, step("s1", "done"), step("d1", "done", { case: "support" }), step("c1", "failed", { error: "nope" })]);
+  expect(card()?.dataset.skillBurger).toBe("failed");
+  expect(folded()).toBe("true");
+  expect(host.querySelector("[data-burger-pill] .text-danger")?.textContent).toContain("Stopped");
+  await act(async () => host.querySelector<HTMLButtonElement>("[data-burger-pill] button[aria-controls]")!.click());
+  expect(folded()).toBe("false");
+});
+
 it("offers to keep what the bot did for a case nobody saved, once it's done, with an Undo", async () => {
   const handed: RunMessage = { id: "call-1", role: "bot", kind: "activity", tool: { name: "mcp__agents__run_workflow", ok: true, input: "{}", output: 'resume "run-1"' } };
   const messages = [ask, step("s1", "done"), step("d1", "done", { case: "spam" }), handed];
@@ -85,17 +98,17 @@ it("offers to keep what the bot did for a case nobody saved, once it's done, wit
   expect(button("Add the")).toBeUndefined();
   await render(messages);
   fixture.api.mockImplementation(async (path: string) => {
-    if (path.includes("?runner=")) return { workflow, everyChat: false };
+    if (path.includes("?runner=")) return { workflow };
     if (path.endsWith("/paths")) return { skill: {}, undo: "u-1" };
     return {};
   });
   await act(async () => button("Add the “spam” path")!.click());
   expect(fixture.api).toHaveBeenCalledWith("/api/skill-burgers/files-new-support-email/paths", {
-    method: "POST", body: JSON.stringify({ runBotId: "scout", threadId: "t1", run: "run-1", decide: "d1", case: "spam", botId: "scout" }),
+    method: "POST", body: JSON.stringify({ runBotId: "scout", threadId: "t1", run: "run-1", decide: "d1", case: "spam" }),
   });
   expect(host.textContent).toContain("“spam” path added");
   await act(async () => button("Undo")!.click());
-  expect(fixture.api).toHaveBeenCalledWith("/api/skill-burgers/files-new-support-email", { method: "PATCH", body: JSON.stringify({ undo: "u-1", botId: "scout" }) });
+  expect(fixture.api).toHaveBeenCalledWith("/api/skill-burgers/files-new-support-email", { method: "PATCH", body: JSON.stringify({ undo: "u-1" }) });
   expect(host.textContent).toContain("Path removed");
 });
 
@@ -104,7 +117,7 @@ it("shows a burger the turn changed, with that change's Undo", async () => {
   await render([{ id: "u2", role: "user", kind: "text", text: "if it's sales, make a deal" }, edit]);
   expect(card()?.dataset.skillBurger).toBe("edited");
   await act(async () => button("Undo")!.click());
-  expect(fixture.api).toHaveBeenCalledWith("/api/skill-burgers/files-new-support-email", { method: "PATCH", body: JSON.stringify({ undo: "0f0e0d0c-0b0a-4908-8706-050403020100", botId: "scout" }) });
+  expect(fixture.api).toHaveBeenCalledWith("/api/skill-burgers/files-new-support-email", { method: "PATCH", body: JSON.stringify({ undo: "0f0e0d0c-0b0a-4908-8706-050403020100" }) });
   expect(host.textContent).toContain("Change undone");
 });
 
@@ -112,7 +125,7 @@ it("asks for a burger's inputs in one form, filled with the saved values, and ru
   const { RunWithInputs } = await import("./RunInputs");
   const ran: Array<Record<string, string>> = [];
   fixture.api.mockImplementation(async () => ({ workflow: { version: 1, summary: "QA", args: { site: { default: "https://mausbot.com" } }, steps: [] } }));
-  const skill = { name: "qa", summary: "QA a site", sha256: "x", savedAt: "", layers: [], args: ["site"], everyChat: false, botId: "lead" };
+  const skill = { name: "qa", summary: "QA a site", sha256: "x", savedAt: "", layers: [], args: ["site"], botId: "lead" };
   await act(async () => root.render(createElement(RunWithInputs, { skill, onRun: (inputs: Record<string, string>) => ran.push(inputs), className: "", panelAction: "run-skill-burger:qa" })));
   const run = host.querySelector<HTMLButtonElement>('button[data-panel-action="run-skill-burger:qa"]')!;
   await act(async () => run.click());

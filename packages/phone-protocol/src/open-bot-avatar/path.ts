@@ -293,11 +293,143 @@ export function insideRow(polys: Point[][], y: number, xs: number[], out: Uint8A
   }
 }
 
+/**
+ * The edges of a set of polygons, listed by the horizontal bands they cross, for many point and
+ * row tests against one outline. A query runs the arithmetic of `winding` or `insideRow` on the
+ * edges of its band only. An edge outside the band cannot straddle the query's y, so it adds
+ * nothing in the full pass either: the answers are the same, bit for bit.
+ */
+export class EdgeBands {
+  /** xj, yj, xi, yi per edge, in the order `winding` visits them. */
+  private readonly e: Float64Array;
+  private readonly start: Int32Array;
+  private readonly items: Int32Array;
+  private readonly y0: number;
+  private readonly inv: number;
+  private readonly n: number;
+  private hitX = new Float64Array(16);
+  private hitDir = new Int8Array(16);
+
+  constructor(polys: Point[][]) {
+    let count = 0;
+    for (const poly of polys) count += poly.length;
+    const e = this.e = new Float64Array(4 * count);
+    let k = 0, lo = Infinity, hi = -Infinity, climb = 0;
+    for (const poly of polys) {
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const yj = poly[j][1], yi = poly[i][1];
+        e[k] = poly[j][0]; e[k + 1] = yj; e[k + 2] = poly[i][0]; e[k + 3] = yi;
+        k += 4;
+        if (yj < lo) lo = yj;
+        if (yj > hi) hi = yj;
+        climb += Math.abs(yi - yj);
+      }
+    }
+    // About four edges to a band, but fewer bands where the edges are tall: an edge is listed in
+    // every band it crosses, and the lists should not outgrow the outline (a few entries an edge).
+    const tall = climb > 0 ? Math.floor((3 * count * (hi - lo)) / climb) : Infinity;
+    const n = this.n = Math.max(1, Math.min(512, Math.ceil(count / 4), tall));
+    this.y0 = count ? lo : 0;
+    this.inv = hi > lo ? n / (hi - lo) : 0;
+    // Counting sort of the edges into every band their y range touches.
+    const start = this.start = new Int32Array(n + 1);
+    for (k = 0; k < e.length; k += 4) {
+      const a = this.band(Math.min(e[k + 1], e[k + 3])), b = this.band(Math.max(e[k + 1], e[k + 3]));
+      for (let q = a; q <= b; q++) start[q + 1]++;
+    }
+    for (let q = 0; q < n; q++) start[q + 1] += start[q];
+    const items = this.items = new Int32Array(start[n]);
+    const next = start.slice(0, n);
+    for (k = 0; k < e.length; k += 4) {
+      const a = this.band(Math.min(e[k + 1], e[k + 3])), b = this.band(Math.max(e[k + 1], e[k + 3]));
+      for (let q = a; q <= b; q++) items[next[q]++] = k;
+    }
+  }
+
+  /** Monotonic in y, so an edge is listed in the band of every y between its ends. */
+  private band(y: number): number {
+    const q = Math.floor((y - this.y0) * this.inv);
+    return q >= this.n ? this.n - 1 : q > 0 ? q : 0;
+  }
+
+  /** Same as `winding(polys, x, y)`. */
+  winding(x: number, y: number): number {
+    const { e, items } = this;
+    const b = this.band(y);
+    let w = 0;
+    for (let q = this.start[b], end = this.start[b + 1]; q < end; q++) {
+      const k = items[q];
+      const xj = e[k], yj = e[k + 1], xi = e[k + 2], yi = e[k + 3];
+      if (yj <= y) {
+        if (yi > y && (xi - xj) * (y - yj) - (x - xj) * (yi - yj) > 0) w++;
+      } else if (yi <= y && (xi - xj) * (y - yj) - (x - xj) * (yi - yj) < 0) w--;
+    }
+    return w;
+  }
+
+  /** The row's crossings, sorted by x, left in hitX and hitDir. Returns how many. */
+  private crossings(y: number): number {
+    const { e, items } = this;
+    const b = this.band(y);
+    const end = this.start[b + 1];
+    if (end - this.start[b] > this.hitX.length) {
+      this.hitX = new Float64Array(2 * (end - this.start[b]));
+      this.hitDir = new Int8Array(this.hitX.length);
+    }
+    const hx = this.hitX, hd = this.hitDir;
+    let n = 0;
+    for (let q = this.start[b]; q < end; q++) {
+      const k = items[q];
+      const xj = e[k], yj = e[k + 1], xi = e[k + 2], yi = e[k + 3];
+      let dir = 0;
+      if (yj <= y && yi > y) dir = 1;
+      else if (yi <= y && yj > y) dir = -1;
+      else continue;
+      const x = xj + ((y - yj) * (xi - xj)) / (yi - yj);
+      // Insertion sort: a row has a handful of crossings. Ties may land in any order, since
+      // crossings at one x are always counted together.
+      let m = n++;
+      for (; m > 0 && hx[m - 1] > x; m--) { hx[m] = hx[m - 1]; hd[m] = hd[m - 1]; }
+      hx[m] = x; hd[m] = dir;
+    }
+    return n;
+  }
+
+  /** Same as `insideRow(polys, y, xs, out)`. */
+  insideRow(y: number, xs: ArrayLike<number>, out: Uint8Array): void {
+    const n = this.crossings(y);
+    const hx = this.hitX, hd = this.hitDir;
+    let w = 0, h = 0;
+    for (let k = 0; k < xs.length; k++) {
+      while (h < n && hx[h] < xs[k]) w += hd[h++];
+      out[k] = w !== 0 ? 1 : 0;
+    }
+  }
+
+  /** One flag of `insideRow`: what it reports for a row at `y` with `x` among its points. */
+  insideRowAt(x: number, y: number): boolean {
+    const n = this.crossings(y);
+    let w = 0;
+    for (let h = 0; h < n && this.hitX[h] < x; h++) w += this.hitDir[h];
+    return w !== 0;
+  }
+}
+
+const bands = new WeakMap<Point[][], EdgeBands>();
+
+/** The band index of these polygons, built once per array. They must not change afterwards. */
+export function edgeBands(polys: Point[][]): EdgeBands {
+  let index = bands.get(polys);
+  if (!index) bands.set(polys, index = new EdgeBands(polys));
+  return index;
+}
+
 export interface Bounds { minX: number; minY: number; maxX: number; maxY: number }
 
 export function bounds(polys: Point[][]): Bounds {
   const b = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
-  for (const p of polys) for (const [x, y] of p) {
+  for (const p of polys) for (let k = 0; k < p.length; k++) {
+    const x = p[k][0], y = p[k][1];
     if (x < b.minX) b.minX = x;
     if (y < b.minY) b.minY = y;
     if (x > b.maxX) b.maxX = x;
@@ -312,8 +444,9 @@ export function filledArea(polys: Point[][], b: Bounds = bounds(polys)): number 
   const xs: number[] = [];
   for (let x = Math.floor(b.minX) + 0.5; x < b.maxX; x += 1) xs.push(x);
   const row = new Uint8Array(xs.length);
+  const index = edgeBands(polys);
   for (let y = Math.floor(b.minY) + 0.5; y < b.maxY; y += 1) {
-    insideRow(polys, y, xs, row);
+    index.insideRow(y, xs, row);
     for (const v of row) n += v;
   }
   return n;

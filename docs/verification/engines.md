@@ -73,6 +73,16 @@ The contract tests use the repository's fake ACP CLI and disposable folders. The
 
 The following is a one-time author qualification against vibe-acp 3.1.1 on macOS (darwin-aarch64), not a checked-in repeatable native fixture: initialize answers protocolVersion 1 with `browser-auth` as the only auth method; an unauthenticated session/new fails with -32000 "Missing API key for mistral provider."; the authenticate request stays pending while the CLI opens https://console.mistral.ai/codestral/cli/authenticate, honours `$BROWSER`, and completes after the person signs in; session/new exposes `mode`, `model` (zai-glm-5-3-flash, Mistral Large, Codestral, mistral-medium-3.5), and `thinking` (off | high); an `MISTRAL_API_KEY` satisfies the gate with no sign-in. These checks do not prove a real paid turn, native Windows behavior or packaged desktop integration.
 
+## Cursor: a failed model call sent as the reply
+
+cursor-agent 2026.10.22 (`cursor-release.ts`) catches a failed model call inside session/prompt, sends `\n\nError: ${String(error)}` as one message chunk, may then show a `Watching: …` tool call for a backgrounded shell, and answers end_turn. OpenMausBot holds that chunk out of the reply and the live stream, and fails the turn with Cursor's own wording, so a routine run is retried as a temporary AI error instead of being recorded as completed.
+
+```sh
+pnpm exec vitest run server/cursor-reply-failure.e2e.test.ts server/drivers/acp/cursor.test.ts
+```
+
+The end-to-end test launches the isolated fixture (`launchVerificationServer`), adds a `cursorAgent` instance backed by `server/testing/fake-acp-cli.ts` that replays that wire sequence, and drives it with the control verbs and the routines API. A chat turn settles as failed with "Cursor had a temporary server problem (HTTP 503)…" and no message carries the raw failure line. A routine run started by hand is queued for one automatic retry (`retried: "provider"`) and completes once the fake stops failing. When the retry fails too, the run ends failed with "Failed after one automatic retry: …", the routine's failure streak is 1, the owner is notified and the Chief opens its Problems to look at thread. On a build without the fix, the turn and both runs settle as completed. These checks replay the pinned build's output; they do not prove a live Cursor account or a later Cursor release's wording.
+
 ## Slow or empty CLI version responses
 
 ```sh
