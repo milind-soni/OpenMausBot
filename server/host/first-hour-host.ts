@@ -53,6 +53,8 @@ export interface FirstHourHostDeps {
   proactive: Pick<Proactive, "brief">;
   /** A move into this Cloud is running: its lease is held (cloud-send-lease.ts), unless a test says otherwise. */
   moving?(): boolean;
+  /** The person pressed Stop on the turn running in this chat. */
+  stopped?(threadId: string): boolean;
   /** The brief is on: the proactive bot's briefing routine. */
   briefOn(): boolean;
   ensureBrief(): void;
@@ -102,6 +104,7 @@ export function startFirstHour(deps: FirstHourHostDeps): FirstHour | null {
       },
     },
     moving: deps.moving ?? moveInRunning,
+    ...(deps.stopped ? { stopped: deps.stopped } : {}),
     briefOn: deps.briefOn,
     ensureBrief: deps.ensureBrief,
     briefCard: () => deps.proactive.brief.latestCard(),

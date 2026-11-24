@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createMoveLeases, LEASE_MS, moveInRunning, moveLeaseRoute } from "./cloud-send-lease.ts";
+import { createMoveLeases, LEASE_MS, MOVE_QUIET_MS, moveInRunning, moveLeaseRoute } from "./cloud-send-lease.ts";
 
 function cloud(owner = true) {
   let clock = 1_000;
@@ -26,6 +26,17 @@ describe("POST /api/cloud-send/lease", () => {
     expect(moveInRunning()).toBe(false);
     await ask({ v: 1, holder: "computer-mac", label: "Mac" });
     advance(LEASE_MS + 1);
+    expect(moveInRunning()).toBe(false);
+  });
+
+  it("counts the owner's computer asking about a move as one about to run, for a while", () => {
+    const { leases, advance } = cloud();
+    expect(moveInRunning()).toBe(false);
+    leases.touched();
+    expect(moveInRunning()).toBe(true);
+    advance(MOVE_QUIET_MS - 1);
+    expect(moveInRunning()).toBe(true);
+    advance(1);
     expect(moveInRunning()).toBe(false);
   });
 

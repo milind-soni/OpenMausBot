@@ -20,14 +20,22 @@ const askSchema = z.object({
   release: z.literal(true).optional(),
 });
 
-/** This server's lease, the one its move routes made: a new Cloud's first hour holds its inbox offer while a move runs. */
+/** A computer of the owner's asked this Cloud about a move this recently: one is starting or running. */
+export const MOVE_QUIET_MS = 10 * 60_000;
+
+/** This server's lease, the one its move routes made: a new Cloud's first hour holds its inbox offer while a move runs,
+ * or while the owner's computer is still asking about one (it compares and plans before it takes the lease). */
 let serverLeases: MoveLeases | null = null;
-export const moveInRunning = (): boolean => Boolean(serverLeases?.held());
+export const moveInRunning = (): boolean => Boolean(serverLeases?.held() || serverLeases?.asked());
 
 /** One Cloud's lease. `ask`: held by `holder` from now on (null), or who holds it. */
 export function createMoveLeases(now: () => number = Date.now) {
   let held: MoveLease | null = null;
+  let askedAt: number | null = null;
   const leases = {
+    /** The owner's computer used one of this Cloud's move routes just now. */
+    touched(): void { askedAt = now(); },
+    asked: (): boolean => askedAt !== null && now() - askedAt < MOVE_QUIET_MS,
     ask(holder: string, label: string): MoveLease | null {
       if (held && held.holder !== holder && held.until > now()) return held;
       held = { holder, label: label || (held?.holder === holder ? held.label : ""), until: now() + LEASE_MS };

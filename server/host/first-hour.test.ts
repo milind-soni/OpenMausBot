@@ -38,7 +38,9 @@ function setup(options: { start?: string; connected?: { gmail?: boolean; googlec
     /** While set, the first look's turn runs until this is called. */
     held: null as null | (() => void), hold: false,
     /** A move into the Cloud is running; the next first look's start throws this. */
-    moving: false, refuse: null as null | Error, chiefId: chief.id,
+    moving: false, refuse: null as null | Error, chiefId: chief.id, stopped: false,
+    /** Runs as a first look's turn starts. */
+    onTurn: undefined as undefined | (() => void),
     /** How the next first look's turn fails: without a reply, or as a failed turn. */
     failure: undefined as undefined | { text: string; stopReason?: string },
   };
@@ -48,9 +50,10 @@ function setup(options: { start?: string; connected?: { gmail?: boolean; googlec
     person: () => world.person, language: () => world.language, timeZone: () => world.zone,
     apps: { reachable: () => true, connected: async () => ({ ...world.connected }), card: async (slug) => ({ label: slug === "gmail" ? "Gmail" : "Google Calendar", description: "" }) },
     briefOn: () => world.briefOn, ensureBrief: () => { world.briefOn = true; }, briefCard: () => world.briefCard, phones: () => world.phones,
-    moving: () => world.moving,
+    moving: () => world.moving, stopped: () => world.stopped,
     startTurn: async (_botId, text, opts) => {
       world.turns.push({ text, threadId: opts.threadId });
+      world.onTurn?.();
       if (world.refuse) throw world.refuse;
       const end = () => {
         if (world.reply) store.appendMessage(opts.threadId, { role: "bot", kind: "text", text: world.reply, turnId: "look" });
@@ -163,6 +166,23 @@ describe("a new Cloud the person's own bots came to", () => {
     b.stop();
   });
 
+  it("names the bots that came, not the computer's own MausBot that came with them, and stops rewriting the greeting after the first day", () => {
+    const s = setup();
+    const fh = s.make();
+    fh.begin();
+    s.store.createBot({ name: "MausBot (MacBook)" }, { seedMessages: false });
+    s.store.createBot({ name: "Coder" }, { seedMessages: false });
+    fh.tick();
+    expect(s.texts()[0]).toMatch(/^Hi! Coder is here now/u);
+    s.advance(25 * HOUR);
+    s.store.createBot({ name: "Writer" }, { seedMessages: false });
+    s.world.language = "de";
+    fh.tick();
+    fh.arrived();
+    fh.stop();
+    expect(s.texts()[0]).toMatch(/^Hi! Coder is here now/u);
+  });
+
   it("changes nothing for a bot that comes after the first day", () => {
     const s = setup();
     const fh = s.make();
@@ -204,7 +224,9 @@ describe("a new Cloud the person's own bots came to", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(s.store.messagesFor(arrived.threadId)).toEqual([]);
     expect(fh.prompt(arrived.id, arrived.threadId)).toBe("");
-    expect(s.texts()[0]).toMatch(/^Hi! MausBot \(MacBook\) is here now/u);
+    // The computer's own MausBot is no news in the greeting: it stays as it was, and no inbox offer comes.
+    expect(s.texts()[0]).toMatch(/^Hi! I'm MausBot/u);
+    expect(fh.health()!.ms.movedIn).toBe(0);
     fh.stop();
   });
 });
@@ -347,7 +369,7 @@ describe("a new Cloud's first hour", () => {
     expect(fh.health()).toMatchObject({ look: "failed", lookFailure: "error", lookTries: 2 });
     const lines = warn.mock.calls.map((call) => String(call[0])).filter((line) => line.startsWith("first hour: the first look failed"));
     expect(lines).toEqual([
-      expect.stringMatching(/^first hour: the first look failed \(try 1 of 2, again in 60 s\): path=settled ok=false replied=false stalled=false stop=- code=- sinceBoot=\d+ sinceApp=0 ms=0 apps=googlecalendar rows=[\w,-]+ cause="-"$/u),
+      expect.stringMatching(/^first hour: the first look failed \(try 1 of 2, again in 60 s\): path=settled ok=false replied=false stalled=false stop=- code=- sinceBoot=\d+ sinceApp=0 ms=0 apps=googlecalendar rows=[\w,-]+ drafts=0 cause="-"$/u),
       expect.stringMatching(/^first hour: the first look failed \(try 2 of 2, the last\): path=settled ok=false replied=false/u),
     ]);
   });
@@ -374,6 +396,82 @@ describe("a new Cloud's first hour", () => {
     expect(s.texts()).toContain("This week: Standup Tue 10:00.");
     expect(s.world.pushed).toEqual(["Your first look is ready"]);
     expect(fh.health()).toMatchObject({ look: "delivered", lookTries: 1 });
+  });
+
+  it("waits out a move into the Cloud: no look starts while it runs, and a try that fails during it is not counted", async () => {
+    const s = setup();
+    const fh = s.make();
+    fh.begin();
+    await s.answer(fh);
+    s.world.moving = true;
+    const gmail = s.cards().find((card) => card.connector!.slug === "gmail")!;
+    s.store.patchMessage(s.thread(), gmail.id, { connector: { ...gmail.connector!, status: "connected" } });
+    fh.tick();
+    await settle();
+    expect(s.world.turns).toEqual([]);
+    s.world.moving = false;
+    s.world.reply = null;
+    s.world.onTurn = () => { s.world.moving = true; };
+    fh.tick();
+    await settle();
+    expect(s.world.turns).toHaveLength(1);
+    expect(fh.health()!.lookTries).toBeUndefined();
+    expect(fh.health()!.look).toBeUndefined();
+    s.world.moving = false;
+    s.world.onTurn = undefined;
+    s.world.reply = "This week: Standup Tue 10:00.";
+    s.advance(LOOK_RETRY_MS);
+    fh.tick();
+    await settle();
+    expect(s.world.turns).toHaveLength(2);
+    expect(fh.health()).toMatchObject({ look: "delivered" });
+    expect(s.texts().some((text) => text?.includes("couldn't take my first look"))).toBe(false);
+  });
+
+  it("never starts again a first look the person stopped, and says nothing about it", async () => {
+    const s = setup({ connected: { gmail: true } });
+    const fh = s.make();
+    fh.begin();
+    s.world.reply = null;
+    s.world.stopped = true;
+    await s.answer(fh);
+    expect(fh.health()).toMatchObject({ look: "failed", lookFailure: "stopped" });
+    s.advance(LOOK_RETRY_MS);
+    fh.tick();
+    await settle();
+    expect(s.world.turns).toHaveLength(1);
+    expect(s.texts().some((text) => text?.includes("first look"))).toBe(false);
+  });
+
+  it("does not try again once the person has written in that chat since the first try failed", async () => {
+    const s = setup({ connected: { gmail: true } });
+    const fh = s.make();
+    fh.begin();
+    s.world.reply = null;
+    await s.answer(fh);
+    expect(fh.health()).toMatchObject({ lookTries: 1 });
+    s.write("Never mind, look at my repo instead.");
+    s.advance(LOOK_RETRY_MS);
+    fh.tick();
+    await settle();
+    expect(s.world.turns).toHaveLength(1);
+    expect(fh.health()).toMatchObject({ look: "failed" });
+    expect(s.texts().some((text) => text?.includes("first look"))).toBe(false);
+  });
+
+  it("does not repeat a first look that already wrote a draft: a second try would start its three drafts over", async () => {
+    const s = setup({ connected: { gmail: true } });
+    const fh = s.make();
+    fh.begin();
+    s.world.reply = null;
+    s.world.onTurn = () => { expect(fh.look(s.thread())!.draft({} as never)).toBe(true); };
+    await s.answer(fh);
+    expect(fh.health()).toMatchObject({ look: "failed", lookTries: 1 });
+    s.advance(LOOK_RETRY_MS);
+    fh.tick();
+    await settle();
+    expect(s.world.turns).toHaveLength(1);
+    expect(s.texts().some((text) => text?.startsWith("Gmail is connected, but I couldn't take my first look"))).toBe(true);
   });
 
   it("does not try again when the bot is paused, and logs a failed turn's stop reason", async () => {
