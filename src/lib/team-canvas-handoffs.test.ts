@@ -1,0 +1,51 @@
+import { describe, expect, it } from "vitest";
+import { botCardBoxes, handoffLines, type CardBox } from "./team-canvas-handoffs";
+import { layoutTeams, teamSize } from "./team-canvas";
+import type { TeamMapSection } from "./team-map";
+
+const bot = (id: string, chiefOfStaff = false) => ({ id, name: id, chiefOfStaff });
+const sales: TeamMapSection = { key: "Sales", name: "Sales", chiefs: [bot("chief", true)], members: [bot("ana"), bot("ben")] };
+const ops: TeamMapSection = { key: "Ops", name: "Ops", chiefs: [], members: [bot("cy")] };
+
+describe("botCardBoxes", () => {
+  it("places chiefs left of members, each column centred under the team header", () => {
+    const tiles = [{ key: "Sales", x: 100, y: 50, ...teamSize(sales) }];
+    const boxes = botCardBoxes([sales], tiles, [null], {});
+    expect(boxes.get("chief")).toEqual({ x: 120, y: 50 + 64 + 71, width: 236, height: 126 });
+    expect(boxes.get("ana")).toEqual({ x: 396, y: 114, width: 236, height: 126 });
+    expect(boxes.get("ben")).toEqual({ x: 396, y: 256, width: 236, height: 126 });
+  });
+
+  it("follows the person's own card order and a team with members only", () => {
+    const tiles = layoutTeams([sales, ops], {});
+    const boxes = botCardBoxes([sales, ops], tiles, [null, null], { Sales: ["ben", "ana"] });
+    expect(boxes.get("ben")!.y).toBeLessThan(boxes.get("ana")!.y);
+    expect(boxes.get("cy")).toMatchObject({ x: tiles[1].x + 20, y: tiles[1].y + 64 });
+  });
+
+  it("uses the computer layout's own card spots when a team draws computers", () => {
+    const tiles = [{ key: "Ops", x: 10, y: 20, width: 400, height: 300 }];
+    const geometry = { width: 400, height: 300, cards: [{ botId: "cy", x: 30, y: 90 }], monitors: [], links: [], tree: [] };
+    expect(botCardBoxes([ops], tiles, [geometry], {})).toEqual(new Map([["cy", { x: 40, y: 110, width: 236, height: 126 }]]));
+  });
+});
+
+describe("handoffLines", () => {
+  const box = (x: number, y: number): CardBox => ({ x, y, width: 100, height: 50 });
+  const boxes = new Map([["a", box(0, 0)], ["b", box(300, 100)], ["c", box(0, 200)]]);
+
+  it("joins side-by-side cards from the giver's facing edge to the receiver's, labelled mid-way", () => {
+    expect(handoffLines([{ sourceBotId: "a", targetBotId: "b", state: "running" }], boxes)).toEqual([{
+      key: "a:b", state: "running", path: "M 100 25 C 200 25 200 125 300 125", label: { x: 200, y: 75 },
+    }]);
+    expect(handoffLines([{ sourceBotId: "b", targetBotId: "a", state: "queued" }], boxes)[0].path).toBe("M 300 125 C 200 125 200 25 100 25");
+  });
+
+  it("joins stacked cards bottom to top, and skips bots that are not on the canvas", () => {
+    const lines = handoffLines([
+      { sourceBotId: "c", targetBotId: "a", state: "connected" },
+      { sourceBotId: "a", targetBotId: "hidden", state: "running" },
+    ], boxes);
+    expect(lines).toEqual([{ key: "c:a", state: "connected", path: "M 50 200 C 50 125 50 125 50 50", label: { x: 50, y: 125 } }]);
+  });
+});
