@@ -1,9 +1,11 @@
+import { botShowsUnread } from "./bot-unread";
 import { t } from "./i18n";
 
 export type SidebarAttentionBot = {
   unread?: boolean;
   busy?: boolean;
   activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead" | "parked.computer";
+  tasks?: Parameters<typeof botShowsUnread>[0]["tasks"];
 };
 
 export type SidebarAttentionGroup = {
@@ -24,7 +26,7 @@ export function sidebarSectionAttention(
 ): SidebarSectionAttention {
   return {
     unread:
-      bots.filter((bot) => Boolean(bot.unread)).length +
+      bots.filter(botShowsUnread).length +
       groups.filter((group) => Boolean(group.unread)).length,
     waiting: bots.filter((bot) => bot.activity === "waiting-on-you").length,
     working:

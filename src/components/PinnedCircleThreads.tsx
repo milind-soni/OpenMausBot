@@ -18,7 +18,7 @@ import { PINNED_CIRCLE_DRAG_TYPE, pinnedCircleDropPlace, rankPinnedCircles, reor
 import { sidebarSectionAttention } from "@/lib/sidebar-attention";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { BotListItem, BotThreadList, type BotRowProps } from "./Sidebar";
-import { useUnreadNotice } from "./unread-notice";
+import { useBotUnread } from "./unread-notice";
 
 function useVisibleMessages(bot: Bot): Message[] {
   const { messages, activeLeafId } = bot;
@@ -189,8 +189,7 @@ export const PinnedBotCircle = memo(function PinnedBotCircle({
   const activityTasks = sidebarBotActivityTasks(bot, pendingQueued);
   const waiting = bot.activity === "waiting-on-you" || activityTasks.some((task) => task.activity === "waiting-on-you");
   const working = !waiting && (Boolean(bot.busy) || activityTasks.some((task) => task.busy || task.activity === "working"));
-  const unread = bot.unread || activityTasks.some((task) => task.unread);
-  const noticing = useUnreadNotice(Boolean(bot.unread)); const beat = useMotionBeat(mascotMotion?.kind, mascotMotion?.nonce ?? 0);
+  const { unread, noticing } = useBotUnread(bot); const beat = useMotionBeat(mascotMotion?.kind, mascotMotion?.nonce ?? 0);
   const radius = avatarCropRadius(botAvatarProfile(bot).avatarCrop);
   return (
     <div className="flex w-full min-w-0 flex-col items-center">
