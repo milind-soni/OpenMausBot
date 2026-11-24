@@ -10,7 +10,9 @@ import type { ProviderSnapshot, RuntimeEvent } from "../contracts.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { makeFakeDriver, type FakeDriverHandle, type FakeDriverOptions } from "../testing/fake-driver.ts";
 import { STATUS_SAVE_DELAY_MS } from "./engine-status-file.ts";
-import { PROBE_RETRY_MS, TURN_PROOF_MS } from "./probe-hold.ts";
+import { PERSON_CHECK_MS, PROBE_RETRY_MS, PROMPT_RETRY_MS, STATUS_STALE_MS, TURN_PROOF_MS } from "./probe-hold.ts";
+import { readyToRun, selectDefaultModelSelection } from "../default-model-selection.ts";
+import { probeUnsettled } from "../cli-program.ts";
 import { ENGINE_LIST_REUSE_MS, ProviderRegistry, SNAPSHOT_DEADLINE_MS } from "./registry.ts";
 
 const SIGNED_IN = { state: "available", version: "1.2.3", authenticated: true } as const satisfies ProviderSnapshot;
@@ -62,6 +64,19 @@ describe("a status check that could not finish", () => {
     expect(noEngines(await registry.describe())).toBe(false);
   });
 
+  it("marks the CLI unsettled until a check answers, so no kept answer stands in for the check again", async () => {
+    const { registry, opts, listed } = await engine(SIGNED_IN);
+    await listed();
+    opts.answer = TIMED_OUT;
+    registry.forgetSnapshots();
+    await listed();
+    expect(probeUnsettled("opencode")).toBe(true);
+    opts.answer = SIGNED_IN;
+    registry.forgetSnapshots();
+    await listed();
+    expect(probeUnsettled("opencode")).toBe(false);
+  });
+
   it("first ever, with the program file there: installed but unverified, never missing", async () => {
     const present = vi.fn(() => true);
     const { listed } = await engine(TIMED_OUT, { cliPresent: present });
@@ -97,28 +112,64 @@ describe("a status check that could not finish", () => {
     expect(await read).toEqual(SIGNED_IN);
   });
 
-  it("is checked again later, backing off, and a check that answers ends the retries", async () => {
+  it("is checked again later, backing off; on a calm machine the third that cannot finish is its answer", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const { registry, opts, listed, probes } = await engine(SIGNED_IN);
     await listed();
     opts.answer = TIMED_OUT;
-    registry.forgetSnapshots();
-    await listed();
+    await vi.advanceTimersByTimeAsync(PERSON_CHECK_MS);
+    expect(await listed()).toEqual(SIGNED_IN);
     expect(probes()).toBe(2);
 
     await vi.advanceTimersByTimeAsync(PROBE_RETRY_MS[0]);
     expect(probes()).toBe(3);
+    expect(registry.knownSnapshot("opencode")).toEqual(SIGNED_IN);
     await vi.advanceTimersByTimeAsync(PROBE_RETRY_MS[0]);
     expect(probes()).toBe(3); // the next waits longer
     await vi.advanceTimersByTimeAsync(PROBE_RETRY_MS[1] - PROBE_RETRY_MS[0]);
     expect(probes()).toBe(4);
-
-    opts.answer = NOT_FOUND;
-    await vi.advanceTimersByTimeAsync(PROBE_RETRY_MS[2]);
-    expect(probes()).toBe(5);
-    expect(registry.knownSnapshot("opencode")).toEqual(NOT_FOUND);
+    // A hang or a kill every time on a calm machine is a broken engine, not a starved one.
+    expect(registry.knownSnapshot("opencode")).toEqual({ state: "unavailable", reason: TIMED_OUT.reason });
     await vi.advanceTimersByTimeAsync(PROBE_RETRY_MS[4] * 2);
-    expect(probes()).toBe(5);
+    expect(probes()).toBe(4);
+    // Once taken as broken, it stays so through the next check that cannot finish, until one answers.
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await listed()).toEqual({ state: "unavailable", reason: TIMED_OUT.reason });
+    opts.answer = SIGNED_IN;
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await listed()).toEqual(SIGNED_IN);
+  });
+
+  it("on a pressed machine it is never taken as broken, and is checked anyway at the back-off's last step", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    let pressed = false;
+    const { opts, listed, probes, registry } = await engine(SIGNED_IN, { pressed: () => pressed });
+    await listed();
+    opts.answer = TIMED_OUT;
+    pressed = true;
+    await vi.advanceTimersByTimeAsync(PERSON_CHECK_MS);
+    await listed();
+    expect(probes()).toBe(2);
+    const lastStep = PROBE_RETRY_MS.slice(0, PROBE_RETRY_MS.length - 1).reduce((sum, ms) => sum + ms, 0);
+    await vi.advanceTimersByTimeAsync(lastStep - 1);
+    expect(probes()).toBe(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(probes()).toBe(3);
+    expect(registry.knownSnapshot("opencode")).toEqual(SIGNED_IN);
+  });
+
+  it("after the person's own change, a check that cannot finish is tried again promptly, pressed or not", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const SIGNED_OUT = { ...SIGNED_IN, authenticated: false } as const;
+    const { registry, opts, listed, probes } = await engine(SIGNED_OUT, { pressed: () => true });
+    await listed();
+    opts.answer = TIMED_OUT;
+    registry.forgetSnapshots(); // the person signed in
+    expect(await listed()).toEqual(SIGNED_OUT);
+    opts.answer = SIGNED_IN;
+    await vi.advanceTimersByTimeAsync(PROMPT_RETRY_MS);
+    expect(probes()).toBe(3);
+    expect(registry.knownSnapshot("opencode")).toEqual(SIGNED_IN);
   });
 
   it("a sign-out read on a pressed machine is checked once more, pressed or not, then believed", async () => {
@@ -149,15 +200,29 @@ describe("a status check that could not finish", () => {
     await vi.advanceTimersByTimeAsync(STATUS_SAVE_DELAY_MS);
     await first.registry.disposeAll();
 
-    const second = await engine(TIMED_OUT, { statusFile: file, cliPresent: () => false });
+    const second = await engine(TIMED_OUT, { statusFile: file, pressed: () => true });
     const { engines } = await second.registry.readAtStart();
     expect(engines.find((row) => row.instanceId === "opencode")!.snapshot).toEqual(SIGNED_IN);
     expect(await second.listed()).toEqual(SIGNED_IN);
     await vi.advanceTimersByTimeAsync(STATUS_SAVE_DELAY_MS);
 
-    const third = await engine(TIMED_OUT, { statusFile: file, cliPresent: () => false });
+    const third = await engine(TIMED_OUT, { statusFile: file, pressed: () => true });
     await third.registry.readAtStart();
     expect(third.registry.knownSnapshot("opencode")).toEqual(SIGNED_IN);
+    await third.registry.disposeAll();
+
+    // The saved status never brings back an engine whose program was deleted meanwhile.
+    const deleted = await engine(TIMED_OUT, { statusFile: file, pressed: () => true, cliPresent: () => false });
+    await deleted.registry.readAtStart();
+    expect(deleted.registry.knownSnapshot("opencode")).toEqual({ state: "unavailable", reason: TIMED_OUT.reason });
+  });
+
+  it("an engine only found installed is never chosen to run, as a default, or as a backup", async () => {
+    const { registry } = await engine(TIMED_OUT);
+    const rows = await registry.describe();
+    expect(rows[0]!.snapshot).toEqual({ state: "available", unverified: true });
+    expect(readyToRun({ ...rows[0]!, enabled: true })).toBe(false);
+    expect(selectDefaultModelSelection(rows.map((row) => ({ ...row, enabled: true })))).toEqual({ instanceId: "", model: "" });
   });
 });
 
@@ -190,7 +255,7 @@ describe("checks that can wait", () => {
     expect(probes()).toBe(2);
   });
 
-  it("do not run while the machine is pressed", async () => {
+  it("do not run while the machine is pressed, until the last answer is STATUS_STALE_MS old", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     let pressed = false;
     const { registry, probes } = await engine(SIGNED_IN, { pressed: () => pressed });
@@ -199,7 +264,7 @@ describe("checks that can wait", () => {
     vi.setSystemTime(Date.now() + ENGINE_LIST_REUSE_MS);
     await reused(registry);
     expect(probes()).toBe(1);
-    pressed = false;
+    vi.setSystemTime(Date.now() + STATUS_STALE_MS - ENGINE_LIST_REUSE_MS);
     await reused(registry);
     expect(probes()).toBe(2);
   });
@@ -207,10 +272,10 @@ describe("checks that can wait", () => {
   it("a retry that comes due while the machine is pressed waits for another", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     let pressed = false;
-    const { registry, opts, listed, probes } = await engine(SIGNED_IN, { pressed: () => pressed });
+    const { opts, listed, probes } = await engine(SIGNED_IN, { pressed: () => pressed });
     await listed();
     opts.answer = TIMED_OUT;
-    registry.forgetSnapshots();
+    await vi.advanceTimersByTimeAsync(5_000);
     await listed();
     pressed = true;
     await vi.advanceTimersByTimeAsync(PROBE_RETRY_MS[0]);

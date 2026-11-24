@@ -249,18 +249,20 @@ export function engineMaybeThere(instance: { snapshot: { state: string; busy?: t
   return instance.snapshot.state === "available" || instance.snapshot.busy === true;
 }
 
-type EngineRow = { instanceId: string; snapshot: { state: string; busy?: true; authenticated?: boolean } };
+type EngineRow = { instanceId: string; snapshot: { state: string; busy?: true; unverified?: true; authenticated?: boolean } };
 
 /** Engines seen available since this page loaded. */
 const workedThisSession = new Set<string>();
 /** A fresh page, as a new load starts (tests). */
 export const forgetWorkedEngines = (): void => workedThisSession.clear();
 
-/** Notes the engines available now; true for one that was available earlier since this page loaded. A setup page never
- * replaces a working engine that reads unavailable later: the app's usual waiting view stays while the server checks it
- * again. */
+/** Notes the engines available now (by a check that answered); true for one that was available earlier since this page
+ * loaded and has not since been found missing. A setup page never replaces a working engine whose later check could not
+ * finish: the app's usual waiting view stays while the server checks it again. */
 export function workedEarlier(instance: EngineRow, worked: Set<string> = workedThisSession): boolean {
-  if (instance.snapshot.state === "available") worked.add(instance.instanceId);
+  if (instance.snapshot.state === "available" && instance.snapshot.unverified !== true) worked.add(instance.instanceId);
+  // A check that answered "not there" is a real loss: the setup page may show again.
+  else if (instance.snapshot.state !== "available" && instance.snapshot.busy !== true) worked.delete(instance.instanceId);
   return worked.has(instance.instanceId);
 }
 

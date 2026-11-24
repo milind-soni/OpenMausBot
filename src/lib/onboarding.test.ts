@@ -339,15 +339,21 @@ describe("the no-AI setup page", () => {
     expect(noEnginesDue({ connected: true, instances: [row({ state: "available", unverified: true })] }, worked)).toBe(false);
   });
 
-  it("never for an engine that worked earlier since the page loaded", () => {
+  it("never for an engine that worked earlier since the page loaded, until a check finds it missing", () => {
     const worked = new Set<string>();
     expect(noEnginesDue({ connected: true, instances: [row({ state: "available" }, "opencode")] }, worked)).toBe(false);
-    expect(noEnginesDue({ connected: true, instances: [row({ state: "unavailable", reason: "gone" } as never, "opencode")] }, worked)).toBe(false);
-    expect(workedEarlier(row({ state: "unavailable" }, "opencode"), worked)).toBe(true);
+    expect(workedEarlier(row({ state: "unavailable", busy: true }, "opencode"), worked)).toBe(true);
     expect(workedEarlier(row({ state: "unavailable" }, "codex"), worked)).toBe(false);
     expect(noEnginesDue({ connected: true, instances: [row({ state: "unavailable" }, "codex")] }, worked)).toBe(true);
+    // A check that answered "not there" is a real loss: the setup page may show again.
+    expect(noEnginesDue({ connected: true, instances: [row({ state: "available" }, "kimi")] }, worked)).toBe(false);
+    expect(noEnginesDue({ connected: true, instances: [row({ state: "unavailable", busy: true }, "kimi")] }, worked)).toBe(false);
+    expect(noEnginesDue({ connected: true, instances: [row({ state: "unavailable" }, "kimi")] }, worked)).toBe(true);
+    // Only found installed is not "worked".
+    expect(workedEarlier(row({ state: "available", unverified: true }, "pi"), worked)).toBe(false);
     // Another place, after the connection dropped: its own engines decide.
-    expect(noEnginesDue({ connected: false, instances: [row({ state: "unavailable" }, "opencode")] }, worked)).toBe(false);
-    expect(noEnginesDue({ connected: true, instances: [row({ state: "unavailable" }, "opencode")] }, worked)).toBe(true);
+    expect(workedEarlier(row({ state: "available" }, "grok"), worked)).toBe(true);
+    expect(noEnginesDue({ connected: false, instances: [row({ state: "unavailable", busy: true }, "grok")] }, worked)).toBe(false);
+    expect(workedEarlier(row({ state: "unavailable", busy: true }, "grok"), worked)).toBe(false);
   });
 });

@@ -8,7 +8,11 @@ import { engineMemory as memoryGate, withEngineMemory } from "../engine-memory.t
 import { withEngineHomes } from "../engine-homes/engine-homes.ts";
 import { withLocalContext } from "../drivers/local-inject.ts";
 import { engineStatusFile, snapshotFrom } from "./engine-status-file.ts";
-import { cliPresent, heldSnapshot, inconclusiveFailure, PROBE_QUEUE_WAIT_MS, PROBE_RETRY_MS, turnActivity } from "./probe-hold.ts";
+import {
+  CALM_FAILURES_BELIEVED, cliPresent, heldSnapshot, inconclusiveFailure, PERSON_CHECK_MS, PROBE_QUEUE_WAIT_MS, PROBE_RETRY_MS, PROMPT_RETRIES, PROMPT_RETRY_MS,
+  STATUS_STALE_MS, turnActivity,
+} from "./probe-hold.ts";
+import { noteProbeUnsettled } from "../cli-program.ts";
 import { withUnaskedStops } from "./unasked-stop.ts";
 import { withTurnScope } from "../crash-guard.ts";
 import { withWslNotice } from "./wsl-launch.ts";
@@ -156,7 +160,14 @@ export class ProviderRegistry {
   private readonly small: () => boolean;
   private readonly cliPresent: (cli: string) => boolean;
   /** Engines whose last check could not finish: how many times in a row, and the check again that is due. */
-  private readonly retries = new Map<InstanceId, { attempt: number; timer?: NodeJS.Timeout; signOut?: true }>();
+  /** `calm`: checks in a row that could not finish while the machine was not pressed; `since`: the first of them; `prompt`:
+   * prompt checks again spent after the person's own change. */
+  private readonly retries = new Map<InstanceId, { attempt: number; timer?: NodeJS.Timeout; signOut?: true; calm: number; since: number; prompt: number }>();
+  /** When the last change that may alter an engine's status was made (forgetSnapshots: an install, a sign-in, a key). */
+  private changedAt = -Infinity;
+  /** Engines whose checks failed to finish CALM_FAILURES_BELIEVED times on a calm machine: one more such check is believed
+   * at once, until a check answers. */
+  private readonly calmBroken = new Set<InstanceId>();
   private readonly turns = new Map<InstanceId, { activity: ReturnType<typeof turnActivity>; off: () => void }>();
   private probeQueue: Promise<void> = Promise.resolve();
   /** Whether a turn under way puts off its engine's checks that can wait (where turns wait for room); off unless given. */
@@ -306,18 +317,28 @@ export class ProviderRegistry {
   }
 
   /** After a check that could not finish: one more, later, backing off; a turn or a pressed machine puts it off again. */
+  private retryEntry(instanceId: InstanceId) {
+    const entry = this.retries.get(instanceId) ?? { attempt: 0, calm: 0, since: Date.now(), prompt: 0 };
+    this.retries.set(instanceId, entry);
+    return entry;
+  }
+
+  /** Put off by a pressed machine or a turn only up to a point: never past the back-off's last step, nor once the status is
+   * STATUS_STALE_MS old. After the person's own change the check is tried again promptly, pressed or not, a few times. */
   private retryLater(instance: ProviderInstance, signOut = false): void {
-    const entry = this.retries.get(instance.instanceId) ?? { attempt: 0 };
-    this.retries.set(instance.instanceId, entry);
+    const entry = this.retryEntry(instance.instanceId);
     if (signOut) entry.signOut = true;
     if (entry.timer) return;
+    const prompt = Date.now() - this.changedAt < PERSON_CHECK_MS && entry.prompt < PROMPT_RETRIES;
+    if (prompt) entry.prompt += 1;
     entry.timer = setTimeout(() => {
       entry.timer = undefined;
       if (this.retries.get(instance.instanceId) !== entry || this.byId.get(instance.instanceId)?.live !== instance) return;
       entry.attempt += 1;
-      if (!entry.signOut && this.probeDeferred(instance.instanceId)) this.retryLater(instance);
+      const due = prompt || entry.signOut === true || entry.attempt >= PROBE_RETRY_MS.length - 1 || Date.now() - entry.since >= STATUS_STALE_MS;
+      if (!due && this.probeDeferred(instance.instanceId)) this.retryLater(instance);
       else void this.read(instance);
-    }, PROBE_RETRY_MS[Math.min(entry.attempt, PROBE_RETRY_MS.length - 1)]);
+    }, prompt ? PROMPT_RETRY_MS : PROBE_RETRY_MS[Math.min(entry.attempt, PROBE_RETRY_MS.length - 1)]);
     entry.timer.unref?.();
   }
 
@@ -330,6 +351,7 @@ export class ProviderRegistry {
   /** Every engine's next status read probes its CLI again: an install, update, sign-in or key change may alter what it reports. */
   forgetSnapshots(): void {
     this.snapshotGeneration += 1;
+    this.changedAt = Date.now();
     this.seeds.clear();
   }
 
@@ -552,9 +574,11 @@ export class ProviderRegistry {
       if (seed) return Promise.resolve(seed);
       const last = options.reuse && this.readsOf.get(instance);
       if (!options.reuse || !last || last.generation !== this.snapshotGeneration) return this.read(instance);
-      if (options.reuse.maxAgeMs !== undefined && Date.now() - last.at >= options.reuse.maxAgeMs && !this.probeDeferred(instance.instanceId)) return this.read(instance);
-      // A check that can wait does not run during a turn of this engine or while the machine is pressed: the last answer stands.
-      if (this.probeDeferred(instance.instanceId)) return Promise.resolve(last.snapshot);
+      // A check that can wait does not run during a turn of this engine or while the machine is pressed: the last answer
+      // stands, until it is STATUS_STALE_MS old.
+      const waits = Date.now() - last.at < STATUS_STALE_MS && this.probeDeferred(instance.instanceId);
+      if (options.reuse.maxAgeMs !== undefined && Date.now() - last.at >= options.reuse.maxAgeMs && !waits) return this.read(instance);
+      if (waits) return Promise.resolve(last.snapshot);
       if (Date.now() - last.at >= options.reuse.ms) {
         const { changed } = options.reuse;
         void this.read(instance).then((snapshot) => { if (JSON.stringify(snapshot) !== JSON.stringify(last.snapshot)) changed(); });
@@ -582,7 +606,17 @@ export class ProviderRegistry {
     const holdSignOut = !inconclusive && !signOutHeld && before?.authenticated === true && snapshot.state === "available" && snapshot.authenticated === false
       && (lastRead === undefined || lastRead.generation === generation) && this.pressed();
     if (holdSignOut) inconclusive = true;
-    if (inconclusive) {
+    // A check that keeps failing to finish on a calm machine is an answer: the engine hangs or is killed, it is not starved.
+    const calm = (this.retries.get(instance.instanceId)?.calm ?? 0) + (inconclusive && !holdSignOut && !this.pressed() ? 1 : 0);
+    const believed = inconclusive && !holdSignOut && (calm >= CALM_FAILURES_BELIEVED || (calm > 0 && this.calmBroken.has(instance.instanceId)));
+    if (!inconclusive) this.calmBroken.delete(instance.instanceId);
+    if (believed) {
+      inconclusive = false;
+      this.calmBroken.add(instance.instanceId);
+      const { busy: _busy, ...failed } = snapshot;
+      snapshot = { ...failed, state: "unavailable" };
+      this.log(`engines: ${instance.instanceId}'s status check failed to finish ${calm} times in a row on a calm machine; taken as its answer`);
+    } else if (inconclusive) {
       const cli = this.cliTarget(instance.instanceId)?.cli;
       snapshot = heldSnapshot(before, snapshot, () => (cli ? this.cliPresent(cli) : null));
       this.log(`engines: ${instance.instanceId}'s status check gave no clear answer; ${snapshot === before ? "keeping its last status"
@@ -591,7 +625,12 @@ export class ProviderRegistry {
     if (answered || inconclusive) this.readsOf.set(instance, { snapshot, at: Date.now(), generation });
     // Only while this is still the live instance: a reload may have replaced it during the read.
     if (this.byId.get(instance.instanceId)?.live === instance) {
-      if (inconclusive) this.retryLater(instance, holdSignOut); else this.stopRetry(instance.instanceId);
+      if (inconclusive) {
+        this.retryEntry(instance.instanceId).calm = calm;
+        this.retryLater(instance, holdSignOut);
+      } else this.stopRetry(instance.instanceId);
+      const cli = this.cliTarget(instance.instanceId)?.cli;
+      if (cli) noteProbeUnsettled(cli, inconclusive && !holdSignOut);
       this.lastSnapshots.set(instance.instanceId, snapshot);
       this.unread?.delete(instance.instanceId);
       this.saveStatus();
