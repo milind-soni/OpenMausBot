@@ -55,6 +55,10 @@ const statuses = full ? [
   { id: "mini", state: "connected", since: now - 9e8, version: "0.1.171", behind: true, install: "global" },
   { id: "vps", state: "cantReach", since: now - 40 * MIN, version: "0.1.180", behind: false, install: "docker" },
 ] : [];
+const lendViews: Record<string, DesktopLendView> = {
+  mini: { name: "Studio Mac mini", lendable: true, on: true, connected: true, paused: false },
+  vps: { name: "Hetzner box", lendable: true, on: false, connected: false, paused: false },
+};
 const ogb = {
   platform: "darwin",
   app: { version: "0.1.180" },
@@ -64,6 +68,9 @@ const ogb = {
     environments: { state: async () => ({ localOrigin: "http://127.0.0.1:8799", remote: false, packaged: true, activeId: "local", environments }), status: async () => statuses,
       switch: async () => {}, forget: async () => {}, retry: async () => {}, addFromLink: async () => {}, create: async () => ({ ok: true, state: null }), pickDir: async () => ({ ok: false }) },
     computerSharing: { servers: async () => (full ? [{ id: "mini", enabled: true, connected: true, paused: false }] : []) },
+    // The one lend switch on a server's card (src/lib/use-lend-computer.ts): the Mac mini lends, the VPS doesn't yet.
+    lendComputer: { state: async (id: string | null) => lendViews[id ?? ""] ?? lendViews.vps!, set: async (id: string | null, on: boolean) => (lendViews[id ?? ""] = { ...(lendViews[id ?? ""] as Extract<DesktopLendView, { lendable: true }>), on, connected: on }),
+      allowScreen: async (id: string | null) => lendViews[id ?? ""]!, wish: async () => true },
     workspaces: { state: () => new Promise(() => {}), places: () => new Promise(() => {}), add: async () => {}, probe: async () => ({ outcome: "problem", problem: "empty" }) },
   } : {}),
 };

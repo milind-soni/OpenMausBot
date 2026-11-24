@@ -4,6 +4,7 @@ import { t } from "@/lib/i18n";
 import { lastSeen } from "@/lib/pairing-time";
 import { deviceGroup, type Device, type DeviceAction, type DeviceGroup } from "@/lib/devices";
 import { SettingsGroup, SettingsRows } from "../SettingsPrimitives";
+import { LendComputerSwitch } from "../LendComputerSwitch";
 import { DOT, KIND_ICON, groupLabel, kindLabel, routeLabel, statusText } from "./device-words";
 
 const GROUPS: readonly DeviceGroup[] = ["computers", "servers", "phones"];
@@ -45,6 +46,9 @@ function ActionButton({ device, action, quiet, onAction }: { device: Device; act
 }
 const actionKey = (action: DeviceAction) => `${action.type}:${"source" in action ? action.source.id : ""}`;
 
+/** A server saved by hand on This computer's own page: the saved id its lend switch is about. */
+const lendsHere = (device: Device) => (window.ogb?.lendComputer?.wish && device.address && device.kind !== "cloud" ? device.sources.find((source) => source.type === "place")?.id ?? null : null);
+
 /** What a device is, how it connects and what bots can do with it, then its other actions. */
 export function DeviceDetails({ device, actions, onAction, now }: { device: Device; actions: readonly DeviceAction[]; onAction: (device: Device, action: DeviceAction) => void; now: number }) {
   return <>
@@ -56,9 +60,11 @@ export function DeviceDetails({ device, actions, onAction, now }: { device: Devi
       {device.lastSeen && device.status !== "online" && <Detail label={t("devicesPage.detail.lastSeen")}>{lastSeen(device.lastSeen, now)}</Detail>}
       <Detail label={t("devicesPage.detail.bots")}>
         {device.canRunBots ? t("devicesPage.detail.runsBots") : device.canHostComputer ? t("devicesPage.detail.hostsComputer") : t("devicesPage.detail.reachesBots")}
-        {device.usesThisComputer && <span className="block">{t("servers.share.on", { name: device.name })}</span>}
+        {device.usesThisComputer && !lendsHere(device) && <span className="block">{t("servers.share.on", { name: device.name })}</span>}
       </Detail>
     </dl>
+    {/* A server of the person's own, saved by hand: the same switch as its row in Your computers. */}
+    {lendsHere(device) && <LendComputerSwitch id={lendsHere(device)!} />}
     {actions.length > 0 && <div className="flex flex-wrap items-center gap-x-4 gap-y-2">{actions.map((action) => <ActionButton key={actionKey(action)} device={device} action={action} quiet onAction={onAction} />)}</div>}
   </>;
 }

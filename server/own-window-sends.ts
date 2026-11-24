@@ -11,8 +11,24 @@ const sends = createPhoneSends();
 const proof = (threadId: string, sendId: string, text: string): string =>
   createHash("sha256").update(JSON.stringify(["own-window", threadId, sendId, text])).digest("base64");
 
-export function noteOwnWindowSend(threadId: string, sendId: string, text: string): void {
-  sends.note(proof(threadId, sendId, text));
+const inFlight = new Map<string, number>();
+
+/**
+ * A send from the window, known from before it is accepted: the turn it starts may set up (and read its line) before
+ * the send answers. The answer settles it: kept for a send that was accepted, gone for one that was refused.
+ */
+export function ownWindowSendStarting(threadId: string, sendId: string, text: string): (accepted: boolean) => void {
+  const key = proof(threadId, sendId, text);
+  inFlight.set(key, (inFlight.get(key) ?? 0) + 1);
+  let settled = false;
+  return (accepted) => {
+    if (settled) return;
+    settled = true;
+    const left = inFlight.get(key)! - 1;
+    if (left) inFlight.set(key, left);
+    else inFlight.delete(key);
+    if (accepted) sends.note(key);
+  };
 }
 
 type Line = { role?: string; text?: string; sendId?: string; sender?: unknown; peerAsk?: unknown; relayed?: boolean; via?: string; aside?: unknown };
@@ -20,5 +36,7 @@ type Line = { role?: string; text?: string; sendId?: string; sender?: unknown; p
 /** A person's line the desktop app's own window sent: no signed-in sender, relay, app or bot wrote it. */
 export function ownWindowLine(threadId: string, line: Line | undefined): boolean {
   if (!line || line.role !== "user" || line.sender || line.peerAsk || line.relayed || line.via !== undefined || line.aside) return false;
-  return line.sendId !== undefined && line.text !== undefined && sends.has(proof(threadId, line.sendId, line.text));
+  if (line.sendId === undefined || line.text === undefined) return false;
+  const key = proof(threadId, line.sendId, line.text);
+  return sends.has(key) || inFlight.has(key);
 }
