@@ -358,9 +358,9 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
         add(nativesFor(bot, threadId, instance, cwd).filter((skill) => !switched.has(skill.name) && isNativeSkillEnabled(bot.id, skill.name)));
       }
       if (files.size < mentioned.length) add(projectInUse(bot, threadId, cwd, instance, assigned).filter((skill) => !skill.modelOnly));
-      // A Skill Burger runs exactly with run_workflow, whether it is the bot's own or used in every chat.
+      // A Skill Burger runs exactly with run_workflow, from any bot.
       const burgers = mentioned.flatMap((name) => { const found = findWorkflowSkill(bot.id, name); return found ? [{ name, found }] : []; });
-      for (const { name, found } of burgers) if (!files.has(name) && "everyChat" in found.place) files.set(name, librarySkillFilePath(name));
+      for (const { name } of burgers) if (!files.has(name)) files.set(name, librarySkillFilePath(name));
       const expanded = skillCommandTurnText(text, files, typed, ownStart);
       return burgers.length ? `${expanded}\n\n${burgers.map(({ name, found }) => `/${name} is a saved Skill Burger: run it with the run_workflow tool (name "${name}"), filling its args from the request, rather than by hand.${burgerInputs(found.workflow)}`).join(" ")}` : expanded;
     },

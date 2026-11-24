@@ -1,6 +1,5 @@
-// A saved burger as lists show it: its name, the summary on its top bun, one entry per layer, its args, and where it is
-// used. A burger belongs to the bot it was made with until someone turns on "Use in every chat"; then it is in the shared
-// library and on for every bot, and `botId` still names the bot it came from.
+// A saved burger as lists show it: its name, the summary on its top bun, one entry per layer and its args. Every saved
+// burger is used in every chat by every bot; `botId` names the bot it was made with.
 import type { LayerKind } from "./layers.ts";
 
 export interface SavedWorkflowLayer {
@@ -20,9 +19,10 @@ export interface SavedWorkflow {
   savedAt: string;
   layers: SavedWorkflowLayer[];
   args: string[];
-  everyChat: boolean;
   /** The bot it was made with; unknown for one whose bot is gone. */
   botId?: string;
+  /** Whether the person reading the list may rename or remove it: whoever saved it, or an admin. */
+  canChange?: boolean;
 }
 
 /** The source a saved burger records: the bot it was made with. */

@@ -5,7 +5,6 @@ import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { renameBurger, runBurgerIn, useSavedBurgers, type SavedWorkflow } from "@/lib/skill-burger";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
-import { BotAvatar } from "../Avatar";
 import { SidebarPopoverMenu } from "../SidebarPopoverMenu";
 import { TOOL_PAGE_TITLE, ToolPage, ToolPageHeader } from "../ToolPageShell";
 import { MiniBurger } from "./MiniBurger";
@@ -38,7 +37,7 @@ function BurgerCard({ skill, onRemove }: { skill: SavedWorkflow; onRemove: () =>
     if (event.key === "Escape") { event.preventDefault(); setRenaming(null); }
   };
   return (
-    <li data-skill-burger-card={skill.name} data-every-chat={skill.everyChat ? "on" : "off"} className="flex min-w-0 gap-3.5 rounded-2xl border border-hairline/40 bg-card p-3.5">
+    <li data-skill-burger-card={skill.name} className="flex min-w-0 gap-3.5 rounded-2xl border border-hairline/40 bg-card p-3.5">
       <MiniBurger skill={skill} />
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         <div className="flex min-w-0 items-start gap-1">
@@ -72,20 +71,14 @@ function BurgerCard({ skill, onRemove }: { skill: SavedWorkflow; onRemove: () =>
               </span>
             )}
             items={[
-              ...(advanced ? [{ key: "rename", label: t("skillBurger.menu.rename"), icon: <Pencil size={16} />, onSelect: () => setRenaming(skill.name) }] : []),
-              { key: "delete", label: t("common.delete"), icon: <Trash2 size={16} />, onSelect: onRemove },
+              ...(advanced && skill.canChange !== false ? [{ key: "rename", label: t("skillBurger.menu.rename"), icon: <Pencil size={16} />, onSelect: () => setRenaming(skill.name) }] : []),
+              ...(skill.canChange !== false ? [{ key: "delete", label: t("common.delete"), icon: <Trash2 size={16} />, onSelect: onRemove }] : []),
             ]}
           />
         </div>
         <p className="flex min-w-0 items-center gap-1.5 text-[12px] text-ink-secondary">
-          {skill.everyChat || !bot ? <span>{t("skillBurger.card.everyChat")}</span> : (
-            <>
-              <BotAvatar bot={bot} size={16} />
-              <span dir="auto" className="min-w-0 truncate">{bot.name}</span>
-            </>
-          )}
-          <span aria-hidden="true">·</span>
           <span className="shrink-0">{skill.layers.length === 1 ? t("skillBurger.layersOne") : t("skillBurger.layersMany", { count: skill.layers.length })}</span>
+          {advanced && bot && <><span aria-hidden="true">·</span><span dir="auto" className="min-w-0 truncate">{t("skillBurger.card.madeBy", { name: bot.name })}</span></>}
         </p>
         {runner && (
           <RunWithInputs skill={skill} onRun={(inputs) => runBurgerIn(dispatch, runner, skill.name, inputs)} className="ui-button ui-button-md self-start" />
@@ -96,7 +89,7 @@ function BurgerCard({ skill, onRemove }: { skill: SavedWorkflow; onRemove: () =>
   );
 }
 
-/** Every Skill Burger the person's bots made: each bot's own, and the ones used in every chat. */
+/** Every saved Skill Burger: each one is used in every chat by every bot. */
 export function SkillBurgersPage() {
   const dispatch = useStoreDispatch();
   const { skills, error, refresh } = useSavedBurgers();
@@ -131,7 +124,7 @@ export function SkillBurgersPage() {
             </section>
           ) : skills ? (
             <ul aria-label={t("skillBurger.list.title")} className="grid grid-cols-[repeat(auto-fill,minmax(min(320px,100%),1fr))] gap-4">
-              {skills.map((skill) => <BurgerCard key={`${skill.everyChat ? "every" : skill.botId}:${skill.name}`} skill={skill} onRemove={() => void remove(skill)} />)}
+              {skills.map((skill) => <BurgerCard key={skill.name} skill={skill} onRemove={() => void remove(skill)} />)}
             </ul>
           ) : null}
         </div>
