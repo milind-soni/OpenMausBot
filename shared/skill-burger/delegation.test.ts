@@ -65,7 +65,7 @@ describe("a delegation run", () => {
     expect(send.tasks[0]!.message).toEqual(expect.arrayContaining([{ $arg: "site" }]));
     expect(send.tasks.every((task) => task.doneWhen?.startsWith("3 findings"))).toBe(true);
     expect(send.review?.example).toMatch(/^Rio: /);
-    expect(review).toMatchObject({ kind: "ai", deterministic: false, input: { $step: "s1" } });
+    expect(review).toMatchObject({ kind: "ai", deterministic: false, input: { $step: "s1", path: "text" } });
     // The replies are this run's results: shown on the card, never written into the workflow.
     expect(JSON.stringify(draft.workflow)).not.toContain("Scope:** I checked the homepage");
     const md = renderWorkflowSkillMd("qa-test", draft.workflow);

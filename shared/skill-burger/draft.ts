@@ -306,7 +306,7 @@ class Drafter {
       this.steps.push({
         id, kind: "ai", deterministic: false, label,
         prompt: `Review what came back against the request and report to the person: ${this.askText.replace(/\s+/g, " ").slice(0, 600)}`,
-        ...(from ? { input: { $step: from.id } } : {}), ...(words ? { example: redactSecretsInText(words).slice(0, EXAMPLE_MAX) } : {}),
+        ...(from ? { input: { $step: from.id, path: "text" } } : {}), ...(words ? { example: redactSecretsInText(words).slice(0, EXAMPLE_MAX) } : {}),
       });
     } else if (layer.replay !== "exact" || !layer.args) {
       this.steps.push(this.ai(id, layer, label));

@@ -17,8 +17,9 @@ export interface ExecutorContext {
   botId: string;
   /** The conversation's folder: commands start here and files are written under it. */
   cwd: string;
-  /** Posts a JSON body to one of the server's internal routes as this turn, with a capability of `kind`. */
-  internal(kind: "agents" | "connectors" | "computer" | "browser", path: string, body: unknown, signal: AbortSignal): Promise<{ ok: boolean; body: Record<string, unknown> }>;
+  /** Posts a JSON body to one of the server's internal routes as this turn, with a capability of `kind`; with no body,
+   * a GET. */
+  internal(kind: "agents" | "connectors" | "computer" | "browser", path: string, body: unknown, signal: AbortSignal): Promise<{ ok: boolean; body: Record<string, unknown>; status?: number }>;
   /** The shell a command runs in on this computer. */
   shell?: { command: string; args: (script: string) => string[] };
 }
@@ -130,6 +131,30 @@ export function appFrame(tool: string, args: Record<string, unknown>, account: s
 
 export function createExecutors(context: ExecutorContext): StepExecutors {
   return {
+    // A delegate step's hand-offs go through coordinate_bots' own route, as this turn: the same reach, limits and receipts.
+    async teammates(signal) {
+      const answer = await context.internal("agents", `/api/internal/agents?self=${encodeURIComponent(context.botId)}`, undefined, signal);
+      const bots = Array.isArray(answer.body.bots) ? answer.body.bots.map(record).filter((bot): bot is Record<string, unknown> => Boolean(bot)) : [];
+      return bots.flatMap((bot) => (typeof bot.id === "string" && typeof bot.name === "string" ? [{ id: bot.id, name: bot.name, ...(typeof bot.title === "string" ? { title: bot.title } : {}) }] : []));
+    },
+    async delegate(input) {
+      const answer = await context.internal("agents", "/api/internal/coordinate-bots", {
+        botIds: input.botIds, message: input.message, ...(input.doneWhen ? { done_when: input.doneWhen } : {}), ...(input.rework ? { rework: true } : {}), ...(input.consult ? { consult: true } : {}),
+        reason: "A saved Skill Burger step",
+      }, input.signal);
+      const receipts = (Array.isArray(answer.body.receipts) ? answer.body.receipts : []).map(record).flatMap((receipt) => (
+        receipt && typeof receipt.botId === "string" && typeof receipt.requestId === "string" ? [{ botId: receipt.botId, name: String(receipt.botName ?? receipt.botId), requestId: receipt.requestId }] : []));
+      if (!answer.ok || !receipts.length) {
+        const refusedOne = (Array.isArray(answer.body.receipts) ? answer.body.receipts : []).map(record).find((receipt) => receipt?.detail);
+        return { ok: false, error: String(answer.body.error ?? refusedOne?.detail ?? "the hand-off was refused") };
+      }
+      return { ok: true, receipts };
+    },
+    async assignment(id, signal) {
+      const answer = await context.internal("agents", `/api/internal/assignment-status?id=${encodeURIComponent(id)}`, undefined, signal);
+      const row = record(answer.body.assignment) ?? answer.body;
+      return answer.ok && typeof row.status === "string" ? { status: row.status, result: typeof row.result === "string" ? row.result : "" } : null;
+    },
     shell: (input) => (input.where === "vm" ? runOnVm(context, input) : runInBox(context, input)),
     async app(input) {
       const { slug, frame } = appFrame(input.tool, input.args, input.account, rpcId());

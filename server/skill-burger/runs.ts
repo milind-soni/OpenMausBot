@@ -9,8 +9,9 @@ import type { WorkflowStep } from "../../shared/skill-burger/format.ts";
 import { PASS, type RouteHandler } from "../routes/table.ts";
 import { applyEdit, editSchema, editUndo } from "./edit.ts";
 import { createExecutors, type ExecutorContext } from "./executors.ts";
+import { createRunHistory } from "./history.ts";
 import { createRunStates } from "./run-state.ts";
-import { resumeRun, startRun, type RunDeps, type StepExecutors, type StepResult } from "./runner.ts";
+import { resumeRun, startRun, type RunDeps, type RunEnvelope, type StepExecutors, type StepResult } from "./runner.ts";
 import { findWorkflowSkill, replaceWorkflowSkill } from "./store.ts";
 import { burgerTurn, type BurgerHostDeps, type CallingTurn } from "./turn-host.ts";
 
@@ -42,6 +43,14 @@ const runBody = z.object({ name: z.string().min(1).max(64), args: z.record(z.str
 const resumeBody = z.object({ run: z.string().min(1).max(64), response: z.string().max(20_000) }).strict();
 const undoBody = z.object({ undo: z.string().min(1).max(64) }).strict();
 
+const DETAIL_MAX = 6_000;
+/** A step's detail as its row carries it: a few replies of a few hundred characters, never the whole of them. */
+function boundedDetail(detail: StepResult["detail"]): StepResult["detail"] {
+  if (!detail?.replies) return detail;
+  const each = Math.floor(DETAIL_MAX / Math.max(1, detail.replies.length));
+  return { ...detail, replies: detail.replies.slice(0, 8).map((reply) => ({ ...reply, text: reply.text.slice(0, Math.min(600, each)) })) };
+}
+
 /** The step rows a run publishes, each started before it ends, even a step the run passed over. */
 function stepEvents(turn: BurgerTurn, open: Map<string, Set<string>>): RunDeps["events"] {
   const itemId = (run: string, step: WorkflowStep) => `burger-${run}-${step.id}`;
@@ -58,7 +67,7 @@ function stepEvents(turn: BurgerTurn, open: Map<string, Set<string>>): RunDeps["
       start(run, name, step);
       turn.publish({
         type: "item.completed", itemId: itemId(run, step), ok: result.state !== "failed",
-        output: JSON.stringify({ state: result.state, ...(result.case ? { case: result.case } : {}), ...(result.error ? { error: result.error } : {}) }),
+        output: JSON.stringify({ state: result.state, ...(result.case ? { case: result.case } : {}), ...(result.error ? { error: result.error } : {}), ...(result.detail ? { detail: boundedDetail(result.detail) } : {}) }),
       });
     },
   };
@@ -66,14 +75,16 @@ function stepEvents(turn: BurgerTurn, open: Map<string, Set<string>>): RunDeps["
 
 export function createSkillBurgerRuns(deps: { dataDir: string; root?: string; host?: BurgerHostDeps; executors?: (turn: BurgerTurn) => StepExecutors }) {
   const states = createRunStates(join(deps.dataDir, "skill-burger-runs"));
+  const history = createRunHistory(join(deps.dataDir, "skill-burger-runs"));
   const open = new Map<string, Set<string>>();
   const runDeps = (turn: BurgerTurn): RunDeps => ({
     exec: deps.executors?.(turn) ?? createExecutors({ botId: turn.botId, cwd: turn.cwd, internal: turn.internal }),
     events: stepEvents(turn, open),
     save: (state) => states.save(state),
   });
-  const finished = (envelope: { run: string; status?: string }) => {
+  const finished = (turn: BurgerTurn, name: string | undefined, envelope: RunEnvelope) => {
     if (envelope.status !== "needs_input") open.delete(envelope.run);
+    if (name) history.record({ name, botId: turn.botId, threadId: turn.threadId }, envelope);
     return envelope;
   };
 
@@ -86,14 +97,14 @@ export function createSkillBurgerRuns(deps: { dataDir: string; root?: string; ho
       const found = findWorkflowSkill(turn.botId, parsed.data.name, deps.root);
       if (!found) return json(res, 404, { error: `No Skill Burger named "${parsed.data.name}" here. Check the names in your skills index.` });
       const envelope = await startRun({ name: parsed.data.name, botId: turn.botId, threadId: turn.threadId, sha256: found.sha256, workflow: found.workflow, ...(parsed.data.args ? { args: parsed.data.args } : {}) }, runDeps(turn));
-      return json(res, 200, finished(envelope));
+      return json(res, 200, finished(turn, parsed.data.name, envelope));
     }
     if (path === RESUME_PATH) {
       const parsed = resumeBody.safeParse(body);
       if (!parsed.success) return json(res, 400, { error: "Resume needs the run's token and your response." });
       const state = states.take(parsed.data.run, turn.botId);
       if (!state) return json(res, 404, { error: "That run can't be resumed: it finished, was resumed already, or is more than a day old." });
-      return json(res, 200, finished(await resumeRun({ ...state, threadId: turn.threadId }, parsed.data.response, runDeps(turn))));
+      return json(res, 200, finished(turn, state.name, await resumeRun({ ...state, threadId: turn.threadId }, parsed.data.response, runDeps(turn))));
     }
     if (path === UNDO_PATH) {
       const parsed = undoBody.safeParse(body);
@@ -128,6 +139,6 @@ export function createSkillBurgerRuns(deps: { dataDir: string; root?: string; ho
       ? internalRoutes(burgerTurn(deps.host, calling, authorization))(ctx)
       : Promise.resolve(PASS);
 
-  return { internalRoutes, routesFor };
+  return { internalRoutes, routesFor, history };
 }
 export type SkillBurgerRuns = ReturnType<typeof createSkillBurgerRuns>;

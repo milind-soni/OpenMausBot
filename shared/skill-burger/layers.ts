@@ -446,7 +446,7 @@ const botsOf = (layer: BurgerLayer) => new Set((layer.delegation?.rounds.flat() 
 /** coordinate_bots calls made together (one after another, before any reply came back) are one step that asks several
  * teammates at once. A later call to teammates that step already asked is another round of it, not a new step. Each
  * reply joins the round that asked for it. */
-function joinDelegations(layers: BurgerLayer[], round: ReadonlyMap<string, number>, replies: ReadonlyMap<string, Omit<DelegateReply, "round">>): BurgerLayer[] {
+function joinDelegations(layers: BurgerLayer[], round: Map<string, number>, replies: ReadonlyMap<string, Omit<DelegateReply, "round">>): BurgerLayer[] {
   const out: BurgerLayer[] = [];
   for (const layer of layers) {
     if (layer.kind !== "delegate" || !layer.delegation) { out.push(layer); continue; }
