@@ -19,7 +19,7 @@ import { readThreadEvents } from "../thread-events.ts";
 import { parseUsageRange } from "../usage-ledger.ts";
 import type { ConfigStatus } from "./config.ts";
 import type { PrivateRecords } from "../host/private-records.ts";
-import type { RequestAuth } from "../request-auth.ts";
+import { fromPairedDevice, type RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface StatusRouteDeps {
@@ -147,6 +147,9 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
     if (method === "POST" && path === "/api/keys/test") {
       const body = await readBody(req, 8192);
       const provider = body?.provider;
+      // A phone tests the key it pasted, at the address the computer already uses: never a saved key, never its own URL.
+      const pairedDevice = fromPairedDevice(req, auth);
+      if (pairedDevice && typeof body?.key !== "string") return json(res, 400, { error: "Paste a key to test." });
       if (provider === "treg") {
         if (body?.key !== undefined && typeof body.key !== "string") return json(res, 400, { error: "key must be a string" });
         const key = typeof body?.key === "string" ? body.key.trim() : cfg.treg?.key?.trim() || "";
@@ -166,7 +169,7 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
       const key = typeof body?.key === "string" ? body.key.trim() : saved?.key?.trim() || "";
       if (!key) return json(res, 400, { error: "No key to test. Paste one or save one first." });
       if (key.length > 512) return json(res, 400, { error: "That does not look like an API key." });
-      const url = typeof body?.url === "string" && body.url.trim() ? body.url.trim() : (saved && "url" in saved ? saved.url : undefined);
+      const url = !pairedDevice && typeof body?.url === "string" && body.url.trim() ? body.url.trim() : (saved && "url" in saved ? saved.url : undefined);
       res.setHeader("cache-control", "no-store");
       const verdict = await checkProviderKey({ provider: kind, key, url });
       if (kind !== "anthropic") {

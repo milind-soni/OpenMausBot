@@ -42,7 +42,8 @@ describe("a reply's Markdown while it streams", () => {
   let root: Root;
   const draw = (text: string, streaming: boolean) =>
     act(() => root.render(createElement(StreamingReplyContext, { value: streaming }, createElement(ChatMarkdown, { text }))));
-  const markup = () => host.innerHTML;
+  // The streaming mark only gates the fade-in; the page under it is what is compared.
+  const markup = () => host.innerHTML.replace(' data-streaming=""', "");
 
   beforeEach(() => {
     setLocale("en");
