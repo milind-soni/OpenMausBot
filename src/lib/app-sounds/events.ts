@@ -57,6 +57,7 @@ export function createEventSounds(deps: {
       groupHeard.set(group, now);
       return deps.play(event, () => !entry.id || !read.has(entry.id));
     },
+    isRead: (id: string | undefined) => id !== undefined && read.has(id),
     notificationsRead(ids: readonly string[]): void {
       for (const id of ids) read.add(id);
       while (read.size > REMEMBERED) read.delete(read.values().next().value as string);

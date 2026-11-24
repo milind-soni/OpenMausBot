@@ -221,6 +221,43 @@ describe("app sound player", () => {
     expect(speaker.started).toHaveLength(0);
   });
 
+  it.each([
+    ["a call starts", (sounds: ReturnType<typeof player>) => void sounds.hold("call")],
+    ["a recording starts", (sounds: ReturnType<typeof player>) => void sounds.hold("recording")],
+    ["sounds are turned off", () => void (choice = "off")],
+  ])("leaves no cue to the system either when %s before the deadline runs out", async (_change, change) => {
+    vi.useFakeTimers();
+    slowWake();
+    const sounds = player();
+    sounds.unlock();
+    const decision = sounds.play("mention");
+    change(sounds);
+    vi.advanceTimersByTime(RESUME_DEADLINE_MS);
+    await expect(decision).resolves.toBe("silenced");
+    expect(speaker.started).toHaveLength(0);
+  });
+
+  it("leaves no cue to the system for a notice read before the deadline runs out", async () => {
+    vi.useFakeTimers();
+    slowWake();
+    const sounds = player();
+    sounds.unlock();
+    let unread = true;
+    const decision = sounds.play("mention", () => unread);
+    unread = false;
+    vi.advanceTimersByTime(RESUME_DEADLINE_MS);
+    await expect(decision).resolves.toBe("silenced");
+  });
+
+  it("leaves no cue to the system when the wake fails during a call", async () => {
+    speaker = fakeOutput("suspended", false);
+    const sounds = player();
+    sounds.unlock();
+    const decision = sounds.play("mention");
+    sounds.hold("call");
+    await expect(decision).resolves.toBe("silenced");
+  });
+
   it("plays once the context wakes within the deadline", async () => {
     vi.useFakeTimers();
     const wake = slowWake();

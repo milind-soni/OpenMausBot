@@ -68,7 +68,8 @@ export function createSoundPlayer(host: SoundHost) {
     source.start();
   };
 
-  /** A suspended context only counts once it woke within the deadline; until then anything may have asked for quiet. */
+  /** A suspended context only counts once it woke within the deadline; until then anything may have asked for quiet,
+   * and what asked for quiet keeps the system chime quiet too. */
   const emitWhenRunning = (event: SoundEvent, style: SoundStyle, quiet: () => boolean): SoundDecision => {
     const out = output;
     if (!out) return "unplayable";
@@ -86,11 +87,9 @@ export function createSoundPlayer(host: SoundHost) {
         if (outcome === "played") emit(out, event, style);
         resolve(outcome);
       };
-      const deadline = setTimeout(() => settle("unplayable"), RESUME_DEADLINE_MS);
-      out.resume().then(
-        () => settle(quiet() ? "silenced" : out.state === "running" ? "played" : "unplayable"),
-        () => settle("unplayable"),
-      );
+      const fallBack = () => settle(quiet() ? "silenced" : "unplayable");
+      const deadline = setTimeout(fallBack, RESUME_DEADLINE_MS);
+      out.resume().then(() => (quiet() ? settle("silenced") : out.state === "running" ? settle("played") : fallBack()), fallBack);
     });
   };
 

@@ -62,10 +62,13 @@ function closing(): void {
   }
 }
 
-function readAcks(): Array<{ id: string; at: number }> {
+/** A receipt from the window in use, or with `by` and `fallback` a background window's claim to chime for a frozen one. */
+type Ack = { id: string; at: number; by?: string; fallback?: true };
+
+function readAcks(): Ack[] {
   try {
     const value = JSON.parse(storage()?.getItem(SOUND_ACK_KEY) ?? "[]") as unknown;
-    return Array.isArray(value) ? value.filter((ack): ack is { id: string; at: number } => typeof ack?.id === "string" && typeof ack?.at === "number") : [];
+    return Array.isArray(value) ? value.filter((ack): ack is Ack => typeof ack?.id === "string" && typeof ack?.at === "number") : [];
   } catch {
     return [];
   }
@@ -73,19 +76,28 @@ function readAcks(): Array<{ id: string; at: number }> {
 
 const acknowledged = (key: string) => readAcks().some((ack) => ack.id === key);
 
-function acknowledge(key: string): void {
-  const now = Date.now();
+function writeAck(ack: Ack): void {
   try {
-    const kept = readAcks().filter((ack) => ack.id !== key && now - ack.at < ACK_KEPT_MS);
-    storage()?.setItem(SOUND_ACK_KEY, JSON.stringify([...kept, { id: key, at: now }]));
+    const kept = readAcks().filter((old) => old.id !== ack.id && ack.at - old.at < ACK_KEPT_MS);
+    storage()?.setItem(SOUND_ACK_KEY, JSON.stringify([...kept, ack]));
   } catch {
     // Without storage every window counts as the one in use, so none waits for this.
   }
 }
 
+const acknowledge = (key: string) => writeAck({ id: key, at: Date.now() });
+
+/** Only the first background window to claim a notice chimes for it. Two windows writing within the same instant
+ * can both read their own claim back, since storage is not locked across windows. */
+function claimFallback(key: string): boolean {
+  if (acknowledged(key)) return false;
+  writeAck({ id: key, at: Date.now(), by: windowId, fallback: true });
+  return readAcks().find((ack) => ack.id === key)?.by === windowId;
+}
+
 /** The window in use writes a receipt for each notice it took. One that never does (frozen, or closed without a word)
- * leaves this window's banner to chime, so a notice is never lost; a slow one may mean the person hears two. */
-function awaitLeader(key: string): Promise<SoundOutcome> {
+ * leaves one background window's banner to chime, if the notice is still wanted then; a slow one may mean two. */
+function awaitLeader(key: string, wanted: () => boolean): Promise<SoundOutcome> {
   return new Promise((resolve) => {
     const done = (outcome: SoundOutcome) => {
       clearTimeout(timer);
@@ -95,7 +107,7 @@ function awaitLeader(key: string): Promise<SoundOutcome> {
     const heard = (event: StorageEvent) => {
       if (event.key === SOUND_ACK_KEY && acknowledged(key)) done("silenced");
     };
-    const timer = setTimeout(() => done(acknowledged(key) ? "silenced" : "unplayable"), SOUND_ACK_WAIT_MS);
+    const timer = setTimeout(() => done(wanted() && claimFallback(key) ? "unplayable" : "silenced"), SOUND_ACK_WAIT_MS);
     if (typeof window !== "undefined") window.addEventListener("storage", heard);
   });
 }
@@ -120,7 +132,8 @@ const player = createSoundPlayer({
   createOutput,
 });
 
-const eventSounds = createEventSounds({ play: (event, wanted) => player.play(event, wanted), now, finishedNotices: finishedNotificationsEnabled, soundsOn: () => readSoundChoice() !== "off" && !player.holding() });
+const soundsOn = () => readSoundChoice() !== "off" && !player.holding();
+const eventSounds = createEventSounds({ play: (event, wanted) => player.play(event, wanted), now, finishedNotices: finishedNotificationsEnabled, soundsOn });
 
 const here = (outcome: PlayOutcome): SoundOutcome => (outcome === "elsewhere" ? "silenced" : outcome);
 const inThisWindow = (decision: PlayDecision): SoundDecision => (typeof decision === "string" ? here(decision) : decision.then(here));
@@ -138,7 +151,7 @@ export function notificationSound(entry: NotificationSoundEntry, viewing: boolea
       acknowledge(key);
       return outcome;
     }
-    return acknowledged(key) ? "silenced" : awaitLeader(key);
+    return acknowledged(key) ? "silenced" : awaitLeader(key, () => soundsOn() && !eventSounds.isRead(entry.id));
   };
   const decision = eventSounds.notified(entry, viewing);
   return typeof decision === "string" ? settled(decision) : decision.then(settled);

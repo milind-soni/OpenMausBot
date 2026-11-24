@@ -142,6 +142,43 @@ describe("app sounds in a window", () => {
     expect(started).toBe(1);
   });
 
+  it("chimes through only one of the other windows when the window in use is frozen", async () => {
+    const frozen = await openWindow();
+    const left = await openWindow();
+    const right = await openWindow();
+    left.fire("pointerdown");
+    right.fire("pointerdown");
+    frozen.fire("pointerdown");
+    page.visibilityState = "hidden";
+    page.hasFocus = () => false;
+    const waiting = [left.sounds.notificationSound(mention("m7", "t7"), false), right.sounds.notificationSound(mention("m7", "t7"), false)];
+    vi.advanceTimersByTime(left.sounds.SOUND_ACK_WAIT_MS);
+    const outcomes = await Promise.all(waiting);
+    expect(outcomes.filter((outcome) => outcome === "unplayable")).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome === "silenced")).toHaveLength(1);
+  });
+
+  it.each([
+    ["is read", (sounds: Awaited<ReturnType<typeof openWindow>>["sounds"]) => sounds.notificationsRead(["m8"])],
+    ["arrives during a call", (sounds: Awaited<ReturnType<typeof openWindow>>["sounds"]) => void sounds.holdAppSounds("call")],
+    ["arrives during a recording", (sounds: Awaited<ReturnType<typeof openWindow>>["sounds"]) => void sounds.holdAppSounds("recording")],
+    ["arrives with sounds turned off", () => local.setItem("omb-notification-sounds", "0")],
+  ])("chimes through no window when the frozen leader's notice %s before the wait ends", async (_change, change) => {
+    const frozen = await openWindow();
+    const left = await openWindow();
+    const right = await openWindow();
+    left.fire("pointerdown");
+    right.fire("pointerdown");
+    frozen.fire("pointerdown");
+    page.visibilityState = "hidden";
+    page.hasFocus = () => false;
+    const waiting = [left.sounds.notificationSound(mention("m8", "t8"), false), right.sounds.notificationSound(mention("m8", "t8"), false)];
+    change(left.sounds);
+    change(right.sounds);
+    vi.advanceTimersByTime(left.sounds.SOUND_ACK_WAIT_MS);
+    await expect(Promise.all(waiting)).resolves.toEqual(["silenced", "silenced"]);
+  });
+
   it("plays no style sample while recording", async () => {
     const { sounds, fire } = await openWindow();
     fire("pointerdown");
