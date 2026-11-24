@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import type { GitHubSkillOrigin, SkippedSkillFile } from "../shared/skill-import.ts";
 import { SKILL_FILE_MAX_BYTES } from "../shared/skill-md.ts";
-import { githubToken } from "./github/token.ts";
+import { githubToken, reportGithubAuthFailure } from "./github/token.ts";
 import { planSkillFolder, SKILL_FOLDER_LIMITS, type FolderEntry, type SkillFolderFile } from "./skill-folder.ts";
 
 const API = "https://api.github.com";
@@ -16,9 +16,18 @@ const PARALLEL_DOWNLOADS = 4;
 class ImportLimitError extends Error {}
 class GitHubApiError extends Error {}
 
-/** A refused audience (`null`) stays anonymous. `githubToken(null)` is the server sign-in off a Team Cloud. */
-export function skillImportToken(audience?: string | null): Promise<string | null> {
-  return audience === null ? Promise.resolve(null) : githubToken(audience);
+export interface SkillImportSignIn {
+  token: string | null;
+  /** Set only when `token` is this audience's sign-in. A 401 on a request that sent it marks that sign-in stale. */
+  refused?(): void;
+}
+
+/** A refused audience (`null`) stays anonymous and has no `refused`. `githubToken(null)` is the server sign-in off a Team Cloud. */
+export function skillImportToken(audience?: string | null): Promise<SkillImportSignIn> {
+  if (audience === null) return Promise.resolve({ token: null });
+  return githubToken(audience).then((token) => token
+    ? { token, refused: () => reportGithubAuthFailure(audience ?? "owner") }
+    : { token: null });
 }
 
 function requestHref(input: Parameters<typeof fetch>[0]): string {
@@ -48,16 +57,17 @@ function withBearer(input: Parameters<typeof fetch>[0], init: RequestInit | unde
 function boundedImportFetch(
   fetcher: typeof fetch,
   cancel?: AbortSignal,
-  authorization: () => Promise<string | null> = () => skillImportToken(),
+  authorization: () => Promise<SkillImportSignIn> = () => skillImportToken(),
 ): typeof fetch {
   let apiRequests = 0;
   let downloads = 0;
   let bytes = 0;
-  let credential: Promise<string | null> | undefined;
+  let reported = false;
+  let credential: Promise<SkillImportSignIn> | undefined;
   const timeout = AbortSignal.timeout(IMPORT_LIMITS.ms);
   const signal = cancel ? AbortSignal.any([timeout, cancel]) : timeout;
   // `gh auth token` starts a process; a null answer stays null for this import.
-  const credentialOnce = (): Promise<string | null> => (credential ??= (async () => authorization())());
+  const credentialOnce = (): Promise<SkillImportSignIn> => (credential ??= (async () => authorization())());
   return async (input, init) => {
     const api = isGitHubApiRequest(input);
     if (api ? ++apiRequests > IMPORT_LIMITS.apiRequests : ++downloads > IMPORT_LIMITS.downloads) {
@@ -65,15 +75,21 @@ function boundedImportFetch(
     }
     signal.throwIfAborted();
     const sent: RequestInit = { ...init, signal };
+    let carried: SkillImportSignIn["refused"];
     if (api) {
-      const token = await credentialOnce();
-      const headers = token ? withBearer(input, init, token) : null;
+      const signIn = await credentialOnce();
+      const headers = signIn.token ? withBearer(input, init, signIn.token) : null;
       if (headers) {
         sent.headers = headers;
         sent.redirect = "error";
+        carried = signIn.refused;
       }
     }
     const response = await fetcher(input, sent);
+    if (carried && response.status === 401 && !reported) {
+      reported = true;
+      carried();
+    }
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});
       return response;
@@ -404,7 +420,7 @@ export async function fetchSkillFromSource(
   input: string,
   fetcher: typeof fetch = fetch,
   cancel?: AbortSignal,
-  authorization?: () => Promise<string | null>,
+  authorization?: () => Promise<SkillImportSignIn>,
 ): Promise<{ skills: FetchedSkill[] } | { error: string }> {
   const parsed = parseSkillSource(input);
   if ("error" in parsed) return parsed;
@@ -426,7 +442,7 @@ export async function fetchSkillFromSource(
 export async function latestSkillCommit(
   origin: GitHubSkillOrigin,
   fetcher: typeof fetch = fetch,
-  authorization?: () => Promise<string | null>,
+  authorization?: () => Promise<SkillImportSignIn>,
 ): Promise<string | { error: string }> {
   try {
     return await resolveCommit(origin.owner, origin.repo, origin.ref, boundedImportFetch(fetcher, undefined, authorization));

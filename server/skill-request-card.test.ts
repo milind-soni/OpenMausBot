@@ -76,7 +76,7 @@ describe("importedSkillRequest", () => {
       { action: "import", source: "https://github.com/acme/skills/tree/main/skills/pdf" },
       fetcher,
       undefined,
-      async () => token,
+      async () => ({ token }),
     );
     expect(body).toMatchObject({ action: "create", skill_md: SKILL("pdf") });
     const api = calls.filter((call) => call.url.startsWith("https://api.github.com/"));

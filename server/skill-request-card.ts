@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { redactSecretsInText } from "./redact.ts";
-import { fetchSkillFromSource } from "./skill-fetch.ts";
+import { fetchSkillFromSource, type SkillImportSignIn } from "./skill-fetch.ts";
 import { isSkillReferencePath, MAX_SKILL_REFERENCES, STAGED_SKILL_REFERENCE_MAX_BYTES } from "./skill-storage.ts";
 import { listSkills, readSkillFile, readSkillReferences, STAGED_GIST_MAX } from "./skills.ts";
 import type { SkillRequestCardData } from "../shared/skill-request.ts";
@@ -60,7 +60,7 @@ export async function importedSkillRequest<T extends Record<string, unknown>>(
   body: T,
   fetcher: typeof fetch = fetch,
   cancel?: AbortSignal,
-  authorization?: () => Promise<string | null>,
+  authorization?: () => Promise<SkillImportSignIn>,
 ): Promise<T | { importError: string }> {
   if (body.action !== "import") return body;
   const source = typeof body.source === "string" ? body.source.trim() : "";

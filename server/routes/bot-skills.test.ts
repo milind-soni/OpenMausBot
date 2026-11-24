@@ -7,7 +7,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DATA_DIR, type AppConfig } from "../config.ts";
 import { provideGithubSignIn } from "../github/token.ts";
 import { json, readBody } from "../harness/http.ts";
+import { personKey } from "../person-key.ts";
 import type { RequestAuth } from "../request-auth.ts";
+import type { SessionRecord } from "../sessions.ts";
 import { installLibrarySkill, readLibrarySkillFile, setLibrarySkillEveryBot } from "../skill-library.ts";
 import type { Store } from "../store.ts";
 import { installSkill, listSkills, resolveBotSkills } from "../skills.ts";
@@ -87,10 +89,10 @@ describe("whose GitHub sign-in a bot import uses", () => {
   const OWNER = "gho_ownerSignInMustNotLeak";
   const SKILL_MD = "---\nname: pdf\ndescription: Does pdf things.\n---\n\n# pdf\n";
 
-  async function importAs(auth: RequestAuth) {
+  async function importAs(auth: RequestAuth, team = false) {
     const asked: Array<string | null | undefined> = [];
     provideGithubSignIn({
-      token: async (audience) => { asked.push(audience); return audience === "owner" ? TOKEN : OWNER; },
+      token: async (audience) => { asked.push(audience); return audience ? TOKEN : OWNER; },
       reportAuthFailure: () => {},
       signedIn: () => true,
     });
@@ -110,7 +112,7 @@ describe("whose GitHub sign-in a bot import uses", () => {
       listBotSkills: () => [],
       readBotSkillFile: () => null,
       stagedSkillListing: (staged) => staged,
-      team: false,
+      team,
     })];
     const server = createServer(async (req, res) => {
       const url = new URL(req.url ?? "/", "http://localhost");
@@ -149,6 +151,38 @@ describe("whose GitHub sign-in a bot import uses", () => {
     expect(asked).toEqual([]);
     expect(JSON.stringify({ body, calls })).not.toContain(OWNER);
     expect(JSON.stringify({ body, calls })).not.toContain(TOKEN);
+  });
+
+  const memberSession = (email: string): RequestAuth => ({
+    kind: "session",
+    via: "cookie",
+    scopes: ["client"],
+    session: {
+      id: "s-1", tokenHash: "0".repeat(64), label: "Ada", scopes: ["client"], createdAt: 1, lastSeenAt: 1, expiresAt: 9_000,
+      email, teamRole: "member", membershipAuthority: "team",
+    } as SessionRecord,
+  });
+
+  it("asks for that member's person key on a Team Cloud", async () => {
+    const key = personKey({ id: "", email: "ada@example.com" });
+    const { status, body, calls, asked } = await importAs(memberSession("ada@example.com"), true);
+    expect(status).toBe(201);
+    const api = calls.filter((call) => call.url.startsWith("https://api.github.com/"));
+    const raw = calls.filter((call) => call.url.startsWith("https://raw.githubusercontent.com/"));
+    expect(api.length).toBeGreaterThan(0);
+    expect(raw.length).toBeGreaterThan(0);
+    expect(asked).toEqual([key]);
+    expect(api.every((call) => call.headers.get("authorization") === `Bearer ${TOKEN}`)).toBe(true);
+    expect(raw.every((call) => call.headers.get("authorization") === null)).toBe(true);
+    expect(JSON.stringify(body)).not.toContain(TOKEN);
+  });
+
+  it("does not look up a token on a Team Cloud when this session has no member sign-in", async () => {
+    const { status, calls, asked } = await importAs({ kind: "loopback", scopes: ["admin"] } as RequestAuth, true);
+    expect(status).toBe(201);
+    expect(calls.some((call) => call.url.startsWith("https://api.github.com/"))).toBe(true);
+    expect(asked).toEqual([]);
+    expect(calls.every((call) => call.headers.get("authorization") === null)).toBe(true);
   });
 });
 
