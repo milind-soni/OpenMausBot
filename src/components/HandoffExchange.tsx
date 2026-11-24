@@ -16,7 +16,7 @@ import { conversationRows, handoffTranscript, LOADING_TRANSCRIPT, type Conversat
 import { intlLocale, t } from "@/lib/i18n";
 import { listenLiveFrames } from "@/lib/live-events";
 import { localDay } from "@/lib/transcript-derivations";
-import { BotExchangesContext, latestPersonTurn, useBotExchanges } from "@/lib/use-bot-exchanges";
+import { BotExchangesContext, latestPersonTurn, useBotExchanges, useEarlierExchange } from "@/lib/use-bot-exchanges";
 import { loadFullThread } from "@/state/message-history";
 import { visibleMessages } from "@/state/snapshot-navigation";
 import type { Bot, Message } from "@/state/store";
@@ -31,6 +31,10 @@ export interface HandoffExchange {
   threadId: string;
   /** The hand-off, when the view is for one exchange: only its own lines show, and it can be stopped. */
   id?: string;
+  /** When its "Sent to" row was written, for a hand-off from an earlier request. */
+  sentAt?: number;
+  /** When its "Sent to" row last saw it end: the bound on its lines if the server no longer has the hand-off. */
+  endedAt?: number;
 }
 
 /** Opens a hand-off's exchange in place of the chat it is in. Null where no chat column hosts one (a room, the side
@@ -46,7 +50,11 @@ export function HandoffExchangeHost({ bot, children }: { bot: Bot; children: Rea
   const openExchange = useCallback((exchange: HandoffExchange) => setOpen({ chat, exchange }), [chat]);
   const exchange = open?.chat === chat ? open.exchange : null;
   const since = useMemo(() => latestPersonTurn(bot.messages), [bot.messages]);
-  const exchanges = useBotExchanges(bot.threadId, since, Boolean(bot.busy || bot.waitingForTeammates));
+  const current = useBotExchanges(bot.threadId, since, Boolean(bot.busy || bot.waitingForTeammates));
+  const covered = current.exchanges.some((entry) => entry.id === exchange?.id);
+  const earlier = useEarlierExchange(bot.threadId, exchange?.id, exchange?.sentAt, covered);
+  const exchanges = useMemo(() => earlier && !covered ? { ...current, exchanges: [...current.exchanges, earlier] } : current,
+    [current, earlier, covered]);
   return (
     <BotExchangesContext value={exchanges}>
       {exchange ? <HandoffExchangeView key={exchange.id ?? exchange.threadId} exchange={exchange} onBack={() => setOpen(null)} />
@@ -55,7 +63,7 @@ export function HandoffExchangeHost({ bot, children }: { bot: Bot; children: Rea
   );
 }
 
-export function HandoffExchangeView({ exchange: { asker, helper, threadId, id }, onBack }: { exchange: HandoffExchange; onBack: () => void }) {
+export function HandoffExchangeView({ exchange: { asker, helper, threadId, id, endedAt }, onBack }: { exchange: HandoffExchange; onBack: () => void }) {
   const [transcript, dispatch] = useReducer(handoffTranscript, LOADING_TRANSCRIPT);
   const [load, setLoad] = useState(0);
   const reload = () => {
@@ -87,8 +95,8 @@ export function HandoffExchangeView({ exchange: { asker, helper, threadId, id },
 
   const entry = use(BotExchangesContext).exchanges.find((candidate) => candidate.id === id);
   const lines = useMemo(() => id === undefined ? null
-    : exchangeLines(visibleMessages(transcript), { id, state: entry?.state ?? "working", finishedAt: entry?.finishedAt }),
-  [transcript, id, entry?.state, entry?.finishedAt]);
+    : exchangeLines(visibleMessages(transcript), { id, state: entry?.state ?? "working", finishedAt: entry?.finishedAt ?? endedAt }),
+  [transcript, id, entry?.state, entry?.finishedAt, endedAt]);
   const you = t("chat.you");
   const rows = useMemo(() => {
     const all = conversationRows(transcript, asker, helper, you);

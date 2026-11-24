@@ -72,6 +72,23 @@ export function useBotExchanges(threadId: string | undefined, since: number | un
   return useMemo(() => ({ exchanges, stop }), [exchanges, stop]);
 }
 
+/** An exchange opened from an earlier request, which the read from the person's latest message no longer covers. The
+ * server's job read takes every hand-off still open at `since`, so reading from its "Sent to" row finds it. */
+export function useEarlierExchange(threadId: string | undefined, id: string | undefined, since: number | undefined, covered: boolean): BotExchangeEntry | undefined {
+  const [found, setFound] = useState<{ id: string; entry: BotExchangeEntry } | null>(null);
+  const teammate = t("chat.botExchange.teammate");
+  useEffect(() => {
+    if (!threadId || !id || since === undefined || covered) return;
+    const abort = new AbortController();
+    api<JobRead>(`/api/threads/${encodeURIComponent(threadId)}/job?since=${since}`, { signal: abort.signal, background: true }).then((job) => {
+      const entry = Array.isArray(job?.nodes) ? exchangesOf(job, teammate).find((candidate) => candidate.id === id) : undefined;
+      if (entry && !abort.signal.aborted) setFound({ id, entry });
+    }, () => {});
+    return () => abort.abort();
+  }, [threadId, id, since, covered, teammate]);
+  return found && found.id === id ? found.entry : undefined;
+}
+
 const pause = (ms: number, signal: AbortSignal) => new Promise<void>((resolve) => {
   const stop = () => { clearTimeout(timer); resolve(); };
   const timer = setTimeout(() => { signal.removeEventListener("abort", stop); resolve(); }, ms);
