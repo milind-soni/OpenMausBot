@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight, FolderOpen, Plus } from "lucide-react";
 
 import { api, type Bot } from "@/state/store";
 import { useBotEditor } from "./BotEditorContext";
+import { VpsAliasField } from "./VpsAliasField";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
@@ -14,7 +15,7 @@ import { shortPath } from "@/lib/short-path";
 import { isOwnThreadFolder } from "../../../shared/thread-folder";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { CloudBackendPicker } from "../CloudBackendPicker";
-import { placeManagedBy, worksOnChoices, WorksOnGrid, worksOnSelected, type WorksOnMode } from "../WorksOnGrid";
+import { placeManagedBy, worksOnChoices, WorksOnGrid, worksOnHintKey, worksOnSelected, type WorksOnMode } from "../WorksOnGrid";
 import { Switch } from "../SettingsPrimitives";
 import { PhoneAppsCard } from "./PhoneAppsCard";
 import { ProposalStatus } from "./ProposalStatus";
@@ -35,7 +36,6 @@ import {
 } from "@/lib/connector-grants";
 import { inputCls } from "./field";
 import { openKeySettings } from "../keys/key-focus";
-import { KeysLink } from "../keys/KeysLink";
 import type { ConnectorScope, ConnectorScopes } from "../../../shared/connector-scopes";
 import type { ConnectorAccount } from "@/lib/connector-status";
 import type { useBotSettingsDerived } from "./useBotSettingsDerived";
@@ -558,70 +558,6 @@ export function cloudPreferenceShown(bot: Pick<Bot, "computer">, config: { cloud
   return (!bot.computer || bot.computer === "cloud") && !config?.cloudHome;
 }
 
-/**
- * A bot's own VPS server. PATCHed directly, not via updateBot: the server refuses
- * a move while the bot's computer still lives on the old host.
- */
-export function VpsAliasField({ bot }: { bot: Bot }) {
-  const { request: api } = useBotEditor();
-  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
-  const defaultAlias = state.config?.vps?.sshAlias ?? "";
-  const [draft, setDraft] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  // Set when the old server could not be reached: the move went ahead, and this says what may be left there.
-  const [notice, setNotice] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const save = async (alias: string | null) => {
-    setSaving(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const saved = await api<{ notice?: string }>(`/api/bots/${bot.id}`, { method: "PATCH", body: JSON.stringify({ vpsAlias: alias }) });
-      setNotice(saved?.notice ?? null);
-      setDraft(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-  const value = draft ?? bot.vpsAlias ?? "";
-  return (
-    <div className="mt-3 rounded-lg bg-inset p-3">
-      <div className="text-[13px] text-ink">{t("botAccess.cloud.server")}</div>
-      <div className="mt-0.5 text-[12px] text-ink-secondary">
-        {defaultAlias
-          ? t("botAccess.cloud.serverDefault", { alias: defaultAlias })
-          : t("botAccess.cloud.serverNoDefault")} <KeysLink id="vps" />
-      </div>
-      <form
-        className="mt-2 flex items-center gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void save(value.trim() || null);
-        }}
-      >
-        <input
-          className={cn(inputCls, "font-mono text-[13px]")}
-          placeholder={defaultAlias || t("botAccess.cloud.serverPlaceholder")}
-          value={value}
-          aria-label={t("botAccess.cloud.server")}
-          onChange={(e) => setDraft(e.target.value)}
-        />
-        <button
-          type="submit"
-          disabled={saving || draft === null}
-          className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
-        >
-          {t("botAccess.cloud.serverSave")}
-        </button>
-      </form>
-      {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}
-      {notice && <div role="status" className="mt-2 break-words text-[12px] text-ink-secondary">{notice}</div>}
-    </div>
-  );
-}
-
 export function CloudPreference({ bot, patch }: { bot: Bot; patch: ReturnType<typeof useBotSettingsDerived>["patch"] }) {
   const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const { draft } = useBotEditor();
@@ -685,7 +621,7 @@ function DraftWorksOn({ bot, patch, seat }: { bot: Bot; patch: ReturnType<typeof
   const choose = (mode: WorksOnMode) => patch(mode === "browser" ? { computer: mode, browser: true } : { computer: mode });
   return <>
     <div className="text-[15px] font-medium text-ink">{t("computer.worksOn")}</div>
-    <p className="mt-1 text-[12px] leading-5 text-ink-secondary">{t(state.config?.cloudHome ? "computer.worksOnHintCloudHome" : "computer.worksOnHint")}</p>
+    <p className="mt-1 text-[12px] leading-5 text-ink-secondary">{t(worksOnHintKey(state.config, capabilities))}</p>
     <WorksOnGrid options={options} onSelect={choose} />
   </>;
 }

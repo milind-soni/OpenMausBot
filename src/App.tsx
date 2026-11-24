@@ -20,14 +20,15 @@ import { parseComputerHelp } from "@/lib/computer-control";
 import { viewerClosedRelease } from "@/components/computer-takeover";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
+import { HandoffExchangeHost } from "@/components/HandoffExchange";
 import { GroupView } from "@/components/GroupView";
 import { ForkPanel } from "@/components/ForkPanel";
-import { SIDEBAR_AND_NARROW_PANEL_FIT, SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQuery } from "@/lib/use-media-query";
-import { anySidePanel, sidebarFoldsForPanel, type OpenSidePanels } from "@/lib/sidebar-fold";
+import { SIDEBAR_AND_BOT_PANEL_FIT, SIDEBAR_AND_NARROW_PANEL_FIT, SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQuery } from "@/lib/use-media-query";
+import { anySidePanel, botPanelFloats, panelsMovingSidebar, sidebarFoldsForPanel, type OpenSidePanels } from "@/lib/sidebar-fold";
 import { preloadConnectedApps } from "@/lib/connected-apps";
 import {
   ActivityPanel, AnnouncementsPage, BotSettingsDialog, CloudAddDialog, ComputerPanel, FilesView, InboxPanel, InspectorPanel, KeyboardShortcutsModal, LocalVmWorkspace,
-  PluginsPanel, preloadScreens, PublishedAppsPage, RemoteAgentSettingsPanel, RemoteDesktopPanel, RoomPanel, SettingsModal, TeamFilesPage, TeamMapPage, TriggersPage,
+  PluginsPanel, preloadScreens, PublishedAppsPage, RemoteAgentSettingsPanel, SkillBurgersPage, RemoteDesktopPanel, RoomPanel, SettingsModal, TeamFilesPage, TeamMapPage, TriggersPage,
 } from "@/components/lazy-screens";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useRoomPanelShown } from "@/lib/room-panel";
@@ -91,6 +92,7 @@ import { WebPanelPage } from "@/components/WebPanelPage";
 import { AppPreviewPanel } from "@/components/published-apps/AppPreviewPanel";
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { refreshPublishedApps } from "@/lib/own-published-apps";
+import { serverFetch } from "@/lib/relay-server";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
@@ -114,6 +116,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const twoSidePanelsFit = useMediaQuery(TWO_SIDE_PANELS_FIT, true);
   const sidebarAndPanelFit = useMediaQuery(SIDEBAR_AND_PANEL_FIT, true);
   const sidebarAndNarrowPanelFit = useMediaQuery(SIDEBAR_AND_NARROW_PANEL_FIT, true);
+  const sidebarAndBotPanelFit = useMediaQuery(SIDEBAR_AND_BOT_PANEL_FIT, true);
   const sidebarInline = useMediaQuery(SIDEBAR_INLINE, false);
   useEffect(() => {
     if (!sidebarInline && state.forkPanel) dispatch({ type: "closeForkPanel" });
@@ -186,8 +189,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   };
   // A 320 panel leaves room for the open sidebar from 1040 up; a wider one from 1280. Narrower, the sidebar folds.
   const collapseSidebar = sidebarFoldsForPanel(sidePanels, { wide: sidebarAndPanelFit, narrow: sidebarAndNarrowPanelFit });
-  // Open beside a panel below 1280, the sidebar keeps to 280 so the chat keeps its 440.
-  const sidebarBesidePanel = anySidePanel(sidePanels) && !sidebarAndPanelFit;
+  // Open beside a panel below 1280, the sidebar keeps to 280 so the chat keeps its 440; Simple's bot panel never moves it.
+  const sidebarBesidePanel = anySidePanel(panelsMovingSidebar(sidePanels)) && !sidebarAndPanelFit;
   const calendarFocus = state.activeView === "routines" && state.routinesFocus.view === "calendar";
   const notificationTray = notificationFeed && !calendarFocus;
 
@@ -224,9 +227,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       if (!mod) return;
       const bots = shortcutBots(state.bots.filter((b) => !b.hidden), shownBotIds(document.querySelector("[data-sidebar-root]")));
       const step = e.shiftKey ? botCycleStep(e) : null;
-      if (e.key.toLowerCase() === "n" && !e.altKey) {
+      const newThreadKey = e.key.toLowerCase() === "t" && !e.shiftKey && !e.altKey;
+      if ((e.key.toLowerCase() === "n" || newThreadKey) && !e.altKey) {
         e.preventDefault();
-        if (e.shiftKey) {
+        if (e.shiftKey || newThreadKey) {
           const selected = state.bots.find((bot) => bot.id === state.selectedId && !bot.hidden);
           if (!e.repeat && selected && selected.yourAccess !== "view") dispatch({ type: "newTask", botId: selected.id });
         } else {
@@ -330,7 +334,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     return window.ogb?.desktopViewer?.onState((viewer) => {
       if (viewer.open || !viewer.contextId) return;
       const botId = viewer.contextId, release = viewerClosedRelease(botId);
-      if (release) void fetch(`/api/bots/${botId}/computer/control`, {
+      if (release) void serverFetch(`/api/bots/${botId}/computer/control`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(release),
@@ -340,7 +344,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           if (snap) dispatch({ type: "computerControl", botId, held: snap.held === true, helpReason: snap.helpReason ?? null, help: parseComputerHelp(snap.help) });
         })
         .catch(() => {});
-      void fetch(`/api/bots/${botId}/computer/viewer-close`, {
+      void serverFetch(`/api/bots/${botId}/computer/viewer-close`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: "{}",
@@ -349,8 +353,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   }, [dispatch]);
 
   const framed = windowFramed(capabilities);
+  // The sidebar is on screen, so its update button is too. In Simple that button is the one; the top bar leaves its own out.
+  const sidebarShown = !calendarFocus && (sidebarInline || drawerOpen);
   const strips = <>
-    <UpdateBanner sidebarIndicator={framed || (!calendarFocus && (sidebarInline || drawerOpen))} />
+    <UpdateBanner sidebarIndicator={framed || sidebarShown} />
     <CloudAsleepStrip />
     <LiveConnectionStrip connected={state.connected} hydrated={state.hydrated === true} />
     <CloudSendStrip cloudHome={state.config?.cloudHome === true} />
@@ -360,11 +366,11 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   </>;
   return (
     <div data-look="app" className={cn("flex h-full flex-col", framed && "bg-frame")} onClickCapture={drawerOpen ? noteDrawerAction : undefined} onKeyDownCapture={drawerOpen ? noteDrawerAction : undefined}>
-      <WindowFrameBar notifications={notificationTray} />
+      <WindowFrameBar notifications={notificationTray} sidebarUpdate={!advanced && sidebarShown} />
       <BotLimitPopup />
       <ConversationShareDialogs />
       {!framed && strips}
-      <div className="relative flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1 overflow-x-clip">
       {!calendarFocus && <button
         type="button"
         ref={menuButtonRef}
@@ -389,9 +395,9 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           the window's rail: its top corners and its bottom-left corner are round, and it runs to the window's right and
           bottom edges. */}
       <div data-window-card={framed ? "" : undefined}
-        className={framed ? "relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-t-[12px] rounded-bl-[12px] bg-app" : "contents"}>
+        data-look={framed ? "window" : undefined} className={framed ? "relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-t-[12px] rounded-bl-[12px] bg-app" : "contents"}>
       {framed && strips}
-      <div className={framed ? "relative flex min-h-0 flex-1" : "contents"}>
+      <div className={framed ? "relative flex min-h-0 flex-1 overflow-x-clip" : "contents"}>
       {!calendarFocus && <Sidebar
         collapseToIcons={collapseSidebar}
         besidePanel={sidebarBesidePanel}
@@ -404,6 +410,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         <FilesView />
       ) : state.activeView === "web-panel" ? (
         <WebPanelPage />
+      ) : state.activeView === "skill-burgers" ? (
+        <SkillBurgersPage />
       ) : state.activeView === "published-apps" ? (
         <PublishedAppsPage />
       ) : state.activeView === "announcements" ? (
@@ -432,7 +440,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       ) : group ? (
         <GroupView key={group.id} group={group} />
       ) : bot ? (
-        <ChatView bot={chatBot ?? bot} />
+        <HandoffExchangeHost bot={chatBot ?? bot}><ChatView bot={chatBot ?? bot} /></HandoffExchangeHost>
       ) : noEngines ? (
         <NoEngines />
       ) : (
@@ -452,7 +460,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       {state.settingsOpen && bot && (
         remoteClient
           ? <RemoteAgentSettingsPanel bot={bot} overlay={state.computerOpen && !twoSidePanelsFit} />
-          : <BotSettingsDialog key={`settings:${bot.id}`} bot={bot} overlay={(state.inspectorOpen || state.computerOpen || (notificationFeed && state.notificationsOpen)) && !twoSidePanelsFit} />
+          : <BotSettingsDialog key={`settings:${bot.id}`} bot={bot} overlay={((state.inspectorOpen || state.computerOpen || (notificationFeed && state.notificationsOpen)) && !twoSidePanelsFit) || botPanelFloats(sidePanels, sidebarAndBotPanelFit)} />
       )}
       {state.computerOpen && bot && (
         remoteClient ? (

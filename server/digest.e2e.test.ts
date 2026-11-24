@@ -177,7 +177,9 @@ posixOnly("work digest e2e (every fake engine)", () => {
     // the staged folder in the shadow itself, not for the first index that appears (the draft's, before the rename).
     const shadow = () => (existsSync(shadows) ? readdirSync(shadows) : []).filter((name) => !name.endsWith(".new")).map((name) => join(shadows, name, ".git")).find((dir) => existsSync(join(dir, "index")));
     const shadowGit = (...args: string[]) => execFileSync("git", args, { encoding: "utf8", env: { ...process.env, GIT_DIR: shadow()! } }).trim();
-    await waitFor(async () => shadow() !== undefined && shadowGit("ls-files") !== "", "the project to be read ahead of the first message");
+    // The shadow can still be moving into place as it is read: a git that finds no repository there is "not yet".
+    const staged = () => { try { return shadowGit("ls-files") !== ""; } catch { return false; } };
+    await waitFor(async () => shadow() !== undefined && staged(), "the project to be read ahead of the first message");
     expect(shadowGit("ls-files")).toBe("README.md");
     expect(shadowGit("log", "--format=%s")).toBe("checkpoint base");
 

@@ -9,7 +9,7 @@ import { AnalyticsRow } from "../../AnalyticsRow";
 import { analyticsAvailable } from "@/lib/analytics";
 import { ChatWidthRow, FontRow, SidebarToolsLayoutRow } from "../../AppearanceSelectRows";
 import {
-  ColorUserBubblesRow, FollowUpRow, LanguageRow, PinnedCirclesRow, ReplayTourRow, RunCardRow, SendKeyRow, ShowThreadsRow,
+  ColorUserBubblesRow, FollowUpRow, LanguageRow, PinnedCirclesRow, ReplayTourRow, SendKeyRow, ShowThreadsRow,
   ToolCallsRow, UniversalPinsRow, UpdatesRow,
 } from "../../AppSettingsRows";
 import { ChromeRailRow } from "../../ChromeRailToggle";
@@ -171,7 +171,6 @@ export function AppearancePage() {
     <SettingsGroup label={t("settings.appearance.chat")} block="chat">
       <SettingsRows>
         {!ctx.client && <ToolCallsRow />}
-        {ctx.advanced && <RunCardRow />}
         {ctx.advanced && <ChatWidthRow />}
         {ctx.advanced && <FontRow />}
       </SettingsRows>

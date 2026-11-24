@@ -277,7 +277,8 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
   const signInStarted = useSignInStarted(instance.instanceId);
   const [busy, setBusy] = useState<"install" | "signin" | "complete" | "check" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [flow, setFlow] = useState<{ flowId: string; authorizationUrl: string } | null>(null);
+  // `pasteCode`: Antigravity's native CLI, whose Google page shows a code to paste back instead of a redirect.
+  const [flow, setFlow] = useState<{ flowId: string; authorizationUrl: string; pasteCode?: boolean } | null>(null);
   const [callbackUrl, setCallbackUrl] = useState("");
   const managed = instance.install!.managed!;
 
@@ -341,7 +342,7 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
       return;
     }
     if (!auth.flowId || !auth.authorizationUrl) throw new Error(t("engineSetup.googleNoLink"));
-    setFlow({ flowId: auth.flowId, authorizationUrl: auth.authorizationUrl });
+    setFlow({ flowId: auth.flowId, authorizationUrl: auth.authorizationUrl, pasteCode: auth.pasteCode === true });
     await openLink(auth.authorizationUrl);
   });
 
@@ -373,9 +374,9 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
           {busy === "install" ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
           {busy === "install" ? t("engineSetup.installing") : managed.label}
         </button>
-        <p className="mt-1.5 text-center text-[11px] text-ink-tertiary">
+        {!managed.sizeUnknown && <p className="mt-1.5 text-center text-[11px] text-ink-tertiary">
           {t("engineSetup.downloadNote", { mb: Math.ceil(managed.downloadBytes / 1024 / 1024) })}
-        </p>
+        </p>}
         {error && <p className="mt-2 text-[12px] text-danger">{error}</p>}
       </div>
     );
@@ -384,7 +385,7 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
   const cloudHome = state.config?.cloudHome === true;
   return (
     <div className="mt-3 space-y-2">
-      {cloudHome && <p className="text-[12px] leading-relaxed text-ink-secondary">{t("engineSetup.cloudPasteHint")}</p>}
+      {cloudHome && !flow?.pasteCode && <p className="text-[12px] leading-relaxed text-ink-secondary">{t("engineSetup.cloudPasteHint")}</p>}
       <button
         type="button"
         disabled={busy !== null}
@@ -399,7 +400,27 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
             : t("engineSetup.signInGoogle")}
       </button>
       {busy === "signin" && <p role="status" className="text-[12px] text-ink-secondary">{t("engineSetup.antigravitySlow")}</p>}
-      {flow && (
+      {flow?.pasteCode && (
+        <div data-code-paste className="rounded-lg border border-hairline/50 bg-app px-2.5 py-2 text-[12px] text-ink-secondary">
+          <p className="leading-relaxed">{t("engineSetup.pasteCodeHint")}</p>
+          <input
+            value={callbackUrl}
+            onChange={(event) => setCallbackUrl(event.target.value)}
+            aria-label={t("engineSetup.pasteCodeLabel")}
+            autoComplete="off"
+            className="mt-2 w-full rounded-md border border-hairline bg-inset px-2 py-1.5 text-[11px] text-ink outline-none focus:border-accent"
+          />
+          <button
+            type="button"
+            disabled={!callbackUrl.trim() || busy !== null}
+            onClick={() => void complete()}
+            className="mt-2 w-full rounded-md bg-control px-2 py-1.5 font-medium text-ink disabled:opacity-50"
+          >
+            {busy === "complete" ? t("engineSetup.sending") : t("engineSetup.sendCode")}
+          </button>
+        </div>
+      )}
+      {flow && !flow.pasteCode && (
         <>
           <button type="button" onClick={() => void check()} className="w-full rounded-lg bg-control px-3 py-2 text-[12px] font-semibold text-ink hover:bg-raised-hover">
             {busy === "check" ? t("common.checking") : t("engineSetup.finishedSignIn")}
@@ -464,6 +485,8 @@ export function ApiKeyHint({ instance }: { instance: InstanceInfo }) {
   );
 }
 
+const UNREADABLE_NOTE = { failed: "model.unreadable.failed", signedOut: "model.unreadable.signedOut", timedOut: "model.unreadable.timedOut" } as const;
+
 export function InstanceAccountNotes({ instance, listsModels }: { instance: InstanceInfo; listsModels: boolean }) {
   const account = instance.snapshot.authenticated && instance.snapshot.account
     ? [instance.snapshot.account.email, instance.snapshot.account.organization].filter(Boolean).join(" · ")
@@ -473,7 +496,7 @@ export function InstanceAccountNotes({ instance, listsModels }: { instance: Inst
       {account !== null && <p className="mt-1 truncate text-[12px] leading-4 text-ink-tertiary" title={account}>{account}</p>}
       {instance.modelsUnconfirmed && listsModels && (
         <p data-models-unconfirmed className="mt-1 text-[12px] leading-4 text-ink-tertiary">
-          {t("model.unconfirmed", { name: instance.displayName })}
+          {t(instance.modelsUnreadable ? UNREADABLE_NOTE[instance.modelsUnreadable] : "model.unconfirmed", { name: instance.displayName })}
         </p>
       )}
     </>

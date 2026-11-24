@@ -280,9 +280,10 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
      * could not use that app: no connected-apps bridge in the turn or none its tool selection allows, a `person` app, one
      * its scopes or grants leave out, or one `blocked` refuses; a card only where it may call COMPOSIO_MANAGE_CONNECTIONS.
      * Undefined when no server stands for an app. Never waits: the apps connected are the ones read last. */
-    mcpServerApps(bot: Bot, input: { servers: Record<string, McpServerSpec>; bridged: boolean; blocked(slug: string): string | undefined }): ((name: string, url: string) => McpServerApp | null) | undefined {
+    mcpServerApps(bot: Bot, input: { servers: Readonly<Record<string, unknown>>; bridged: boolean; blocked(slug: string): string | undefined }): ((name: string, url: string) => McpServerApp | null) | undefined {
       if (!input.bridged || bot.composio === false || !canUseMcpServer(bot.toolScope, "composio")) return undefined;
-      if (!Object.entries(input.servers).some(([name, spec]) => "url" in spec && typeof spec.url === "string" && knownMcpServerApp(name, spec.url))) return undefined;
+      const urlOf = (spec: unknown) => (spec && typeof spec === "object" && "url" in spec && typeof spec.url === "string" ? spec.url : null);
+      if (!Object.entries(input.servers).some(([name, spec]) => { const url = urlOf(spec); return url !== null && knownMcpServerApp(name, url); })) return undefined;
       const connected = connectedApps.get(appsKey())?.apps ?? [], apps = personApps();
       const card = allowsTool(bot.toolScope, { kind: "mcp", server: "composio", name: "COMPOSIO_MANAGE_CONNECTIONS" });
       return (name, url) => {

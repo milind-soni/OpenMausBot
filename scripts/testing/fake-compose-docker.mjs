@@ -46,6 +46,11 @@ function composeUp() {
   // `exits`: it stops as it starts, and Podman removes the container (--rm): it is listed once, then gone before anyone
   // inspects it. Its unit's log keeps its last words.
   if (wanted.behaviour === "exits") Object.assign(state.containers.omb, { status: "exited", vanishes: true });
+  // `uninspectable`: listed, but its state never reads; `inspect-fails-once`: its first read answers nothing;
+  // `replaced`: a new container (another id) at every read, each one answering.
+  if (wanted.behaviour === "uninspectable") state.containers.omb.inspectFails = 1e9; // (JSON has no Infinity)
+  if (wanted.behaviour === "inspect-fails-once") state.containers.omb.inspectFails = 1;
+  if (wanted.behaviour === "replaced") state.containers.omb.replaced = true;
   state.lastImage = wanted.id;
   state.containers.caddy = { id: `caddy-${state.serial}`, status: wanted.behaviour === "no-caddy" ? "exited" : "running" };
   // A server that starts writes to its data, as a new version's migrations do.
@@ -59,6 +64,7 @@ function compose(rest) {
   if (verb === "config") return out(`services:\n  omb:\n    image: ${composeImage()}`);
   if (verb === "ps" && more.includes("-aq")) {
     if (omb?.vanishes) delete state.containers.omb;
+    if (omb?.replaced) omb.id = `omb-${++state.serial}`;
     return omb ? out(omb.id) : undefined;
   }
   if (verb === "ps") return Object.entries(state.containers).filter(([, container]) => container?.status === "running").forEach(([name]) => out(name));
@@ -112,7 +118,13 @@ function inspect(format, target) {
   if (!omb || omb.id !== target) fail(`No such object: ${target}`);
   if (format === "{{.Image}}") return out(omb.image);
   if (format === "{{.State.Running}}") return out(String(omb.status === "running"));
-  if (format === "{{.State.Status}} {{.RestartCount}} {{.Image}}") return out(`${omb.status} ${omb.restarts} ${omb.image}`);
+  if (format === "{{.State.Status}} {{.RestartCount}} {{.Image}}") {
+    if (omb.inspectFails > 0) {
+      omb.inspectFails -= 1;
+      fail(`Error: No such object: ${target}`);
+    }
+    return out(`${omb.status} ${omb.restarts} ${omb.image}`);
+  }
   // Where /data is on the host: the volume's folder here (update-runner.sh reads its owner).
   if (format.includes(".Mounts") && !format.includes(".Name")) return out(volume(state.dataVolume));
   if (format.includes(".Mounts")) return out(state.dataVolume);

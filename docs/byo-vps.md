@@ -102,6 +102,13 @@ that matters to that bot — provisioning, status checks, previews, screenshots,
 computer tools, and deletion cleanup. The Settings inventory spans every server in play and tags each
 computer with the alias that holds it.
 
+To pick servers from a list instead of typing aliases, add them under **Named servers** below the default alias
+(Settings → AI → Other services → Self-hosted VPS): a name you choose plus its SSH config alias. Each saved VPS bot
+then gets a server picker in Bot settings → Computer → Where … works: the default server, every named server, or
+**Other SSH alias…** for one that is not on the list, then **Save**. The list is stored as `vpsServers` in `config.json`
+(`[{ "name": "Home lab", "sshAlias": "home-lab" }]`); saving or removing an entry never moves a bot, and the
+picker writes the same `vpsAlias` field. Only owner and admin sessions see the list.
+
 A bot cannot be moved to another server while its computer still lives on the old one, and the default alias
 cannot change while any computer it manages still exists: remove the computer first from Settings → Local VM →
 Self-hosted VPS computers (or by hand: `docker -H ssh://old-server rm -f openmausbot-vps-<bot>-<hash>`). A server
@@ -193,6 +200,15 @@ managed containers can keep customized resource and OOM settings, unlimited budg
 policies, including the legacy `no` policy. OpenMausBot does not reset those settings or recreate a
 container to enforce its defaults. Restart behavior follows the chosen Docker policy; for example,
 `always` can wake a slept container after a Docker daemon restart.
+
+Memory (2–128 GiB) and CPU cores (1–64) are set in Settings under **Self-hosted VPS**, for the default server and,
+separately, for each named server. The default server uses 4 GiB and 2 cores until you change them; a named server
+that leaves memory or cores empty uses the default server's.
+
+A new container takes the limits at once. A stopped one takes them when it next starts. A running container keeps
+its limits until it stops; the next start applies the current ones, so recreating it is not needed. When you save a
+limit, OpenMausBot asks the VPS's Docker engine for its CPU count and memory over SSH and refuses cores or memory the
+machine does not have. A host that does not answer does not hold the save up.
 
 - **Provision** (choosing **Cloud** for the bot, or the panel's button): builds the pinned Cua image on the
   VPS if needed, creates the container if missing, starts it if stopped, and waits until the desktop answers.

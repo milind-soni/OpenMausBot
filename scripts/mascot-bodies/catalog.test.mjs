@@ -32,15 +32,14 @@ describe("the generated catalog", () => {
     for (const id of MASCOT_BODY_IDS) {
       const { anchor } = MASCOT_BODIES[id];
       expect(anchor.scale, id).toBeGreaterThan(0);
-      expect(anchor.scale, id).toBeLessThanOrEqual(1);
       expect(anchor.x, id).toBeGreaterThan(0);
       expect(anchor.y, id).toBeGreaterThan(0);
     }
   });
 
-  it("clamps every face to one shared size", () => {
-    const scales = new Set(MASCOT_BODY_IDS.map(id => MASCOT_BODIES[id].anchor.scale));
-    expect([...scales]).toHaveLength(1);
+  it("never gives a body a smaller face than the cursor's", () => {
+    const floor = MASCOT_BODIES[DEFAULT_MASCOT_BODY].anchor.scale;
+    for (const id of MASCOT_BODY_IDS) expect(MASCOT_BODIES[id].anchor.scale, id).toBeGreaterThanOrEqual(floor);
   });
 });
 

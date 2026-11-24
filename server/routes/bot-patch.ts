@@ -6,6 +6,7 @@ import { isBotLiveVoice } from "../../shared/live-call.ts";
 import { normalizeOutboundPolicy } from "../../shared/outbound.ts";
 import { normalizePhoneApps } from "../../shared/phone-apps.ts";
 import { parseToolScope, toolScopeWidens } from "../../shared/tool-scope.ts";
+import type { MemoryModelSelection } from "../../shared/memory-model.ts";
 import { parseToolsOff, TOOL_GROUPS } from "../../shared/tool-groups.ts";
 import { isMausColor, MAUS_COLOR_NAMES, type BotUpdateResponse, type WireBot, type WireGroup } from "../../shared/wire.ts";
 import { dropRemovedGrants, MAX_ALWAYS_ALLOW } from "../always-allow.ts";
@@ -90,6 +91,8 @@ export interface BotPatchRouteDeps {
   chiefChanged?(changed: readonly BotRecord[]): void;
   /** The bots of the turns now running, each with the grants its turn reads. */
   turnBots?: { values(): Iterable<BotRecord> };
+  /** A bot's model changed, from `before` to `after`, seen in `threadId` (host/no-terminal.ts says there what it takes away). */
+  modelSwitched?(botId: string, threadId: string, before: ModelSelection, after: ModelSelection, routinesFollow: boolean): void;
 }
 
 export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
@@ -370,6 +373,16 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (typeof body.memoryUpkeep !== "boolean") return json(res, 400, { error: "memoryUpkeep must be true or false" });
         patch.memoryUpkeep = body.memoryUpkeep;
       }
+      let memoryModel: MemoryModelSelection | undefined;
+      if (body.memoryModel !== undefined) {
+        const parsed = z.object({
+          instanceId: z.string().min(1).max(200),
+          model: z.string().min(1).max(500).regex(/^[A-Za-z0-9][\x21-\x7e]*$/),
+        }).strict().nullable().safeParse(body.memoryModel);
+        if (!parsed.success) return json(res, 400, { error: "memoryModel must name a connection and model, or be null for Automatic" });
+        memoryModel = parsed.data ?? undefined;
+        patch.memoryModel = memoryModel;
+      }
       // true/false overrides the workspace, null follows it.
       if (body.cacheKeepWarm !== undefined) {
         if (body.cacheKeepWarm !== null && typeof body.cacheKeepWarm !== "boolean") return json(res, 400, { error: "cacheKeepWarm must be true, false or null" });
@@ -378,6 +391,14 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       if (body.helperModel !== undefined) {
         if (typeof body.helperModel !== "boolean") return json(res, 400, { error: "helperModel must be true or false" });
         patch.helperModel = body.helperModel;
+      }
+      // An object turns Check before done on, naming the bot that checks or none for a thread on another model; null turns it off.
+      if (body.checkWork !== undefined) {
+        const parsed = z.object({ checker: z.string().min(1).max(128).optional() }).strict().nullable().safeParse(body.checkWork);
+        if (!parsed.success) return json(res, 400, { error: "checkWork must be null or an object with an optional checker bot id" });
+        const checker = parsed.data?.checker;
+        if (checker !== undefined && (checker === m[1] || !store.bot(checker) || deps.levelOf(auth, checker) === "none")) return json(res, 400, { error: "checkWork.checker must be another bot here that you can reach" });
+        patch.checkWork = parsed.data ?? undefined;
       }
       if (body.browser !== undefined) {
         if (typeof body.browser !== "boolean") return json(res, 400, { error: "browser must be true or false" });
@@ -650,6 +671,15 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         sectionKey(existingBot?.section) !== sectionKey(section);
       let bot: BotRecord | null;
       const freshBrowserBot = store.bot(m[1]);
+      if (memoryModel && freshBrowserBot) {
+        const { instanceId, model } = memoryModel;
+        const instance = registry.get(instanceId);
+        if (instanceId !== (normalizedSelection ?? freshBrowserBot.modelSelection).instanceId || !instance?.openRouter ||
+            !instance.enabled || !instance.models.options.some((option) => option.id === model) ||
+            hostedModels?.allows({ instanceId, model }) === false) {
+          return json(res, 400, { error: "Choose a model from this bot's current OpenRouter connection." });
+        }
+      }
       // Rechecked: the awaits above can yield after the first memory check.
       if (freshBrowserBot && body.memoryEnabled !== undefined &&
           body.memoryEnabled !== (freshBrowserBot.memoryEnabled !== false) &&
@@ -713,6 +743,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       if (computerSpecified && requestedComputer !== undefined) store.clearAutoSurfacePins(m[1], requestedComputer);
       if (normalizedSelection && movedTask) store.patchTask(bot.id, movedTask.threadId, { modelSelection: undefined,
         ...hostedModels?.resetTask(movedTask.modelSelection, normalizedSelection) });
+      if (normalizedSelection && existingBot) deps.modelSwitched?.(bot.id, movedTask?.threadId ?? existingBot.threadId, movedTask?.modelSelection ?? existingBot.modelSelection, normalizedSelection, true);
       if (existingBot) {
         settleBrowserChange(bot, { browserProfile: beforeBrowserProfile, browser: beforeBrowserEnabled }, { closeForBot: (id) => browserLive.closeForBot(id), forgetTemporaryBrowser });
       }

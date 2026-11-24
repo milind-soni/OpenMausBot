@@ -50,7 +50,7 @@ ipcRenderer.on("desktop-notifications:open", (_event, target) => {
 
 // Only fixed actions are retained, never a destination supplied by a renderer.
 const FIXED_SETTINGS_ACTIONS = new Set(["organization", "cloud", "cloud-settings", "cloud-add", "cloud-add-howto",
-  "overview", "phone", "ai", "bots", "desktops", "vault", "usage", "transfer", "data", "people", "installations", "account", "plan", "app", "general", "appearance"]);
+  "overview", "devices", "phone", "ai", "bots", "desktops", "vault", "usage", "transfer", "data", "people", "installations", "account", "plan", "app", "general", "appearance"]);
 let pendingSettingsAction = null;
 const appSettingsListeners = new Set();
 ipcRenderer.on("app:open-settings", (_event, section) => {
@@ -185,6 +185,9 @@ const bridge = {
     // Remove from list, for a Cloud the window's rail lists as removable, from a click on the rail's own page (main refuses any other page).
     remove: (id) => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("workspaces:remove", String(id)) : Promise.reject(new Error("Choose Remove from list.")),
+    // Rename a server saved by hand, from a click on the rail's own page (main refuses any other page).
+    rename: (id, name) => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("workspaces:rename", String(id), String(name)) : Promise.reject(new Error("Choose Rename.")),
     // Make a server of the person's own their bots' home, from a click on the rail's own page (main refuses any other page).
     makeHome: (id) => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("workspaces:make-home", String(id)) : Promise.reject(new Error("Choose Make my home.")),
@@ -429,6 +432,17 @@ const bridge = {
       ipcRenderer.on("desktop-workspace:state", handler);
       return () => ipcRenderer.removeListener("desktop-workspace:state", handler);
     },
+  },
+  // This computer's page only: where a bot's Browser panel shows its native browser view.
+  browserPane: {
+    show: (input) => ipcRenderer.invoke("browser-pane:show", input),
+    hold: (input) => ipcRenderer.invoke("browser-pane:hold", input),
+  },
+  // This computer's page only: a site's sign-in from the person's own browsers into a bot's, which they start themselves.
+  browserCookies: {
+    sources: () => ipcRenderer.invoke("browser-cookies:sources"),
+    offer: (input) => ipcRenderer.invoke("browser-cookies:offer", input),
+    import: (input) => ipcRenderer.invoke("browser-cookies:import", input),
   },
   pickFolder: (current) => ipcRenderer.invoke("desktop:pick-folder", current),
   exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),

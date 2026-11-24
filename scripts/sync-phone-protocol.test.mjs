@@ -36,14 +36,14 @@ function tree(dir) {
 }
 
 describe("sync-phone-protocol", () => {
-  it("copies the package's sources, the wire vectors and the app host page from HEAD, and names the commit", () => {
+  it("copies the package's sources but the avatar engine's DOM mount, the wire vectors and the app host page from HEAD, and names the commit", () => {
     const out = join(scratch(), "protocol");
     execFileSync(process.execPath, [SCRIPT, "--out", out], { cwd: ROOT, stdio: "pipe" });
 
     const head = git("rev-parse", "HEAD");
     expect(readFileSync(join(out, "SOURCE"), "utf8")).toBe(`${head}\n`);
     const sources = git("ls-tree", "-r", "--name-only", "HEAD", "--", "packages/phone-protocol/src").split("\n")
-      .filter((path) => !path.endsWith(".test.ts"));
+      .filter((path) => !path.endsWith(".test.ts") && !path.includes("/open-bot-avatar/dom/"));
     for (const name of [
       "wire", "responses", "pairing-code", "app-rpc", "cursor-face-data", "failed-turn", "mention-boundary", "upload-limits",
       "markdown-plain-paths", "bot-limit", "codex-usage-limit", "cloud-hints", "waits",
@@ -51,6 +51,8 @@ describe("sync-phone-protocol", () => {
     ]) {
       expect(sources).toContain(`packages/phone-protocol/src/${name}.ts`);
     }
+    expect(sources).toContain("packages/phone-protocol/src/open-bot-avatar/LICENSE");
+    expect(sources).toContain("packages/phone-protocol/src/open-bot-avatar/render.ts");
     expect(Object.keys(tree(out)).sort()).toEqual([
       "SOURCE", "app-host.html", "package.json", "vectors/v1.json",
       ...sources.map((path) => path.slice("packages/phone-protocol/".length)),

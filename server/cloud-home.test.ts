@@ -394,8 +394,8 @@ it("gives the edge only its routing name and the server the contract, never a ga
   expect(server).toMatchObject({ HOME: "/data", OMB_DATA_DIR: "/data/.openmausbot", NODE_COMPILE_CACHE: "/data/.openmausbot/cache/node-compile", OMB_PORT: "8799", OMB_WEBHOOK_PORT: "8800",
     OMB_PUBLIC_URL: "https://omb-u-1a2b3c4d5e6f.fly.dev", OMB_WEBHOOK_PUBLIC_URL: "https://omb-u-1a2b3c4d5e6f.fly.dev", OMB_CLOUD_SECRETS_FD: "3" });
   for (const key of CLOUD_IGNORED_KEYS) expect(server).not.toHaveProperty(key);
-  // The bot box switch reaches the server; an unknown name does not.
-  expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_BOT_BOX: "0", OMB_SOMETHING_ELSE: "x" }, "/data").server).toMatchObject({ OMB_BOT_BOX: "0" });
+  // The bot box and image-engines switches reach the server; an unknown name does not.
+  expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_BOT_BOX: "0", OMB_IMAGE_ENGINES: "1", OMB_SOMETHING_ELSE: "x" }, "/data").server).toMatchObject({ OMB_BOT_BOX: "0", OMB_IMAGE_ENGINES: "1" });
   expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_SOMETHING_ELSE: "x" }, "/data").server).not.toHaveProperty("OMB_SOMETHING_ELSE");
   expect(JSON.stringify(server)).not.toContain(token);
   expect(secrets).toEqual({ OMB_CLOUD_BOOTSTRAP_SECRET: secret, ...relay });

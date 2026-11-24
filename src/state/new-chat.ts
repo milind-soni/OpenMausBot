@@ -4,12 +4,14 @@ import type { Action, AppState, Bot } from "./store";
 /** A blank new chat with one bot: shown in place of its open conversation and made into one by the first send. */
 export type NewChat = { session: number; botId: string; projectId?: string; held: HeldAction[] };
 type HeldAction = Extract<Action, { type: "setModel" } | { type: "updateTask" }>;
+/** Makes the conversation a bot's blank chat stands for, as its first send would, and answers with its thread. */
+export type MakeNewChatAction = { type: "makeNewChat"; botId: string; threadId: string; onMade: (threadId: string) => void; onError?: () => void };
 
 const THREAD_PREFIX = "new-chat-";
 export const newChatThreadId = (botId: string) => `${THREAD_PREFIX}${botId}`;
 export const isNewChatThread = (threadId: unknown): threadId is string => typeof threadId === "string" && threadId.startsWith(THREAD_PREFIX);
 
-const LEAVING = new Set<Action["type"]>(["select", "switchTask", "taskSwitched", "newGroupTask", "switchGroupTask", "showRoutines", "showTeamMap", "showFiles", "showWebPanel", "showPublishedApps", "showTeamFiles", "showAnnouncements"]);
+const LEAVING = new Set<Action["type"]>(["select", "switchTask", "taskSwitched", "newGroupTask", "switchGroupTask", "showRoutines", "showTeamMap", "showFiles", "showWebPanel", "showPublishedApps", "showSkillBurgers", "showTeamFiles", "showAnnouncements"]);
 
 /** The reducer's first step: `done` when the action belongs to the blank chat alone and the rest of the reducer must not
  * see it. */
@@ -51,12 +53,14 @@ type Effects = {
   create: (botId: string, projectId: string | undefined) => Promise<{ bot: Bot }>;
   navigated: (botId: string) => void;
   showError: (error: unknown) => void;
+  /** Settles once the conversation's held settings (approval mode, model) are saved, as a send waits for them. */
+  settled: (botId: string, threadId: string) => Promise<unknown>;
 };
 
 /** The store's effects for the blank chat, answering true for an action they took. While a bot's blank chat is open, a
  * send to the conversation it covers goes into the blank chat too. The first send makes the conversation, once per blank
  * chat however many arrive while it is being made, then each is sent into it. The conversation opens only if the person
- * is still in that blank chat when it is made. */
+ * is still in that blank chat when it is made. A Live call started in the blank chat makes it the same way. */
 export function createNewChat(effects: Effects) {
   const making = new Map<number, Promise<string>>(), heldWhileMaking = new Map<number, HeldAction[]>();
   let sessions = 0;
@@ -82,13 +86,24 @@ export function createNewChat(effects: Effects) {
     const state = effects.state(), open = state.newChat;
     const intoBlank = action.type === "send" && open?.botId === action.botId && action.threadId === state.bots.find((bot) => bot.id === action.botId)?.threadId;
     if (!intoBlank && !("threadId" in action && isNewChatThread(action.threadId))) return false;
+    const conversationFor = (botId: string) => open?.botId === botId ? making.get(open.session) ?? make(open) : null;
+    if (action.type === "makeNewChat") {
+      const made = conversationFor(action.botId);
+      if (!made) action.onError?.();
+      else made.then((threadId) => effects.settled(action.botId, threadId).then(() => action.onMade(threadId)))
+        .catch((error: unknown) => {
+          action.onError?.();
+          effects.showError(error);
+        });
+      return true;
+    }
     if (action.type !== "send") {
       effects.rawDispatch(action);
       const after = effects.state().newChat;
       if (after && heldWhileMaking.has(after.session)) heldWhileMaking.set(after.session, after.held);
       return true;
     }
-    const made = open?.botId === action.botId ? making.get(open.session) ?? make(open) : null;
+    const made = conversationFor(action.botId);
     if (!made) {
       action.onError?.();
       return true;

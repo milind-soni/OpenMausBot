@@ -341,6 +341,12 @@ export interface ProviderAdapter {
     hold(threadId: ThreadId, until: number | null): boolean;
     compact?(threadId: ThreadId, options: { instructions: string; session?: string; signal?: AbortSignal }): Promise<IdleCompactResult>;
   };
+  /** The engine's own compaction of this thread's native session, in place, asked for by the person. `session` is the
+   * resume cursor the host holds, `model` the selection the next turn would run on, and `selectionNow` the instance and model read again
+   * when the engine is about to be asked. Only a kept engine process that is
+   * still on that session takes it: otherwise `ok` is false and nothing was sent to the engine. `usage` is null when the
+   * engine reports none for the compaction. */
+  compactSession?(threadId: ThreadId, options: { botId?: string; session: string; model?: string | null; selectionNow?: () => { instanceId: string; model: string | null } | undefined; signal?: AbortSignal }): Promise<EngineCompactResult>;
   /** Starting a thread's engine before its first message, so that message finds it running. `start` launches the process
    * exactly as a turn with this input would and sends it nothing; it resolves true once the process is launched. The next
    * sendTurn on the thread takes that process when its launch would have been the same and it has started up (`ready`),
@@ -368,6 +374,10 @@ export type CacheWarmPingResult =
 export type IdleCompactResult =
   | { ok: true; session: string; sessionBefore: string; input: number; cacheRead: number; cacheWrite: number; output: number; costUsd: number | null; model: string | null }
   | { ok: false; reason: string; busy?: boolean; limit?: boolean };
+
+export type EngineCompactResult =
+  | { ok: true; usage: { input: number; output: number; cachedInput: number } | null; model: string | null }
+  | { ok: false; reason: string };
 
 export type SteerOutcome = "steered" | "refused" | "indeterminate";
 
@@ -421,10 +431,12 @@ export interface EngineInstall {
   /** The vendor's npm package, for an engine whose `command` is its own installer script: Settings installs it on the
    * server when npm is there, while a terminal keeps the vendor's command. */
   npmPackage?: string;
-  /** The app downloads and verifies a pinned provider runtime itself. */
+  /** The app downloads and verifies a provider runtime itself. `downloadBytes` is a number for every client; with
+   * `sizeUnknown` it is not the size of what will be downloaded, and a client shows no size. */
   managed?: {
     label: string;
     downloadBytes: number;
+    sizeUnknown?: true;
   };
   /** The engine needs a key saved in the app rather than a terminal step. */
   settings?: "connections";
@@ -492,6 +504,8 @@ export interface ProviderAuthenticationStart {
   expiresAt: string | null;
   /** A short-lived code to enter only at the provider's authorization URL. */
   userCode?: string;
+  /** The provider's page shows a code after the sign-in, which the person pastes back (Antigravity's native CLI). */
+  pasteCode?: boolean;
 }
 
 export interface ProviderAuthenticationStatus extends Omit<ProviderAuthenticationStart, "phase"> {
@@ -521,6 +535,9 @@ export interface ModelCatalog {
     local?: LocalModelFacts;
   }>;
 }
+
+/** Why an engine's model list could not be read: it refused the sign-in, it took too long, or anything else. */
+export type ModelListProblem = "signedOut" | "timedOut" | "failed";
 
 /** "gpt-5.4-mini" → "Gpt 5.4 Mini", splitting on the caller's word breaks. */
 export function titleCaseModelId(id: string, wordBreaks: RegExp): string {
@@ -567,6 +584,8 @@ export interface TextGenerationOptions {
   /** One of this instance's models instead of the driver's quick-call choice: the helper model setting, and the setup
    * card's quick model (side-jobs.ts). */
   model?: string;
+  /** A one-shot call can reject the resolved model before sending the prompt. */
+  checkModel?: (model: string) => void;
   /** How long the caller will wait; drivers with their own process timer use it instead of their default. */
   timeoutMs?: number;
   /** For a bot's own engine whose driver picks a small model of its own. */
@@ -587,8 +606,12 @@ export interface ProviderInstance {
   readonly displayName: string | undefined;
   readonly enabled: boolean;
   readonly models: ModelCatalog;
+  /** An unmanaged OpenRouter connection, where upkeep can name a model from this account's catalog. */
+  readonly openRouter?: true;
   /** True while the catalog is the driver's fixed list or a failed read's leftover, not a list the engine gave. */
   readonly modelsUnconfirmed?: boolean;
+  /** Set with modelsUnconfirmed when the engine's last read of its list failed: why, for the picker to say. */
+  readonly modelsUnreadable?: ModelListProblem;
   /** False while the sign-in can refuse a model its catalog lists (Codex on a ChatGPT account): a short message and background text then stay on the bot's own model. */
   readonly quickModelsUsable?: () => boolean;
   /** Refresh a live catalog without recreating the provider instance. */

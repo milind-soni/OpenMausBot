@@ -5,6 +5,10 @@
 
 import { t } from "./i18n";
 import { repositoryDoc } from "../../shared/services";
+import { serverFetch } from "./relay-server";
+
+/** Refusals before open a client that was connected takes as its server restarting: about 45 s with the backoff. */
+const RESTART_RETRIES = 8;
 
 /** The browser's host cannot run Chrome until it is set up; the close reason names the fix. */
 export const PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE = 4503;
@@ -110,6 +114,8 @@ export type PreviewStreamInput =
   /** The installed extensions, for the Extensions menu; an extension's own page opens by its id only. */
   | { readonly type: "extensions" }
   | { readonly type: "openExtension"; readonly id: string }
+  /** The desktop app shows its native view of this browser over the panel: no frames are needed until it hides. */
+  | { readonly type: "covered"; readonly covered: boolean }
   | {
       readonly type: "mouse";
       readonly action: "move" | "down" | "up";
@@ -186,7 +192,7 @@ export async function uploadPreviewStreamFiles(
 ): Promise<void> {
   const body = new FormData();
   for (const file of files) body.append("file", file, file.name ?? "file");
-  const response = await fetch(chooser.uploadUrl, {
+  const response = await serverFetch(chooser.uploadUrl, {
     method: "POST",
     body,
     credentials: chooser.credentials ? "include" : "omit",
@@ -283,7 +289,7 @@ export interface PreviewStreamClient {
 /** A viewer that may operate sizes the page while it watches, and may restart or wake it; the person holding the browser
  * hands it back from any of their views; everything else needs control. */
 const allowed = (input: PreviewStreamInput, control: PreviewStreamControl): boolean =>
-  input.type === "takeControl" || input.type === "resize" || input.type === "frameCap" || input.type === "restart" || input.type === "wake"
+  input.type === "takeControl" || input.type === "resize" || input.type === "frameCap" || input.type === "restart" || input.type === "wake" || input.type === "covered"
   || (input.type === "releaseControl" && control.owned === true) || control.controller === "you";
 
 const ACK_MESSAGE = JSON.stringify({ type: "ack" });
@@ -293,6 +299,7 @@ export function createPreviewStreamClient(
 ): PreviewStreamClient {
   let cap = { width: target.maxWidth, height: target.maxHeight };
   let size = target.width !== undefined && target.height !== undefined ? { width: target.width, height: target.height } : null;
+  let covered = false;
   const streamUrl = () => {
     const query = new URLSearchParams({
       maxWidth: String(Math.max(1, Math.round(cap.width))),
@@ -309,6 +316,9 @@ export function createPreviewStreamClient(
   let socket: WebSocket | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let failures = 0;
+  /** A socket of this client opened once: a later refusal before open is the server restarting, for a while. */
+  let everOpened = false;
+  let unreachable = 0;
   let control: PreviewStreamControl | null = null;
   let fileChooser: string | null = null;
 
@@ -322,6 +332,8 @@ export function createPreviewStreamClient(
     ws.addEventListener("open", () => {
       if (socket !== ws) return;
       opened = true;
+      everOpened = true;
+      unreachable = 0;
       events.onConnectedChange(true);
     });
     ws.addEventListener("message", (event) => {
@@ -437,6 +449,8 @@ export function createPreviewStreamClient(
         // A size or cap the viewer asked for while this socket was opening reaches the server now.
         if (first && canOperate && cap !== opening.cap) ws.send(JSON.stringify({ type: "frameCap", maxWidth: cap.width, maxHeight: cap.height }));
         if (first && canOperate && size && size !== opening.size) ws.send(JSON.stringify({ type: "resize", ...size }));
+        // Each socket is a new view on the server, which starts uncovered.
+        if (first && canOperate && covered) ws.send(JSON.stringify({ type: "covered", covered: true }));
         events.onControl?.(nextControl);
       } else if (typeof type === "string") {
         events.onMessage?.(message as Record<string, unknown>);
@@ -459,8 +473,10 @@ export function createPreviewStreamClient(
         events.onHostSetup?.(decodeHostSetup(event.reason));
         return;
       }
-      // Rejected upgrades surface as 1006 before open for both cookies and tickets.
-      if (event.code === 1008 || event.code === 4401 || (!opened && event.code === 1006)) {
+      // Rejected upgrades surface as 1006 before open for both cookies and tickets; so does a server that is restarting,
+      // which a client that was connected waits out before taking it as a refusal.
+      const restarting = !opened && event.code === 1006 && everOpened && ++unreachable <= RESTART_RETRIES;
+      if (event.code === 1008 || event.code === 4401 || (!opened && event.code === 1006 && !restarting)) {
         stopped = true;
         events.onUnauthorized();
         return;
@@ -476,6 +492,7 @@ export function createPreviewStreamClient(
     send: (input) => {
       if (input.type === "resize") size = { width: input.width, height: input.height };
       else if (input.type === "frameCap") cap = { width: input.maxWidth, height: input.maxHeight };
+      else if (input.type === "covered") covered = input.covered;
       if (socket?.readyState !== WebSocket.OPEN) return false;
       if (!control?.canOperate) return false;
       if (!allowed(input, control)) return false;

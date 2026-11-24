@@ -74,7 +74,7 @@ describe("the bridge that resets a switch's approval to Ask", () => {
 describe("initial desktop capabilities", () => {
   it.each([
     ["darwin", { available: true, engine: "apple-speech", onDevice: true }],
-    ["win32", { available: true, engine: "fish-audio", onDevice: false }],
+    ["win32", { available: true, engine: "windows-speech", onDevice: true }],
     ["linux", { available: true, engine: "fish-audio", onDevice: false }],
     ["freebsd", { available: false, engine: "none", onDevice: false, reasonCode: "unsupported-platform" }],
   ])("report dictation on %s", async (platform, dictation) => {

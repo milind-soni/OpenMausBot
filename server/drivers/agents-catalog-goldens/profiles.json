@@ -1,7 +1,7 @@
 {
   "default": {
-    "bytes": 58766,
-    "sha256": "b8ee1f62c8aa26f119d4f177b49660c3e87ba1e8886aa20be092af3e5a541048",
+    "bytes": 61453,
+    "sha256": "ea027c7bc19b35dfbd8e79b4c6f09a65c6c2a9229fc46ed8165c6ece4bdcf20e",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -14,6 +14,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -36,6 +38,7 @@
       "fill_login",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -58,8 +61,8 @@
     ]
   },
   "voice": {
-    "bytes": 59547,
-    "sha256": "a08d68120c48a400dc5a06691cd13a0af2fb7b5cc9b8c320eadcd339554e2249",
+    "bytes": 62234,
+    "sha256": "84e1a36e0f2a1e8ad02e2f5af6210c45d8ea32d001dfa778e5e82347df005b96",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -72,6 +75,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -95,6 +100,7 @@
       "send_voice_note",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -117,8 +123,8 @@
     ]
   },
   "shared": {
-    "bytes": 61031,
-    "sha256": "50b5f441212b82dc33951f1a1408b38d7ad2b9837b42dcaa9bb9eac76ee48545",
+    "bytes": 63718,
+    "sha256": "f1f2a433d68cadb64c270e66207c822b4ff290cb757a4f4f8772f0bd6bf00da8",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -133,6 +139,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -155,6 +163,7 @@
       "fill_login",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -177,8 +186,8 @@
     ]
   },
   "shared+voice": {
-    "bytes": 61812,
-    "sha256": "5ae9a6571a5dbd1b2400b4a5b5e505c55f4baaa3607fee638b5dcbbdc685fe7f",
+    "bytes": 64499,
+    "sha256": "62ffdd966d4a7f5cbed2cb26541ff7f9f570bc67480abe599c801b79c16be12a",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -193,6 +202,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -216,6 +227,7 @@
       "send_voice_note",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -238,8 +250,8 @@
     ]
   },
   "skills": {
-    "bytes": 61087,
-    "sha256": "72b1126228a4341f560796922da8e9b6a11efbb61735e78b64feb14ce8817674",
+    "bytes": 63774,
+    "sha256": "f678d0f54792411fa3619c7209ff9938205ed066773271f5ff56377aebff2c07",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -252,6 +264,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -274,6 +288,7 @@
       "fill_login",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -298,8 +313,8 @@
     ]
   },
   "skills+voice": {
-    "bytes": 61868,
-    "sha256": "247ad6f64cc5c63be8428771571ba059040c1b416e7e46ee5f762f2fff82bc13",
+    "bytes": 64555,
+    "sha256": "d991d49917a0935ae30537e79ad9dfda917d05efba8fe50a90e2614f29eba38b",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -312,6 +327,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -335,6 +352,7 @@
       "send_voice_note",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -359,8 +377,8 @@
     ]
   },
   "skills+shared": {
-    "bytes": 63352,
-    "sha256": "bf0a4463571cede6c12af9e241a0550cdc2ebaa1daf46f7cbfd93eb48b3a0b02",
+    "bytes": 66039,
+    "sha256": "c3374836d93c86beb999c69aa26d1514a4099d18ec9f97d9ca8960e44000d1e6",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -375,6 +393,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -397,6 +417,7 @@
       "fill_login",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -421,8 +442,8 @@
     ]
   },
   "skills+shared+voice": {
-    "bytes": 64133,
-    "sha256": "00015980b1499fdd4600d885a7161108fe4ce348c303b803177a244030665f2f",
+    "bytes": 66820,
+    "sha256": "4f1f246759587c31ff4b8be16bdfd8e910663e29ca443668dfb2141f5e9aa625",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -437,6 +458,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -460,6 +483,7 @@
       "send_voice_note",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -484,8 +508,8 @@
     ]
   },
   "non-chief": {
-    "bytes": 50218,
-    "sha256": "dea4be2992d379a3ecfe698021a9e15f688beacc98f638b648470e77d8abb74d",
+    "bytes": 52905,
+    "sha256": "964a8be83918b08e10e5110734cbac8518efc5e4707230d2aa3e1736c12ecd15",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -498,6 +522,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -514,6 +540,7 @@
       "fill_login",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -535,8 +562,8 @@
     ]
   },
   "voice+non-chief": {
-    "bytes": 50999,
-    "sha256": "f3b414bf38eafd74e2adce37675dab065bfa37affe9f026d2b9af2800c4f2846",
+    "bytes": 53686,
+    "sha256": "2ccf49cd3f4730e8115d23f9970c49ed3f7d6a15ba3bb39271aeb0631c410ae2",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -549,6 +576,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -566,6 +595,7 @@
       "send_voice_note",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -587,8 +617,8 @@
     ]
   },
   "shared+non-chief": {
-    "bytes": 52483,
-    "sha256": "e83bb178689919b78fc6c66ab8d063516de8715d36ba6990f0e2355b687db14e",
+    "bytes": 55170,
+    "sha256": "3dbfcbc8882bf2706bd8712e8aab89a76b7ca2eb6758a615227613a8cff11d5f",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -603,6 +633,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -619,6 +651,7 @@
       "fill_login",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -640,8 +673,8 @@
     ]
   },
   "shared+voice+non-chief": {
-    "bytes": 53264,
-    "sha256": "dccdcf888810a8e94c8683c3caf55d6f832045dbce1e8e0ea74a63213bcb37bb",
+    "bytes": 55951,
+    "sha256": "889de71e4a820e4b10a03e55632a11a89069377b65826d2b47416785c8438654",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -656,6 +689,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -673,6 +708,7 @@
       "send_voice_note",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -694,8 +730,8 @@
     ]
   },
   "skills+non-chief": {
-    "bytes": 52539,
-    "sha256": "a2a34d4091b3facd33b994ab013130e1a69e96a4d0b73d0028fca45dd4ab8706",
+    "bytes": 55226,
+    "sha256": "59d38a24047b2bbaf60d164a8506ea97899fb02ecab31f5b1f6990f3ac7b324f",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -708,6 +744,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -724,6 +762,7 @@
       "fill_login",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -747,8 +786,8 @@
     ]
   },
   "skills+voice+non-chief": {
-    "bytes": 53320,
-    "sha256": "b8b525de70958e362aba3080055a3d702c57f9b03588c74297a3e03946a3c40e",
+    "bytes": 56007,
+    "sha256": "b2095762f3916645e0d822b1b77935e232207eee4242bc23729a8ba0369ed737",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -761,6 +800,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -778,6 +819,7 @@
       "send_voice_note",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -801,8 +843,8 @@
     ]
   },
   "skills+shared+non-chief": {
-    "bytes": 54804,
-    "sha256": "90a6ed3c1c04ccf933e709bdbac60ad24d3e9e66603f8dd9d15cfe648d63d9bc",
+    "bytes": 57491,
+    "sha256": "7a0ccfc169b47ef44bd459b9584a52227c774e0d5cfb874a3cee1d8e4ed2aec0",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -817,6 +859,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -833,6 +877,7 @@
       "fill_login",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -856,8 +901,8 @@
     ]
   },
   "skills+shared+voice+non-chief": {
-    "bytes": 55585,
-    "sha256": "e50dda88044700d9dc01870966de10d1d64398ff9b559b968b92047d97a52d1b",
+    "bytes": 58272,
+    "sha256": "0ab9b8fdc48732ea850940cd613327d5478fc3d27febcb0a6e0d78ff1672e3d5",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -872,6 +917,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -889,6 +936,7 @@
       "send_voice_note",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -912,8 +960,8 @@
     ]
   },
   "skills+shared+voice+cloud-home": {
-    "bytes": 63899,
-    "sha256": "db482bb83cc7919ae10b11393c1087170309105ac3e2b506aadee165189327a7",
+    "bytes": 66576,
+    "sha256": "18639d18bca784b84a0bf6078e1dc7e9aab0b1f563c7e021dcf4f882c6d11a4b",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -928,6 +976,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -950,6 +1000,7 @@
       "send_voice_note",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -975,8 +1026,8 @@
     ]
   },
   "skills+shared+voice+non-chief+cloud-home": {
-    "bytes": 55351,
-    "sha256": "bb160df0dce89f746a8b74eca052eb9acab389f0feb78309384743f5ee3b1774",
+    "bytes": 58028,
+    "sha256": "29e28275ef125c057aee1f2a9b9b0861d0096559f0786230ff862d990fa96b18",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -991,6 +1042,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -1007,6 +1060,7 @@
       "send_voice_note",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -1031,8 +1085,8 @@
     ]
   },
   "skills+shared+voice+x": {
-    "bytes": 67972,
-    "sha256": "b906ecffd4377fb1d2bb208fd4b6682be63cdcc4719185fc1b3e0de47b05ef1b",
+    "bytes": 70659,
+    "sha256": "6705226934b29a75daff9c7d5d113aa0f0e81fc3b7fc3c0a85ccf274f12a528b",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -1047,6 +1101,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -1074,6 +1130,7 @@
       "research_call",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -1098,8 +1155,8 @@
     ]
   },
   "skills+shared+voice+x+team": {
-    "bytes": 67972,
-    "sha256": "b906ecffd4377fb1d2bb208fd4b6682be63cdcc4719185fc1b3e0de47b05ef1b",
+    "bytes": 70659,
+    "sha256": "6705226934b29a75daff9c7d5d113aa0f0e81fc3b7fc3c0a85ccf274f12a528b",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -1114,6 +1171,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -1141,6 +1200,7 @@
       "research_call",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -1165,8 +1225,8 @@
     ]
   },
   "skills+shared+voice+x+team+images": {
-    "bytes": 69919,
-    "sha256": "57e72345537fa550b5ecee6b6dc7c6ee05be75e4ceedd317bb57ab5ffe8e20c1",
+    "bytes": 72606,
+    "sha256": "2c1050df2e047766fbcf5a542a30c8dcf1ac06017d8aade8835e371b05d5802d",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -1181,6 +1241,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -1208,6 +1270,7 @@
       "research_call",
       "decide",
       "extract",
+      "what_changed",
       "edit_image",
       "generate_image",
       "message_person",
@@ -1234,8 +1297,8 @@
     ]
   },
   "default+legacy-switches": {
-    "bytes": 58766,
-    "sha256": "b8ee1f62c8aa26f119d4f177b49660c3e87ba1e8886aa20be092af3e5a541048",
+    "bytes": 61453,
+    "sha256": "ea027c7bc19b35dfbd8e79b4c6f09a65c6c2a9229fc46ed8165c6ece4bdcf20e",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -1248,6 +1311,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -1270,6 +1335,7 @@
       "fill_login",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -1292,8 +1358,8 @@
     ]
   },
   "default+mausbot": {
-    "bytes": 59417,
-    "sha256": "6b9d79f4b8280bcb59b5c112cef80f7e7138fd85268dadfb52ff266c12135f5e",
+    "bytes": 62104,
+    "sha256": "7f8ddfbd20b51258834ecf05772f008e09d43b87be3e9e12eb4232f023933c9a",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -1306,6 +1372,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -1328,6 +1396,7 @@
       "fill_login",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -1352,8 +1421,8 @@
     ]
   },
   "skills+shared+voice+mausbot": {
-    "bytes": 64784,
-    "sha256": "e86a2c2ae18f87097a1212f7467dfcc63f2f8a4c178c98fc17b62e2c8419cced",
+    "bytes": 67471,
+    "sha256": "17c9d28cd1af9917dcc60ef4931639d699bfaa8ec26c96efb906b5b7e6653820",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -1368,6 +1437,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -1391,6 +1462,7 @@
       "send_voice_note",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -1417,8 +1489,8 @@
     ]
   },
   "default+no-computer-pick": {
-    "bytes": 57566,
-    "sha256": "7682899ff6f9036d9a739b8f9b051e5b0d95d7e0b0d948268cbf8f47cbf8a758",
+    "bytes": 60253,
+    "sha256": "a5a4cd637caecbfd32046a770aa396b64fbdce866f759afb11b277cff60a5ef4",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -1430,6 +1502,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -1452,6 +1526,7 @@
       "fill_login",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -1474,8 +1549,8 @@
     ]
   },
   "default+room": {
-    "bytes": 54126,
-    "sha256": "aff266fb5b6ab60cb30c3077de474e5f21b8f1da8d8fd37de9e56dc36602379a",
+    "bytes": 56813,
+    "sha256": "ff1f99b0d70763199f0d706692d7444a07994b897804795f7eb31206d29f46b2",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -1486,6 +1561,8 @@
       "list_rooms",
       "list_threads",
       "close_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "list_models",
       "vm_exec",
@@ -1507,6 +1584,7 @@
       "fill_login",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -1525,8 +1603,8 @@
     ]
   },
   "non-chief+room": {
-    "bytes": 45578,
-    "sha256": "7ef0aeb3fb3fe3a14bf28b5c78a8c89a7ae6ecbd0093a65a6c1bab26972513ef",
+    "bytes": 48265,
+    "sha256": "2d28ac23f7a254ddf71a77a53b97907a66706b8bb985902d30008ab5802df04d",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -1537,6 +1615,8 @@
       "list_rooms",
       "list_threads",
       "close_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "list_models",
       "vm_exec",
@@ -1552,6 +1632,7 @@
       "fill_login",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "share",
@@ -1569,8 +1650,8 @@
     ]
   },
   "default+images": {
-    "bytes": 60713,
-    "sha256": "1ab86143fd22ca2f2ee48004da15f85903a10d22f887842043a5c2488be0bf80",
+    "bytes": 63400,
+    "sha256": "69bc94d00fa60012b783d46e4bf9125841caa883caa575fe4bfe269aa77b3d69",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -1583,6 +1664,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -1605,6 +1688,7 @@
       "fill_login",
       "decide",
       "extract",
+      "what_changed",
       "edit_image",
       "generate_image",
       "message_person",
@@ -1629,8 +1713,8 @@
     ]
   },
   "skills+shared+voice+x+team+images+hosting": {
-    "bytes": 71782,
-    "sha256": "4f14e3c266e7a476416beba1502852b2d253c42a66ec94dee7a312f0fcd28ccf",
+    "bytes": 74469,
+    "sha256": "e5ba5df3f48143e1a3e13d90c695d8838b7550bdb6d796669dc8b2c8b67bbc3f",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -1645,6 +1729,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -1672,6 +1758,7 @@
       "research_call",
       "decide",
       "extract",
+      "what_changed",
       "edit_image",
       "generate_image",
       "message_person",
@@ -1700,8 +1787,8 @@
     ]
   },
   "default+hosting": {
-    "bytes": 60629,
-    "sha256": "a80a79c81a62c565106d5f51de78f9908d9a288d939c3524458b3c0fa3e1f0ac",
+    "bytes": 63316,
+    "sha256": "4922fec0a346633e5e2614677b691ff1240bb2df185e8dcc29498d51e9270588",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -1714,6 +1801,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -1736,6 +1825,7 @@
       "fill_login",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "publish_app",
@@ -1760,8 +1850,8 @@
     ]
   },
   "default+tools-off": {
-    "bytes": 54448,
-    "sha256": "fb75cf97d027f48f4f661a12aa0150e817bb4e40dce80fb09bb57fd28a0896b3",
+    "bytes": 57136,
+    "sha256": "a5835edbe6fd40b4840c87b60191833d285bf652c0be9d900bc5e898cfbfc165",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -1774,6 +1864,8 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "run_workflow",
+      "workflow_edit",
       "start_thread",
       "burst",
       "list_models",
@@ -1793,6 +1885,7 @@
       "fill_login",
       "decide",
       "extract",
+      "what_changed",
       "message_person",
       "report_bug",
       "memory_update",

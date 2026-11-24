@@ -19,10 +19,10 @@ import { useStoreActions } from "@/state/store-select";
 import { DEFAULT_MASCOT_BODY } from "../../shared/mascot-bodies";
 
 export type AvatarPatch = Partial<
-  Pick<Bot, "avatarCrop" | "avatarUrl" | "avatarZoom" | "avatarFocusX" | "avatarFocusY" | "color" | "mascotExpression" | "mascotBody" | "mascotFaceColor">
+  Pick<Bot, "avatarCrop" | "avatarUrl" | "avatarZoom" | "avatarFocusX" | "avatarFocusY" | "color" | "mascotExpression" | "mascotBody" | "mascotFaceColor" | "mascotBodyColor">
 >;
 
-export const RESET_MASCOT_PATCH: AvatarPatch = { avatarCrop: "mascot", color: "green", mascotExpression: null, mascotBody: DEFAULT_MASCOT_BODY, mascotFaceColor: null };
+export const RESET_MASCOT_PATCH: AvatarPatch = { avatarCrop: "mascot", color: "green", mascotExpression: null, mascotBody: DEFAULT_MASCOT_BODY, mascotFaceColor: null, mascotBodyColor: null };
 
 export const CROP_LABEL = {
   mascot: "Mascot",

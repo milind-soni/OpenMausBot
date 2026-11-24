@@ -25,9 +25,16 @@ describe("MausAvatar body", () => {
     expect(render({})).toContain(MASCOT_BODIES[DEFAULT_MASCOT_BODY].fit);
   });
 
-  it("wears the body it is given", () => {
-    const markup = render({ bodyId: "star" });
-    expect(markup).toContain(MASCOT_BODIES.star.fit);
+  it("draws every shape but the cursor with the Open Bot Avatar engine", () => {
+    expect(render({ bodyId: "star" })).toContain('data-object-body="star"');
+    expect(render({ bodyId: "circle" })).toContain('data-object-body="circle"');
+    expect(render({})).not.toContain("data-object-body");
+  });
+
+  it("paints the cursor in a gradient of its custom colour", () => {
+    const stops = (markup: string) => [...markup.matchAll(/stop-color="([^"]+)"/g)].map((m) => m[1]);
+    expect(stops(render({ bodyColor: "#123456" }))).toContain("#123456");
+    expect(stops(render({ bodyColor: "not a colour" }))).not.toContain("not a colour");
   });
 
   it("falls back to the cursor for an unknown body", () => {
@@ -38,8 +45,8 @@ describe("MausAvatar body", () => {
     );
   });
 
-  it("paints the body with the per-bot gradient, never a flat black fill", () => {
-    const markup = render({ bodyId: "circle" });
+  it("paints the cursor with the per-bot gradient, never a flat black fill", () => {
+    const markup = render({});
     expect(markup).not.toContain('fill="#000000"');
     expect(markup).not.toContain("{{GRADIENT}}");
     expect(markup).toContain("url(#");
@@ -116,10 +123,11 @@ describe("BotAvatar's two avatar outcomes", () => {
 });
 
 describe("theme hooks on faces", () => {
-  it("marks a bot's picture, its gradient mascot and its carved mascot, and leaves a decorative mascot unmarked", () => {
+  it("marks a bot's picture, its gradient, carved and object mascots, and leaves a decorative mascot unmarked", () => {
     expect(renderBot({ avatarUrl: "/api/attachments/a.png", avatarCrop: "circle" })).toMatch(/<span data-avatar="picture" data-avatar-kind="bot"/);
     expect(renderBot({})).toMatch(/<span data-avatar="mascot" data-avatar-kind="bot"/);
     expect(renderBot({ mascotBody: "ghost" })).toMatch(/<span data-avatar="mascot" data-avatar-kind="bot"/);
+    expect(renderBot({ mascotBody: "obj-ghost" })).toMatch(/<span data-avatar="mascot" data-avatar-kind="bot"/);
     expect(render({})).not.toContain("data-avatar");
   });
 

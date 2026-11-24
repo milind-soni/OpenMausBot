@@ -16,6 +16,8 @@ export const STATIC_CODEX_MODELS: ModelCatalog = {
   default: "gpt-5.6-sol",
   options: [
     // Only used when live discovery fails; these rows do not establish account access.
+    { id: "gpt-6.2-astra", label: "GPT-6.2 Astra (availability unverified)" },
+    { id: "gpt-6.2-sol", label: "GPT-6.2 Sol (availability unverified)" },
     { id: "gpt-6-astra", label: "GPT-6 Astra (availability unverified)" },
     { id: "gpt-6-sol", label: "GPT-6 Sol (availability unverified)" },
     { id: "gpt-6-luna", label: "GPT-6 Luna (availability unverified)" },
@@ -53,6 +55,13 @@ export function decodeCodexSelection(id: string | null | undefined): {
   const tiered = codexTierOf(id);
   if (tiered) return { model: tiered.model, modelProvider: OFFICIAL_CODEX_PROVIDER, serviceTier: tiered.tier };
   return { model: id, modelProvider: OFFICIAL_CODEX_PROVIDER };
+}
+
+/** The model and provider a thread is started or resumed with: a routed (company or endpoint) instance and a ChatGPT plan
+ * name their own, any other follows the model's selection. */
+export function codexThreadSelection(route: { routedProvider?: string; plan: boolean }, model: string | null | undefined): { model?: string | null; modelProvider: string | null; serviceTier?: string } {
+  if (route.routedProvider) return { model, modelProvider: route.routedProvider };
+  return route.plan ? { model, modelProvider: "openai_chatgpt_plan" } : decodeCodexSelection(model);
 }
 
 /** Starts Codex on the chosen model's provider. codex-cli 0.167.0 refuses a turn whose thread provider differs from its

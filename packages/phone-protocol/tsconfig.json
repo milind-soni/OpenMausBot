@@ -16,5 +16,5 @@
     "types": []
   },
   "include": ["src", "portable-globals.d.ts"],
-  "exclude": ["src/**/*.test.ts"]
+  "exclude": ["src/**/*.test.ts", "src/open-bot-avatar/dom"]
 }

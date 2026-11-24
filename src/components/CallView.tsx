@@ -10,7 +10,7 @@ import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { currentCall, deferCallCleanup, endCall, startCall, useOnCall } from "@/lib/call";
 import { CALL_MODES, callModeHint, effectiveCallMode, setCallMode, useCallMode, type CallMode } from "@/lib/call-mode";
-import { NO, YES } from "../../shared/call-consent";
+import { chineseConsent, NO, YES } from "../../shared/call-consent";
 import { dismissStartPrompt, hangUpLiveCall, isLiveCallRunning, startLiveCall, useLiveMedia } from "@/lib/live-call-media";
 import { t } from "@/lib/i18n";
 import { speaker } from "@/lib/tts";
@@ -37,6 +37,15 @@ type Phase = "listening" | "sending" | "working" | "speaking";
 /** `panel`: the small round button beside the bot in its panel, with no chevron. It leaves the composer's + menu to the
  * composer's own button: two buttons answering it would start two calls. */
 export type CallButtonPlacement = "header" | "composer" | "panel";
+
+/** Each bot's Live start from a blank chat, kept outside the button: making the conversation changes the chat's thread,
+ * which remounts the composer and the button inside it. */
+const liveStarts = new Map<string, { request: number; waiting: number }>();
+function liveStartOf(botId: string): { request: number; waiting: number } {
+  let pending = liveStarts.get(botId);
+  if (!pending) liveStarts.set(botId, (pending = { request: 0, waiting: 0 }));
+  return pending;
+}
 
 /** `fill` (Simple composer): a round button in that colour with its glyph in `ink`, and no chevron; the + menu picks the
  * call mode. */
@@ -96,7 +105,7 @@ export function CallTargetButton({
   const showThreads = useShowThreads();
   const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
   const media = useLiveMedia();
-  const liveThreadId = liveCapable && !isNewChatThread(threadId) ? threadId : undefined;
+  const liveThreadId = liveCapable ? threadId : undefined;
   const canLive = liveThreadId !== undefined;
   // Check Live first: startCall also marks the target as on a call.
   const liveRunning = isLiveCallRunning(media.phase);
@@ -178,12 +187,26 @@ export function CallTargetButton({
 
   useEffect(() => () => dismissStartPrompt(targetId), [targetId]);
 
+  // A Live call from a blank chat starts once its conversation is made and its held settings are saved; a later start
+  // or a Turns call cancels it, and pressing Live again meanwhile waits for that same start.
+  useEffect(() => { if (onCall) liveStartOf(targetId).request++; }, [onCall, targetId]);
   const start = (next: CallMode) => {
     setHelpOpen(false);
     setMenuOpen(false);
+    const pending = liveStartOf(targetId);
+    if (next === "live" && pending.waiting && pending.waiting === pending.request) return;
+    const request = ++pending.request;
     if (next === "live" && liveThreadId !== undefined) {
       onStart("live");
-      void startLiveCall({ botId: targetId, threadId: liveThreadId, provider: state.config?.live?.provider });
+      const live = (thread: string) => {
+        if (pending.waiting === request) pending.waiting = 0;
+        if (pending.request === request) void startLiveCall({ botId: targetId, threadId: thread, provider: state.config?.live?.provider });
+      };
+      if (isNewChatThread(liveThreadId)) {
+        pending.waiting = request;
+        const failed = () => { if (pending.waiting === request) pending.waiting = 0; };
+        dispatch({ type: "makeNewChat", botId: targetId, threadId: liveThreadId, onMade: live, onError: failed });
+      } else live(liveThreadId);
       return;
     }
     if (!turnsReady) {
@@ -588,8 +611,10 @@ function Call({ bot }: { bot: Bot }) {
           hush();
           return;
         }
-        if (YES.test(said) || NO.test(said)) {
-          const allow = YES.test(said);
+        // English is read exactly as before; chineseConsent only adds the Chinese answers.
+        const decision = YES.test(said) ? "allow" : NO.test(said) ? "deny" : chineseConsent(said);
+        if (decision) {
+          const allow = decision === "allow";
           if (allow && open.skill) {
             setHeard("");
             void sayThenListen("Open this chat to review the complete skill before approving it. You can say no now to deny it.");

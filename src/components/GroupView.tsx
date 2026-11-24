@@ -47,6 +47,7 @@ import { isPureLeakedSystemHarnessMessage } from "../../shared/system-message-gu
 import { ConnectorCard } from "./ConnectorCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { SignInRequestCard } from "./SignInRequestCard";
+import { isPinnedSignIn, NO_PINNED_SIGN_INS, PinnedSignInSlot } from "./PinnedSignInSlot";
 import { hasRoutineExecutionTask, RoutineRunCard } from "./RoutineRunCard";
 import { GoalRunCard } from "./GoalRunCard";
 import { OptionCard } from "./OptionCard";
@@ -63,7 +64,7 @@ import { useMenuMotion } from "./MenuMotion";
 import { useLiveToolIds } from "@/hooks/use-live-tool-ids";
 import { roomNeedsSetup, setupResponderMode, type RoomResponderMode } from "@/lib/room-setup";
 import { useComposerDockPad } from "@/lib/composer-dock";
-import { GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
+import { ChatBackdrop, GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
 import { awaitedMemberId, showWorkingDots } from "@/lib/turn-tail";
 import { turnNowPhrases } from "@/lib/live-activity"; import { useTurnLive } from "@/state/turn-status"; import { isLiveReply, roomLiveSpeaker, StreamingReplyContext, useLiveRow, useLiveTranscriptLayout } from "@/state/live-reply";
 import { useTranscriptViewport } from "@/hooks/use-transcript-viewport"; import { staysInView } from "../../shared/person-wait";
@@ -126,6 +127,7 @@ export const Transcript = memo(function Transcript({
   locale, localVoice = false,
   messages: saved,
   transcript,
+  pinnedSignInIds = NO_PINNED_SIGN_INS,
   emergingId,
   unreadDividerId = null,
   unreadDividerFading = false,
@@ -136,6 +138,7 @@ export const Transcript = memo(function Transcript({
   locale: string; localVoice?: boolean;
   messages: Message[];
   transcript: Message[];
+  pinnedSignInIds?: ReadonlySet<string>;
   emergingId?: string | null;
   unreadDividerId?: string | null;
   unreadDividerFading?: boolean;
@@ -241,7 +244,7 @@ export const Transcript = memo(function Transcript({
         ) :
           m.kind === "secret" && m.secret && m.from?.botId ? (
             <SecretRequestCard botId={m.from.botId} color={m.from.color} threadId={group.threadId} message={m} />
-          ) : m.kind === "signin" && m.signIn && m.from?.botId ? (
+          ) : m.kind === "signin" && m.signIn && m.from?.botId && !pinnedSignInIds.has(m.id) ? (
             <SignInRequestCard botId={m.from.botId} botName={m.from.name} color={m.from.color} threadId={group.threadId} message={m} />
           ) : m.kind === "connector" && m.connector && m.from?.botId ? (
             <ConnectorCard botId={m.from.botId} color={m.from.color} threadId={group.threadId} message={m} />
@@ -678,6 +681,11 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const composerDockRef = useRef<HTMLDivElement>(null);
   const composerDock = useComposerDockPad(composerDockRef);
+  const pinnedSignIns = useMemo(() => group.messages.flatMap((m) => {
+    const from = m.from;
+    return isPinnedSignIn(m) && from?.botId ? [{ message: m, botId: from.botId, botName: from.name, color: from.color, threadId: group.threadId }] : [];
+  }), [group.messages, group.threadId]);
+  const pinnedSignInIds = useMemo(() => new Set(pinnedSignIns.map((card) => card.message.id)), [pinnedSignIns]);
   const [folderOpen, setFolderOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
@@ -788,7 +796,7 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
 
   return (
     <main data-look="chat" className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
-      <GroupCallOverlay group={group} members={members} />
+      <ChatBackdrop /><GroupCallOverlay group={group} members={members} />
       {membersOpen && !remoteClient && !group.dm && (
         <ManageMembersPanel group={group} onClose={closeMembers} triggerRef={membersTriggerRef} />
       )}
@@ -839,6 +847,7 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
           </div>
         </div>
       )}
+      <PinnedSignInSlot cards={pinnedSignIns} />
 
       </GlassBar>
 
@@ -895,6 +904,7 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
             locale={activeLocale()} localVoice={localSystemVoiceActive()}
             messages={windowedMessages}
             transcript={group.messages}
+            pinnedSignInIds={pinnedSignInIds}
             emergingId={popping?.id}
             unreadDividerId={unreadDivider.messageId}
             unreadDividerFading={unreadDivider.fading}

@@ -4,6 +4,7 @@ import type { RoutineRunCardData } from "../../shared/routine-run";
 import { peerLine } from "@/lib/peer-message";
 import { isReceipt } from "@/lib/receipts";
 import { activityPreview, botEngine, failedTurnCause, STATUS_MARKER } from "@/lib/failed-turn";
+import { newestWaitingHandoff } from "@/lib/handoff";
 import { t } from "@/lib/i18n";
 import { sidebarConnectorPreview, sidebarGoalRunPreview } from "@/lib/sidebar-layout";
 import { citationPreviewText } from "@/lib/citations";
@@ -12,17 +13,25 @@ import { isClientCancellation, isStoppedTurnName } from "../../shared/client-can
 import { roomWorkingPreview } from "@/lib/room-threads";
 import { localizedCard } from "@/lib/widget-text";
 import { widgetToText } from "../../shared/widget";
+import { isSavedToThreadLine } from "@/lib/activity-text";
 
 /** The newest message a preview can show. A receipt or a screen frame says nothing about the conversation on its own. */
 export function lastPreviewable<T extends { kind: string }>(messages: readonly T[] | undefined): T | undefined {
-  return messages?.findLast((message) => !isReceipt(message) && message.kind !== "screen");
+  return messages?.findLast((message) => !isReceipt(message) && message.kind !== "screen" && !isSavedToThreadLine(message as { tool?: { nameCode?: string } }));
 }
 
 export function botPreview(bot: Bot, visible: Message[], instances: InstanceInfo[], advanced: boolean): string {
-  if (bot.activity === "waiting-on-you") return t("sidebar.preview.waiting");
+  if (bot.activity === "waiting-on-you") return waitingHandoffPreview(visible) ?? t("sidebar.preview.waiting");
   if (bot.waitingForTeammates) return t("sidebar.preview.waitingOnTeammate");
   if (bot.busy) return t("sidebar.preview.working");
   return lastLine(bot, visible, instances, advanced);
+}
+
+/** "Waiting for you: Sign in to GitHub on the open page", while a step the bot handed over waits. */
+export function waitingHandoffPreview(visible: readonly Message[]): string | null {
+  const id = newestWaitingHandoff(visible);
+  const instruction = id ? visible.find((message) => message.id === id)?.signIn?.instruction : undefined;
+  return instruction ? t("sidebar.preview.waitingFor", { what: instruction }) : null;
 }
 
 function plainStep(message: Message): boolean {

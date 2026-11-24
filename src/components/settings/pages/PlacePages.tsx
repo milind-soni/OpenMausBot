@@ -25,6 +25,7 @@ import { McpCallTimeoutSettings } from "../../McpCallTimeoutSettings";
 import { DefaultBotSettings } from "../../NewBotDialog";
 import { PlaceLookRows } from "../../PlaceLookCard";
 import { ProfileFields } from "../../ProfileSettings";
+import { RemoteTeammatesSettings } from "../../RemoteTeammatesSettings";
 import { RoomTurnTimeoutSettings } from "../../RoomTurnTimeoutSettings";
 import { SavedStepsRow } from "../../SavedStepsRow";
 import { Card, SettingRow, SettingsDisclosureRow, SettingsFoldRow, SettingsGroup, SettingsLinkRow, SettingsRows } from "../../SettingsPrimitives";
@@ -34,6 +35,7 @@ import { SkillsSection } from "../../SkillsSection";
 import { ThreadConcurrencySettings } from "../../ThreadConcurrencySettings";
 import { usePhonePlaceState } from "../phone-status";
 import { KeysPage } from "../../keys/KeysPage";
+import { KEYS_ANCHOR_FOR_FOCUS } from "../../keys/key-focus";
 import { BrowserProfilesRow, ExperimentalFeaturesRow, NewBotEffortRow } from "../../AppSettingsRows";
 import { ServerUpdateRow } from "../../ServerUpdateRow";
 import { versionLine } from "../settings-context";
@@ -120,9 +122,10 @@ export function AiPage() {
   const { ctx, anchor } = useSettingsShell();
   const [more, setMore] = useState(false);
   // Simple ends after Providers: Other services is one closed fold row, so the page fits one window.
-  const [services, setServices] = useState(ctx.advanced || anchor === "ai-keys");
-  // A key asked for by search or a link opens Other services whatever the fold says.
-  const shown = ctx.advanced || services || anchor === "ai-keys";
+  const asksForKeys = anchor === "ai-keys" || anchor === KEYS_ANCHOR_FOR_FOCUS;
+  const [services, setServices] = useState(ctx.advanced || asksForKeys);
+  useEffect(() => { if (asksForKeys) setServices(true); }, [asksForKeys]);
+  const shown = ctx.advanced || services;
   const count = KEY_SECTIONS.filter((section) => section.id !== "ai").length;
   return <>
     <AdminOnly>
@@ -132,12 +135,12 @@ export function AiPage() {
       {!ctx.advanced && (
         <SettingsGroup block="ai-keys-fold">
           <SettingsRows>
-            <SettingsFoldRow id="ai-other-services" title={t("settings.ai.otherServices")} value={String(count)} open={shown} onToggle={() => setServices(!shown)} />
+            <SettingsFoldRow id="ai-other-services" title={t("settings.ai.otherServices")} subtitle={t("settings.ai.otherServicesLine")} value={String(count)} open={shown} onToggle={() => setServices(!shown)} />
           </SettingsRows>
         </SettingsGroup>
       )}
       {shown && (
-        <SettingsGroup label={ctx.advanced ? t("settings.ai.otherServices") : undefined} block="ai-keys">
+        <SettingsGroup label={ctx.advanced ? t("settings.ai.otherServices") : undefined} description={t("settings.ai.otherServicesLine")} block="ai-keys">
           <KeysPage bare exclude={anchor === "ai-keys" ? [] : ["ai"]} />
         </SettingsGroup>
       )}
@@ -164,6 +167,7 @@ export function BotsPage() {
     <SettingsGroup label={t("settings.bots.newBots")} block="new-bots">
       <SettingsRows><NewBotEffortRow /><DefaultBotSettings simple /></SettingsRows>
     </SettingsGroup>
+    {!(ctx.team && !ctx.admin) && <AdvancedSection anchor="remote-teammates"><AdminOnly><RemoteTeammatesSettings /></AdminOnly></AdvancedSection>}
     {!(ctx.team && !ctx.admin) && <AdvancedSection anchor="limits" also={["parallel", "group-turns", "tool-time", "keep-warm"]}><SettingsGroup label={t("settings.simple.more.limits")} block="limits">
       <SettingsRows selectWidth={160}>
         <div data-settings-block="group-turns" className="contents"><RoomTurnTimeoutSettings /></div>

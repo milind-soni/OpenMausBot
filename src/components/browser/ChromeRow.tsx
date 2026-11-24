@@ -64,6 +64,8 @@ export const ChromeRow = forwardRef<HTMLInputElement, {
   fullscreen: boolean;
   /** Maximized: the panel overlays the whole window, instead of its usual share of it. */
   maximized: boolean;
+  /** The full-size viewer's own pill, under the page, says who drives it; this row then shows no second one. */
+  pillBelow?: boolean;
   menu: ReactNode;
   onCommand: (command: { type: "navigate"; url: string } | { type: "history"; delta: -1 | 1 } | { type: "reload" } | { type: "tabSelect"; tabId: string } | { type: "tabClose"; tabId: string } | { type: "tabNew" }) => void;
   onAddress: (text: string) => void;
@@ -94,7 +96,7 @@ export const ChromeRow = forwardRef<HTMLInputElement, {
           )) : <div className="flex items-center gap-2 rounded-xl bg-inset px-3 py-1.5 text-[12px] text-ink-secondary"><Globe size={13} aria-hidden="true" />{t("browser.panel.newTab")}</div>}
           <button className={`${button} shrink-0`} disabled={!commandsReady} aria-label={t("browser.panel.newTab")} title={t("browser.panel.newTab")} onClick={() => props.onCommand({ type: "tabNew" })}><Plus size={16} /></button>
         </div>
-        <button
+        {!props.pillBelow && <button
           type="button"
           aria-pressed={handsBack}
           aria-label={`${PILL_TEXT[pill](botName)}. ${t(handsBack ? "browser.control.handBack" : "browser.control.take")}`}
@@ -108,7 +110,7 @@ export const ChromeRow = forwardRef<HTMLInputElement, {
           {pill === "taking" || pill === "waiting" || pill === "connecting" ? <Loader2 size={12} className="shrink-0 animate-spin" aria-hidden="true" /> : <Hand size={12} className="shrink-0" aria-hidden="true" />}
           <span className="truncate">{PILL_TEXT[pill](botName)}</span>
           {pill === "bot" || pill === "watching" ? <span className="shrink-0 text-ink">· {t("browser.control.take")}</span> : handsBack ? <span className="shrink-0">· {t("browser.control.handBack")}</span> : null}
-        </button>
+        </button>}
         <button className={button} title={t(props.maximized ? "browser.panel.restore" : "browser.panel.maximizeHint")} aria-label={t(props.maximized ? "browser.panel.restore" : "browser.panel.maximize")} onClick={props.onMaximize}>{props.maximized ? <Shrink size={15} /> : <AppWindow size={15} />}</button>
         <button className={button} title={t(props.fullscreen ? "browser.panel.exitFullscreen" : "browser.panel.fullscreenHint")} aria-label={t(props.fullscreen ? "browser.panel.exitFullscreen" : "browser.panel.fullscreen")} onClick={props.onFullscreen}>{props.fullscreen ? <Minimize size={15} /> : <Maximize size={15} />}</button>
         <button className={`${button} rounded-xl bg-inset p-1.5`} title={t("browser.panel.profileTitle", { name: props.profileName })} aria-label={t("browser.panel.profiles")} onClick={props.onProfiles}><UserRound size={15} /></button>

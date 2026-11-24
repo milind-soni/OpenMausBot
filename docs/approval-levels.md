@@ -5,7 +5,7 @@ when that provider resumes an existing native thread. You can also change one
 while the bot is working (see below). Each level is one of the
 provider's own permission modes, passed through. A native tool request that
 reaches you is one the provider left for you. OpenMausBot only answers from an
-explicit grant: Full Access, a saved exact command or MCP read-shaped tool,
+explicit grant: Full Access, a saved exact command or MCP tool that sends nothing,
 the narrow built-in web-search allowance under Approve for me, or a bot reading
 its own files. In Full Access, OMB also applies its own configuration tools
 without another approval.
@@ -261,19 +261,25 @@ another server, and a bridge into a VM or a Boat is new each turn) for the
 rest of the conversation, in memory until the server restarts. Another bot in
 the same room asks again.
 
-For a read-shaped tool from a configured custom MCP server, the card also
-offers **Always allow**. This is an explicit standing grant for that exact bot,
-provider instance, MCP server, tool name, and current server configuration. A
+For an MCP tool that sends nothing, from a configured custom MCP server or one
+of OpenMausBot's own bridges (apps, browser, data, email, the phone app's
+tools), the card also offers **Always allow**, on Claude, ACP agents and API
+models alike. This is an explicit standing grant for that exact bot,
+provider instance, MCP server, tool name, and current server configuration;
+an own bridge is named, never the token it is started with for one turn. A
 different tool still asks; editing the server command, arguments, variables,
 URL or headers invalidates the grant. A key kept in the Vault is part of that
 configuration by its reference, not its value, so giving the Vault item a new
 value keeps the grant, and so does restarting the server. Switching the bot to
 Full access leaves its grants saved, unused, for when it goes back to Ask. It
-is not offered for create/update/delete
-tools, computer control, a sandbox change, an unconfigured server, or a guest's
-turn. A custom MCP server controls its own tool names, so only remember tools
+is not offered for a tool that sends a message, posts or moves money, for
+control of a computer or a phone (the computer tools, a USB phone, a shared
+computer), a sandbox change, an action the provider marks as needing explicit
+approval, an unconfigured server, or a guest's turn. A remembered apps batch
+or workbench call still holds each send inside it for its own approval. A custom MCP server controls its own tool names, so only remember tools
 from a server you trust. The grant applies to the bot's current and future
-conversations, including newly delegated work. Saved entries are visible and
+conversations, including newly delegated work and a conversation opened before
+the grant was saved or set back to Ask since. Saved entries are visible and
 revocable in the bot's Access settings; removing one there takes it from every
 conversation of the bot at once, a running turn included.
 
@@ -293,10 +299,10 @@ mode is unavailable to the session, starts in Manual without an error. On
 Claude Code 2.1.266 that is the case for Claude Haiku 4.5 and Sonnet 4.5,
 and for any organization that set `disableAutoMode`. In that session the bot
 asks before each action unless you have explicitly remembered that exact MCP
-read tool. The Claude driver reads the mode the session actually runs in from
+tool. The Claude driver reads the mode the session actually runs in from
 the CLI's `init` frame; when Approve for me was requested and the session runs
 Manual, the chat shows one notice per session naming the model. Choose a model
-the reviewer supports, remember the MCP reads you trust, or use Full access to
+the reviewer supports, remember the MCP tools you trust, or use Full access to
 stop the prompts.
 
 ### Changing a bot's engine
@@ -318,6 +324,20 @@ automatic reviewer. The composer chip reads **Auto**. This is the Full access
 level under another name, not a separate permission setting, applies at once
 like Full access, and covers every model in that Antigravity instance,
 including Gemini.
+
+The native Antigravity CLI (1.5.0 and later) rejects `yolo` and `auto_edit`,
+so it stays in its `default` mode at every level and asks before each action.
+On Auto the app answers those requests itself, never-list commands excepted.
+On Auto-accept edits it answers a request only when it is a plain file edit
+inside the turn's folder: one that names a command, gives no location, or
+reaches outside that folder is asked as usual. A turn fails rather than start
+when the CLI offers no mode or does not confirm `default`.
+
+A computer that already has the pinned runtime keeps it. To move an
+Antigravity account to the native CLI, set its **CLI path** to `antigravity`
+and choose **Install official Antigravity**; to move back, set the CLI path to
+`agy`. New installs get the native CLI when Google's channel can be reached and
+the pinned runtime otherwise.
 
 A new Antigravity bot starts on Auto, the default. Old Antigravity
 `auto` / `autoApprove` settings still behave as Ask and are displayed as Ask;
@@ -364,6 +384,7 @@ multi-question card renders its structured form on current apps instead.
 | Claude | Native `default` | Native `acceptEdits` | Native `auto` | Native `bypassPermissions` |
 | Cursor | Native default | not offered | Native `--auto-review` | Native `--force` |
 | Antigravity | Native `default` | Native `auto_edit` | Legacy `auto` behaves as Ask; UI Auto selects Full access | Native `yolo` plus automatic approval of remaining tool-permission requests; shown as Auto |
+| Antigravity (native CLI, 1.5.0 and later) | Native `default` | Native `default`; the app answers file edits inside the turn's folder itself | as Antigravity | Native `default`; the app answers every tool-permission request, never-list commands excepted; shown as Auto |
 | Grok Build | Native `default` | Native `acceptEdits` | Native `--permission-mode auto`; availability of Grok's reviewer depends on its feature rollout | Native `bypassPermissions` plus automatic approval of remaining tool-permission requests |
 | OpenCode | Ask | not offered | Ask | Approve individual ACP permission requests, never task questions |
 | Qwen Code | Native `default` | Native `--approval-mode auto-edit` | Native `--approval-mode auto` (Qwen's LLM classifier approves safe actions, blocks risky ones) | `--yolo`, plus automatic approval of remaining ACP permission requests |
@@ -379,6 +400,14 @@ to a different provider while on Custom requires leaving Custom first;
 choose Ask. Switching models within Antigravity keeps the selected level.
 Native modes require a CLI version that supports them; OpenMausBot does not
 silently substitute unrestricted access when a mode is rejected.
+
+On Linux, Codex's sandboxed modes (`Ask`, `Auto`, and `Custom` when configured
+with `workspace-write` or `read-only`) run shell commands in a user namespace
+where root-owned files (such as `/etc/ssh/ssh_config.d/*`) appear owned by
+`nobody` (uid 65534) and network access may be restricted. OpenSSH can reject
+those config files with `Bad owner or permissions on /etc/ssh/...`; use an
+approved escalation or `Full access` (`danger-full-access`) for `ssh` and
+`git`-over-SSH commands.
 
 ### Read-only integration tools
 

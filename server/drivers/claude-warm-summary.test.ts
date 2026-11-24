@@ -9,6 +9,7 @@ import type { ProviderInstance } from "../contracts.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { ClaudeDriver } from "./claude.ts";
+import { readCostHistory, recordCostState } from "./claude-cost-history.ts";
 import type { KeepWarmContract } from "./claude-keepwarm.ts";
 import { claudeForks, PARKED_FORK_MS, parseWarmSummaryResult, warmSummaryPrompt, type WarmSummaryRun } from "./claude-warm-summary.ts";
 
@@ -125,6 +126,30 @@ describe("ClaudeDriver warm summary (fake CLI)", () => {
     recorder?.stop();
     await instance?.dispose();
     await removeTempDir(scratch);
+  });
+
+  it("bills repeated pings and an in-place summary against the state the fork restored", async () => {
+    const session = "cbd80c4c-d57c-4fd5-914b-4869f9c69d9e";
+    const frame = JSON.stringify({
+      type: "result", session_id: session, total_cost_usd: 11.452,
+      usage: { input_tokens: 2, cache_read_input_tokens: 30, output_tokens: 4 },
+      modelUsage: { opus: { inputTokens: 52, cacheReadInputTokens: 230, cacheCreationInputTokens: 4, outputTokens: 13 } },
+    });
+    vi.stubEnv("FAKE_CLAUDE_PING_RESULT", frame);
+    vi.stubEnv("FAKE_CLAUDE_COMPACT_RESULT", frame);
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-cost", text: "hi", resumeCursor: session });
+      await recorder.until((e) => e.type === "turn.completed");
+      recordCostState(session, { total: 11.44, models: { opus: [50, 200, 4, 9] } });
+      recordCostState(session, { total: 12, models: { opus: [80, 300, 5, 15] } });
+      const forks = instance.adapter.cacheKeepWarm!;
+      for (let i = 0; i < 2; i++) expect(await forks.ping("t-cost")).toMatchObject({ ok: true, costUsd: 0.012 });
+      expect(readCostHistory()[session]?.at(-1)?.total).toBe(12);
+      expect(await forks.compact!("t-cost", { instructions: "", session })).toMatchObject({ ok: true, session, costUsd: 0.012 });
+      expect(readCostHistory()[session]?.at(-1)?.total).toBe(11.452);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("summarizes on a persisted fork of the live session with its launch contract, and the next turn resumes the fork", async () => {

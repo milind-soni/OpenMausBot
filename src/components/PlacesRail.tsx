@@ -3,7 +3,7 @@
 // the person's own a server and a workspace of this computer's own with a name of its own a laptop, so each reads at a
 // glance. Main lists the places and opens one by its id; the rail never names an address. A right-click on a tile (or its
 // row past eight) opens that place's menu: a workspace of this computer's own is renamed, recoloured or removed there (asked
-// first); for the rest, its colour, changed
+// first); a server saved by hand is renamed there too (on this computer only); for the rest, its colour, changed
 // here for every place whatever its server runs, Remove from list for a Cloud of the person's own that ended or was
 // never paid for (asked first; main takes it off their list on the Admin), and Make … my home for a server of theirs that
 // main says this computer's bots may move to (one tap: main starts the move). With several accounts signed in here, the tiles
@@ -19,7 +19,7 @@ import { activeLocale, t } from "@/lib/i18n";
 import { localizedRelativeTime } from "@/lib/relative-time";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useBesideFramed } from "@/lib/chrome-rail";
-import { computerName, editLocal, makeHome, placeInitials, recolorPlace, removeLocal, removePlace, usePlaces, type RailPlace } from "@/lib/places";
+import { computerName, editLocal, makeHome, placeInitials, recolorPlace, removeLocal, removePlace, renamePlace, usePlaces, type RailPlace } from "@/lib/places";
 import { AccountsSheet, switchNote } from "./AccountMenu";
 import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 import { MENU_ROW, MENU_SHEET } from "./menu-recipe";
@@ -211,7 +211,7 @@ function MakeHomeRow({ place, onStarted }: { place: RailPlace; onStarted: () => 
       {busy ? <Loader2 size={15} aria-hidden="true" className="mt-0.5 shrink-0 animate-spin motion-reduce:animate-none" /> : <House size={15} aria-hidden="true" className="mt-0.5 shrink-0" />}
       <span className="flex min-w-0 flex-col text-start">
         <span className="text-[13px] text-ink">{t("rail.makeHome", { name: place.name })}</span>
-        <span className="text-[12px] leading-snug text-ink-secondary">{t("rail.makeHomeSub", { name: place.name })}</span>
+        <span className="text-[12px] leading-snug text-ink-secondary">{t("rail.makeHomeSub", { name: place.name })} {t("rail.makeHomeDataStays", { name: place.name })}</span>
       </span>
     </button>
     {said && <p role="alert" className="px-1.5 pb-1 text-[12px] text-danger">{said}</p>}
@@ -231,8 +231,8 @@ function ListedMenu({ place, top, onClose }: { place: RailPlace; top: number; on
   const [pending, setPending] = useState<CloudSwatch | null>(null);
   const [outcome, setOutcome] = useState<PlaceColorOutcome | null>(null);
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => { (ref.current?.querySelector<HTMLElement>("[role='radio'][tabindex='0']") ?? ref.current?.querySelector<HTMLElement>("[data-rail-remove-ask], [data-rail-make-home-start]"))?.focus(); }, []);
-  if (!paint && !place.removable && !place.makeHome) return null;
+  useEffect(() => { (ref.current?.querySelector<HTMLElement>("[data-rail-rename], [role='radio'][tabindex='0']") ?? ref.current?.querySelector<HTMLElement>("[data-rail-remove-ask], [data-rail-make-home-start]"))?.focus(); }, []);
+  if (!paint && !place.removable && !place.makeHome && !place.renames) return null;
   const name = place.kind === "computer" ? computerName(place) : place.name;
   const choose = (swatch: CloudSwatch) => {
     if (!paint || paint.locked || pending || swatch === paint.swatch) return;
@@ -247,6 +247,7 @@ function ListedMenu({ place, top, onClose }: { place: RailPlace; top: number; on
       <PlaceMark place={place} size={22} />
       <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{name}</span>
     </div>
+    {place.renames && <div className="px-0.5 pt-1"><RenameRow current={place.name} save={(next) => renamePlace(place.id, next)} onSaved={onClose} /></div>}
     {paint && <>
       <p className="px-2 pt-1 text-[12px] text-ink-secondary">{t("placeLook.title")}</p>
       <div className="px-2 pb-1.5 pt-0.5">
@@ -262,19 +263,20 @@ function ListedMenu({ place, top, onClose }: { place: RailPlace; top: number; on
 
 const rowText = (place: RailPlace) => [placeStatus(place, Date.now()), place.signIn && t("accounts.needsSignIn")].filter(Boolean).join(" · ");
 
-/** Rename in a workspace's menu: its name in a field, saved on Enter or Save; Escape or Cancel leaves it as it was. */
-function RenameRow({ place, onSaved }: { place: RailPlace; onSaved: () => void }) {
+/** Rename in a place's menu (a workspace of this computer's own, or a server saved by hand): its name in a field, saved on
+ * Enter or Save by `save`; Escape or Cancel leaves it as it was. */
+function RenameRow({ current, save: saveName, onSaved }: { current: string; save: (name: string) => Promise<"saved" | "name" | "taken" | "failed">; onSaved: () => void }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState<"taken" | "failed" | null>(null);
-  const start = () => { setName(computerName(place)); setSaid(null); setEditing(true); };
+  const start = () => { setName(current); setSaid(null); setEditing(true); };
   const save = () => {
     const next = name.trim();
     if (!next || busy) return;
-    if (next === computerName(place)) { setEditing(false); return; }
+    if (next === current) { setEditing(false); return; }
     setBusy(true); setSaid(null);
-    void editLocal(place.id, { name: next }).then((outcome) => {
+    void saveName(next).then((outcome) => {
       setBusy(false);
       if (outcome === "saved") { setEditing(false); onSaved(); return; }
       setSaid(outcome === "taken" ? "taken" : "failed");
@@ -344,7 +346,7 @@ function LocalMenu({ place, top, onClose }: { place: RailPlace; top: number; onC
       <PlaceMark place={place} size={22} />
       <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{name}</span>
     </div>
-    <div className="px-0.5 pt-1"><RenameRow place={place} onSaved={onClose} /></div>
+    <div className="px-0.5 pt-1"><RenameRow current={computerName(place)} save={(next) => editLocal(place.id, { name: next })} onSaved={onClose} /></div>
     <p className="px-2 pt-1 text-[12px] text-ink-secondary">{t("placeLook.title")}</p>
     <div className="px-2 pb-1.5 pt-0.5" data-rail-local-color>
       <SwatchRadios value={(pending === undefined ? swatch : pending) ?? "slate"} onChange={choose} label={t("placeLook.aria", { name })} offset="menu" none />

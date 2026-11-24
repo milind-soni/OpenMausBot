@@ -16,19 +16,19 @@ const HARD_CAP = 2000;
 const LISTED_FROM = 1000;
 
 const LINES: Record<string, number> = {
-  "server/index.ts": 15312,
-  "src/state/store.tsx": 3285,
+  "server/index.ts": 15278,
+  "src/state/store.tsx": 3278,
   "electron/main.mjs": 3126,
-  "server/store.ts": 2265,
+  "server/store.ts": 2257,
   "src/components/Sidebar.tsx": 1672,
-  "server/drivers/claude.ts": 2070,
-  "server/drivers/acp/core.ts": 1645,
-  "server/drivers/codex.ts": 1594,
+  "server/drivers/claude.ts": 2017,
+  "server/drivers/acp/core.ts": 1574,
+  "server/drivers/codex.ts": 1586,
   "server/routines.ts": 1554,
   "src/components/ComputerPanel.tsx": 1782,
   "src/components/RoutineCalendarPage.tsx": 1485,
-  "server/config.ts": 1247,
-  "src/components/ChatView.tsx": 1261,
+  "server/config.ts": 1231,
+  "src/components/ChatView.tsx": 1203,
   "server/routine-requests.ts": 1469,
   "src/components/LocalComputerSection.tsx": 1437,
   "src/components/CursorAvatar.tsx": 1064,
@@ -38,18 +38,19 @@ const LINES: Record<string, number> = {
   "server/boat.ts": 1254,
   "server/drivers/pi.ts": 1015,
   "server/plan-usage.ts": 1042,
-  "server/container-computer.ts": 1176,
-  "src/components/ModelPicker.tsx": 1039,
+  "server/container-computer.ts": 1159,
+  "src/components/ModelPicker.tsx": 1017,
   "src/components/PhoneSetupFlow.tsx": 1088,
   "server/cli.ts": 1062,
-  "src/components/AttachmentPreview.tsx": 1034,
+  "src/components/AttachmentPreview.tsx": 1025,
   "server/meetings/meetbot.ts": 1047,
+  "electron/data-dir-lease.node-test.mjs": 848, // the data-folder lease's own tests: many platform cases (Windows probes in data-dir-lease-windows.node-test.mjs)
   "electron/cloud-account.mjs": 1003,
   "electron/cloud-send.mjs": 1002,
   "electron/computer-sharing.mjs": 1002,
   "server/browser-runtime.ts": 1001,
+  "server/drivers/openai-chat.ts": 1001,
   "server/message-db.ts": 1001,
-  "electron/data-dir-lease.node-test.mjs": 848, // the data-folder lease's own tests: many platform cases (Windows probes in data-dir-lease-windows.node-test.mjs)
 };
 
 function sourceFiles(): string[] {

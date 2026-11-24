@@ -16,7 +16,7 @@ import type { ThreadStarters } from "../thread-starters.ts";
 import { titleConversationExcerpt, type ThreadTitleSource } from "../thread-title.ts";
 import type { MessagePage } from "./channels.ts";
 import { bulkDeleteThreadIds, type BulkDeleteRefusal } from "./bulk-delete.ts";
-import { forkMessageId } from "./fork-request.ts";
+import { FORK_BUSY, FORK_NO_TEXT, parseForkRequest } from "./fork-request.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { madeThread, sawThread } from "../thread-presence.ts";
 import { refusalBody, userError } from "../user-errors.ts";
@@ -74,6 +74,8 @@ export interface TaskRouteDeps {
   rejectDeletedThreadSkillStages(cleanups: Array<{ botId: string; stagedId: string }>): void;
   /** A person opened this conversation (a Team Cloud's Needs you lines for them there are done). */
   threadRead?(auth: RequestAuth, threadId: string): void;
+  /** A conversation's model changed (host/no-terminal.ts); `routinesFollow`: the bot's own model changed with it. */
+  modelSwitched?(botId: string, threadId: string, before: ModelSelection, after: ModelSelection, routinesFollow: boolean): void;
 }
 
 /** `deleteTasks`: the same deletion for the server's own use (a person leaving a Team Cloud, host/team-member-left.ts). */
@@ -167,14 +169,13 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
     if (m && method === "POST") {
       const bot = store.bot(m[1]);
       if (!bot || !store.taskByThread(bot.id, m[2])) return json(res, 404, { error: "no such conversation" });
-      const body = await readBody(req);
-      const messageId = forkMessageId(body);
-      if (messageId === null) return json(res, 400, { error: "messageId must be a string" });
+      const fork = parseForkRequest(await readBody(req), true);
+      if (!fork) return json(res, 400, { error: "Provide a string messageId or set latest to true" });
       const notYours = cloudThreadRefusal(auth, m[2]);
       if (notYours) return json(res, 403, { error: notYours });
-      if (threadBusy(bot.id, m[2])) return json(res, 409, { error: "this conversation is running — wait for it to finish" });
-      const task = store.forkTask(bot.id, m[2], messageId);
-      if (!task) return json(res, 404, { error: "no such completed message in this conversation" });
+      if (threadBusy(bot.id, m[2])) return json(res, 409, FORK_BUSY);
+      const task = store.forkTask(bot.id, m[2], fork.messageId, fork.branchLeafId);
+      if (!task) return json(res, 404, fork.messageId === undefined ? FORK_NO_TEXT : { error: "no such completed message in this conversation" });
       if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));
       return json(res, 201, { bot: publicBot(store.bot(bot.id)!), task: wireTask(task, store.bot(bot.id)!.modelSelection) } satisfies TaskResponse);
     }
@@ -407,6 +408,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
         ? store.switchTaskModel(m[1], m[2], patch.modelSelection, body.updateBotDefault === true, body.resetApprovalToAsk === true,
           { ...patch, ...hostedModels?.resetTask(current.modelSelection, patch.modelSelection) })!
         : store.patchTask(m[1], m[2], patch)!;
+      if (patch.modelSelection) deps.modelSwitched?.(m[1], m[2], current.modelSelection, patch.modelSelection, body.updateBotDefault === true);
       return json(res, 200, { task: wireTask(task, store.bot(m[1])!.modelSelection), bot: publicBot(store.bot(m[1])!) } satisfies TaskResponse);
     }
     if (m && method === "DELETE") {

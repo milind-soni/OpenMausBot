@@ -2,13 +2,29 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+const sourceHandles = vi.hoisted(() => ({
+  record: false,
+  opened: [] as { path: string; handle: import("node:fs/promises").FileHandle }[],
+}));
+vi.mock("node:fs/promises", async (original) => {
+  const real = await original<typeof import("node:fs/promises")>();
+  return {
+    ...real,
+    open: async (...args: Parameters<typeof real.open>) => {
+      const handle = await real.open(...args);
+      if (sourceHandles.record) sourceHandles.opened.push({ path: String(args[0]), handle });
+      return handle;
+    },
+  };
+});
 
 // attachments.ts reads DATA_DIR at import time.
 const DATA_ROOT = mkdtempSync(join(tmpdir(), "omb-bot-attachment-"));
 process.env.OMB_DATA_DIR = join(DATA_ROOT, "data");
 const { attachForTurn, contentUploadId, deliveredCopy, guestWorkspaceToHost, saveBotAttachment } = await import("./bot-attachment.ts");
-const { ATTACHMENTS_DIR, FILE_MAX_BYTES, PREVIEW_MAX_BYTES } = await import("./attachments.ts");
+const { ATTACHMENTS_DIR, ATTACHMENTS_MAX_BYTES, FILE_MAX_BYTES, PREVIEW_MAX_BYTES, __resetAttachmentAccountingForTests } = await import("./attachments.ts");
 
 const WORK = join(DATA_ROOT, "work");
 const VM_HOME = join(DATA_ROOT, "vm-home");
@@ -145,6 +161,35 @@ describe("saveBotAttachment", () => {
     await expect(saveBotAttachment({ path: "nope.pdf", roots: [WORK] })).rejects.toMatchObject({ status: 404 });
     await expect(saveBotAttachment({ path: "  ", roots: [WORK] })).rejects.toMatchObject({ status: 400 });
     expect(existsSync(ATTACHMENTS_DIR)).toBe(true);
+  });
+
+  it("closes the source when the store is full before the file is read", async () => {
+    const source = join(WORK, "quota.pdf");
+    writeFileSync(source, Buffer.alloc(64 * 1024, 7));
+    mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+    const filler = join(ATTACHMENTS_DIR, "quota-filler.bin");
+    writeFileSync(filler, Buffer.alloc(1));
+    truncateSync(filler, ATTACHMENTS_MAX_BYTES);
+    __resetAttachmentAccountingForTests();
+    sourceHandles.record = true;
+    sourceHandles.opened.length = 0;
+    try {
+      await expect(saveBotAttachment({ path: "quota.pdf", roots: [WORK] })).rejects.toMatchObject({
+        status: 507,
+        message: expect.stringMatching(/storage is full/),
+      });
+      // The native form: on Windows it expands short (8.3) names as the opener's fs/promises realpath does.
+      const handle = sourceHandles.opened.find((entry) => entry.path === realpathSync.native(source))?.handle;
+      expect(handle).toBeDefined();
+      expect(handle!.fd).toBe(-1);
+    } finally {
+      sourceHandles.record = false;
+      rmSync(filler, { force: true });
+      __resetAttachmentAccountingForTests();
+      for (const entry of sourceHandles.opened) {
+        if (entry.handle.fd !== -1) await entry.handle.close().catch(() => undefined);
+      }
+    }
   });
 });
 
@@ -489,5 +534,30 @@ describe("deliveredCopy", () => {
     const peer = bot("peer", "ask", { ...by("other"), attachments: [renamed] });
     const reply = bot("reply", "peer", by("me"));
     expect(deliveredCopy([ask, peer, reply], reply, "README.md", "D:\\AI\\openmausbot-skills\\README.md")).toBeNull();
+  });
+});
+
+describe("saveBotAttachment for a file attached to the conversation", () => {
+  it("passes on a stored file by the name it was attached with", async () => {
+    mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+    const stored = join(ATTACHMENTS_DIR, "0b7f6a52-3c1d-4e8f-9a2b-5c6d7e8f9a0b.md");
+    writeFileSync(stored, "# Chapter 3");
+    const saved = await saveBotAttachment({ path: stored, roots: [WORK], attached: () => [{ path: stored, name: "chapter-3.md" }] });
+    expect(saved.attachment).toMatchObject({ kind: "file", name: "chapter-3.md" });
+    expect(readFileSync(saved.attachment.path, "utf8")).toBe("# Chapter 3");
+    const byLink = await saveBotAttachment({ path: pathToFileURL(stored).href, roots: [WORK], attached: () => [{ path: stored, name: "chapter-3.md" }] });
+    expect(byLink.attachment).toMatchObject({ name: "chapter-3.md" });
+  });
+
+  it("opens nothing outside the attachment store, whatever a tag names, and nothing in it that was not attached", async () => {
+    mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+    mkdirSync(process.env.OMB_DATA_DIR!, { recursive: true });
+    const config = join(process.env.OMB_DATA_DIR!, "config.json");
+    writeFileSync(config, "{\"secret\":true}");
+    await expect(saveBotAttachment({ path: config, roots: [WORK], attached: () => [{ path: config, name: "config.json" }] }))
+      .rejects.toMatchObject({ status: 403 });
+    const other = join(ATTACHMENTS_DIR, "1c8e7b63-4d2e-4f9a-8b3c-6d7e8f9a0b1c.md");
+    writeFileSync(other, "Someone else's");
+    await expect(saveBotAttachment({ path: other, roots: [WORK], attached: () => [] })).rejects.toMatchObject({ status: 403 });
   });
 });
