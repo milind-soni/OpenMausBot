@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import { t } from "@/lib/i18n";
 import {
   setFinishedNotifications,
+  setNotificationAutoClear,
   setNotificationFeed,
   setNotificationSounds,
   useFinishedNotifications,
+  useNotificationAutoClear,
   useNotificationFeed,
   useNotificationSounds,
 } from "@/lib/notification-preferences";
@@ -17,6 +19,7 @@ export function NotificationRows({ simple = false }: { simple?: boolean }) {
       <DeviceNotificationsRow simple={simple} />
       <NotificationSoundsRow simple={simple} />
       <NotificationFeedRow simple={simple} />
+      <NotificationAutoClearRow />
     </>
   );
 }
@@ -85,6 +88,19 @@ export function NotificationFeedRow({ simple = false }: { simple?: boolean }) {
         checked={enabled}
         aria-label={t("settings.notificationFeed.show")}
         onClick={() => setNotificationFeed(!enabled)}
+      />
+    </SettingRow>
+  );
+}
+
+export function NotificationAutoClearRow() {
+  const enabled = useNotificationAutoClear();
+  return (
+    <SettingRow title={t("settings.notificationAutoClear.title")} subtitle={t("settings.notificationAutoClear.subtitle")}>
+      <Switch
+        checked={enabled}
+        aria-label={t("settings.notificationAutoClear.title")}
+        onClick={() => setNotificationAutoClear(!enabled)}
       />
     </SettingRow>
   );

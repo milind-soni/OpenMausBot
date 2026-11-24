@@ -3587,6 +3587,8 @@
   "settings.newBotEffort.error": "नए बॉट्स का प्रयास सहेजा नहीं जा सका।",
   "settings.newBotEffort.title": "नए बॉट्स के लिए प्रयास",
   "settings.notificationFeed.show": "सूचना फ़ीड दिखाएँ",
+  "settings.notificationAutoClear.title": "पुरानी सूचनाएँ हटाएँ",
+  "settings.notificationAutoClear.subtitle": "सूचनाएँ आने के एक दिन बाद उन्हें सूची से हटा दें।",
   "settings.notificationFeed.title": "सूचना फ़ीड",
   "settings.notificationSounds.play": "सूचना ध्वनियाँ",
   "settings.notificationSounds.title": "सूचना ध्वनियाँ",

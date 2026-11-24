@@ -4018,6 +4018,8 @@
   "settings.newBotEffort.error": "Не вдалося зберегти зусилля для нових ботів.",
   "settings.newBotEffort.title": "Зусилля для нових ботів",
   "settings.notificationFeed.show": "Показувати стрічку сповіщень",
+  "settings.notificationAutoClear.title": "Видаляти старі сповіщення",
+  "settings.notificationAutoClear.subtitle": "Прибирати сповіщення зі стрічки через день після їх появи.",
   "settings.notificationFeed.title": "Стрічка сповіщень",
   "settings.notificationSounds.play": "Звуки сповіщень",
   "settings.notificationSounds.title": "Звуки сповіщень",

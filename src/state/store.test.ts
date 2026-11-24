@@ -3273,6 +3273,17 @@ describe("notifications feed", () => {
     expect(state.notifications.every((n) => n.read)).toBe(true);
   });
 
+  it("clears every entry, or only those older than a time", () => {
+    let state = reducer(initialState, {
+      type: "notificationsHydrated",
+      notifications: [entry("n1", 1), entry("n2", 2), entry("n3", 3)],
+    });
+    state = reducer(state, { type: "notificationsCleared", before: 2 });
+    expect(state.notifications.map((n) => n.id)).toEqual(["n3", "n2"]);
+    state = reducer(state, { type: "notificationsCleared" });
+    expect(state.notifications).toEqual([]);
+  });
+
   it("marks the entries a conversation read elsewhere, and only those", () => {
     let state = reducer(initialState, {
       type: "notificationsHydrated",

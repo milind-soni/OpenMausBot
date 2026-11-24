@@ -3735,6 +3735,8 @@
   "settings.newBotEffort.error": "Impossible d'enregistrer l'effort des nouveaux bots.",
   "settings.newBotEffort.title": "Effort des nouveaux bots",
   "settings.notificationFeed.show": "Afficher le fil de notifications",
+  "settings.notificationAutoClear.title": "Effacer les anciennes notifications",
+  "settings.notificationAutoClear.subtitle": "Retire les notifications de la liste un jour après leur arrivée.",
   "settings.notificationFeed.title": "Fil de notifications",
   "settings.notificationSounds.play": "Sons de notification",
   "settings.notificationSounds.title": "Sons de notification",

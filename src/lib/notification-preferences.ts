@@ -5,10 +5,12 @@ export const NOTIFICATION_SOUNDS_KEY = "omb-notification-sounds";
 export const NOTIFICATION_FEED_KEY = "omb-notification-feed";
 export const FINISHED_NOTIFICATIONS_KEY = "omb-finished-notifications";
 export const NOTIFICATION_TRAY_PINNED_KEY = "omb-notification-tray-pinned";
+export const NOTIFICATION_AUTO_CLEAR_KEY = "omb-notification-auto-clear";
 
 let sessionChoice: boolean | undefined;
 let feedSessionChoice: boolean | undefined;
 let finishedSessionChoice: boolean | undefined;
+let autoClearSessionChoice: boolean | undefined;
 const listeners = new Set<() => void>();
 
 function storage(): Storage | undefined {
@@ -33,11 +35,12 @@ function notify() {
 }
 
 function onStorage(event: StorageEvent) {
-  if (event.key !== NOTIFICATION_SOUNDS_KEY && event.key !== NOTIFICATION_FEED_KEY && event.key !== FINISHED_NOTIFICATIONS_KEY && event.key !== null) return;
+  if (event.key !== NOTIFICATION_SOUNDS_KEY && event.key !== NOTIFICATION_FEED_KEY && event.key !== FINISHED_NOTIFICATIONS_KEY && event.key !== NOTIFICATION_AUTO_CLEAR_KEY && event.key !== null) return;
   if (event.storageArea && event.storageArea !== storage()) return;
   sessionChoice = undefined;
   feedSessionChoice = undefined;
   finishedSessionChoice = undefined;
+  autoClearSessionChoice = undefined;
   notify();
 }
 
@@ -120,6 +123,31 @@ export function setFinishedNotifications(enabled: boolean): void {
 
 export function useFinishedNotifications(): boolean {
   return useSyncExternalStore(subscribe, finishedNotificationsEnabled, () => true);
+}
+
+export function notificationAutoClearEnabled(): boolean {
+  if (autoClearSessionChoice !== undefined) return autoClearSessionChoice;
+  try {
+    return storage()?.getItem(NOTIFICATION_AUTO_CLEAR_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function setNotificationAutoClear(enabled: boolean): void {
+  autoClearSessionChoice = enabled;
+  try {
+    const local = storage();
+    const value = enabled ? "1" : "0";
+    local?.setItem(NOTIFICATION_AUTO_CLEAR_KEY, value);
+    if (local?.getItem(NOTIFICATION_AUTO_CLEAR_KEY) === value) autoClearSessionChoice = undefined;
+  } catch {
+  }
+  notify();
+}
+
+export function useNotificationAutoClear(): boolean {
+  return useSyncExternalStore(subscribe, notificationAutoClearEnabled, () => false);
 }
 
 /** Per device: the notification tray stays open while the person switches chats. */

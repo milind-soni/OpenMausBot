@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
-import { AlertTriangle, AtSign, Bell, CheckCircle2, CircleHelp, HandHelping, Info, KeyRound, LogIn, Newspaper, Pin, RotateCcw, Wallet, X, type LucideIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, AtSign, Bell, CheckCircle2, CircleHelp, HandHelping, Info, KeyRound, LogIn, Newspaper, Pin, RotateCcw, Trash2, Wallet, X, type LucideIcon } from "lucide-react";
 import { api, useStore, openThread, type Action } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { setNotificationTrayPinned } from "@/lib/notification-preferences";
+import { setNotificationTrayPinned, useNotificationAutoClear } from "@/lib/notification-preferences";
 import { useShowThreads } from "@/lib/thread-preferences";
 import type { LocaleKey } from "@/locales";
 import { BotAvatar, type BotAvatarProps } from "./Avatar";
@@ -117,6 +117,29 @@ export async function postNotificationRead(path: string, dispatch: (action: Acti
   }
 }
 
+export const NOTIFICATION_AUTO_CLEAR_AGE_MS = 24 * 60 * 60 * 1000;
+
+export function useNotificationAutoClearing(): void {
+  const { state, dispatch } = useStore();
+  const enabled = useNotificationAutoClear();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return;
+    const timer = setInterval(() => setNow(Date.now()), 60 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, [enabled]);
+  const before = now - NOTIFICATION_AUTO_CLEAR_AGE_MS;
+  const stale = enabled && state.notifications.some((entry) => entry.at < before);
+  const sent = useRef(0);
+  useEffect(() => {
+    if (!stale) return;
+    dispatch({ type: "notificationsCleared", before });
+    if (sent.current === before) return;
+    sent.current = before;
+    void postNotificationRead(`/api/notifications/clear?before=${before}`, dispatch);
+  }, [stale, before, dispatch]);
+}
+
 export function NotificationsPanel() {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
@@ -151,6 +174,11 @@ export function NotificationsPanel() {
     void postNotificationRead("/api/notifications/read-all", dispatch);
   };
 
+  const clearAll = () => {
+    dispatch({ type: "notificationsCleared" });
+    void postNotificationRead("/api/notifications/clear", dispatch);
+  };
+
   return (
     <aside
       aria-label={t("notifications.title")}
@@ -163,6 +191,15 @@ export function NotificationsPanel() {
         </span>
         <button type="button" onClick={markAllRead} className="shrink-0 whitespace-nowrap text-[12px] text-accent hover:underline">
           {t("notifications.markAllRead")}
+        </button>
+        <button
+          type="button"
+          onClick={clearAll}
+          aria-label={t("notifications.clearAll")}
+          title={t("notifications.clearAll")}
+          className="flex size-[26px] shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
+        >
+          <Trash2 size={14} />
         </button>
         <button
           type="button"

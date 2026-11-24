@@ -3994,6 +3994,8 @@
   "settings.newBotEffort.error": "Der Aufwand für neue Bots konnte nicht gespeichert werden.",
   "settings.newBotEffort.title": "Aufwand für neue Bots",
   "settings.notificationFeed.show": "Mitteilungsfeed zeigen",
+  "settings.notificationAutoClear.title": "Alte Benachrichtigungen löschen",
+  "settings.notificationAutoClear.subtitle": "Benachrichtigungen einen Tag nach dem Eintreffen aus der Liste entfernen.",
   "settings.notificationFeed.title": "Mitteilungsfeed",
   "settings.notificationSounds.play": "Mitteilungstöne",
   "settings.notificationSounds.title": "Mitteilungstöne",
