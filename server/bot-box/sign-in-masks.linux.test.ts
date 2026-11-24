@@ -24,6 +24,7 @@ function runInBox(engine: string, script: string): string {
   const request: BoxRequest = { command: "/bin/sh", args: [], cwd, env: { HOME: home, PATH: "/usr/bin:/bin" }, engine };
   const plan = planBox({ dataDir, home, codeRoots: [], engineRoots: [], bridges: [] }, request, signInMasks({ home, dataDir, env: request.env, engine }));
   const ran = spawnSync(detection.tools!.bwrap, [...bwrapArgs(plan), "--", "/bin/sh", "-c", script], { env: { HOME: home, PATH: "/usr/bin:/bin" }, encoding: "utf8", timeout: 30_000 });
+  if (ran.error || ran.signal || ran.status !== 0) throw new Error(`the box did not run: ${ran.error?.message ?? ran.signal ?? ran.status}: ${ran.stderr}`);
   return `${ran.stdout}${ran.stderr}`;
 }
 

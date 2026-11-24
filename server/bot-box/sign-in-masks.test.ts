@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -102,6 +102,27 @@ describe("a bot box on a My Cloud keeps only its own engine account's sign-in", 
     expect(visibleInBox(pi, planted.signIns.codex)).toBe("none");
     const codex = planted.plan({ env: { HOME: planted.home, CODEX_HOME: own }, engine: "codex" });
     expect(visibleInBox(codex, planted.signIns.claude)).toBe("none");
+  });
+
+  it("keeps an engine's own login reached through a linked folder, and masks under HOME as the box has it when HOME is a link", () => {
+    const linked = volume("linked-cloud");
+    const real = join(linked.home, "dotfiles", "config");
+    mkdirSync(dirname(real), { recursive: true });
+    renameSync(join(linked.home, ".config"), real);
+    symlinkSync(real, join(linked.home, ".config"));
+    const muse = linked.plan({ env: { HOME: linked.home }, engine: "museCode" });
+    expect(visibleInBox(muse, join(real, "muse", "auth.json"))).toBe("rw");
+    expect(visibleInBox(linked.plan({ env: { HOME: linked.home }, engine: "claudeAgent" }), join(real, "muse", "auth.json"))).toBe("none");
+
+    const alias = join(root, "home-link");
+    symlinkSync(cloud.home, alias);
+    const masks = signInMasks({ home: alias, dataDir: join(alias, ".openmausbot"), env: { HOME: alias }, engine: "claudeAgent" });
+    expect(masks.masked).toContain(join(alias, ".codex", "auth.json"));
+    expect(masks.hidden).toEqual([join(alias, ".omb-edge")]);
+    const plan = planBox({ ...cloud.setup, home: alias, dataDir: join(alias, ".openmausbot") }, { command: "claude", args: [], env: { HOME: alias }, engine: "claudeAgent" }, masks);
+    expect(visibleInBox(plan, join(alias, ".codex", "auth.json"))).toBe("none");
+    expect(visibleInBox(plan, join(alias, ".omb-edge", "caddy", "certificates", "site.key"))).toBe("none");
+    expect(visibleInBox(plan, join(alias, ".claude", ".credentials.json"))).toBe("rw");
   });
 
   it("makes every folder between HOME and a sign-in a mount point, before the data folder's line, so none can be renamed away", () => {
