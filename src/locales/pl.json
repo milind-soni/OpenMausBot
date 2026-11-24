@@ -7345,5 +7345,7 @@
   "phone.reach.offAdding": "Wyłączone · Dodanie telefonu włącza te opcje",
   "settings.nav.devicesNeedYou": "Urządzenie lub sieć prywatna wymaga uwagi",
   "settings.nav.phoneConnectedAllClear": "Telefon jest połączony i nic nie wymaga uwagi",
-  "keys.vps.ownServer": "Własny serwer (SSH)"
+  "keys.vps.ownServer": "Własny serwer (SSH)",
+  "chat.notice.cloudBusyStart": "Ta chmura jest teraz zbyt zajęta, by uruchomić AI, więc to zadanie się nie wykonało. Poczekaj minutę i wyślij je ponownie, zatrzymaj ciężkie zadanie, które właśnie działa, albo przejdź na większy plan, by mieć więcej miejsca.",
+  "chat.notice.cloudOutOfCpu": "Twojej chmurze zabrakło procesora na to zadanie, więc AI nie mogło się uruchomić i nic się nie wykonało. Poczekaj minutę i wyślij je ponownie, zatrzymaj ciężkie zadanie, które właśnie działa, albo przejdź na większy plan, by mieć więcej procesora."
 }

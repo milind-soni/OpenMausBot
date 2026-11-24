@@ -3309,6 +3309,8 @@
       "server.room.turns": "22d3991e5e5089d0ec7c8997863b7172c73e1bc0bbaf9dc96febeaae98e02d0b",
       "server.room.turnsStill": "02e83aa50e246a76d138335f0ba4d12c15efc909de572cb1a27be7ccaee2307f",
       "chat.notice.outOfProcesses": "7dd799040935793afd9a12757698c404c5b9d9a83d9a749dda145d05607a5a85",
+      "chat.notice.cloudBusyStart": "6527443654885b972eadaaab2d27d31e2d6376f53209f967e35ea225e898013f",
+      "chat.notice.cloudOutOfCpu": "9ace19c7c64d5f83b31ac29a4bff62cef4cf767c33b1f4ca5d632fd18edea221",
       "server.botPaused": "44a1a67145a3178073e8dd5ecbc95a7bba0e9bdb2a4daca56b58c81c0a5a9105",
       "botLimit.tasks.title": "406225acaae475dfba01e5670171a780563961c82f6cb05f9c74eed8d564c373",
       "botLimit.tasks.body": "8858c581592229bb8a2c27d0c646c80294e5832f15be671067eda856926b55b1",
@@ -10988,7 +10990,9 @@
       "cloudSend.changes.lendCommandsHint": "f2454f4eb2cd204a3de88bf81670931a3906f8783641dbd990d3ec0738c7cfa3",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.botMove.goes": "670b500e4fcd0a977b5645e4938a8881cf97f15e76782edaceb4c8f2eadb0062",
-      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236"
+      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236",
+      "chat.notice.cloudBusyStart": "6527443654885b972eadaaab2d27d31e2d6376f53209f967e35ea225e898013f",
+      "chat.notice.cloudOutOfCpu": "9ace19c7c64d5f83b31ac29a4bff62cef4cf767c33b1f4ca5d632fd18edea221"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -15026,7 +15030,9 @@
       "cloudSend.changes.lendCommandsHint": "f2454f4eb2cd204a3de88bf81670931a3906f8783641dbd990d3ec0738c7cfa3",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.botMove.goes": "670b500e4fcd0a977b5645e4938a8881cf97f15e76782edaceb4c8f2eadb0062",
-      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236"
+      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236",
+      "chat.notice.cloudBusyStart": "6527443654885b972eadaaab2d27d31e2d6376f53209f967e35ea225e898013f",
+      "chat.notice.cloudOutOfCpu": "9ace19c7c64d5f83b31ac29a4bff62cef4cf767c33b1f4ca5d632fd18edea221"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -18916,7 +18922,9 @@
       "cloudSend.changes.lendCommandsHint": "f2454f4eb2cd204a3de88bf81670931a3906f8783641dbd990d3ec0738c7cfa3",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.botMove.goes": "670b500e4fcd0a977b5645e4938a8881cf97f15e76782edaceb4c8f2eadb0062",
-      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236"
+      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236",
+      "chat.notice.cloudBusyStart": "6527443654885b972eadaaab2d27d31e2d6376f53209f967e35ea225e898013f",
+      "chat.notice.cloudOutOfCpu": "9ace19c7c64d5f83b31ac29a4bff62cef4cf767c33b1f4ca5d632fd18edea221"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -27079,7 +27087,9 @@
       "cloudSend.changes.lendCommandsHint": "f2454f4eb2cd204a3de88bf81670931a3906f8783641dbd990d3ec0738c7cfa3",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.botMove.goes": "670b500e4fcd0a977b5645e4938a8881cf97f15e76782edaceb4c8f2eadb0062",
-      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236"
+      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236",
+      "chat.notice.cloudBusyStart": "6527443654885b972eadaaab2d27d31e2d6376f53209f967e35ea225e898013f",
+      "chat.notice.cloudOutOfCpu": "9ace19c7c64d5f83b31ac29a4bff62cef4cf767c33b1f4ca5d632fd18edea221"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -36207,6 +36217,8 @@
       "chat.notice.memoryReclaimedBrowserDetail": "29c781b36ba9bc63c701f8ac7c9488b0b116430c3e400ceaa51694c41e3d9050",
       "chat.notice.memoryReclaimedTaskDetail": "8692d2880c5425cd005f7002561ae2d7850e41209d0dcf40b1e098a9ea1725f8",
       "chat.notice.outOfProcesses": "7dd799040935793afd9a12757698c404c5b9d9a83d9a749dda145d05607a5a85",
+      "chat.notice.cloudBusyStart": "6527443654885b972eadaaab2d27d31e2d6376f53209f967e35ea225e898013f",
+      "chat.notice.cloudOutOfCpu": "9ace19c7c64d5f83b31ac29a4bff62cef4cf767c33b1f4ca5d632fd18edea221",
       "server.personFirst.stoppedSeconds": "9ccef9cb0269e710e1fb314a11834a4033b48d66cb54ca6b38e8c7a2fdcb9a8a",
       "server.personFirst.stoppedMinutes": "b36afce574a81b8dfc9a4141f280973c6ca5fa7ef4ae008045494b31622ce387",
       "server.routines.held.planCancelled": "8a6b13354ba469ae192bc6f6e65a0e40689ade9798eafb23136f6dfdb8a2db48",
@@ -49282,7 +49294,9 @@
       "cloudSend.changes.lendCommandsHint": "f2454f4eb2cd204a3de88bf81670931a3906f8783641dbd990d3ec0738c7cfa3",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.botMove.goes": "670b500e4fcd0a977b5645e4938a8881cf97f15e76782edaceb4c8f2eadb0062",
-      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236"
+      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236",
+      "chat.notice.cloudBusyStart": "6527443654885b972eadaaab2d27d31e2d6376f53209f967e35ea225e898013f",
+      "chat.notice.cloudOutOfCpu": "9ace19c7c64d5f83b31ac29a4bff62cef4cf767c33b1f4ca5d632fd18edea221"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -59723,7 +59737,9 @@
       "cloudSend.changes.lendCommandsHint": "f2454f4eb2cd204a3de88bf81670931a3906f8783641dbd990d3ec0738c7cfa3",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.botMove.goes": "670b500e4fcd0a977b5645e4938a8881cf97f15e76782edaceb4c8f2eadb0062",
-      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236"
+      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236",
+      "chat.notice.cloudBusyStart": "6527443654885b972eadaaab2d27d31e2d6376f53209f967e35ea225e898013f",
+      "chat.notice.cloudOutOfCpu": "9ace19c7c64d5f83b31ac29a4bff62cef4cf767c33b1f4ca5d632fd18edea221"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -64032,7 +64048,9 @@
       "cloudSend.changes.lendCommandsHint": "f2454f4eb2cd204a3de88bf81670931a3906f8783641dbd990d3ec0738c7cfa3",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.botMove.goes": "670b500e4fcd0a977b5645e4938a8881cf97f15e76782edaceb4c8f2eadb0062",
-      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236"
+      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236",
+      "chat.notice.cloudBusyStart": "6527443654885b972eadaaab2d27d31e2d6376f53209f967e35ea225e898013f",
+      "chat.notice.cloudOutOfCpu": "9ace19c7c64d5f83b31ac29a4bff62cef4cf767c33b1f4ca5d632fd18edea221"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -70156,7 +70174,9 @@
       "cloudSend.changes.lendCommandsHint": "f2454f4eb2cd204a3de88bf81670931a3906f8783641dbd990d3ec0738c7cfa3",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.botMove.goes": "670b500e4fcd0a977b5645e4938a8881cf97f15e76782edaceb4c8f2eadb0062",
-      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236"
+      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236",
+      "chat.notice.cloudBusyStart": "6527443654885b972eadaaab2d27d31e2d6376f53209f967e35ea225e898013f",
+      "chat.notice.cloudOutOfCpu": "9ace19c7c64d5f83b31ac29a4bff62cef4cf767c33b1f4ca5d632fd18edea221"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -76280,7 +76300,9 @@
       "cloudSend.changes.lendCommandsHint": "f2454f4eb2cd204a3de88bf81670931a3906f8783641dbd990d3ec0738c7cfa3",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.botMove.goes": "670b500e4fcd0a977b5645e4938a8881cf97f15e76782edaceb4c8f2eadb0062",
-      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236"
+      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236",
+      "chat.notice.cloudBusyStart": "6527443654885b972eadaaab2d27d31e2d6376f53209f967e35ea225e898013f",
+      "chat.notice.cloudOutOfCpu": "9ace19c7c64d5f83b31ac29a4bff62cef4cf767c33b1f4ca5d632fd18edea221"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -83605,7 +83627,9 @@
       "cloudSend.changes.lendCommandsHint": "f2454f4eb2cd204a3de88bf81670931a3906f8783641dbd990d3ec0738c7cfa3",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.botMove.goes": "670b500e4fcd0a977b5645e4938a8881cf97f15e76782edaceb4c8f2eadb0062",
-      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236"
+      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236",
+      "chat.notice.cloudBusyStart": "6527443654885b972eadaaab2d27d31e2d6376f53209f967e35ea225e898013f",
+      "chat.notice.cloudOutOfCpu": "9ace19c7c64d5f83b31ac29a4bff62cef4cf767c33b1f4ca5d632fd18edea221"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -90984,7 +91008,9 @@
       "cloudSend.changes.lendCommandsHint": "f2454f4eb2cd204a3de88bf81670931a3906f8783641dbd990d3ec0738c7cfa3",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.botMove.goes": "670b500e4fcd0a977b5645e4938a8881cf97f15e76782edaceb4c8f2eadb0062",
-      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236"
+      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236",
+      "chat.notice.cloudBusyStart": "6527443654885b972eadaaab2d27d31e2d6376f53209f967e35ea225e898013f",
+      "chat.notice.cloudOutOfCpu": "9ace19c7c64d5f83b31ac29a4bff62cef4cf767c33b1f4ca5d632fd18edea221"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -101763,6 +101789,8 @@
       "chat.notice.memoryReclaimedBrowserDetail": "29c781b36ba9bc63c701f8ac7c9488b0b116430c3e400ceaa51694c41e3d9050",
       "chat.notice.memoryReclaimedTaskDetail": "8692d2880c5425cd005f7002561ae2d7850e41209d0dcf40b1e098a9ea1725f8",
       "chat.notice.outOfProcesses": "7dd799040935793afd9a12757698c404c5b9d9a83d9a749dda145d05607a5a85",
+      "chat.notice.cloudBusyStart": "6527443654885b972eadaaab2d27d31e2d6376f53209f967e35ea225e898013f",
+      "chat.notice.cloudOutOfCpu": "9ace19c7c64d5f83b31ac29a4bff62cef4cf767c33b1f4ca5d632fd18edea221",
       "server.personFirst.stoppedSeconds": "9ccef9cb0269e710e1fb314a11834a4033b48d66cb54ca6b38e8c7a2fdcb9a8a",
       "server.personFirst.stoppedMinutes": "b36afce574a81b8dfc9a4141f280973c6ca5fa7ef4ae008045494b31622ce387",
       "server.runOwner.onlyAskerStops": "832c893848422bf9040e17b415756f5466d3988354b4e661cb73511be36ff56e",
@@ -110607,7 +110635,9 @@
       "cloudSend.changes.lendCommandsHint": "f2454f4eb2cd204a3de88bf81670931a3906f8783641dbd990d3ec0738c7cfa3",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.botMove.goes": "670b500e4fcd0a977b5645e4938a8881cf97f15e76782edaceb4c8f2eadb0062",
-      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236"
+      "cloudSend.changes.commandsTools": "af6e99ce2459132c8aa5a48d21aa12e8e2bbe5d3d4f49b99d7656f947c883236",
+      "chat.notice.cloudBusyStart": "6527443654885b972eadaaab2d27d31e2d6376f53209f967e35ea225e898013f",
+      "chat.notice.cloudOutOfCpu": "9ace19c7c64d5f83b31ac29a4bff62cef4cf767c33b1f4ca5d632fd18edea221"
     }
   }
 }

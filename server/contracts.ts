@@ -400,6 +400,11 @@ export interface ProviderSnapshot {
   nativeCli?: true;
   /** Not ready because its runtime is being installed on this computer right now. */
   installing?: true;
+  /** With `unavailable`: its status check could not finish (out of time, killed, no room to start it), which says nothing
+   * about whether it is installed. Never a reason to show that no AI is connected. */
+  busy?: true;
+  /** With `available`: its program file is there but its status check could not finish yet; it is checked again. */
+  unverified?: true;
   /** Display identity from the provider CLI, never credentials; `method` is a personal login or the workspace API key. */
   account?: { email?: string; organization?: string; method?: "login" | "api-key" };
   version?: string | null;

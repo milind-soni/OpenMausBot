@@ -28,6 +28,7 @@ import { spawnBotWork } from "./oom-score.ts";
 import { noticeFailure } from "./chat-notices.ts";
 import { processBudget } from "./process-room.ts";
 import { shortageCode } from "./process-shortage.ts";
+import { inconclusiveMark } from "./harness/probe-hold.ts";
 import { unboxedGitCredential } from "./github/git-credential.ts";
 
 export function resolveCli(cli: string, args: string[] = [], env?: NodeJS.ProcessEnv): ResolvedSpawn {
@@ -564,7 +565,8 @@ function cutOffError(cli: string, timeout: number | undefined): Error {
 
 export const CLI_VERSION_TIMEOUT_MS = 30_000;
 
-export function cliVersionReader(cli: string): (err: Error | null, stdout: string) => { version: string } | { reason: string } {
+/** `busy`: the check could not finish (probe-hold.ts), which says nothing about whether the CLI is installed. */
+export function cliVersionReader(cli: string): (err: Error | null, stdout: string) => { version: string } | { reason: string; busy?: true } {
   let last: string | null = null;
   return (err, stdout) => {
     const version = err ? "" : stdout.trim();
@@ -582,7 +584,7 @@ export function cliVersionReader(cli: string): (err: Error | null, stdout: strin
     if (last && (timedOut || !err || typeof failure?.code === "number")) return { version: last };
     return { reason: timedOut
       ? `\`${cli}\` took longer than ${CLI_VERSION_TIMEOUT_MS / 1000} seconds to answer --version. The machine may be busy; check again.`
-      : !err ? `\`${cli}\` returned no version. Check again.` : `\`${cli}\` could not report its version. Check that it starts in a terminal, then check again.` };
+      : !err ? `\`${cli}\` returned no version. Check again.` : `\`${cli}\` could not report its version. Check that it starts in a terminal, then check again.`, ...inconclusiveMark(err) };
   };
 }
 
