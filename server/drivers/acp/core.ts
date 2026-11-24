@@ -142,6 +142,9 @@ export interface AcpSupport extends AcpDriverHooks {
   /** Select the model through a session config option instead of argv (opencode's ACP subcommand
    *  takes no -m). The agent must confirm it before the prompt. */
   selectModel?: AcpModelSelection;
+  /** With no `selectModel`: the one-shot turn carries the caller's model on the command line, so the CLI does not
+   * start on its own cloud-managed default (Grok; issue #7240 — 402 on installs routed through other models). */
+  oneShotTurnModel?: boolean;
   /** With `selectModel`: the model a turn runs when it asked for none or for one this session does
    * not offer; null keeps the strict behaviour. */
   fallbackModel?(sessionConfig: unknown, catalogDefault: string): string | null;
@@ -1475,6 +1478,16 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const cwd = mkdtempSync(join(await support.oneShotFolder?.() ?? tmpdir(), "omb-acp-memory-"));
         try {
           const turn = { threadId: `memory-text-${newId()}`, text: prompt, approvalMode: "ask", cwd } as SendTurnInput;
+          // An engine that picks its model on the command line (Grok) must not let a one-shot start the CLI on its
+          // own cloud-managed default, which an install routed through other models neither uses nor pays for.
+          if (support.oneShotTurnModel && !support.selectModel) {
+            const requestedModel = options.model ?? options.fallback?.model;
+            if (requestedModel && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(requestedModel)) {
+              try {
+                turn.model = support.resolveTurnModel?.(requestedModel, env, catalog.models) ?? requestedModel;
+              } catch { /* the engine can no longer route it; its default runs, as an unoffered one does */ }
+            }
+          }
           const model = applyOneShotEnv(support, env, options, catalog.models, { fullAuto: false, cwd, threadId: turn.threadId, mcpServers: [] });
           const launch: { command: string; args?: string[]; env?: Record<string, string | undefined>; ro?: readonly string[] } = support.resolveCommand ? await support.resolveCommand(env, turnConfig, instanceId) : { command: turnConfig.cli };
           const spawnEnv = launch.env ?? env;

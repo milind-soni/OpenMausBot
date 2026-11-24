@@ -60,6 +60,51 @@ describe("ACP memory one-shot (generateMemoryText)", () => {
     expect(usage).toEqual([expect.objectContaining({ input: 12, output: 4 })]);
   });
 
+  it("starts the grok CLI on the bot's own model, not the engine's cloud default", async () => {
+    process.env.FAKE_ACP_TEXT_REPLY = "[]";
+    process.env.FAKE_ACP_DUMP = join(scratch, "dump.json");
+    const botModel = (model: string) => ({ model, refused: new Set<string>(), onRefused: () => {} });
+    await (await create(GrokAgentDriver)).generateMemoryText!("prompt", { fallback: botModel("grok-4.1-fast") });
+    const { argv } = JSON.parse(readFileSync(process.env.FAKE_ACP_DUMP, "utf8"));
+    expect(argv).toContain("-m");
+    expect(argv[argv.indexOf("-m") + 1]).toBe("grok-4.1-fast");
+  });
+
+  it("an explicit model beats the bot's fallback model on a grok one-shot", async () => {
+    process.env.FAKE_ACP_TEXT_REPLY = "[]";
+    process.env.FAKE_ACP_DUMP = join(scratch, "dump.json");
+    const botModel = (model: string) => ({ model, refused: new Set<string>(), onRefused: () => {} });
+    await (await create(GrokAgentDriver)).generateMemoryText!("prompt", { model: "grok-4-fast", fallback: botModel("grok-4.1-fast") });
+    const { argv } = JSON.parse(readFileSync(process.env.FAKE_ACP_DUMP, "utf8"));
+    expect(argv[argv.indexOf("-m") + 1]).toBe("grok-4-fast");
+  });
+
+  it("no model supplied leaves the grok one-shot without -m, as before", async () => {
+    process.env.FAKE_ACP_TEXT_REPLY = "[]";
+    process.env.FAKE_ACP_DUMP = join(scratch, "dump.json");
+    await (await create(GrokAgentDriver)).generateMemoryText!("prompt");
+    const { argv } = JSON.parse(readFileSync(process.env.FAKE_ACP_DUMP, "utf8"));
+    expect(argv).not.toContain("-m");
+  });
+
+  it("a model that is not a plain slug never reaches the grok command line", async () => {
+    process.env.FAKE_ACP_TEXT_REPLY = "[]";
+    process.env.FAKE_ACP_DUMP = join(scratch, "dump.json");
+    const botModel = (model: string) => ({ model, refused: new Set<string>(), onRefused: () => {} });
+    await (await create(GrokAgentDriver)).generateMemoryText!("prompt", { fallback: botModel("omniroute host/combo:model") });
+    const { argv } = JSON.parse(readFileSync(process.env.FAKE_ACP_DUMP, "utf8"));
+    expect(argv).not.toContain("-m");
+  });
+
+  it("another engine without selectModel is unchanged: no -m from the caller's model", async () => {
+    process.env.FAKE_ACP_TEXT_REPLY = "[]";
+    process.env.FAKE_ACP_DUMP = join(scratch, "dump.json");
+    const botModel = (model: string) => ({ model, refused: new Set<string>(), onRefused: () => {} });
+    await (await create(GeminiAgentDriver)).generateMemoryText!("prompt", { fallback: botModel("gemini-2.5-flash") });
+    const { argv } = JSON.parse(readFileSync(process.env.FAKE_ACP_DUMP, "utf8"));
+    expect(argv).not.toContain("-m");
+  });
+
   it("runs in the interactive mode even on an instance set to full auto", async () => {
     process.env.FAKE_ACP_TEXT_REPLY = "[]";
     process.env.FAKE_ACP_DUMP = join(scratch, "dump.json");

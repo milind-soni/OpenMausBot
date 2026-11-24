@@ -537,6 +537,9 @@ const support: AcpSupport = {
   // With the instance HOME/GROK_HOME: ensureGrokInjectSlug defaults to process.env.
   resolveTurnModel: (model, env) => (model ? ensureGrokInjectSlug(model, env) : model),
 
+  // A memory one-shot starts the CLI on the bot's own model instead of Grok's cloud-managed default (issue #7240).
+  oneShotTurnModel: true,
+
   // --permission-mode is global; -m and --reasoning-effort only apply between `agent` and `stdio`
   // (Grok 1.0.6; -m first is taken as a TUI option and ignored). Auto selects Grok's native
   // classifier, never bypassPermissions. xai-org/grok-build@37949780 crates/codegen/xai-grok-pager-bin/src/main.rs:1259-1273.
