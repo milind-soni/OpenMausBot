@@ -116,6 +116,7 @@ import { ChatBackdrop, GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
 import { PagePaneContext } from "./app/PageTools";
 import { useTranscriptViewport } from "@/hooks/use-transcript-viewport"; import { staysInView } from "../../shared/person-wait";
 import { useUnreadDivider } from "@/hooks/use-unread-divider";
+import { useTabsFrameOnRoot } from "@/hooks/use-tabs-frame-on-root";
 import { NewMessagesDivider } from "./NewMessagesDivider";
 import { unreadMessageIds } from "@/lib/unread-divider"; import { UnreadContextOverlay } from "./UnreadContextOverlay";
 import { appendDraftAttachments, useReplyDraft } from "@/lib/drafts";
@@ -759,6 +760,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
   const phone = useMediaQuery(PHONE_LAYOUT);
   const phoneMenu = phone && !remoteClient;
   const simpleHead = !advanced && !remoteClient, headTabs = useThreadTabsShown(bot.id) && !inForkPanel;
+  useTabsFrameOnRoot(headTabs ? (simpleHead ? "simple" : "advanced") : undefined);
   const canWrite = useCanWriteIn(bot.threadId, bot.yourAccess), mayWrite = canWrite !== false;
 
   const computerStarting = computerStartLine(state.computerStart, bot.name); useScreensWhile(Boolean(computerStarting));

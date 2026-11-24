@@ -3932,12 +3932,12 @@ button:disabled.bg-danger {
   [data-chathead-tabs]::before { left: 0; background: radial-gradient(circle at 100% 100%, transparent calc(var(--chat-card-radius) - 0.5px), var(--color-edge) calc(var(--chat-card-radius) - 0.5px), var(--color-edge) var(--chat-card-radius), var(--color-panel) calc(var(--chat-card-radius) + 0.5px)); }
   [data-chathead-tabs]::after { right: 0; background: radial-gradient(circle at 0 100%, transparent calc(var(--chat-card-radius) - 0.5px), var(--color-edge) calc(var(--chat-card-radius) - 0.5px), var(--color-edge) var(--chat-card-radius), var(--color-panel) calc(var(--chat-card-radius) + 0.5px)); }
   [data-chathead-tabs]:has([data-panel-beside])::after { display: none; }
-  :root:has([data-chathead-tabs="simple"]) [data-sidebar] { border-image: linear-gradient(to bottom, transparent 60px, var(--color-edge) 60px) 1; }
-  :root:has([data-chathead-tabs="advanced"]) [data-sidebar] { border-image: linear-gradient(to bottom, transparent 54px, var(--color-edge) 54px) 1; }
-  :root[data-skin="midnight"]:has([data-chathead-tabs]) { --color-frame: #0a0a0a; }
-  :root[data-skin="midnight"]:has([data-chathead-tabs]) :is([data-sidebar], [data-places-rail], [data-chathead-tabs]) { --color-panel: #0a0a0a; }
-  :root:has([data-chathead-tabs="simple"]) [data-sidebar-top-row="simple"] { padding-top: 14px; }
-  :root:has([data-chathead-tabs="simple"]) [data-sidebar-top-row="simple"] :is([data-rail-toggle], [data-sidebar-top-buttons] button.size-9) { width: 32px; height: 32px; }
+  :root[data-chat-tabs-frame="simple"] [data-sidebar] { border-image: linear-gradient(to bottom, transparent 60px, var(--color-edge) 60px) 1; }
+  :root[data-chat-tabs-frame="advanced"] [data-sidebar] { border-image: linear-gradient(to bottom, transparent 54px, var(--color-edge) 54px) 1; }
+  :root[data-skin="midnight"][data-chat-tabs-frame] { --color-frame: #0a0a0a; }
+  :root[data-skin="midnight"][data-chat-tabs-frame] :is([data-sidebar], [data-places-rail], [data-chathead-tabs]) { --color-panel: #0a0a0a; }
+  :root[data-chat-tabs-frame="simple"] [data-sidebar-top-row="simple"] { padding-top: 14px; }
+  :root[data-chat-tabs-frame="simple"] [data-sidebar-top-row="simple"] :is([data-rail-toggle], [data-sidebar-top-buttons] button.size-9) { width: 32px; height: 32px; }
   [data-chathead-tabs] [data-chathead-row] { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; height: 100%; }
   [data-chathead-tabs] [data-chathead-identity] { grid-column: 2; justify-self: stretch; align-self: stretch; -webkit-app-region: drag !important; }
   [data-chathead-tabs] [data-chathead-identity] > :not([data-thread-tabs], [data-chathead-status]) { display: none; }

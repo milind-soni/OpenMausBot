@@ -210,7 +210,7 @@ describe("sidebar top row", () => {
     for (const classes of round) expect(classes).toContain("size-9");
     expect(row).toMatch(/data-rail-toggle/);
     const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "styles.css"), "utf8").replace(/\r\n/g, "\n");
-    const beside = ':root:has([data-chathead-tabs="simple"]) [data-sidebar-top-row="simple"]';
+    const beside = ':root[data-chat-tabs-frame="simple"] [data-sidebar-top-row="simple"]';
     expect(css).toContain(`${beside} { padding-top: 14px; }`);
     expect(css).toContain(`${beside} :is([data-rail-toggle], [data-sidebar-top-buttons] button.size-9) { width: 32px; height: 32px; }`);
   });
