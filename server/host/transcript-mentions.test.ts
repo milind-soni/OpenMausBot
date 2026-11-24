@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { threadsMentioning } from "./transcript-mentions.ts";
+import { threadsMentioning, transcriptThreads } from "./transcript-mentions.ts";
 
 const made: string[] = [];
 afterEach(() => {
@@ -46,5 +46,11 @@ describe("which conversations mention a word", () => {
 
   it("reads nothing for no words", async () => {
     expect((await threadsMentioning("/nowhere", [])).size).toBe(0);
+  });
+
+  it("lists every conversation the transcripts hold, and rejects when they cannot be read", async () => {
+    const file = transcripts([["a", { text: "x" }], ["b", { text: "y" }], ["a", { text: "z" }]]);
+    expect([...await transcriptThreads(file)].sort()).toEqual(["a", "b"]);
+    await expect(transcriptThreads(join(tmpdir(), "no-such-folder-omb", "messages.db"))).rejects.toThrow(/missing/);
   });
 });
