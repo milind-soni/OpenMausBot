@@ -8,6 +8,7 @@ import {
   CONVERSATIONAL_STYLE_PROMPT,
   CLOUD_HOME_PLACE,
   CLOUD_ENGINES_HERE,
+  CLOUD_PUSH_CODE_WORK,
   CLOUD_REUSE_INSTALLS,
   cloudHomePrompt,
   userProfileSystemPrompt,
@@ -413,6 +414,16 @@ describe("cloudHomePrompt", () => {
       expect(text).toContain(CLOUD_REUSE_INSTALLS);
       expect(CLOUD_REUSE_INSTALLS).not.toMatch(/\b(?:remove|delete|clean)/i);
     }
+  });
+
+  it("asks bots to push code work with a remote to a new branch, never forced, never the default branch, never secrets", () => {
+    for (const tools of [true, false]) {
+      const text = cloudHomePrompt(tools);
+      expect(text).toContain(CLOUD_REUSE_INSTALLS + CLOUD_PUSH_CODE_WORK);
+    }
+    expect(CLOUD_PUSH_CODE_WORK).toMatch(/push it to a new branch/);
+    expect(CLOUD_PUSH_CODE_WORK).toMatch(/never force-push, never push to the default branch/);
+    expect(CLOUD_PUSH_CODE_WORK).toMatch(/never commit secrets, \.env files or installed packages/);
   });
 
   it("says the Cloud is off their network, whatever memory says, and sends ssh through the lent computer", () => {

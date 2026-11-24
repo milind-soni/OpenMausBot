@@ -109,6 +109,14 @@ GNOME/Wayland additionally requires WinRects v8 plus the exact Cua health-report
   and `?Privacy_ScreenCapture`). Expect macOS 15's ~monthly screen-recording
   re-prompt; the `persistent-content-capture` entitlement is Apple-gated and
   not realistically available to us.
+- Computer use needs macOS 15 or later: the pinned 0.45.4 SDK declares
+  `minos 13.0` in `otool -l`, but links ScreenCaptureKit strongly and names
+  `SCScreenshotManager` (macOS 14) and `SCRecordingOutput` (macOS 15), so dyld
+  cannot load it below 15. `macDriverUnsupported` in
+  `electron/capabilities.cjs` is that floor: `startCua` stops there, and the app
+  itself still opens on macOS 12. When bumping `@trycua/cua-driver`, re-check
+  `otool -L | grep ScreenCaptureKit` for `(weak)` and the `nm -u` class list;
+  `minos` alone cannot see this.
 
 ### MCP exposure: the official `cua-driver mcp` proxy (no custom proxy)
 

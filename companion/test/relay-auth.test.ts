@@ -46,7 +46,7 @@ it("adds the private capability only after authenticating and authorizing, never
   expect(received).toHaveLength(0);
   capability = "private-relay-secret";
   expect(await call("/api/bots/b/read", "unpaired")).toBe(401);
-  expect(await call("/api/config", "paired", "PUT")).toBe(403);
+  expect(await call("/api/config", "paired", "PATCH")).toBe(403);
   expect(await call("/api/bots/b/computer/join")).toBe(403);
   expect(received).toHaveLength(0);
   expect(await call("/api/bots/b/read")).toBe(200);
