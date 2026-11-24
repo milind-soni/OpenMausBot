@@ -139,7 +139,6 @@ try {
     assert.equal(await main.evaluate(`fetch(${JSON.stringify(origin + "/api/auth/session")}).then(() => true, () => false)`), false);
   }
   const [work, homeBot] = await Promise.all([main.control("create_bot", { name: "Studio Echo" }), other.control("create_bot", { name: "Personal Echo" })].map(p => p.then(r => r.bot)));
-  const { task } = await main.control("create_task", { target_type: "bot", target_id: work.id, title: "Studio sketches" });
   const send = (page, bot, text) => page.control("send_bot_message", { bot_id: bot.id, task_id: bot.activeTaskId, text });
   await Promise.all([send(main, work, "Studio fixture note"), send(other, homeBot, "Personal fixture note")]);
   for (const [page, bot, elsewhere] of [[main, work, homeBot], [other, homeBot, work]]) {
@@ -158,6 +157,7 @@ try {
   await main.menu(`[data-sidebar-bot-row="${work.id}"]`);
   const isChat = thread => p => new URL(p.url).searchParams.get("chatWindow") === thread;
   const first = await attach(isChat(work.activeTaskId), "first chat window");
+  const { task } = await main.control("create_task", { target_type: "bot", target_id: work.id, title: "Studio sketches" });
   if (remote) {
     await main.menu(`[data-sidebar-bot-row="${work.id}"]`, "View threads");
     await main.menu(`[data-conversation="${task.taskId}"] [data-sidebar-thread-row]`);
@@ -194,6 +194,18 @@ try {
     const group = await attach(isChat(channel.activeTaskId), "group conversation");
     await until(() => group.evaluate('Boolean(document.querySelector("[data-chat-window] textarea"))'), "group composer");
     assert.equal(new URL(group.url).origin, saved[1].origin);
+    const { task: topic } = await other.control("create_task", { target_type: "channel", target_id: channel.id, title: "Second room topic" });
+    assert.equal(await other.evaluate(`window.ombChatWindow.openThread(${JSON.stringify(channel.id)}, ${JSON.stringify(topic.taskId)})`, true), true);
+    const secondGroup = await attach(isChat(topic.taskId), "second group thread");
+    await Promise.all([compose(group, "Original room window"), compose(secondGroup, "Second room window")]);
+    for (const [id, here, elsewhere] of [[channel.activeTaskId, "Original room window", "Second room window"], [topic.taskId, "Second room window", "Original room window"]]) {
+      const history = await until(async () => {
+        const { messages: rows } = await other.control("get_channel_messages", { channel_id: channel.id, task_id: id });
+        return rows.some(message => message.text === here) && rows;
+      }, here);
+      assert.ok(!history.some(message => message.text === elsewhere));
+    }
+    await secondGroup.close();
     await group.close();
   }
   await other.menu(`[data-sidebar-bot-row="${homeBot.id}"]`);
