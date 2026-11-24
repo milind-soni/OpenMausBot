@@ -78,17 +78,21 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
   const [focusAt, setFocusAt] = useState<number | null>(null);
   const finishing = useRef(false);
   const tree = useRef<HTMLDivElement>(null);
-  // Folding plays the unfold backwards: the rows that go fade out in place before the list shortens.
+  // Folding plays the unfold backwards: the rows that go fade out in place before the list shortens. So does a row
+  // that leaves because it was unpinned.
   const shown = useRef({ unfolded, rows, more });
   const [leaving, setLeaving] = useState<{ rows: LabelRow[]; gone: ReadonlySet<string>; more: number } | null>(null);
+  const pins = rows.filter((row) => row.pinned).map((row) => row.task.threadId).join("\n");
   useLayoutEffect(() => {
     const was = shown.current;
-    if (!was.unfolded || unfolded || reducedMotion()) { setLeaving(null); return; }
     const kept = new Set(rows.map((row) => row.task.threadId));
-    setLeaving({ rows: was.rows, gone: new Set(was.rows.filter((row) => !kept.has(row.task.threadId)).map((row) => row.task.threadId)), more: was.more });
+    const folding = was.unfolded && !unfolded;
+    const gone = was.rows.filter((row) => !kept.has(row.task.threadId) && (folding || row.pinned));
+    if (!gone.length || reducedMotion()) { setLeaving(null); return; }
+    setLeaving({ rows: was.rows, gone: new Set(gone.map((row) => row.task.threadId)), more: was.more });
     const timer = window.setTimeout(() => setLeaving(null), FOLD_MS);
     return () => window.clearTimeout(timer);
-  }, [unfolded]);
+  }, [unfolded, pins]);
   useLayoutEffect(() => { shown.current = { unfolded, rows, more }; });
   useEffect(() => {
     if (!toast) return;
@@ -175,9 +179,12 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
                 }}
                 className="-ms-1.5 h-7 min-w-0 flex-1 rounded-md border border-focus bg-transparent px-1.5 text-[13px] text-ink outline-none" />
             ) : <>
-              <span dir="auto" className={cn("min-w-0 flex-1 truncate", hideable(row) && YIELDS)}>{title}</span>
-              <span className={cn("flex shrink-0 items-center gap-1.5", hideable(row) && "transition-opacity duration-[120ms] group-hover/label:opacity-0 motion-reduce:transition-none")}>
-                {row.pinned && <Pin size={11} role="img" aria-label={t("task.pinned")} className="shrink-0 text-ink-secondary" />}<StatusMark row={row} />
+              <span className={cn("flex min-w-0 flex-1 items-center gap-1.5", hideable(row) && YIELDS)}>
+                <span dir="auto" className="min-w-0 truncate">{title}</span>
+                {row.pinned && <Pin size={10} role="img" aria-label={t("task.pinned")} className="shrink-0 text-ink-tertiary" />}
+              </span>
+              <span className={cn("flex shrink-0 items-center", hideable(row) && "transition-opacity duration-[120ms] group-hover/label:opacity-0 motion-reduce:transition-none")}>
+                <StatusMark row={row} />
               </span>
               {hideable(row) && (
                 <button type="button" tabIndex={-1} aria-label={t("sidebar.threads.hide", { title })} title={t("sidebar.threads.hideShort")}
