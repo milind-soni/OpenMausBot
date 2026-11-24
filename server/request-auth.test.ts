@@ -30,6 +30,7 @@ import {
   sessionCookieName,
 } from "./request-auth.ts";
 import { SESSION_TTL_MS, SessionRegistry } from "./sessions.ts";
+import { webSessionHeaders } from "../companion/src/session-route.ts";
 
 function request(headers: Record<string, string>, method = "GET"): IncomingMessage {
   // SAFETY: the resolver reads only headers and method; a bare object is the whole contract here
@@ -288,6 +289,19 @@ describe("resolveRequestAuth", () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
+  it("treats a request the companion carries for a web session as remote: only its own session counts", () => {
+    // The companion's real headers (companion/src/session-route.ts), however the device dressed the request.
+    const carried = (headers: Record<string, string>) =>
+      webSessionHeaders(request({ host: "127.0.0.1:8799", ...headers }), "web-1") as Record<string, string>;
+    const forged = { "x-forwarded-for": "127.0.0.1", "x-real-ip": "127.0.0.1", cookie: `${cookieName}=stolen`, origin: "http://127.0.0.1:8799" };
+    expect(resolve(carried(forged)).auth).toBeNull();
+    expect(resolve(carried({ ...forged, authorization: "Bearer omb_sess_wrong" })).auth).toBeNull();
+    const { token } = sessions.issue({ label: "web", scopes: ["admin", "client"] });
+    expect(resolve(carried({ ...forged, authorization: `Bearer ${token}` })).auth?.kind).toBe("session");
+    // From the companion on this machine, the lockout counts this device, never every device as one.
+    expect(requestSource({ headers: carried(forged), socket: { remoteAddress: "127.0.0.1" } } as unknown as IncomingMessage)).toBe("relay-web-1");
+  });
+
   it("accepts authenticated relay mutations without exposing the desktop owner capability", () => {
     const headers = {
       host: "127.0.0.1:8799",
@@ -333,7 +347,7 @@ describe("resolveRequestAuth", () => {
     for (const overrides of forged) expect(check("POST", "/api/bots/b/read", overrides).auth).toBeNull();
     expect(check("POST", "/api/bots/b/read", {}, "").auth).toBeNull();
     for (const [method, path] of [
-      ["PUT", "/api/config"], ["POST", "/api/auth/pairing"],
+      ["PATCH", "/api/config"], ["POST", "/api/auth/pairing"],
       ["POST", "/api/internal/anything"], ["GET", "/api/auth/sessions"],
       ["POST", "/api/not-yet-supported"],
     ]) expect(check(method, path).auth, path).toBeNull();

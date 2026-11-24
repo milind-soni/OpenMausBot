@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { acpPermissionCommand, permissionCommand } from "./permission-command.ts";
+import { bindSafetyFloor } from "../safety-floor-gate.ts";
+
+import { acpAnswersAlone, acpCarriesCommand, acpFileEditWithin, acpPermissionCommand, acpShellRequest, answersAlone, permissionCommand } from "./permission-command.ts";
 
 const CWD = "/home/user/work";
 
@@ -54,5 +56,47 @@ describe("permissionCommand", () => {
     expect(permissionCommand("ls\0", CWD)).toBeUndefined();
     expect(permissionCommand("ls", `${CWD}\0`)).toBeUndefined();
     expect(permissionCommand(undefined, CWD)).toBeUndefined();
+  });
+});
+
+describe("the never-list on an ACP request", () => {
+  beforeEach(() => bindSafetyFloor(() => ({ safetyFloor: { enabled: true } }) as never, undefined, "linux"));
+  afterEach(() => bindSafetyFloor(() => ({})));
+
+  it("reads a command under either spelling, whatever the request's kind", () => {
+    expect(answersAlone("rm -rf ~")).toBe(false);
+    expect(acpAnswersAlone({ command: "rm -rf ~" })).toBe(false);
+    expect(acpAnswersAlone({ CommandLine: "rm -rf ~" })).toBe(false);
+    expect(acpAnswersAlone({ command: "ls", CommandLine: "rm -rf ~" })).toBe(false);
+    expect(acpAnswersAlone({ CommandLine: 42 })).toBe(false);
+    expect(acpAnswersAlone({ CommandLine: "ls" })).toBe(true);
+    expect(acpAnswersAlone({ command: "ls", CommandLine: "ls" })).toBe(true);
+    for (const none of [undefined, null, {}, { path: "/tmp/a" }, ["rm -rf ~"]]) expect(acpAnswersAlone(none)).toBe(true);
+    expect(acpCarriesCommand({ CommandLine: "ls" })).toBe(true);
+    expect(acpCarriesCommand({ command: "" })).toBe(true);
+    expect(acpCarriesCommand({ path: "/tmp/a" })).toBe(false);
+  });
+
+  it("carries the command line of a request that is not a shell call, and both lines when two spellings differ", () => {
+    expect(acpShellRequest(false, { CommandLine: "rm -rf ~" }, CWD)).toEqual({ command: undefined, commandLine: "rm -rf ~" });
+    expect(acpShellRequest(false, { command: "ls" }, CWD)).toEqual({ command: undefined, commandLine: "ls" });
+    expect(acpShellRequest(true, { CommandLine: "ls" }, CWD)).toEqual({ command: { command: "ls", cwd: CWD }, commandLine: "ls" });
+    expect(acpShellRequest(true, { command: "ls", CommandLine: "rm -rf ~" }, CWD)).toEqual({ command: undefined, commandLine: "ls\nrm -rf ~" });
+    expect(acpShellRequest(false, { path: "/tmp/a" }, CWD)).toEqual({ command: undefined, commandLine: undefined });
+    expect(acpShellRequest(false, undefined, CWD)).toEqual({ command: undefined, commandLine: undefined });
+  });
+
+  it("takes a request for a file edit only when it is one, inside the folder", () => {
+    const root = process.cwd();
+    const inside = { kind: "edit", locations: [{ path: `${root}/notes.md` }] };
+    expect(acpFileEditWithin(inside, root)).toBe(true);
+    expect(acpFileEditWithin(inside, undefined)).toBe(false);
+    expect(acpFileEditWithin({ ...inside, kind: "execute" }, root)).toBe(false);
+    expect(acpFileEditWithin({ ...inside, rawInput: { CommandLine: "ls" } }, root)).toBe(false);
+    expect(acpFileEditWithin({ kind: "edit", locations: [{ path: root }] }, root)).toBe(false);
+    expect(acpFileEditWithin({ kind: "edit", locations: [] }, root)).toBe(false);
+    expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/../x` }] }, root)).toBe(false);
+    expect(acpFileEditWithin({ kind: "edit", locations: [{ path: `${root}/a\0b` }] }, root)).toBe(false);
+    expect(acpFileEditWithin({ kind: "edit", locations: [{}] }, root)).toBe(false);
   });
 });

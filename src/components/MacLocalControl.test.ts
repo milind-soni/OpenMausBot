@@ -35,7 +35,7 @@ describe("Mac local computer status", () => {
   });
 
   it("offers no permission repair on a Mac too old for the driver", () => {
-    fixture.localComputer = { available: false, status: "unavailable", reasonCode: "macos-version-unsupported", message: "Local desktop control needs macOS 13 Ventura or later." } as DesktopCapabilities["localComputer"];
+    fixture.localComputer = { available: false, status: "unavailable", reasonCode: "macos-version-unsupported", message: "Local desktop control needs macOS 15 Sequoia or later." } as DesktopCapabilities["localComputer"];
     expect(renderToStaticMarkup(createElement(MacLocalControl))).toBe("");
   });
 

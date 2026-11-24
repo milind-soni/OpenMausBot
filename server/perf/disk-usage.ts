@@ -4,7 +4,7 @@
 // is saved as it goes, so a home that sleeps by stopping goes on after each start rather than starting again. Node gives no
 // per-call I/O priority and re-nicing would slow the whole server, so the budget is the only throttle. Privacy invariant:
 // sizes, counts, fixed category names, ids of bots the store knows and names from OTHER_NAMES; never a file's contents.
-import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { statfs } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -12,7 +12,7 @@ import { performance } from "node:perf_hooks";
 import { writeFileAtomic } from "../atomic.ts";
 import { OTHER_NAMES, STORAGE_CATEGORIES, type StorageCategory, type StorageClass } from "./disk-categories.ts";
 import {
-  checkpointFrom, createDiskWalk, totalsFrom, totalsJson, type DiskWalk, type Tally, type WalkCheckpoint, type WalkFs, type WalkRoot, type WalkSkipped, type WalkTotals,
+  checkpointFrom, count, createDiskWalk, SAVED_FILE_MAX_BYTES, totalsFrom, totalsJson, type DiskWalk, type Tally, type WalkCheckpoint, type WalkFs, type WalkRoot, type WalkSkipped, type WalkTotals,
 } from "./disk-walk.ts";
 
 export const STORAGE_REPORT_VERSION = 1;
@@ -98,7 +98,13 @@ export const PROGRESS_EVERY_MS = 60_000;
 /** A saved pass under way older than this starts again from nothing. */
 const PROGRESS_MAX_AGE_MS = 7 * 24 * 3_600_000;
 
-const count = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0);
+/** A saved file's text, or null when it is missing, not a file or larger than SAVED_FILE_MAX_BYTES (never read whole). */
+export function savedFileText(file: string): string | null {
+  try {
+    const stat = statSync(file);
+    return stat.isFile() && stat.size <= SAVED_FILE_MAX_BYTES ? readFileSync(file, "utf8") : null;
+  } catch { return null; }
+}
 
 function savedText(completed: CompletedPass): string {
   const bots = [...completed.totals.bots].sort(([, a], [, b]) => b.bytes - a.bytes);
@@ -116,7 +122,7 @@ export function readSavedPass(text: string): CompletedPass | null {
   return {
     at: count(saved.at), tookMs: count(saved.tookMs),
     volume: volume && typeof volume === "object" ? { totalBytes: count(volume.totalBytes), freeBytes: count(volume.freeBytes), usedBytes: count(volume.usedBytes) } : null,
-    totals: totalsFrom(saved.totals),
+    totals: totalsFrom(saved.totals, SAVED_BOTS),
   };
 }
 
@@ -145,13 +151,13 @@ export function createDiskUsage(options: DiskUsageOptions) {
     } catch { return null; }
   };
   let last: CompletedPass | null = null;
-  if (options.file) { try { last = readSavedPass(readFileSync(options.file, "utf8")); } catch {} }
+  if (options.file) { const text = savedFileText(options.file); last = text === null ? null : readSavedPass(text); }
   const firstAt = now() + (options.firstPassAfterMs ?? FIRST_PASS_AFTER_MS);
   let dueAt = last && last.at <= now() ? Math.max(firstAt, last.at + everyMs) : firstAt;
   let walk: DiskWalk | null = null, pass: { startedAt: number; waitedMs: number; lastTickAt: number } | null = null;
   let failed = false, ticking = false, stopped = false, progressSavedAt = -Infinity;
   let resumeFrom: SavedProgress | null = null;
-  if (options.progressFile) { try { resumeFrom = readSavedProgress(readFileSync(options.progressFile, "utf8"), roots, now()); } catch {} }
+  if (options.progressFile) { const text = savedFileText(options.progressFile); resumeFrom = text === null ? null : readSavedProgress(text, roots, now()); }
   if (resumeFrom) dueAt = firstAt;
   const write = (file: string | undefined, text: string) => {
     if (!file) return;
@@ -162,8 +168,10 @@ export function createDiskUsage(options: DiskUsageOptions) {
     const checkpoint = take();
     if (!checkpoint) return;
     progressSavedAt = now();
-    write(options.progressFile, JSON.stringify({ v: STORAGE_REPORT_VERSION, startedAt: pass.startedAt, waitedMs: pass.waitedMs, savedAt: progressSavedAt,
-      checkpoint: { ...checkpoint, totals: totalsJson(checkpoint.totals) } }));
+    const text = JSON.stringify({ v: STORAGE_REPORT_VERSION, startedAt: pass.startedAt, waitedMs: pass.waitedMs, savedAt: progressSavedAt,
+      checkpoint: { ...checkpoint, totals: totalsJson(checkpoint.totals) } });
+    // One too large to be read back is not saved, and the one before it goes: a restart then starts the pass again.
+    if (Buffer.byteLength(text) <= SAVED_FILE_MAX_BYTES) write(options.progressFile, text); else forgetProgress();
   };
   const forgetProgress = () => { if (options.progressFile) { try { rmSync(options.progressFile, { force: true }); } catch {} } };
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -215,7 +223,14 @@ export function createDiskUsage(options: DiskUsageOptions) {
 
   return {
     start() { if (options.timer !== false && !timer && !stopped) schedule(); },
-    async stop() { stopped = true; if (timer) clearTimeout(timer); timer = null; await walk?.close(); walk = null; pass = null; },
+    async stop() {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      timer = null;
+      const closing = walk;
+      walk = null; pass = null;
+      await closing?.close();
+    },
     tick,
     /** Starts a pass at the next tick, whatever the schedule says. */
     passNow() { if (!walk) dueAt = now(); },

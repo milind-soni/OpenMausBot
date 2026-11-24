@@ -1110,6 +1110,46 @@ The app files are the last layers, so an image built from a later commit
 differs from the previous one only in those (a few MB) unless Chrome, an
 engine, Grok's pin, or the Node base image changed in between.
 
+**What a new home downloads before its bots can work: nothing.** Claude Code,
+Codex and Grok run from `/usr/local/bin`, agent-browser from its global npm
+install, and both browser drivers (agent-browser's launcher and OpenMausBot's
+own `engine: "chrome"`) run the Chrome the image names in
+`AGENT_BROWSER_EXECUTABLE_PATH` (`server/browser/chrome/resolve.ts`, "named"),
+so `tools/chrome/` stays empty on a Cloud. The data folder gains tools only for
+what someone uses later: an engine installed from Settings (`tools/npm`,
+`tools/standalone`), a Bitwarden vault (`tools/bitwarden`, 46 MB), a spreadsheet or
+database read by the Data tools (`duckdb-extensions/<duckdb version>`, 4 to
+15 MB each). None of these are in backups or moves.
+
+**Engine copies in the data folder.** The data folder's npm prefix
+(`tools/npm/bin`) goes ahead of `/usr/local/bin` on the engines' PATH, so a copy
+installed there runs even when the image carries a newer one, and the engine
+updater keeps it current. With `OMB_IMAGE_ENGINES=1` in a home's environment
+(passed to the server by `serverEnvironmentAllowed`; off by default, never on
+Windows, desktop unchanged), `server/image-engines.ts` changes that for a
+package both places hold:
+
+- the image's copy runs unless the data folder's is newer (a newer copy
+  someone installed from Settings, or one an update installed because the
+  image's copy is below what the driver needs, keeps running);
+- while the image's copies run, the updater downloads nothing for a
+  data-folder copy no newer than the image's, unless the image's copy is
+  below the engine's `minimum` or an exact
+  `target` in `server/engine-versions.ts`, or a CLI path saved on the engine
+  runs that copy (`configuredClis`);
+- PATH is one list, so when any shared package is newer in the data folder,
+  the data folder's bin stays first for all of them, as today;
+- a CLI path saved on the engine always wins, as before.
+
+Nothing is removed. A later cleanup may remove, on a home with the switch on:
+`tools/npm/lib/node_modules/@anthropic-ai/claude-code` and `@openai/codex`
+(and their `tools/npm/bin` links) when no newer than the image's, and
+`tools/npm-home/cache`; `tools/chrome/*`, which a Cloud never runs;
+`tools/agent-browser/<version>` when the image carries the same version;
+`duckdb-extensions/<older duckdb versions>`; and
+`cache/node-compile/v<older node>-*` (a home runs `index.js` with
+`NODE_COMPILE_CACHE`, which keeps every Node version's entries).
+
 At boot the launcher, running as root, hands the volume's mount point to the
 `maus` user, locks the volume for as long as it runs (`flock` on the volume's
 root: a second home on a volume a live home holds refuses to start, which
@@ -1912,7 +1952,9 @@ starts a walk.
   ends. The last pass is kept in the data folder's
   `cache/storage-report.json`, and the pass under way in
   `cache/storage-progress.json`, saved at most once a minute between two
-  folders of the top four levels. Backups leave both out. A home that sleeps
+  folders of the top four levels. Backups leave both out. Neither is read
+  back when it is over 1 MB, and every count read back is checked to be
+  10 PB at most. A home that sleeps
   by stopping keeps its report and picks the pass up where it left off.
   Node has no per-call I/O priority, and lowering the server's own priority
   would slow everything else, so the budget is the only throttle.

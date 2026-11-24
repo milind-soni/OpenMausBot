@@ -26,7 +26,7 @@ import {
   type AppConfig,
 } from "../config.ts";
 import type { InstanceConfigMap, ModelSelection } from "../contracts.ts";
-import type { RequestAuth } from "../request-auth.ts";
+import { fromPairedDevice, type RequestAuth } from "../request-auth.ts";
 import { parseConfigPatchForPerson } from "../decider/config-errors.ts";
 import { teamPersonalHint } from "../../shared/cloud-hints.ts";
 import { DECIDER_KEY_ERROR, deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderBorrowedKey, type Decider } from "../decider/index.ts";
@@ -34,7 +34,7 @@ import type { ProviderRegistry } from "../harness/registry.ts";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import { forgetKey } from "../key-rejections.ts";
 import type { ComputerIdleTimer } from "../computer-idle.ts";
-import { PROVIDER_KEY_KINDS } from "../provider-key-check.ts";
+import { isPhoneKeyPatch, PROVIDER_KEY_KINDS } from "../provider-key-check.ts";
 import type { SessionRegistry } from "../sessions.ts";
 import type { SharedComputerControl } from "../shared-computer-control.ts";
 import type { SharedComputers } from "../shared-computers.ts";
@@ -43,6 +43,7 @@ import type { Store } from "../store.ts";
 import * as tts from "../tts/index.ts";
 import { DEFAULT_DEEPSEEK_VOICE } from "../../shared/deepseek-voice.ts";
 import * as vps from "../vps-computer.ts";
+import { vpsHostLimitProblem } from "../vps-host-limits.ts";
 import { refusalBody, userError, userErrorFields } from "../user-errors.ts";
 import type { ServerErrorBody } from "../../shared/server-text.ts";
 import type { Postiz } from "../postiz/service.ts";
@@ -138,6 +139,10 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
     }
     if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
       const body = await readBody(req);
+      const pairedDevice = fromPairedDevice(req, auth);
+      if (pairedDevice && !isPhoneKeyPatch(body)) {
+        return json(res, 403, { error: "From a phone, only API keys can be changed. Change other settings on your computer." });
+      }
       if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
       const patch = parseConfigPatchForPerson(body);
       if (deps.cloudTeam && patch.browserEngine?.egress?.proxy !== undefined && !(auth.kind === "session" && auth.session.teamRole === "owner")) {
@@ -205,6 +210,11 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       }
       if (changingVoiceProvider && patch.tts?.model === undefined) patch.tts = { ...patch.tts, model: "" };
       if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
+      if (patch.vps !== undefined || patch.vpsServers !== undefined) {
+        providerConfigBusy.set(true);
+        const overHost = await vpsHostLimitProblem(cfg, patch).finally(() => providerConfigBusy.set(false));
+        if (overHost) return json(res, 400, overHost);
+      }
       if (patch.browserProfiles !== undefined && body.expectedBrowserProfiles !== undefined) {
         const current = (cfg.browserProfiles ?? []).map(({ id, name, browser }) => ({ id, name, ...(browser ? { browser } : {}) }));
         if (JSON.stringify(body.expectedBrowserProfiles) !== JSON.stringify(current)) {
@@ -561,7 +571,8 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         : null;
       const enginesBefore = engineLaunches(providerConfigs());
       const localVmModeChanged = changingLocalVmMode ? localVmModeChanging() : null;
-      const externalSecretStorage = url.searchParams.get("secretStorage") === "external";
+      // Only the desktop's own save has put the key in the encrypted store; a phone's must land in config.json.
+      const externalSecretStorage = !pairedDevice && url.searchParams.get("secretStorage") === "external";
       try {
         if (patch.live) patch.live = liveSavePatch(cfg.live, patch.live);
         // Before the provider commit, so a failed write never leaves a foreign voice id to speak.

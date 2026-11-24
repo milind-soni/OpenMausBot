@@ -19,7 +19,9 @@ const PAGE_BYTES = 4096;
 /** What one engine and its MCP servers take until one has been measured here: `opencode acp` 1.19.3 measured 361 MB on a
  * Cloud home before its first prompt and 623 MB with six stdio MCP servers, and about 466 MB while working. */
 export const ENGINE_DEFAULT_BYTES = 700 * MB;
-const ENGINE_MIN_BYTES = 300 * MB, ENGINE_MAX_BYTES = 1500 * MB;
+const ENGINE_MIN_BYTES = 300 * MB;
+/** The most admission plans for one engine, however large the ones measured here. */
+export const ENGINE_MAX_BYTES = 1500 * MB;
 /** One more session in a running shared process: OpenCode 1.19.3 grew about 110 MB a session with three stdio MCP
  * servers after a prompt; more MCP servers cost more. */
 export const SESSION_BYTES = 200 * MB;
@@ -685,6 +687,29 @@ export class EngineMemory {
     return memory !== null && this.free(memory) < this.floor(memory);
   }
 
+  /** Memory available, not counting swap, is under relief's floor (`times` the floor, where given): a browser over its hard
+   * line then closes whatever holds it (browser/memory-ceiling.ts). False where memory can't be read. */
+  memoryShort(times = 1): boolean {
+    const memory = this.read();
+    return memory !== null && memory.availableBytes < this.floor(memory) * times;
+  }
+
+  /** The browser this thread's turn holds was closed for memory, whatever held it (browser/memory-ceiling.ts): the engine
+   * running that turn is stopped as relief stops one, and the turn ends with the line that the browser was closed. False
+   * when no engine here runs that turn. */
+  stopForBrowser(threadId: string): boolean {
+    const engine = [...this.engines.values()].find((candidate) => this.working(candidate).includes(threadId));
+    if (!engine) return false;
+    if (engine.stopping) return true;
+    const stopped = this.working(engine);
+    // A driver that carries other conversations stops them too; only this one's line says its browser was the cause.
+    this.noteStops(stopped, () => this.busy(), false, threadId);
+    this.noteRoomStopped(engine);
+    this.lastRelief = this.now();
+    void this.stop(engine, "relief").then(() => this.closeBrowsers(stopped));
+    return true;
+  }
+
   /** Stops the engine idle longest, if any: what a browser that has no room to open asks before it is refused. */
   async reclaimIdle(): Promise<boolean> {
     const idle = this.enabled ? this.idle() : null;
@@ -800,10 +825,10 @@ export class EngineMemory {
   }
 
   /** These threads' turns were stopped for memory, with how many tasks ran then: each says whether its browser was closed. */
-  private noteStops(threadIds: string[], count: (threadId: string) => number, only = false): void {
+  private noteStops(threadIds: string[], count: (threadId: string) => number, only = false, browserClosed?: string): void {
     for (const threadId of threadIds) {
       if (!this.stops.has(threadId)) this.ledger.note(this.now(), "stopped");
-      this.stops.set(threadId, { count: count(threadId), browser: this.browsers?.running(threadId) === true, ...(only ? { only: true as const } : {}) });
+      this.stops.set(threadId, { count: count(threadId), browser: threadId === browserClosed || this.browsers?.running(threadId) === true, ...(only ? { only: true as const } : {}) });
     }
   }
 

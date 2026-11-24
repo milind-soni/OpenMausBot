@@ -9,7 +9,7 @@ import { useShowThreads } from "@/lib/thread-preferences";
 import { api, openBotRow, useStore, type Bot } from "@/state/store";
 import { useChiefStepOpen } from "@/lib/default-bot";
 
-import { BotAvatar } from "./Avatar";
+import { BotAvatar } from "./Avatar"; import { useMotionBeat } from "./mascot-beat";
 import { botTooltip } from "./BotModelBadge";
 import { liveBadgeFor } from "./LiveCallPill";
 import { pinnedCircleDragClass, pinnedCircleDragHandlers, usePinnedCircleDrag, type PinnedCircleDragProps } from "./PinnedCircleThreads";
@@ -31,7 +31,7 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
   const [renaming, setRenaming] = useState(false);
   const visible = useVisibleMessages(bot);
   const { waiting, working, failed, teammateWait, queued } = sidebarBotStatus(bot, pendingQueued, visible);
-  const { unread, noticing } = useBotUnread(bot);
+  const { unread, noticing } = useBotUnread(bot); const beat = useMotionBeat(mascotMotion?.kind, mascotMotion?.nonce ?? 0);
   const onLiveCall = liveBadgeFor(bot.id, liveMedia, liveCall);
   const tooltip = botTooltip(bot, instances);
   const status = waiting ? t("sidebar.preview.waiting") : working ? t("chat.activity.working") : failed ? t("sidebar.preview.failed") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued ? t("task.queued") : "";
@@ -85,9 +85,9 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
           bot={bot}
           state={stateForBot({ ...bot, messages: visible })}
           size={60}
-          motion={mascotMotion?.kind ?? "none"}
+          motion={(beat && mascotMotion?.kind) || "none"}
           motionKey={mascotMotion?.nonce ?? 0}
-          animated={working || noticing || (mascotMotion?.kind ?? "none") !== "none"}
+          animated={beat || working || noticing}
         />
         {primary && bot.chiefOfStaff && (
           <span data-testid="chief-badge" className={cn("absolute -bottom-px -right-px flex size-4 items-center justify-center rounded-full bg-[#E8993A] text-white", RING)}>
