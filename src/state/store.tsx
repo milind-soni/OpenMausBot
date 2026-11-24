@@ -274,7 +274,7 @@ export interface TaskUsage {
   context?: { tokens: number; window?: number };
 }
 
-export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor" | "mascotBodyColor" | "mascotMaterial" | "access" | "yourAccess" | "onlyPeopleAdded"> {
+export interface Bot extends DefaultBotFields, Pick<WireBot, "uiInterfaceEnabled" | "mascotFaceColor" | "mascotBodyColor" | "mascotMaterial" | "access" | "yourAccess" | "onlyPeopleAdded"> {
   toolScope?: ToolScope;
   waitingForTeammates?: boolean;
   id: string;
@@ -474,6 +474,7 @@ export type SettingsPageId = "overview" | "devices" | "ai" | "bots" | "desktops"
   | "installations" | "account" | "plan" | "app" | "general" | "appearance" | "features";
 
 export type BotSettingsSection =
+  | "ui-interface"
   | "overview"
   | "identity"
   | "slack"
@@ -510,7 +511,7 @@ export interface AppState {
   liveCallVersion: number;
   liveCallLookupSeq: number;
   selectedId: string;
-  activeView: "chat" | "team-map" | "routines" | "files" | "web-panel" | "published-apps" | "team-files" | "announcements" | "skill-burgers";
+  activeView: "chat" | "ui-interface" | "team-map" | "routines" | "files" | "web-panel" | "published-apps" | "team-files" | "announcements" | "skill-burgers";
   /** Folders a finished move left on this computer, for Files to offer sharing. */
   filesSuggest: string[] | null; webPanelId?: string;
   routines: Routine[]; routineRunLimits?: RoutineRunLimits;
@@ -596,6 +597,7 @@ export type Action =
   | { type: "showRoutines"; section?: "schedule" | "logs"; view?: "calendar" | "list"; botId?: string; routineId?: string; runStatus?: RoutineRunStatusFilter }
   | { type: "showTeamMap" } | { type: "showPublishedApps" } | { type: "showSkillBurgers" } | { type: "showTeamFiles" } | { type: "showAnnouncements" } | { type: "showWebPanel"; id: string }
   | { type: "showFiles"; suggest?: string[] }
+  | { type: "showBotInterface"; botId: string }
   | { type: "showChat" }
   | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[]; since?: number; runLimits?: RoutineRunLimits }
   | { type: "routinesLoadFailed" } | { type: "routineRunsLoaded"; runs: RoutineRun[]; from?: number; to?: number }
@@ -859,7 +861,15 @@ function dismissOnboardingCard(state: AppState, botId: string): AppState {
 
 export const CLOUD_LINK_SETTINGS = { type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true } as const satisfies Action;
 
-export function reducer(state: AppState, action: Action): AppState { return olderThanHeld(state, action) ? state : capHeldInBackground(reduceApp(state, action), action); }
+export function reducer(state: AppState, action: Action): AppState {
+  if (olderThanHeld(state, action)) return state;
+  const next = capHeldInBackground(reduceApp(state, action), action);
+  if (next.activeView === "ui-interface" && (next.selectedId !== state.selectedId ||
+    !next.bots.some((bot) => bot.id === next.selectedId && bot.uiInterfaceEnabled))) {
+    return { ...next, activeView: "chat" };
+  }
+  return next;
+}
 function reduceApp(state: AppState, action: Action): AppState {
   const [newChatState, newChatOnly] = reduceNewChat(state, action); if (newChatOnly) return newChatState; state = newChatState;
   if (action.type === "optimisticMessageRemoved") state = removeForkOptimistic(state, action);
@@ -940,6 +950,9 @@ function reduceApp(state: AppState, action: Action): AppState {
         appSettingsOpen: false,
         pluginsOpen: false,
       };
+    case "showBotInterface":
+      if (state.selectedId !== action.botId || !state.bots.find((bot) => bot.id === action.botId)?.uiInterfaceEnabled) return state;
+      return { ...state, activeView: "ui-interface", settingsOpen: false, computerOpen: false, inspectorOpen: false, activityOpen: false, forkPanel: null };
     case "showChat":
       return state.activeView === "chat" ? state : { ...state, activeView: "chat" };
     case "forkMessage": case "openForkPanel": case "forkPanelLoaded": case "forkPanelLoadFailed":
@@ -2192,7 +2205,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
 
     const wrapped: React.Dispatch<Action> = (action) => {
-      store.flushFrames(); if (["select", "newTask", "switchTask", "newGroupTask", "switchGroupTask", "showChat", "showRoutines", "showTeamMap", "showFiles", "showWebPanel", "showPublishedApps", "showSkillBurgers", "showTeamFiles", "showAnnouncements"].includes(action.type)) selectionRevision.current++;
+      store.flushFrames(); if (["select", "newTask", "switchTask", "newGroupTask", "switchGroupTask", "showChat", "showBotInterface", "showRoutines", "showTeamMap", "showFiles", "showWebPanel", "showPublishedApps", "showSkillBurgers", "showTeamFiles", "showAnnouncements"].includes(action.type)) selectionRevision.current++;
       // Pin before any await or optimistic state change.
       action = pinBotThreadAction(action, stateRef.current.bots); holdMarkedUnread(action, stateRef.current);
       if (runNewChat(action)) return;

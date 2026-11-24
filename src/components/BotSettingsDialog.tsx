@@ -24,6 +24,7 @@ import { UsageSection } from "./bot-settings/UsageSection";
 import { VisibilitySection } from "./bot-settings/VisibilitySection";
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
+import { UiInterfaceSetting } from "./bot-panel/UiInterfaceSetting";
 import { BotPanel } from "./bot-panel/PanelShell";
 import { LibraryTab } from "./bot-panel/LibraryTab";
 import type { SimplePageId } from "./bot-panel/page-registry";
@@ -108,6 +109,8 @@ export function BotSettingsDialog({ bot, overlay = false }: {
 
   const renderSectionBody = (id: (typeof BOT_SECTIONS)[number]["id"]) => {
     switch (id) {
+      case "ui-interface":
+        return <UiInterfaceSetting bot={bot} />;
       case "overview":
         return overview === null && overviewError ? (
           <div className="rounded-xl bg-card p-4 text-[13px] text-ink-secondary">{t("botSettings.overviewFailed")}</div>

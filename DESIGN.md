@@ -44,10 +44,11 @@ where they belong instead of adding new places.
   screen; Advanced mode's composer shows the model under its field instead. Anything else goes in the bot panel, a menu or the command palette.
   A button that exists only while the conversation has what it shows (its
   pinned message) is fine: it opens a menu and is gone when there is nothing
-  to show. One exception: **New thread** (a plus, also ⌘T) sits at the end of the
+  to show. **New thread** (a plus, also ⌘T) sits at the end of the
   header in both modes, because starting a thread is an everyday action people
-  look for at the top. With Thread tabs on, the bot's threads take the pill's
-  place in the header as tabs, with the plus at their end. With it off, Simple
+  look for at the top. Bots with UI Interface enabled also show a Chat / UI
+  switcher beside their name so either view can be reached from the other.
+  With Thread tabs on, the bot's threads take the pill's place in the header as tabs, with the plus at their end. With it off, Simple
   mode's pill opens a bot's threads once it has two, and the plus sits at their end.
 - **No count badges and no "needs you" summaries** above the sidebar list or
   in the header. A status mark on the row it belongs to is fine.

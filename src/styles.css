@@ -3940,7 +3940,9 @@ button:disabled.bg-danger {
   :root:has([data-chathead-tabs="simple"]) [data-sidebar-top-row="simple"] :is([data-rail-toggle], [data-sidebar-top-buttons] button.size-9) { width: 32px; height: 32px; }
   [data-chathead-tabs] [data-chathead-row] { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; height: 100%; }
   [data-chathead-tabs] [data-chathead-identity] { grid-column: 2; justify-self: stretch; align-self: stretch; -webkit-app-region: drag !important; }
-  [data-chathead-tabs] [data-chathead-identity] > :not([data-thread-tabs], [data-chathead-status]) { display: none; }
+  [data-chathead-tabs] [data-chathead-identity] > :not([data-thread-tabs], [data-chathead-status], [data-bot-view-switcher]) { display: none; }
+  [data-chathead-tabs] [data-bot-view-switcher] { padding: 0; -webkit-app-region: no-drag; }
+  [data-chathead-tabs] [data-bot-view-switcher] > :first-child { display: none; }
   [data-chathead-tabs="advanced"] [data-chathead-identity] { margin-inline-start: 8px; }
   [data-chathead-tabs] [data-chathead-controls] { grid-column: 3; margin-inline-start: 8px; gap: 10px; }
   [data-chathead-tabs="simple"] { height: 48px; padding-inline-end: 16px; }

@@ -10,6 +10,7 @@ export const BOT_SETTINGS_SECTION_IDS: readonly BotSettingsSection[] = [
   "skills",
   "memory",
   "library",
+  "ui-interface",
   "routines",
   "access",
   "model",

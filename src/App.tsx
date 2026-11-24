@@ -19,6 +19,7 @@ import { cloudAccountBridge, openCloudOnWeb } from "@/lib/cloud-add-web";
 import { parseComputerHelp } from "@/lib/computer-control";
 import { viewerClosedRelease } from "@/components/computer-takeover";
 import { Sidebar } from "@/components/Sidebar";
+import { BotInterfaceView } from "./components/BotInterfaceView";
 import { ChatView } from "@/components/ChatView";
 import { HandoffExchangeHost } from "@/components/HandoffExchange";
 import { GroupView } from "@/components/GroupView";
@@ -432,7 +433,9 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         open={drawerOpen}
         onClose={closeDrawer}
       />}
-      {state.activeView === "team-map" ? (
+      {state.activeView === "ui-interface" && bot?.uiInterfaceEnabled ? (
+        <BotInterfaceView bot={bot} />
+      ) : state.activeView === "team-map" ? (
         <TeamMapPage />
       ) : state.activeView === "files" ? (
         <FilesView />

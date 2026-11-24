@@ -152,6 +152,21 @@ describe("independent bot threads", () => {
   };
   const start = () => ({ ...initialState, bots: [bot], selectedId: bot.id });
 
+  it("opens the native page only for the enabled bot and keeps its conversation on return or disable", () => {
+    const state = start();
+    const open = { type: "showBotInterface", botId: bot.id } as const;
+    expect(reducer(state, open)).toBe(state);
+    const enabled = { ...state, bots: [{ ...bot, uiInterfaceEnabled: true }] };
+    const page = reducer(enabled, open);
+    expect(page.activeView).toBe("ui-interface");
+    const chat = reducer(page, { type: "showChat" });
+    expect(chat.activeView).toBe("chat");
+    expect(chat.bots).toBe(enabled.bots);
+    const disabled = reducer(page, { type: "botPatched", bot: { ...bot, uiInterfaceEnabled: false } });
+    expect(disabled.activeView).toBe("chat");
+    expect(disabled.bots[0]?.threadId).toBe(bot.threadId);
+  });
+
   it("keeps the profile aggregate while projecting the selected thread's model, permissions and idle composer", () => {
     const current = currentTaskBot(bot);
     expect(current).toMatchObject({ busy: false, activity: "idle", unread: false, approvalMode: "auto", alwaysAllow: ["Read"] });

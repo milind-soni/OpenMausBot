@@ -198,6 +198,10 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       }
       const patch: Record<string, unknown> = {};
       Object.assign(patch, profile.patch);
+      if (body.uiInterfaceEnabled !== undefined) {
+        if (typeof body.uiInterfaceEnabled !== "boolean") return json(res, 400, { error: "uiInterfaceEnabled must be true or false" });
+        patch.uiInterfaceEnabled = body.uiInterfaceEnabled;
+      }
       let section: string | undefined | null;
       if (body.section !== undefined) {
         if (body.section === null) section = null;

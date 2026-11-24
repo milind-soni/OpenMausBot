@@ -29,6 +29,7 @@ import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerive
 import { RoutineList } from "../routines/RoutineList";
 import { BrowserLogins } from "./browser-logins";
 import { useOpenComputer, WherePage } from "./ComputerTab";
+import { UiInterfaceSetting } from "./UiInterfaceSetting";
 import { SettingsPage } from "./SettingsPage";
 import { MemoryText } from "./MemoryText";
 import { LendingReviewNotice } from "../bot-settings/MemorySection";
@@ -442,6 +443,8 @@ export function PageBody({ page, onOpen, editingInstructions, onEditInstructions
   onEditInstructions?: (open: boolean) => void;
 }): ReactNode {
   switch (page) {
+    case "ui-interface":
+      return <UiInterfaceSetting bot={context.bot} />;
     case "settings":
       return <SettingsPage {...context} onOpen={onOpen} editingInstructions={editingInstructions} onEditInstructions={onEditInstructions} />;
     case "where":

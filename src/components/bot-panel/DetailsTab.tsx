@@ -1,4 +1,4 @@
-import { Calendar, CalendarPlus, ChevronRight, Sparkles } from "lucide-react";
+import { Calendar, CalendarPlus, ChevronRight, PanelsTopLeft, Sparkles } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -100,6 +100,11 @@ export function DetailsTab({ bot, derived, onOpen }: {
           {conversationItems.map((item) => <ItemRow key={item.key} item={item} />)}
         </section>
       )}
+
+      <section data-panel-card="ui-interface">
+        <CardLabel>{t("botPanel.uiInterface")}</CardLabel>
+        <NavRow icon={PanelsTopLeft} title={t("botPanel.uiInterface")} data-panel-page="ui-interface" onClick={() => onOpen("ui-interface")} />
+      </section>
 
       {derived.botRoutines.length === 0 ? (
         <section data-panel-empty="routines">

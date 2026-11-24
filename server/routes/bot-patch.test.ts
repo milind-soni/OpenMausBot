@@ -87,6 +87,20 @@ function fixture(extra: Partial<BotPatchRouteDeps> = {}) {
   return { store, bot, activeVpsThreads, privateThreads, patch };
 }
 
+it("persists the native interface setting for only the chosen bot", async () => {
+  const { store, bot, patch } = fixture();
+  const other = store.createBot({ name: "Pepper" });
+  for (const enabled of [true, false]) {
+    expect(await patch(bot.id, { uiInterfaceEnabled: enabled })).toMatchObject({
+      status: 200, body: { bot: { uiInterfaceEnabled: enabled } },
+    });
+    expect((await patch(bot.id, { uiInterfaceEnabled: "true" })).status).toBe(400);
+    const reloaded = new Store(() => sonnet);
+    expect(reloaded.bot(bot.id)?.uiInterfaceEnabled).toBe(enabled);
+    expect(reloaded.bot(other.id)?.uiInterfaceEnabled).toBeUndefined();
+  }
+});
+
 describe("PATCH /api/bots/:id memory model", () => {
   it("saves a model from the bot's OpenRouter connection and restores Automatic on null", async () => {
     const memoryModel = { instanceId: "router", model: "vendor/memory" };
