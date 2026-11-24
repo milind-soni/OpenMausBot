@@ -13,7 +13,10 @@ import { boxEnvironment } from "./env.ts";
 import { bwrapArgs, planBox, visibleInBox, type BoxRequest, type BoxSetup } from "./plan.ts";
 import { signInMasks } from "./sign-in-masks.ts";
 
-const root = realpathSync(mkdtempSync(join(tmpdir(), "omb-sign-in-masks-")));
+// Under the checkout, like a Cloud's /data: the box keeps an engine folder under /tmp its own private one, so a fixture
+// data folder there would never have its Codex homes put back.
+const checkoutUnderTmp = ["/tmp", "/var/tmp", realpathSync(tmpdir())].some((base) => realpathSync(process.cwd()).startsWith(`${base}/`));
+const root = realpathSync(mkdtempSync(join(process.cwd(), ".omb-test-sign-in-masks-")));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 const put = (path: string, text = "x") => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text); };
@@ -46,7 +49,7 @@ function volume(name: string) {
   return { home, dataDir, signIns, edge, botFiles, cwd, setup, plan };
 }
 
-describe("a bot box on a My Cloud keeps only its own engine account's sign-in", () => {
+describe.skipIf(checkoutUnderTmp)("a bot box on a My Cloud keeps only its own engine account's sign-in", () => {
   const cloud = volume("my-cloud");
   const { signIns, home, dataDir } = cloud;
 
