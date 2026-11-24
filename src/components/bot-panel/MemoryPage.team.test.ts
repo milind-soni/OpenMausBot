@@ -85,12 +85,12 @@ it("on a Team Cloud shows the person's own notes, topics included, as text they 
 });
 
 it("shows no count on the Details tab, only whether it remembers anything", async () => {
-  await act(async () => root.render(createElement(BotKeeps, { bot, onOpen: () => {} })));
+  await act(async () => root.render(createElement(BotKeeps, { bot, routines: [], onOpen: () => {} })));
   await settle();
   expect(host.querySelector('[data-panel-page="memory"]')?.textContent).toBe("What it remembers");
   files["memory/food.md"] = "";
   files["MEMORY.md"] = "";
-  await act(async () => root.render(createElement(BotKeeps, { bot: { ...bot, threadId: "t2" }, onOpen: () => {} })));
+  await act(async () => root.render(createElement(BotKeeps, { bot: { ...bot, threadId: "t2" }, routines: [], onOpen: () => {} })));
   await settle();
   expect(host.querySelector('[data-panel-page="memory"]')?.textContent).toContain("Nothing yet");
 });

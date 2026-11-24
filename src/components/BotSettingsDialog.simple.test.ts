@@ -208,7 +208,7 @@ const botTab = (bot: Bot) => capture(() => DetailsTab({ bot, derived: derived(),
 const settingsPage = (bot: Bot, editingInstructions = false) =>
   capture(() => SettingsPage({ bot, derived: derived(), onOpen, editingInstructions, onEditInstructions }));
 const library = (bot: Bot) => capture(() => LibraryTab({ bot }));
-const keeps = (bot: Bot) => capture(() => BotKeeps({ bot, onOpen }));
+const keeps = (bot: Bot) => capture(() => BotKeeps({ bot, routines: fixture.derived.botRoutines as Routine[], onOpen }));
 const computer = (bot: Bot) => capture(() => ComputerTab({ bot, derived: derived(), onOpen }));
 const find = (rendered: { nodes: Node[] }, attr: string, value: unknown = true) => {
   const found = rendered.nodes.find((node) => node.props[attr] === value);
@@ -666,11 +666,11 @@ describe("the avatar editor", () => {
 
 
 describe("the Details tab", () => {
-  it("holds the model, what the bot keeps, the conversations, this conversation's rows and routines, in that order, with no switch or Thinking row", () => {
+  it("holds the model, what the bot keeps with its routines, the conversations and this conversation's rows, in that order, with no switch or Thinking row", () => {
     const rendered = botTab(makeBot());
     expect(ofType(rendered, ModelPicker)!.props).toMatchObject({ bot: expect.objectContaining({ id: "scout" }), threadId: "thread-scout", contained: true });
     expect(ofType(rendered, BotConversations)!.props.bot).toMatchObject({ id: "scout" });
-    const order = ['data-panel-row="model"', 'data-panel-page="memory"', 'data-panel-page="skills"', 'data-panel-page="folder"', 'data-panel-card="conversations"', 'data-panel-item="find"', 'data-panel-item="activity"', 'data-panel-empty="routines"']
+    const order = ['data-panel-row="model"', 'data-panel-page="memory"', 'data-panel-page="skills"', 'data-panel-page="folder"', 'data-panel-page="routines"', 'data-panel-card="conversations"', 'data-panel-item="find"', 'data-panel-item="activity"']
       .map((marker) => rendered.html.indexOf(marker));
     expect(order.every((index) => index > -1)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
@@ -786,30 +786,26 @@ describe("the Details tab", () => {
     });
   });
 
-  it("offers Add a routine, which says what routines are, and Automations while the bot has none, and lists them once it has some", () => {
-    const empty = botTab(makeBot());
-    expect(empty.html).toContain('data-panel-empty="routines"');
-    expect(empty.html).toContain('title="Jobs this bot runs on a schedule, like a news roundup every morning."');
-    expect(empty.html).toMatch(/data-panel-automations=""[^>]*>Automations<svg/);
+  it("keeps Routines a row under Working folder while the bot has none, which says what routines are and opens the page to add one", () => {
+    const empty = keeps(makeBot());
     expect(empty.html.match(/data-panel-page="routines"/g)).toHaveLength(1);
-    const add = find(empty, "data-panel-page", "routines");
-    expect(empty.html).toMatch(/data-panel-page="routines"[^>]*>.*<span class="truncate">Add a routine<\/span><\/button>/);
-    click(add);
+    for (const gone of ['data-panel-empty="routines"', "data-panel-automations", "Add a routine"]) expect(empty.html, gone).not.toContain(gone);
+    expect(empty.html).toMatch(/data-panel-page="routines" title="Jobs this bot runs on a schedule, like a news roundup every morning."/);
+    expect(rowValue(empty, "routines")).toBe("None");
+    click(find(empty, "data-panel-page", "routines"));
     expect(onOpen).toHaveBeenLastCalledWith("routines");
     fixture.derived.botRoutines = [routine()];
-    const some = botTab(makeBot());
-    expect(some.html).not.toContain('data-panel-empty="routines"');
-    expect(some.html.indexOf('data-panel-card="conversations"')).toBeLessThan(some.html.indexOf('data-panel-page="routines"'));
+    expect(keeps(makeBot()).html).not.toContain('title="Jobs this bot runs');
   });
 
   it("values Routines by how many are on, and opens the routines page", () => {
     fixture.derived.botRoutines = [routine(), routine({ id: "r2", enabled: false }), routine({ id: "r3" })];
-    const rendered = botTab(makeBot());
+    const rendered = keeps(makeBot());
     expect(rowValue(rendered, "routines")).toBe("2 on");
     click(find(rendered, "data-panel-page", "routines"));
     expect(onOpen).toHaveBeenLastCalledWith("routines");
     fixture.derived.botRoutines = [routine({ enabled: false })];
-    expect(rowValue(botTab(makeBot()), "routines")).toBe("None");
+    expect(rowValue(keeps(makeBot()), "routines")).toBe("None");
   });
 
   it("lists Find, Activity and the Inspector for this conversation as rows that run them, leaving Copy and Download to Share", () => {

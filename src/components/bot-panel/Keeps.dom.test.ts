@@ -3,6 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
+import type { Routine } from "@/lib/routines";
 import type { Bot } from "@/state/store";
 
 const fixture = vi.hoisted(() => ({ skills: [] as unknown[], skillBurger: true }));
@@ -33,17 +34,25 @@ afterEach(() => {
   host.remove();
 });
 
-const render = async (onOpen: (page: string) => void = () => {}) => {
-  await act(async () => root.render(createElement(BotKeeps, { bot, onOpen })));
+const render = async (onOpen: (page: string) => void = () => {}, routines: Routine[] = []) => {
+  await act(async () => root.render(createElement(BotKeeps, { bot, routines, onOpen })));
 };
 
-it("lists what it remembers, its skills and its folder, and each opens its page", async () => {
+it("lists what it remembers, its skills, its folder and its routines, and each opens its page", async () => {
   const opened: string[] = [];
   await render((page) => opened.push(page));
   const rows = [...host.querySelectorAll<HTMLButtonElement>("[data-panel-page]")];
-  expect(rows.map((row) => row.dataset.panelPage)).toEqual(["memory", "skills", "folder"]);
+  expect(rows.map((row) => row.dataset.panelPage)).toEqual(["memory", "skills", "folder", "routines"]);
   for (const row of rows) await act(async () => row.click());
-  expect(opened).toEqual(["memory", "skills", "folder"]);
+  expect(opened).toEqual(["memory", "skills", "folder", "routines"]);
+});
+
+it("values Routines by how many are on", async () => {
+  const routine = (id: string, enabled: boolean) => ({ id, botId: "scout", enabled }) as Routine;
+  await render(undefined, [routine("a", true), routine("b", false), routine("c", true)]);
+  expect(host.querySelector('[data-panel-page="routines"]')!.textContent).toContain("2 on");
+  await render(undefined, [routine("b", false)]);
+  expect(host.querySelector('[data-panel-page="routines"]')!.textContent).toContain("None");
 });
 
 it("counts a saved Skill Burger among the bot's skills only while Skill Burger is on", async () => {
