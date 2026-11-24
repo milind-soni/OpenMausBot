@@ -8076,6 +8076,8 @@
   "palette.bots": "機器人",
   "palette.groups": "群組",
   "palette.messages": "訊息",
+  "palette.commands": "指令",
+  "palette.toggleTheme": "切換淺色/深色",
   "remote.status.pairedOne": "已配對 1 部裝置",
   "remote.status.pairedMany": "已配對 {count} 部裝置",
   "companyBackup.restorePending": "先前的還原需要先完成復原。",

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { peerLine } from "@/lib/peer-message";
-import { UNREAD_DIVIDER_FADE_MS, UNREAD_DIVIDER_LINGER_MS } from "@/lib/unread-divider";
+import { fromPerson, UNREAD_DIVIDER_FADE_MS, UNREAD_DIVIDER_LINGER_MS } from "@/lib/unread-divider";
 import type { Message } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
@@ -13,7 +12,7 @@ export function useUnreadDivider({ threadId, messages, following }: {
   const messageId = divider && divider.threadId === threadId ? divider.messageId : null;
   const newestOwnId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i]!.role === "user" && !peerLine(messages[i]!)) return messages[i]!.id;
+      if (fromPerson(messages[i]!)) return messages[i]!.id;
     }
     return null;
   }, [messages]);
