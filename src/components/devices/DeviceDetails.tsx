@@ -12,7 +12,7 @@ import { CommandLine } from "../SettingsPrimitives";
 import { needOf, useBotsOn } from "./device-parts";
 import { kindLabel, routeLabel } from "./device-words";
 
-export function actionLabel(action: DeviceAction, device: Device): string {
+export function actionLabel(action: DeviceAction): string {
   switch (action.type) {
     case "switch": return t("devicesPage.action.switch");
     case "retry": return t("servers.tryNow");
@@ -21,9 +21,6 @@ export function actionLabel(action: DeviceAction, device: Device): string {
     case "copy-update": return t("devicesPage.tile.update");
     case "manage": return action.page === "phone" ? t("devicesPage.action.openPhonePage") : t("devicesPage.action.manage");
     case "remove":
-      if (device.kind === "phone") return t("remote.devices.removeShort");
-      if (device.sources.length > 1 && action.source.type === "phone-app") return t("devicesPage.action.removeApps");
-      if (device.sources.length > 1 && action.source.type === "session") return t("devicesPage.action.signOut");
       return t("remote.devices.removeShort");
   }
 }
@@ -49,13 +46,13 @@ function Detail({ label, children }: { label: string; children: ReactNode }) {
 export function ActionButton({ device, action, onAction }: { device: Device; action: DeviceAction; onAction: (device: Device, action: DeviceAction) => void }) {
   return (
     <button type="button" data-device-action={action.type} data-danger={action.type === "remove" ? "" : undefined} onClick={() => onAction(device, action)}
-      aria-label={`${actionLabel(action, device)}: ${device.name}`} className={action.type === "remove" ? "settings-quiet shrink-0 cursor-pointer text-danger!" : "settings-quiet shrink-0 cursor-pointer"}>{actionLabel(action, device)}</button>
+      aria-label={`${actionLabel(action)}: ${device.name}`} className={action.type === "remove" ? "ui-button ms-auto shrink-0" : "ui-button shrink-0"}>{actionLabel(action)}</button>
   );
 }
-/** Harmless actions first, Remove last; a phone's one Remove takes every way it is paired. */
+/** Harmless actions first, then one Remove, which takes every way the device is joined here. */
 function orderActions(device: Device): DeviceAction[] {
   const removes = device.actions.filter((action) => action.type === "remove");
-  return [...device.actions.filter((action) => action.type !== "remove"), ...(device.kind === "phone" ? removes.slice(0, 1) : removes)];
+  return [...device.actions.filter((action) => action.type !== "remove"), ...removes.slice(0, 1)];
 }
 
 const actionKey = (action: DeviceAction) => `${action.type}:${"source" in action ? action.source.id : ""}`;
@@ -107,7 +104,7 @@ export function DeviceDetails({ device, onAction, onRemoved, now, pairing, onPai
       {device.usesThisComputer && !lend && <p className="text-[13px] leading-[18px] text-ink-secondary">{t("servers.share.on", { name: device.name })}</p>}
       {lend && <LendComputerSwitch id={lend} className="-mx-3" />}
       {vps && <div data-device-ssh-editor="" className="flex flex-col gap-2">
-        <p className="text-[13px] leading-[18px] text-ink-secondary">{t("devicesPage.detail.sshEditor")}</p>
+        <p className="text-[13px] leading-[18px] text-ink-secondary">{t("devicesPage.detail.sshEditorAlias", { alias: device.sources.find((one) => one.type === "vps")?.id ?? "" })}</p>
         <VpsServerEditor serverId={vps} onRemoved={onRemoved} />
       </div>}
       {pairing && pairAgain?.type === "pair-again"
@@ -116,7 +113,7 @@ export function DeviceDetails({ device, onAction, onRemoved, now, pairing, onPai
           <OwnServerLink inline onBack={null} onConnected={() => onPairing(false, true)} start={{ address: pairAgain.address, locked: true, title: "" }}
             aside={<button type="button" className="ui-button" data-pair-again-cancel="" onClick={() => onPairing(false)}>{t("common.cancel")}</button>} />
         </div>
-        : actions.length > 0 && <div data-device-actions="" className="-ms-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+        : actions.length > 0 && <div data-device-actions="" className="flex flex-wrap items-center gap-2">
           {actions.map((action) => <ActionButton key={actionKey(action)} device={device} action={action}
             onAction={(chosen, act) => (act.type === "pair-again" ? onPairing(true) : onAction(chosen, act))} />)}
         </div>}

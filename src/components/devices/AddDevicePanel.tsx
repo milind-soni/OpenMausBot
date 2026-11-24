@@ -6,12 +6,14 @@ import { t } from "@/lib/i18n";
 import type { Device, PrivateNetwork } from "@/lib/devices";
 import { DESKTOP_DOWNLOAD_URL } from "../../../shared/computer-ask";
 import { OwnServerLink } from "../PlaceAddSheet";
-import { SettingsLinkRow, SettingsRows } from "../SettingsPrimitives";
+import { SettingsLinkRow, SettingsMark, SettingsRows } from "../SettingsPrimitives";
 import { networkLine, networkShort } from "./device-words";
 import type { SettingsShell } from "../settings/settings-shell";
 import type { NetworkAction } from "./DeviceRows";
 import { CommandRow, PairCodePanel, SERVER_COMMANDS } from "./PairCodePanel";
 import { StatusMark } from "./device-parts";
+
+const TAILSCALE_GET = "https://tailscale.com/download";
 
 export type AddKind = "phone" | "computer" | "server" | "cloud";
 
@@ -97,7 +99,6 @@ export interface AddDeviceProps {
   onCheck?: () => void;
   checking?: boolean;
   /** A phone-narrow window: its header names this step and goes back, so the page leaves out its own. */
-  narrow?: boolean;
   setSub?: SettingsShell["setSub"];
 }
 
@@ -107,15 +108,18 @@ export interface AddDeviceProps {
  * Settings: a phone on This computer gets Pair a phone's own steps, a server Connect to a server's own form.
  */
 export function AddDevicePanel(props: AddDeviceProps) {
-  const { here, cloud, devices, network, networkAction, tailnetAddress, start, onBack, onConnected, phoneSteps, canConnectServer, onGetCloud, onCheck, checking = false, narrow = false, setSub } = props;
+  const { here, cloud, devices, network, networkAction, tailnetAddress, start, onBack, onConnected, phoneSteps, canConnectServer, onGetCloud, onCheck, checking = false, setSub } = props;
   const [kind, setKind] = useState<AddKind | null>(start);
   const [known] = useState(() => new Set(devices.map((device) => device.id)));
   const heading = useRef<HTMLDivElement>(null);
   const left = useRef<AddKind | null>(null);
   // Into a step, focus goes to its heading; back on the choices, to the choice just left.
   useEffect(() => {
-    const chosen = !kind && left.current ? heading.current?.parentElement?.querySelector<HTMLElement>(`[data-add-kind="${left.current}"]`) : null;
-    (chosen ?? heading.current)?.focus({ preventScroll: false });
+    const panel = heading.current?.parentElement;
+    const chosen = !kind && left.current ? panel?.querySelector<HTMLElement>(`[data-add-kind="${left.current}"]`) : null;
+    const first = kind ? panel?.querySelector<HTMLElement>("[data-add-card] :is(button:not([disabled]), a[href], input:not([disabled]))") : null;
+    document.querySelector("[data-settings-scroll]")?.scrollTo?.({ top: 0 });
+    (chosen ?? first ?? heading.current)?.focus({ preventScroll: true });
   }, [kind]);
   const back = () => {
     if (kind && !start) { left.current = kind; setKind(null); return; }
@@ -144,7 +148,7 @@ export function AddDevicePanel(props: AddDeviceProps) {
   return (
     <div data-add-panel="" data-add-step={kind ?? "choose"} onKeyDown={onKey} className="flex flex-col gap-4">
       <div ref={heading} tabIndex={-1} role="group" aria-label={title} className="flex flex-col gap-1 px-4 outline-none!">
-        {!narrow && <>
+        {!setSub && <>
           <button type="button" data-add-back="" onClick={back} aria-label={kind && !start ? t("devicesPage.addFlow.backToChoose") : t("devicesPage.addFlow.backToList")}
             className="-ms-1.5 inline-flex h-7 w-fit cursor-pointer items-center gap-0.5 rounded-full pe-2 ps-1 text-[13px] font-medium leading-5 text-ink-secondary hover:bg-ink/[0.05] hover:text-ink">
             <ChevronLeft size={16} aria-hidden="true" className="rtl:-scale-x-100" />{backTo}
@@ -155,14 +159,14 @@ export function AddDevicePanel(props: AddDeviceProps) {
       </div>
       {!kind && (
         <SettingsRows icons>
-          <SettingsLinkRow leading={<Smartphone size={16} className="text-ink-secondary" />} title={t("devicesPage.add.phone")} subtitle={t("devicesPage.add.phoneLine", { app: productName() })} onClick={() => setKind("phone")} data={{ "data-add-kind": "phone" }} />
-          <SettingsLinkRow leading={<Laptop size={16} className="text-ink-secondary" />} title={t("devicesPage.add.computer")} subtitle={t("devicesPage.add.computerLine")} onClick={() => setKind("computer")} data={{ "data-add-kind": "computer" }} />
-          <SettingsLinkRow leading={<Server size={16} className="text-ink-secondary" />} title={t("devicesPage.add.server")} subtitle={t("devicesPage.add.serverLine")} onClick={() => setKind("server")} data={{ "data-add-kind": "server" }} />
-          {onGetCloud && <SettingsLinkRow leading={<Cloud size={16} className="text-ink-secondary" />} title={t("devicesPage.add.cloud")} subtitle={t("devicesPage.add.cloudLine")} onClick={() => setKind("cloud")} data={{ "data-add-kind": "cloud" }} />}
+          <SettingsLinkRow leading={<SettingsMark><Smartphone /></SettingsMark>} title={t("devicesPage.add.phone")} subtitle={t("devicesPage.add.phoneLine", { app: productName() })} onClick={() => setKind("phone")} data={{ "data-add-kind": "phone" }} />
+          <SettingsLinkRow leading={<SettingsMark><Laptop /></SettingsMark>} title={t("devicesPage.add.computer")} subtitle={t("devicesPage.add.computerLine")} onClick={() => setKind("computer")} data={{ "data-add-kind": "computer" }} />
+          <SettingsLinkRow leading={<SettingsMark><Server /></SettingsMark>} title={t("devicesPage.add.server")} subtitle={t("devicesPage.add.serverLine")} onClick={() => setKind("server")} data={{ "data-add-kind": "server" }} />
+          {onGetCloud && <SettingsLinkRow leading={<SettingsMark><Cloud /></SettingsMark>} title={t("devicesPage.add.cloud")} subtitle={t("devicesPage.add.cloudLine")} onClick={() => setKind("cloud")} data={{ "data-add-kind": "cloud" }} />}
         </SettingsRows>
       )}
       {kind && (
-        <div className={CARD}>
+        <div data-add-card="" className={CARD}>
           {joined ? <Connected device={joined} onDone={(id) => onBack(id)} /> : <>
             {kind === "phone" && (phoneSteps ? phoneSteps(() => onBack()) : <PairCodePanel kind="phone" address={null} onConnected={onConnected} />)}
             {kind === "computer" && (cloud
@@ -171,8 +175,12 @@ export function AddDevicePanel(props: AddDeviceProps) {
                 {here && network && <Step n={1} title={t("devicesPage.addFlow.networkFirst")} state={networkReady ? "done" : "now"}>
                   {!networkReady && <NetworkStep network={network} action={stepAction} waiting={Boolean(shared && !tailnetAddress)} />}
                 </Step>}
-                <Step n={here && network ? 2 : 1} title={t("devicesPage.addFlow.installStep", { app: productName() })} state={!here || networkReady ? "now" : "later"}>
-                  <a href={DESKTOP_DOWNLOAD_URL} target="_blank" rel="noreferrer" className="ui-button ui-button-sm w-fit">{t("computerAsk.action.getApp", { app: productName() })}</a>
+                <Step n={here && network ? 2 : 1} title={t(here && network ? "devicesPage.addFlow.installBoth" : "devicesPage.addFlow.installStep", { app: productName() })} state={!here || networkReady ? "now" : "later"}>
+                  {here && network && <p className={BODY}>{t("devicesPage.addFlow.installBothLine")}</p>}
+                  <span className="flex flex-wrap gap-2">
+                    <a href={DESKTOP_DOWNLOAD_URL} target="_blank" rel="noreferrer" className="ui-button ui-button-sm w-fit">{t("computerAsk.action.getApp", { app: productName() })}</a>
+                    {here && network && <a href={TAILSCALE_GET} target="_blank" rel="noreferrer" className="ui-button ui-button-sm w-fit">{t("remote.tailscale.getIt")}</a>}
+                  </span>
                 </Step>
                 <Step n={here && network ? 3 : 2} title={t("devicesPage.addFlow.pasteStep")} state={!here || networkReady ? "now" : "later"}>
                   <PairCodePanel kind="computer" address={tailnetAddress} onConnected={onConnected} />
@@ -204,5 +212,5 @@ export function AddDevicePanel(props: AddDeviceProps) {
   );
 }
 
-const TITLE = { phone: "devicesPage.add.phoneTitle", computer: "devicesPage.add.computerTitle", server: "devicesPage.add.serverTitle", cloud: "devicesPage.add.cloudTitle" } as const;
+const TITLE = { phone: "devicesPage.add.phoneTitle", computer: "devicesPage.add.computerTitle", server: "devicesPage.add.server", cloud: "devicesPage.add.cloudTitle" } as const;
 const LEDE = { phone: "devicesPage.addFlow.phoneLede", computer: "devicesPage.addFlow.computerLede", server: "devicesPage.addFlow.serverLede", cloud: "devicesPage.addFlow.cloudLede" } as const;

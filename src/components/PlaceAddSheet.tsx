@@ -2,7 +2,7 @@
 // organization on the Team plan the person pays for (when they run one), buy a Cloud (the buying sheet: another Cloud right
 // here, or the first one on this computer's own sheet), or connect to a server of the person's own.
 import { useEffect, useEffectEvent, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { Building2, Cloud, Laptop, Loader2, Server, UserRound, X } from "lucide-react";
+import { Building2, Check, Cloud, Copy, Laptop, Loader2, Server, UserRound, X } from "lucide-react";
 import type { CloudSwatch } from "../../electron/cloud-list.mjs";
 import type { RailAddChoices, RailPlace } from "../../electron/cloud-rail.mjs";
 import { EXAMPLE_ADDRESS, parseServerInput } from "../../electron/server-address.mjs";
@@ -26,8 +26,16 @@ import { SETTINGS_INPUT } from "./SettingsPrimitives";
 const PAIR_COMMAND = "npx openmausbot pair";
 
 /** A command to run on the server, with its own Copy button. */
-function CommandLine({ command }: { command: string }) {
+function CommandLine({ command, inline = false }: { command: string; inline?: boolean }) {
   const { state, copy } = useCopyFeedback(command);
+  if (inline) {
+    return <span className="flex items-center gap-1">
+      <code className="min-w-0 rounded-md bg-ink/[0.05] px-2 py-1 font-mono text-[12px] text-ink">{command}</code>
+      <button type="button" onClick={copy} aria-label={t(state === "copied" ? "connect.copied" : "connect.copy")} title={t("connect.copy")} className="ui-icon-button shrink-0">
+        {state === "copied" ? <Check size={14} aria-hidden="true" className="text-success" /> : <Copy size={14} aria-hidden="true" />}
+      </button>
+    </span>;
+  }
   return <span className="flex items-center gap-2">
     <code className="min-w-0 truncate rounded-md bg-inset px-2 py-1 font-mono text-[12px] text-ink">{command}</code>
     <button type="button" onClick={copy} className="text-[12px] font-medium text-accent-text hover:underline">{t(state === "copied" ? "connect.copied" : "connect.copy")}</button>
@@ -61,6 +69,8 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
   const [movedCode, setMovedCode] = useState(false);
   const [probe, setProbe] = useState<ServerProbe | null>(null);
   const [probing, setProbing] = useState(false);
+  const [asks, setAsks] = useState(0);
+  const problemLine = useRef<HTMLParagraphElement>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const codeField = useRef<HTMLInputElement>(null);
@@ -80,7 +90,7 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
         .finally(() => { if (current) setProbing(false); });
     }, 400);
     return () => { current = false; window.clearTimeout(timer); };
-  }, [address, code, canProbe, workspaces]);
+  }, [address, code, canProbe, workspaces, asks]);
   const typeAddress = (value: string, pasted: boolean) => {
     setFailure(null);
     const read = parseServerInput(value);
@@ -113,6 +123,7 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
     }
   };
   const shownProblem = failure ?? (probe?.outcome === "problem" && probe.problem !== "empty" ? problemText(probe.problem, probe.host) : null);
+  useEffect(() => { if (shownProblem && inline) problemLine.current?.scrollIntoView?.({ block: "nearest" }); }, [shownProblem, inline]);
   const codeOnlyHint = movedCode && !address.trim();
   return <form data-place-add={connect ? "connect-server" : "own-server"} onSubmit={(event) => void submit(event)} className={cn("flex flex-col gap-4", !inline && "px-[30px] pb-[26px] pt-7")}>
     {onBack && <div><BackLink label={t("rail.back")} onClick={onBack} /></div>}
@@ -122,20 +133,22 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
         placeholder={t("connect.addressPlaceholder")} autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false} aria-invalid={Boolean(shownProblem) || undefined}
         className={inline ? cn(SETTINGS_INPUT, "font-normal") : "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] font-normal text-ink outline-none focus:border-accent/50"} />
     </label>
+    {shownProblem && inline && <p ref={problemLine} role="alert" data-connect-problem className="-mt-2 text-[13px] leading-[18px] text-danger">{shownProblem}
+      {!failure && <>{" "}<button type="button" data-connect-retry="" className="cursor-pointer font-medium text-ink underline-offset-2 hover:underline" onClick={() => setAsks((n) => n + 1)}>{t("remote.checkAgain")}</button></>}</p>}
     {!connect && !start && !inline && <p data-connect-other-computer className="text-[12px] leading-4 text-ink-secondary">{t("connect.otherComputer", { app: productName() })}</p>}
     {codeOnlyHint && <p data-connect-hint className="text-[13px] text-ink-secondary">{t("connect.addAddress", { example: EXAMPLE_ADDRESS })}</p>}
-    {found && <p data-connect-found className="text-[13px] text-ink-secondary">
-      ✓ {found.version ? t("connect.found", { name: found.label, version: found.version }) : found.label} · {t(TRANSPORT_KEY[found.transport])}
+    {found && <p data-connect-found className={cn("text-[13px] text-ink-secondary", inline && "flex items-center gap-1.5")}>
+      {inline ? <Check size={14} aria-hidden="true" className="shrink-0 text-success" /> : "✓"} {found.version ? t("connect.found", { name: found.label, version: found.version }) : found.label} · {t(TRANSPORT_KEY[found.transport])}
     </p>}
     {showCode && <label className="flex flex-col gap-1.5 text-[13px] font-medium text-ink">{t("connect.code")}
       <input ref={codeField} data-autofocus={start?.locked ? true : undefined} data-own-server-code value={code} disabled={busy} onChange={(event) => { setCode(event.target.value); setFailure(null); }}
         placeholder="7KQ2-M9XD-H4TP" autoCapitalize="characters" autoCorrect="off" autoComplete="off" spellCheck={false}
         className={inline ? cn(SETTINGS_INPUT, "font-mono font-normal") : "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[14px] font-normal text-ink outline-none focus:border-accent/50"} />
-      <span className="flex flex-col gap-1 text-[12px] font-normal text-ink-secondary">{t("connect.noCode")}<CommandLine command={PAIR_COMMAND} /></span>
+      <span className="flex flex-col gap-1 text-[12px] font-normal text-ink-secondary">{t("connect.noCode")}<CommandLine command={PAIR_COMMAND} inline={inline} /></span>
     </label>}
     {/* The question after pairing lives here: on, a server of the person's own may use this computer once paired. */}
     {!start?.locked && address.trim() && <AddFormLendSwitch address={address} />}
-    {shownProblem && <p role="alert" data-connect-problem className="text-[13px] text-danger">{shownProblem}</p>}
+    {shownProblem && !inline && <p role="alert" data-connect-problem className="text-[13px] text-danger">{shownProblem}</p>}
     {canProbe && probing && !found && !shownProblem && <p data-connect-checking className="inline-flex items-center gap-1.5 text-[13px] text-ink-secondary">
       <Loader2 size={13} className="animate-spin" aria-hidden="true" />{t("connect.checking")}
     </p>}

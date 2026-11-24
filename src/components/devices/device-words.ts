@@ -14,8 +14,8 @@ const KIND: Record<DeviceKind, LocaleKey> = {
 export const kindLabel = (kind: DeviceKind): string => t(KIND[kind]);
 
 const ROUTE: Record<DeviceRoute, LocaleKey> = {
-  here: "devicesPage.route.here", local: "devicesPage.route.local", tailscale: "devicesPage.route.tailscale", relay: "devicesPage.route.relay",
-  cloud: "devicesPage.route.cloud", internet: "devicesPage.route.internet", paired: "devicesPage.route.paired", ssh: "devicesPage.route.ssh",
+  here: "devicesPage.route.here", local: "devicesPage.route.sameWifi", tailscale: "devicesPage.route.tailscale", relay: "devicesPage.route.anywhere",
+  cloud: "devicesPage.route.cloud", internet: "devicesPage.route.overInternet", paired: "devicesPage.route.pairedCode", ssh: "devicesPage.route.secureLogin",
 };
 export const routeLabel = (route: DeviceRoute): string => t(ROUTE[route], { app: productName() });
 
@@ -33,7 +33,7 @@ export function statusText(device: Device, now = Date.now()): string {
   if (device.kind === "vm") return device.desktop ? t(DESKTOP[device.desktop]) : "";
   if (device.status === "online") return t("devicesPage.status.online");
   if (device.status === "offline") return device.lastSeen ? t("devicesPage.status.seen", { when: lastSeen(device.lastSeen, now) }) : t("devicesPage.status.offline");
-  if (device.route === "ssh") return t("devicesPage.status.ssh");
+  if (device.route === "ssh") return t("devicesPage.status.sshBots");
   if (device.kind === "cloud") return device.home ? `${t("servers.homeTag")} · ${t("servers.managed")}` : t("servers.managed");
   return device.home ? t("servers.homeTag") : t("devicesPage.status.unknown");
 }
@@ -59,9 +59,9 @@ export function networkLine(network: PrivateNetwork): string {
     case "unknown": return t("devicesPage.network.line.unknown");
     case "not-installed": return t("devicesPage.network.line.notInstalledFree");
     case "no-cli": return t("remote.tailscale.noCli");
-    case "signed-out": return t("remote.tailscale.signIn");
+    case "signed-out": return t("devicesPage.network.line.signedOut");
     case "not-running": return t("remote.tailscale.notRunning");
-    case "needs-approval": return t("remote.tailscale.needsApproval");
+    case "needs-approval": return t("devicesPage.network.line.needsApproval");
     case "needs-permission": return t("remote.tailscale.needsPermission", { app: productName() });
     case "magicdns": return `${t("remote.tailscale.magicDns")}. ${t("remote.tailscale.magicDnsDetail")}`;
     case "ready": return network.shared ? t("devicesPage.network.line.readyShort", { name: shortName(network.name) }) : t("devicesPage.network.line.notSharedShort", { name: shortName(network.name) });

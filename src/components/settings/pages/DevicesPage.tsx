@@ -14,6 +14,7 @@ import { PhoneCodeInline } from "../../devices/CodeCard";
 import { networkLine } from "../../devices/device-words";
 import { PairPhoneSteps } from "../../PhoneDevicesSection";
 import { usePhoneSetupController } from "../../PhoneSetupFlow";
+import { SettingsMark } from "../../SettingsPrimitives";
 import { PlaceBadge } from "../SettingsNav";
 import { useSettingsShell } from "../settings-shell";
 
@@ -46,7 +47,7 @@ const ADD_LABEL: Record<DeviceGroup, Parameters<typeof t>[0]> = { phones: "devic
 const ADD_KIND: Record<DeviceGroup, AddKind> = { phones: "phone", computers: "computer", servers: "server" };
 
 export function DevicesPage() {
-  const { ctx, place, go, narrow, setSub } = useSettingsShell();
+  const { ctx, place, go, setSub } = useSettingsShell();
   const dispatch = useStoreDispatch();
   const config = useStoreSelector((state) => state.config);
   const { devices, companion, refresh } = useDevices({ here: ctx.here, client: ctx.client, name: place.name, kind: place.kind });
@@ -99,8 +100,9 @@ export function DevicesPage() {
         case "copy-update": setOpen(device.id); setPairing(false); return;
         case "manage": go(action.page, action.anchor); return;
         case "remove": {
-          // A phone is removed whole: its pairing and its app's registration both go.
-          const sources = device.kind === "phone" ? device.actions.flatMap((one) => (one.type === "remove" ? [one.source] : [])) : [action.source];
+          // A device is removed whole: every way it is joined here goes (a phone's pairing and its app, a saved server and
+          // its sign-in).
+          const sources = device.actions.flatMap((one) => (one.type === "remove" ? [one.source] : []));
           for (const source of sources) {
             if (source.type === "place") await environments?.forget(source.id);
             else if (source.type === "phone") await c.act((bridge) => bridge.revoke(source.id));
@@ -143,19 +145,19 @@ export function DevicesPage() {
     return <AddDevicePanel here={ctx.here} cloud={ctx.cloud} devices={devices} network={network} networkAction={networkAction}
       tailnetAddress={companion?.tailnetShare?.origin ?? null} start={adding.start} onBack={leave} onConnected={refresh}
       phoneSteps={ctx.here && c.state ? (onClose) => <PairPhoneSteps c={c} state={c.state!} onClose={() => { refresh(); onClose(); }} codeView={<PhoneCodeInline c={c} />} /> : null}
-      narrow={narrow} setSub={setSub}
+      setSub={setSub}
       canConnectServer={Boolean(workspaces?.add)} onCheck={() => void check()} checking={c.busy}
       onGetCloud={workspaces?.add ? () => { setAdding(null); dispatch({ type: "toggleAppSettings", open: false }); void workspaces.add?.("cloud"); } : null} />;
   }
 
   const here = devices.find((device) => device.here)!;
-  const mark = place.kind === "computer" ? <Laptop size={16} aria-hidden="true" /> : <PlaceBadge place={place} size={20} />;
+  const mark = place.kind === "computer" ? <SettingsMark><Laptop /></SettingsMark> : <PlaceBadge place={place} size={28} />;
   const groups = groupByKind(devices, { all: true });
   const now = Date.now();
   // At most one quiet button beside the next step: ask again after installing, open the admin console, or manage.
   const secondary = !network || blocked ? null
     : networkAction?.href ? <button type="button" className="settings-quiet cursor-pointer" disabled={c.busy} onClick={() => void check()}>{c.busy ? t("common.checking") : t("remote.checkAgain")}</button>
-    : network.state === "needs-approval" ? <a className="settings-quiet" href={TAILSCALE_ADMIN} target="_blank" rel="noreferrer">{t("devicesPage.network.openAdmin")}</a>
+    : network.state === "needs-approval" ? <a className="settings-quiet" href={TAILSCALE_ADMIN} target="_blank" rel="noreferrer">{t("devicesPage.network.approveIn")}</a>
     : network.state === "ready" && network.shared ? <button type="button" className="settings-quiet cursor-pointer" onClick={() => go("phone", "computers")}>{t("devicesPage.action.manage")}</button> : null;
   return <>
     {failure && <p role="alert" className="px-4 text-[13px] leading-[18px] text-danger">{failure}</p>}

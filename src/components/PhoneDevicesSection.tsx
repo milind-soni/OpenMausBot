@@ -268,7 +268,7 @@ export function PairPhoneSteps({ c, state, onClose, secureAddress = false, onSte
   /** HTTPS address → Set up: the free web address, with its sign-in, before the code. */
   secureAddress?: boolean;
   onStep?: (step: PairStep) => void;
-  /** The code in a page's own look, with Cancel under it in place of Done. */
+  /** The code in a page's own look; the page's own Back is the way out, so neither Cancel nor Done shows. */
   codeView?: ReactNode;
 }) {
   const signedIn = c.account?.status === "ready";
@@ -304,12 +304,7 @@ export function PairPhoneSteps({ c, state, onClose, secureAddress = false, onSte
   };
   const localHint = picked === "wifi" && !state.routes?.wifi?.on && typeof window !== "undefined" && window.ogb?.platform === "darwin";
   if (step === "sign-in") return <PhoneSetupFlowView controller={c} />;
-  if (step === "pairing" && codeView) {
-    return <>
-      {codeView}
-      <div><button type="button" className="ui-button" data-pair-cancel="" onClick={onClose}>{t("common.cancel")}</button></div>
-    </>;
-  }
+  if (step === "pairing" && codeView) return <>{codeView}</>;
   if (step === "pairing") {
     return <>
       <PhoneSetupFlowView controller={c} />
@@ -335,8 +330,8 @@ export function PairPhoneSteps({ c, state, onClose, secureAddress = false, onSte
     </div>
     <p className="text-[12px] leading-4 text-ink-secondary">{t("phone.pair.footShort")}</p>
     {c.error && <p role="alert" className="text-[12px] leading-4 text-danger">{c.error}</p>}
-    <div className="flex justify-end gap-2">
-      <button type="button" className="ui-button" onClick={onClose}>{t("common.cancel")}</button>
+    <div className={cn("flex gap-2", codeView ? "justify-start" : "justify-end")}>
+      {!codeView && <button type="button" className="ui-button" onClick={onClose}>{t("common.cancel")}</button>}
       <button type="button" disabled={c.busy} onClick={() => void begin()} className="ui-button ui-button-primary" data-pair-turn-on="">{t("phone.pair.turnOnShow")}</button>
     </div>
   </>;

@@ -1,9 +1,9 @@
 import { useId, type KeyboardEvent, type ReactNode } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Waypoints } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { Device, DeviceAction, DeviceGroup, PrivateNetwork } from "@/lib/devices";
-import { SettingsEmptyRow, SettingsGroup, SettingsRows } from "../SettingsPrimitives";
+import { SettingsEmptyRow, SettingsGroup, SettingsMark, SettingsRows } from "../SettingsPrimitives";
 import { actionLabel, DeviceDetails } from "./DeviceDetails";
 import { BotsOn, botsLabel, needOf, StatusLine, StatusMark, useBotsOn } from "./device-parts";
 import { KIND_ICON, groupLabel, networkShort, statusText } from "./device-words";
@@ -50,17 +50,18 @@ function DeviceRow({ device, mark, opened, onAction, now }: {
   return (
     <div data-device-row={device.id} data-device-status={device.status} data-open={open ? "" : undefined} onKeyDown={onKey}>
       <div className="relative flex min-h-11 items-center gap-3 px-4 py-3">
-        <span aria-hidden="true" className={SLOT}>{mark ?? <Icon size={16} />}</span>
+        <span aria-hidden="true" className={SLOT}>{mark ?? <SettingsMark><Icon /></SettingsMark>}</span>
         <button type="button" data-device-node={node} aria-expanded={open} aria-controls={detailsId} aria-label={label} title={device.name}
           onClick={() => opened.toggle(device.id)}
           className="flex min-w-0 flex-1 cursor-pointer flex-col gap-0.5 text-start after:absolute after:inset-0 after:content-[''] hover:after:bg-ink/[0.03] focus-visible:outline-none! focus-visible:after:rounded-xl focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-focus">
           <span className="break-words text-[14px] font-medium leading-5 text-ink">{device.name}</span>
           <StatusLine device={device} now={now} />
+          {bots.length > 0 && <span className="pt-1 @min-[480px]/rows:hidden"><BotsOn bots={bots} /></span>}
         </button>
-        <BotsOn bots={bots} />
+        {bots.length > 0 && <span className="hidden @min-[480px]/rows:flex"><BotsOn bots={bots} /></span>}
         {need && (
-          <button type="button" data-row-action={need.type} onClick={() => onAction(device, need)} aria-label={`${need.type === "copy-update" ? t("devicesPage.tile.update") : actionLabel(need, device)}: ${device.name}`}
-            className="ui-button ui-button-sm relative z-10 shrink-0">{need.type === "copy-update" ? t("devicesPage.tile.update") : actionLabel(need, device)}</button>
+          <button type="button" data-row-action={need.type} onClick={() => onAction(device, need)} aria-label={`${need.type === "copy-update" ? t("devicesPage.tile.update") : actionLabel(need)}: ${device.name}`}
+            className="ui-button ui-button-sm relative z-10 shrink-0">{need.type === "copy-update" ? t("devicesPage.tile.update") : actionLabel(need)}</button>
         )}
         <ChevronRight size={14} aria-hidden="true" className={cn("-me-1 shrink-0 text-ink-tertiary transition-transform duration-150 motion-reduce:transition-none rtl:-scale-x-100", open && "rotate-90")} />
       </div>
@@ -79,7 +80,7 @@ function NetworkRow({ network, line, action, secondary }: { network: PrivateNetw
   return (
     <div data-settings-block="network" data-private-network="" className="flex scroll-mt-4 flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
       <div className="flex min-w-[min(100%,14rem)] flex-1 gap-3">
-        <span aria-hidden="true" className={SLOT} />
+        <span aria-hidden="true" className={SLOT}><SettingsMark><Waypoints /></SettingsMark></span>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="flex flex-wrap items-center gap-x-2 text-[14px] leading-5 text-ink">
             {t("devicesPage.network.title")}
