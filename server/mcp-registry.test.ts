@@ -317,6 +317,18 @@ describe("a url server's sign-in app", () => {
     expect(parseStoredMcpServer("docs", { url, oauth: { clientId: "corp-app", redirectUri: "https://user:pw@docs.example/mcp-oauth/callback" } })).toMatchObject({ ok: false });
   });
 
+  it("keeps a configured redirect uri through an edit that leaves it out, only for the same client id", () => {
+    const configured = { ...saved, oauth: { clientId: "corp-app", redirectUri: "https://maus.example/mcp-oauth/callback" } };
+    expect(parseMcpServerMutation("docs", { url, oauth: { clientId: "corp-app", scopes: ["offline_access"] } }, configured)).toEqual({
+      ok: true,
+      server: { type: "http", url, headers: {}, oauth: { clientId: "corp-app", scopes: ["offline_access"], redirectUri: "https://maus.example/mcp-oauth/callback" }, enabled: true },
+    });
+    expect(parseMcpServerMutation("docs", { url, oauth: { clientId: "other-app" } }, configured)).toEqual({
+      ok: true,
+      server: { type: "http", url, headers: {}, oauth: { clientId: "other-app" }, enabled: true },
+    });
+  });
+
   it("keeps a saved secret behind a placeholder only for the same client id", () => {
     expect(parseMcpServerMutation("docs", { url, oauth: { clientId: "corp-app", clientSecret: true } }, saved)).toEqual({
       ok: true,

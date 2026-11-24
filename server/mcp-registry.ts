@@ -293,13 +293,14 @@ function resolveOAuthClient(
     const redirectError = mcpConfiguredRedirectError(incoming.redirectUri);
     if (redirectError) return { ok: false, error: redirectError };
   }
+  const redirectUri = incoming.redirectUri ?? (saved?.clientId === incoming.clientId ? saved.redirectUri : undefined);
   return {
     ok: true,
     value: {
       clientId: incoming.clientId,
       ...(clientSecret ? { clientSecret } : {}),
       ...(scopes.length ? { scopes } : {}),
-      ...(incoming.redirectUri ? { redirectUri: incoming.redirectUri } : {}),
+      ...(redirectUri ? { redirectUri } : {}),
     },
   };
 }
