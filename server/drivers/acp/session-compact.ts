@@ -90,7 +90,8 @@ export function acpCompactSession(deps: AcpCompactDeps) {
       const { check } = before;
       if (stopRequested || options.signal?.aborted) return fail("stopped");
       if (!live() || selectionMoved()) return fail("the conversation moved on before the compaction was sent");
-      timer = setTimeout(() => { interrupt("timeout"); end({ kind: "timeout" }); }, timeoutMs());
+      let timedOut = false;
+      timer = setTimeout(() => { timedOut = true; interrupt("timeout"); end({ kind: "timeout" }); }, timeoutMs());
       timer.unref?.();
       counted.open = true;
       const answer = session.acp.request("session/prompt", { sessionId: options.session, prompt: [{ type: "text", text: `/${command}` }] },
@@ -119,12 +120,11 @@ export function acpCompactSession(deps: AcpCompactDeps) {
       if (ending.kind !== "answered") return fail("stopped");
       const { result } = ending;
       const usage = promptTokenUsage(result);
-      const interruptedAfter = new Promise<"stopped" | "gone" | "timeout">((resolve) => { onInterrupt = resolve; });
+      const interruptedAfter = new Promise<"stopped" | "gone" | "timeout">((resolve) => { onInterrupt = resolve; if (timedOut) resolve("timeout"); });
       const reported = await Promise.race([Promise.resolve(check?.(result)).catch(() => undefined), interruptedAfter]);
-      if (reported === "stopped") return fail("stopped");
-      if (reported === "gone" || reported === "timeout") {
-        keep = false;
-        return failSent(reported === "gone" ? "the agent exited during compaction" : "timed out", result);
+      if (reported === "stopped" || reported === "gone" || reported === "timeout") {
+        keep = reported === "stopped" && !counted.replied;
+        return failSent(reported === "stopped" ? "stopped" : reported === "gone" ? "the agent exited during compaction" : "timed out", result);
       }
       const why = result?.stopReason !== "end_turn" ? `the compaction ended ${String(result?.stopReason ?? "without a stop reason")}`
         : reported ? `the agent reported a failure: ${reported.message}`

@@ -168,8 +168,46 @@ describe("an ACP agent's own compaction of a live session", () => {
     await vi.waitFor(() => expect(active.has("thread")).toBe(true));
     await new Promise((resolve) => setImmediate(resolve));
     stop.abort();
-    expect(await compacting).toEqual({ ok: false, reason: "stopped" });
+    expect(await compacting).toMatchObject({ ok: false, reason: "stopped", usage: { input: 900, output: 50 } });
     expect(active.has("thread")).toBe(false);
+  });
+
+  it("keeps a reply's usage and lets no turn carry the session on when Stop cuts the failure check short", async () => {
+    const { deps, active, sessions } = setup(({ heard, reply }) => {
+      heard({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Nothing to compact" } });
+      reply(RESULT);
+    });
+    deps.promptOutcome = async () => () => new Promise(() => {});
+    const stop = new AbortController();
+    const compacting = acpCompactSession(deps)("thread", { session: SESSION, signal: stop.signal });
+    await vi.waitFor(() => expect(active.has("thread")).toBe(true));
+    await new Promise((resolve) => setImmediate(resolve));
+    stop.abort();
+    expect(await compacting).toMatchObject({ ok: false, reason: "stopped", usage: { input: 900, output: 50 }, sessionChanged: true });
+    expect(sessions.has("thread")).toBe(false);
+  });
+
+  it("ends a failure check that starts after the deadline passed", async () => {
+    let answer: ((result: unknown) => void) | undefined;
+    const { deps, acp } = setup(({ heard, reply }) => { answer = (result) => { heard({ sessionUpdate: "usage_update", used: 950 }); reply(result); }; });
+    deps.promptOutcome = async () => () => new Promise(() => {});
+    vi.useFakeTimers();
+    try {
+      const stop = new AbortController();
+      const compacting = acpCompactSession(deps)("thread", { session: SESSION, signal: stop.signal });
+      await vi.advanceTimersByTimeAsync(298_000);
+      stop.abort();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(acp.send).toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(3_000);
+      answer!(RESULT);
+      let result: unknown;
+      void compacting.then((value) => { result = value; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(result).toMatchObject({ ok: false, reason: "timed out", usage: { input: 900 } });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not send /compact to a process a signal ended", async () => {
