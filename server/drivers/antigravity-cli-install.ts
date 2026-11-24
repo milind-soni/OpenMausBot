@@ -28,7 +28,7 @@ export const ANTIGRAVITY_NATIVE_CLI_ENV = "OMB_ANTIGRAVITY_NATIVE_CLI";
 
 /** `OMB_ANTIGRAVITY_NATIVE_CLI=1` in the server's environment, read at start: an account whose CLI path names no runtime
  * (none, or `agy`) runs the native CLI even where the pinned runtime is installed, and the engine updater installs the
- * CLI there. An account set to a runtime under Runs on keeps it; nothing is removed. Off (the default), such an account
+ * CLI there. An account whose path names a runtime keeps it; nothing is removed. Off (the default), such an account
  * keeps the pinned runtime where it is installed, and only a new install takes the CLI. */
 export const ANTIGRAVITY_CLI_FIRST = process.env[ANTIGRAVITY_NATIVE_CLI_ENV] === "1";
 
