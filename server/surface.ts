@@ -305,6 +305,8 @@ export function surfacePrompt(
   opts: { pinned?: Surface | null; note?: string; canSelect?: boolean; selectionRules?: boolean; cloudHome?: boolean; botOpened?: boolean;
     ownComputer?: ReadonlyArray<{ name: string; platform: LentPlatform | null }>;
     lentToServer?: ReadonlyArray<{ name: string; platform: LentPlatform | null }>;
+    /** The bot's Works on is Auto: no place of its own was chosen (Off refuses the lent screen, and a chosen place is the person's). */
+    worksOnAuto?: boolean;
     /** This computer can be picked for this bot here: its name, the platform this server runs on, and whether the desktop
      * app runs this server (false: a server no app launched, whose This computer no bot can use). */
     thisComputer?: { bot: string; botId?: string; platform: NodeJS.Platform; desktopApp?: boolean } } = {},
@@ -352,7 +354,7 @@ export function surfacePrompt(
     text += ownComputerSentence(opts.lentToServer, computer);
     // With no place chosen, "select_computer is the way to connect them" read as the way to the lent computer too, and a
     // bot asked for desktop apps selected a Local VM that was never set up.
-    if (!computer && !opts.pinned) text += ` No other computer is set for this conversation: for desktop apps, use ${theirComputer(opts.lentToServer).theirs} through shared_computer, and don't select a Local VM or another place for it unless they ask.`;
+    if (opts.worksOnAuto && !computer && !opts.pinned) text += ` No other computer is set for this conversation: for desktop apps, use ${theirComputer(opts.lentToServer).theirs} through shared_computer, and don't select a Local VM or another place for it unless they ask.`;
   }
   if (opts.thisComputer && !opts.cloudHome && !reportBack && mounted.computer !== "local") {
     text += ownFilesSentence(opts.thisComputer, mounted.computer, Boolean(opts.canSelect), opts.lentToServer);

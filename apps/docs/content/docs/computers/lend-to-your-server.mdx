@@ -14,7 +14,7 @@ app is open on that computer. It is one switch, and you can turn it off at any t
   `npx openmausbot serve` (or the Docker or Podman install) with no members and at most one admin address. A team's
   server, a server other people sign in to, and a MausBot Cloud are not "your own" for this: a Cloud lends by its own
   rules, from the MausBot icon's menu.
-- The MausBot desktop app on the computer you want to lend: Windows 10 or 11 on an x64 PC, or macOS 13 or later.
+- The MausBot desktop app on the computer you want to lend: Windows on an x64 PC, or macOS 13 or later.
 - The app paired with the server as its owner: on the server, run `npx openmausbot pair --label "My PC"` and use the code
   it prints (a `--phone` code can't lend a computer).
 
@@ -65,10 +65,12 @@ tools, whatever its Works on is. Ask it in plain words: "open Notepad on my PC".
 - Or pause it, with your Clouds, from the MausBot icon's menu (the menu bar on a Mac, the tray on Windows).
 - Closing the app stops it until you open the app again.
 
+Both the app and the server need MausBot 0.1.179 or later for the switch; with an older one on either side, update it.
+
 ## Limits
 
-- The app has to be open, and you signed in to your computer. A locked screen is refused: the bot is told the screen is
-  locked.
+- The app has to be open, and you signed in to your computer. While the screen is locked, the bot is told so and
+  can't use it.
 - Windows on x64 only for now. Windows on Arm and 32-bit Windows have no computer-control helper yet.
-- A bot uses your real screen. Watch what it does, and keep it on **Ask for approval** if you want to approve each step.
+- A bot uses your real screen, with the same control you have. Lend it only to a server you trust, and turn the switch off when you don't need it.
 - To turn lending off for a server entirely, set `features.sharedComputers` to `false` in that server's config.

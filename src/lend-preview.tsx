@@ -10,7 +10,8 @@ import { Monitor } from "lucide-react";
 import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { LendHere } from "@/components/LendComputerSwitch";
 import { SettingsModal } from "@/components/SettingsModal";
-import { loadLocale } from "@/lib/i18n";
+import { productName } from "@/lib/brand";
+import { loadLocale, t } from "@/lib/i18n";
 import { setAdvancedMode } from "@/lib/interface-mode";
 import { applySkinChoice, SKIN_IDS, type SkinId } from "@/lib/skins";
 import { initialState, StoreContext } from "@/state/store";
@@ -81,15 +82,17 @@ globalThis.fetch = async (input: RequestInfo | URL) => {
   return Response.json({ error: "not in the preview" }, { status: 404 });
 };
 
-/** The Screen panel's computer tab around the switch: its heading and empty screen, as on a server's own page. */
+/** The Screen panel's computer tab around the switch, as on a server's own page: a stand-in frame with the panel's own
+ * words, not the real panel (ComputerPanel.simple.test.ts checks the real one carries LendHere). */
 function PanelFrame() {
   const [bot] = useState("Ada");
   return <div className="flex min-h-screen justify-end bg-app">
     <aside className="flex w-[380px] flex-col border-l border-hairline/40 bg-panel px-5 pb-5">
       <div className="mb-1.5 mt-4 text-[13px] text-ink-secondary">{`${bot}’s screen`}</div>
       <div className="relative flex aspect-[16/10] w-full items-center justify-center overflow-hidden rounded-xl bg-card">
-        <div className="flex flex-col items-center gap-2 px-6 text-center text-ink-secondary"><Monitor size={22} /><span className="text-[12px]">{browser ? "This bot is set to This computer." : "Nothing to show yet."}</span></div>
+        <div className="flex flex-col items-center gap-2 px-6 text-center text-ink-secondary"><Monitor size={22} /><span className="text-[12px]">{browser ? t("computer.problem.localNeedsApp", { app: productName() }) : t("computer.problem.lendRemoteServer")}</span></div>
       </div>
+      {/* As for a bot set to This computer, the panel's own line over the screen; the switch or reason under it. */}
       <div data-preview-ready><LendHere appNeeded={browser || stateName === "team"} /></div>
     </aside>
   </div>;

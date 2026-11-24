@@ -13,6 +13,7 @@ import { createComputerSharing, ownServerSession } from "./computer-sharing.mjs"
 import { createLendingIndicator } from "./lending-indicator.mjs";
 import { installServerLending } from "./server-lending.mjs";
 import { ownServerRefusal } from "./own-server-refusal.mjs";
+import { cloudPageSenderAllowed } from "./cloud-home.mjs";
 import { screenStatus } from "./screen-status.mjs";
 
 const GARAGE = "http://192.168.1.20:8799";
@@ -278,6 +279,12 @@ test("after pairing a server of the person's own, no popup: the add form's switc
   await stale.lending.offer(stale.win);
   assert.deepEqual(stale.calls.lent, [], "an old wish lends nothing");
 
+  const typed = mainLending();
+  await typed.handlers.get("lend:wish")({}, "192.168.1.20", true);
+  await typed.handlers.get("lend:wish")({}, "192.168.1.2", true);
+  await typed.lending.offer(typed.win);
+  assert.deepEqual(typed.calls.lent, [], "only the address as last typed is wished for");
+
   const elsewhere = mainLending();
   await elsewhere.handlers.get("lend:wish")({}, "other.example", true);
   await elsewhere.lending.offer(elsewhere.win);
@@ -360,6 +367,20 @@ test("a server that can't be lent to says why in one word; a Cloud or team never
   assert.deepEqual(await mainLending().handlers.get("lend:state")({ page: team }), { name: "Acme", lendable: false, why: "team" });
   const cloud = { id: "home", name: "My Cloud", origin: "https://omb-h.fly.dev", home: true };
   assert.deepEqual(await mainLending().handlers.get("lend:state")({ page: cloud }), { name: "My Cloud", lendable: false, why: "cloud" });
+  // A Cloud's or a team's page changes nothing: no stop written on its grant, no system prompt for the screen.
+  for (const page of [team, cloud]) {
+    const quiet = mainLending({ response: 0 });
+    await quiet.handlers.get("lend:set")({ page }, null, false);
+    await assert.rejects(quiet.handlers.get("lend:set")({ page }, null, true), /Only your own server/);
+    await quiet.handlers.get("lend:allow-screen")({ page }, null);
+    assert.deepEqual(quiet.calls.revoked, []);
+    assert.deepEqual(quiet.calls.lent, []);
+    assert.equal(quiet.calls.allowScreen, undefined);
+    assert.deepEqual(quiet.calls.boxes, []);
+  }
+  const off = mainLending();
+  await off.handlers.get("lend:allow-screen")({}, "garage");
+  assert.equal(off.calls.allowScreen, undefined, "nothing is asked of the system while the switch is off");
 });
 
 test("on, its apps and screen as the system allows them: macOS asks for its two permissions, Windows needs nothing more", async () => {
@@ -379,4 +400,17 @@ test("on, its apps and screen as the system allows them: macOS asks for its two 
   const blocked = mainLending({ screen: async () => screenStatus({ platform: "win32", connection: { status: "unavailable", reason: "spawn cua-driver.exe EACCES" } }) });
   await blocked.handlers.get("lend:set")({}, "garage", true);
   assert.notEqual((await blocked.handlers.get("lend:state")({}, "garage")).screen, "permissions");
+});
+
+test("main wires the switch's senders as tested here: this app's own page, or the main frame of the active server's page", async () => {
+  const main = await readFile(new URL("./main.mjs", import.meta.url), "utf8");
+  assert.match(main, /installServerLending\(\{[\s\S]{0,1500}?local: event => cloudPageAsking\(event\) === "local"/);
+  assert.match(main, /page: event => \{ const env = activeEnvironment\(environmentsState\); return env\?\.origin && env\.kind !== "local" && activePageOrigin\(event\) === env\.origin \? env : null; \}/);
+  // activePageOrigin is cloudPageSenderAllowed for the active origin: only the window's main frame, on that origin.
+  const mainFrame = { url: `${GARAGE}/chat` }, contents = { mainFrame };
+  const page = event => (cloudPageSenderAllowed(event, { contents, homeOrigin: GARAGE, activeOrigin: GARAGE }) ? garage : null);
+  assert.equal(page({ sender: contents, senderFrame: mainFrame }), garage);
+  assert.equal(page({ sender: contents, senderFrame: { url: `${GARAGE}/frame` } }), null, "a frame inside the page");
+  assert.equal(page({ sender: contents, senderFrame: Object.assign(mainFrame, { url: "https://evil.example/" }) }), null, "another origin");
+  assert.equal(page({ sender: {}, senderFrame: mainFrame }), null, "another window");
 });

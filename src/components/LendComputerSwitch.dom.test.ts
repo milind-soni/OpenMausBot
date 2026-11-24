@@ -101,7 +101,7 @@ it("in a browser, for a bot set to This computer: only the app on a computer can
   Object.assign(window, { ogb: undefined });
   capabilities = { host: { label: "Browser", platform: "unknown" }, localComputer: { available: false } };
   await show(createElement(LendHere, { appNeeded: true }));
-  expect(host.querySelector("[data-lend-browser]")?.textContent).toContain("Bots on this server can use your computer only through the MausBot app: open it on that computer, connect it to this server, and turn on “Let its bots use this computer”.");
+  expect(host.querySelector("[data-lend-browser]")?.textContent).toContain("Or, in the MausBot app on a computer, connect to this server and turn on “Let its bots use this computer”.");
   expect(host.querySelector("a")?.getAttribute("href")).toBe("https://www.openmausbot.com/download");
   await act(async () => root!.unmount()); root = null;
   await show(createElement(LendHere));

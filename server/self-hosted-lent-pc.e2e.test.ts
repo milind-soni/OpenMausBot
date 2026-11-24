@@ -117,5 +117,5 @@ it("tells a conversation a routine started why it can't use the lent PC, instead
   const listed = JSON.parse((await tools.call("list_shared_computers")).content[0]!.text);
   expect(listed.computers).toEqual([]);
   expect(listed.unavailable).toContain("This conversation can't use their PC (OFFICE-PC): it is lent, and not offline");
-  expect(listed.say).toBe("This conversation wasn't started by you, so it can't use your PC. Ask for it in a conversation you start with this bot.");
+  expect(listed.say).toBe("Only a conversation you start yourself can use your PC. Ask for it in a new conversation with this bot.");
 }, 60_000);

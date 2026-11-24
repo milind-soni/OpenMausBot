@@ -115,10 +115,11 @@ export function installServerLending({ ipcMain, guard, sharing, dialogs, validat
   // The switch: on lends the apps on the screen at once from this app's own page; a server's own page could press it
   // itself, so from there main's own popup (which no page can draw or answer) asks first. Off is one tap anywhere.
   ipcMain.handle("lend:state", async (event, id) => view(target(event, id).env));
+  // Only a server of the person's own is ever changed here: a Cloud's or a team's page (or any other) changes nothing.
   ipcMain.handle("lend:set", async (event, id, on) => {
     const { env, fromPage } = target(event, id);
+    if (!(await own(env))) { if (on === true) throw new Error(t("native.lend.notOwnServer")); return view(env); }
     if (on !== true) { sharing().revoke(env); return view(env); }
-    if (!(await own(env))) throw new Error(t("native.lend.notOwnServer"));
     if (fromPage && !(await allows(env))) return view(env);
     await sharing().lendOwn(env, firstGrant);
     return view(env);
@@ -126,7 +127,7 @@ export function installServerLending({ ipcMain, guard, sharing, dialogs, validat
   /** macOS's Accessibility and Screen Recording, the one step the system itself asks for. */
   ipcMain.handle("lend:allow-screen", async (event, id) => {
     const { env } = target(event, id);
-    await allowScreen();
+    if (await own(env) && sharing().state(env.id).enabled === true) await allowScreen();
     return view(env);
   });
   /** The add form's switch: lend to the server about to be paired at `host`, if it turns out to be the person's own. Only
@@ -137,7 +138,9 @@ export function installServerLending({ ipcMain, guard, sharing, dialogs, validat
     if (!local(event)) throw new Error("These controls are only available in the main desktop window");
     const host = hostOf(/^[a-z][a-z0-9+.-]*:\/\//i.test(String(address ?? "")) ? String(address) : `https://${address ?? ""}`);
     if (!host) return false;
-    if (on === true) wishes.set(host, now()); else wishes.delete(host);
+    // One wish at a time: the form's address as typed so far, never each partial host on the way.
+    wishes.clear();
+    if (on === true) wishes.set(host, now());
     return true;
   });
   const wished = env => {
