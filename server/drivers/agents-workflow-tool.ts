@@ -41,6 +41,9 @@ export function runText(envelope: Json): string {
 export async function callWorkflowTool(name: string, args: Json, context: ToolCallContext): Promise<ToolCallResult> {
   const { apiResponse } = context.client;
   if (name === RUN_WORKFLOW_TOOL) {
+    // A model sometimes nests resume and response inside args: that is still a resume, never a new run with saved values.
+    const nested = args.args && typeof args.args === "object" && !Array.isArray(args.args) ? args.args as Json : {};
+    if (typeof args.resume !== "string" && typeof nested.resume === "string") { args = { ...args, resume: nested.resume, response: nested.response }; }
     const resume = typeof args.resume === "string" ? args.resume.trim() : "";
     const { ok, body } = resume
       ? await apiResponse("/api/internal/skill-burgers/resume", { method: "POST", body: JSON.stringify({ run: resume, response: typeof args.response === "string" ? args.response : args.response === undefined || args.response === null ? "" : JSON.stringify(args.response) }) })

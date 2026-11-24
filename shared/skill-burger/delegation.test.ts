@@ -138,7 +138,7 @@ describe("a step's place and the run's own leftovers", () => {
       bash(`cat > upgrade.md <<'EOF'\n${body}\nEOF`),
     ])!;
     expect(draft.workflow.steps.map((step) => [step.kind, step.label])).toEqual([["shell", "Fetch api.github.com"], ["ai", "Write upgrade.md"]]);
-    expect(draft.workflow.steps[1]).toMatchObject({ example: body });
+    expect(draft.workflow.steps[1]).toMatchObject({ example: body, input: { $step: "s1" } });
   });
 
   it("reads a redirect only outside quotes", () => {

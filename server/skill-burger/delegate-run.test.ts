@@ -175,3 +175,17 @@ describe("a step's check", () => {
     expect(await h.resume("pass")).toMatchObject({ ok: true, status: "ok" });
   });
 });
+
+describe("the run_workflow tool", () => {
+  it("reads resume and response nested inside args as a resume, never as a new run", async () => {
+    const { callWorkflowTool } = await import("../drivers/agents-workflow-tool.ts");
+    const calls: Array<{ path: string; body: unknown }> = [];
+    const context = { client: { apiResponse: async (path: string, init: { body: string }) => { calls.push({ path, body: JSON.parse(init.body) }); return { ok: true, status: 200, body: { protocolVersion: 1, ok: true, status: "ok", run: "r", steps: [] } }; } } };
+    await callWorkflowTool("run_workflow", { name: "qa", args: { resume: "run-7", response: "Wrote wait.md" } }, context as never);
+    await callWorkflowTool("run_workflow", { name: "qa", resume: "run-7", response: { redo: { Rio: "add the URL" } } }, context as never);
+    expect(calls).toEqual([
+      { path: "/api/internal/skill-burgers/resume", body: { run: "run-7", response: "Wrote wait.md" } },
+      { path: "/api/internal/skill-burgers/resume", body: { run: "run-7", response: '{"redo":{"Rio":"add the URL"}}' } },
+    ]);
+  });
+});

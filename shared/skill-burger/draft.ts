@@ -325,8 +325,9 @@ class Drafter {
     } else if (layer.kind === "shell" && heredoc && heredoc[3]!.trim().length >= HEREDOC_MIN && layer.afterRead) {
       // The command wrote text the AI composed from what it read: write it again from what is there now.
       const target = /(?:>{1,2})\s*["']?([^\s"';|&]+)/.exec(command)?.[1]?.split("/").pop() ?? "the file";
+      const read = [...this.recorded].reverse().find((entry) => entry.read);
       this.steps.push({
-        id, kind: "ai", deterministic: false, label: `Write ${target}`.slice(0, 120),
+        id, kind: "ai", deterministic: false, label: `Write ${target}`.slice(0, 120), ...(read ? { input: { $step: read.id } } : {}),
         prompt: `Write ${target} again from what this run reads now, for the request: ${this.request(400)}. Match the example's shape; don't copy its values. Last time the command was: ${redactSecretsInText(command.replace(CONVERSATION_FOLDER, ".").split("\n", 1)[0]!).slice(0, 300)}`,
         example: redactSecretsInText(heredoc[3]!).slice(0, EXAMPLE_MAX),
       });
