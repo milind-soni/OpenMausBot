@@ -41,11 +41,12 @@ export function useServerUpdate() {
     return next;
   }, []);
 
-  const load = useCallback(async () => {
+  /** `fresh`: the Check for updates button, which must not get the server's answer from up to an hour ago. */
+  const load = useCallback(async (fresh = false) => {
     setChecking(true);
     setFailed(false);
     try {
-      const next = await api<ServerUpdateCheck>("/api/updates/check", { timeoutMs: 20_000 });
+      const next = await api<ServerUpdateCheck>(fresh ? "/api/updates/check?fresh=1" : "/api/updates/check", { timeoutMs: 20_000 });
       setCheck(next);
       if (next.install !== "desktop" && next.install !== "managed") await readStatus().catch(() => null);
     } catch {
@@ -129,7 +130,7 @@ export function ServerUpdateRow({ title }: { title: string }) {
   const [confirming, setConfirming] = useState(false);
   const { view, check, status } = update;
   const press = () => {
-    if (view.action === "check") return void update.load();
+    if (view.action === "check") return void update.load(true);
     if (view.action === "reload") return window.location.reload();
     if (view.action === "update-app") return void update.updateApp();
     if (view.action === "update-server") {

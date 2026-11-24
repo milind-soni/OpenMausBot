@@ -255,7 +255,7 @@ export function useServerUpdateItem(enabled: boolean): UpdateEntry | null {
         if (phase === "available" && check?.releaseUrl) return void openExternalLink(check.releaseUrl);
         if (phase === "reload") return window.location.reload();
         setPhase("checking");
-        void api<ServerUpdateCheck>("/api/updates/check", { timeoutMs: 20_000 })
+        void api<ServerUpdateCheck>("/api/updates/check?fresh=1", { timeoutMs: 20_000 })
           .then((next) => {
             setCheck(next);
             setPhase(serverCheckPhase(next));
