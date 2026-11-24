@@ -8593,6 +8593,8 @@ async function beginTurn(
         turnSucceeded: false,
         tool: failedTurnTool(message, { ...(e instanceof PlaceUnavailableError ? { place: e.row } : e instanceof TurnUsageLimitRefusedError ? { limitResetsAt: e.resetsAt } : e instanceof TurnAuthenticationRefusedError ? { setup: true } : {}), text: startFailureText(e) }),
       });
+      store.setTaskActivity(bot.id, threadId, "idle");
+      directTurnBots.delete(threadId);
       const personTurn = opts?.automationSource === undefined && !opts?.commsDepth && !opts?.cardContinuation, told = personTurn && takeoverScope === "signed-out" ? limitTakeover.tell(bot, bot.modelSelection, { scope: "signed-out" }) : null; // a limit or a sign-out is heard once a stretch, not once a turn
       if (told) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${told}`, ok: true, setup: true } });
       if (personTurn && (!takeoverScope || limitTakeover.firstIncident(bot.id, bot.modelSelection, takeoverScope, e instanceof TurnUsageLimitRefusedError ? e.resetsAt : undefined))) {
@@ -8601,8 +8603,6 @@ async function beginTurn(
         );
         reportIncident({ kind: "could-not-start", bot, threadId, detail: message });
       }
-      store.setTaskActivity(bot.id, threadId, "idle");
-      directTurnBots.delete(threadId);
       opts?.onDispatchError?.(message);
       // A dispatch failure emits no turn.completed, so drain here or the queue behind this turn strands.
       drainQueuedSends();
