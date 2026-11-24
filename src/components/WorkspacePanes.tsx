@@ -126,8 +126,8 @@ export function WorkspacePanes({ primary, title, children }: { primary: string; 
       aria-orientation={beside ? "vertical" : "horizontal"} aria-valuenow={Math.round(layout.ratio * 100)} aria-valuemin={20} aria-valuemax={80}
       style={beside ? { left: second.x + "%", top: box.y + "%", height: box.h + "%" }
         : { top: second.y + "%", left: box.x + "%", width: box.w + "%" }}
-      className={'absolute z-10 flex touch-none items-center justify-center outline-none hover:bg-accent/20 focus-visible:bg-accent/30 ' +
-        (beside ? 'w-2 -translate-x-1/2 cursor-col-resize' : 'h-2 -translate-y-1/2 cursor-row-resize')}
+      className={'workspace-divider absolute z-30 grid touch-none place-items-center ' +
+        (beside ? 'w-3 -translate-x-1/2 cursor-col-resize' : 'h-3 -translate-y-1/2 cursor-row-resize')}
       onPointerDown={(event) => {
         if (event.button !== 0 || !root.current) return;
         event.preventDefault();
@@ -144,7 +144,7 @@ export function WorkspacePanes({ primary, title, children }: { primary: string; 
       onKeyDown={(event) => {
         const delta = event.key === (beside ? "ArrowRight" : "ArrowDown") ? .05 : event.key === (beside ? "ArrowLeft" : "ArrowUp") ? -.05 : 0;
         if (delta) { event.preventDefault(); resize(layout.ratio + delta); }
-      }}><span className={beside ? "h-full w-px bg-hairline" : "h-px w-full bg-hairline"} /></div>);
+      }} />);
     draw(layout.first, first, path + "0");
     draw(layout.second, second, path + "1");
   }

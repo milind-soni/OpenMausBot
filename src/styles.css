@@ -3682,6 +3682,7 @@ button:disabled.bg-danger {
 [data-window-drag] :has(> :is(select, input)),
 [data-window-drag] :is(button, a[href], input, select, textarea, label, summary, [role="button"], [role="link"], [role="tab"], [role="switch"], [role="checkbox"], [role="radio"], [role="combobox"], [role="slider"], [role="separator"], [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])),
 :is([role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [role="tooltip"]),
+.workspace-divider,
 .fixed:has(> :is([role="dialog"], [role="alertdialog"], [aria-modal="true"])),
 [data-browser-transport],
 [data-live-desktop][data-expanded] {
@@ -3887,6 +3888,32 @@ button:disabled.bg-danger {
 .tiled-room-controls > * > :is([role="menu"], [role="dialog"]) {
   inset-inline: 0 auto;
   max-inline-size: 100%;
+}
+.workspace-divider {
+  --seam-width: 1px;
+  color: color-mix(in srgb, var(--color-ink-tertiary) 75%, var(--color-hairline));
+}
+.workspace-divider::before {
+  content: "";
+  width: var(--seam-width);
+  height: 100%;
+  background: currentColor;
+  pointer-events: none;
+}
+.workspace-divider[aria-orientation="horizontal"]::before {
+  width: 100%;
+  height: var(--seam-width);
+}
+.workspace-divider:is(:hover, :focus-visible, :active) {
+  --seam-width: 3px;
+  color: var(--color-focus);
+  outline: none;
+  z-index: 31;
+}
+@media (forced-colors: active) {
+  .workspace-divider { color: CanvasText; }
+  .workspace-divider:is(:hover, :focus-visible, :active) { color: Highlight; }
+  .workspace-divider::before { forced-color-adjust: none; }
 }
 [data-pane-focused] :is([data-chathead-pill], [data-roomhead-identity]) {
   box-shadow: 0 0 0 1px var(--color-edge);

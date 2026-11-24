@@ -121,20 +121,35 @@ export async function verifyWorkspacePanes(previewUrl: string, finishGate: strin
     assert.equal(a.bottom, c.y);
     assert.equal(a.right, b.x);
     assert.equal(c.bottom, b.bottom);
+    await page.evaluate("import('/src/lib/interface-mode.ts').then(mode => mode.setAdvancedMode(true))");
+    await page.until("!document.querySelector('[data-chathead-float]')");
+    await key("Tab", 9);
     for (const [orientation, keyName, code] of [["vertical", "ArrowRight", 39], ["horizontal", "ArrowDown", 40]] as const) {
       const divider = element(`[role=separator][aria-label="Resize panes"][aria-orientation=${orientation}]`);
       await page.evaluate(`${divider}.focus()`);
+      const reachable = await page.evaluate(`(() => {
+        const divider = ${divider}, r = divider.getBoundingClientRect(), vertical = divider.ariaOrientation === "vertical";
+        const length = vertical ? r.height : r.width;
+        return [1, 24, length / 2, length - 2].map(offset => {
+          const x = r.x + (vertical ? r.width / 2 : offset), y = r.y + (vertical ? offset : r.height / 2);
+          return divider.contains(document.elementFromPoint(x, y));
+        });
+      })()`);
+      assert.deepEqual(reachable, [true, true, true, true], orientation + " divider must be reachable along its shared edge");
       await key(keyName, code);
       await page.until(`${divider}.getAttribute('aria-valuenow') === '55'`);
     }
     const vertical = element('[role=separator][aria-label="Resize panes"][aria-orientation=vertical]');
     const grip = await page.evaluate(`${vertical}.getBoundingClientRect().toJSON()`);
-    const x = grip.x + grip.width / 2, y = grip.y + grip.height / 2;
+    const x = grip.x + grip.width / 2 + 4, y = grip.top + 12;
     await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
     await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
+    await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: b.right - 12, y, button: "left", buttons: 1 });
+    await page.until(`${vertical}.getAttribute('aria-valuenow') === '80' && ${vertical}.matches(':active')`);
     await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: x - 48, y, button: "left", buttons: 1 });
     await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: x - 48, y, button: "left" });
     await page.until(`Number(${vertical}.getAttribute('aria-valuenow')) < 55`);
+    await page.evaluate("import('/src/lib/interface-mode.ts').then(mode => mode.setAdvancedMode(false))");
     await click(composer(third));
     writeFileSync(evidence, await page.capture());
     writeFileSync(finishGate, "");
