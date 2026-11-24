@@ -151,7 +151,8 @@ export function readReview(response: string, state: DelegationState): Record<str
   const out: Record<string, string> = {};
   for (const [name, fix] of Object.entries(redo as Record<string, unknown>)) {
     const part = Object.entries(state.replies).find(([key, reply]) => norm(key) === norm(name) || norm(reply.name) === norm(name))?.[0];
-    if (part && typeof fix === "string" && fix.trim()) out[part] = fix.trim().slice(0, 2_000);
+    if (!part || typeof fix !== "string" || !fix.trim()) return null;
+    out[part] = fix.trim().slice(0, 2_000);
   }
   return out;
 }
