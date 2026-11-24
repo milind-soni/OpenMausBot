@@ -187,7 +187,8 @@ element's job and never a pixel value:
   chevrons at the end of a row, not before the label.
 - **Control heights: 24, 28, 32 or 36px.** Menu rows are 30px (32px in the
   composer's menu). The chat header's controls and the sidebar's top buttons
-  are 36px. On touch screens, targets grow to 40–44px with the `touch:`
+  are 36px; beside the thread tabs band both are 32px, on the same centre
+  line. On touch screens, targets grow to 40–44px with the `touch:`
   variant.
 - **Sidebar rows:** Simple's rows have 8px padding and a 10px gap after the
   36px avatar; every row hovers at `bg-ink/[0.06]`. The sidebar is 280px wide
