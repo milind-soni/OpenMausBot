@@ -54,6 +54,8 @@ const SERVER_ENV_NAMES = new Set([
   "OMB_CONVERSATION_FOLDER_CLEANUP",
   // The orphan sweep's switch (server/host/orphan-sweep.ts): off, report or remove, set per home by the Admin.
   "OMB_ORPHAN_SWEEP", "OMB_ORPHAN_SWEEP_MAX_SHARE",
+  // The full tool results' day-old sweep (server/host/tool-results-sweep.ts), off unless the Admin sets it.
+  "OMB_TOOL_RESULTS_SWEEP",
 ]);
 export function serverEnvironmentAllowed(name: string): boolean {
   return SERVER_ENV_NAMES.has(name) || name.startsWith("LC_");
