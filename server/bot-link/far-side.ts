@@ -11,6 +11,7 @@
 // "confined") refuse such work with a line back to the sender, rather than run it at the bot's own level.
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import type { SendTurnInput } from "../contracts.ts";
+import { outsideRouteRefused } from "../host/outside-fence.ts";
 import { LINK_PREFIX } from "./protocol.ts";
 
 /** What the bot is told, and how a refusal ends. */
@@ -19,6 +20,8 @@ export const LINK_COMMANDS_OFF = "Running commands on this computer is off for w
 export const LINK_ENGINE_REFUSAL = "This bot's AI can't work on this computer without running commands, and running commands on this computer is off for work from My Cloud, so this was not started. The person can turn on \"Let Clouds run commands on this computer\" from the OpenMausBot icon, or give this bot an AI that can work without them.";
 /** An action such work asked for that it may not take. */
 export const LINK_ACTION_DENIED = "Not allowed for work from My Cloud while running commands on this computer is off.";
+/** A harness route such work may not use. */
+export const LINK_ROUTE_REFUSAL = "Work from My Cloud can't do that on this computer while running commands here is off: it may not change settings, add tools, or start or schedule work outside this conversation. Finish what you can here and say plainly what the person would need to do.";
 /** The desktop's word on the grant, over Electron's private parent port (electron/link-commands-fact.mjs). */
 export const LINK_COMMANDS_MESSAGE = "openmausbot:link-commands";
 
@@ -26,6 +29,23 @@ export const LINK_COMMANDS_MESSAGE = "openmausbot:link-commands";
  * own Chrome), the paired phones, the person's own MCP servers (commands run here), and the Data tools (their SQL reads
  * and writes files). The harness's own team tools, connected apps, email and hooks stay. */
 const NOT_LENT = ["localComputer", "browser", "phone", "device", "custom", "mcpApps", "customResultBudgets", "data"] as const;
+
+/** Of the routes a confined turn may reach (host/outside-fence.ts), the ones that would change this computer's setup or
+ * start work later outside this conversation's lineage, where it would run at a bot's own level; and the integrations'
+ * own routes, which such a turn is never given. Handing work on stays: it keeps the lineage. */
+const LATER_OR_SETUP: ReadonlySet<string> = new Set([
+  "POST /api/internal/threads", "POST /api/internal/post-to-room", "POST /api/internal/retry-thread", "POST /api/internal/trigger-requests",
+  "POST /api/internal/manage-room", "POST /api/internal/waits", "POST /api/internal/profile-requests", "POST /api/internal/model-requests",
+  "POST /api/internal/team-setup-requests", "POST /api/internal/bot-deletion-requests", "POST /api/internal/create-bot",
+  "POST /api/internal/skills/stage", "POST /api/internal/mcp-servers", "POST /api/internal/shared-computers", "POST /api/internal/connectors/request",
+  "POST /api/internal/browser/mcp", "POST /api/internal/computer/mcp", "GET /api/internal/computer-control", "POST /api/internal/computer-control",
+  "POST /api/internal/computer/journal", "POST /api/internal/data/mcp",
+]);
+
+/** Whether a limited turn is refused this harness route: every route a confined turn is, and LATER_OR_SETUP. */
+export function linkRouteRefused(method: string, path: string): boolean {
+  return outsideRouteRefused(method, path) || LATER_OR_SETUP.has(`${method.toUpperCase()} ${path}`);
+}
 
 export interface LinkLimitsDeps {
   /** This server is a Cloud, or the side of the link that computers ask: work from a computer runs in its own place, so

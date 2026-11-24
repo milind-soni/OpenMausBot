@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createCoordinator, type Coordinator, type CoordinatorHost, type HandoffView } from "../coordinator.ts";
 import type { SendTurnInput } from "../contracts.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
-import { createLinkLimits, LINK_ACTION_DENIED, LINK_COMMANDS_MESSAGE, LINK_COMMANDS_OFF, LINK_ENGINE_REFUSAL, linkLevel } from "./far-side.ts";
+import { createLinkLimits, LINK_ACTION_DENIED, LINK_COMMANDS_MESSAGE, LINK_COMMANDS_OFF, LINK_ENGINE_REFUSAL, linkLevel, linkRouteRefused } from "./far-side.ts";
 import { createBotLink, type BotLink } from "./link.ts";
 import { peerKey, type Frame } from "./protocol.ts";
 
@@ -167,6 +167,18 @@ describe("what a limited turn's engine is given", () => {
     expect(linkLevel("auto", "claudeAgent")).toBe("edits");
     expect(linkLevel("custom", "codex")).toBe("ask");
     expect(linkLevel("edits", "geminiAgent")).toBe("edits");
+  });
+
+  it("reaches no harness route that changes this computer's setup or starts work later, and keeps handing work on and memory", () => {
+    for (const refused of ["POST /api/internal/mcp-servers", "POST /api/internal/trigger-requests", "POST /api/internal/waits", "POST /api/internal/create-bot",
+      "POST /api/internal/computer/mcp", "POST /api/internal/post-to-room", "POST /api/internal/routines", "PATCH /api/internal/app-settings"]) {
+      const [method, path] = refused.split(" ") as [string, string];
+      expect(linkRouteRefused(method, path), refused).toBe(true);
+    }
+    for (const kept of ["POST /api/internal/coordinate-bots", "GET /api/internal/assignment-status", "POST /api/internal/memory", "POST /api/internal/connectors/mcp", "POST /api/internal/email/mcp"]) {
+      const [method, path] = kept.split(" ") as [string, string];
+      expect(linkRouteRefused(method, path), kept).toBe(false);
+    }
   });
 
   it("answers its permission requests at the capped level only while that turn runs", () => {

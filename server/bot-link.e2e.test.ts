@@ -155,8 +155,9 @@ it("a bot on the computer and a bot on the person's own server hand each other w
     expect(withFiles.some((message) => message.attachments?.some((file: any) => file.name === "orders.csv"))).toBe(true);
     expect(withFiles.some((message) => message.roomRequest?.phase === "result" && message.attachments?.some((file: any) => file.name === "totals.txt"))).toBe(true);
 
-    // And the other way, over the same link.
-    computer.plan(writer.id, { reply: "Writer drafted the summary." });
+    // And the other way, over the same link. Writer also tries to add a tool server and to write outside its folder.
+    computer.plan(writer.id, { steps: [{ tool: "mcp_server", arguments: { action: "add", name: "planted", url: "https://example.invalid/mcp" }, expectError: true }],
+      approve: { tool_name: "Write", input: { file_path: join(computer.dataDir, "..", "planted.txt"), content: "x" } }, reply: "Writer drafted the summary." });
     home.plan(atlas.id,
       { steps: [{ tool: "coordinate_bots", arguments: { bot_ids: ["Writer"], request_key: "draft", message: "Draft the weekly summary." } }], reply: "Asked Writer." },
       { reply: "Writer drafted it." });
@@ -169,6 +170,8 @@ it("a bot on the computer and a bot on the person's own server hand each other w
     const drafted = computer.providerTurns().filter((turn) => turn.botId === writer.id).at(-1);
     expect(drafted).toMatchObject({ permissionMode: "acceptEdits", restricted: true });
     expect(JSON.stringify(drafted.prompt)).toContain("Running commands on this computer is off for work from My Cloud");
+    expect(JSON.stringify(drafted.evidence)).toContain("it may not change settings, add tools, or start or schedule work outside this conversation");
+    expect(drafted.approval).toMatchObject({ behavior: "deny" });
     const workHere = (await computer.api("GET", "/api/bots")).bots.find((bot: any) => bot.id === writer.id).tasks.find((task: any) => /Atlas/.test(task.title ?? ""));
     expect(workHere, "the work's own thread on the computer").toBeTruthy();
     expect((await computer.messages(workHere.threadId)).filter((message) => message.kind === "options")).toEqual([]);
