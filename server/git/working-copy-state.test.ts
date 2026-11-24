@@ -126,6 +126,42 @@ describe("workingCopyState: what it judges", () => {
     expect(kinds(await workingCopyState(dir))).toEqual(["commits"]);
   });
 
+  it("counts a repository of its own inside an ignored folder as work, however it is ignored", async () => {
+    const nest = (dir: string, inside: string) => {
+      const inner = join(dir, inside);
+      mkdirSync(inner, { recursive: true });
+      git(inner, "init", "-q");
+      writeFileSync(join(inner, "x.txt"), "work");
+      git(inner, "add", "x.txt");
+      git(inner, "commit", "-qm", "only here");
+    };
+    const gitignore = repo();
+    writeFileSync(join(gitignore, ".gitignore"), "node_modules/\n.env\nwork/\n");
+    git(gitignore, "commit", "-qam", "ignore work");
+    markPushed(gitignore);
+    nest(gitignore, "work");
+    expect(git(gitignore, "status", "--porcelain")).toBe("");
+    expect(kinds(await workingCopyState(gitignore))).toEqual(["nested-repo"]);
+
+    const exclude = repo();
+    writeFileSync(join(exclude, ".git", "info", "exclude"), "scratch/\n");
+    nest(exclude, join("scratch", "deep", "down"));
+    expect(git(exclude, "status", "--porcelain")).toBe("");
+    expect(kinds(await workingCopyState(exclude))).toEqual(["nested-repo"]);
+
+    const untracked = repo();
+    nest(untracked, "work");
+    expect(kinds(await workingCopyState(untracked))).toEqual(["changes"]);
+  });
+
+  it("answers unknown when the ignored folders are too many to look through", async () => {
+    const dir = repo();
+    for (let index = 0; index < 10; index++) mkdirSync(join(dir, "node_modules", `p${index}`, "lib"), { recursive: true });
+    expect(await workingCopyState(dir)).toEqual({ state: "disposable" });
+    const state = await workingCopyState(dir, { maxIgnoredFolders: 5 });
+    expect(state.state).toBe("unknown");
+  });
+
   it("counts a stash as work", async () => {
     const dir = repo();
     writeFileSync(join(dir, "a.txt"), "two\n");
@@ -147,6 +183,43 @@ describe("workingCopyState: what it judges", () => {
     expect(state.state === "has-unpushed-work" && state.reasons[0]!.detail).toBe("its only remotes are folders on this disk");
     git(local, "remote", "set-url", "origin", `file://${bare.replace(/\\/g, "/")}`);
     expect(kinds(await workingCopyState(local))).toEqual(["no-remote"]);
+  });
+
+  it("does not count a remote whose push address is a folder on this disk", async () => {
+    const bare = join(scratch(), "remote.git");
+    git(scratch(), "init", "-q", "--bare", bare);
+    const pushUrl = repo();
+    commit(pushUrl, "b.txt", "b");
+    git(pushUrl, "remote", "set-url", "--push", "origin", bare);
+    git(pushUrl, "push", "-q", "origin", "main");
+    expect(git(pushUrl, "rev-parse", "origin/main")).toBe(git(pushUrl, "rev-parse", "HEAD"));
+    expect(kinds(await workingCopyState(pushUrl))).toEqual(["no-remote"]);
+
+    const insteadOf = repo();
+    commit(insteadOf, "b.txt", "b");
+    git(insteadOf, "config", `url.${scratch().replace(/\\/g, "/")}/.pushInsteadOf`, "https://example.invalid/");
+    git(insteadOf, "update-ref", "refs/remotes/origin/main", "HEAD");
+    expect(kinds(await workingCopyState(insteadOf))).toEqual(["no-remote"]);
+  });
+
+  it("answers unknown when one remote's name is another's plus /…", async () => {
+    const dir = repo();
+    commit(dir, "b.txt", "b");
+    const bare = join(scratch(), "backup.git");
+    git(scratch(), "init", "-q", "--bare", bare);
+    git(dir, "remote", "add", "origin/backup", bare);
+    git(dir, "push", "-q", "origin/backup", "main");
+    expect(git(dir, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/backup")).toContain("refs/remotes/origin/backup/main");
+    expect((await workingCopyState(dir)).state).toBe("unknown");
+  });
+
+  it("puts no file names in a reason's detail", async () => {
+    const dir = repo();
+    writeFileSync(join(dir, "a.txt"), "two\n");
+    writeFileSync(join(dir, "private-name.txt"), "x");
+    const state = await workingCopyState(dir);
+    expect(kinds(state)).toEqual(["changes"]);
+    expect(JSON.stringify(state)).not.toMatch(/private-name|a\.txt/);
   });
 
   it("counts a merge, rebase, cherry-pick, revert or bisect in progress as work", async () => {
@@ -194,10 +267,39 @@ describe("workingCopyState: what it judges", () => {
     rmSync(join(linked, "wip.txt"));
     writeFileSync(join(dir, "wip.txt"), "wip");
     expect(await workingCopyState(linked)).toEqual({ state: "disposable" });
-    // A commit on the linked worktree's detached HEAD is unpushed from the main checkout too.
+    // A commit on the linked worktree's detached HEAD is unpushed from the main checkout too, and only that tree's own.
     rmSync(join(dir, "wip.txt"));
     commit(linked, "b.txt", "b");
-    expect(kinds(await workingCopyState(dir))).toEqual(["commits"]);
+    expect(kinds(await workingCopyState(dir))).toEqual(["worktree"]);
+    const own = await workingCopyState(linked);
+    expect(own.state === "has-unpushed-work" && own.reasons.map(({ kind, scope }) => ({ kind, scope }))).toEqual([{ kind: "commits", scope: "this-worktree" }]);
+  });
+
+  it("finds a commit kept only by a linked worktree's refs/worktree/*, from the main checkout", async () => {
+    const dir = repo();
+    const linked = join(scratch(), "linked");
+    git(dir, "worktree", "add", "-q", "--detach", linked);
+    commit(linked, "b.txt", "b");
+    git(linked, "update-ref", "refs/worktree/keep", "HEAD");
+    git(linked, "checkout", "-q", "--detach", "origin/main");
+    const state = await workingCopyState(dir);
+    expect(kinds(state)).toEqual(["worktree"]);
+    expect(state.state === "has-unpushed-work" && state.reasons[0]!.detail).toContain("refs/worktree");
+  });
+
+  it("tells commits on a shared branch from commits only on this working tree's HEAD", async () => {
+    const branch = repo();
+    git(branch, "branch", "side");
+    git(branch, "checkout", "-q", "side");
+    commit(branch, "b.txt", "b");
+    git(branch, "checkout", "-q", "main");
+    const shared = await workingCopyState(branch);
+    expect(shared.state === "has-unpushed-work" && shared.reasons.map(({ kind, scope }) => ({ kind, scope }))).toEqual([{ kind: "commits", scope: "repository" }]);
+    const head = repo();
+    git(head, "checkout", "-q", "--detach");
+    commit(head, "b.txt", "b");
+    const own = await workingCopyState(head);
+    expect(own.state === "has-unpushed-work" && own.reasons.map(({ kind, scope }) => ({ kind, scope }))).toEqual([{ kind: "commits", scope: "this-worktree" }]);
   });
 
   it("calls files marked assume-unchanged or skip-worktree hidden changes", async () => {
@@ -240,7 +342,7 @@ describe("workingCopyState: what it judges", () => {
     expect(git(dir, "status", "--porcelain")).toBe("");
     const state = await workingCopyState(dir);
     expect(kinds(state)).toEqual(["submodule"]);
-    expect(state.state === "has-unpushed-work" && state.reasons[0]!.detail).toContain("commits that are on no remote");
+    expect(state.state === "has-unpushed-work" && state.reasons[0]!.detail).toContain("on no remote");
     markPushed(sm);
     expect(await workingCopyState(dir)).toEqual({ state: "disposable" });
 
