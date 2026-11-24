@@ -4359,7 +4359,13 @@
       "skillBurger.pill.running": "4562a26adc2516299326914cbb4713c9008351f7e33c798957de6fea70c83605",
       "skillBurger.pill.stopped": "1a4f630ac1b69fd00728fa8a672ded71d0eae8516cb23e78f94529113399b79b",
       "skillBurger.pill.addPath": "e2be77dfefb3684ce50c6200d9406b683abca0b1590ed64354ac444a32c0fec8",
-      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e"
+      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e",
+      "settings.page.features": "5697d03daef4de9cf8db7cb11755f71358a32b4acca94909a9d449f71040d2dd",
+      "settings.features.skillBurger": "678261e35eee4f84742a23ad473f68df1b642a09fb2d284c16b1e16282e9faa3",
+      "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
+      "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
+      "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -10989,7 +10995,13 @@
       "skillBurger.pill.running": "4562a26adc2516299326914cbb4713c9008351f7e33c798957de6fea70c83605",
       "skillBurger.pill.stopped": "1a4f630ac1b69fd00728fa8a672ded71d0eae8516cb23e78f94529113399b79b",
       "skillBurger.pill.addPath": "e2be77dfefb3684ce50c6200d9406b683abca0b1590ed64354ac444a32c0fec8",
-      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e"
+      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e",
+      "settings.page.features": "5697d03daef4de9cf8db7cb11755f71358a32b4acca94909a9d449f71040d2dd",
+      "settings.features.skillBurger": "678261e35eee4f84742a23ad473f68df1b642a09fb2d284c16b1e16282e9faa3",
+      "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
+      "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
+      "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -15024,7 +15036,13 @@
       "skillBurger.pill.running": "4562a26adc2516299326914cbb4713c9008351f7e33c798957de6fea70c83605",
       "skillBurger.pill.stopped": "1a4f630ac1b69fd00728fa8a672ded71d0eae8516cb23e78f94529113399b79b",
       "skillBurger.pill.addPath": "e2be77dfefb3684ce50c6200d9406b683abca0b1590ed64354ac444a32c0fec8",
-      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e"
+      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e",
+      "settings.page.features": "5697d03daef4de9cf8db7cb11755f71358a32b4acca94909a9d449f71040d2dd",
+      "settings.features.skillBurger": "678261e35eee4f84742a23ad473f68df1b642a09fb2d284c16b1e16282e9faa3",
+      "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
+      "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
+      "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -18911,7 +18929,13 @@
       "skillBurger.pill.running": "4562a26adc2516299326914cbb4713c9008351f7e33c798957de6fea70c83605",
       "skillBurger.pill.stopped": "1a4f630ac1b69fd00728fa8a672ded71d0eae8516cb23e78f94529113399b79b",
       "skillBurger.pill.addPath": "e2be77dfefb3684ce50c6200d9406b683abca0b1590ed64354ac444a32c0fec8",
-      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e"
+      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e",
+      "settings.page.features": "5697d03daef4de9cf8db7cb11755f71358a32b4acca94909a9d449f71040d2dd",
+      "settings.features.skillBurger": "678261e35eee4f84742a23ad473f68df1b642a09fb2d284c16b1e16282e9faa3",
+      "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
+      "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
+      "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -27075,7 +27099,13 @@
       "skillBurger.pill.running": "4562a26adc2516299326914cbb4713c9008351f7e33c798957de6fea70c83605",
       "skillBurger.pill.stopped": "1a4f630ac1b69fd00728fa8a672ded71d0eae8516cb23e78f94529113399b79b",
       "skillBurger.pill.addPath": "e2be77dfefb3684ce50c6200d9406b683abca0b1590ed64354ac444a32c0fec8",
-      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e"
+      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e",
+      "settings.page.features": "5697d03daef4de9cf8db7cb11755f71358a32b4acca94909a9d449f71040d2dd",
+      "settings.features.skillBurger": "678261e35eee4f84742a23ad473f68df1b642a09fb2d284c16b1e16282e9faa3",
+      "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
+      "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
+      "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -38953,7 +38983,14 @@
       "skillBurger.pill.running": "4562a26adc2516299326914cbb4713c9008351f7e33c798957de6fea70c83605",
       "skillBurger.pill.stopped": "1a4f630ac1b69fd00728fa8a672ded71d0eae8516cb23e78f94529113399b79b",
       "skillBurger.pill.addPath": "e2be77dfefb3684ce50c6200d9406b683abca0b1590ed64354ac444a32c0fec8",
-      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e"
+      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e",
+      "shortcuts.switch-thread": "706acb3c34904ac296501a94d3abc79050c9479d1e7de49ce33a6bd2f15b02ae",
+      "settings.page.features": "5697d03daef4de9cf8db7cb11755f71358a32b4acca94909a9d449f71040d2dd",
+      "settings.features.skillBurger": "678261e35eee4f84742a23ad473f68df1b642a09fb2d284c16b1e16282e9faa3",
+      "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
+      "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
+      "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -49309,7 +49346,13 @@
       "skillBurger.pill.running": "4562a26adc2516299326914cbb4713c9008351f7e33c798957de6fea70c83605",
       "skillBurger.pill.stopped": "1a4f630ac1b69fd00728fa8a672ded71d0eae8516cb23e78f94529113399b79b",
       "skillBurger.pill.addPath": "e2be77dfefb3684ce50c6200d9406b683abca0b1590ed64354ac444a32c0fec8",
-      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e"
+      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e",
+      "settings.page.features": "5697d03daef4de9cf8db7cb11755f71358a32b4acca94909a9d449f71040d2dd",
+      "settings.features.skillBurger": "678261e35eee4f84742a23ad473f68df1b642a09fb2d284c16b1e16282e9faa3",
+      "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
+      "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
+      "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -59752,7 +59795,13 @@
       "skillBurger.pill.running": "4562a26adc2516299326914cbb4713c9008351f7e33c798957de6fea70c83605",
       "skillBurger.pill.stopped": "1a4f630ac1b69fd00728fa8a672ded71d0eae8516cb23e78f94529113399b79b",
       "skillBurger.pill.addPath": "e2be77dfefb3684ce50c6200d9406b683abca0b1590ed64354ac444a32c0fec8",
-      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e"
+      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e",
+      "settings.page.features": "5697d03daef4de9cf8db7cb11755f71358a32b4acca94909a9d449f71040d2dd",
+      "settings.features.skillBurger": "678261e35eee4f84742a23ad473f68df1b642a09fb2d284c16b1e16282e9faa3",
+      "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
+      "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
+      "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -64059,7 +64108,13 @@
       "skillBurger.pill.running": "4562a26adc2516299326914cbb4713c9008351f7e33c798957de6fea70c83605",
       "skillBurger.pill.stopped": "1a4f630ac1b69fd00728fa8a672ded71d0eae8516cb23e78f94529113399b79b",
       "skillBurger.pill.addPath": "e2be77dfefb3684ce50c6200d9406b683abca0b1590ed64354ac444a32c0fec8",
-      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e"
+      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e",
+      "settings.page.features": "5697d03daef4de9cf8db7cb11755f71358a32b4acca94909a9d449f71040d2dd",
+      "settings.features.skillBurger": "678261e35eee4f84742a23ad473f68df1b642a09fb2d284c16b1e16282e9faa3",
+      "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
+      "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
+      "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -70184,7 +70239,13 @@
       "skillBurger.pill.running": "4562a26adc2516299326914cbb4713c9008351f7e33c798957de6fea70c83605",
       "skillBurger.pill.stopped": "1a4f630ac1b69fd00728fa8a672ded71d0eae8516cb23e78f94529113399b79b",
       "skillBurger.pill.addPath": "e2be77dfefb3684ce50c6200d9406b683abca0b1590ed64354ac444a32c0fec8",
-      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e"
+      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e",
+      "settings.page.features": "5697d03daef4de9cf8db7cb11755f71358a32b4acca94909a9d449f71040d2dd",
+      "settings.features.skillBurger": "678261e35eee4f84742a23ad473f68df1b642a09fb2d284c16b1e16282e9faa3",
+      "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
+      "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
+      "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -76309,7 +76370,13 @@
       "skillBurger.pill.running": "4562a26adc2516299326914cbb4713c9008351f7e33c798957de6fea70c83605",
       "skillBurger.pill.stopped": "1a4f630ac1b69fd00728fa8a672ded71d0eae8516cb23e78f94529113399b79b",
       "skillBurger.pill.addPath": "e2be77dfefb3684ce50c6200d9406b683abca0b1590ed64354ac444a32c0fec8",
-      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e"
+      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e",
+      "settings.page.features": "5697d03daef4de9cf8db7cb11755f71358a32b4acca94909a9d449f71040d2dd",
+      "settings.features.skillBurger": "678261e35eee4f84742a23ad473f68df1b642a09fb2d284c16b1e16282e9faa3",
+      "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
+      "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
+      "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -83635,7 +83702,13 @@
       "skillBurger.pill.running": "4562a26adc2516299326914cbb4713c9008351f7e33c798957de6fea70c83605",
       "skillBurger.pill.stopped": "1a4f630ac1b69fd00728fa8a672ded71d0eae8516cb23e78f94529113399b79b",
       "skillBurger.pill.addPath": "e2be77dfefb3684ce50c6200d9406b683abca0b1590ed64354ac444a32c0fec8",
-      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e"
+      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e",
+      "settings.page.features": "5697d03daef4de9cf8db7cb11755f71358a32b4acca94909a9d449f71040d2dd",
+      "settings.features.skillBurger": "678261e35eee4f84742a23ad473f68df1b642a09fb2d284c16b1e16282e9faa3",
+      "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
+      "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
+      "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -91015,7 +91088,13 @@
       "skillBurger.pill.running": "4562a26adc2516299326914cbb4713c9008351f7e33c798957de6fea70c83605",
       "skillBurger.pill.stopped": "1a4f630ac1b69fd00728fa8a672ded71d0eae8516cb23e78f94529113399b79b",
       "skillBurger.pill.addPath": "e2be77dfefb3684ce50c6200d9406b683abca0b1590ed64354ac444a32c0fec8",
-      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e"
+      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e",
+      "settings.page.features": "5697d03daef4de9cf8db7cb11755f71358a32b4acca94909a9d449f71040d2dd",
+      "settings.features.skillBurger": "678261e35eee4f84742a23ad473f68df1b642a09fb2d284c16b1e16282e9faa3",
+      "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
+      "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
+      "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -102813,7 +102892,13 @@
       "skillBurger.pill.running": "4562a26adc2516299326914cbb4713c9008351f7e33c798957de6fea70c83605",
       "skillBurger.pill.stopped": "1a4f630ac1b69fd00728fa8a672ded71d0eae8516cb23e78f94529113399b79b",
       "skillBurger.pill.addPath": "e2be77dfefb3684ce50c6200d9406b683abca0b1590ed64354ac444a32c0fec8",
-      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e"
+      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e",
+      "settings.page.features": "5697d03daef4de9cf8db7cb11755f71358a32b4acca94909a9d449f71040d2dd",
+      "settings.features.skillBurger": "678261e35eee4f84742a23ad473f68df1b642a09fb2d284c16b1e16282e9faa3",
+      "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
+      "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
+      "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -110667,7 +110752,13 @@
       "skillBurger.pill.running": "4562a26adc2516299326914cbb4713c9008351f7e33c798957de6fea70c83605",
       "skillBurger.pill.stopped": "1a4f630ac1b69fd00728fa8a672ded71d0eae8516cb23e78f94529113399b79b",
       "skillBurger.pill.addPath": "e2be77dfefb3684ce50c6200d9406b683abca0b1590ed64354ac444a32c0fec8",
-      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e"
+      "skillBurger.card.madeBy": "aa4d9404a8f7f1c9c0039057f26ca85d1a43187de6c7a1901b69b59574ae010e",
+      "settings.page.features": "5697d03daef4de9cf8db7cb11755f71358a32b4acca94909a9d449f71040d2dd",
+      "settings.features.skillBurger": "678261e35eee4f84742a23ad473f68df1b642a09fb2d284c16b1e16282e9faa3",
+      "settings.features.skillBurgerLine": "727e1768d70f546045efe8b15d1ee23510993af8689549bc6fdfb84c40cccc15",
+      "settings.features.threadTabs": "af4220066028642bd47d7d9296d6c0a8d0f751c76e679bc7808e56a709303b30",
+      "settings.features.threadTabsLine": "0a9fe8a611767b2544e475a51a146ae6199ae2583e6330426fb281f79a38ef89",
+      "settings.features.error": "2610cc2e3f901d171a740d9d9b5a897d8437d42e6f5ecf7dd71a57b4e4c63b27"
     }
   }
 }
