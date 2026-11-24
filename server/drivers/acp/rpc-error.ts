@@ -1,4 +1,5 @@
 import { redactSecretsInText } from "../../redact.ts";
+import { classifyError } from "../retry.ts";
 
 /** The vendor's own message and the method we called, before redaction or any attached detail. */
 const vendorFailures = new WeakMap<object, { message: string; method: string }>();
