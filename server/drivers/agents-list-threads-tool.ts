@@ -10,10 +10,11 @@ const STATE_WORD: Record<string, string> = { running: "running", "waiting-on-you
 function threadLine(thread: Json): string {
   const where = thread.own === true ? "yours" : `on @${String(thread.botName)}${typeof thread.openedBy === "string" && thread.openedBy ? `, opened by @${thread.openedBy}` : ""}`;
   const state = STATE_WORD[String(thread.state)] ?? String(thread.state);
+  const archived = thread.archived === true ? ", archived: no longer in the person's sidebar" : "";
   const unread = thread.unread === true ? ", unread for the person" : "";
   const handoff = typeof thread.delegationId === "string" && thread.delegationId ? ` [delegation id: ${thread.delegationId}]` : "";
   const waiting = typeof thread.waiting === "string" && thread.waiting ? `: ${thread.waiting}` : "";
-  return `- #${String(thread.title)} (${where}, ${state}${waiting}${unread}) [thread id: ${String(thread.threadId)}]${handoff}`;
+  return `- #${String(thread.title)} (${where}, ${state}${waiting}${archived}${unread}) [thread id: ${String(thread.threadId)}]${handoff}`;
 }
 
 export async function callListThreadsTool(args: Json, context: ToolCallContext): Promise<ToolCallResult> {

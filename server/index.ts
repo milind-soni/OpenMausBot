@@ -26,7 +26,7 @@ import { botMemoryFiles, createLendingMemory } from "./lending-memory.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { STATUS_REPLY_TIMEOUT_MS } from "./runtime/status-reply.ts"; import { createCoordinator, type ComposedTurn, type CoordinateBotsCall, type Coordinator, type HandoffOpener, type HandoffOptions, type HandoffView, type HostTurnResult } from "./coordinator.ts";
 import { queuedBehindPersonText, turnWaitedOnPerson, UnansweredApprovals } from "./waiting-on-person.ts";
-import { createPersonWaits } from "./host/person-waits.ts"; import { askToolName, createAskCards } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts"; import { workThreadFor } from "./host/work-thread.ts"; import { closesOnResult } from "./host/finished-work.ts"; import { leaveThreadPost, postToThread, threadWaitsOn, unreadThreadPosts } from "./host/thread-posts.ts"; import { anyCardLive, closedByStop, resumableCards as cardsWaitedOn } from "./host/resumable-cards.ts"; import { createMcpChat } from "./host/mcp-chat.ts"; import { isCardOwnerLive, isMcpSignInCard } from "./host/mcp-sign-in-cards.ts"; import { createConnectCardSettle } from "./host/connect-card-settle.ts";
+import { createPersonWaits } from "./host/person-waits.ts"; import { askToolName, createAskCards } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts"; import { workThreadFor } from "./host/work-thread.ts"; import { finishHandedThread, reopenHandedThread } from "./host/finished-work.ts"; import { leaveThreadPost, postToThread, threadWaitsOn, unreadThreadPosts } from "./host/thread-posts.ts"; import { anyCardLive, closedByStop, resumableCards as cardsWaitedOn } from "./host/resumable-cards.ts"; import { createMcpChat } from "./host/mcp-chat.ts"; import { isCardOwnerLive, isMcpSignInCard } from "./host/mcp-sign-in-cards.ts"; import { createConnectCardSettle } from "./host/connect-card-settle.ts";
 import { assertRequestTarget, guardedRequestPath, requestConflict, requestNeedsInput } from "./guarded-requests.ts";
 import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
@@ -3926,12 +3926,7 @@ const titleHandedThread = createHandedThreadTitle({ store, gate: threadTitleGate
         const source = store.bot(parent.botId);
         if (source) markTaskContextExternallyUpdated(source, parent.threadId);
       }
-      const childTask = store.taskByThread(child.botId, child.threadId);
-      if (!child.groupId && child.status === "completed" && !problem && !coordinator.activeDirect(child.threadId)
-        && closesOnResult(childTask, parent.botId, child.botId)) {
-        store.setTaskClosedBy(child.botId, child.threadId,
-          { botId: parent.botId, name: store.bot(parent.botId)?.name ?? childTask!.openedBy!.name, at: Date.now() });
-      }
+      if (!child.groupId && child.status === "completed" && !problem && !coordinator.activeDirect(child.threadId)) finishHandedThread(store, child.botId, child.threadId, parent.botId, (threadId) => botWaits.list(child.botId).some((wait) => wait.threadId === threadId));
     },
     run: handoffFiles.around(async (node, resumed, signal, composed: ComposedTurn) => {
       const group = node.groupId ? store.group(node.groupId) : undefined;
@@ -13589,7 +13584,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             });
             usageTrace.link(node.id, node.parentId, { threadId: internalCapability.threadId, turnId: liveTurnByThread.get(internalCapability.threadId) ?? "" }); if (!duplicate) { actingPeople.handOn(internalCapability, node, lends, CLOUD_HOME ? undefined : OWN_SERVER_LENDER); if (!lends && !room && !lane) handedInUnproven(routed.threadId); }
             if (!duplicate && call.files?.length) handoffFiles.sent(node.id, { botId: internalSender.id, name: internalSender.name }, call.files);
-            if (duplicate && createdThread) store.deleteTask(target.botId, createdThread);
+            if (!duplicate && continued) reopenHandedThread(store, target.botId, continued); if (duplicate && createdThread) store.deleteTask(target.botId, createdThread);
             else if (createdThread) {
               threadStarters.set(createdThread, opener); if (via === "direct" && !(fresh && call.title)) titleHandedThread(target.botId, createdThread, call.message, fresh ? "" : `@${internalSender.name} · `);
               if (fresh && !EXTERNAL) internalCapability.openedThreads += 1;
