@@ -29,7 +29,7 @@ export function PhoneSetupSignInRoutes({ c }: { c: PhoneSetupController }) {
       )}
       {c.tailscaleAvailable && (
         <p className="mt-2 text-center text-[11px] leading-relaxed text-ink-secondary">
-          {t("phone.signIn.tailnetNote")}
+          {t("phone.signIn.sameTailscaleNote")}
         </p>
       )}
     </>

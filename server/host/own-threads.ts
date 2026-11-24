@@ -5,6 +5,7 @@ import { modelMenu, type MenuEngine, type ModelMenu } from "../routes/internal-m
 import type { BotRecord, Store } from "../store.ts";
 import type { NewThreadLevel } from "../task-record.ts";
 import type { ThreadModelFallback } from "../thread-model.ts";
+import type { EngineHint } from "./engine-hints.ts";
 import { createSpawnLevel, type SpawnLevelDeps } from "./spawn-level.ts";
 
 type Placed = { botId: string; threadId: string; groupId?: string };
@@ -20,6 +21,10 @@ export function createOwnThreads(deps: Pick<SpawnLevelDeps, "sourceLevel" | "may
   /** Why turn start would run a thread chosen on `selection` on the bot's own model instead. */
   givesWay(selection: ModelSelection, botModel: ModelSelection): ThreadModelFallback | null;
   modelName(selection: ModelSelection): string;
+  /** Why an engine can't run now and how the person connects it (engine-hints.ts). */
+  hint(instanceId: string): EngineHint;
+  /** Engines whose saved settings could not be read. */
+  broken?(): ReadonlyArray<{ name: string; hint: EngineHint }>;
 }) {
   const { store } = deps;
   /** The level a new thread opened from a conversation starts at (spawn-level.ts). */
@@ -76,7 +81,9 @@ export function createOwnThreads(deps: Pick<SpawnLevelDeps, "sourceLevel" | "may
       if (!bot) return null;
       const current = deps.current(botId, threadId) ?? bot.modelSelection;
       return modelMenu({ engines: deps.registry.instances(), current, pinned: [bot.modelSelection], refusal: (selection) => refusal(selection, bot),
-        down: (engine) => deps.givesWay({ instanceId: engine.instanceId, model: engine.models.default }, bot.modelSelection) === "unavailable", search });
+        down: (engine) => deps.givesWay({ instanceId: engine.instanceId, model: engine.models.default }, bot.modelSelection) === "unavailable" ? deps.hint(engine.instanceId) : null,
+        signedOut: (engine) => deps.givesWay({ instanceId: engine.instanceId, model: engine.models.default }, bot.modelSelection) === "signed-out" ? deps.hint(engine.instanceId) : null,
+        broken: deps.broken?.() ?? [], search });
     },
   };
 }

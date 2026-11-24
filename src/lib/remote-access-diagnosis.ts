@@ -145,7 +145,7 @@ function routeStep(facts: RemoteAccessFacts, relay: RemoteAccessStepResult): Eva
   if (relay === "ok") return { result: "ok", reason: t("remote.diagnosis.route.anywhere") };
   const on = (route: "wifi" | "relay" | "tailscale" | "https") => companion.routes?.[route]?.on === true;
   if (on("wifi") && hasWifiAddress(companion)) return { result: "ok", reason: t("remote.diagnosis.route.wifi") };
-  if (on("tailscale") && companion.routes?.tailscale?.name) return { result: "ok", reason: t("remote.diagnosis.route.tailscale") };
+  if (on("tailscale") && companion.routes?.tailscale?.name) return { result: "ok", reason: t("remote.diagnosis.route.privateNetwork") };
   if (on("https") && facts.account?.problem === "address") {
     return { result: "failed", reason: t("remote.diagnosis.route.https"), next: [t("remote.diagnosis.next.retry"), t("remote.diagnosis.next.useWifi")] };
   }

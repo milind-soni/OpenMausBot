@@ -242,7 +242,7 @@ it("a pasted link main can't open says so and keeps the sheet; cancelling main's
 
 const settle = () => act(async () => { await new Promise((done) => setTimeout(done, 450)); });
 
-it("Connect to a server never sits grey without saying why: it says it is looking, and says so when the check itself fails", async () => {
+it("Connect to another computer never sits grey without saying why: it says it is looking, and says so when the check itself fails", async () => {
   let answer: (value: unknown) => void = () => {};
   const probe = vi.fn((): Promise<unknown> => new Promise((resolve, reject) => { answer = resolve; void reject; }));
   Object.assign(window, { ogb: { workspaces: { ...workspaces, probe }, cloudAdd } });
@@ -263,7 +263,7 @@ it("Connect to a server never sits grey without saying why: it says it is lookin
   expect(form.querySelector("[data-connect-problem]")?.textContent).toBe("Can't reach 192.168.1.21:8799. Check the server is running and reachable from this computer.");
 });
 
-it("Connect to a server says how another computer's desktop app is opened from here: its Your other computers link, or My Cloud", async () => {
+it("Connect to another computer says how another computer's desktop app is opened from here: its Your other computers link, or My Cloud", async () => {
   const probe = vi.fn(async (address: string): Promise<unknown> => (address === "123456"
     ? { outcome: "problem", problem: "oldCode" }
     : { outcome: "problem", problem: "desktopApp", host: "192.168.1.30:8799" }));
@@ -272,18 +272,18 @@ it("Connect to a server says how another computer's desktop app is opened from h
   await click(host.querySelector("[data-rail-add]"));
   await click(document.querySelector('[data-place-add-choice="server"]'));
   const form = document.querySelector('[data-place-add="own-server"]')!;
-  expect(form.querySelector("[data-connect-other-computer]")?.textContent).toBe("For another computer running the MausBot app: on that computer, open Settings → Phone & devices → Your other computers.");
+  expect(form.querySelector("[data-connect-other-computer]")?.textContent).toBe("For another computer running the MausBot app: on that computer, open Settings → Devices → Private network → Your other computers.");
   await type(form.querySelector("[data-own-server-link]"), "192.168.1.30:8799");
   await settle();
   const line = form.querySelector("[data-connect-problem]")?.textContent ?? "";
-  expect(line).toContain("192.168.1.30:8799 is a MausBot desktop app. To open it from here, turn on Tailscale and Your other computers in its Settings → Phone & devices, then use the link shown there.");
+  expect(line).toContain("192.168.1.30:8799 is a MausBot desktop app. To open it from here, turn on Tailscale and Your other computers in its Settings → Devices, then use the link shown there.");
   expect(line).toContain("My Cloud");
   expect(line).not.toMatch(/can't connect to another|isn't a MausBot server/);
   expect((form.querySelector("[data-own-server-connect]") as HTMLButtonElement).disabled).toBe(true);
   await type(form.querySelector("[data-own-server-link]"), "123456");
   await settle();
   const code = form.querySelector("[data-connect-problem]")?.textContent ?? "";
-  expect(code).toContain("That code is for the phone app. To open that computer from here, turn on Tailscale and Your other computers in its Settings → Phone & devices, then use the link shown there.");
+  expect(code).toContain("That code is for the phone app. To open that computer from here, turn on Tailscale and Your other computers in its Settings → Devices, then use the link shown there.");
   expect(code).toContain("My Cloud");
   expect(code).not.toMatch(/can't connect to another|older MausBot/);
 });
@@ -311,7 +311,7 @@ it("an address typed key by key stays in its box; a pasted one moves on to the c
   expect(document.activeElement).toBe(form.querySelector("[data-own-server-code]"));
 });
 
-it("Connect to a server takes an address and a code typed apart: a code pasted alone moves to its field, and main names the server it found", async () => {
+it("Connect to another computer takes an address and a code typed apart: a code pasted alone moves to its field, and main names the server it found", async () => {
   const probe = vi.fn(async (address: string): Promise<unknown> => (address.includes("192.168.1.20")
     ? { outcome: "found", origin: "http://192.168.1.20:8799", label: "kitchen-box", version: "0.1.147", transport: "private-http", code: null, credential: null }
     : { outcome: "problem", problem: "publicHttp", host: "203.0.113.9" }));

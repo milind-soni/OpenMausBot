@@ -110,7 +110,7 @@ describe("buildApplicationMenu", () => {
     expect(items.map((entry) => entry.label)).toEqual(["Back to My Cloud", "Office — office.example.test", "Add Server from Copied Pairing Link…", "Forget “Office”"]);
     items[0].click();
     expect(home.onBack).toHaveBeenCalledOnce();
-    expect(items.some((entry) => /This computer|organization|Add a Cloud|Connect to a server/.test(entry.label))).toBe(false);
+    expect(items.some((entry) => /This computer|organization|Add a Cloud|Connect to another computer/.test(entry.label))).toBe(false);
     const onCloud = build("darwin", { environments: [cloud, office], activeId: "c", home }).find((entry) => entry.label === "Server").submenu;
     expect(onCloud.find((entry) => entry.id === "back-to-my-cloud").enabled).toBe(false);
   });
