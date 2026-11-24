@@ -265,11 +265,11 @@ const passThrough = (error: unknown) => error instanceof ImportLimitError || (er
 const toSkillSlug = (name: string) =>
   name.toLowerCase().replace(/[\s_]+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "");
 
-async function skillNameFrom(entries: ContentEntry[], fetcher: typeof fetch): Promise<string | undefined> {
-  const skillMd = entries.find((entry) => entry.type === "file" && entry.name === "SKILL.md" && entry.download_url);
+async function skillNameFrom(snapshot: Snapshot, entries: ContentEntry[], fetcher: typeof fetch): Promise<string | undefined> {
+  const skillMd = entries.find((entry) => entry.type === "file" && entry.name === "SKILL.md");
   if (!skillMd) return undefined;
   try {
-    const text = (await fetchBytes(skillMd.download_url!, fetcher)).toString("utf8");
+    const text = (await fetchBytes(`https://${RAW_HOST}/${snapshot.owner}/${snapshot.repo}/${snapshot.commit}/${encodePath(skillMd.path)}`, fetcher)).toString("utf8");
     return text.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1]?.match(/^name:\s*(.+)$/m)?.[1]?.trim();
   } catch (error) {
     if (passThrough(error)) throw error;
@@ -285,7 +285,7 @@ async function discoverSkillDirs(target: Target, snapshot: Snapshot, fetcher: ty
   const isWanted = async (dir: string, entries: ContentEntry[]) => {
     if (!wanted) return true;
     if (dirMatches(dir)) return true;
-    const name = await skillNameFrom(entries, fetcher);
+    const name = await skillNameFrom(snapshot, entries, fetcher);
     return !!name && toSkillSlug(name) === wanted;
   };
   if (root.some((entry) => entry.type === "file" && entry.name === "SKILL.md") && (await isWanted(target.path, root))) {

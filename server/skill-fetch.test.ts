@@ -373,9 +373,38 @@ describe("skill fetch host pinning", () => {
       if (!String(input).endsWith("/contents/skills/search-helper?ref=" + github.commitOf("a/b"))) return response;
       return Response.json([{ type: "file", name: "SKILL.md", path: "skills/search-helper/SKILL.md", download_url }]);
     }) as typeof fetch;
-    expect(await fetchSkillFromSource("https://skills.sh/a/b/wanted-skill", fetcher))
-      .toEqual({ error: expect.stringContaining('no skill named "wanted-skill"') });
+    const [skill] = ok(await fetchSkillFromSource("https://skills.sh/a/b/wanted-skill", fetcher));
+    expect(skill!.source).toBe("github.com/a/b/skills/search-helper");
     expect(vi.mocked(fetcher).mock.calls.map(([input]) => String(input))).not.toContain(download_url);
+  });
+
+  it("does not fetch a Contents API download_url, even one with a temporary token", async () => {
+    const skillMd = "---\nname: Find Skills\ndescription: finds things\n---\n# A skill";
+    const github = fakeGitHub({ "vercel-labs/skills": { "skills/search-helper/SKILL.md": skillMd } });
+    const tokenized = `https://raw.githubusercontent.com/vercel-labs/skills/${github.commitOf("vercel-labs/skills")}/skills/search-helper/SKILL.md?token=v1.private-file-token`;
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const response = await github.fetch(input, init);
+      if (!String(input).includes("/contents/skills/search-helper?ref=")) return response;
+      return Response.json([{
+        type: "file",
+        name: "SKILL.md",
+        path: "skills/search-helper/SKILL.md",
+        download_url: tokenized,
+      }]);
+    }) as typeof fetch;
+    const recorded = recordingFetch(fetcher);
+    const [skill] = ok(await fetchSkillFromSource(
+      "https://skills.sh/vercel-labs/skills/find-skills",
+      recorded.fetch,
+      undefined,
+      async () => SIGNED_IN,
+    ));
+    expect(skill!.source).toBe("github.com/vercel-labs/skills/skills/search-helper");
+    const urls = recorded.calls.map((call) => call.url);
+    expect(urls).not.toContain(tokenized);
+    expect(urls.every((url) => !url.includes("token="))).toBe(true);
+    expect(rawCalls(recorded.calls).every((call) => call.headers.get("authorization") === null && !call.url.includes("?"))).toBe(true);
+    expect(JSON.stringify(urls)).not.toContain("v1.private-file-token");
   });
 
   it("refuses a pasted plain-http raw link without fetching it", async () => {
