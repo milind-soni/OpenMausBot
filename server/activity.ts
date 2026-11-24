@@ -244,7 +244,7 @@ export function describedTool(name: string, input?: unknown): Described {
 }
 
 const DECISION_SCAN = 20_000;
-const EVENTS_PER_THREAD = 2_000;
+export const EVENTS_PER_THREAD = 2_000;
 /** A verdict is written as the request opens and the run follows, occasionally a clock skew's worth earlier. */
 const MATCH_BEFORE_MS = 5_000;
 const MATCH_AFTER_MS = 30_000;
