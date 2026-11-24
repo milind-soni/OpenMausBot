@@ -146,8 +146,9 @@ export function acpRequestSteering(running: () => boolean, send: (text: string) 
 /** `send` carries one `session/prompt` and settles when the agent answers it, at the end of the run. Without `takeOver` a
  * steer is reported as steered once it is sent: the agent gives no earlier answer. With it, steers go one at a time, each
  * decided by the agent: taken in when it answers the prompt carrying the turn while the turn is `live`, refused when it
- * rejects the steer or the turn stops or ends first (a settled turn fails every request still out). The turn waits for
- * every steer the agent took. */
+ * rejects the steer or the turn stops first, indeterminate when the steer fails any other way before that answer (it timed
+ * out, or the turn settled and failed every request still out): it was sent and may run. The turn waits for every steer
+ * the agent took. */
 export function acpPromptSteering(running: () => boolean, send: (text: string) => Promise<unknown>, takeOver?: AcpPromptSteer["takeOver"],
   live: () => boolean = running): AcpTurnSteering {
   let answered = false;
@@ -178,7 +179,9 @@ export function acpPromptSteering(running: () => boolean, send: (text: string) =
       return true;
     });
     // A reply that comes before the carrying prompt's answer only ends a stopped turn: the agent never took the steer.
-    void reply.then(() => decide(live() ? "steered" : "refused"), () => decide("refused"));
+    // Only the agent's own rejection proves that of a failed one: a timeout, a closed session or a settled turn leaves the
+    // words sent and maybe taken in, so the caller records them instead of sending them again.
+    void reply.then(() => decide(live() ? "steered" : "refused"), (error) => decide(takeOver!.rejected(error) ? "refused" : "indeterminate"));
     carrier = carrier.then(() => decide(live() ? "steered" : "refused") === "steered" ? reply.then(() => undefined, () => undefined) : undefined);
     return reported;
   };

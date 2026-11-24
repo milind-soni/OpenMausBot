@@ -270,12 +270,40 @@ describe("acpPromptSteering", () => {
       expect(steering.replies).toEqual([{ stopReason: "cancelled" }]);
     });
 
-    it("refuses a steer still out when the turn ends and its requests fail", async () => {
+    it("calls a steer still out indeterminate, never refused, when the turn ends and its requests fail", async () => {
       const { steering, sent } = takeOver();
       const outcome = steering.steer("use pytest", hears);
       await tick();
       sent[0]!.fail(new Error("turn settled"));
-      expect(await outcome).toBe("refused");
+      expect(await outcome).toBe("indeterminate");
+    });
+
+    it("calls a steer the agent got but never answered indeterminate once the wait expires, and never has it sent again", async () => {
+      vi.useFakeTimers();
+      try {
+        const sent: string[] = [];
+        // The engine takes the steer and stays silent; the request gives up after its idle wait, as core.ts's prompt does.
+        const steering = acpPromptSteering(() => true, (text) => {
+          sent.push(text);
+          return new Promise((_resolve, reject) => { setTimeout(() => reject(new Error("session/prompt timed out after 30000ms")), 30_000); });
+        }, { rejected });
+        const refused = vi.fn();
+        let outcome: string | undefined;
+        void steering.steer("use pytest", { refused }).then((one) => { outcome = one; });
+        await vi.advanceTimersByTimeAsync(29_999);
+        expect(outcome).toBeUndefined();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(outcome).toBe("indeterminate");
+        // "indeterminate" is the outcome the message route records as steered and never queues or sends again (index.ts).
+        expect(refused).not.toHaveBeenCalled();
+        const ended = steering.promptAnswered();
+        await vi.advanceTimersByTimeAsync(0);
+        await ended;
+        expect(refused).not.toHaveBeenCalled();
+        expect(sent).toEqual(["use pytest"]);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });
