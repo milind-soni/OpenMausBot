@@ -34,8 +34,8 @@ describe("HTML file preview errors", () => {
     expect(alertText()).toContain("Check your connection");
   });
 
-  it("opens a page the server sends", async () => {
-    await open(async () => new Response("<h1>Report</h1>"));
+  it("opens an HTML page larger than 2 MiB", async () => {
+    await open(async () => new Response(" ".repeat(2 * 1024 * 1024) + "<h1>Report</h1>"));
     expect(alertText()).toBe("");
     expect(document.body.querySelector("iframe")?.getAttribute("srcdoc")).toContain("<h1>Report</h1>");
   });
