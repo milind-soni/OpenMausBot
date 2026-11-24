@@ -121,6 +121,34 @@ describe("the pill's thread switcher", () => {
     expect(sent()).toEqual([]);
   });
 
+  it("folds on Escape after a real switch, with focus out in the composer", () => {
+    render(pepper(THREADS, "launch"));
+    act(() => q("[data-chathead-threads]")!.click());
+    act(() => chips()[2].click());
+    act(() => root!.render(createElement(ChatHeadPill, { bot: pepper(THREADS, "trip"), avatar: {} as never, privacy: null, onToggle, switcher: true })));
+    const composer = document.body.appendChild(document.createElement("textarea"));
+    act(() => composer.focus());
+    act(() => { composer.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(q("[role=listbox]")).toBeNull();
+    expect(document.activeElement).toBe(composer);
+  });
+
+  it("leaves Escape to an open dialog, and to anything that already used it", () => {
+    render(pepper(THREADS, "launch"));
+    act(() => q("[data-chathead-threads]")!.click());
+    const dialog = document.body.appendChild(document.createElement("div"));
+    dialog.setAttribute("role", "dialog");
+    const field = dialog.appendChild(document.createElement("input"));
+    act(() => field.focus());
+    act(() => { field.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(q("[role=listbox]")).not.toBeNull();
+    dialog.remove();
+    const used = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    used.preventDefault();
+    act(() => { document.body.dispatchEvent(used); });
+    expect(q("[role=listbox]")).not.toBeNull();
+  });
+
   it("has no plus of its own, folded or open: New thread stays at the header's end", () => {
     render(pepper(THREADS, "launch"));
     expect(q("[data-thread-chip-new]")).toBeNull();

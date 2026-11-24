@@ -87,6 +87,11 @@ function useGlidingWidth(key: unknown) {
   return box;
 }
 
+const OVERLAY = '[role="dialog"], [role="alertdialog"], [aria-modal="true"], [role="menu"], [popover]';
+function overlayOpen(target: EventTarget | null) {
+  return (target instanceof Element && Boolean(target.closest(OVERLAY))) || Boolean(document.querySelector('[aria-modal="true"]'));
+}
+
 /**
  * Simple mode's pill for a bot with two threads or more: its face and name open the bot panel as ever, a chevron beside
  * them widens the pill in place into the bot's threads (its main thread first) and folds it back. It stays open while
@@ -148,6 +153,17 @@ export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle
     if (open && row) centreChip(row, row.querySelector<HTMLElement>(`[data-thread-chip="${CSS.escape(active)}"]`));
   }, [open, active]);
   useLayoutEffect(() => { if (open) measure(); }, [open, shown, measure]);
+  useEffect(() => {
+    if (!open) return;
+    // Bubbles to window last, so a dialog, menu or the composer's own pickers claim Escape first.
+    const fold = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || overlayOpen(event.target)) return;
+      event.preventDefault();
+      close(Boolean(box.current?.contains(document.activeElement)));
+    };
+    window.addEventListener("keydown", fold);
+    return () => window.removeEventListener("keydown", fold);
+  });
 
   const pick = (tab: ThreadTab) => {
     if (tab.threadId !== active) dispatch({ type: "switchTask", botId: bot.id, threadId: tab.threadId });
@@ -163,7 +179,6 @@ export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle
     event.currentTarget.scrollLeft += event.deltaY;
   };
   const onKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(true); return; }
     const chips = Array.from(list.current?.querySelectorAll<HTMLElement>("[role=option]") ?? []);
     const at = chips.indexOf(document.activeElement as HTMLElement);
     if (at < 0) return;
