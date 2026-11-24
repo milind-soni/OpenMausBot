@@ -101,13 +101,13 @@ export function bubbleJoins(slots: readonly TranscriptSlot[]): BubbleJoin[] {
 }
 
 /** Simple mode: a card sits 12px under its own bot's bubble, and a bubble 12px under its card, instead of the 16px
- * between senders. Two bubbles join instead, and a stamp between rows keeps the full gap. */
+ * between senders. Two bubbles join instead, and a stamp or boundary caption between rows keeps the full gap. */
 export function cardTucks(slots: readonly TranscriptSlot[]): boolean[] {
   const tucks = slots.map(() => false);
   let previous: TranscriptSlot | null = null;
   slots.forEach((slot, index) => {
     if (slot.hidden) return;
-    tucks[index] = Boolean(previous && slot.sender && slot.sender === previous.sender && !slot.stamped && !previous.breakAfter && !(slot.group && previous.group));
+    tucks[index] = Boolean(previous && slot.sender && slot.sender === previous.sender && !slot.stamped && !slot.breakBefore && !previous.breakAfter && !(slot.group && previous.group));
     previous = slot;
   });
   return tucks;

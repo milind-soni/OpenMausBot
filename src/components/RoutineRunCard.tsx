@@ -149,22 +149,26 @@ export function AutomationCaption({ message, line, botId }: { message: Message; 
   const asking = line.needsYou === true && (message.card ? liveCardKind(message.card) !== null : line.copyOf !== undefined ||
     !state.bots.find((bot) => bot.id === botId)?.messages.some((later) => later.role === "user" && later.at > message.at));
   const tone = line.partial ? "text-warning" : line.failed ? "text-danger" : asking ? "text-warning" : "text-accent";
+  const chipBorder = line.partial || asking ? "border-warning/35" : line.failed ? "border-danger/35" : "border-hairline/60";
   return (
-    <div data-automation-caption={line.runId} className="-mb-2 flex min-w-0 items-center gap-1.5 pl-0.5 text-[11px] text-ink-tertiary">
-      <Zap aria-hidden="true" size={12} className={cn("shrink-0", tone)} />
-      <span className="truncate font-medium text-ink-secondary">{line.name}</span>
-      <time className="shrink-0" dateTime={new Date(line.scheduledFor).toISOString()}>· {formatTime(line.scheduledFor)}</time>
-      {(line.failed || asking) && <span className={cn("shrink-0", tone)}>· {t(line.partial ? "chat.automation.partial" : line.failed ? "chat.automation.failed" : "chat.automation.needsYou")}</span>}
-      {canOpen && (
-        <button
-          type="button"
-          onClick={() => openThread(dispatch, { botId, threadId: line.executionThreadId }, state, showThreads)}
-          aria-label={t("chat.automation.openRunFor", { name: line.name })}
-          className="shrink-0 rounded px-1 hover:bg-inset hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
-        >
-          {t("chat.automation.openRun")}
-        </button>
-      )}
+    <div data-automation-caption={line.runId} className="mt-2 -mb-1 flex w-full min-w-0 items-center gap-2 text-[12px] leading-4 text-ink-secondary">
+      <span data-automation-badge className={cn("ui-chip gap-1.5 border bg-panel px-2.5 text-ink-secondary", chipBorder)}>
+        <Zap aria-hidden="true" size={12} className={cn("shrink-0", tone)} />
+        <span dir="auto" title={line.name} className="truncate font-medium text-ink">{line.name}</span>
+        <time className="shrink-0 text-ink-secondary" dateTime={new Date(line.scheduledFor).toISOString()}>· {formatTime(line.scheduledFor)}</time>
+        {(line.failed || asking) && <span className={cn("shrink-0", tone)}>· {t(line.partial ? "chat.automation.partial" : line.failed ? "chat.automation.failed" : "chat.automation.needsYou")}</span>}
+        {canOpen && (
+          <button
+            type="button"
+            onClick={() => openThread(dispatch, { botId, threadId: line.executionThreadId }, state, showThreads)}
+            aria-label={t("chat.automation.openRunFor", { name: line.name })}
+            className="ms-0.5 shrink-0 cursor-pointer rounded px-1 font-medium text-ink-secondary transition-colors motion-reduce:transition-none hover:bg-raised-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
+          >
+            {t("chat.automation.openRun")}
+          </button>
+        )}
+      </span>
+      <span aria-hidden="true" data-automation-rule className="h-px min-w-4 flex-1 bg-hairline/60" />
     </div>
   );
 }
