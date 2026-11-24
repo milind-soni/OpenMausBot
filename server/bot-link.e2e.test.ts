@@ -57,6 +57,11 @@ it("a bot on the computer and a bot on the person's own server hand each other w
     await expect.poll(() => prompt(home), { timeout: 15_000 }).toContain("- Writer — General assistant, on this computer");
     expect(await prompt(home)).toContain("you are not their Chief of Staff");
     expect(await prompt(computer)).not.toContain("you are not their Chief of Staff");
+    // A bot paused there leaves the roster here, and comes back when it is resumed.
+    await home.api("POST", "/api/paused", { kind: "bot", id: atlas.id, paused: true });
+    await expect.poll(() => prompt(computer), { timeout: 15_000 }).not.toContain("- Atlas — ");
+    await home.api("POST", "/api/paused", { kind: "bot", id: atlas.id, paused: false });
+    await expect.poll(() => prompt(computer), { timeout: 15_000 }).toContain("- Atlas — General assistant, on My Cloud");
 
     // The link's own sign-in opens the link and nothing else of the person's server.
     await home.api("GET", "/api/bots?messages=0", undefined, { token: paired.token, status: 403 });
@@ -120,7 +125,8 @@ it("a bot on the computer and a bot on the person's own server hand each other w
     expect(JSON.stringify(await computer.api("GET", `/api/bots/${standIn.id}`))).toContain("\"Atlas\"");
 
     // The computer's bot hands work to the server's bot by name, and is resumed with its result.
-    home.plan(atlas.id, { reply: "Atlas counted 42 orders." });
+    // The work it is handed carries [LIVE TEAMMATES] with the computer's bots in it, marked as on this computer.
+    home.plan(atlas.id, { reply: "Atlas counted 42 orders.", expectContextIncludes: ["[LIVE TEAMMATES]", "- Writer — on this computer [id: link-"] });
     computer.plan(writer.id,
       { steps: [{ tool: "list_bots", arguments: {} }, { tool: "coordinate_bots", arguments: { bot_ids: ["Atlas"], request_key: "count", message: "Count this week's orders." } }], reply: "Asked Atlas." },
       { reply: "Atlas says 42." });

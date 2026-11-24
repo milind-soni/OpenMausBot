@@ -4366,7 +4366,7 @@ function coordinationLiveRosterBlock(recipient: BotRecord): string {
     ...peer,
     lastActivityAt: newestPeerActivityAt(peer.id),
   }));
-  return livePeerRosterBlock(livePeerRoster(team), linkedRoster.liveLines());
+  return livePeerRosterBlock(livePeerRoster(team), linkedRoster.liveLines(recipient));
 }
 
 function cancelGroupTurnOperations(
