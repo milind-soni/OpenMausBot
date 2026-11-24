@@ -22,7 +22,6 @@ import { lastNonReceipt } from "@/lib/receipts";
 import { botPreview, groupPreview, lastLine, waitingHandoffPreview } from "./sidebar-preview";
 import { activeLocale, t } from "@/lib/i18n"; import { isBotHeld } from "@/lib/bot-pause";
 import { copyText } from "@/lib/copy-text";
-import type { LocaleKey } from "@/locales";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { BulkSelectFilters, ThreadListFooter, deleteThreadsInBulk, retitleThreadsInBulk, useBulkSelect } from "./BulkSelectBar";
 import { SidebarThreadLabels, ThreadFoldChevron, useFillOnLabel } from "./SidebarThreadLabels";
@@ -56,7 +55,7 @@ import {
   pinnedCircleThreadListVisible,
   sectionsInUse,
   sidebarBotRows,
-  sidebarSectionLabel,
+  localizedSidebarSectionLabel as sectionLabel,
   userSectionId,
   userSectionName,
   withPrimaryTile,
@@ -116,19 +115,6 @@ import { roomDeleteCopy } from "./room-delete-copy"; export { roomDeleteCopy };
 
 /** The centre of macOS's traffic lights (14px tall) with the window's frame off, where the window puts them at 16,16. */
 export const MAC_TRAFFIC_LIGHT_CENTER_Y = 23;
-
-const SECTION_LABEL_KEYS: Record<string, LocaleKey> = {
-  [PINNED_SECTION_ID]: "sidebar.section.pinned",
-  [UNREAD_SECTION_ID]: "sidebar.section.unread",
-  [CHANNELS_SECTION_ID]: "sidebar.section.channels",
-  [BOT_CHATS_SECTION_ID]: "sidebar.section.botChats",
-  [BOTS_SECTION_ID]: "sidebar.section.bots",
-};
-
-function sectionLabel(id: string): string {
-  const key = SECTION_LABEL_KEYS[id];
-  return key ? t(key) : sidebarSectionLabel(id);
-}
 
 export interface MenuState {
   botId: string;

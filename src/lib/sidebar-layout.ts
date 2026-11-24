@@ -67,6 +67,19 @@ export function sidebarSectionLabel(id: SidebarSectionId): string {
   return userSectionName(id) ?? id;
 }
 
+const SECTION_LABEL_KEYS: Record<string, LocaleKey> = {
+  [PINNED_SECTION_ID]: "sidebar.section.pinned",
+  [UNREAD_SECTION_ID]: "sidebar.section.unread",
+  [CHANNELS_SECTION_ID]: "sidebar.section.channels",
+  [BOT_CHATS_SECTION_ID]: "sidebar.section.botChats",
+  [BOTS_SECTION_ID]: "sidebar.section.bots",
+};
+
+export function localizedSidebarSectionLabel(id: string): string {
+  const key = SECTION_LABEL_KEYS[id];
+  return key ? t(key) : sidebarSectionLabel(id);
+}
+
 export function sidebarGoalRunPreview(run: GroupGoalRunCardData): string {
   const detail = run.detail?.replace(/\s+/g, " ").trim();
   const goal = run.goal.replace(/\s+/g, " ").trim();
