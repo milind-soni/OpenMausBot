@@ -1349,7 +1349,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
 
       <GlassScroller className={rail ? "[scrollbar-gutter:stable_both-edges]" : simpleDesk ? "px-3" : "px-2"}>
         <div className={cn("flex flex-col", simpleDesk ? cn("gap-0.5 pb-2", !tiles && "pt-2") : advanced ? "gap-0.5" : "gap-1 pb-2 pt-2")}>
-          {matchingBots.length === 0 && visibleGroups.length === 0 && q && q.length < MIN_QUERY && (
+          {matchingBots.length === 0 && visibleGroups.length === 0 && !placed.length && q && q.length < MIN_QUERY && (
             <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">{t("sidebar.noMatch", { query })}</div>
           )}
           {!q && <NeedsYouButton compact={rail} />}{!q && <SidebarPeople compact={rail} onOpened={phone ? onClose : undefined} />}
@@ -1462,7 +1462,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
               </div>
             );
           })}
-          <OtherPlaceLine query={query} /><MovedBotRows bots={state.bots} /><MovedToMyCloudRow bots={state.bots} /><SearchResults query={query} onLanded={() => { setQuery(""); setSearchOpen(false); }} />
+          <OtherPlaceLine query={query} icons={density === "icons"} /><MovedBotRows bots={state.bots} /><MovedToMyCloudRow bots={state.bots} /><SearchResults query={query} onLanded={() => { setQuery(""); setSearchOpen(false); }} />
           {showPinnedCircleThreads && (
             <PinnedCircleThreadSection
               bots={pinnedBots}

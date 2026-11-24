@@ -29,17 +29,20 @@ function saidOf(state: PlacesTogetherState | null): Said | null {
 /** My Cloud's page, opened from this computer's page (main's own switch, which wakes it as opening it always does). */
 const openMyCloud = () => (window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudSendPage?.openMyCloud);
 
-export function OtherPlaceLine({ query = "" }: { query?: string }) {
+/** `icons`: the avatars-only sidebar, where the line is its icon alone, its words its tooltip and label. */
+export function OtherPlaceLine({ query = "", icons = false }: { query?: string; icons?: boolean }) {
   const said = usePlacesTogetherPart(saidOf);
   if (!said || query.trim()) return null;
   const { icon: Icon, words, opens } = SAID[said];
   const open = opens ? openMyCloud() : undefined;
   const [home, state] = said.split(":");
-  const body = <><Icon size={13} aria-hidden="true" className={cn("shrink-0", said === "cloud:waking" && "animate-pulse motion-reduce:animate-none")} /><span className="min-w-0">{t(words)}</span></>;
-  const look = "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px] leading-4 text-ink-secondary";
-  return <div data-other-place={home} data-other-place-state={state} className="flex flex-col px-2 pb-1 pt-2">
+  const line = t(words);
+  const body = <><Icon size={icons ? 16 : 13} aria-hidden="true" className={cn("shrink-0", said === "cloud:waking" && "animate-pulse motion-reduce:animate-none")} />{icons ? null : <span className="min-w-0">{line}</span>}</>;
+  const look = icons ? "flex size-9 items-center justify-center self-center text-ink-secondary" : "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px] leading-4 text-ink-secondary";
+  const named = icons ? { title: line, "aria-label": line } : {};
+  return <div data-other-place={home} data-other-place-state={state} className={cn("flex flex-col", icons ? "pt-2" : "px-2 pb-1 pt-2")}>
     {open
-      ? <button type="button" data-other-place-line="" onClick={() => { void open().catch(() => {}); }} className={cn(look, "rounded-lg hover:bg-menu-hover hover:text-ink")}>{body}</button>
-      : <p role="status" data-other-place-line="" className={look}>{body}</p>}
+      ? <button type="button" data-other-place-line="" {...named} onClick={() => { void open().catch(() => {}); }} className={cn(look, "rounded-lg hover:bg-menu-hover hover:text-ink")}>{body}</button>
+      : <p role="status" data-other-place-line="" {...named} className={look}>{body}</p>}
   </div>;
 }

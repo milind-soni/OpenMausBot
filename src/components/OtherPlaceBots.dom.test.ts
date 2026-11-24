@@ -83,6 +83,19 @@ it("a sleeping Cloud with nothing kept says so as normal, and opening it wakes i
   }
 });
 
+it("in the avatars-only sidebar the line is its icon alone, its words its tooltip and label, and it still opens My Cloud", async () => {
+  const openMyCloud = vi.fn(async () => {});
+  window.ogb = { placesTogether: page, cloudSendPage: { openMyCloud } } as never;
+  said = state({ other: { home: "cloud", state: "asleep", bots: [] } });
+  await render(createElement(OtherPlaceLine, { key: "line", icons: true }));
+  const line = q("button[data-other-place-line]")!;
+  expect(line.textContent).toBe("");
+  expect(line.getAttribute("aria-label")).toBe("My Cloud is asleep. Open it to see its bots.");
+  expect(line.getAttribute("title")).toBe("My Cloud is asleep. Open it to see its bots.");
+  await act(async () => line.click());
+  expect(openMyCloud).toHaveBeenCalledTimes(1);
+});
+
 it("a line is no search result: hidden while the sidebar is searched", async () => {
   said = state({ other: { home: "cloud", state: "signin", bots: [] } });
   await render(createElement(OtherPlaceLine, { key: "line", query: "scout" }));

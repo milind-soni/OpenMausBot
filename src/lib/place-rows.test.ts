@@ -1,9 +1,11 @@
 // @vitest-environment happy-dom
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
 import { setLocale } from "./i18n";
-import { isPlacedBot, otherPlaceDispatch, ownRows, placedBot, placedLine, placeMark, placeOfHome, resetPlaceRowsForTest, withOtherPlace, type Place } from "./place-rows";
-import type { PlaceBotRow } from "./places-together";
+import { isPlacedBot, otherPlaceDispatch, useOtherPlaceBots, ownRows, placedBot, placedLine, placeMark, placeOfHome, resetPlaceRowsForTest, withOtherPlace, type Place } from "./place-rows";
+import { resetPlacesTogetherForTest, type PlaceBotRow, type PlacesTogetherState } from "./places-together";
 import { partitionSidebarBots, sidebarBotRows } from "./sidebar-layout";
 
 const row = (home: "computer" | "cloud", id: string, over: Partial<PlaceBotRow> = {}): PlaceBotRow => ({ home, id, threadId: `t-${id}`, name: id, color: "blue", ...over });
@@ -11,7 +13,7 @@ const own = (id: string, over: Partial<Bot> = {}): Bot => ({ id, name: id, threa
   notifications: true, messages: [], modelSelection: { instanceId: "here", model: "m" }, ...over });
 
 beforeEach(() => setLocale("en"));
-afterEach(() => { resetPlaceRowsForTest(); vi.unstubAllGlobals(); delete (window as { ogb?: unknown }).ogb; });
+afterEach(() => { resetPlaceRowsForTest(); resetPlacesTogetherForTest(); vi.unstubAllGlobals(); delete (window as { ogb?: unknown }).ogb; });
 
 describe("a row of the other place as a bot of the one list", () => {
   it("is keyed by its place and its id, so the same id in two places is two bots", () => {
@@ -144,5 +146,33 @@ describe("the device mark", () => {
     setLocale("pt-br");
     expect(placeMark(placeOfHome("cloud"), "ready", false, "Scout").label).toBe("No My Cloud");
     expect(placeMark(placeOfHome("cloud"), "asleep", false, "Atlas").label).toBe("O My Cloud está em repouso. Abrir Atlas o ativa.");
+  });
+});
+
+describe("a steady list", () => {
+  it("main answering again with the same rows keeps the same list and the same bots, so no row is drawn again; a changed row is new", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    let changed = () => {};
+    const answer = (bots: PlaceBotRow[]): PlacesTogetherState => ({ v: 1, available: true, on: true, here: "computer", other: { home: "cloud", state: "ready", bots } });
+    let said = answer([row("cloud", "scout"), row("cloud", "nova")]);
+    window.ogb = { placesTogether: { state: async () => ({ ...said, other: { ...said.other!, bots: said.other!.bots.map((bot) => ({ ...bot })) } }), onChanged: (callback: () => void) => { changed = callback; return () => {}; } } } as never;
+    const seen: Array<readonly Bot[]> = [];
+    const Probe = () => { seen.push(useOtherPlaceBots("")); return null; };
+    const host = document.createElement("div"), root = createRoot(host);
+    await act(async () => root.render(createElement(Probe)));
+    await act(async () => { await Promise.resolve(); });
+    const first = seen.at(-1)!;
+    expect(first.map((bot) => bot.id)).toEqual(["cloud:scout", "cloud:nova"]);
+    await act(async () => changed());
+    await act(async () => { await Promise.resolve(); });
+    expect(seen.at(-1)).toBe(first);
+    said = answer([row("cloud", "scout"), row("cloud", "nova", { unread: true })]);
+    await act(async () => changed());
+    await act(async () => { await Promise.resolve(); });
+    const next = seen.at(-1)!;
+    expect(next).not.toBe(first);
+    expect(next[0]).toBe(first[0]);
+    expect(next[1]).not.toBe(first[1]);
+    await act(async () => root.unmount());
   });
 });
