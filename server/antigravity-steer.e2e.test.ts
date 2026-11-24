@@ -20,7 +20,7 @@ posixOnly("Antigravity CLI steer through the message route", () => {
   let child: ChildProcess;
   let home: string, tools: string;
   // One Antigravity instance per test, each with its own gates and log.
-  const NAMES = ["agy", "agyLate", "agyQueue", "agyQueueFull", "agyRoom"];
+  const NAMES = ["agy", "agyLate", "agyLateFull", "agyQueue", "agyQueueFull", "agyRoom"];
   const cli = (name: string) => ({ finishGate: join(tools, `${name}.finish`), rejectGate: join(tools, `${name}.reject`), rpc: join(tools, `${name}.rpc.jsonl`) });
   let stderr = "";
 
@@ -148,6 +148,34 @@ posixOnly("Antigravity CLI steer through the message route", () => {
     expect(typed.some((m: any) => m.steered)).toBe(false);
     expect(bot.messages.some((m: any) => m.kind === "error")).toBe(false);
     expect(calls("agyLate", "session/prompt.rejected")).toBe(1);
+  }, 60_000);
+
+  it("a message taken as steered that the CLI rejects late and cannot be queued again loses the mark and says so in the thread, with no retry", async () => {
+    const created = (await api("POST", "/api/bots")).body.bot;
+    expect((await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "agyLateFull", model: "gemini-3.8-flash" } })).status).toBe(200);
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "Build the report." })).status).toBe(202);
+    await waitFor(async () => (await getBot(created.id)).busy === true && calls("agyLateFull", "session/prompt") === 1, "the turn to start");
+    const sent = api("POST", `/api/bots/${created.id}/messages`, { text: "Use pytest." });
+    await waitFor(() => calls("agyLateFull", "session/prompt.held") === 1, "the CLI to hold the steer");
+    writeFileSync(cli("agyLateFull").finishGate, "finish");
+    expect((await sent).body).toMatchObject({ ok: true, steered: true });
+
+    const database = new DatabaseSync(join(home, ".openmausbot", "messages.db"));
+    database.exec("CREATE TRIGGER disk_full_direct BEFORE INSERT ON chat_followups BEGIN SELECT RAISE(ABORT, 'disk full'); END");
+    try {
+      writeFileSync(cli("agyLateFull").rejectGate, "reject");
+      await waitFor(async () => {
+        const bot = await getBot(created.id);
+        return !bot.busy && bot.messages.some((m: any) => m.kind === "activity" && m.tool?.nameCode === "chat.notice.unreadMessage");
+      }, "the thread to say the turned-down message was not delivered");
+    } finally { database.exec("DROP TRIGGER disk_full_direct"); database.close(); }
+    const bot = await getBot(created.id);
+    const typed = bot.messages.filter((m: any) => m.role === "user" && m.kind === "text");
+    expect(typed.map((m: any) => m.text)).toEqual(["Build the report.", "Use pytest."]);
+    expect(typed.some((m: any) => m.steered)).toBe(false);
+    const failed = bot.messages.filter((m: any) => m.kind === "activity" && m.tool?.ok === false);
+    expect(failed.map((m: any) => m.tool.nameCode)).toEqual(["chat.notice.unreadMessage"]);
+    expect(calls("agyLateFull", "session/prompt")).toBe(2);
   }, 60_000);
 
   it("the queue's Steer button: messages the CLI rejects once the turn's own run has ended lose the mark and run once, in order, as the next turn", async () => {
