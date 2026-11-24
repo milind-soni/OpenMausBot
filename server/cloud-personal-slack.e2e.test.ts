@@ -207,8 +207,8 @@ it("a direct message is an ordinary conversation too, with the owner's MausBot b
   expect(named.status, JSON.stringify(named.body)).toBe(202);
   expect(named.body.bot).toEqual({ id: scout.id, name: "Scout" });
   await finished(named.id);
-  // A direct message's conversation is as any the owner opens: the one they last wrote in is the chat the bot opens to.
-  expect((await botOf(scout.id)).mainThreadId).toBe(named.body.conversationId);
+  // A direct message's conversation is as any the owner opens: writing in it does not move the chat the bot opens to.
+  expect((await botOf(scout.id)).mainThreadId).toBe(scout.threadId);
 
   // There is one person and no audience to tell apart: a thread continues by its id whichever audience is named.
   const more = await slack(ownerSlack, { audience: "team", conversationId: channelThread, text: "And the week after?" });
@@ -229,7 +229,7 @@ it("a direct message is an ordinary conversation too, with the owner's MausBot b
   expect(missing.status).toBe(404);
   expect(missing.body).toEqual({ error: "No such bot.", code: "no_such_bot" });
   // The channel's conversation, though written in last, is still not that chat.
-  expect((await botOf(scout.id)).mainThreadId).toBe(named.body.conversationId);
+  expect((await botOf(scout.id)).mainThreadId).toBe(scout.threadId);
 }, hostTimeout(180_000));
 
 it("a line written while the bot works waits in the queue and runs after, as its own turn", async () => {

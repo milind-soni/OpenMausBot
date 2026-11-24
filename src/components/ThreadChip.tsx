@@ -24,9 +24,11 @@ export function ThreadChip({ message, threadId }: { message: Message; threadId?:
   // A teammate's work for the bot that sent it is read in place of this chat; any other thread still opens in its own chat.
   const asker = message.from;
   // The helper's main chat is its talk with the person, not with the asker: that still opens there.
+  const handoff = message.handoff, ended = handoff?.state === "done" || handoff?.state === "failed";
   const workThread = bot && ref.threadId !== bot.threadId && (bot.tasks ?? []).some((task) => task.threadId === ref.threadId);
   const exchange = openExchange && !direct && asker && bot && asker.botId !== bot.id && workThread
-    ? { asker, helper: { botId: bot.id, name: bot.name, color: bot.color }, threadId: ref.threadId } : null;
+    ? { asker, helper: { botId: bot.id, name: bot.name, color: bot.color }, threadId: ref.threadId, ...(handoff ? { id: handoff.id, sentAt: message.at, ...(ended ? { endedAt: handoff.at } : {}) } : {}) }
+    : null;
   const exchangeLabel = bot ? t("chat.handoffExchange.open", { name: bot.name }) : "";
   return (
     <HandoffReply message={message} threadId={threadId}>

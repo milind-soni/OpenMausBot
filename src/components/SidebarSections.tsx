@@ -108,6 +108,11 @@ export function useSidebarSections({ simple, rail, density, query, label, sideba
         zone: (id: string) => ({
           onDragOver: (event: DragEvent<HTMLElement>) => {
             if (!interactive || !drag.current.from) return;
+            // A section outside the order being arranged has no place to give: it takes no drop and shows no line.
+            if (!sectionIds.includes(id)) {
+              drag.current.over = null;
+              return setDropTarget(null);
+            }
             event.preventDefault();
             event.dataTransfer.dropEffect = "move";
             const rect = event.currentTarget.getBoundingClientRect();
