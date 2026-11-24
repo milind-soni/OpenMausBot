@@ -119,7 +119,7 @@ test("the transcript is found where Claude Code writes it: a linked working dire
   };
   const long = mkdtempSync(join(tmpdir(), "claude-images-")) + "/" + "deep/".repeat(50) + "thread";
   mkdirSync(long, { recursive: true });
-  const resolvedLong = realpathSync(long);
+  const resolvedLong = realpathSync.native(long).normalize("NFC"); // as the CLI resolves it: on Windows the long name, not an 8.3 short one
   assert.ok(resolvedLong.length > 200);
   const longName = transcriptPath(configDir, long, "s1");
   assert.equal(longName, join(configDir, "projects", `${resolvedLong.replace(/[^A-Za-z0-9]/g, "-").slice(0, 200)}-${suffix(resolvedLong)}`, "s1.jsonl"));
