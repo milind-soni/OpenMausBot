@@ -178,7 +178,7 @@ describe("the GitHub row in Apps", () => {
     expect(field.type).toBe("password");
     expect(field.autocomplete).toBe("off");
     expect(field.getAttribute("aria-label")).toBe("GitHub token");
-    expect(host.querySelector("a[href='https://github.com/settings/personal-access-tokens/new']")!.textContent).toBe("Create a fine-grained token on GitHub");
+    expect(host.querySelector("a[href='https://github.com/settings/personal-access-tokens/new']")!.textContent!.trim()).toBe("Create a fine-grained token on GitHub");
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, token);
       field.dispatchEvent(new Event("input", { bubbles: true }));
