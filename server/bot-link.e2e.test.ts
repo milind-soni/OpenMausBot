@@ -50,6 +50,14 @@ it("a bot on the computer and a bot on the person's own server hand each other w
     await expect.poll(async () => (await computer.api("GET", "/api/bot-link")), { timeout: 15_000 }).toMatchObject({ on: true, role: "dialer", online: true, peer: { name: "My server" } });
     await expect.poll(async () => (await computer.api("GET", "/api/bot-link")).bots, { timeout: 15_000 }).toBeGreaterThan(0);
 
+    // Each place's Chief knows the other place's bots, and only the one made first (the computer's) is the person's Chief.
+    const chiefOf = async (side: ReturnType<typeof place>) => (await side.api("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.chiefOfStaff) as { id: string };
+    const prompt = async (side: ReturnType<typeof place>) => JSON.stringify(await side.api("GET", `/api/bots/${(await chiefOf(side)).id}/system-prompt`));
+    await expect.poll(() => prompt(computer), { timeout: 15_000 }).toContain("- Atlas — General assistant, on My Cloud");
+    await expect.poll(() => prompt(home), { timeout: 15_000 }).toContain("- Writer — General assistant, on this computer");
+    expect(await prompt(home)).toContain("you are not their Chief of Staff");
+    expect(await prompt(computer)).not.toContain("you are not their Chief of Staff");
+
     // The link's own sign-in opens the link and nothing else of the person's server.
     await home.api("GET", "/api/bots?messages=0", undefined, { token: paired.token, status: 403 });
     await home.api("GET", "/api/auth/session", undefined, { token: paired.token, status: 403 });
