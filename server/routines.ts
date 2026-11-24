@@ -1289,7 +1289,18 @@ export class RoutineManager {
       if (event.cost != null) run.cost = (run.cost ?? 0) + event.cost;
       if (event.denials?.length) run.denials = [...new Set([...(run.denials ?? []), ...event.denials])];
       if (!event.ok) {
-        this.settleFailure(run, routineFailure(run.error, event.stopReason), { ...this.failureFacts.get(run.id), stopReason: event.stopReason });
+        const facts = { ...this.failureFacts.get(run.id), stopReason: event.stopReason };
+        // A run whose reply was already delivered (partial: the answer streamed first) is not failed by the last tool
+        // call that went wrong after it: the output holds the finished deliverable, so the run completes with the
+        // failing step kept in its error line. A run-limit stop or a network failure still fails the run (#7186).
+        if (event.stopReason === "tool_error" && facts.partial && run.output) {
+          Object.assign(run, { status: "completed", attention: undefined, finishedAt: this.now(), partial: true } satisfies Partial<RoutineRun>);
+          this.saveLater();
+          this.emitRun(run);
+          queueMicrotask(() => this.tickInBackground());
+          return cloneRun(run);
+        }
+        this.settleFailure(run, routineFailure(run.error, event.stopReason), facts);
         return cloneRun(run);
       }
       this.failureFacts.delete(run.id);
