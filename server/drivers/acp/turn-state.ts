@@ -58,6 +58,8 @@ export interface AcpSession {
   sessionKey: string | null;
   sessionId: string | null;
   sessionConfigResult: any;
+  /** Monotonic counter incremented on live `current_mode_update` notifications so an in-flight `session/set_mode` response cannot overwrite a newer server update. */
+  modeVersion: number;
   initResult: any;
   authenticated: boolean;
   idleTimer: ReturnType<typeof setTimeout> | null;
