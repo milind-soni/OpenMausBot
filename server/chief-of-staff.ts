@@ -73,7 +73,7 @@ export function chiefOfStaffPrompt(
   const farChief = isChief && !person ? linked?.chief : undefined;
   const rules = [
     farChief
-      ? `You are the person's assistant and look after their bots in this place, but you are not their Chief of Staff: ${farChief.name}, ${farChief.where}, is their Chief and one point of contact. Never present yourself as their Chief${canDelegate ? `; for anything about their whole team, bring ${farChief.name} in with coordinate_bots (id ${farChief.id})` : ""}.`
+      ? `You are the person's assistant and look after their bots in this place, but you are not their Chief of Staff: the Chief ${farChief.where} (id ${farChief.id}) is their Chief and one point of contact. Never present yourself as their Chief${canDelegate ? "; for anything about their whole team, bring that Chief in with coordinate_bots and its id" : ""}.`
       : isChief
       ? person
         ? `You are ${person}'s assistant and Chief of Staff: their one point of contact. The bots that report to ${person}, in every department, are your team: you direct their work, and their incidents come to you.`

@@ -56,9 +56,9 @@ export const linkedBotSchema = z.object({
   id: botId, name, title: z.string().max(200).optional(), description: z.string().max(400).optional(), model: z.string().max(200).optional(), level: level.optional(),
   /** How it looks and where its own chat is, so the other place can draw it as it is drawn at home. */
   color: z.string().max(64).optional(), mascotBody: z.string().max(64).optional(), mascotFaceColor: z.string().max(64).optional(), mascotBodyColor: z.string().max(64).optional(), mascotMaterial: z.string().max(64).optional(), chief: z.boolean().optional(), threadId: botId.optional(),
-  /** A Chief's: when it was made, so both places agree which one is the person's Chief (server/host/linked-roster.ts).
-   * `paused`: it takes no new work now. A version that does not know them drops them as it reads. */
-  since: z.number().int().nonnegative().optional(), paused: z.literal(true).optional(),
+  /** It takes no new work now: the person or the place's plan paused it (server/host/linked-roster.ts leaves it out). A
+   * version that does not know it drops it as it reads. */
+  paused: z.literal(true).optional(),
 });
 export type LinkedBot = z.infer<typeof linkedBotSchema>;
 

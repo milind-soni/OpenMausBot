@@ -104,7 +104,7 @@ const endedSchema = z.array(z.object({ origin: z.string(), token: z.string(), at
 export type EndedLink = z.infer<typeof endedSchema>[number];
 
 interface LocalBot { id: string; name: string; color?: string; hidden?: boolean; title?: string; description?: string; movedTo?: unknown;
-  mascotBody?: string | null; mascotFaceColor?: string | null; mascotBodyColor?: string | null; mascotMaterial?: string | null; chiefOfStaff?: boolean; threadId?: string; createdAt?: number }
+  mascotBody?: string | null; mascotFaceColor?: string | null; mascotBodyColor?: string | null; mascotMaterial?: string | null; chiefOfStaff?: boolean; threadId?: string }
 
 export interface BotLinkDeps {
   dataDir: string;
@@ -211,7 +211,7 @@ export function createBotLink(deps: BotLinkDeps) {
     ...(bot.color ? { color: bot.color.slice(0, 64) } : {}), ...(bot.mascotBody ? { mascotBody: bot.mascotBody.slice(0, 64) } : {}), ...(bot.mascotFaceColor ? { mascotFaceColor: bot.mascotFaceColor.slice(0, 64) } : {}),
     ...(bot.mascotBodyColor ? { mascotBodyColor: bot.mascotBodyColor.slice(0, 64) } : {}), ...(bot.mascotMaterial ? { mascotMaterial: bot.mascotMaterial.slice(0, 64) } : {}),
     ...(bot.chiefOfStaff ? { chief: true } : {}), ...(bot.threadId ? { threadId: bot.threadId } : {}),
-    ...(bot.chiefOfStaff && Number.isSafeInteger(bot.createdAt) && bot.createdAt! >= 0 ? { since: bot.createdAt } : {}), ...(deps.refusal?.(bot) ? { paused: true as const } : {}),
+    ...(deps.refusal?.(bot) ? { paused: true as const } : {}),
   })).slice(0, 500);
 
   function send(peer: string, frame: Frame): void {
