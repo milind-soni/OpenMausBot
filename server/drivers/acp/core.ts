@@ -24,7 +24,6 @@ import { boxAudienceKey, describeSpawnFailure, execCli, killCliTree, sharedBoxSc
 import { applyOneShotEnv, oneShotTurnModel, runAcpOneShot } from "./background-text.ts"; import type { AcpBackgroundWork } from "./background-work.ts";
 import { acpCapabilities } from "./capabilities.ts"; import { readAcpMediaLinks } from "./media-links.ts"; import { acpCompactSession } from "./session-compact.ts";
 import { acpNativeLogMessage } from "./tool-log.ts";
-import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
 import { formatQuietLimit, lastSeenPhrase, LIMIT_WORDS, promptIdleTimeoutMs, type LogSignal } from "./quiet-status.ts"; import { startAcpQuietWatch } from "./quiet-watch.ts"; import { AppliedConfig } from "./applied-config.ts"; import { modelRefused, roomForReadBeside, startupRefresh } from "./startup-refresh.ts"; import { stderrFailureOf, watchStderrFailure, type StderrFailure } from "./harness-failure.ts"; import { timed, turnStartClock, type TurnStartClock } from "../../perf/turn-starts.ts";
 import { acpMissingSession, retryTransient } from "./rpc-error.ts";
 import { readSessionReport } from "./session-reports.ts";
@@ -66,7 +65,7 @@ import { acpToolEndEvents } from "./tool-items.ts";
 import { AcpHost } from "./host.ts"; import { LiveSwitchRefused, SignInRequests, type AcpDriverHooks } from "./driver-hooks.ts";
 import { exitBeforeResult } from "./exit-report.ts"; import { readNodeVersion } from "./node-version.ts";
 import { decodeAcpConfig } from "./config-decode.ts";
-import { endTurn, receiveText, trackAssistantImage, trackAssistantWords, trackThoughtAfterTool, trackRunningTool, trackToolEndShown, type AcpAskFinish, type AcpSession, type AcpTurn } from "./turn-state.ts";
+import { endTurn, receiveText, takeAssistantText, trackAssistantImage, trackThoughtAfterTool, trackRunningTool, trackToolEndShown, type AcpAskFinish, type AcpSession, type AcpTurn } from "./turn-state.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
 import { noticeFailure } from "../../chat-notices.ts";
 import { armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose, type ColdStartCost } from "../session-idle.ts";
@@ -510,6 +509,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         session.current = null; session.settledAt = Date.now();
         active.delete(threadId); if (current.state.stopped) endBackground(threadId, session);
         const end = endTurn(current, ok, stopReason, support.displayName);
+        // A turn the agent compacted its own session under says so ahead of its last words, and only when it settled as a success.
+        if (end.ok && end.stopReason === null && session.compactCommand && current.state.collapsedInTurn) emit({ ...base(threadId, current.turnId), type: "context.compacted" });
+        if (end.finalText !== null) emit({ ...base(threadId, current.turnId), type: "item.completed", itemType: "assistant_text", text: end.finalText });
         if (end.error) emit({ ...base(threadId, current.turnId), type: "runtime.error", ...end.error });
         emit({ ...base(threadId, current.turnId), type: "turn.completed", ok: end.ok, stopReason: end.stopReason, cost: null });
         if (session.child.exitCode === null && !session.closing && !session.dead) {
@@ -986,7 +988,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         ): Promise<any> =>
           timed(clock, method, signIn.refused(session.host) ?? session.acp.request(method, params, timeoutMs, receive, idleMs, idleMessage));
 
-        const state: AcpTurn["state"] = { settled: false, promptSent: false, text: "", textMessageId: null, producedItem: false, repliedText: false, startupActivity: false, stopped: false, toolsSinceShown: false, thoughtSinceTool: false, usagePeak: null, usageLast: null, usageCompacted: false, failedChunk: null, cancelling: false };
+        const state: AcpTurn["state"] = { settled: false, promptSent: false, text: "", textMessageId: null, producedItem: false, repliedText: false, startupActivity: false, stopped: false, toolsSinceShown: false, thoughtSinceTool: false, usagePeak: null, usageLast: null, usageCompacted: false, turnPeak: null, turnSize: null, turnBlind: false, collapsedInTurn: false, failedChunk: null, cancelling: false };
         let acknowledge = () => {};
         let rejectStartup = (_error: TurnNotStartedError) => {};
         const startupAck = turn.startupRecovery ? new Promise<{ turnId: string }>((resolve, reject) => {
@@ -1009,12 +1011,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const requestedVariantOption = () => modelControls.variant(variant);
 
         const flushAssistantText = () => {
-          const raw = state.text;
-          state.text = "";
-          const text = stripLeakedSystemHarnessMessages(raw);
-          if (!text.trim()) return;
-          trackAssistantWords(state);
-          emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
+          const text = takeAssistantText(state);
+          if (text !== null) emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
         };
         const current: AcpTurn = {
           turnId,
@@ -1215,7 +1213,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 if (pick.notice) emit({ ...base(threadId, turnId), type: "runtime.notice", message: pick.notice, text: pick.noticeText });
                 ({ turn: cliTurn, variant, reportedModel } = pick);
                 current.turn = cliTurn;
+                const modelBefore = selectedModel;
                 selectedModel = await modelControls.select((m, p, t, r) => (session.appliedConfig.clear(), request(m, p, t, r)), sessionId, INIT_TIMEOUT);
+                // the model a session switched to reports its own usage and window: this turn's readings no longer compare
+                if (modelControls.modelOf(session.sessionConfigResult) !== modelBefore) state.turnBlind = true;
               }
 
               if (support.configureSession) {

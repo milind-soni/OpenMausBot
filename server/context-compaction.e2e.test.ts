@@ -652,11 +652,27 @@ it.skipIf(process.platform === "win32")("keeps the compacted session when the la
   expect(f.sessionSetups()).toEqual(["session/new"]);
 }), 120_000);
 
-it.skipIf(process.platform === "win32")("folds that long a conversation on its next message when nothing compacted it", () => antigravityFixture(async f => {
+const antigravityLongThenSixth = async (f: Awaited<ReturnType<typeof antigravitySetup>>) => {
   const long = (label: string) => `${label} ${"x".repeat(90_000)}`;
   await f.conversation(["FIRST", "SECOND", "THIRD", "FOURTH", "FIFTH"].map(long));
   const session = f.cursor();
-  await f.send("SIXTH with no compaction");
+  await f.send("SIXTH");
+  return session;
+};
+
+it.skipIf(process.platform === "win32")("folds that long a conversation on its next message when the native CLI reported no compaction: no engine notice, a new cursor", () => antigravityFixture(async f => {
+  const session = await antigravityLongThenSixth(f);
   expect((await f.folds()).at(-1)?.compaction.by).toBe("harness");
   expect(f.cursor()).not.toBe(session);
+  expect(await f.engineRows()).toHaveLength(0);
+  expect(f.task().engineCompacted).toBeUndefined();
 }), 120_000);
+
+it.skipIf(process.platform === "win32")("keeps the session the native CLI auto-compacted at a turn's start: one engine notice, no fold, the same cursor", () => antigravityFixture(async f => {
+  const session = await antigravityLongThenSixth(f);
+  expect(await f.engineRows()).toHaveLength(1);
+  expect(await f.folds()).toHaveLength(0);
+  expect(f.cursor()).toBe(session);
+  expect(f.task().engineCompacted).toMatchObject({ instanceId: "antigravity", session });
+  expect(f.sessionSetups()).toEqual(["session/new"]);
+}, { FAKE_AGY_AUTO_COMPACT: "1", FAKE_AGY_AUTO_COMPACT_AT: "13000" }), 120_000);

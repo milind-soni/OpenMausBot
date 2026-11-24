@@ -43,6 +43,31 @@ interface CompactionInstance {
   adapter: { capabilities: { contextReading?: "meter"; nativeCompaction?: boolean }; compactSession?: unknown };
 }
 
+export interface EngineCompactionNoticeDeps {
+  store: Pick<Store, "taskByThread" | "patchTask" | "activePath">;
+  directContext(bot: BotRecord, threadId: string, messages: Message[]): ContextMessage[];
+  instance(instanceId: string): CompactionInstance | null | undefined;
+}
+
+/** An engine's report that it compacted the session the settled turn just ran on (the native Antigravity CLI does this
+ * silently at a turn's start). Every engine's chat gets its notice. Only an engine OpenMausBot cannot fold for itself
+ * (`compactSession`, no `nativeCompaction`) also gets the boundary its fold measures from: through the message its
+ * compacted session had received, so the next fold counts only what came after it. */
+export function noteEngineCompaction(deps: EngineCompactionNoticeDeps, bot: BotRecord | undefined, threadId: string, reportedInstanceId: string | undefined, notice: () => void): void {
+  notice();
+  if (!bot) return;
+  const task = deps.store.taskByThread(bot.id, threadId);
+  const instanceId = reportedInstanceId ?? task?.lastInstanceId;
+  const instance = instanceId === undefined ? undefined : deps.instance(instanceId);
+  if (!task || instanceId === undefined || !instance?.adapter.compactSession || instance.adapter.capabilities.nativeCompaction === true) return;
+  const session = task.resumeCursors[instanceId];
+  const handed = task.handedMessages?.[instanceId];
+  if (typeof session !== "string" || !handed?.through) return;
+  const order = deps.directContext(bot, threadId, sinceFreshStart(deps.store.activePath(threadId))).map((entry) => entry.id);
+  if (!handedStateUsable(handed, session, order)) return;
+  deps.store.patchTask(bot.id, threadId, { engineCompacted: { instanceId, session, throughId: handed.through } });
+}
+
 export interface CompactConversationInput {
   bot: BotRecord; threadId: string; generation: string; instance: CompactionInstance; model: string;
   excludedIds: ReadonlySet<string>; manual: boolean; idle?: AbortSignal;

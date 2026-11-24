@@ -14,7 +14,7 @@ import { basename, join } from "node:path";
 import { authorizeExternalRuntime, externalRuntimeIsActive, type ExternalRuntimeGrant } from "./external-runtime.ts";
 import { z } from "zod";
 import { DEFAULT_REBUILD_BYTES } from "./context-rebuild.ts";
-import { claudeCompactionDisabled, createConversationCompaction } from "./host/conversation-compaction.ts"; import { createResumeCheck } from "./host/resume-check.ts";
+import { claudeCompactionDisabled, createConversationCompaction, noteEngineCompaction } from "./host/conversation-compaction.ts"; import { createResumeCheck } from "./host/resume-check.ts";
 import { compactionReading } from "./context-budget.ts";
 import { autoCompactWindow } from "./drivers/claude.ts";
 import { RoomContextTracker, roomResetNote } from "./room-context.ts";
@@ -6604,7 +6604,7 @@ bus.subscribe((event: RuntimeEvent) => {
         tool: { name: `retrying — attempt ${event.attempt + 1}/${RETRY_MAX_ATTEMPTS} in ${Math.round(event.delayMs / 1000)}s — ${event.reason}`, ok: true },
       });
       break;
-    case "context.compacted": pushMessage({ role: "bot", kind: "compaction", engineCompaction: true }); break;
+    case "context.compacted": noteEngineCompaction({ store, directContext, instance: (instanceId) => registry.get(instanceId) }, bot, event.threadId, event.providerInstanceId, () => pushMessage({ role: "bot", kind: "compaction", engineCompaction: true })); break;
     case "runtime.notice": pushMessage({ role: "bot", kind: "activity", tool: { ...runtimeNoticeTool(event), name: `notice: ${event.message.slice(0, 400)}` } }); break;
     case "runtime.error":
       // A turn the person stopped ends quietly, whatever error the stop cut it short with.

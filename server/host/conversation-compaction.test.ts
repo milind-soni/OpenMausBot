@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { compactBudget } from "../context-budget.ts";
 import type { BotRecord, Message } from "../store.ts";
-import { claudeCompactionDisabled, createConversationCompaction, foldBackstop, foldDue, type ConversationCompactionDeps } from "./conversation-compaction.ts";
+import { claudeCompactionDisabled, createConversationCompaction, foldBackstop, foldDue, noteEngineCompaction, type ConversationCompactionDeps, type EngineCompactionNoticeDeps } from "./conversation-compaction.ts";
 
 describe("foldBackstop", () => {
   it("sits above where each engine compacts by itself and below its limit", () => {
@@ -226,6 +226,92 @@ describe("compactConversation", () => {
     const done = setup({ tokens: 50_000, engineCompact: true });
     await done.run(true);
     expect(done.summarizing).toEqual([]);
+  });
+});
+
+describe("noteEngineCompaction", () => {
+  const bot = { id: "bot" } as BotRecord;
+  const thread = "thread";
+  function setup(options: { nativeCompaction?: boolean; noCompactSession?: boolean; cursor?: string; handed?: { session: string; through: string }; lastInstance?: string } = {}) {
+    const messages: Message[] = [0, 1].flatMap((index) => [
+      { id: `u${index}`, role: "user", kind: "text", text: `ask ${index}`, at: index * 2 } as Message,
+      { id: `b${index}`, role: "bot", kind: "text", text: `answer ${index}`, at: index * 2 + 1 } as Message,
+    ]);
+    const patches: Array<Record<string, unknown>> = [];
+    const notices: unknown[] = [];
+    const instanceId = "engine";
+    const task = {
+      lastInstanceId: options.lastInstance ?? instanceId,
+      resumeCursors: { engine: options.cursor ?? "s1" },
+      handedMessages: options.handed ? { engine: { session: options.handed.session, through: options.handed.through, ids: [] } } : undefined,
+    };
+    const deps: EngineCompactionNoticeDeps = {
+      store: {
+        taskByThread: () => task as never,
+        activePath: () => messages,
+        patchTask: (_botId: string, _threadId: string, patch: Record<string, unknown>) => { patches.push(patch); return undefined as never; },
+      } as never,
+      directContext: (_bot, _thread, all) => all.filter((m) => m.kind === "text").map((m) => ({ id: m.id, role: m.role === "user" ? "user" as const : "assistant" as const, text: m.text ?? "" })),
+      instance: (id) => {
+        if (id !== instanceId) return undefined;
+        const capabilities: { nativeCompaction?: boolean } = {};
+        if (options.nativeCompaction) capabilities.nativeCompaction = true;
+        const adapter: { capabilities: { nativeCompaction?: boolean }; compactSession?: () => undefined } = { capabilities };
+        if (!options.noCompactSession) adapter.compactSession = () => undefined;
+        return { instanceId: id, driverKind: "engine", adapter };
+      },
+    };
+    const note = (direct = true, reported?: string) => noteEngineCompaction(deps, direct ? bot : undefined, thread, reported, () => notices.push({}));
+    return { note, patches, notices };
+  }
+
+  it("writes the boundary of a session its engine keeps, through what it had received, beside the notice", () => {
+    const engine = setup({ handed: { session: "s1", through: "b1" } });
+    engine.note();
+    expect(engine.patches).toEqual([{ engineCompacted: { instanceId: "engine", session: "s1", throughId: "b1" } }]);
+    expect(engine.notices).toHaveLength(1);
+  });
+
+  it("only notices, for an engine that folds for itself or offers no compaction of its session", () => {
+    const codex = setup({ nativeCompaction: true });
+    codex.note();
+    const pi = setup({ noCompactSession: true });
+    pi.note();
+    expect(codex.patches).toEqual([]);
+    expect(pi.patches).toEqual([]);
+    expect(codex.notices).toHaveLength(1);
+    expect(pi.notices).toHaveLength(1);
+  });
+
+  it("writes nothing when the delivery record is unusable for the session the cursor names, or says none", () => {
+    const other = setup({ handed: { session: "s0", through: "b1" } });
+    other.note();
+    const editedAway = setup({ handed: { session: "s1", through: "edited-away" } });
+    editedAway.note();
+    const none = setup({});
+    none.note();
+    expect(other.patches).toEqual([]);
+    expect(editedAway.patches).toEqual([]);
+    expect(none.patches).toEqual([]);
+    expect(other.notices).toHaveLength(1);
+    expect(none.notices).toHaveLength(1);
+  });
+
+  it("takes the instance the event names over the one the task last ran on", () => {
+    const engine = setup({ lastInstance: "moved-on", handed: { session: "s1", through: "b1" } });
+    engine.note(true, "engine");
+    expect(engine.patches).toEqual([{ engineCompacted: { instanceId: "engine", session: "s1", throughId: "b1" } }]);
+  });
+
+  it("writes nothing for a thread that is not a direct conversation, or an instance no longer there", () => {
+    const room = setup({ handed: { session: "s1", through: "b1" } });
+    room.note(false);
+    const gone = setup({ lastInstance: "moved-on", handed: { session: "s1", through: "b1" } });
+    gone.note();
+    expect(room.patches).toEqual([]);
+    expect(gone.patches).toEqual([]);
+    expect(room.notices).toHaveLength(1);
+    expect(gone.notices).toHaveLength(1);
   });
 });
 
