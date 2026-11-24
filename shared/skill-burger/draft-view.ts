@@ -123,7 +123,7 @@ export function dependents(steps: ReadonlyArray<{ id: string; needs: readonly st
   return [...out];
 }
 
-/** Renames an arg everywhere it is used: references and the OMB_ARG_ variables in commands. */
+/** Renames an arg in references, prompt placeholders and the OMB_ARG_ variables in commands. */
 function renameArg(steps: WorkflowStep[], from: string, to: string): WorkflowStep[] {
   const env = new RegExp(`OMB_ARG_${from.toUpperCase()}(?![A-Z0-9_])`, "g");
   const walk = (node: unknown): unknown => {
@@ -135,7 +135,10 @@ function renameArg(steps: WorkflowStep[], from: string, to: string): WorkflowSte
   };
   return steps.map((step) => {
     const renamed = walk(step) as WorkflowStep;
-    return renamed.kind === "shell" ? { ...renamed, run: renamed.run.replace(env, `OMB_ARG_${to.toUpperCase()}`) } : renamed;
+    if (renamed.kind === "shell") renamed.run = renamed.run.replace(env, `OMB_ARG_${to.toUpperCase()}`);
+    if ((renamed.kind === "ai" || renamed.kind === "decide") && renamed.prompt) renamed.prompt = renamed.prompt.replaceAll(`{${from}}`, `{${to}}`);
+    if (renamed.check && typeof renamed.check === "object") renamed.check.says = renamed.check.says.replaceAll(`{${from}}`, `{${to}}`);
+    return renamed;
   });
 }
 

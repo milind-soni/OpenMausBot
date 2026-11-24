@@ -49,6 +49,7 @@ describe("the person's choices", () => {
     expect(chosen.args.feed).toEqual({ default: "https://b.example/feed.json" });
     expect(chosen.args.url).toBeUndefined();
     expect(chosen.steps[0]).toMatchObject({ run: 'curl -s "$OMB_ARG_FEED" -o feed.json' });
+    expect(chosen.steps[1]).toMatchObject({ prompt: "Write it for {feed}." });
     expect(workflowSchema.safeParse(chosen).success).toBe(true);
     expect(applyChoices(workflow, { inputs: { url: { name: "page" } } })).toEqual({ error: "There is already an input named page." });
     expect(applyChoices(workflow, { inputs: { url: { name: "9x" } } })).toMatchObject({ error: expect.stringContaining("can't be an input's name") });
