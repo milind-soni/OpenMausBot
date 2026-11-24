@@ -76,15 +76,16 @@ it("is the Show me how tip's anchor, and opens the menu as reached from the tip 
 it("draws Simple mode's switcher as a rounded pill that names the server in full, swapping to the laptop icon only when the row is too narrow", () => {
   vi.stubGlobal("window", { ogb: { workspaces: { state: () => new Promise(() => {}), menu: () => Promise.resolve() } } });
   const pill = renderToStaticMarkup(createElement(DesktopWorkspaceSwitcher, { inline: true, pill: true }));
-  expect(pill).toMatch(/aria-label="Switch server: Servers" aria-haspopup="menu" aria-expanded="false"[^>]*class="[^"]*\bh-8\b[^"]*\brounded-full\b[^"]*\bbg-raised\/50\b[^"]*\btext-\[13px\][^"]*\bfont-medium\b/);
+  expect(pill).toMatch(/aria-label="Switch server: Servers" aria-haspopup="menu" aria-expanded="false"[^>]*class="[^"]*\bh-8\b[^"]*\brounded-full\b[^"]*\btext-\[13px\][^"]*\bfont-medium\b[^"]*\btext-ink-secondary\b[^"]*\bhover:bg-ink\/\[0\.06\]/);
+  expect(pill).not.toContain("bg-raised/50");
   expect(pill).toContain('<span class="min-w-0 truncate @max-[124px]/sidebar-top:hidden">Servers</span>');
   expect(pill).toContain("lucide-chevron-down");
   expect(pill).toContain('class="lucide lucide-laptop hidden shrink-0 text-ink-secondary @max-[124px]/sidebar-top:block"');
   expect(pill).not.toContain("@max-[96px]");
   const inline = renderToStaticMarkup(createElement(DesktopWorkspaceSwitcher, { inline: true }));
   expect(inline).toContain("lucide-laptop");
-  expect(inline).toMatch(/class="[^"]*\bh-7\b[^"]*\brounded-md\b[^"]*\btext-\[13px\]/);
-  expect(inline).not.toContain("rounded-full");
+  expect(inline).toMatch(/class="[^"]*\bh-7\b[^"]*\brounded-full\b[^"]*\btext-\[13px\][^"]*\btext-ink-secondary\b[^"]*\bhover:bg-ink\/\[0\.06\]/);
+  expect(inline).not.toContain("hover:bg-control");
 
   vi.stubGlobal("window", {});
   const browser = renderToStaticMarkup(createElement(DesktopWorkspaceSwitcher, { inline: true, pill: true, cloudHome: true }));

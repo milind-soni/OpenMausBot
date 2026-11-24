@@ -52,29 +52,27 @@ async function serve(extra: Partial<SkillBurgerRouteDeps> = {}, scopes: readonly
 }
 
 const send = (method: string, body: unknown): RequestInit => ({ method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-const names = async (api: Awaited<ReturnType<typeof serve>>["api"]) => (await api("/api/skill-burgers")).body.skills.map((skill: { name: string; everyChat: boolean }) => [skill.name, skill.everyChat]);
+const names = async (api: Awaited<ReturnType<typeof serve>>["api"]) => (await api("/api/skill-burgers")).body.skills.map((skill: { name: string }) => skill.name);
 
-it("saves a run to its bot, shares it with every chat and back, renames, undoes and puts a removal back", async () => {
+it("saves a run for every chat, renames, undoes and puts a removal back", async () => {
   const { api, bot } = await serve();
   const saved = await api("/api/skill-burgers", send("POST", { botId: bot, threadId: "t1", summary: "Send the invoice" }));
   expect(saved.status).toBe(201);
-  expect(saved.body.skill).toMatchObject({ name: "send-the-invoice", summary: "Send the invoice", everyChat: false, botId: bot, args: ["query", "recipient", "subject"] });
-  expect(await names(api)).toEqual([["send-the-invoice", false]]);
-  expect((await api(`/api/skill-burgers/send-the-invoice?botId=${bot}`)).body.text).toContain("tags: workflow");
+  expect(saved.body.skill).toMatchObject({ name: "send-the-invoice", summary: "Send the invoice", botId: bot, args: ["query", "recipient", "subject"] });
+  expect(saved.body.skill).not.toHaveProperty("everyChat");
+  expect((await api("/api/skill-burgers")).body.skills.map((skill: { name: string; canChange: boolean }) => [skill.name, skill.canChange])).toEqual([["send-the-invoice", true]]);
+  expect((await api("/api/skill-burgers/send-the-invoice")).body.text).toContain("tags: workflow");
+  // The old switch for every chat is gone: every burger already is.
+  expect((await api("/api/skill-burgers/send-the-invoice", send("PATCH", { everyChat: false }))).status).toBe(400);
 
-  const shared = await api("/api/skill-burgers/send-the-invoice", send("PATCH", { everyChat: true, botId: bot, sha256: saved.body.skill.sha256 }));
-  expect(shared.body.skill).toMatchObject({ everyChat: true, botId: bot });
-  expect(await names(api)).toEqual([["send-the-invoice", true]]);
-  expect((await api("/api/skill-burgers/send-the-invoice", send("PATCH", { everyChat: false }))).body.skill).toMatchObject({ everyChat: false });
-
-  const renamed = await api("/api/skill-burgers/send-the-invoice", send("PATCH", { rename: "invoice-to-priya", botId: bot }));
+  const renamed = await api("/api/skill-burgers/send-the-invoice", send("PATCH", { rename: "invoice-to-priya" }));
   expect(renamed.body.skill).toMatchObject({ name: "invoice-to-priya" });
-  const read = await api(`/api/skill-burgers/invoice-to-priya?botId=${bot}`);
-  expect((await api(`/api/skill-burgers/invoice-to-priya?botId=${bot}&sha256=${"0".repeat(64)}`, { method: "DELETE" })).status).toBe(409);
-  expect((await api(`/api/skill-burgers/invoice-to-priya?botId=${bot}&sha256=${renamed.body.skill.sha256}`, { method: "DELETE" })).body).toEqual({ removed: true });
+  const read = await api("/api/skill-burgers/invoice-to-priya");
+  expect((await api(`/api/skill-burgers/invoice-to-priya?sha256=${"0".repeat(64)}`, { method: "DELETE" })).status).toBe(409);
+  expect((await api(`/api/skill-burgers/invoice-to-priya?sha256=${renamed.body.skill.sha256}`, { method: "DELETE" })).body).toEqual({ removed: true });
   expect(await names(api)).toEqual([]);
   expect((await api("/api/skill-burgers", send("POST", { name: "invoice-to-priya", workflow: read.body.workflow, botId: bot }))).status).toBe(201);
-  expect(await names(api)).toEqual([["invoice-to-priya", false]]);
+  expect(await names(api)).toEqual(["invoice-to-priya"]);
 });
 
 it("refuses a conversation the person can't see or that isn't the bot's, and a run with nothing to save", async () => {
@@ -84,7 +82,7 @@ it("refuses a conversation the person can't see or that isn't the bot's, and a r
   expect((await api("/api/skill-burgers", send("POST", { botId: bot, threadId: "t3" }))).status).toBe(404);
   expect((await api("/api/skill-burgers", send("POST", { botId: bot, threadId: "t4" }))).status).toBe(422);
   expect((await api("/api/skill-burgers", send("POST", { name: "x", workflow: { version: 1 }, botId: bot }))).status).toBe(422);
-  expect((await api("/api/skill-burgers", send("POST", { name: "x", workflow: {}, botId: "gone" }))).status).toBe(404);
+  expect((await api("/api/skill-burgers", send("POST", { name: "x", workflow: {}, botId: "gone" }))).status).toBe(422);
 });
 
 it("names a finished run with the bot's small text model, and says nothing when there is none", async () => {
@@ -97,22 +95,21 @@ it("names a finished run with the bot's small text model, and says nothing when 
 });
 
 
-it("lets a Team member save and remove a burger on a bot they can edit, and keeps every chat an admin's", async () => {
-  let access: "none" | "view" | "chat" | "edit" = "edit";
-  const { api, bot } = await serve({ levelOf: () => access }, ["client"]);
+it("lets a Team member who can chat with the bot add a burger for everyone, and only them or an admin change it", async () => {
+  let access: "none" | "view" | "chat" | "edit" = "chat";
+  let person = "ada@acme.test";
+  const { api, bot } = await serve({ levelOf: () => access, actorOf: () => person }, ["client"]);
   const saved = await api("/api/skill-burgers", send("POST", { botId: bot, threadId: "t1", summary: "Send the invoice" }));
   expect(saved.status).toBe(201);
   const name = saved.body.skill.name as string;
-  const shared = await api(`/api/skill-burgers/${name}`, send("PATCH", { everyChat: true, botId: bot }));
-  expect(shared.status).toBe(403);
-  expect(shared.body.error).toMatch(/Only an admin/);
-  access = "chat";
-  expect((await api("/api/skill-burgers", send("POST", { botId: bot, threadId: "t1" }))).status).toBe(403);
-  expect((await api(`/api/skill-burgers/${name}?botId=${bot}`, { method: "DELETE" })).status).toBe(403);
-  expect((await names(api)).map(([found]: [string]) => found)).toContain(name);
+  // Everyone on the Cloud sees it, even someone who can't reach that bot; only Ada may change it.
+  person = "cleo@acme.test";
   access = "none";
-  expect(await names(api)).toEqual([]);
-  expect((await api(`/api/skill-burgers/${name}?botId=${bot}`)).status).toBe(404);
-  access = "edit";
-  expect((await api(`/api/skill-burgers/${name}?botId=${bot}`, { method: "DELETE" })).status).toBe(200);
+  expect((await api("/api/skill-burgers")).body.skills.map((skill: { name: string; canChange: boolean }) => [skill.name, skill.canChange])).toEqual([[name, false]]);
+  expect((await api(`/api/skill-burgers/${name}`, send("PATCH", { rename: "mine-now" }))).status).toBe(403);
+  expect((await api(`/api/skill-burgers/${name}`, { method: "DELETE" })).status).toBe(403);
+  expect((await api("/api/skill-burgers", send("POST", { botId: bot, threadId: "t1" }))).status).toBe(403);
+  person = "ada@acme.test";
+  expect((await api("/api/skill-burgers")).body.skills[0].canChange).toBe(true);
+  expect((await api(`/api/skill-burgers/${name}`, { method: "DELETE" })).status).toBe(200);
 });

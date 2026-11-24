@@ -19,6 +19,7 @@ import { t } from "@/lib/i18n";
 import { bodyName, colorName, expressionName, festivalName } from "@/lib/mascot-names";
 import { MascotBodyColorSwatch } from "./MascotBodyColorSwatch";
 import { MascotFaceColorPicker } from "./MascotFaceColorPicker";
+import { MascotMaterialPicker } from "./MascotMaterialPicker";
 
 export function BotProfileAvatarCard({
   bot,
@@ -119,6 +120,7 @@ export function BotProfileAvatarCard({
         {crop === "mascot" && (
           <>
             <MascotFaceColorPicker bot={bot} disabled={busy} onPatch={onPatch} />
+            <MascotMaterialPicker bot={bot} disabled={busy} onPatch={onPatch} />
             <div className="mb-2 mt-4 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
               {t("botIdentity.expression")}
             </div>
@@ -137,7 +139,7 @@ export function BotProfileAvatarCard({
                   title={expressionName(expression)}
                   aria-label={t("mascot.useExpression", { expression: expressionName(expression) })}
                 >
-                  <MausAvatar color={bot.color} faceColor={bot.mascotFaceColor} bodyColor={bot.mascotBodyColor} bodyId={bot.mascotBody ?? undefined} state={expression} size={42} animated={false} />
+                  <MausAvatar color={bot.color} faceColor={bot.mascotFaceColor} material={bot.mascotMaterial} bodyColor={bot.mascotBodyColor} bodyId={bot.mascotBody ?? undefined} state={expression} size={42} animated={false} />
                 </button>
               ))}
             </div>
@@ -232,7 +234,7 @@ function BodyButton({ id, name, bot, busy, onPatch }: {
         selected ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/60",
       )}
     >
-      <MausAvatar color={bot.color} faceColor={bot.mascotFaceColor} bodyColor={bot.mascotBodyColor} bodyId={id} size={34} animated={false} trackPointer={false} />
+      <MausAvatar color={bot.color} faceColor={bot.mascotFaceColor} material={bot.mascotMaterial} bodyColor={bot.mascotBodyColor} bodyId={id} size={34} animated={false} trackPointer={false} />
     </button>
   );
 }

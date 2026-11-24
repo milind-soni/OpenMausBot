@@ -9,15 +9,15 @@
  * layer and a small bitmap per avatar. `renderer: 'scene'` mounts a CSS 3D scene
  * instead, where every cross-section is its own small SVG and each frame only
  * writes a few CSS transforms; it costs a compositor layer per visible slice,
- * and is also the fallback where canvas is unavailable. `still` avatars are a
- * single static SVG and never animate. Every avatar on the page shares one
+ * and is also the fallback where canvas is unavailable. `still` avatars are
+ * static images and never animate. Every avatar on the page shares one
  * animation loop.
  */
 import { createAnimator } from '../animator.ts';
 import { pointerGaze } from '../follow.ts';
 import { resolveLook } from '../motion.ts';
 import { DEFAULT_COLOR, DEFAULT_EYE_COLOR, liveFrame, renderAvatarScene, renderAvatarSvg, sceneFrame, type SceneFrame } from '../render.ts';
-import type { AvatarDefinition, AvatarMood, AvatarState, RenderOptions } from '../types.ts';
+import type { AvatarDefinition, AvatarMaterial, AvatarMood, AvatarState, RenderOptions } from '../types.ts';
 import { requestFrame, subscribeFrames } from './clock.ts';
 import { canvasSupported, mountCanvas, paintCanvas, type CanvasSurface } from './paint.ts';
 import { trackPointer } from './pointer.ts';
@@ -29,6 +29,11 @@ export interface AvatarOptions {
   color?: string;
   /** Eye color: #rgb or #rrggbb, or any CSS color. Defaults to a near-black ink. */
   eyeColor?: string;
+  /**
+   * The body's finish: 'flat' (default), or 'fluffy' for a coat of fur with the eyes set into it.
+   * Fluffy needs the canvas renderer and WebGL2; without them the avatar draws flat.
+   */
+  material?: AvatarMaterial;
   /** Volume amount 0..14 (6 = natural depth, 0 = flat). */
   depth?: number;
   /** What the bot is doing (default `idle`). Changes ease from what is on screen. */
@@ -48,7 +53,7 @@ export interface AvatarOptions {
   view?: { yaw: number; pitch: number };
   /** true or false to force; 'system' (default) follows prefers-reduced-motion. */
   reducedMotion?: boolean | 'system';
-  /** Render one static SVG and never animate (thumbnails, lists). */
+  /** Render one fixed pose and never animate (thumbnails, lists): a static SVG, or for fluffy one painted canvas. */
   still?: boolean;
   /**
    * How a live avatar draws. 'canvas' (default) paints each frame to one canvas: one compositor layer
@@ -166,6 +171,12 @@ const VIEW_MARGIN = 100;
 /** Slack so a 60 Hz display reliably draws every other frame rather than drifting between 1 and 3. */
 const FRAME_SLACK = 0.004;
 
+/**
+ * The frame that last painted a fluffy still. They take turns, one a frame: the first paint of a
+ * shape builds its mesh, and a gallery that changes finish asks for all of its stills at once.
+ */
+let fluffyStillAt = -1;
+
 export function mountAvatar(host: HTMLElement, initial: AvatarOptions): MountedAvatar {
   let opts: AvatarOptions = { ...initial };
   const animator = createAnimator();
@@ -183,6 +194,7 @@ export function mountAvatar(host: HTMLElement, initial: AvatarOptions): MountedA
         const next = entry.contentRect.width;
         if (next === size) return;
         size = next;
+        dirty = true;
         requestFrame();
       });
   resize?.observe(host);
@@ -232,6 +244,22 @@ export function mountAvatar(host: HTMLElement, initial: AvatarOptions): MountedA
     lastStill = '';
   };
 
+  /** Whether the avatar is painted in fluffy: on a canvas, live or still. */
+  const fluffy = () => opts.material === 'fluffy' && opts.renderer !== 'scene' && canvasSupported();
+
+  const paint = (p: AvatarOptions, options: RenderOptions) => {
+    if (scene || lastStill) clear();
+    const flat = liveFrame(p.definition, { ...options, color: p.color, eyeColor: p.eyeColor });
+    const key = `${geometryKey(p.definition)}|${p.depth}`;
+    if (!surface || surface.key !== key || !host.contains(surface.canvas)) surface = mountCanvas(host, key, p.definition, p.depth);
+    // Any CSS color works, as in the scene: one that is not hex is read back every frame from the
+    // host's computed `color` and --avatar-ink (which syncHost sets), so themes apply live.
+    const css = isHex(p.color) && isHex(p.eyeColor) ? null : getComputedStyle(host);
+    const fill = css && !isHex(p.color) ? css.color || flat.color : flat.color;
+    const ink = css && !isHex(p.eyeColor) ? css.getPropertyValue('--avatar-ink').trim() || flat.ink : flat.ink;
+    paintCanvas(surface, flat, size, fill, ink, p.material);
+  };
+
   const draw = (time: number, pointer: { x: number; y: number } | null): boolean => {
     const p = opts;
     const reducedMotion = p.reducedMotion === 'system' || p.reducedMotion === undefined ? prefersReducedMotion() : p.reducedMotion;
@@ -240,8 +268,7 @@ export function mountAvatar(host: HTMLElement, initial: AvatarOptions): MountedA
     const look = resolveLook({ state: p.state, mood: p.mood, motion: p.mood });
     try {
       if (p.still) {
-        if (scene || surface) clear();
-        const svg = renderAvatarSvg(p.definition, {
+        const options: RenderOptions = {
           color: p.color,
           eyeColor: p.eyeColor,
           depth: p.depth,
@@ -250,7 +277,15 @@ export function mountAvatar(host: HTMLElement, initial: AvatarOptions): MountedA
           view: p.view,
           gaze: p.lookAt ?? undefined,
           reducedMotion: true,
-        });
+        };
+        if (fluffy()) {
+          // Nothing to paint until the host has a size; the resize that gives it one redraws.
+          if (size > 0) paint(p, { ...options, size });
+          failed = false;
+          return false;
+        }
+        if (scene || surface) clear();
+        const svg = renderAvatarSvg(p.definition, options);
         // The engine derives SVG ids from geometry, so repeated avatars can share them safely.
         if (svg !== lastStill) {
           host.innerHTML = svg;
@@ -280,16 +315,7 @@ export function mountAvatar(host: HTMLElement, initial: AvatarOptions): MountedA
         reducedMotion,
       };
       if (p.renderer !== 'scene' && canvasSupported()) {
-        if (scene) clear();
-        const flat = liveFrame(p.definition, { ...options, color: p.color, eyeColor: p.eyeColor });
-        const key = `${geometryKey(p.definition)}|${p.depth}`;
-        if (!surface || surface.key !== key || !host.contains(surface.canvas)) surface = mountCanvas(host, key, p.definition, p.depth);
-        // Any CSS color works, as in the scene: one that is not hex is read back every frame from the
-        // host's computed `color` and --avatar-ink (which syncHost sets), so themes apply live.
-        const css = isHex(p.color) && isHex(p.eyeColor) ? null : getComputedStyle(host);
-        const fill = css && !isHex(p.color) ? css.color || flat.color : flat.color;
-        const ink = css && !isHex(p.eyeColor) ? css.getPropertyValue('--avatar-ink').trim() || flat.ink : flat.ink;
-        paintCanvas(surface, flat, size, fill, ink);
+        paint(p, options);
         failed = false;
         return !reducedMotion || step.moving;
       }
@@ -320,6 +346,10 @@ export function mountAvatar(host: HTMLElement, initial: AvatarOptions): MountedA
       // Stills, and live avatars out of view, only redraw after a change; live avatars in view every
       // frame they ask for. A change still draws offscreen, so the content is current when printed.
       if ((opts.still || !visible) && !dirty) return false;
+      if (opts.still && size > 0 && fluffy()) {
+        if (fluffyStillAt === time) return true;
+        fluffyStillAt = time;
+      }
       dirty = false;
       const more = draw(time, pointer);
       if (!visible) return false;

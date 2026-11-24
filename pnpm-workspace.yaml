@@ -19,8 +19,9 @@ allowBuilds:
 onlyBuiltDependencies:
   - electron
   - esbuild
-# Transitive packages whose parents still allow a release with a published advisory: mermaid allows an older dompurify
-# and ajv an older fast-uri. Force the patched releases.
+# Transitive packages whose parents still allow a release with a published advisory: mermaid allows an older dompurify,
+# ajv an older fast-uri, and PostCSS and Tailwind an older source-map-js. Force the patched releases.
 overrides:
   dompurify: 3.4.17
   fast-uri: 3.1.9
+  source-map-js: 1.2.2

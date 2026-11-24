@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 
 import { caseOf, teammateNames, type Workflow, type WorkflowRef, type WorkflowStep } from "../../shared/skill-burger/format.ts";
 import { redactSecretsInText } from "../../shared/redact.ts";
+import { appMeta } from "../../shared/skill-burger/apps.ts";
 import { collect, matchTeammates, missingPrompt, readReassignment, readReview, repliesText, reviewPrompt, sendRound, type DelegateExecutors, type DelegationState } from "./delegate-step.ts";
 
 export const STEP_TIMEOUT_MS = 60_000;
@@ -78,7 +79,8 @@ export interface RunEnvelope {
     cases?: string[];
     resumeToken: string;
   };
-  error?: { type: "step_failed" | "timeout" | "output_too_large" | "runtime_error"; message: string; step?: string; resumeToken?: string };
+  /** `needs_connection`: a step needs an app this bot isn't connected to; nothing ran, and `apps` names them. */
+  error?: { type: "step_failed" | "timeout" | "output_too_large" | "runtime_error" | "needs_connection"; message: string; step?: string; resumeToken?: string; apps?: string[] };
 }
 
 export type ExecResult = { ok: true; output: unknown } | { ok: false; error: string; tooLarge?: true };
@@ -88,6 +90,8 @@ export interface StepExecutors extends Partial<DelegateExecutors> {
   app(input: { app: string; tool: string; args: Record<string, unknown>; account?: string; signal: AbortSignal; maxBytes: number }): Promise<ExecResult>;
   browser(input: { url: string; signal: AbortSignal }): Promise<ExecResult>;
   file(input: { path: string; content: string; signal: AbortSignal }): Promise<ExecResult>;
+  /** The apps this bot is connected to (their slugs), or null when that can't be told. */
+  connected?(): Promise<readonly string[] | null>;
 }
 
 /** Each step's start and end, as the chat shows any tool call: the card reads these to cook and stack the run's layers. */
@@ -326,7 +330,25 @@ async function execute(step: WorkflowStep, args: Record<string, unknown>, result
 
 /** A new run of `workflow`, from its first step. The envelope names the inputs the request didn't give, so the bot can
  * say which saved values it used instead of reusing them silently. */
+const squash = (slug: string) => slug.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/** The apps the steps every run takes need and this bot isn't connected to: asked for before anything runs, so a run
+ * never stops halfway for a connection. A case's steps are checked by the connectors gate when the run gets there. */
+export async function missingApps(workflow: Workflow, exec: StepExecutors): Promise<string[]> {
+  const needed = [...new Set(workflow.steps.flatMap((step) => (step.kind === "app" && !step.when ? [step.app] : [])))];
+  if (!needed.length || !exec.connected) return [];
+  const connected = await exec.connected().catch(() => null);
+  if (!connected) return [];
+  const have = new Set(connected.map(squash));
+  return needed.filter((app) => !have.has(squash(app)));
+}
+
 export async function startRun(input: { name: string; botId: string; threadId: string; sha256: string; workflow: Workflow; args?: Record<string, unknown> }, deps: RunDeps): Promise<RunEnvelope> {
+  const missing = await missingApps(input.workflow, deps.exec);
+  if (missing.length) {
+    const names = missing.map((app) => appMeta(app).label);
+    return { protocolVersion: 1, ok: false, run: randomUUID(), steps: [], error: { type: "needs_connection", apps: missing, message: `Nothing ran: this Skill Burger needs ${names.join(", ")}, which ${names.length > 1 ? "aren't" : "isn't"} connected for this bot.` } };
+  }
   const given = input.args ?? {};
   const defaults = Object.entries(input.workflow.args).filter(([name, arg]) => !Object.hasOwn(given, name) && arg.default !== undefined).map(([name, arg]) => ({ name, value: arg.default }));
   const envelope = await runFrom({ id: randomUUID(), name: input.name, botId: input.botId, threadId: input.threadId, sha256: input.sha256, workflow: input.workflow, args: runArgs(input.workflow, input.args), results: {}, from: 0 }, deps);
