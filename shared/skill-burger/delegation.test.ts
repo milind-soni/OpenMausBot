@@ -148,3 +148,15 @@ describe("a step's place and the run's own leftovers", () => {
     expect(redirectTarget("curl -s url 2>&1 >/dev/null")).toBeNull();
   });
 });
+
+describe("a file the person named", () => {
+  it("is an input even inside a folder path", () => {
+    const draft = draftWorkflow([
+      ask("write the summary to top5.md"),
+      bash("python3 make.py > /tmp/out.md"),
+      bash('cp /tmp/out.md "./top5.md"'),
+    ])!;
+    expect(draft.workflow.args).toEqual({ file: { default: "top5.md", label: "file" } });
+    expect(draft.workflow.steps[1]).toMatchObject({ run: 'cp /tmp/out.md "./$OMB_ARG_FILE"' });
+  });
+});

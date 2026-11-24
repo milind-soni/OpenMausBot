@@ -234,7 +234,9 @@ class Drafter {
       let atCommand = true;
       for (let i = 0; i < out.length; i += 1) {
         const char = out[i]!;
-        const boundary = !/[\w./-]/.test(out[i - 1] ?? " ") && !/[\w./-]/.test(out[i + value.length] ?? " ");
+        // A file the person named may sit in a folder ("./top5.md"): a slash before it is still its start.
+        const before = typed && FILE_EXT.test(value) ? /[\w.-]/ : /[\w./-]/;
+        const boundary = !before.test(out[i - 1] ?? " ") && !/[\w./-]/.test(out[i + value.length] ?? " ");
         const allowed = typed ? quote !== "'" : quote === null && !atCommand;
         if (out.startsWith(value, i) && boundary && allowed) {
           rebuilt += quote === '"' ? env : `"${env}"`;
