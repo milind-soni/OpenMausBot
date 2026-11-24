@@ -291,4 +291,18 @@ describe("board dispatcher", () => {
     expect(h.started.at(-1)).toEqual({ threadId: ci.threadId, botId: "scout", text: "@scout wake Ship: Check CI" });
     expect(state(ci.threadId)).toMatchObject({ state: "working", attempts: 1, laterCount: 1 });
   });
+
+  it("hands back an item set aside whose bot left the room", async () => {
+    const { h, dispatcher, board, add, pastQuiet, after, end, state } = harness({ bots: ["scout", "payroll"] });
+    const ci = add("Ship", { forBotId: "scout" });
+    pastQuiet();
+    await dispatcher.tick();
+    board.move(ci.threadId, { move: "later", at: h.clock + 60_000, note: "Check CI" }, { kind: "bot", botId: "scout" });
+    end(ci.threadId);
+    h.rooms.get("g1")!.bots = ["payroll"];
+    after(60_000);
+    await dispatcher.tick();
+    expect(state(ci.threadId)).toMatchObject({ state: "ready", attempts: 1 });
+    expect(state(ci.threadId).later).toBeUndefined();
+  });
 });

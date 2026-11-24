@@ -116,6 +116,8 @@ export function createBoardDispatcher(deps: BoardDispatchDeps) {
     for (const item of deps.board.list({ state: "working" })) {
       if (!item.later || !item.holder || item.later.at > t || due(holdItem.get(item.threadId), t)) continue;
       const botId = item.holder.botId;
+      // Its bot left the room: anyone of the room may take it again.
+      if (!(deps.roomBots(item.groupId) ?? []).includes(botId)) { move(item, { move: "release" }); continue; }
       if (!deps.botFree(botId, item.groupId, item.threadId) || holdsActive(deps.board.list({ state: "working" }), botId)) continue;
       if (deps.threadWorking(item.groupId, item.threadId)) continue;
       if (stoppedByCap(botId, t)) return false;
