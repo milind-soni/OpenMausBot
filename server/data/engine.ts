@@ -583,13 +583,16 @@ class BotDb implements BotDatabase {
     const count = await this.statement("panel", countSql, options, (o, conn) => this.read(o, conn, countSql));
     const rowCount = toCount(count.rows[0]?.[0] ?? 0);
     const key = `${from}\u0000${rowCount}`;
-    const cached = this.statsCache.get(key);
+    const cacheable = entry.type !== "VIEW";
+    const cached = cacheable ? this.statsCache.get(key) : undefined;
     if (cached) return cached;
     const columns = await this.columnsOf("panel", from, options);
     const aggregated = await this.aggregate("panel", from, columns, options);
     const stats: DataColumnStats = { table: this.displayName(entry), rowCount: aggregated.rowCount, columns: aggregated.columns };
-    if (this.statsCache.size >= STATS_CACHE_MAX) this.statsCache.clear();
-    if (revision === this.statsRevision) this.statsCache.set(key, stats);
+    if (cacheable && revision === this.statsRevision) {
+      if (this.statsCache.size >= STATS_CACHE_MAX) this.statsCache.clear();
+      this.statsCache.set(key, stats);
+    }
     return stats;
   }
 
