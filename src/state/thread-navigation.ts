@@ -18,10 +18,11 @@ interface NotificationRoutingState {
 }
 
 export function visibleNotificationThread(
-  state: NotificationRoutingState & Pick<AppState, "activeView" | "selectedId" | "forkPanel">,
+  state: NotificationRoutingState & Pick<AppState, "activeView" | "selectedId" | "forkPanel" | "workspacePanes">,
   threadId?: string,
 ): string | null {
   if (state.activeView !== "chat") return null;
+  if (threadId && state.workspacePanes?.panels[threadId]) return threadId;
   if (threadId && state.forkPanel?.threadId === threadId && state.forkPanel.ownerId === state.selectedId) return threadId;
   return (
     state.bots.find((candidate) => candidate.id === state.selectedId)?.threadId ??

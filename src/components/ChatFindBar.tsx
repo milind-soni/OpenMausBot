@@ -1,3 +1,4 @@
+import { threadPanel } from "@/state/fork-panel";
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
 
@@ -56,7 +57,7 @@ export function ChatFindBar({ threadId, onClose, inForkPanel = false }: { thread
     const hit = hits[next];
     if (!hit) return;
     setIndex(next);
-    const panel = state.forkPanel;
+    const panel = threadPanel(state, threadId);
     const landing = inForkPanel
       ? (async () => {
         if (panel?.threadId !== hit.threadId) throw new Error(t("chat.find.unavailable"));

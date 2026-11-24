@@ -42,7 +42,8 @@ try {
     "#!/usr/bin/env node",
     'import { basename, join } from "node:path";',
     'process.env.FAKE_CLAUDE_MODE = "slow";',
-    `process.env.FAKE_CLAUDE_SLOW_FINISH_GATE = ${JSON.stringify(finishGate)};`,
+    process.argv.includes("--try-panes") ? 'process.env.FAKE_CLAUDE_SLOW_MS = "12000";' :
+      `process.env.FAKE_CLAUDE_SLOW_FINISH_GATE = ${JSON.stringify(finishGate)};`,
     // Fixture-only launch receipts let a verifier exercise the same live
     // permission broker as the provider, without accessing real accounts.
     `process.env.FAKE_CLAUDE_DUMP = join(${JSON.stringify(fixture.info.dataDir)}, basename(process.cwd()) + ".launch.json");`,
@@ -53,7 +54,10 @@ try {
     entry: "/scripts/testing/threads-preview.tsx", route: "/__threads.html", title: "Isolated OpenMaus Threads",
   });
   console.log(JSON.stringify({ ...fixture.info, previewUrl: ui.previewUrl, finishGate }));
-  await parkUntilSignal();
+  if (process.argv.includes("--check-panes")) {
+    const { verifyWorkspacePanes } = await import("./testing/workspace-panes.ts");
+    await verifyWorkspacePanes(ui.previewUrl, finishGate, fixture.info.logPath + ".panes.png");
+  } else await parkUntilSignal();
 } finally {
   await ui?.close();
   await fixture.close();

@@ -1353,7 +1353,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
         setImmediate(finishSlowTurn);
       }, 10);
     } else {
-      setTimeout(finishSlowTurn, 800);
+      setTimeout(finishSlowTurn, Number(process.env.FAKE_CLAUDE_SLOW_MS ?? 800));
     }
   } else {
     finish();

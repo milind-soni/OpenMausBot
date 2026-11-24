@@ -1,3 +1,4 @@
+import { threadPanel } from "@/state/fork-panel";
 import { useState } from "react";
 import { X } from "lucide-react";
 import { useStore, visibleMessages, type Message } from "@/state/store";
@@ -43,7 +44,7 @@ export function OptionCard({
   const [custom, setCustom] = useState("");
   const card = message.card;
   const bot = state.bots.find((candidate) => candidate.id === botId);
-  const panel = state.forkPanel;
+  const panel = threadPanel(state, threadId);
   const transcript = panel && panel.threadId === threadId && panel.kind === (groupId ? "group" : "bot") && panel.ownerId === (groupId ?? botId)
     ? visibleMessages(panel)
     : groupId

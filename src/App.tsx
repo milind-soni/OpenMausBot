@@ -22,6 +22,8 @@ import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { HandoffExchangeHost } from "@/components/HandoffExchange";
 import { GroupView } from "@/components/GroupView";
+import { FocusedWorkspaceThread, WorkspaceChatContext } from "@/state/workspace-chat-context";
+import { WorkspacePanes } from "@/components/WorkspacePanes";
 import { ForkPanel } from "@/components/ForkPanel";
 import { SIDEBAR_AND_BOT_PANEL_FIT, SIDEBAR_AND_NARROW_PANEL_FIT, SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQuery } from "@/lib/use-media-query";
 import { anySidePanel, botPanelFloats, panelsMovingSidebar, sidebarFoldsForPanel, type OpenSidePanels } from "@/lib/sidebar-fold";
@@ -364,7 +366,17 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     <AppNotices quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId)} viewer={viewer} />
     <CliLoginCard />
   </>;
+  const primary = group ?? chatBot ?? bot;
+  const paneChat = sidebarInline && primary && state.activeView === "chat" && !firstRun && !teamWelcomeOn && !chiefStep && !localVmWorkspaceBotId ? primary.threadId : null;
+  const focusedThread = state.workspacePanes && paneChat ? state.workspacePanes.panels[state.workspacePanes.focused]?.threadId ?? paneChat : null;
+  useEffect(() => {
+    if (!state.workspacePanes) return;
+    if (!sidebarInline) dispatch({ type: "closeWorkspacePanes" });
+    else if (paneChat && state.workspacePanes.panels[paneChat]) dispatch({ type: "closePane", id: paneChat });
+  }, [dispatch, paneChat, sidebarInline, state.workspacePanes]);
+
   return (
+    <WorkspaceChatContext value={paneChat}><FocusedWorkspaceThread value={focusedThread}>
     <div data-look="app" className={cn("flex h-full flex-col", framed && "bg-frame")} onClickCapture={drawerOpen ? noteDrawerAction : undefined} onKeyDownCapture={drawerOpen ? noteDrawerAction : undefined}>
       <WindowFrameBar notifications={notificationTray} sidebarUpdate={!advanced && sidebarShown} />
       <BotLimitPopup />
@@ -437,10 +449,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         <CloudEngineSignIn />
       ) : chiefStep ? (
         <EmptyChatShell />
-      ) : group ? (
-        <GroupView key={group.id} group={group} />
-      ) : bot ? (
-        <HandoffExchangeHost bot={chatBot ?? bot}><ChatView bot={chatBot ?? bot} /></HandoffExchangeHost>
+      ) : primary ? (
+        <WorkspacePanes primary={primary.threadId} title={primary.tasks?.find((task) => task.threadId === primary.threadId)?.title ?? primary.name}>
+          {group ? <GroupView key={group.id} group={group} /> : bot && <HandoffExchangeHost bot={chatBot ?? bot}><ChatView bot={chatBot ?? bot} /></HandoffExchangeHost>}
+        </WorkspacePanes>
       ) : noEngines ? (
         <NoEngines />
       ) : (
@@ -514,6 +526,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         visible={capabilities.windowChrome === "win-caption" && Boolean(window.ogb?.windowControls)}
       />
     </div>
+    </FocusedWorkspaceThread></WorkspaceChatContext>
   );
 }
 

@@ -84,7 +84,7 @@ export function createNewChat(effects: Effects) {
       return true;
     }
     const state = effects.state(), open = state.newChat;
-    const intoBlank = action.type === "send" && open?.botId === action.botId && action.threadId === state.bots.find((bot) => bot.id === action.botId)?.threadId;
+    const intoBlank = action.type === "send" && open?.botId === action.botId && !(action.threadId && state.workspacePanes?.panels[action.threadId]) && action.threadId === state.bots.find((bot) => bot.id === action.botId)?.threadId;
     if (!intoBlank && !("threadId" in action && isNewChatThread(action.threadId))) return false;
     const conversationFor = (botId: string) => open?.botId === botId ? making.get(open.session) ?? make(open) : null;
     if (action.type === "makeNewChat") {

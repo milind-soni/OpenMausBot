@@ -1,4 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { FocusedWorkspaceThread } from "@/state/workspace-chat-context";
+import { ThreadSplitMenu, useSelectThreadPane } from "./OpenPaneActions";
+import { useContext, useEffect, useLayoutEffect, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRight, Clock3, Loader2, Plus, X } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -69,7 +71,9 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
   bot: Bot; selected: boolean; drafting?: boolean; rowThreadId: string; pendingQueued: AppState["pendingQueued"]; dispatch: Dispatch<Action>;
 }) {
   const unfolded = useThreadsUnfolded(bot.id) && canUnfold(bot);
-  const current = selected && !drafting ? bot.switchingTo ?? bot.threadId : undefined;
+  const selectPane = useSelectThreadPane(bot.id);
+  const focused = useContext(FocusedWorkspaceThread);
+  const current = focused ? focused : selected && !drafting ? bot.switchingTo ?? bot.threadId : undefined;
   const { rows, more, runningMore } = threadLabels(bot, pendingQueued, { unfolded, current, rowThreadId, now: Date.now() });
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -98,7 +102,7 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
 
   const items = () => Array.from(tree.current?.querySelectorAll<HTMLElement>("[role=treeitem]") ?? []);
   const focusItem = (index: number) => { setFocusAt(index); items()[index]?.focus(); };
-  const open = (threadId: string) => dispatch({ type: "switchTask", botId: bot.id, threadId });
+  const open = (threadId: string) => { if (!selectPane(threadId)) dispatch({ type: "switchTask", botId: bot.id, threadId }); };
   const openPanel = () => {
     showAllConversations(bot.id);
     dispatch({ type: "toggleSettings", open: true, botId: bot.id });
@@ -141,7 +145,10 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
     }
     const row = rows[at];
     if (!row) return;
-    if (event.key === "F2") { event.preventDefault(); startRename(row); }
+    if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+      const trigger = list[at]?.querySelector<HTMLButtonElement>("[data-thread-split-menu] button");
+      if (trigger) { event.preventDefault(); trigger.click(); }
+    } else if (event.key === "F2") { event.preventDefault(); startRename(row); }
     else if (event.key === "Delete") { event.preventDefault(); hide(row); }
   };
   const stop = Math.min(focusAt ?? Math.max(0, rows.findIndex((row) => row.current)), rows.length + Number(more > 0) + Number(runningMore > 0) - 1);
@@ -160,6 +167,10 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
           <div key={row.task.threadId} role="treeitem" aria-hidden={gone || undefined} inert={gone || undefined} aria-level={1} aria-selected={row.current} aria-current={row.current ? "page" : undefined}
             data-thread-label={row.task.threadId} data-sidebar-activity-row={row.task.threadId} tabIndex={roving(index)} title={title}
             onClick={() => { if (renaming !== row.task.threadId) open(row.task.threadId); }}
+            onContextMenu={(event) => {
+              const trigger = event.currentTarget.querySelector<HTMLButtonElement>("[data-thread-split-menu] button");
+              if (trigger) { event.preventDefault(); trigger.click(); }
+            }}
             onDoubleClick={() => startRename(row)} onFocus={() => setFocusAt(index)} style={stagger(index)}
             className={cn(ROW, gone ? FOLDING : "animate-msg-in cursor-default [animation-fill-mode:backwards] motion-reduce:animate-none",
               row.current ? "bg-raised font-medium text-ink" : "text-ink-secondary hover:bg-ink/[0.06] hover:text-ink",
@@ -176,6 +187,7 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
             ) : <>
               <span dir="auto" className={cn("min-w-0 flex-1 truncate", hideable(row) && YIELDS)}>{title}</span>
               <span className={cn("flex shrink-0 items-center", hideable(row) && "transition-opacity duration-[120ms] group-hover/label:opacity-0 motion-reduce:transition-none")}><StatusMark row={row} /></span>
+              <ThreadSplitMenu ownerId={bot.id} threadId={row.task.threadId} title={title} hideable={hideable(row)} />
               {hideable(row) && (
                 <button type="button" tabIndex={-1} aria-label={t("sidebar.threads.hide", { title })} title={t("sidebar.threads.hideShort")}
                   onClick={(event) => { event.stopPropagation(); hide(row); }}

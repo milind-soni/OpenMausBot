@@ -70,3 +70,22 @@ it("prefers a live patch over an older fetched copy while loading", () => {
   expect(loaded.forkPanel).toMatchObject({ loading: false, activeLeafId: source.id });
   expect(loaded.forkPanel?.messages[0]?.text).toBe("Updated");
 });
+
+it("routes late loads and live messages to their thread across splits and replacements", () => {
+  const open = (s: AppState, threadId: string, split: "beside" | "below" | "replace", loadId = threadId) =>
+    reduceForkPanel(s, { type: "openForkPanel", kind: "bot", ownerId: "bot", threadId, split, loadId });
+  const right = open(initialState, "right", "beside");
+  const left = reduceForkPanel(right, { type: "focusPane", id: "primary" });
+  const stacked = open(left, "bottom", "below");
+  const updated = reduceForkPanel(stacked, { type: "forkPanelMessage", threadId: "right", message: source });
+  const switched = open(updated, "new", "replace");
+  const stale = reduceForkPanel(switched, { type: "forkPanelLoaded", threadId: "bottom", loadId: "bottom", messages: [source], activeLeafId: null });
+  expect(stale).toBe(switched);
+  expect(stale.workspacePanes?.panels.right?.messages).toEqual([source]);
+  expect(stale.workspacePanes?.panels.new?.messages).toEqual([]);
+  const reopened = open(stale, "bottom", "replace", "reopened");
+  expect(reduceForkPanel(reopened, { type: "forkPanelLoadFailed", threadId: "bottom", loadId: "bottom" })).toBe(reopened);
+  const closed = reduceForkPanel(reopened, { type: "closePane", id: "right" });
+  expect(closed.workspacePanes?.layout).toMatchObject({ direction: "below", first: "primary", second: "bottom" });
+  expect(closed.workspacePanes?.panels.right).toBeUndefined();
+});

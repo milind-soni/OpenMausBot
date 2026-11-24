@@ -12,6 +12,27 @@ two different saved model choices, an optional Email folder, and a Launch team
 group with separate histories. New turns deliberately remain running so that
 switching and Stop can be exercised without a real provider or account.
 
+## Workspace panes
+
+Run `node --experimental-strip-types scripts/verify-threads.ts --try-panes` and
+open the printed preview URL in a desktop-width browser. This version gives
+each new fake reply twelve seconds to finish.
+
+1. Expand Pepper and select **Triage Gmail**. Open the **Triage iCloud** row’s
+   actions menu and choose **Open beside**. Send a different message in each
+   pane and wait for both replies.
+2. Click the Gmail composer. Choose **Open below** from the **Website ideas**
+   row’s menu and type a draft in the new pane.
+3. Send again in Gmail and iCloud, then stop Gmail. The iCloud reply should
+   finish and the Website ideas draft should still be there.
+4. Drag a divider, or focus it and use the arrow keys. Close a pane with its
+   **×**, then reopen the thread from the sidebar to see its history.
+
+To replay the scenario automatically, run
+`node --experimental-strip-types scripts/verify-threads.ts --check-panes`.
+Set `OMB_CDP_CHROME` to your Chrome or Chromium executable on Linux. This
+check controls when the fake replies finish and prints the screenshot path.
+
 ## Check the real UI
 
 1. Expand Pepper and open Triage Gmail. Confirm its conversation and model.
