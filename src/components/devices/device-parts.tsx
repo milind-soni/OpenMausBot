@@ -19,16 +19,20 @@ export function StatusMark({ status }: { status: Device["status"] }) {
 /** How it connects, after its state: a Cloud and a cloud desktop leave it out, since that is what they are. */
 export const routeOf = (device: Device): string | null => (device.here || device.kind === "cloud" || device.kind === "vm" ? null : routeLabel(device.route));
 
+/** What the mark shows: a device that can't be reached or needs a step is marked as needing the person, even while away. */
+export const markOf = (device: Device): Device["status"] => (device.note && device.note !== "reconnecting" ? "attention" : device.status);
+
 /** "● Online · Same network": the state in a mark and words, then how it connects, in one line that wraps. */
 export function StatusLine({ device, now, className }: { device: Device; now: number; className?: string }) {
   const words = statusText(device, now);
   const route = routeOf(device);
   if (!words && !route) return null;
+  const mark = markOf(device);
   return (
-    <span data-device-state={device.status} className={cn("flex min-w-0 items-start gap-1.5 text-[13px] leading-[18px]", className)}>
-      {words && <span className="flex h-[18px] shrink-0 items-center"><StatusMark status={device.status} /></span>}
+    <span data-device-state={mark} className={cn("flex min-w-0 items-start gap-1.5 text-[13px] leading-[18px]", className)}>
+      {words && mark !== "unknown" && <span className="flex h-[18px] shrink-0 items-center"><StatusMark status={mark} /></span>}
       <span className="min-w-0">
-        {words && <span className={device.status === "attention" ? "text-ink" : "text-ink-secondary"}>{words}</span>}
+        {words && <span className={mark === "attention" ? "text-ink" : "text-ink-secondary"}>{words}</span>}
         {words && route && <span aria-hidden="true" className="text-ink-tertiary">{" · "}</span>}
         {route && <span data-device-route="" className="text-ink-secondary">{route}</span>}
       </span>
@@ -52,6 +56,15 @@ export function BotFaces({ bots, size = 18, ring = "ring-(--color-menu)" }: { bo
         style={{ minWidth: size, height: size }}>+{bots.length - FACES}</span>}
     </span>
   );
+}
+
+/** The faces, then how many bots in words, so the faces never stand unexplained. */
+export function BotsOn({ bots }: { bots: ReturnType<typeof useBotsOn> }) {
+  if (bots.length === 0) return null;
+  return <span className="flex shrink-0 items-center gap-1.5">
+    <BotFaces bots={bots} />
+    <span aria-hidden="true" className="text-[12px] leading-4 text-ink-tertiary tabular-nums">{t(bots.length === 1 ? "devicesPage.bots.one" : "devicesPage.bots.count", { count: bots.length })}</span>
+  </span>;
 }
 
 export const botsLabel = (bots: ReturnType<typeof useBotsOn>) => (bots.length ? t("devicesPage.bots.on", { names: bots.map((bot) => bot.name).join(", ") }) : "");

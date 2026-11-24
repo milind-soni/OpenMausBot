@@ -9,6 +9,17 @@ export interface SettingsShell {
   /** the section a link, a notice or search asked for; folds holding it open */
   anchor: string | null;
   go: (page: SettingsPageId, anchor?: string) => void;
+  /** The window is phone-narrow: its own header shows the page's title and the way back. */
+  narrow?: boolean;
+  /** A step inside the page (Add a device's), named in the narrow header with its own way back; null gives the page back. */
+  setSub?: (sub: SettingsSub | null) => void;
+}
+
+export interface SettingsSub {
+  title: string;
+  /** Where the header's back button goes, in a word or two. */
+  back: string;
+  onBack: () => void;
 }
 
 export const SettingsShellContext = createContext<SettingsShell | null>(null);

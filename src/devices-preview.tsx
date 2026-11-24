@@ -29,6 +29,7 @@ setAdvancedMode(params.get("advanced") === "1");
 await loadLocale(params.get("lang") ?? "en");
 
 const now = Date.now();
+const hostOf = (address: string) => { try { return new URL(/:\/\//.test(address) ? address : `http://${address}`).host; } catch { return address; } };
 const MIN = 60_000;
 const ready = tailscale === "ready" || tailscale === "unshared";
 const tailRoute = { on: ready || tailscale === "magicdns", since: now - 9e8, name: ready ? "ada-macbook.tail4c2e.ts.net" : null, computers: tailscale !== "unshared" };
@@ -90,11 +91,11 @@ const ogb = {
     workspaces: { state: () => new Promise(() => {}), places: () => new Promise(() => {}),
       add: async (how: string, address?: string) => {
         if (how !== "link") return;
-        if (!connectOk) return { outcome: "problem", problem: "unreachable", host: "maus.example.org" };
+        if (!connectOk) return { outcome: "problem", problem: "unreachable", host: hostOf(address ?? "") };
         environments.push({ id: "new-server", kind: "remote", name: "Garage NUC", origin: address ?? "https://maus.example.org" });
         return { outcome: "connected" };
       },
-      probe: async (address: string) => (connectOk && address.trim() ? { outcome: "found", label: "Garage NUC", version: "0.1.180", transport: "https" } : { outcome: "problem", problem: address.trim() ? "unreachable" : "empty", host: "maus.example.org" }) },
+      probe: async (address: string) => (connectOk && address.trim() ? { outcome: "found", label: "Garage NUC", version: "0.1.180", transport: "https" } : { outcome: "problem", problem: address.trim() ? "unreachable" : "empty", host: hostOf(address) }) },
   } : {}),
 };
 (globalThis as unknown as { ogb: unknown }).ogb = ogb;

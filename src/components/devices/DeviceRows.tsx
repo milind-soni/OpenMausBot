@@ -5,7 +5,7 @@ import { t } from "@/lib/i18n";
 import type { Device, DeviceAction, DeviceGroup, PrivateNetwork } from "@/lib/devices";
 import { SettingsEmptyRow, SettingsGroup, SettingsRows } from "../SettingsPrimitives";
 import { actionLabel, DeviceDetails } from "./DeviceDetails";
-import { BotFaces, botsLabel, needOf, StatusLine, StatusMark, useBotsOn } from "./device-parts";
+import { BotsOn, botsLabel, needOf, StatusLine, StatusMark, useBotsOn } from "./device-parts";
 import { KIND_ICON, groupLabel, networkShort, statusText } from "./device-words";
 
 export interface NetworkAction {
@@ -53,11 +53,11 @@ function DeviceRow({ device, mark, opened, onAction, now }: {
         <span aria-hidden="true" className={SLOT}>{mark ?? <Icon size={16} />}</span>
         <button type="button" data-device-node={node} aria-expanded={open} aria-controls={detailsId} aria-label={label} title={device.name}
           onClick={() => opened.toggle(device.id)}
-          className="flex min-w-0 flex-1 cursor-pointer flex-col gap-0.5 text-start after:absolute after:inset-0 after:content-[''] hover:after:bg-ink/[0.03] focus-visible:outline-none! focus-visible:after:rounded-[inherit] focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-focus">
+          className="flex min-w-0 flex-1 cursor-pointer flex-col gap-0.5 text-start after:absolute after:inset-0 after:content-[''] hover:after:bg-ink/[0.03] focus-visible:outline-none! focus-visible:after:rounded-xl focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-focus">
           <span className="break-words text-[14px] font-medium leading-5 text-ink">{device.name}</span>
           <StatusLine device={device} now={now} />
         </button>
-        <BotFaces bots={bots} />
+        <BotsOn bots={bots} />
         {need && (
           <button type="button" data-row-action={need.type} onClick={() => onAction(device, need)} aria-label={`${need.type === "copy-update" ? t("devicesPage.tile.update") : actionLabel(need, device)}: ${device.name}`}
             className="ui-button ui-button-sm relative z-10 shrink-0">{need.type === "copy-update" ? t("devicesPage.tile.update") : actionLabel(need, device)}</button>
@@ -75,7 +75,7 @@ function DeviceRow({ device, mark, opened, onAction, now }: {
 const NETWORK_MARK: Partial<Record<PrivateNetwork["state"], Device["status"]>> = { ready: "online", unknown: "unknown" };
 
 /** The private network on this computer: its state, the whole next step in words, and the one button for it. */
-function NetworkRow({ network, line, action, link }: { network: PrivateNetwork; line: string; action: NetworkAction | null; link?: ReactNode }) {
+function NetworkRow({ network, line, action, secondary }: { network: PrivateNetwork; line: string; action: NetworkAction | null; secondary?: ReactNode }) {
   return (
     <div data-settings-block="network" data-private-network="" className="flex scroll-mt-4 flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
       <div className="flex min-w-[min(100%,14rem)] flex-1 gap-3">
@@ -87,14 +87,15 @@ function NetworkRow({ network, line, action, link }: { network: PrivateNetwork; 
               <StatusMark status={NETWORK_MARK[network.state] ?? "attention"} />{networkShort(network)}
             </span>
           </span>
-          <span data-network-line={network.state} aria-live="polite" className="text-[13px] leading-[18px] text-ink-secondary">{line}{link && <>{" "}{link}</>}</span>
+          <span data-network-line={network.state} aria-live="polite" className="text-[13px] leading-[18px] text-ink-secondary">{line}</span>
         </div>
       </div>
-      {action && (
-        <span className="flex shrink-0 ps-11">
-          {action.href
+      {(action || secondary) && (
+        <span className="flex shrink-0 items-center gap-2 ps-11 @min-[480px]/rows:ps-0">
+          {secondary}
+          {action && (action.href
             ? <a href={action.href} target="_blank" rel="noreferrer" className="ui-button ui-button-sm" data-network-action="">{action.label}</a>
-            : <button type="button" className="ui-button ui-button-sm" data-network-action="" disabled={action.busy} onClick={action.run}>{action.label}</button>}
+            : <button type="button" className="ui-button ui-button-sm" data-network-action="" disabled={action.busy} onClick={action.run}>{action.label}</button>)}
         </span>
       )}
     </div>
@@ -104,10 +105,10 @@ function NetworkRow({ network, line, action, link }: { network: PrivateNetwork; 
 /** This place first: its row (open like any other) and, on This computer, the private network under it. */
 export function HereSection({ device, mark, network, opened, onAction, onAdd, now }: {
   device: Device; mark: ReactNode; opened: Opened; onAction: (device: Device, action: DeviceAction) => void; onAdd: () => void; now: number;
-  network: { network: PrivateNetwork; line: string; action: NetworkAction | null; link?: ReactNode } | null;
+  network: { network: PrivateNetwork; line: string; action: NetworkAction | null; secondary?: ReactNode } | null;
 }) {
   return (
-    <SettingsGroup block="add"
+    <SettingsGroup label={t("devicesPage.here.section")} block="add"
       actions={<button type="button" data-add-device="" onClick={onAdd} className="ui-button ui-button-primary ui-button-sm">{t("devicesPage.add")}</button>}>
       <SettingsRows icons>
         <DeviceRow device={device} mark={mark} opened={opened} onAction={onAction} now={now} />

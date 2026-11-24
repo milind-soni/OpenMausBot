@@ -1,0 +1,64 @@
+import type { ReactNode } from "react";
+import { Check, Loader2 } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
+import { productName } from "@/lib/brand";
+import { t } from "@/lib/i18n";
+import { codeUntil } from "@/lib/pairing-time";
+import { reachLine } from "../PhoneDevicesSection";
+import type { PhoneSetupController } from "../PhoneSetupFlow";
+import { PhoneSetupFlowView } from "../PhoneSetupFlow";
+
+/** "Waiting for it to connect…", then "X is connected". */
+export function Waiting({ connected, waiting = t("devicesPage.addFlow.waiting") }: { connected: string | null; waiting?: string }) {
+  return connected
+    ? <p role="status" data-pair-state="connected" className="flex items-center gap-2 text-[13px] leading-[18px] text-ink"><Check size={14} aria-hidden="true" className="text-success" />{t("devicesPage.addFlow.connected", { name: connected })}</p>
+    : <p role="status" data-pair-state="waiting" className="flex items-center gap-2 text-[13px] leading-[18px] text-ink-secondary"><Loader2 size={14} aria-hidden="true" className="motion-safe:animate-spin" />{waiting}</p>;
+}
+
+/** A code typed by hand: the code, in groups the eye can hold, then until when it works. */
+export function TypedCode({ label, code, expiresAt }: { label: string; code: string; expiresAt: number }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[12px] leading-4 text-ink-tertiary">{label}</span>
+      <span className="flex flex-wrap items-baseline gap-x-2">
+        <span data-pairing-code="" className="font-mono text-[16px] font-medium leading-6 tracking-[0.12em] text-ink tabular-nums">{code}</span>
+        <span className="text-[12px] leading-4 text-ink-tertiary">{codeUntil(expiresAt)}</span>
+      </span>
+    </div>
+  );
+}
+
+/** A phone's code: the QR on its white plate, with what to do, the code to type instead and the wait beside it. */
+export function PhoneCodeCard({ link, code, expiresAt, connected, children }: { link: string; code: string | null; expiresAt: number | null; connected: string | null; children?: ReactNode }) {
+  return (
+    <div data-pair-panel="phone" className="flex flex-wrap items-start gap-4">
+      <div data-pair-qr="" aria-label={t("phone.code.qrAria")} role="img" className="shrink-0 rounded-xl bg-white p-2.5 shadow-[inset_0_0_0_0.5px_var(--settings-edge)]">
+        <QRCodeSVG value={link} size={148} level="M" bgColor="#ffffff" fgColor="#111111" />
+      </div>
+      <div className="flex min-w-[min(100%,13rem)] flex-1 flex-col gap-3">
+        <p className="text-[13px] leading-[18px] text-ink">{t("phone.code.installAndScan", { app: productName() })}</p>
+        {code && expiresAt && <TypedCode label={t("devicesPage.addFlow.orType")} code={code} expiresAt={expiresAt} />}
+        <Waiting connected={connected} waiting={t("devicesPage.addFlow.waitingPhone")} />
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** Pair a phone's code on This computer, in the Devices page's own look; any other moment of the flow (signing in,
+ * starting up) is the flow's own view. */
+export function PhoneCodeInline({ c }: { c: PhoneSetupController }) {
+  const pairing = c.state?.pairing;
+  if (c.phase === "qr" && c.pairingExpired) {
+    return <div className="flex flex-col items-start gap-3">
+      <p className="text-[13px] leading-[18px] text-ink-secondary">{t("remote.serverPairing.expired")}</p>
+      <button type="button" className="ui-button ui-button-sm" onClick={c.refreshCode}>{t("phone.code.createNew")}</button>
+    </div>;
+  }
+  if (c.phase === "qr" && c.pairingLink && c.state) {
+    return <PhoneCodeCard link={c.pairingLink} code={c.state.e2e?.enabled ? null : pairing?.code ?? null} expiresAt={pairing?.expiresAt ?? null} connected={null}>
+      <p className="text-[12px] leading-4 text-ink-tertiary">{reachLine(c.state)}</p>
+    </PhoneCodeCard>;
+  }
+  return <PhoneSetupFlowView controller={c} />;
+}

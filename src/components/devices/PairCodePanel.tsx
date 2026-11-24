@@ -1,17 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { QRCodeSVG } from "qrcode.react";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Copy, Loader2 } from "lucide-react";
 import { productName } from "@/lib/brand";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { readMembership } from "@/lib/membership";
-import { codeUntil } from "@/lib/pairing-time";
 import type { SessionState } from "@/lib/session";
 import { readSharedSessionState } from "@/lib/shared-session";
 import { api } from "@/state/api";
 import { useStoreSelector } from "@/state/store-select";
 import { canPairDevices, computerLink, pairingBlockedReason, type PairingOffer } from "../ServerPairingCard";
 import { TeamPhoneCard } from "../TeamPhoneCard";
+import { PhoneCodeCard, TypedCode, Waiting } from "./CodeCard";
 
 /** One copyable line to run on a new server: the sign-in a tunnel needs, then the server, in one go. */
 export const SERVER_COMMANDS = {
@@ -27,20 +26,20 @@ export function CommandRow({ label, command }: { label: string; command: string 
   return (
     <div className="flex flex-col gap-1">
       <span className="text-[12px] leading-4 text-ink-secondary">{label}</span>
-      <div className="flex min-w-0 items-center gap-2 rounded-lg bg-ink/[0.05] px-3 py-2">
-        <code data-server-command="" className="min-w-0 flex-1 select-text break-all font-mono text-[12px] leading-4 text-ink">{command}</code>
-        <button type="button" onClick={copy} className="shrink-0 cursor-pointer text-[12px] font-medium leading-4 text-accent-text hover:underline">
-          {t(state === "copied" ? "connect.copied" : "connect.copy")}
+      <div className="flex min-w-0 items-start gap-2 rounded-lg bg-ink/[0.05] py-1 ps-3 pe-1">
+        <code data-server-command="" className="min-w-0 flex-1 select-text py-1.5 font-mono text-[12px] leading-4 text-ink [overflow-wrap:anywhere]">{command}</code>
+        <button type="button" onClick={copy} aria-label={state === "failed" ? t("common.copyFailed") : t("devicesPage.addFlow.copyCommand")} title={t("devicesPage.addFlow.copyCommand")} className="ui-icon-button shrink-0">
+          {state === "copied" ? <Check size={14} aria-hidden="true" className="text-success" /> : <Copy size={14} aria-hidden="true" />}
         </button>
       </div>
     </div>
   );
 }
 
-export function Waiting({ connected }: { connected: string | null }) {
-  return connected
-    ? <p role="status" data-pair-state="connected" className="flex items-center gap-2 text-[13px] leading-[18px] text-ink"><Check size={14} aria-hidden="true" className="text-success" />{t("devicesPage.addFlow.connected", { name: connected })}</p>
-    : <p role="status" data-pair-state="waiting" className="flex items-center gap-2 text-[13px] leading-[18px] text-ink-secondary"><Loader2 size={14} aria-hidden="true" className="motion-safe:animate-spin" />{t("devicesPage.addFlow.waiting")}</p>;
+/** A link that breaks only after its scheme, at its slashes and before its code, never inside the code. */
+export function BreakableLink({ link }: { link: string }) {
+  const parts = link.split(/(?<=\/\/|\/)|(?=#)/);
+  return <>{parts.map((part, index) => <span key={index} className={part.startsWith("#") ? "whitespace-nowrap" : undefined}>{index > 0 && <wbr />}{part}</span>)}</>;
 }
 
 /**
@@ -135,29 +134,26 @@ export function PairCodePanel({ kind, address, onConnected }: { kind: "phone" | 
       <button type="button" className="ui-button" onClick={() => void create()}>{t("remote.serverPairing.create")}</button>
     </div>;
   }
+  if (kind === "phone" && link) return <PhoneCodeCard link={link.link} code={offer.code} expiresAt={offer.expiresAt} connected={connected} />;
+  if (kind === "phone") {
+    return <div className="flex flex-col gap-3" data-pair-panel="phone">
+      <p className="text-[13px] leading-[18px] text-ink">{t("phone.code.typeIntro", { app: productName() })}</p>
+      <TypedCode label={t("connect.code")} code={offer.code} expiresAt={offer.expiresAt} />
+      <Waiting connected={connected} waiting={t("devicesPage.addFlow.waitingPhone")} />
+    </div>;
+  }
   return (
-    <div className="flex flex-col gap-4" data-pair-panel={kind}>
-      {kind === "phone" && offer.url && (
-        <div data-pair-qr="" className="self-center rounded-xl bg-white p-3 shadow-[inset_0_0_0_0.5px_var(--settings-edge)]">
-          <QRCodeSVG value={offer.url} size={176} level="M" bgColor="#ffffff" fgColor="#111111" />
-        </div>
-      )}
-      <p className="text-[13px] leading-[18px] text-ink">
-        {kind === "phone" ? t("phone.code.installAndScan", { app: productName() }) : t("devicesPage.addFlow.computerPaste", { app: productName() })}
-      </p>
-      {kind === "computer" && link && (
-        <div className="flex min-w-0 items-center gap-2 rounded-lg bg-ink/[0.05] px-3 py-2">
-          <code data-pair-link="" className="min-w-0 flex-1 select-text break-all font-mono text-[12px] leading-4 text-ink">{link.link}</code>
-          <button type="button" onClick={copy} data-copy-link="" className="shrink-0 cursor-pointer text-[12px] font-medium leading-4 text-accent-text hover:underline">
+    <div className="flex flex-col gap-3" data-pair-panel={kind}>
+      <p className="text-[13px] leading-[18px] text-ink">{t("devicesPage.addFlow.computerPasteLink", { app: productName() })}</p>
+      {link && (
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 rounded-lg bg-ink/[0.05] px-3 py-2">
+          <code data-pair-link="" className="min-w-0 flex-1 select-text font-mono text-[12px] leading-4 text-ink [overflow-wrap:anywhere]"><BreakableLink link={link.link} /></code>
+          <button type="button" onClick={copy} data-copy-link="" className="ui-button ui-button-sm shrink-0">
             {t(copied === "copied" ? "remote.serverPairing.copied" : copied === "failed" ? "common.copyFailed" : "remote.serverPairing.copyLink")}
           </button>
         </div>
       )}
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <span className="text-[12px] leading-4 text-ink-secondary">{t("connect.code")}</span>
-        <span data-pairing-code="" className="text-[16px] font-medium leading-6 tracking-[0.08em] text-ink tabular-nums">{offer.code}</span>
-        <span className="text-[12px] leading-4 text-ink-tertiary">{codeUntil(offer.expiresAt)}</span>
-      </div>
+      <TypedCode label={t("devicesPage.addFlow.ifAsked")} code={offer.code} expiresAt={offer.expiresAt} />
       <Waiting connected={connected} />
     </div>
   );

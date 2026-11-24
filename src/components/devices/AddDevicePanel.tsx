@@ -8,6 +8,7 @@ import { DESKTOP_DOWNLOAD_URL } from "../../../shared/computer-ask";
 import { OwnServerLink } from "../PlaceAddSheet";
 import { SettingsLinkRow, SettingsRows } from "../SettingsPrimitives";
 import { networkLine, networkShort } from "./device-words";
+import type { SettingsShell } from "../settings/settings-shell";
 import type { NetworkAction } from "./DeviceRows";
 import { CommandRow, PairCodePanel, SERVER_COMMANDS } from "./PairCodePanel";
 import { StatusMark } from "./device-parts";
@@ -95,6 +96,9 @@ export interface AddDeviceProps {
   onGetCloud: (() => void) | null;
   onCheck?: () => void;
   checking?: boolean;
+  /** A phone-narrow window: its header names this step and goes back, so the page leaves out its own. */
+  narrow?: boolean;
+  setSub?: SettingsShell["setSub"];
 }
 
 /**
@@ -103,12 +107,21 @@ export interface AddDeviceProps {
  * Settings: a phone on This computer gets Pair a phone's own steps, a server Connect to a server's own form.
  */
 export function AddDevicePanel(props: AddDeviceProps) {
-  const { here, cloud, devices, network, networkAction, tailnetAddress, start, onBack, onConnected, phoneSteps, canConnectServer, onGetCloud, onCheck, checking = false } = props;
+  const { here, cloud, devices, network, networkAction, tailnetAddress, start, onBack, onConnected, phoneSteps, canConnectServer, onGetCloud, onCheck, checking = false, narrow = false, setSub } = props;
   const [kind, setKind] = useState<AddKind | null>(start);
   const [known] = useState(() => new Set(devices.map((device) => device.id)));
-  const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => { heading.current?.focus({ preventScroll: false }); }, [kind]);
-  const back = () => (kind && !start ? setKind(null) : onBack());
+  const heading = useRef<HTMLDivElement>(null);
+  const left = useRef<AddKind | null>(null);
+  // Into a step, focus goes to its heading; back on the choices, to the choice just left.
+  useEffect(() => {
+    const chosen = !kind && left.current ? heading.current?.parentElement?.querySelector<HTMLElement>(`[data-add-kind="${left.current}"]`) : null;
+    (chosen ?? heading.current)?.focus({ preventScroll: false });
+  }, [kind]);
+  const back = () => {
+    if (kind && !start) { left.current = kind; setKind(null); return; }
+    onBack();
+  };
+  const backTo = kind && !start ? t("devicesPage.add") : t("settings.page.devices");
   const onKey = (event: KeyboardEvent) => {
     if (event.key !== "Escape" || event.defaultPrevented) return;
     event.preventDefault();
@@ -122,14 +135,22 @@ export function AddDevicePanel(props: AddDeviceProps) {
   const stepAction: NetworkAction | null = shared && !tailnetAddress ? (onCheck ? { label: t("remote.checkAgain"), run: onCheck, busy: checking } : null) : networkAction;
   const title = kind ? t(TITLE[kind]) : t("devicesPage.add");
   const lede = kind ? t(LEDE[kind], { app: productName() }) : t("devicesPage.addFlow.chooseLede");
+  const backRef = useRef(back);
+  backRef.current = back;
+  useEffect(() => {
+    setSub?.({ title, back: backTo, onBack: () => backRef.current() });
+  }, [setSub, title, backTo]);
+  useEffect(() => () => setSub?.(null), [setSub]);
   return (
     <div data-add-panel="" data-add-step={kind ?? "choose"} onKeyDown={onKey} className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1 px-4">
-        <button type="button" data-add-back="" onClick={back} aria-label={kind && !start ? t("devicesPage.addFlow.backToChoose") : t("devicesPage.addFlow.backToList")}
-          className="-ms-1.5 inline-flex h-7 w-fit cursor-pointer items-center gap-0.5 rounded-full pe-2 ps-1 text-[13px] font-medium leading-5 text-ink-secondary hover:bg-ink/[0.05] hover:text-ink">
-          <ChevronLeft size={16} aria-hidden="true" className="rtl:-scale-x-100" />{kind && !start ? t("devicesPage.add") : t("settings.page.devices")}
-        </button>
-        <h3 ref={heading} tabIndex={-1} data-add-title="" className="text-[17px] font-semibold leading-6 tracking-[-0.01em] text-ink outline-none!">{title}</h3>
+      <div ref={heading} tabIndex={-1} role="group" aria-label={title} className="flex flex-col gap-1 px-4 outline-none!">
+        {!narrow && <>
+          <button type="button" data-add-back="" onClick={back} aria-label={kind && !start ? t("devicesPage.addFlow.backToChoose") : t("devicesPage.addFlow.backToList")}
+            className="-ms-1.5 inline-flex h-7 w-fit cursor-pointer items-center gap-0.5 rounded-full pe-2 ps-1 text-[13px] font-medium leading-5 text-ink-secondary hover:bg-ink/[0.05] hover:text-ink">
+            <ChevronLeft size={16} aria-hidden="true" className="rtl:-scale-x-100" />{backTo}
+          </button>
+          <h3 data-add-title="" className="text-[17px] font-semibold leading-6 tracking-[-0.01em] text-ink">{title}</h3>
+        </>}
         <p className={BODY}>{lede}</p>
       </div>
       {!kind && (
@@ -151,7 +172,7 @@ export function AddDevicePanel(props: AddDeviceProps) {
                   {!networkReady && <NetworkStep network={network} action={stepAction} waiting={Boolean(shared && !tailnetAddress)} />}
                 </Step>}
                 <Step n={here && network ? 2 : 1} title={t("devicesPage.addFlow.installStep", { app: productName() })} state={!here || networkReady ? "now" : "later"}>
-                  <a href={DESKTOP_DOWNLOAD_URL} target="_blank" rel="noreferrer" className="w-fit text-[13px] leading-[18px] text-accent-text hover:underline">{t("computerAsk.action.getApp", { app: productName() })}</a>
+                  <a href={DESKTOP_DOWNLOAD_URL} target="_blank" rel="noreferrer" className="ui-button ui-button-sm w-fit">{t("computerAsk.action.getApp", { app: productName() })}</a>
                 </Step>
                 <Step n={here && network ? 3 : 2} title={t("devicesPage.addFlow.pasteStep")} state={!here || networkReady ? "now" : "later"}>
                   <PairCodePanel kind="computer" address={tailnetAddress} onConnected={onConnected} />
@@ -160,8 +181,8 @@ export function AddDevicePanel(props: AddDeviceProps) {
             {kind === "server" && <Steps>
               <Step n={1} title={t("devicesPage.addFlow.serverRun")}>
                 <CommandRow label={t("devicesPage.addFlow.serverAnywhere")} command={SERVER_COMMANDS.anywhere} />
-                <CommandRow label={t("devicesPage.addFlow.serverTailscale")} command={SERVER_COMMANDS.tailscale} />
-                <p className="text-[12px] leading-4 text-ink-secondary">{t("devicesPage.addFlow.serverNode")}</p>
+                <CommandRow label={t("devicesPage.addFlow.serverPrivate")} command={SERVER_COMMANDS.tailscale} />
+                <p className="text-[12px] leading-4 text-ink-secondary">{t("devicesPage.addFlow.serverHow")}</p>
               </Step>
               <Step n={2} title={t("devicesPage.addFlow.pasteLink")}>
                 {canConnectServer

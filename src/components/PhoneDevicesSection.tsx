@@ -261,13 +261,15 @@ function RouteCard({ route, chosen, disabled, onChoose, needs, action, hint }: {
 /** Pair a device's steps: which way the phone reaches this computer comes first, then the code. The Pair a phone dialog
  * frames them; Settings → Devices shows them in its page. `onClose` is Cancel and Done; a code still open is cancelled
  * when the steps close or go away. */
-export function PairPhoneSteps({ c, state, onClose, secureAddress = false, onStep }: {
+export function PairPhoneSteps({ c, state, onClose, secureAddress = false, onStep, codeView }: {
   c: PhoneSetupController;
   state: CompanionState;
   onClose: () => void;
   /** HTTPS address → Set up: the free web address, with its sign-in, before the code. */
   secureAddress?: boolean;
   onStep?: (step: PairStep) => void;
+  /** The code in a page's own look, with Cancel under it in place of Done. */
+  codeView?: ReactNode;
 }) {
   const signedIn = c.account?.status === "ready";
   const relayAvailable = c.account?.available !== false;
@@ -302,6 +304,12 @@ export function PairPhoneSteps({ c, state, onClose, secureAddress = false, onSte
   };
   const localHint = picked === "wifi" && !state.routes?.wifi?.on && typeof window !== "undefined" && window.ogb?.platform === "darwin";
   if (step === "sign-in") return <PhoneSetupFlowView controller={c} />;
+  if (step === "pairing" && codeView) {
+    return <>
+      {codeView}
+      <div><button type="button" className="ui-button" data-pair-cancel="" onClick={onClose}>{t("common.cancel")}</button></div>
+    </>;
+  }
   if (step === "pairing") {
     return <>
       <PhoneSetupFlowView controller={c} />

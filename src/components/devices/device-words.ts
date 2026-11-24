@@ -19,13 +19,13 @@ const ROUTE: Record<DeviceRoute, LocaleKey> = {
 };
 export const routeLabel = (route: DeviceRoute): string => t(ROUTE[route], { app: productName() });
 
-const GROUP: Record<DeviceGroup, LocaleKey> = { computers: "devicesPage.group.computers", servers: "devicesPage.group.servers", phones: "devicesPage.group.phones" };
+const GROUP: Record<DeviceGroup, LocaleKey> = { computers: "devicesPage.group.computers", servers: "devicesPage.group.servers", phones: "devicesPage.group.phonesTablets" };
 export const groupLabel = (group: DeviceGroup): string => t(GROUP[group]);
 
 /** One short line: how it is, or the one thing it needs. */
 export function statusText(device: Device, now = Date.now()): string {
-  if (device.here) return t("devicesPage.status.here");
-  if (device.note === "update") return t("devicesPage.note.update");
+  if (device.here) return t("devicesPage.status.hub");
+  if (device.note === "update") return t("devicesPage.note.updateReady");
   if (device.note === "signed-out") return t("devicesPage.note.signedOut");
   if (device.note === "insecure") return t("devicesPage.note.insecure");
   if (device.note === "unreachable") return t("devicesPage.note.unreachable");
@@ -50,17 +50,20 @@ const NETWORK_SHORT: Record<PrivateNetworkState, LocaleKey> = {
 /** Two or three words for the map. */
 export const networkShort = (network: PrivateNetwork): string => t(NETWORK_SHORT[network.state]);
 
+/** A computer's name on the private network without the network's own suffix: "ada-macbook", not "ada-macbook.tail4c2e.ts.net". */
+const shortName = (name: string | null) => (name ?? "").split(".")[0] ?? "";
+
 /** The whole next step, in the Tailscale check's own words where it has them. */
 export function networkLine(network: PrivateNetwork): string {
   switch (network.state) {
     case "unknown": return t("devicesPage.network.line.unknown");
-    case "not-installed": return t("devicesPage.network.line.notInstalled");
+    case "not-installed": return t("devicesPage.network.line.notInstalledFree");
     case "no-cli": return t("remote.tailscale.noCli");
     case "signed-out": return t("remote.tailscale.signIn");
     case "not-running": return t("remote.tailscale.notRunning");
     case "needs-approval": return t("remote.tailscale.needsApproval");
     case "needs-permission": return t("remote.tailscale.needsPermission", { app: productName() });
     case "magicdns": return `${t("remote.tailscale.magicDns")}. ${t("remote.tailscale.magicDnsDetail")}`;
-    case "ready": return network.shared ? t("devicesPage.network.line.ready", { name: network.name ?? "" }) : t("devicesPage.network.line.notShared", { name: network.name ?? "" });
+    case "ready": return network.shared ? t("devicesPage.network.line.readyShort", { name: shortName(network.name) }) : t("devicesPage.network.line.notSharedShort", { name: shortName(network.name) });
   }
 }
