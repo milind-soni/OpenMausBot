@@ -334,6 +334,7 @@ const AcpAntigravityDriver = createAcpDriver(support);
 
 export const AntigravityDriver: ProviderDriver<AcpConfig> = {
   ...AcpAntigravityDriver,
+  metadata: { ...AcpAntigravityDriver.metadata, signInAccount: "Google" },
   async create(input: DriverCreateInput<AcpConfig>): Promise<ProviderInstance> {
     // A rebuilt instance may run another CLI, or the same one after a sign-in made outside MausBot.
     nativeSignIn.forget(input.instanceId);

@@ -452,7 +452,7 @@ it("decides from the first snapshot after the link, and connects to a Ready Clou
 });
 
 const PHONE = "Use the Cloud on your phone";
-it("has no phone card: pairing with My Cloud is on Phone & devices, whatever the Cloud's state", async () => {
+it("has no phone card: pairing with My Cloud is on Devices, whatever the Cloud's state", async () => {
   for (const machine of [{ status: "ready", origin }, { status: "provisioning" }, { status: "stopped", origin }] as const) {
     f.values = []; await ready({ ...pro, machine });
     const html = render().html;
@@ -466,7 +466,7 @@ it("is not offered without a paid plan", async () => {
   expect(render().html).not.toContain(PHONE);
   push({ status: "signed-out" }); expect(render().html).not.toContain(PHONE);
 });
-it("on the Cloud itself, the plan card has no phone button: pairing a phone is on Phone & devices", async () => {
+it("on the Cloud itself, the plan card has no phone button: pairing a phone is on Devices", async () => {
   const plan = { state: vi.fn().mockResolvedValue({ status: "paid", tier: "pro" }), manage: vi.fn() };
   const view = () => { f.index = 0; f.effects = []; let tree: ReactNode; function Capture() { tree = CloudPlanOnCloud({ bridge: plan }); return tree; }
     return { html: renderToStaticMarkup(createElement(Capture)), nodes: nodes(tree) }; };

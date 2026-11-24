@@ -205,7 +205,7 @@ describe("outward links", () => {
   });
 });
 
-describe("the Phone & devices row", () => {
+describe("the Devices row", () => {
   const sub = (state: Parameters<typeof phoneDevicesSubtitle>[0], place = "This computer") => phoneDevicesSubtitle(state, place);
 
   it("names the place the phone joins, and how it is doing there", () => {
@@ -221,10 +221,10 @@ describe("the Phone & devices row", () => {
     expect(sub({ kind: "portal" }, "studio.example.com")).toBe("Signed in through your organization");
   });
 
-  it("is one row, dotted green while a phone is connected, that opens Phone & devices", () => {
+  it("is one row, dotted green while a phone is connected, that opens Devices", () => {
     const open = vi.fn();
     const row = phoneDevicesItem({ kind: "paired", count: 1, connected: true }, "This computer", open);
-    expect([row.key, row.label]).toEqual(["phone-devices", "Phone & devices"]);
+    expect([row.key, row.label]).toEqual(["phone-devices", "Devices"]);
     expect(row.trailing).toBeTruthy();
     expect(phoneDevicesItem({ kind: "none" }, "This computer", open).trailing).toBeUndefined();
     row.onSelect();

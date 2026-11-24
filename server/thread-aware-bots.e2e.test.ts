@@ -449,7 +449,8 @@ describe("start_thread on another model, reporting back", () => {
       const token = await heldTurn(pm, "Ask a different engine.");
       const listed = (await api("GET", "/api/internal/models", undefined, token)).body;
       const row = (instanceId: string) => listed.engines.find((engine: any) => engine.instanceId === instanceId);
-      expect(row("curious")).toEqual({ instanceId: "curious", name: "Curious fixture", unusable: expect.stringContaining("can't run now: it is signed out") });
+      expect(row("curious")).toEqual({ instanceId: "curious", name: "Curious fixture", unusable: expect.stringContaining("can't run now: it is signed out"),
+        connect: expect.stringContaining("Settings → AI → Providers") });
       const { instances } = (await api("GET", "/api/instances")).body;
       const pick = (instanceId: string) => {
         const engine = instances.find((instance: any) => instance.instanceId === instanceId);

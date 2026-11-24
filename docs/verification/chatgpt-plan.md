@@ -25,15 +25,19 @@ refresh-token reuse. If a process dies while holding that lock, the safe recover
 is to stop the old process, confirm it has exited, and remove only that account's
 `.credentials.lock` before reconnecting. We do not guess that a live lock is stale.
 
-## Hosted Pro boundary
+## Hosted servers (Clouds, hosted workspaces)
 
-The local callback is not a hosted OAuth redirect. Hosted Pro and managed company
-workspaces explicitly report the integration unavailable; a proxied/remote request
-cannot start a local flow. OpenAI's [hosted-app approval](https://openai.com/form/sign-in-with-chatgpt-interest/)
-and issued client/callback contract are required before implementing and enabling
-the hosted route. Do not use the dynamic local client in a paid hosted service,
-copy a desktop token to Pro, or silently use API billing. Existing separately
-configured providers remain unchanged.
+The local callback is not a hosted OAuth redirect, so the browser sign-in above
+never runs on a hosted server, and a proxied or remote request cannot start it on
+a desktop either. There, a ChatGPT account added in Settings is Codex's own login
+instead: `codex login --device-auth` writes into the account's own Codex home,
+`providers/chatgpt-plan/<account-hash>/codex` (owner-only), the same device-code
+sign-in the first Codex account uses on a Cloud. `codex login status`, `codex
+logout`, the account name, model list, usage limits and every turn of that
+account use that home; the first Codex account keeps `$CODEX_HOME` or `~/.codex`.
+The person's Codex setup (config.toml, skills, plugins) is linked in; the login
+and chats are not. Do not use the dynamic local client in a paid hosted service,
+copy a desktop token to a server, or silently use API billing.
 
 ## Verification
 

@@ -23,7 +23,7 @@ Never forward the harness port yourself. A self-hosted server is reached through
 - `--lan`: this network only, plain http. It listens on every address, but answers only connections whose two ends are both private;
 - `--tunnel`: a free MausBot web address.
 
-Each prints one pairing link; paste it into the desktop app under **＋ → Connect to a server**. The app accepts plain http only on private networks: LAN addresses, Tailscale's 100.64/10 and `*.ts.net`, and `*.local`.
+Each prints one pairing link; paste it into the desktop app under **＋ → Connect to another computer**. The app accepts plain http only on private networks: LAN addresses, Tailscale's 100.64/10 and `*.ts.net`, and `*.local`.
 
 A loopback request counts as the owner only when it really comes from this machine; a LAN client that writes `Host: 127.0.0.1` is still a stranger. For webhook delivery, proxy only the dedicated webhook receiver. Never forward the main harness port to the public internet.
 

@@ -103,7 +103,7 @@ describe("a thread a bot opens while a level change is being confirmed", () => {
     store.patchBot(bot.id, { approvalGrant: { requestId: REQUEST, mode: "full", phase: "prepared", threadId: bot.threadId, threadOnly: true } });
     const drivers: Record<string, string> = { claude: "claudeAgent", codex: "codex" };
     const own = createOwnThreads({ store, registry: { instances: () => [], cliTarget: (id) => ({ driverKind: drivers[id]! }) }, node: () => undefined,
-      current: () => undefined, proposalRefusal: () => null, givesWay: () => null, modelName: (one) => one.model,
+      current: () => undefined, proposalRefusal: () => null, givesWay: () => null, modelName: (one) => one.model, hint: () => ({ why: "", connect: "" }),
       sourceLevel: (botId, threadId) => approvalModeFor(store.projectBotForTask(botId, threadId)!), mayRaise: () => true });
 
     // Auto-accept edits does not exist on Codex, so a burst child or an own thread there starts at Ask, as without a grant.

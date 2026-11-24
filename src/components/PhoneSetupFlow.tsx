@@ -998,7 +998,7 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
           {c.localFallback
             ? t("phone.verifying.localDetail")
             : c.tailscaleFallback
-              ? t("phone.verifying.tailscaleDetail")
+              ? t("phone.verifying.privateNetworkDetail")
             : t("phone.verifying.secureDetail")}
         </p>
         {(c.error || c.accountError) && (

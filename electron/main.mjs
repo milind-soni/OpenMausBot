@@ -1782,7 +1782,7 @@ async function addServerFromClipboard() {
   try {
     return await connectHostedWorkspace(clipboard.readText());
   } catch (error) {
-    await dialog.showMessageBox({ type: "info", message: nativeT("native.dialog.connectFailed.title"), detail: `${error.message}\n${nativeT("native.dialog.connectFailed.detail")}` });
+    await dialog.showMessageBox({ type: "info", message: nativeT("native.dialog.connectFailed.title"), detail: `${error.message}\n${nativeT("native.dialog.connectFailed.detailOther")}` });
     return false;
   }
 }
