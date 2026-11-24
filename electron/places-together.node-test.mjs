@@ -441,24 +441,6 @@ test("a row carries when its conversations last moved there: their own times, ne
   assert.equal("lastAt" in botRow(bot("odd", "Odd", { tasks: [{ threadId: "t1", updatedAt: -5 }] }), "cloud"), false);
 });
 
-test("with the switch on and this computer and My Cloud the only places, the page is told the one list stands for both; off, never", async () => {
-  let pair = true, switched = 0;
-  const f = setup({ deps: { onlyPair: () => pair, switched: () => { switched += 1; } } });
-  assert.equal(f.together.state("computer").onlyPair, true);
-  assert.equal(f.together.state("cloud").onlyPair, true);
-  pair = false;
-  assert.equal("onlyPair" in f.together.state("computer"), false);
-  pair = true;
-  f.together.set("computer", false);
-  assert.equal(switched, 1, "turning the switch draws the rail again");
-  assert.equal("onlyPair" in f.together.state("computer"), false);
-  f.together.set("computer", true);
-  assert.equal(switched, 2);
-  const broken = setup({ deps: { onlyPair: () => { throw new Error("no rail"); }, switched: () => { throw new Error("no rail"); } } });
-  assert.equal("onlyPair" in broken.together.state("computer"), false);
-  assert.doesNotThrow(() => broken.together.set("computer", false));
-});
-
 test("only this computer's page and My Cloud's own page are answered", async () => {
   const handlers = new Map();
   const f = setup();

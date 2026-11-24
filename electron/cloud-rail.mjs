@@ -68,17 +68,16 @@ const unlisted = (entry, { clouds, home, mine }) => Array.isArray(clouds) && (en
  * device, each with its places as they were kept: grouped by account after these (withAccounts). `profiles`: the workspaces
  * of this computer's own it may open (local-profiles.mjs; `active`: the one on screen, `settling`: it opens once that bot
  * finishes): first once My Cloud is home, as This computer was, else right after This computer. `computerSettling`: This
- * computer opens once that bot finishes. `joined`: "This computer and My Cloud together" is on (places-together.mjs): when
- * This computer and My Cloud are then the only places, one list in the sidebar holds both and there is no rail.
- * @param {{ saved: { environments: any[], activeId: string }, home?: string | null, mine?: string | null, state?: any, offers?: (entry: any) => boolean, waiting?: (id: string) => boolean, accounts?: any[], profiles?: Array<{ id: string, name?: string | null, color?: string | null, swatch?: string | null, active?: boolean, settling?: string }>, computerSettling?: string | null, joined?: boolean }} input
+ * computer opens once that bot finishes.
+ * @param {{ saved: { environments: any[], activeId: string }, home?: string | null, mine?: string | null, state?: any, offers?: (entry: any) => boolean, waiting?: (id: string) => boolean, accounts?: any[], profiles?: Array<{ id: string, name?: string | null, color?: string | null, swatch?: string | null, active?: boolean, settling?: string }>, computerSettling?: string | null }} input
  */
-export function railPlaces({ saved, home = null, mine = null, state = null, offers = () => false, waiting = () => false, accounts = [], profiles = [], computerSettling = null, joined = false }) {
+export function railPlaces({ saved, home = null, mine = null, state = null, offers = () => false, waiting = () => false, accounts = [], profiles = [], computerSettling = null }) {
   const connected = state?.status === "connected" ? state : null;
   const clouds = Array.isArray(connected?.clouds) ? connected.clouds : [];
   const order = entry => { const at = clouds.findIndex(cloud => cloud.origin === entry.origin); return at === -1 ? clouds.length : at; };
   const rank = entry => (entry.origin === mine || entry.home ? 0 : environments.listedPlace(entry) ? 1 : 2);
-  const shownRemote = saved.environments.filter(entry => entry.kind !== "local" && entry.origin && !(connected && unlisted(entry, { clouds: connected.clouds, home, mine })));
-  const remote = shownRemote.map((entry, index) => ({ entry, index }))
+  const remote = saved.environments.filter(entry => entry.kind !== "local" && entry.origin && !(connected && unlisted(entry, { clouds: connected.clouds, home, mine })))
+    .map((entry, index) => ({ entry, index }))
     .sort((a, b) => rank(a.entry) - rank(b.entry) || order(a.entry) - order(b.entry) || a.index - b.index)
     .map(({ entry }) => circle(entry, { activeId: saved.activeId, mine, state: connected, offers, waiting }));
   const making = otherOwnClouds(clouds).filter(cloud => !cloud.origin && ["checkout", "setting_up"].includes(cloud.status))
@@ -98,7 +97,6 @@ export function railPlaces({ saved, home = null, mine = null, state = null, offe
     ...(saved.activeId === environments.LOCAL_ID && !profileShown ? { active: true } : {}), ...(waiting(computer.id) ? { attention: true } : {}),
     ...(typeof computerSettling === "string" ? { settling: computerSettling } : {}) }, ...own, ...places];
   if (accounts.length) return withAccounts(all, { saved, accounts, email: state?.account?.email ?? null });
-  if (joined && !home && !own.length && !servers.length && !making.length && shownRemote.length === 1 && shownRemote[0].origin === mine) return [];
   return all.length < (clouds.some(ownCloud) ? 1 : RAIL_MIN_PLACES) ? [] : all;
 }
 

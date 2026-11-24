@@ -225,6 +225,26 @@ describe("switch on: one list", () => {
     expect(q('[data-sidebar-bot-row="git"]')!.getAttribute("aria-label")).toContain("On this computer");
   });
 
+  it("the rail's two circles: this computer's page has the one list; My Cloud's page lists My Cloud's bots only, as with the switch off", async () => {
+    window.ogb = { placesTogether: page } as never;
+    await render();
+    expect(ids('[data-sidebar-section-id="builtin:bots"]')).toEqual(["git", "ledger", "cloud:scout"]);
+    await act(async () => root.unmount());
+    resetPlacesTogetherForTest(); resetPlaceRowsForTest();
+    root = createRoot(host);
+    const cloudBots = [bot("maus", { chiefOfStaff: true }), bot("scout"), bot("atlas")];
+    const offline = await htmlWith(null, cloudBots);
+    answer = async () => said({ here: "cloud", other: { home: "computer", state: "ready", bots: [row("git", { home: "computer", unread: true }), row("ledger", { home: "computer" })] } });
+    const cloudPage = await htmlWith({ placesTogether: page }, cloudBots);
+    answer = async () => said({ here: "cloud", other: { home: "computer", state: "offline", bots: [] } });
+    const cloudPageOffline = await htmlWith({ placesTogether: page }, cloudBots);
+    expect(cloudPage).toBe(offline);
+    expect(cloudPageOffline).toBe(offline);
+    expect(cloudPage).not.toContain("computer:");
+    expect(cloudPage).not.toContain("data-bot-place");
+    expect(cloudPage).not.toContain("data-other-place");
+  });
+
   it("a place that never answers leaves this place's list whole, and the first answer adds its rows without a wait", async () => {
     window.ogb = { placesTogether: page } as never;
     let release!: (value: PlacesTogetherState) => void;

@@ -7,7 +7,6 @@ import type { CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
 import { cloudColor } from "@/lib/cloud-look";
 import { t } from "@/lib/i18n";
 import { railShown, usePlaces, windowPlaceName } from "@/lib/places";
-import { useOnlyPair } from "@/lib/place-rows";
 import { CloudTile } from "./cloud-buy/parts";
 import { SIMPLE_RAIL_BUTTON } from "./SidebarSimpleTop";
 
@@ -88,8 +87,6 @@ type SwitcherProps = {
  * instead: the window's own rail at every width, one drawn on the page on a wide window. */
 export function DesktopWorkspaceSwitcher(props: SwitcherProps) {
   const places = usePlaces();
-  // The one list holds this computer's bots and My Cloud's, and they are the only places: there is nothing to switch.
-  if (useOnlyPair()) return null;
   const switcher = <Switcher {...props} />;
   return railShown(places) ? <div data-switcher-beside-rail className={places.beside ? "hidden" : "contents md:hidden"}>{switcher}</div> : switcher;
 }

@@ -74,12 +74,19 @@ it("a sleeping Cloud with nothing kept says so as normal, and opening it wakes i
   expect(q("[data-other-place-line]")!.className).not.toContain("danger");
   await act(async () => q("button[data-other-place-line]")!.click());
   expect(openMyCloud).toHaveBeenCalledTimes(1);
-  for (const [home, line] of [["cloud", "My Cloud can't be reached right now."], ["computer", "This computer's bots can't be read right now."]] as const) {
-    said = state({ here: home === "cloud" ? "computer" : "cloud", other: { home, state: "offline", bots: [] } });
+  said = state({ other: { home: "cloud", state: "offline", bots: [] } });
+  await act(async () => changed());
+  expect(q("[data-other-place-line]")!.textContent).toBe("My Cloud can't be reached right now.");
+  expect(q("[data-other-place-line]")!.tagName).toBe("P");
+  expect(q("[data-other-place-line]")!.getAttribute("role")).toBe("status");
+});
+
+it("My Cloud's page lists its own bots only: no line about this computer there, whatever main says", async () => {
+  for (const power of ["offline", "ready", "loading"] as const) {
+    said = state({ here: "cloud", other: { home: "computer", state: power, bots: [] } });
+    await render(createElement(OtherPlaceLine, { key: "line" }));
     await act(async () => changed());
-    expect(q("[data-other-place-line]")!.textContent).toBe(line);
-    expect(q("[data-other-place-line]")!.tagName).toBe("P");
-    expect(q("[data-other-place-line]")!.getAttribute("role")).toBe("status");
+    expect(q("[data-other-place]")).toBeNull();
   }
 });
 

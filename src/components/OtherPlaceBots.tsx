@@ -2,10 +2,11 @@
 // place's own (src/lib/place-rows.ts), so this says something only when that place has no rows to show: My Cloud not
 // signed in to yet, or a place that is asleep or can't be reached with nothing kept from before. One quiet line in the
 // list's secondary text, not a card or a banner; it opens My Cloud where there is something to do there. Nothing while
-// the first read is under way, and nothing with the switch off.
+// the first read is under way, nothing with the switch off, and nothing on My Cloud's page, which lists its own bots only.
 import { Cloud, CloudMoon, CloudOff, MonitorOff } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { oneListOn } from "@/lib/place-rows";
 import { usePlacesTogetherPart, type PlacesTogetherState } from "@/lib/places-together";
 import type { LocaleKey } from "@/locales";
 
@@ -20,7 +21,7 @@ const SAID: Record<Said, { icon: typeof Cloud; words: LocaleKey; opens?: true }>
 };
 
 function saidOf(state: PlacesTogetherState | null): Said | null {
-  const other = state?.on ? state.other : null;
+  const other = oneListOn(state) ? state!.other : null;
   if (!other || other.bots.length) return null;
   const said = `${other.home}:${other.state}`;
   return said in SAID ? said as Said : null;

@@ -4,6 +4,9 @@
 // (`cloud:scout`), so two bots with one id in two places never meet, and nothing that writes to this place's server is
 // ever handed one: what such a row sends is either "open it", which main does where the bot lives, or dropped.
 //
+// The one list is this computer's page's: the page the rail's first circle opens. My Cloud's page, opened from its own
+// circle, lists My Cloud's bots only, as it does with the switch off, so the rail still shows the Cloud on its own.
+//
 // Everything here is keyed by a place, not by "My Cloud": today the places are this computer and My Cloud, and a
 // person's own always-on machine (a server of their own, or a computer at home) is meant to join the same list later
 // as one more place, with its own key, kind, name and state.
@@ -87,10 +90,13 @@ const NONE: readonly PlacedBot[] = Object.freeze([]);
 let lastState: PlacesTogetherState | null | undefined;
 let lastList: readonly PlacedBot[] = NONE;
 
+/** The one list is on for this page: the switch is on, main lists the other place, and this is this computer's page. */
+export const oneListOn = (state: PlacesTogetherState | null): boolean => state?.on === true && state.other !== null && state.here === "computer";
+
 function placedList(state: PlacesTogetherState | null): readonly PlacedBot[] {
   if (state === lastState) return lastList;
   lastState = state;
-  const other = state?.on ? state.other : null;
+  const other = oneListOn(state) ? state!.other : null;
   const kept = new Map<string, { row: PlaceBotRow; health: PlaceHealth; bot: PlacedBot }>();
   const next = (other?.bots ?? []).map((row) => {
     const key = placeKeyed(placeOfHome(row.home), row.id), had = adapted.get(key);
@@ -194,8 +200,9 @@ export function placeMark(place: Place, health: PlaceHealth, working: boolean, n
   return mark(device.icon, kind === "my-cloud" ? t("together.onCloud") : kind === "this-computer" ? t("together.onComputer") : t("together.mark.on", { place: place.label }), "hover");
 }
 
-/** This page's place while the one list is on; null while it is off, in a browser, and on any other place's page. */
-const hereOf = (state: PlacesTogetherState | null): BotHome | null => (state?.on && state.other ? state.here : null);
+/** This page's place while the one list is on; null while it is off, in a browser, on My Cloud's page and on any other
+ * place's page. */
+const hereOf = (state: PlacesTogetherState | null): BotHome | null => (oneListOn(state) ? state!.here : null);
 
 /** The mark a row draws, given this page's place while the one list is on (`here`, from useOneListHere once for the
  * whole list); none with it off. A row of this place lives here, and here is awake. */
@@ -213,11 +220,6 @@ export function useOneListHere(): BotHome | null {
 /** The one list is on: this page's own rows and the other place's share the list. */
 export function useOneList(): boolean {
   return usePlacesTogetherPart(hereOf) !== null;
-}
-
-/** On, and this computer and My Cloud are the person's only places: no place pill (main draws no rail either). */
-export function useOnlyPair(): boolean {
-  return usePlacesTogetherPart((state) => state?.on === true && state.other !== null && state.onlyPair === true);
 }
 
 export function resetPlaceRowsForTest(): void {
