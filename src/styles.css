@@ -3895,6 +3895,10 @@ button:disabled.bg-danger {
 /* Folding the layers: the list's row collapses to nothing and fades, so the bun below glides up rather than jumping. */
 .burger-fold { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease-out; }
 .burger-fold[data-folded="true"] { grid-template-rows: 0fr; opacity: 0; }
-.burger-fold > ol { overflow: hidden auto; }
+.burger-fold > ol, .burger-fold > div { overflow: hidden auto; min-width: 0; }
+.burger-fold { grid-template-columns: minmax(0, 1fr); }
+/* Rows that open to show more (a finished run's steps, its inputs and outcome, a step's replies) keep the landing glow
+   but not the drop's height cap. */
+.burger-layer.burger-open { animation: burger-land 1100ms ease-out 180ms both; }
 @media (prefers-reduced-motion: reduce) { .burger-fold { transition: none; } }
 :root[data-reduced-motion="true"] .burger-fold { transition: none; }
