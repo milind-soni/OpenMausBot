@@ -31,6 +31,14 @@ describe("Markdown file preview errors and encodings", () => {
     expect(host.textContent).toContain("Ação concluída");
   });
 
+  it("previews Markdown larger than 2 MiB", async () => {
+    const source = "a".repeat(2 * 1024 * 1024) + "\n\n# Final heading";
+    await open(async () => new Response(source));
+    expect(host.querySelector("pre")?.textContent).toBe(source);
+    expect(host.querySelector('[aria-pressed="true"]')).toBeTruthy();
+    expect((host.querySelector('[aria-pressed="true"]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("still opens UTF-8 files as UTF-8", async () => {
     await open(async () => new Response(new TextEncoder().encode("# Relatório\n\nAção")));
     expect(host.textContent).toContain("Relatório");

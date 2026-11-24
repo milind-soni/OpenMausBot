@@ -164,6 +164,20 @@ describe("which AI carries on while one is limited", () => {
     ]);
   });
 
+  it("names what keeps a backup from running: the refusal before a sign-in, which a custom endpoint never needs", () => {
+    const custom = engine("cursor", "cursorAgent", ["auto"], { access: "custom", snapshot: { state: "available", authenticated: false } });
+    const signedOutCodex = engine("codex-2", "codex", ["gpt-6"], { snapshot: { state: "available", authenticated: false } });
+    const signedOutBlocked = engine("codex-3", "codex", ["gpt-6"], { snapshot: { state: "available", authenticated: false } });
+    const blocked = new Set(["cursor", "codex-3"]);
+    const { instance } = takeover({ engines: () => [CLAUDE, custom, signedOutCodex, signedOutBlocked], context: { refusal: (one) => blocked.has(one.instanceId) ? "Your organisation blocks this endpoint." : undefined },
+      chosen: () => [on("cursor", "auto"), on("codex-2", "gpt-6"), on("codex-3", "gpt-6")] });
+    expect(instance.weighBackups("kai", on("claude", "claude-opus-5-5")).skipped).toEqual([
+      { selection: on("cursor", "auto"), why: "not-ready", detail: "Your organisation blocks this endpoint." },
+      { selection: on("codex-2", "gpt-6"), why: "not-ready", detail: "signed out" },
+      { selection: on("codex-3", "gpt-6"), why: "not-ready", detail: "Your organisation blocks this endpoint." },
+    ]);
+  });
+
   it("says a backup is at its own limit, holding that model, signed out, or one the thread's approval level must ask about", () => {
     const chosen = { chosen: () => [on("claude", "claude-opus-5-5"), on("opencode", "go-default")] };
     const limited = takeover({ blockedUntil: (id) => (id === "claude" ? NOW + HOUR : null), ...chosen }).instance;
@@ -349,6 +363,10 @@ describe("a new conversation once an AI is known to be at its limit", () => {
     expect(instance.takeoverAtStart(KAI, on("claude", "claude-opus-5-5"), own), "nothing holds Claude yet").toBeNull();
     refused(clock, "t1", NOW + 5 * HOUR);
     expect(instance.takeoverAtStart(KAI, on("claude", "claude-opus-5-5"), []), "only the backups given, never the installation's").toBeNull();
+    const lines: string[] = [];
+    const logged = takeover({ blockedUntil: (id) => clock.blockedUntil(id), log: (line) => lines.push(line) }).instance;
+    expect(logged.takeoverAtStart(KAI, on("claude", "claude-opus-5-5"), [on("opencode", "go-gone")]), "none usable").toBeNull();
+    expect(lines, "still says why each was left out").toEqual([expect.stringContaining("passed over backup opencode/go-gone: unknown-model")]);
     expect(instance.heldAtStart(KAI, on("claude", "claude-opus-5-5"), false, []), "nothing to carry on with").toBeNull();
     const taken = instance.takeoverAtStart(KAI, on("claude", "claude-opus-5-5"), own);
     expect(taken).toEqual({ to: on("codex", "gpt-6"), scope: "engine", resetsAt: NOW + 5 * HOUR });
@@ -375,6 +393,7 @@ describe("a new conversation once an AI is known to be at its limit", () => {
     const off = takeover({ blockedUntil: (id) => clock.blockedUntil(id), enabled: () => false }).instance;
     expect(off.heldAtStart(KAI, on("claude", "claude-opus-5-5"))).toBeNull();
     expect(off.heldAtStart(KAI, on("claude", "claude-opus-5-5"), true)).toEqual({ scope: "engine" });
+    expect(off.takeoverAtStart(KAI, on("claude", "claude-opus-5-5"), [on("codex", "gpt-6")]), "a room member's own backup too").toBeNull();
   });
 
   it("keeps one model's own limit through a restart, and a turn that works on another model leaves it held", () => {
