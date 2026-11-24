@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const sounds = vi.hoisted(() => ({ enabled: true, finished: true }));
 vi.mock("./notification-preferences", () => ({
-  notificationSoundsEnabled: () => sounds.enabled,
+  readSoundChoice: () => (sounds.enabled ? "click" : "off"),
   finishedNotificationsEnabled: () => sounds.finished,
 }));
 

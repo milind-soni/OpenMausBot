@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import { withOpenSettings } from "@/components/OpenSystemSettings";
 import { useStoreSelector } from "@/state/store-select";
+import { holdAppSounds, playAppSound } from "./app-sounds";
 import { t } from "./i18n";
 import { listensHere, recordsClips, speechBridge } from "./speech";
 
@@ -26,6 +27,8 @@ export function useComposerDictation({ draftId, text, onText }: {
     cancel.current?.();
     setRecording(false);
   }, []);
+
+  useEffect(() => (recording ? holdAppSounds("recording") : undefined), [recording]);
 
   useEffect(() => {
     if (!recording) return;
@@ -87,6 +90,13 @@ export function useComposerDictation({ draftId, text, onText }: {
     };
   }, [recording, draftId, onText]);
 
+  /** Stops without keeping the recording: a clip not yet transcribed is thrown away. */
+  const discard = () => {
+    const clip = Boolean(finish.current);
+    stop();
+    if (clip) playAppSound("discard");
+  };
+
   const toggle = () => {
     if (!ready || !speechBridge(config)) {
       setSpeechError(t("composer.dictation.unavailable"));
@@ -95,8 +105,9 @@ export function useComposerDictation({ draftId, text, onText }: {
       else stop();
     } else {
       session.current = { draftId, base: text };
+      playAppSound("record");
       setRecording(true);
     }
   };
-  return { recording, ready, speechError, toggle, stop };
+  return { recording, ready, speechError, toggle, stop, discard };
 }

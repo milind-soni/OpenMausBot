@@ -100,6 +100,7 @@ import { WebPanelPage } from "@/components/WebPanelPage";
 import { AppPreviewPanel } from "@/components/published-apps/AppPreviewPanel";
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { refreshPublishedApps } from "@/lib/own-published-apps";
+import { startAppSounds } from "@/lib/app-sounds";
 import { serverFetch } from "@/lib/relay-server";
 import { replaceUrl } from "@/lib/replace-url";
 
@@ -109,7 +110,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const needsYou = needsYouVersion(state.bots, state.groups, state.notifications);
   useTeamPeopleLoader(state.config, needsYou);
   useInboxLoader(`${inboxVersion(state.bots) ?? ""}|${needsYou}`);
-  useEffect(() => { refreshPublishedApps(); }, []);
+  useEffect(() => { refreshPublishedApps(); startAppSounds(); }, []);
   const inboxReady = useInboxReady();
   const inboxPanel = useInboxPanel();
   const inboxShown = inboxPanel.open && inboxReady;

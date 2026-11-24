@@ -60,7 +60,7 @@ import { answerResponse, dismissResponse } from "@/lib/card-answer";
 import { forgetLiveTurns, noteRuntimeTurn, sendStop } from "@/lib/stop-turn";
 import { readLastConversation, rememberConversation } from "@/lib/last-conversation";
 import { readLastBotSection, rememberBotSection } from "@/lib/last-bot-section";
-import { showNotification } from "@/lib/notify";
+import { showNotification } from "@/lib/notify"; import { playAppSound, replySound } from "@/lib/app-sounds";
 import { randomUuid } from "@/lib/random-uuid";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { speechOwner, spokenReplyStream } from "@/lib/spoken-reply-stream";
@@ -2093,7 +2093,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       settled: (botId, threadId) => waitForExecutionSettings(stateRef.current.bots.filter((bot) => bot.id === botId), threadId), navigated: (botId) => navigation.set(botId, (navigation.get(botId) ?? 0) + 1), create: (botId, projectId) => botPatchQueue.flush(botId).then(() => api<{ bot: Bot }>(`/api/bots/${botId}/tasks`, { method: "POST", body: JSON.stringify({ projectId }) })) });
     let creatingBot = false;
     let noticeTimer: ReturnType<typeof setTimeout> | undefined;
-    const showError = (e: unknown) => { if (isBotLimitRefusal(e)) return; if (isNoAiRefusal(e)) wrapped({ type: "notice", notice: { kind: "note", botName: null, text: e.message } }); else rawDispatch({ type: "error", message: e instanceof Error ? e.message : String(e) }); };
+    const showError = (e: unknown) => { if (isBotLimitRefusal(e)) return; playAppSound("error"); if (isNoAiRefusal(e)) wrapped({ type: "notice", notice: { kind: "note", botName: null, text: e.message } }); else rawDispatch({ type: "error", message: e instanceof Error ? e.message : String(e) }); };
     const showSavedState = (owner: SavedOwner) => (error: unknown) => {
       showError(error);
       void api<SavedSnapshot>("/api/bots?messages=0").then((snapshot) => {
@@ -2199,7 +2199,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (action.type === "taskSwitched") action = { ...action, bot: withTaskWrites(action.bot) as Bot };
       if (action.type === "botPatched") action = { ...action, bot: withTaskWrites(action.bot) };
       if (action.type === "openForkPanel" && !action.loadId) action = { ...action, loadId: randomUuid() };
-      if ((action.type === "send" || action.type === "sendGroup" || action.type === "editMessage") && !action.sendId) action = { ...action, sendId: randomUuid() };
+      if ((action.type === "send" || action.type === "sendGroup" || action.type === "editMessage") && !action.sendId) action = { ...action, sendId: randomUuid() }; if (action.type === "send" || action.type === "sendGroup") playAppSound("send");
       const botBeforeUpdate =
         action.type === "updateBot" || action.type === "setModel"
           ? stateRef.current.bots.find((candidate) => candidate.id === action.botId)
@@ -2422,7 +2422,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   body: JSON.stringify(owner ? { threadId: action.threadId, allowKey: action.alwaysAllow.key } : { alwaysAllow: next }),
                 });
               }
-              const response = await respond();
+              const response = await respond(); if (action.behavior === "allow") playAppSound("approved");
               if (response?.settlementPending && typeof response.message === "string") {
                 showError(new Error(response.message));
               }
@@ -2710,7 +2710,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             .catch((error) => { showError(error); action.onError?.(error instanceof Error ? error.message : String(error)); });
           break;
         case "interrupt":
-          sendStop(api, action, showError);
+          sendStop(api, action, showError); playAppSound("stop");
           break;
         case "newTask":
         case "switchTask": {
@@ -2799,7 +2799,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             .then(roomAnswer(action.groupId, false))
             .catch(showError);
           break;
-        case "interruptGroup":
+        case "interruptGroup": playAppSound("stop");
           api(`/api/groups/${action.groupId}/interrupt`, {
             method: "POST",
             body: action.threadId ? JSON.stringify({ threadId: action.threadId }) : undefined,
@@ -3049,7 +3049,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             });
           }
           if (frame.message?.role === "bot" && frame.message?.kind === "text") {
-            const owner = speechOwner(stateRef.current, frame.threadId);
+            const owner = speechOwner(stateRef.current, frame.threadId); replySound(frame.message.id, visibleNotificationThread(stateRef.current, frame.threadId) === frame.threadId);
             spokenReplyStream.completeBotText(frame.threadId, frame.message.turnId, frame.message.text ?? "", owner, frame.message.id);
           }
           break;

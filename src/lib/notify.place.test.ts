@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 
-vi.mock("./notification-preferences", () => ({ notificationSoundsEnabled: () => true, finishedNotificationsEnabled: () => true }));
+vi.mock("./notification-preferences", () => ({ readSoundChoice: () => "click", finishedNotificationsEnabled: () => true }));
 
 import { setNotificationPlace, showNotification, type NotifyFrame } from "./notify";
 

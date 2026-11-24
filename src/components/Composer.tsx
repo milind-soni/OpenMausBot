@@ -233,7 +233,7 @@ export function Composer({
     },
     [text, editText, editAttachments],
   );
-  const { recording, ready: micReady, speechError, toggle: toggleMic, stop: stopDictation } = useComposerDictation({ draftId, text, onText: editText });
+  const { recording, ready: micReady, speechError, toggle: toggleMic, stop: stopDictation, discard: discardDictation } = useComposerDictation({ draftId, text, onText: editText });
   const fork = useComposerFork({ ownerId: forkOwnerId, kind: group ? "group" : "bot", threadId,
     branchLeafId: group ? undefined : bot?.activeLeafId ?? undefined, draftId, text, editText, stopDictation });
   const micShown = !locked && !busy && micReady;
@@ -898,7 +898,7 @@ export function Composer({
               send(followUpFor(alternateSend(e.nativeEvent, sendKey)));
             }
             if (e.key !== "Escape") return;
-            if (recording) stopDictation();
+            if (recording) discardDictation();
             else if (!e.defaultPrevented) {
               escapeBlurs.current += 1;
               e.currentTarget.blur();

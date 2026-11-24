@@ -1,8 +1,9 @@
 import type { Notification } from "../../shared/notification";
 import { plainPreviewText } from "../../shared/plain-preview";
-import { finishedNotificationsEnabled, notificationSoundsEnabled } from "./notification-preferences";
+import { bannerSilent, notificationSound } from "./app-sounds";
+import { finishedNotificationsEnabled } from "./notification-preferences";
 
-export type NotifyFrame = Notification;
+export type NotifyFrame = Notification & { id?: string; read?: boolean };
 
 export type NotificationTarget = Pick<NotifyFrame, "botId" | "threadId">;
 
@@ -37,10 +38,12 @@ export function showNotification(
   avatarUrl?: string | null,
   visibleThreadId?: string | null,
 ) {
+  const focused = typeof document !== "undefined" && document.hasFocus();
+  notificationSound(frame, focused && visibleThreadId === frame.threadId);
   if (typeof Notification === "undefined") return;
   if (frame.kind === "done" && !finishedNotificationsEnabled()) return;
   const spend = frame.kind === "spend";
-  if (!spend && document.hasFocus() && visibleThreadId === frame.threadId) return;
+  if (!spend && focused && visibleThreadId === frame.threadId) return;
   if (Notification.permission !== "granted") return;
 
   const title = placeName ? `${placeName} · ${frame.title}` : frame.title;
@@ -50,7 +53,7 @@ export function showNotification(
     body,
     ...buildNotificationOptions({ id: frame.botId, avatarUrl }),
     ...(spend ? { tag: "openmausbot:spend", icon: undefined } : {}),
-    ...(notificationSoundsEnabled() ? {} : { silent: true }),
+    ...(bannerSilent() ? { silent: true } : {}),
   };
   const shownByPage = () => {
     new Notification(title, options).onclick = () => {
