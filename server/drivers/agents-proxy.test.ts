@@ -49,6 +49,7 @@ let assignmentStatusCode = 200;
 let lastThreadBody: any = null;
 let threadCalls = 0;
 let threadsList: unknown = { threads: [] };
+let closeReply: unknown = {};
 let lastThreadsUrl = "";
 let threadResponse: unknown = { threadId: "thread-new", title: "QA: PR #1", botId: "bot-asker", botName: "Asker", self: true, state: "running", limit: 3 };
 let computerRequests: { method: string; url: string; body: unknown }[] = [];
@@ -273,6 +274,11 @@ beforeAll(async () => {
       lastThreadsUrl = req.url;
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(threadsList));
+      return;
+    }
+    if (req.method === "POST" && /^\/api\/internal\/threads\/[\w-]+\/close$/.test(req.url ?? "")) {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(closeReply));
       return;
     }
     if (req.method === "POST" && req.url === "/api/internal/threads") {
@@ -1345,6 +1351,29 @@ describe("agents-proxy MCP surface", () => {
       expect((await callTool("list_threads", {})).result.content[0].text).toContain(`#Export CSV (on @Ops, queued: ${waiting}) [thread id: t-q] [delegation id: asg-q]`);
     } finally {
       assignmentStatusResponse = DONE_ASSIGNMENT;
+      threadsList = { threads: [] };
+    }
+  });
+
+  it("close_thread and list_threads say whether a thread is archived, and a repeat close says it was already closed", async () => {
+    try {
+      closeReply = { closed: true, threadId: "t-1", title: "Export CSV", botName: "Ops", archived: false };
+      expect((await callTool("close_thread", { thread_id: "t-1" })).result.content[0].text)
+        .toBe("Closed #Export CSV on @Ops. It stays in the person's sidebar, idle, with a note that you closed it.");
+      closeReply = { closed: true, threadId: "t-1", title: "Export CSV", botName: "Ops", archived: true };
+      expect((await callTool("close_thread", { thread_id: "t-1" })).result.content[0].text)
+        .toBe("Closed #Export CSV on @Ops. It was archived already, so it stays out of the person's sidebar, with a note that you closed it.");
+      closeReply = { closed: true, alreadyClosed: true, threadId: "t-1", title: "Export CSV", botName: "Ops", closedBy: "Clive", archived: true };
+      expect((await callTool("close_thread", { thread_id: "t-1" })).result.content[0].text)
+        .toBe("#Export CSV on @Ops was already closed by @Clive, so nothing changed. It is archived: it is no longer in the person's sidebar.");
+      closeReply = { closed: true, alreadyClosed: true, threadId: "t-1", title: "Export CSV", botName: "Ops", closedBy: "Clive", archived: false };
+      expect((await callTool("close_thread", { thread_id: "t-1" })).result.content[0].text)
+        .toBe("#Export CSV on @Ops was already closed by @Clive, so nothing changed. It stays in the person's sidebar, idle.");
+      threadsList = { threads: [{ threadId: "t-1", botId: "bot-ops", botName: "Ops", title: "Export CSV", state: "closed", archived: true, own: false, unread: false, openedAt: 1 }] };
+      expect((await callTool("list_threads", {})).result.content[0].text)
+        .toBe("Threads, newest first:\n- #Export CSV (on @Ops, closed, archived: no longer in the person's sidebar) [thread id: t-1]");
+    } finally {
+      closeReply = {};
       threadsList = { threads: [] };
     }
   });
