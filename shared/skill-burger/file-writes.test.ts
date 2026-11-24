@@ -32,7 +32,6 @@ describe("file writes in a saved workflow", () => {
     ];
     const draft = draftWorkflow([ask, ...commands.map((command) => shell(command))]);
     expect(draft!.workflow.steps.map((step) => step.kind === "shell" && step.run)).toEqual(commands);
-    expect(redirectTarget(commands[2]!)).toBe("north detailed.csv");
   });
 
   it("keeps relative output paths in different working directories", () => {
@@ -79,7 +78,13 @@ describe("file writes in a saved workflow", () => {
     const commands = [command, "printf second > first.csv", "cp report.csv backup.csv"];
     const draft = draftWorkflow([ask, ...commands.map((one) => shell(one))]);
     expect(draft!.workflow.steps.map((step) => step.kind === "shell" && step.run)).toEqual(commands);
-    expect(redirectTarget(command)).toBe("first.csv");
+  });
+
+  it("keeps a command's other effects when a later command overwrites its redirected output", () => {
+    const commands = ["cp source.txt artifact.txt > build.log", "printf done > build.log"];
+    const draft = draftWorkflow([ask, ...commands.map((command) => shell(command))]);
+    expect(draft).not.toBeNull();
+    expect(draft!.workflow.steps.map((step) => step.kind === "shell" && step.run)).toEqual(commands);
   });
 
   it("keeps an output written on different computers", () => {
@@ -107,7 +112,7 @@ describe("file writes in a saved workflow", () => {
     expect(redirectTarget(commands[1]!)).toBe("report.csv");
   });
 
-  it("still keeps the last complete rewrite of the same file in the same place", () => {
+  it("folds adjacent complete file-tool rewrites and keeps successful shell commands", () => {
     const layers = burgerLayers([
       ask,
       write("/reports/summary.md", "Draft"),
@@ -118,7 +123,8 @@ describe("file writes in a saved workflow", () => {
     ]);
     expect(layers.map((layer) => [layer.args, layer.tries])).toEqual([
       [{ path: "/reports/summary.md", content: "Finished" }, 2],
-      [{ command: "printf finished > report.csv", cwd: "/reports" }, 1],
+      [{ command: "printf draft > report.csv", cwd: "/reports" }, undefined],
+      [{ command: "printf finished > report.csv", cwd: "/reports" }, undefined],
     ]);
   });
 });

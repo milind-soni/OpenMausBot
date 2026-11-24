@@ -106,8 +106,9 @@ export function isServerRow(message: RunMessage): boolean {
   return Boolean(message.threadRef || message.comm || message.roomRequest || message.handoff || message.doneWhen || tool.setup || (!tool.input && !tool.summary));
 }
 
-function outputRedirects(command: string): Array<{ target: string; append: boolean }> {
-  const redirects: Array<{ target: string; append: boolean }> = [];
+/** The unquoted output redirect of a command (`> notes.md`, `>> log.txt`, `cat > a.md <<EOF`), other than to /dev/…:
+ * it writes a file, whatever program it runs. */
+export function redirectTarget(command: string): string | null {
   let quote: string | null = null;
   for (let i = 0; i < command.length; i += 1) {
     const char = command[i]!;
@@ -117,21 +118,13 @@ function outputRedirects(command: string): Array<{ target: string; append: boole
     const before = command[i - 1] ?? " ";
     if (/[0-9&>-]/.test(before) && before !== " ") continue;
     let j = i + 1;
-    const append = command[j] === ">";
-    if (append) j += 1;
+    if (command[j] === ">") j += 1;
     if (command[j] === "&" || command[j] === "(") continue;
     while (command[j] === " ") j += 1;
-    const match = /^(?:"([^"]+)"|'([^']+)'|([^\s"'<>;|&]+))/.exec(command.slice(j));
-    const target = match?.[1] ?? match?.[2] ?? match?.[3];
-    if (target && !target.startsWith("/dev/")) redirects.push({ target, append });
+    const target = /^["']?([^\s"';|&]+)/.exec(command.slice(j))?.[1];
+    if (target && !target.startsWith("/dev/")) return target;
   }
-  return redirects;
-}
-
-/** The unquoted output redirect of a command (`> notes.md`, `>> log.txt`, `cat > a.md <<EOF`), other than to /dev/…:
- * it writes a file, whatever program it runs. */
-export function redirectTarget(command: string): string | null {
-  return outputRedirects(command)[0]?.target ?? null;
+  return null;
 }
 
 /** A fetch from the web (curl or wget to an http address) with nothing sent: a read, but one a workflow needs again. */
@@ -392,14 +385,8 @@ function joinDesktop(layers: BurgerLayer[]): BurgerLayer[] {
 }
 
 function writesTo(layer: BurgerLayer): string | null {
-  let path: string | undefined;
-  if (layer.kind === "file" && typeof layer.args?.path === "string") path = layer.args.path;
-  if (layer.kind === "shell" && typeof layer.args?.command === "string") {
-    if (/[;&|\r\n]/.test(layer.args.command)) return null;
-    const redirects = outputRedirects(layer.args.command);
-    if (redirects.length === 1 && !redirects[0]!.append) path = redirects[0]!.target;
-  }
-  return path ? JSON.stringify([layer.where, layer.args?.cwd ?? null, path]) : null;
+  return layer.kind === "file" && typeof layer.args?.path === "string"
+    ? JSON.stringify([layer.where, layer.args?.cwd ?? null, layer.args.path]) : null;
 }
 
 /** A read the run made that leaves no layer: a page looked at, a file or listing read. */

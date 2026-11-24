@@ -70,6 +70,14 @@ describe("where a Skill Burger's steps run", () => {
       commands: ["printf first > first.csv > report.csv", "printf second > first.csv", "cp report.csv backup.csv"],
       expected: { "first.csv": "second", "report.csv": "first", "backup.csv": "first" },
     },
+    {
+      name: "a command's artifact after its redirected log is overwritten",
+      commands: [
+        "printf payload > source.txt", "cp source.txt artifact.txt > build.log",
+        "printf done > build.log", "cp artifact.txt packaged.txt",
+      ],
+      expected: { "artifact.txt": "payload", "packaged.txt": "payload", "build.log": "done" },
+    },
   ])("replays $name", async ({ commands, expected }) => {
     const cwd = folder();
     try {

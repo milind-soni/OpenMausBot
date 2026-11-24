@@ -137,9 +137,11 @@ describe("a step's place and the run's own leftovers", () => {
     expect(draft.workflow.steps[1]).toMatchObject({ kind: "ai", deterministic: false });
   });
 
-  it("keeps the try that worked when a file is written again", () => {
+  it("keeps successful shell commands even when they overwrite the same output", () => {
     const layers = burgerLayers([ask("make the csv"), bash("curl -sf https://example.com/a.json -o a.json"), bash("in2csv a.json > done.csv"), bash("in2csv -I a.json > done.csv")]);
-    expect(layers.map((layer) => [layerLabel(layer), layer.tries ?? 0])).toEqual([["Run curl -sf https://example.com/a.json -o a.json", 0], ["Run in2csv -I a.json > done.csv", 1]]);
+    expect(layers.map((layer) => [layerLabel(layer), layer.tries ?? 0])).toEqual([
+      ["Run curl -sf https://example.com/a.json -o a.json", 0], ["Run in2csv a.json > done.csv", 0], ["Run in2csv -I a.json > done.csv", 0],
+    ]);
   });
 
   it("writes text the AI composed after a read again from what it reads, not last time's words", () => {
