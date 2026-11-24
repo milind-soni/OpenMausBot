@@ -180,6 +180,7 @@ describe("search", () => {
   it("opens an old link to Activity at the top of Data in the desktop app, where only a browser has it", () => {
     expect(resolveSettingsTarget("activity", fullContext({ advanced: false }))).toEqual({ page: "data", advanced: true });
     expect(resolveSettingsTarget("activity", fullContext())).toEqual({ page: "data" });
+    expect(resolveSettingsTarget("activity", fullContext({ desktop: false, admin: false, advanced: false }))).toEqual({ page: "data", advanced: true });
   });
 
   it("finds Repeat computer tasks without AI only where the server can repeat saved steps", () => {

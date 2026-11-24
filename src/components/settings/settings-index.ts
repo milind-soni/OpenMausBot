@@ -49,6 +49,7 @@ export interface SettingsPage {
 }
 
 const notClient = (ctx: SettingsContext) => !ctx.client;
+const browserAdmin = (ctx: SettingsContext) => !ctx.desktop && ctx.admin;
 /** What only an admin can use: a team's member isn't offered it at all (the installation's AI, desktops, spending, data). */
 const adminPage = (ctx: SettingsContext) => !ctx.client && !(ctx.team && !ctx.admin);
 /** A page Simple mode leaves out: its everyday rows show elsewhere in Simple (Overview, This app, Plan & billing). */
@@ -127,8 +128,8 @@ export const LEGACY_SETTINGS: Record<Exclude<AppSettingsSection, SettingsPageId>
   computer: () => ({ page: "desktops" }),
   logins: () => ({ page: "vault" }),
   botAccess: () => ({ page: "people", anchor: "bot-access" }),
-  // Only a browser has Activity; the desktop app opens Data at the top.
-  activity: (ctx) => (ctx.desktop ? { page: "data" } : { page: "data", anchor: "activity" }),
+  // Only an admin in a browser has Activity; anyone else lands at the top of Data.
+  activity: (ctx) => (browserAdmin(ctx) ? { page: "data", anchor: "activity" } : { page: "data" }),
   backups: () => ({ page: "transfer", anchor: "take-out" }),
   workspaces: () => ({ page: "installations" }),
   skills: (ctx) => (ctx.skills ? { page: "bots", anchor: "skills" } : { page: "bots" }),
@@ -184,7 +185,6 @@ export interface SettingsIndexEntry {
 
 const desk = (ctx: SettingsContext) => ctx.desktop && !ctx.client;
 const hereOnly = (ctx: SettingsContext) => ctx.here;
-const browserAdmin = (ctx: SettingsContext) => !ctx.desktop && ctx.admin;
 
 export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "add-device", page: "devices", anchor: "add", labelKey: "devicesPage.add", topFor: ["add a device", "add device", "new device"], synonyms: ["add a computer", "add a server", "add a phone", "connect a device"] },
