@@ -12010,6 +12010,8 @@
   "room.thread.panel": "Thread",
   "room.thread.close": "Close thread",
   "room.thread.resize": "Resize thread",
+  "settings.features.teamBoard": "Board",
+  "settings.features.teamBoardLine": "Track work in group chats as items with a state, labels and what each one waits for",
   "settings.features.error": "Couldn't save that. Check your connection and try again.",
   "skillBurger.pill.cooking": "Cooking… {count}",
   "skillBurger.pill.add": "Add",

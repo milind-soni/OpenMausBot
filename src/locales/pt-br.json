@@ -12010,6 +12010,8 @@
   "room.thread.panel": "Conversa",
   "room.thread.close": "Fechar conversa",
   "room.thread.resize": "Redimensionar conversa",
+  "settings.features.teamBoard": "Quadro",
+  "settings.features.teamBoardLine": "Acompanhe o trabalho nos chats em grupo como itens com status, rótulos e o que cada um espera",
   "settings.features.error": "Não foi possível salvar. Verifique sua conexão e tente de novo.",
   "skillBurger.pill.cooking": "Cozinhando… {count}",
   "skillBurger.pill.add": "Adicionar",

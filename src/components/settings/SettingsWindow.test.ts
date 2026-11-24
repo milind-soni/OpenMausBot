@@ -302,6 +302,12 @@ describe("Settings → Features", () => {
     expect(api).toHaveBeenCalledWith("/api/config", { method: "PATCH", body: JSON.stringify({ features: { skillBurger: false } }) });
   });
 
+  it("shows the Board switch only where the server reports it (a Team Cloud)", () => {
+    fixture.config = { cloudHome: true, team: { name: "Acme" }, features: { skillBurger: true, threadTabs: false, teamBoard: false } };
+    expect(render("features")).toContain("Board");
+    expect(featureSwitches()).toEqual({ skillBurger: true, threadTabs: false, teamBoard: false });
+  });
+
   it("shows no switch its server doesn't know, and isn't offered to a team's member", () => {
     fixture.config = {};
     render("features");
