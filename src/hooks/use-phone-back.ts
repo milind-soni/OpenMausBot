@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { useStableCallback } from "./use-stable-callback";
 
 /** Each entry the hook adds keeps its place above the start in its history state, so a press can tell Back from Forward. */
@@ -22,14 +22,17 @@ function withEntry(entry: number): Record<string, unknown> {
  * from is not a step: the app stays where it is and the entry is taken away again.
  */
 export function usePhoneBack(enabled: boolean, steps: number, back: () => void): void {
-  const added = useRef(0);
+  // A reload keeps the entries added before it, with the page on one of them; count from that one.
+  const [start] = useState(() => entryOf(window.history.state) ?? 0);
+  const added = useRef(start);
   const ownPops = useRef(0);
   const stepBack = useStableCallback(back);
   const [, redraw] = useReducer((draws: number) => draws + 1, 0);
   useEffect(() => {
     const wanted = enabled ? steps : 0;
     if (wanted > added.current) {
-      if (added.current === 0) window.history.replaceState(withEntry(0), "", window.location.href);
+      // While the app's own step back is still on its way, the current entry is the one it leaves, not the start.
+      if (added.current === 0 && ownPops.current === 0) window.history.replaceState(withEntry(0), "", window.location.href);
       for (let entry = added.current + 1; entry <= wanted; entry += 1) window.history.pushState(withEntry(entry), "", window.location.href);
     } else if (wanted < added.current) {
       ownPops.current += 1;

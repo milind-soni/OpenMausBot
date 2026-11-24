@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { phoneBackStep, phoneBackSteps, type PhoneBackPlace } from "./phone-back";
 
-const CHAT: PhoneBackPlace = { calendar: false, drawerOpen: false, panelOpen: false, appsPage: false, drawerSteps: 0 };
+const CHAT: PhoneBackPlace = { calendar: false, drawerOpen: false, panelOpen: false, preview: false, appsPage: false, drawerSteps: 0 };
 
 describe("the phone's back button", () => {
   it("has nothing to step back from on the first chat, so back leaves the app", () => {
@@ -26,5 +26,12 @@ describe("the phone's back button", () => {
     expect(phoneBackStep({ ...CHAT, drawerOpen: true, panelOpen: true, drawerSteps: 1 })).toBe("drawer");
     expect(phoneBackStep({ ...CHAT, panelOpen: true, drawerSteps: 1 })).toBe("panels");
     expect(phoneBackSteps({ ...CHAT, panelOpen: true, drawerSteps: 1 })).toBe(2);
+  });
+
+  it("closes a file or app preview over the chat like a side panel", () => {
+    const preview = { ...CHAT, preview: true, drawerSteps: 1 };
+    expect(phoneBackSteps(preview)).toBe(2);
+    expect(phoneBackStep(preview)).toBe("panels");
+    expect(phoneBackSteps({ ...preview, panelOpen: true }), "one step closes both").toBe(2);
   });
 });
