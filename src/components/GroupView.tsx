@@ -333,10 +333,12 @@ export const Transcript = memo(function Transcript({
   const showToolCalls = showToolCallsEnabled(state.config);
   const canReact = useCanReact(group.threadId); const teammatePeers = useTeammates().peers;
   const memberOf = (id?: string) => members.find((b) => b.id === id); const messages = useLiveTranscript(group.threadId, saved, transcript, members, roomThreadSpeakerId(group, group.threadId));
+  const focus = state.focusMessage;
+  const focusId = focus?.threadId === group.threadId ? focus.messageId : undefined;
   const folds = useMemo(() => roomTurnFolds(messages), [messages, locale]);
   const items = useMemo(() => groupActivityRuns(messages.filter(message =>
-    !folds.hiddenIds.has(message.id) &&
-    (message.kind !== "activity" || roomActivityVisible(message, showToolCalls)))), [messages, showToolCalls, folds]);
+    message.id === focusId || (!folds.hiddenIds.has(message.id) &&
+    (message.kind !== "activity" || roomActivityVisible(message, showToolCalls))))), [messages, showToolCalls, folds, focusId]);
   const newestMessageId = messages.at(-1)?.id;
   const newestUserMessageId = [...messages].reverse().find((message) => message.role === "user")?.id;
   const roomBusy = roomThreadWorking(group, group.threadId);
@@ -366,8 +368,6 @@ export const Transcript = memo(function Transcript({
       ...(retryRequest.replyToId ? { replyToId: retryRequest.replyToId } : {}),
     });
   }, [dispatch, group.id, group.threadId, retryRequest, roomBusy]);
-  const focus = state.focusMessage;
-  const focusedId = focus && !focus.consumed && focus.threadId === group.threadId ? focus.messageId : null;
   const unreadIds = useMemo(() => unreadMessageIds(messages, unreadDividerId), [messages, unreadDividerId]);
   let dividerPlaced = false;
   const dividerAbove = (rows: readonly Message[]) => {
@@ -384,7 +384,7 @@ export const Transcript = memo(function Transcript({
         const newDay = !prev || localDay(prev.at) !== localDay(first.at);
         const divider = dividerAbove(item.kind === "run" ? item.messages : [item.message]);
         if (item.kind === "run") {
-          if (!showToolCalls) return divider && <div key={item.id} className="contents">{divider}</div>;
+          if (!showToolCalls && !item.messages.some(step => step.id === focusId)) return divider && <div key={item.id} className="contents">{divider}</div>;
           const cluster = runShowsSpeaker(items, i, showToolCalls);
           return (
             <div key={item.id} className="contents">
@@ -397,7 +397,7 @@ export const Transcript = memo(function Transcript({
               {first.from && cluster && (
                 <ClusterLabel bot={memberOf(first.from.botId)} name={first.from.name} color={first.from.color} />
               )}
-              <ActivityRun messages={item.messages} forceOpen={item.messages.some((step) => step.id === focusedId)}>
+              <ActivityRun messages={item.messages} forceOpen={!focus?.consumed && item.messages.some(step => step.id === focusId)}>
                 {item.messages.map((step) => (
                   <div key={step.id} className="contents" data-mid={step.id}>
                     <RoomToolChip message={step} threadId={group.threadId} live={liveTools.has(step.id)} />
@@ -457,7 +457,7 @@ export const Transcript = memo(function Transcript({
               />
             </div>
           ) : m.kind === "activity" && m.tool ? (
-            roomActivityVisible(m, showToolCalls) ? (
+            (m.id === focusId || roomActivityVisible(m, showToolCalls)) ? (
               m.dataResult ? <DataResultChip message={m} /> : isStatusActivity(m) ? <StatusActivityRow message={m} /> : <RoomToolChip message={m} roomId={group.id} threadId={group.threadId} live={liveTools.has(m.id)} />
             ) : null
           ) : m.kind === "screen" ? (
@@ -483,6 +483,7 @@ export const Transcript = memo(function Transcript({
           ) : null;
         if (!row) return divider && <div key={m.id} className="contents">{divider}</div>;
         const fold = folds.byTerminalId.get(m.id);
+        const notes = fold?.messages.filter(note => note.id !== focusId);
         return (
           <div key={m.id} className="contents" data-mid={m.id}>
             {newDay && (
@@ -497,12 +498,9 @@ export const Transcript = memo(function Transcript({
             ) && (
               <ClusterLabel bot={memberOf(m.from.botId)} name={m.from.name} color={m.from.color} to={m.kind === "text" ? roomAddressees(m, members, transcript, teammatePeers) : undefined} />
             )}
-            {fold && (
-              <TurnNarrationRun
-                label={fold.label}
-                forceOpen={fold.messages.some((note) => note.id === focusedId)}
-              >
-                {fold.messages.map((note) => (
+            {fold && notes?.length ? (
+              <TurnNarrationRun label={fold.label}>
+                {notes.map((note) => (
                   <div key={note.id} className="contents" data-mid={note.id}>
                     <RoomTextMessage
                       group={group}
@@ -518,7 +516,7 @@ export const Transcript = memo(function Transcript({
                   </div>
                 ))}
               </TurnNarrationRun>
-            )}
+            ) : null}
             {isLiveReply(m) ? <StreamingReplyContext value>{row}</StreamingReplyContext> : row}
           </div>
         );

@@ -75,3 +75,33 @@ describe("search match highlighting", () => {
     expect(requestAnimationFrame).toHaveBeenCalledOnce();
   });
 });
+
+it("centers a match in a later bubble without starting a competing row scroll", () => {
+  const first = { data: "first bubble", length: 12 };
+  const second = { data: "second bubble", length: 13 };
+  const bubble = { ...target };
+  const roots = [{ node: first }, { node: second }];
+  vi.spyOn(document, "createTreeWalker").mockImplementation((root) => {
+    const node = (root as unknown as { node: unknown }).node;
+    let available = true;
+    return { currentNode: node, nextNode: () => {
+      const result = available;
+      available = false;
+      return result;
+    } } as unknown as TreeWalker;
+  });
+  vi.spyOn(document, "createRange").mockReturnValue({
+    setStart: vi.fn(), setEnd: vi.fn(), getBoundingClientRect: () => ({ top: 390, height: 20 }),
+  } as unknown as Range);
+  const row = { ...target, querySelector: () => bubble,
+    querySelectorAll: () => ({ item: (index: number) => roots[index], length: roots.length }) };
+  const scroller = { querySelector: () => ({ lastElementChild: row }), scrollTop: 100, scrollTo: vi.fn(),
+    getBoundingClientRect: () => ({ top: 50, height: 300 }) };
+  fixture.text = "second";
+  useFocusMessage("thread", true, { current: scroller as unknown as HTMLElement });
+  cleanup = fixture.effect!() as () => void;
+  expect(bubble.scrollIntoView).not.toHaveBeenCalled();
+  const [frame] = vi.mocked(requestAnimationFrame).mock.calls[0]!;
+  frame(0);
+  expect(scroller.scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 300, behavior: "instant" });
+});

@@ -130,7 +130,7 @@ export function useChatHistory(bot: Bot) {
     }));
     for (const message of raw) {
       const optimistic = message.sendId && message.id === optimisticMessageId(message.sendId);
-      if (!page || optimistic || !visit.baseline.has(message) || (bot.busy && message.id === bot.activeLeafId)) {
+      if (!page || message.id === focusId || optimistic || !visit.baseline.has(message) || (bot.busy && message.id === bot.activeLeafId)) {
         merged.set(message.id, message);
       }
     }

@@ -13,6 +13,7 @@ export function ChatFindBar({ threadId, onClose, inForkPanel = false }: { thread
   const showThreads = useShowThreads();
   const inputRef = useRef<HTMLInputElement>(null);
   const requestRef = useRef(0);
+  const navigation = useRef<AbortController | null>(null);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [index, setIndex] = useState(0);
@@ -24,11 +25,12 @@ export function ChatFindBar({ threadId, onClose, inForkPanel = false }: { thread
   }, []);
 
   useEffect(() => {
+    navigation.current?.abort();
+    setHits(previous => previous.length ? [] : previous);
+    setIndex(0);
     const trimmed = query.trim();
     const request = ++requestRef.current;
     if (!trimmed) {
-      setHits([]);
-      setIndex(0);
       setLoading(false);
       return;
     }
@@ -49,12 +51,19 @@ export function ChatFindBar({ threadId, onClose, inForkPanel = false }: { thread
           if (request === requestRef.current) setLoading(false);
         });
     }, 180);
-    return () => window.clearTimeout(timer);
+    return () => {
+      requestRef.current++;
+      window.clearTimeout(timer);
+      navigation.current?.abort();
+    };
   }, [dispatch, query, threadId]);
 
   const land = (next: number) => {
     const hit = hits[next];
     if (!hit) return;
+    navigation.current?.abort();
+    const controller = new AbortController();
+    navigation.current = controller;
     setIndex(next);
     const panel = state.forkPanel;
     const landing = inForkPanel
@@ -63,10 +72,10 @@ export function ChatFindBar({ threadId, onClose, inForkPanel = false }: { thread
         dispatch({ type: "focusMessage", threadId: hit.threadId, messageId: hit.messageId,
           matchText: hit.snippet.slice(hit.matchStart, hit.matchStart + hit.matchLength) });
       })()
-      : landOnSearchHit(hit, state, dispatch, showThreads);
-    void landing.catch((error) =>
-      dispatch({ type: "error", message: error instanceof Error ? error.message : t("chat.find.unavailable") }),
-    );
+      : landOnSearchHit(hit, state, dispatch, showThreads, controller.signal);
+    void landing.catch((error) => {
+      if (!controller.signal.aborted) dispatch({ type: "error", message: error instanceof Error ? error.message : t("chat.find.unavailable") });
+    });
   };
   const move = (delta: number) => {
     if (!hits.length) return;

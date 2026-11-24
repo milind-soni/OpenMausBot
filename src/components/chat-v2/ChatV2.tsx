@@ -274,7 +274,7 @@ export function ChatV2({ profile, phoneLayout = false }: { profile: Bot; phoneLa
   const liveMessages = useLiveTranscript(bot.threadId, viewport.windowedMessages, historyPage.history);
   const messages = frozen?.messages ?? liveMessages;
   const unread = useUnreadDivider({ threadId: bot.threadId, messages: history, following: viewport.following, hasMore: historyPage.hasMore });
-  const focusId = focused?.threadId === bot.threadId && !focused.consumed ? focused.messageId : undefined;
+  const focusId = focused?.threadId === bot.threadId ? focused.messageId : undefined;
   const items = useMemo(() => groupChatWork(messages, busy, history, focusId), [messages, busy, history, focusId]);
   const digestByReply = useMemo(() => {
     const replies = new Map<string, string>();
@@ -401,11 +401,11 @@ export function ChatV2({ profile, phoneLayout = false }: { profile: Bot; phoneLa
           </div>
         )}
         <ChatImagePreloads.Provider value={imagePreloads}>
-        <ExchangeTimeline key={bot.threadId} working={!stopPresentation && Boolean(busy || history.at(-1)?.id.startsWith("optimistic-"))} ready={!bot.switchingTo && !bot.awaitingThreadSnapshot} storedKeys={storedRowKeys} items={items} botId={bot.id} focusId={focused?.messageId ?? null} unreadId={unread.messageId}
+        <ExchangeTimeline key={bot.threadId} working={!stopPresentation && Boolean(busy || history.at(-1)?.id.startsWith("optimistic-"))} ready={!bot.switchingTo && !bot.awaitingThreadSnapshot} storedKeys={storedRowKeys} items={items} botId={bot.id} focusId={focusId ?? null} unreadId={unread.messageId}
           render={item => {
             if (item.kind === "message") return renderMessage(item.message);
             if (item.kind !== "turn") return null;
-            return <ChatWork key={item.id} item={item} focusedId={item.messages.some(message => message.id === focusId) ? focusId : undefined}>
+            return <ChatWork key={item.id} item={item} focusedId={!focused?.consumed && item.messages.some(message => message.id === focusId) ? focusId : undefined}>
               {item.messages.map(message => <div key={message.id} className="v2-work-step-enter">
                 <div className="v2-work-step-content">{renderMessage(message)}</div>
               </div>)}

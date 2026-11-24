@@ -146,3 +146,19 @@ it("shows persisted messages while refreshing, then applies edits and deletions 
     write.mockRestore();
   }
 });
+
+it("keeps a global search hit from a switched thread visible after its compact page loads and focus is consumed", async () => {
+  const url = "/api/threads/B-other/messages?view=chat&limit=200";
+  const activity: Message = { ...line("tool", "historical tool command"), kind: "activity", tool: { name: "git status" } };
+  const reply = { ...line("reply", "latest reply", activity.id), at: 2 };
+  requests.mockImplementation(input => input === url
+    ? Promise.resolve(Response.json({ messages: [reply], hasMore: false }))
+    : new Promise(() => {}));
+  flushSync(() => dispatch({ type: "taskSwitched", bot: { ...profile, threadId: "B-other", activeLeafId: reply.id, messages: [activity, reply] } }));
+  await vi.waitFor(() => expect(requests).toHaveBeenCalledWith(url, expect.anything()));
+  await vi.waitFor(() => expect(host.textContent).toBe("latest reply"));
+  flushSync(() => dispatch({ type: "focusMessage", threadId: "B-other", messageId: activity.id, matchText: "git status" }));
+  expect(host.textContent).toBe("historical tool command,latest reply");
+  flushSync(() => dispatch({ type: "focusMessageConsumed", nonce: 1 }));
+  await vi.waitFor(() => expect(host.textContent).toBe("historical tool command,latest reply"));
+});

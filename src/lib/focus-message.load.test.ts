@@ -82,3 +82,27 @@ describe("landing on a search hit older than the loaded page", () => {
     expect(actions.map((action) => action.type)).toEqual(["select", "focusMessage"]);
   });
 });
+
+it("does not land on an older result after an in-chat search has moved on", async () => {
+  const pending = Promise.withResolvers<{ messages: Message[]; hasMore: boolean }>();
+  fixture.api.mockReturnValueOnce(pending.promise);
+  const navigation = new AbortController();
+  const older = landOnSearchHit({ ...hit, botId: "scout", threadId: "t", messageId: "m300" }, state, dispatch, true, navigation.signal);
+  navigation.abort();
+  await landOnSearchHit({ ...hit, botId: "scout", threadId: "t", messageId: "m450" }, state, dispatch, true);
+  pending.resolve(pages.m400!);
+  await expect(older).rejects.toHaveProperty("name", "AbortError");
+  expect(actions.filter(action => action.type === "focusMessage").map(action => action.messageId)).toEqual(["m450"]);
+});
+
+it("rechecks a previously active result after the user has switched branches", async () => {
+  const destination = { ...message(1), parentId: null };
+  const current = { ...message(2), parentId: null };
+  const branched = { ...state, bots: [{ ...bot, messages: [destination, current], activeLeafId: current.id }] };
+  fixture.api.mockResolvedValue({ activeLeafId: destination.id });
+  await landOnSearchHit({ ...hit, botId: "scout", threadId: "t", messageId: destination.id }, branched, dispatch, true);
+  expect(actions.slice(-2)).toMatchObject([
+    { type: "threadActive", activeLeafId: destination.id },
+    { type: "focusMessage", messageId: destination.id },
+  ]);
+});
