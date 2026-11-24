@@ -1,3 +1,4 @@
+import { automationNote } from "@/lib/automation-note";
 import { splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { splitTranscriptAttachments } from "@/lib/composer-attachments";
 import { peerLine } from "@/lib/peer-message";
@@ -13,7 +14,7 @@ export function unreadContextMessage(messages: readonly Message[], unreadMessage
   if (at < 0) return null;
   for (let i = at - 1; i >= 0; i--) {
     const message = messages[i]!;
-    if (message.role === "user" && message.kind === "text" && !peerLine(message)) return message;
+    if (message.role === "user" && message.kind === "text" && !peerLine(message) && !automationNote(message)) return message;
   }
   return null;
 }

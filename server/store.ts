@@ -1202,14 +1202,14 @@ export class Store {
     const full: Message = {
       id: newId(),
       at: Date.now(),
-      role: "user",
-      kind: "text",
+      role: "user", kind: "text",
       text,
       parentId: source.parentId ?? null,
       replyToId: source.replyToId,
       ...(source.reaction && source.text === text ? { reaction: source.reaction } : {}),
-      ...(sendId ? { sendId } : {}),
-      ...(sender ? { sender } : {}),
+      // Regenerate and Try again send the stored words back: an automation's line stays the automation's.
+      ...(source.automated === true && source.text?.trim() === text.trim() ? { automated: true, ...(source.waitId ? { waitId: source.waitId } : {}) } : {}),
+      ...(sendId ? { sendId } : {}), ...(sender ? { sender } : {}),
       ...(dataContext ? { dataContext } : {}), ...from,
     };
     t.messages.push(full); this.threads.grew(threadId, full);
