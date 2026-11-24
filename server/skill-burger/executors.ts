@@ -145,10 +145,10 @@ export function createExecutors(context: ExecutorContext): StepExecutors {
         botIds: input.botIds, message: input.message, ...(input.doneWhen ? { done_when: input.doneWhen } : {}), ...(input.rework ? { rework: true } : {}), ...(input.consult ? { consult: true } : {}),
       }, input.signal);
       const receipts = (Array.isArray(answer.body.receipts) ? answer.body.receipts : []).map(record).flatMap((receipt) => (
-        receipt && typeof receipt.botId === "string" && typeof receipt.requestId === "string" ? [{ botId: receipt.botId, name: String(receipt.botName ?? receipt.botId), requestId: receipt.requestId }] : []));
-      if (!answer.ok || !receipts.length) {
-        const refusedOne = (Array.isArray(answer.body.receipts) ? answer.body.receipts : []).map(record).find((receipt) => receipt?.detail);
-        return { ok: false, error: String(answer.body.error ?? refusedOne?.detail ?? "the hand-off was refused") };
+        receipt && receipt.outcome !== "failed" && typeof receipt.botId === "string" && typeof receipt.requestId === "string" ? [{ botId: receipt.botId, name: String(receipt.botName ?? receipt.botId), requestId: receipt.requestId }] : []));
+      if (!answer.ok || !receipts.length || input.botIds.some((botId) => !receipts.some((receipt) => receipt.botId === botId))) {
+        const refusedOne = (Array.isArray(answer.body.receipts) ? answer.body.receipts : []).map(record).find((receipt) => receipt?.detail && !receipts.some((one) => one.botId === receipt.botId));
+        return { ok: false, error: String(answer.body.error ?? refusedOne?.detail ?? "the hand-off was refused"), receipts };
       }
       return { ok: true, receipts };
     },

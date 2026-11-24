@@ -253,13 +253,19 @@ export async function runFrom(state: Omit<RunState, "waiting" | "createdAt"> & {
     const signal = deps.signal ?? new AbortController().signal;
     const roster = await exec.teammates(signal).catch(() => []);
     const { who, missing } = matchTeammates(step, roster, chosen);
-    const delegation: NonNullable<RunState["delegation"]> = { step: step.id, round: 1, who, requests: [], replies: {} };
+    const delegation: NonNullable<RunState["delegation"]> = state.delegation?.step === step.id && state.delegation.pendingSend
+      ? { ...state.delegation, who }
+      : { step: step.id, round: 1, who, requests: [], replies: {}, pendingSend: {} };
     if (missing.length) return hand(step, "missing_bot", undefined, { prompt: missingPrompt(missing), delegation });
-    const sent = await sendRound(step, delegation, (ref) => resolve(ref, args, results), exec as DelegateExecutors, signal);
-    if (!sent.ok) return fail(step, "step_failed", clip(redactSecretsInText(sent.error), ERROR_MAX));
+    const sent = await sendRound(step, delegation, (ref) => resolve(ref, args, results), exec as DelegateExecutors, signal, delegation.pendingSend?.fixes, delegation.requests);
     delegation.requests = sent.requests;
+    if (!sent.ok) {
+      state.delegation = delegation;
+      return fail(step, "step_failed", clip(redactSecretsInText(sent.error), ERROR_MAX));
+    }
+    delete delegation.pendingSend;
     const names = [...new Set(sent.requests.map((request) => request.name))];
-    results[step.id] = { state: "handed", detail: { waitingOn: names, rounds: 1 } };
+    results[step.id] = { state: "handed", detail: { waitingOn: names, rounds: delegation.round } };
     return hand(step, "teammates", undefined, { prompt: TEAMMATES_PROMPT(teammateNames(names.map((one) => ({ bot: { name: one } })), false), id), delegation });
   };
 
@@ -424,14 +430,16 @@ export async function resumeRun(state: RunState, response: string, deps: RunDeps
     const parts = Object.keys(redo);
     if (!parts.length) return finish();
     if (delegation.round - 1 >= (step.review?.rounds ?? 0)) return finish(parts);
-    const sent = await sendRound(step, delegation, fill, exec, signal, redo);
+    const next: NonNullable<RunState["delegation"]> = { ...delegation, round: delegation.round + 1, requests: [], pendingSend: { fixes: redo } };
+    const sent = await sendRound(step, next, fill, exec, signal, redo);
+    next.requests = sent.requests;
     if (!sent.ok) {
       results[step.id] = { state: "failed", error: clip(sent.error, ERROR_MAX) };
       deps.events.ended(state.id, state.name, step, results[step.id]!);
-      deps.save({ ...state, results, waiting: { step: step.id, type: "failed" }, createdAt: Date.now() });
+      deps.save({ ...state, results, delegation: next, waiting: { step: step.id, type: "failed" }, createdAt: Date.now() });
       return { protocolVersion: 1, ok: false, run: state.id, steps: [], error: { type: "step_failed", message: `"${step.label}" couldn't send the work back: ${clip(sent.error, ERROR_MAX)}`, step: step.id, resumeToken: state.id } };
     }
-    const next = { ...delegation, round: delegation.round + 1, requests: sent.requests };
+    delete next.pendingSend;
     const names = [...new Set(sent.requests.map((request) => request.name))];
     results[step.id] = { state: "handed", detail: { waitingOn: names, rounds: next.round } };
     return ask("teammates", TEAMMATES_PROMPT(names.join(", "), state.id), { delegation: next });
