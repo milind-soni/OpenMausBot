@@ -8,7 +8,7 @@ MausBot can sign in to GitHub once, so the server can clone, push and open pull 
 
 ## How the sign-in works
 
-1. You start the sign-in. On a MausBot Cloud, the first sign-in first downloads GitHub CLI (about 15 MB). MausBot checks it against the release it pins before anything runs.
+1. You start the sign-in. Where GitHub CLI is not installed, as on a MausBot Cloud or a computer without it, the first sign-in first downloads it (about 15 MB). MausBot checks the download against the release it pins before anything runs.
 2. MausBot shows a one-time code, such as `ABCD-1234`, and the address **https://github.com/login/device**.
 3. Open that address, sign in to GitHub if asked, type the code and approve the request.
 4. MausBot shows **Signed in as** your GitHub username.
@@ -23,15 +23,15 @@ GitHub lists the grant as **GitHub CLI** under your account's authorized OAuth a
 - `read:org`: which organizations and teams you belong to
 - `gist`: your gists
 
-The sign-in does not expire. It works until you revoke it on GitHub or sign out in MausBot.
+MausBot asks GitHub for a sign-in that does not expire, and GitHub normally gives one. If GitHub gives a sign-in that expires instead, GitHub CLI renews it whenever MausBot uses it. Either way it works until you revoke it on GitHub or sign out in MausBot.
 
 ## Where the sign-in is kept
 
-- **MausBot Cloud and self-hosted servers.** Each sign-in has its own private folder in the server's data folder. Where bots run in their sandbox, as on every MausBot Cloud, that folder is never inside it. The folder is never part of a backup. The server uses the token for git and GitHub actions on the bots' behalf and never hands it to a bot.
+- **MausBot Cloud and self-hosted servers.** Each sign-in has its own private folder in the server's data folder. Where bots run in their sandbox, as on every MausBot Cloud, that folder is never inside it. The folder is never part of a backup, so a Cloud restored from a backup or moved to another server starts without the sign-in: sign in again there. The server uses the token for git and GitHub actions on the bots' behalf and never hands it to a bot.
 - **Team Cloud.** Each member signs in with their own GitHub account. Nobody can use another member's sign-in.
 - **This computer.** If you already signed in with GitHub CLI yourself (`gh auth login`), MausBot shows **signed in via GitHub CLI** and asks nothing more. MausBot reads that sign-in and never changes it. To sign out of it, run `gh auth logout` in your own terminal.
 
-On Windows, GitHub CLI keeps sign-ins in Windows Credential Manager, which MausBot cannot keep separate. MausBot therefore starts its own sign-in only while your own GitHub CLI has no working sign-in, so at most it can remove an old entry that had already stopped working.
+On Windows, GitHub CLI keeps sign-ins in Windows Credential Manager, which MausBot cannot keep separate. So on Windows MausBot starts its own sign-in only when your own GitHub CLI says it is signed out, or when Credential Manager holds no GitHub CLI entry at all. Otherwise it asks you to paste a token instead.
 
 ## Using a token instead
 

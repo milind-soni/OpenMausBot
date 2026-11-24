@@ -47,7 +47,8 @@ interface Fake {
   tools: GhTools;
   children: FakeChild[];
   calls: Array<{ file: string; args: readonly string[]; env: Record<string, string> }>;
-  set: { personal: string | null; version: [number, number, number] | null; pinned: string | null; install: () => Promise<string>; personalStatus: GhRun; personalToken: GhRun; ownStatus: GhRun };
+  set: { personal: string | null; version: [number, number, number] | null; pinned: string | null; onDisk: boolean; install: () => Promise<string>; personalStatus: GhRun; personalToken: GhRun; ownStatus: GhRun; winCreds: string[] | null };
+  installs: () => number;
 }
 
 const ok = (stdout: string): GhRun => ({ code: 0, stdout, stderr: "" });
@@ -55,8 +56,9 @@ const ok = (stdout: string): GhRun => ({ code: 0, stdout, stderr: "" });
 function fakeTools(): Fake {
   const children: FakeChild[] = [];
   const calls: Fake["calls"] = [];
+  let installs = 0;
   const set: Fake["set"] = {
-    personal: null, version: [2, 103, 3], pinned: "/data/tools/standalone/github-cli/bin/gh", install: () => Promise.resolve("/data/tools/standalone/github-cli/bin/gh"),
+    personal: null, version: [2, 103, 3], pinned: "/data/tools/standalone/github-cli/bin/gh", onDisk: true, install: () => Promise.resolve("/data/tools/standalone/github-cli/bin/gh"), winCreds: [],
     personalStatus: ok(fixture("2.102.0/status-json-signedout.stdout.txt")), personalToken: { code: 1, stdout: "", stderr: "no oauth token found for github.com" },
     ownStatus: ok(fixture("constructed/status-json-success.stdout.txt")),
   };
@@ -64,8 +66,9 @@ function fakeTools(): Fake {
     personal: () => set.personal,
     version: async () => set.version,
     pinnedReady: () => set.pinned,
-    pinnedOnDisk: () => set.pinned !== null,
+    pinnedOnDisk: () => set.pinned !== null || set.onDisk,
     install: async () => {
+      installs++;
       const file = await set.install();
       set.pinned = file;
       return file;
@@ -86,8 +89,9 @@ function fakeTools(): Fake {
       if (args[0] === "api" && args[1] === "user/orgs") return ok("acme\nwidgets\n");
       return { code: 1, stdout: "", stderr: "unknown command" };
     },
+    windowsGhCredentials: async () => set.winCreds,
   };
-  return { tools, children, calls, set };
+  return { tools, children, calls, set, installs: () => installs };
 }
 
 function fakeVault(): GithubSignInDeps["vault"] & { saved: Map<string, { token: string; login: string }> } {
@@ -115,10 +119,10 @@ afterEach(() => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-function setup(options: { team?: boolean; fetchImpl?: typeof fetch } = {}) {
+function setup(options: { team?: boolean; fetchImpl?: typeof fetch; platform?: NodeJS.Platform } = {}) {
   const fake = fakeTools(), vault = fakeVault();
   const remembered: string[] = [];
-  const signIn = createGithubSignIn({ dataDir, team: options.team ?? false, tools: fake.tools, vault, now: () => clock, fetchImpl: options.fetchImpl, remember: (token) => remembered.push(token) });
+  const signIn = createGithubSignIn({ dataDir, team: options.team ?? false, tools: fake.tools, vault, now: () => clock, fetchImpl: options.fetchImpl, remember: (token) => remembered.push(token), platform: options.platform ?? "linux" });
   return { ...fake, vault, signIn, remembered };
 }
 
@@ -148,7 +152,9 @@ describe("GitHub sign-in with GitHub CLI's device code", () => {
     expect(child.args).toEqual(["auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web", "--insecure-storage", "--clipboard=false", "--expiring=false"]);
     const folders = githubFolders(dataDir, "owner");
     expect(child.env).toMatchObject({ HOME: folders.home, GH_CONFIG_DIR: folders.config, GH_PROMPT_DISABLED: "1", GH_TELEMETRY: "false", NO_COLOR: "1" });
-    for (const name of ["GH_TOKEN", "GITHUB_TOKEN", "DBUS_SESSION_BUS_ADDRESS", "GH_ENTERPRISE_TOKEN"]) expect(child.env[name], name).toBeUndefined();
+    for (const name of ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN"]) expect(child.env[name], name).toBeUndefined();
+    // Never the person's session bus: an address in the private folder where nothing listens.
+    expect(child.env.DBUS_SESSION_BUS_ADDRESS).toBe(`unix:path=${folders.home}/.run/no-bus`);
 
     child.approve();
     await settle();
@@ -205,6 +211,7 @@ describe("GitHub sign-in with GitHub CLI's device code", () => {
   it("with no gh anywhere, Start downloads the pinned one first, and says so when that fails", async () => {
     const fake = setup();
     fake.set.pinned = null;
+    fake.set.onDisk = false;
     let finish!: (file: string) => void;
     fake.set.install = () => new Promise((resolve) => { finish = resolve; });
     expect(await fake.signIn.status("owner")).toEqual({ state: "signed-out", download: true });
@@ -217,6 +224,7 @@ describe("GitHub sign-in with GitHub CLI's device code", () => {
 
     const broken = setup();
     broken.set.pinned = null;
+    broken.set.onDisk = false;
     broken.set.install = () => Promise.reject(new Error("GitHub CLI has no download for this computer."));
     await broken.signIn.start("owner");
     await settle();
@@ -421,5 +429,64 @@ describe("the accessor for server-side callers", () => {
     } finally {
       provideGithubSignIn(null);
     }
+  });
+});
+
+describe("only Start downloads, and overlapping asks share one answer", () => {
+  it("a signed-in folder with no pinned gh on disk (a newer pin) is shown unchecked and its token read from gh's file", async () => {
+    const fake = setup();
+    const child = await showCode(fake);
+    child.approve();
+    await settle();
+    fake.set.pinned = null;
+    fake.set.onDisk = false;
+    const fresh = createGithubSignIn({ dataDir, team: false, tools: fake.tools, vault: fakeVault(), now: () => clock });
+    expect(await fresh.status("owner", { check: true })).toMatchObject({ state: "signed-in", login: "octo-fixture", source: "mausbot", checkedAt: null });
+    expect(await fresh.token()).toBe(TOKEN);
+    expect(fake.installs()).toBe(0);
+  });
+
+  it("parallel checks start gh once", async () => {
+    const fake = setup();
+    const child = await showCode(fake);
+    child.approve();
+    await settle();
+    await fake.signIn.status("owner");
+    const before = fake.calls.filter((call) => call.args[1] === "status").length;
+    const answers = await Promise.all([1, 2, 3].map(() => fake.signIn.status("owner", { check: true })));
+    expect(new Set(answers.map((answer) => JSON.stringify(answer))).size).toBe(1);
+    expect(fake.calls.filter((call) => call.args[1] === "status").length).toBe(before + 1);
+  });
+});
+
+describe("Windows: Credential Manager is one store, so only a positive none lets Start go ahead", () => {
+  const entry = ["gh", "github.com", "octo-fixture"].join(":");
+  it("refuses while Credential Manager holds a gh entry, or cannot be read, and their gh is not there to say signed out", async () => {
+    for (const creds of [[entry], [`gh:_refreshable:github.com:octo-fixture`], null]) {
+      const fake = setup({ platform: "win32" });
+      fake.set.winCreds = creds;
+      await expect(fake.signIn.start("owner")).rejects.toMatchObject({ status: 409 });
+      expect(fake.children).toHaveLength(0);
+    }
+    const empty = setup({ platform: "win32" });
+    empty.set.winCreds = [];
+    expect((await empty.signIn.start("owner")).state).toBe("installing");
+  });
+
+  it("goes ahead when their own gh says signed out, and refuses on their refused (401) sign-in too", async () => {
+    const out = setup({ platform: "win32" });
+    out.set.personal = "C:\\Program Files\\GitHub CLI\\gh.exe";
+    out.set.winCreds = [entry];
+    expect((await out.signIn.start("owner")).state).toBe("installing");
+
+    const refused = setup({ platform: "win32" });
+    refused.set.personal = "C:\\Program Files\\GitHub CLI\\gh.exe";
+    refused.set.personalStatus = ok(fixture("2.103.3/status-json-invalid.stdout.txt"));
+    await expect(refused.signIn.start("owner")).rejects.toMatchObject({ status: 409 });
+    // Elsewhere a refused sign-in of theirs lets OpenMausBot's own start.
+    const linux = setup({ platform: "linux" });
+    linux.set.personal = "/usr/bin/gh";
+    linux.set.personalStatus = ok(fixture("2.103.3/status-json-invalid.stdout.txt"));
+    expect((await linux.signIn.start("owner")).state).toBe("installing");
   });
 });
