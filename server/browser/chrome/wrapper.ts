@@ -21,6 +21,9 @@ export interface LauncherSettings {
   home?: string;
   /** Every Chrome this launcher starts runs in this box (a Team Cloud's), with only the profile it was started on. */
   box?: LauncherBox;
+  /** A Cloud home's browsers' cgroup (browser/memory-cgroup.ts): Chrome joins it before it starts, so all of its processes
+   * are born under the kernel's memory limit. A failed join leaves Chrome where it was. */
+  memoryGroup?: string;
 }
 
 /** bubblewrap's options for a browser's box, before `--` and without the profile, which the launcher binds per start. */
@@ -75,6 +78,7 @@ export function launcherScript(settings: LauncherSettings, platform: NodeJS.Plat
   const chrome = `${shellQuote(settings.chrome)} "$@" ${flags.map(shellQuote).join(" ")} $headless`;
   return [
     "#!/bin/sh",
+    ...(settings.memoryGroup ? [`{ echo $$ > ${shellQuote(`${settings.memoryGroup}/cgroup.procs`)}; } 2>/dev/null`] : []),
     ...(settings.home ? [`HOME=${shellQuote(settings.home)}`, "export HOME"] : []),
     ...(settings.timeZone ? [`TZ=${shellQuote(settings.timeZone)}`, "export TZ"] : []),
     "headless=",

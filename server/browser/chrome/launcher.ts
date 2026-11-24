@@ -15,6 +15,7 @@ import { installChromeForTesting, type ChromeForTestingPin, type DownloadProgres
 import { chromeHost, installedGoogleChrome, resolveChromePlan, type ChromeEngine, type ChromeHost, type ChromePlan, type FoundChrome } from "./resolve.ts";
 import { IdentitySidecars } from "./sidecar.ts";
 import { browserLanguage, browserTimeZone, languageList, launcherPath, primaryScreen, writeLauncher, type LauncherBox, type LauncherSettings, type Screen } from "./wrapper.ts";
+import { BROWSER_CGROUP_ENV, browserCgroupDir } from "../memory-cgroup.ts";
 
 type Ready = { kind: "ready"; chrome: FoundChrome; identity: ChromeIdentity; product: string; fingerprint: string; launcher?: LauncherSettings };
 type State =
@@ -276,6 +277,7 @@ export class ChromeLauncher implements BrowserLaunch {
         language: this.resolvedLanguage(), timeZone: browserTimeZone(env, platform),
         ...(platform === "darwin" ? { home: userInfo().homedir } : {}),
         ...this.boxed(),
+        ...(platform === "linux" && browserCgroupDir(env[BROWSER_CGROUP_ENV]) ? { memoryGroup: browserCgroupDir(env[BROWSER_CGROUP_ENV])! } : {}),
       };
       writeLauncher(this.path, launcher, platform);
       if (platform !== "win32") await (this.options.checkLauncher ?? runsLauncher)(this.path, this.chromeEnv());
