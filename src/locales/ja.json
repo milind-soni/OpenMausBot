@@ -8145,9 +8145,5 @@
   "settings.features.skillBurgerLine": "ボットの実行を、もう一度実行できる手順として保存します",
   "settings.features.threadTabs": "スレッドのタブ",
   "settings.features.threadTabsLine": "ボットのスレッドをチャットの上にタブで表示します",
-  "settings.features.threadNotes": "スレッドのメモ",
-  "settings.features.threadNotesLine": "ボットが各スレッドについて書き留めた内容を表示します",
-  "settings.features.mascotMotion": "マスコットのアニメーション",
-  "settings.features.mascotMotionLine": "作業中にボットのマスコットを動かします",
   "settings.features.error": "保存できませんでした。接続を確認して、もう一度お試しください。"
 }

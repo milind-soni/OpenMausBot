@@ -4016,9 +4016,5 @@
   "settings.features.skillBurgerLine": "Enregistre l'exécution d'un bot en étapes que tu peux relancer",
   "settings.features.threadTabs": "Onglets de fils",
   "settings.features.threadTabsLine": "Affiche les fils d'un bot en onglets au-dessus du chat",
-  "settings.features.threadNotes": "Notes du fil",
-  "settings.features.threadNotesLine": "Affiche ce qu'un bot note pour chaque fil",
-  "settings.features.mascotMotion": "Animations de la mascotte",
-  "settings.features.mascotMotionLine": "Laisse les mascottes des bots bouger pendant qu'ils travaillent",
   "settings.features.error": "Impossible d'enregistrer. Vérifie ta connexion et réessaie."
 }

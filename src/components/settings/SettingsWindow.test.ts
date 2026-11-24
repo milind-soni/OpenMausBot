@@ -274,7 +274,6 @@ describe("the outer menu", () => {
 
 describe("Settings → Features", () => {
   const featureSwitches = () => Object.fromEntries(fixture.switches.map((props) => [(props as { "data-feature-switch"?: string })["data-feature-switch"], props.checked]).filter(([name]) => name));
-  beforeEach(() => { vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} }); });
 
   it("is in Simple mode's list, with Skill Burger on and thread tabs off by default", () => {
     fixture.config = { features: { skillBurger: true, threadTabs: false } };
@@ -282,7 +281,8 @@ describe("Settings → Features", () => {
     expect(navPages(html)).toContain("features");
     expect(html).toContain("Skill Burger");
     expect(html).toContain("Save a bot&#x27;s run as steps you can run again");
-    expect(featureSwitches()).toEqual({ skillBurger: true, threadTabs: false, threadNotes: true, mascotMotion: true });
+    expect(html).not.toContain("Saved in");
+    expect(featureSwitches()).toEqual({ skillBurger: true, threadTabs: false });
   });
 
   it("saves Skill Burger off in the place's config.json", async () => {
@@ -293,14 +293,12 @@ describe("Settings → Features", () => {
     expect(api).toHaveBeenCalledWith("/api/config", { method: "PATCH", body: JSON.stringify({ features: { skillBurger: false } }) });
   });
 
-  it("leaves out the place's switches when its server doesn't know them, and for a team's member", () => {
+  it("shows no switch its server doesn't know, and isn't offered to a team's member", () => {
     fixture.config = {};
     render("features");
-    expect(featureSwitches()).toEqual({ threadNotes: true, mascotMotion: true });
-    fixture.switches = [];
+    expect(featureSwitches()).toEqual({});
     fixture.config = { cloudHome: true, team: { name: "Acme" }, features: { skillBurger: true, threadTabs: false } };
     fixture.admin = false;
-    render("features");
-    expect(featureSwitches()).toEqual({ threadNotes: true, mascotMotion: true });
+    expect(navPages(render("overview"))).not.toContain("features");
   });
 });

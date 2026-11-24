@@ -4288,9 +4288,5 @@
   "settings.features.skillBurgerLine": "Зберігає роботу бота як кроки, які можна запустити знову",
   "settings.features.threadTabs": "Вкладки гілок",
   "settings.features.threadTabsLine": "Показує гілки бота вкладками над чатом",
-  "settings.features.threadNotes": "Нотатки гілки",
-  "settings.features.threadNotesLine": "Показує, що бот записує для кожної гілки",
-  "settings.features.mascotMotion": "Анімації маскота",
-  "settings.features.mascotMotionLine": "Маскоти ботів рухаються, поки боти працюють",
   "settings.features.error": "Не вдалося зберегти. Перевірте з'єднання і спробуйте ще раз."
 }

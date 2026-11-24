@@ -6611,9 +6611,5 @@
   "settings.features.skillBurgerLine": "Guarda la ejecución de un bot como pasos que puedes volver a ejecutar",
   "settings.features.threadTabs": "Pestañas de hilos",
   "settings.features.threadTabsLine": "Muestra los hilos de un bot como pestañas sobre el chat",
-  "settings.features.threadNotes": "Notas del hilo",
-  "settings.features.threadNotesLine": "Muestra lo que un bot anota para cada hilo",
-  "settings.features.mascotMotion": "Animaciones de la mascota",
-  "settings.features.mascotMotionLine": "Deja que las mascotas de los bots se muevan mientras trabajan",
   "settings.features.error": "No se pudo guardar. Revisa tu conexión e inténtalo de nuevo."
 }

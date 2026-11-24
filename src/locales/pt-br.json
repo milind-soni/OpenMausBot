@@ -11855,9 +11855,5 @@
   "settings.features.skillBurgerLine": "Salva a execução de um bot como etapas que você pode executar de novo",
   "settings.features.threadTabs": "Abas de conversas",
   "settings.features.threadTabsLine": "Mostra as conversas de um bot como abas acima do chat",
-  "settings.features.threadNotes": "Notas da conversa",
-  "settings.features.threadNotesLine": "Mostra o que um bot anota em cada conversa",
-  "settings.features.mascotMotion": "Animações do mascote",
-  "settings.features.mascotMotionLine": "Deixa os mascotes dos bots se moverem enquanto trabalham",
   "settings.features.error": "Não foi possível salvar. Verifique sua conexão e tente de novo."
 }
