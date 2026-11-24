@@ -11,8 +11,9 @@ export type DeviceStatus = "online" | "offline" | "attention" | "unknown";
 /** How a device reaches the place on screen: `here` is the place itself. `paired` is a device signed in with a code,
  * whose way in the server does not record. */
 export type DeviceRoute = "here" | "local" | "tailscale" | "relay" | "cloud" | "internet" | "ssh" | "paired";
-/** What needs the person, when `status` is `attention` (or `offline` with a way to try again). */
-export type DeviceNote = "update" | "signed-out" | "insecure" | "unreachable" | "reconnecting";
+/** What needs the person, when `status` is `attention` (or `offline` with a way to try again). `no-way-in`: a phone with
+ * none of its ways to this computer turned on. */
+export type DeviceNote = "update" | "signed-out" | "insecure" | "unreachable" | "reconnecting" | "no-way-in";
 
 /** Where a device was read from, and its id there: what every action acts on. */
 export type DeviceSource =
@@ -31,7 +32,8 @@ export type DeviceAction =
   | { type: "pair-again"; placeId: string; address: string }
   | { type: "retry"; placeId: string }
   | { type: "copy-update"; install: ServerInstall | null }
-  | { type: "manage"; page: "phone" | "ai" | "desktops" | "app"; anchor?: string };
+  | { type: "manage"; page: "ai" | "desktops" | "app"; anchor?: string }
+  | { type: "turn-on-way" };
 
 export interface Device {
   /** Stable across reads: the first source's type and its own id there, never the name. */
@@ -39,7 +41,8 @@ export interface Device {
   kind: DeviceKind;
   name: string;
   status: DeviceStatus;
-  /** The way it reaches this place now (or last did); `routes` holds every way any of its sources says. */
+  /** The way it reaches this place now (or last did); `routes` holds every way any of its sources says is open. A
+   * `route` missing from `routes` is not shown. */
   route: DeviceRoute;
   routes: DeviceRoute[];
   lastSeen?: number;
@@ -52,6 +55,9 @@ export interface Device {
   canRunBots: boolean;
   /** Bots can work on it: this desktop, a computer lent to this place, a server bots reach over SSH. */
   canHostComputer: boolean;
+  /** A device signed in with a code: what it may do here, and whose email it signed in with. */
+  access?: "full" | "chat";
+  email?: string;
   here?: true;
   /** The place the bots live: My Cloud, or a server the person made their home. */
   home?: true;
@@ -151,13 +157,15 @@ function placeState(status: ServerStatus | undefined): Pick<Device, "status" | "
 
 function fromPlace(entry: SavedPlace, status: ServerStatus | undefined, lends: boolean): Device {
   const hand = byHand(entry);
-  const state = hand ? placeState(status) : { status: "unknown" as const };
+  // A Cloud this app is connected to right now is online; nothing else about it is checked from here.
+  const state = hand ? placeState(status) : status?.state === "connected" ? { status: "online" as const } : { status: "unknown" as const };
   const route = placeRoute(entry);
   const actions: DeviceAction[] = [{ type: "switch", placeId: entry.id }];
   if (hand && entry.origin) {
     if (state.note === "unreachable") actions.push({ type: "retry", placeId: entry.id });
     if (state.note === "update") actions.push({ type: "copy-update", install: status?.install ?? null });
-    actions.push({ type: "pair-again", placeId: entry.id, address: entry.origin });
+    // One way back per case: Try again while it can't be reached, Pair again only once its sign-in is gone or unsafe.
+    if (state.note === "signed-out" || state.note === "insecure") actions.push({ type: "pair-again", placeId: entry.id, address: entry.origin });
     actions.push({ type: "copy-address", address: entry.origin });
   }
   if (!entry.home) actions.push({ type: "remove", source: { type: "place", id: entry.id } });
@@ -169,20 +177,31 @@ function fromPlace(entry: SavedPlace, status: ServerStatus | undefined, lends: b
   };
 }
 
-function phoneRoute(device: PhoneDevice, routes: CompanionState["routes"] | undefined): DeviceRoute {
-  if (device.route === "wifi") return "local";
-  if (device.route === "tailscale" || device.route === "relay") return device.route;
-  if (device.routes !== "local" && routes?.relay?.on) return "relay";
-  return routes?.tailscale?.on && !routes?.wifi?.on ? "tailscale" : "local";
+/** The ways a phone may use to reach this computer right now; null where the phone link doesn't say (an older build). */
+function phoneWays(device: PhoneDevice, routes: CompanionState["routes"] | undefined): DeviceRoute[] | null {
+  if (!routes) return null;
+  const anywhere = device.routes !== "local";
+  return [
+    ...(anywhere && routes.relay?.on ? ["relay" as const] : []),
+    ...(routes.wifi?.on ? ["local" as const] : []),
+    ...(routes.tailscale?.on ? ["tailscale" as const] : []),
+    ...(anywhere && routes.https?.on ? ["internet" as const] : []),
+  ];
 }
 
+const RECORDED: Record<NonNullable<PhoneDevice["route"]>, DeviceRoute> = { wifi: "local", tailscale: "tailscale", relay: "relay" };
+
 function fromPhone(device: PhoneDevice, connected: ReadonlySet<string>, routes: CompanionState["routes"] | undefined): Device {
-  const route = phoneRoute(device, routes);
-  const now = connected.has(device.id) || Boolean(device.route);
+  const ways = phoneWays(device, routes);
+  const recorded = device.route ? RECORDED[device.route] : null;
+  const route = recorded && (!ways || ways.includes(recorded)) ? recorded : ways?.[0] ?? "local";
+  const closed = ways?.length === 0 && !Object.values(routes ?? {}).some((way) => way.on);
+  const now = !closed && (connected.has(device.id) || Boolean(device.route));
   return {
-    id: `phone:${device.id}`, kind: "phone", name: device.name, status: now ? "online" : "offline", ...(now ? { live: true as const } : {}),
-    route, routes: [route], lastSeen: device.lastSeenAt, sources: [{ type: "phone", id: device.id }], canRunBots: false, canHostComputer: false,
-    actions: [{ type: "remove", source: { type: "phone", id: device.id } }, { type: "manage", page: "phone", anchor: "paired" }],
+    id: `phone:${device.id}`, kind: "phone", name: device.name, status: closed ? "attention" : now ? "online" : "offline", ...(closed ? { note: "no-way-in" as const } : {}),
+    ...(now ? { live: true as const } : {}), route, routes: ways?.length === 0 ? [] : [route], lastSeen: device.lastSeenAt, sources: [{ type: "phone", id: device.id }],
+    canRunBots: false, canHostComputer: false,
+    actions: [...(closed ? [{ type: "turn-on-way" as const }] : []), { type: "remove", source: { type: "phone", id: device.id } }],
   };
 }
 
@@ -200,6 +219,7 @@ function fromSession(session: SignedInDevice, route: DeviceRoute, now: number): 
   return {
     id: `session:${session.id}`, kind: kindFromLabel(session.label), name, status: now - session.lastSeenAt < SESSION_ONLINE_MS ? "online" : "offline",
     route, routes: [route], lastSeen: session.lastSeenAt, sources: [{ type: "session", id: session.id }], canRunBots: false, canHostComputer: false,
+    access: session.scopes.includes("admin") ? "full" : "chat", ...(session.email && session.email !== session.person ? { email: session.email } : {}),
     actions: [{ type: "remove", source: { type: "session", id: session.id } }],
   };
 }
@@ -318,8 +338,8 @@ export const GROUP_ORDER: readonly DeviceGroup[] = ["phones", "computers", "serv
 export const deviceGroup = (device: Device): DeviceGroup =>
   device.kind === "phone" ? "phones" : device.kind === "laptop" || device.kind === "desktop" ? "computers" : "servers";
 
-/** The groups the map draws around this place, in a fixed order; empty groups are left out. */
-export function groupByKind(devices: readonly Device[]): Array<{ group: DeviceGroup; devices: Device[] }> {
+/** The groups around this place, in a fixed order; empty groups are left out unless `all` asks for them. */
+export function groupByKind(devices: readonly Device[], { all = false }: { all?: boolean } = {}): Array<{ group: DeviceGroup; devices: Device[] }> {
   return GROUP_ORDER.map((group) => ({ group, devices: devices.filter((device) => !device.here && deviceGroup(device) === group) }))
-    .filter((entry) => entry.devices.length > 0);
+    .filter((entry) => all || entry.devices.length > 0);
 }

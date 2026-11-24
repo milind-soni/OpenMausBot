@@ -1468,7 +1468,7 @@ describe("Companion account on demand", () => {
       expect(f.store.read()[COMPANION_TUNNEL_WAITING_FIELD]).toBe(true);
       expect(f.store.read()).not.toHaveProperty(MANAGED_COMPANION_ENDPOINT_FIELD);
 
-      // Nobody opens Phone & devices: each watchdog tick asks again, and after the hour a manual Retry counts for.
+      // Nobody opens Devices: each watchdog tick asks again, and after the hour a manual Retry counts for.
       for (let tick = 2; tick <= 5; tick += 1) {
         f.clock.now += HOUR_MS;
         await f.watchdog();

@@ -1,7 +1,9 @@
 // A new personal Cloud's first hour, run by its Chief in its own chat, with no setup screen: a greeting by name and one
 // question; after the first answer, Gmail and Google Calendar offered with the reason; a first look the moment one of
 // them is in; the morning brief said once; the phone offered; and on day two a recap of what was really done. Each step
-// happens once, kept with its time in first-hour.json, which the health report carries to the Admin.
+// happens once, kept with its time in first-hour.json, which the health report carries to the Admin. A person who already
+// has bots here (moved in from their computer, or made) is greeted with them instead, and is never offered the inbox
+// unasked: they came for those bots.
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -15,6 +17,8 @@ import { createAgentCard } from "../chat-widgets.ts";
 import { connectorCardText } from "../connector-card-text.ts";
 import type { DraftReply } from "../read-and-draft.ts";
 import { localDate, validZone } from "./check-plan.ts";
+import { BOT_HELD_CODE, BOT_PAUSED_CODE } from "../../shared/bot-limit.ts";
+import { PERSON_STOPPED_TURN_NAME } from "../../shared/client-cancel.ts";
 import { FIRST_HOUR_OFFER_KEY } from "../../shared/person-wait.ts";
 import { firstHourWords, type FirstHourWords } from "./first-hour-words.ts";
 import { anyValue, minutesSaved, type ValueLedger, type ValueTally } from "./value-ledger.ts";
@@ -33,6 +37,10 @@ export const LOOK_DRAFTS = 3;
 /** While the offer is open, how often a connection made elsewhere (another tab, the phone) is looked for, and how long. */
 const CONNECTED_POLL_MS = MINUTE;
 const CONNECTED_POLL_FOR_MS = 6 * HOUR;
+/** A first look that failed is tried once more after this: a new Cloud's AI or apps may need a moment more. */
+export const LOOK_RETRY_MS = MINUTE;
+/** Tries of the first look in all, the first included. */
+export const LOOK_TRIES = 2;
 /** A first look that never reports back frees its chat after this. */
 const LOOK_MAX_MS = 15 * MINUTE;
 /** A first look waiting on a busy chat stops waiting after this. */
@@ -64,6 +72,15 @@ const stateSchema = z.object({
   firstLookAt: at.optional(),
   /** Why there was no first look: it failed, or the person's own task continued once its app was connected. */
   lookSkipped: z.enum(["failed", "own-task"]).optional(),
+  /** Tries of the first look that failed, the newest one's way of failing, and when the next try may start. */
+  lookTries: z.number().int().min(0).max(LOOK_TRIES).optional(),
+  lookFailure: z.enum(["start", "error", "stalled", "no-reply", "busy", "stopped"]).optional(),
+  lookRetryAt: at.optional(),
+  /** How many messages the person had written in the look's chat when a try failed: one written since ends the retry. */
+  lookSaid: z.number().int().nonnegative().optional(),
+  /** The Chief that greeted, and when bots of the person's own were first seen here besides it. */
+  chiefId: id.optional(),
+  movedInAt: at.optional(),
   briefOnAt: at.optional(),
   phoneOfferedAt: at.optional(),
   phonePairedAt: at.optional(),
@@ -77,13 +94,27 @@ type FirstHourState = z.infer<typeof stateSchema>;
 /** The milestones as times since the Cloud's first boot, for the Admin to set beside the trial's outcome. Times only. */
 export interface FirstHourReport {
   startedAt: number;
-  ms: Partial<Record<"seen" | "firstMessage" | "offered" | "firstApp" | "declined" | "firstLook" | "briefOn" | "phoneOffered" | "phonePaired" | "recap", number>>;
+  ms: Partial<Record<"seen" | "firstMessage" | "offered" | "firstApp" | "declined" | "firstLook" | "briefOn" | "phoneOffered" | "phonePaired" | "recap" | "movedIn", number>>;
   apps: LookApp[];
   look?: "delivered" | "failed" | "own-task";
+  /** How the newest failed try of the first look failed, and how many tries failed. */
+  lookFailure?: NonNullable<FirstHourState["lookFailure"]>;
+  lookTries?: number;
 }
 
+/** How a try of the first look ended without a look: never the turn's own words. */
+interface LookMiss { path: "start" | "settled"; ok?: boolean; replied?: boolean; stalled?: boolean; stopReason?: string | null; code?: string; cause?: string; rows?: string[];
+  /** The person pressed Stop on it. */ stopped?: boolean; /** Reply drafts it already wrote. */ drafted?: number }
+/** Causes no second try changes: the bot is paused or held, or gone. */
+const LASTING = new Set([BOT_PAUSED_CODE, BOT_HELD_CODE, "moved", "404"]);
+/** A cause in the system's words, on one line, with no addresses in it. */
+const causeLine = (text: string | undefined): string | undefined => {
+  const line = text?.replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/gu, "<address>").replace(/\s+/gu, " ").trim().slice(0, 160);
+  return line || undefined;
+};
+
 export interface FirstHourDeps {
-  store: Pick<Store, "bot" | "messagesFor" | "activePath" | "appendMessage" | "patchMessage" | "patchTask" | "patchBot" | "taskByThread" | "groupByThread">;
+  store: Pick<Store, "bot" | "bots" | "messagesFor" | "activePath" | "appendMessage" | "patchMessage" | "patchTask" | "patchBot" | "taskByThread" | "groupByThread">;
   dataDir: string;
   now?: () => number;
   /** The Chief the first hour belongs to: the place's MausBot, or its main Chief. */
@@ -100,6 +131,11 @@ export interface FirstHourDeps {
     connected(): Promise<Partial<Record<LookApp, boolean>> | null>;
     card(slug: LookApp): Promise<{ label: string; description: string }>;
   };
+  /** A move into this Cloud is running or about to (cloud-send-lease.ts): the inbox is not offered while bots may still
+   * arrive, and the first look waits. */
+  moving?(): boolean;
+  /** The person pressed Stop on the turn running in this chat. */
+  stopped?(threadId: string): boolean;
   /** The Chief's brief is on. */
   briefOn(): boolean;
   /** An app it reads is in: the brief is made now if it was not yet. */
@@ -129,8 +165,10 @@ export function firstName(person: { name?: string; email?: string }): string | u
   return first[0]!.toUpperCase() + first.slice(1);
 }
 
-export function greetingMessage(bot: Pick<BotRecord, "name">, person: { name?: string; email?: string }, language: string | undefined): Omit<Message, "id" | "at"> {
-  return { role: "bot", kind: "text", text: firstHourWords(language).greeting(firstName(person), bot.name) };
+/** `arrived`: the names of the person's own bots already here besides the Chief, which the greeting says are here now. */
+export function greetingMessage(bot: Pick<BotRecord, "name">, person: { name?: string; email?: string }, language: string | undefined, arrived: readonly string[] = []): Omit<Message, "id" | "at"> {
+  const words = firstHourWords(language);
+  return { role: "bot", kind: "text", text: arrived.length ? words.arrivedGreeting(firstName(person), bot.name, arrived) : words.greeting(firstName(person), bot.name) };
 }
 
 const languageName = (language: string | undefined): string => {
@@ -198,6 +236,8 @@ export function createFirstHour(deps: FirstHourDeps) {
     const threadId = bot ? deps.mainThread(bot.id) : undefined;
     return bot && threadId ? { bot, threadId } : null;
   };
+  /** How many messages the person has written in a chat. */
+  const written = (threadId: string): number => deps.store.messagesFor(threadId).filter((message) => message.role === "user" && message.kind === "text").length;
   const said = (threadId: string, from: number): boolean =>
     deps.store.messagesFor(threadId).some((message) => message.role === "user" && message.kind === "text" && message.at >= from);
   /** The person's newest message on the shown branch has no answer from a bot turn yet (text or a rich reply such as a
@@ -220,28 +260,58 @@ export function createFirstHour(deps: FirstHourDeps) {
 
   let look: { threadId: string; drafts: number; until: number } | null = null;
   let offerTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The offer was due while a move into this Cloud was running: it is tried again once the move lets go. */
+  let offerHeld = false;
   let lastPoll = 0;
   let busy = false;
 
-  /** The greeting in the person's language and with their name, while it is still the last thing in the chat. */
+  /** The bot that greeted: kept since the first hour began, else the bot whose chat the greeting is in. */
+  const greeter = (): string | undefined => state?.chiefId ?? (state?.greeting ? deps.store.bots.find((bot) => bot.threadId === state!.greeting!.threadId)?.id : undefined);
+  /** The person's own bots here besides the Chief that greeted them: moved in from their computer, or made. */
+  const others = (): BotRecord[] => {
+    const chief = greeter();
+    return deps.store.bots.filter((bot) => bot.id !== chief && !bot.hidden && !bot.movedTo).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0) || a.name.localeCompare(b.name));
+  };
+  /** Their names for the greeting, leaving out a MausBot that came along: "MausBot is here now… I'm MausBot" says nothing. */
+  const arrivals = (): string[] => {
+    const own = greeter() ? deps.store.bot(greeter()!)?.name : undefined;
+    return others().filter((bot) => !bot.defaultBot && (!own || (bot.name !== own && !bot.name.startsWith(`${own} (`)))).map((bot) => bot.name);
+  };
+  /** Bots of the person's own came before the inbox was offered: the first hour greets them with those bots and never
+   * offers the inbox unasked. Decided once, and kept. */
+  const movedIn = (): boolean => {
+    if (!state) return false;
+    if (state.movedInAt) return true;
+    if (state.offeredAt || now() - state.startedAt > FIRST_DAY_MS || !others().length) return false;
+    mark({ movedInAt: now() });
+    return true;
+  };
+
+  /** The greeting in the person's language and with their name, and the bots already here, while it is still the last
+   * thing in the chat. */
   function refreshGreeting(): void {
     const greeting = state?.greeting;
-    const bot = deps.chief();
-    if (!greeting || !bot) return;
+    const bot = greeter() ? deps.store.bot(greeter()!) : deps.chief();
+    if (!greeting || !bot || (state!.movedInAt && now() - state!.startedAt > FIRST_DAY_MS)) return;
     const rows = deps.store.messagesFor(greeting.threadId);
     if (rows.at(-1)?.id !== greeting.messageId) return;
-    const text = greetingMessage(bot, deps.person(), deps.language()).text!;
+    const text = greetingMessage(bot, deps.person(), deps.language(), movedIn() ? arrivals() : []).text!;
     if (rows.at(-1)!.text !== text) deps.store.patchMessage(greeting.threadId, greeting.messageId, { text });
   }
 
   async function offer(): Promise<void> {
-    if (!state || state.offeredAt || busy) return;
+    if (!state || state.offeredAt || busy || movedIn()) return;
+    if (deps.moving?.()) {
+      offerHeld = true;
+      return;
+    }
+    offerHeld = false;
     const place = home();
     if (!place || !deps.apps.reachable(place.bot) || deps.threadBusy(place.bot.id, place.threadId)) return;
     busy = true;
     try {
       const connected = await deps.apps.connected().catch(() => null);
-      if (!state || state.offeredAt || deps.threadBusy(place.bot.id, place.threadId)) return;
+      if (!state || state.offeredAt || movedIn() || deps.threadBusy(place.bot.id, place.threadId)) return;
       const missing = LOOK_APPS.filter((app) => connected?.[app] !== true);
       const there = LOOK_APPS.filter((app) => connected?.[app] === true);
       if (!missing.length) {
@@ -250,7 +320,7 @@ export function createFirstHour(deps: FirstHourDeps) {
         return;
       }
       const cards = await Promise.all(missing.map(async (slug) => ({ slug, ...(await deps.apps.card(slug).catch(() => ({ label: APP_NAME[slug], description: "" }))) })));
-      if (!state || state.offeredAt || deps.threadBusy(place.bot.id, place.threadId)) return;
+      if (!state || state.offeredAt || movedIn() || deps.threadBusy(place.bot.id, place.threadId)) return;
       const key = `${FIRST_HOUR_OFFER_KEY}${randomUUID()}`;
       say(place.bot, place.threadId, words().connect);
       for (const card of cards) {
@@ -280,11 +350,20 @@ export function createFirstHour(deps: FirstHourDeps) {
   }
 
   async function startLook(): Promise<void> {
-    if (!state || state.lookStartedAt || state.lookSkipped || look) return;
+    if (!state || state.lookStartedAt || state.lookSkipped || look || (state.lookRetryAt && now() < state.lookRetryAt)) return;
     const place = home();
     if (!place) return;
-    if (deps.threadBusy(place.bot.id, place.threadId)) {
-      if (now() - (state.firstAppAt ?? now()) > LOOK_WAIT_MS) mark({ lookSkipped: "failed" });
+    if (deps.threadBusy(place.bot.id, place.threadId) || deps.moving?.()) {
+      if (now() - (state.firstAppAt ?? now()) > LOOK_WAIT_MS) {
+        console.warn(`first hour: the first look gave up waiting: its chat stayed busy, or a move into this Cloud ran, for ${Math.round((now() - state.firstAppAt!) / MINUTE)} minutes after an app came in`);
+        mark({ lookSkipped: "failed", lookFailure: "busy", lookRetryAt: undefined });
+      }
+      return;
+    }
+    if (state.lookSaid !== undefined && written(place.threadId) > state.lookSaid) {
+      // The person has moved on in that chat: a look arriving now would land in the middle of it.
+      console.warn("first hour: the first look is not tried again: the person wrote in its chat since it failed");
+      mark({ lookSkipped: "failed", lookRetryAt: undefined });
       return;
     }
     const started = now();
@@ -292,29 +371,63 @@ export function createFirstHour(deps: FirstHourDeps) {
     mark({ lookStartedAt: started });
     const prompt = lookPrompt({ apps: state.apps ?? [], ...(firstName(deps.person()) ? { name: firstName(deps.person()) } : {}), language: deps.language() });
     try {
-      await deps.startTurn(place.bot.id, prompt, { threadId: place.threadId, cardContinuation: true, onSettled: (outcome) => lookSettled(place.bot, place.threadId, started, outcome.ok) });
+      await deps.startTurn(place.bot.id, prompt, { threadId: place.threadId, cardContinuation: true, onSettled: (outcome) => lookSettled(place.bot, place.threadId, started, outcome) });
     } catch (error) {
       look = null;
-      const code = (error as { code?: unknown } | null)?.code;
+      const fields = (error ?? {}) as { code?: unknown; status?: unknown };
+      const code = typeof fields.code === "string" ? fields.code : fields.status === 404 ? "404" : undefined;
       if (code === "thread_busy" || code === "thread_limit") mark({ lookStartedAt: undefined });
-      else {
-        console.warn(`first hour: the first look could not start: ${error instanceof Error ? error.message : String(error)}`);
-        lookSettled(place.bot, place.threadId, started, false);
-      }
+      else lookMissed(place.bot, place.threadId, started, { path: "start", ...(code ? { code } : {}), cause: error instanceof Error ? error.message : String(error) });
     }
   }
 
-  function lookSettled(bot: BotRecord, threadId: string, started: number, ok: boolean): void {
+  function lookSettled(bot: BotRecord, threadId: string, started: number, outcome: HostTurnResult): void {
+    const drafted = look?.drafts ?? 0;
     look = null;
     if (!state || state.firstLookAt || state.lookSkipped) return;
-    const replied = ok && deps.store.activePath(threadId).some((message) => message.role === "bot" && message.kind === "text" && message.at >= started && Boolean(message.text?.trim()));
+    const since = deps.store.activePath(threadId).filter((message) => message.role === "bot" && message.at >= started);
+    const replied = outcome.ok && since.some((message) => message.kind === "text" && Boolean(message.text?.trim()));
     if (replied) {
-      mark({ firstLookAt: now() });
+      mark({ firstLookAt: now(), lookRetryAt: undefined });
       deps.notify(bot, threadId, words().firstLookReady);
-    } else {
-      mark({ lookSkipped: "failed" });
-      if (!deps.threadBusy(bot.id, threadId)) say(bot, threadId, words().connected);
+      soon(afterLook);
+      return;
     }
+    // outcome.text is the bot's own reply when the turn ended well: only a failed turn's cause, in the system's words, is kept.
+    lookMissed(bot, threadId, started, { path: "settled", ok: outcome.ok, replied: false, stalled: Boolean(outcome.stalled), stopReason: outcome.failure?.stopReason ?? null,
+      ...(outcome.ok ? {} : { cause: outcome.failure?.text || outcome.text }), rows: [...new Set(since.map((message) => message.kind))], drafted,
+      stopped: Boolean(deps.stopped?.(threadId)) || since.some((message) => message.tool?.name === PERSON_STOPPED_TURN_NAME) });
+  }
+
+  /** A try of the first look ended without one: logged with how, then tried once more after a short wait, unless the bot
+   * is paused, held or gone. After the last try the person hears which apps are in and how to get the look. */
+  function lookMissed(bot: BotRecord, threadId: string, started: number, miss: LookMiss): void {
+    if (!state) return;
+    if (miss.stopped) {
+      // The person stopped it: never started again, and nothing said about it.
+      console.warn("first hour: the person stopped the first look; it is not tried again");
+      mark({ lookTries: Math.min(LOOK_TRIES, (state.lookTries ?? 0) + 1), lookFailure: "stopped", lookSkipped: "failed", lookRetryAt: undefined });
+      return;
+    }
+    // A try that failed while a move into this Cloud ran is not counted: the move, not the look, was the trouble.
+    const counted = !deps.moving?.();
+    const tries = Math.min(LOOK_TRIES, (state.lookTries ?? 0) + (counted ? 1 : 0));
+    const failure = miss.path === "start" ? "start" : miss.stalled ? "stalled" : miss.ok ? "no-reply" : "error";
+    const lasting = miss.code !== undefined && LASTING.has(miss.code);
+    // A second try would start its drafts over: one that already wrote a draft is not repeated.
+    const last = lasting || (miss.drafted ?? 0) > 0 || (counted && tries >= LOOK_TRIES);
+    console.warn([`first hour: the first look failed (try ${tries} of ${LOOK_TRIES}${last ? ", the last" : `, again in ${LOOK_RETRY_MS / 1000} s`}${counted ? "" : ", not counted: a move is running"}):`,
+      `path=${miss.path}`, ...(miss.path === "settled" ? [`ok=${miss.ok}`, `replied=${miss.replied}`, `stalled=${miss.stalled}`, `stop=${miss.stopReason ?? "-"}`] : []),
+      `code=${miss.code ?? "-"}`, `sinceBoot=${started - state.startedAt}`, `sinceApp=${started - (state.firstAppAt ?? started)}`, `ms=${now() - started}`,
+      `apps=${(state.apps ?? []).join(",") || "-"}`, ...(miss.rows ? [`rows=${miss.rows.join(",") || "-"}`, `drafts=${miss.drafted ?? 0}`] : []), `cause=${JSON.stringify(causeLine(miss.cause) ?? "-")}`].join(" "));
+    if (!last) {
+      mark({ ...(tries ? { lookTries: tries } : {}), lookFailure: failure, lookStartedAt: undefined, lookRetryAt: now() + LOOK_RETRY_MS, lookSaid: written(threadId) });
+      return;
+    }
+    mark({ ...(tries ? { lookTries: tries } : {}), lookFailure: failure, lookSkipped: "failed", lookRetryAt: undefined });
+    const w = words();
+    // A paused, held or gone bot has its own notice: "ask me later" would only be refused again.
+    if (!lasting && !deps.threadBusy(bot.id, threadId)) say(bot, threadId, w.lookLater(w.list((state.apps ?? []).map((app) => APP_NAME[app])), state.apps?.length ?? 0));
     soon(afterLook);
   }
 
@@ -385,6 +498,11 @@ export function createFirstHour(deps: FirstHourDeps) {
     if (!state || state.recapAt) return;
     const at = now(), zone = deps.timeZone();
     if (at - state.startedAt < RECAP_AFTER_MS || localDate(at, zone) === localDate(state.startedAt, zone) || localMinutes(at, zone) < clockMinutes(MORNING)) return;
+    if (state.movedInAt) {
+      // The recap tells an inbox's first day: someone who came for their own bots never had one.
+      mark({ recapAt: at, recapQuiet: true });
+      return;
+    }
     const place = home();
     if (!place || deps.threadBusy(place.bot.id, place.threadId) || personUnanswered(place.threadId)) return;
     const counts = tally();
@@ -413,6 +531,8 @@ export function createFirstHour(deps: FirstHourDeps) {
     if (!state) return;
     if (look && now() > look.until) look = null;
     const place = home();
+    if (!state.offeredAt && state.greeting && now() - state.startedAt <= FIRST_DAY_MS && others().length) refreshGreeting();
+    if (offerHeld && !deps.moving?.()) void offer();
     if (!state.offeredAt && state.firstMessageAt && place && answered(place.threadId, state.firstMessageAt)) void offer();
     if (!state.phonePairedAt && deps.phones() > 0) phonePaired();
     if (state.firstAppAt && !state.lookStartedAt && !state.lookSkipped) void startLook();
@@ -430,7 +550,7 @@ export function createFirstHour(deps: FirstHourDeps) {
       if (state || existsSync(file)) return;
       const place = home();
       const first = place ? deps.store.messagesFor(place.threadId).find((message) => message.role === "bot") : undefined;
-      state = { version: 1, startedAt: now(), ...(place && first ? { greeting: { threadId: place.threadId, messageId: first.id } } : {}) };
+      state = { version: 1, startedAt: now(), ...(place ? { chiefId: place.bot.id } : {}), ...(place && first ? { greeting: { threadId: place.threadId, messageId: first.id } } : {}) };
       save();
       deps.welcomeDone();
       if (place) {
@@ -507,9 +627,22 @@ export function createFirstHour(deps: FirstHourDeps) {
     prompt(botId: string, threadId: string): string {
       const place = home();
       if (!state || !place || place.bot.id !== botId || place.threadId !== threadId || now() - state.startedAt > FIRST_DAY_MS) return "";
+      // A Chief that arrived by a move has its own history with the person: the first day is the greeting Chief's.
+      if (greeter() && greeter() !== botId) return "";
       const name = firstName(deps.person());
+      const theirs = name ? `${name}'s` : "the person's";
+      if (state.movedInAt) {
+        const arrived = arrivals();
+        const who = arrived.length ? `Their own ${arrived.length === 1 ? "bot" : "bots"} ${arrived.join(", ")} ${arrived.length === 1 ? "is" : "are"}` : "Their own bots are";
+        return [
+          ` This is ${theirs} first day with you on their new Cloud. ${who} here too, moved from their computer or already made, and keep${arrived.length === 1 ? "s" : ""} working while their computer is off: that is mostly what they came for. You greeted them${arrived.length ? " and said so" : ""}.`,
+          "Help with what they ask, and point them to their own bots for those bots' work. Keep replies short and concrete.",
+          "Don't offer Gmail, Google Calendar or a morning brief unasked. If they bring up their email or calendar, you may offer to connect Gmail and Google Calendar then.",
+          "Anything that would send, accept, decline or delete waits for them: write drafts and ask first.",
+        ].join(" ");
+      }
       return [
-        ` This is ${name ? `${name}'s` : "the person's"} first day with you on their new Cloud. You greeted them and asked one question: what they want off their plate. Treat the answer as your first job: say in a line or two how you'll take it on, and do the first part now when you can. Keep replies short and concrete.`,
+        ` This is ${theirs} first day with you on their new Cloud. You greeted them and asked one question: what they want off their plate. Treat the answer as your first job: say in a line or two how you'll take it on, and do the first part now when you can. Keep replies short and concrete.`,
         "The app itself offers Gmail and Google Calendar in this chat, with the reason, right after your first reply: never call COMPOSIO_MANAGE_CONNECTIONS for them and don't ask the person to connect them.",
         `Their morning brief is on: every morning at ${MORNING.replace(/^0/, "")} their time you send a brief of what needs them.`,
         "Anything that would send, accept, decline or delete waits for them: write drafts and ask first.",
@@ -521,12 +654,13 @@ export function createFirstHour(deps: FirstHourDeps) {
       const since = (time: number | undefined) => (time === undefined ? undefined : Math.max(0, time - s.startedAt));
       const ms: FirstHourReport["ms"] = {};
       const times = { seen: s.seenAt, firstMessage: s.firstMessageAt, offered: s.offeredAt, firstApp: s.firstAppAt, declined: s.declinedAt, firstLook: s.firstLookAt,
-        briefOn: s.briefOnAt, phoneOffered: s.phoneOfferedAt, phonePaired: s.phonePairedAt, recap: s.recapAt };
+        briefOn: s.briefOnAt, phoneOffered: s.phoneOfferedAt, phonePaired: s.phonePairedAt, recap: s.recapAt, movedIn: s.movedInAt };
       for (const [key, time] of Object.entries(times) as Array<[keyof FirstHourReport["ms"], number | undefined]>) {
         const value = since(time);
         if (value !== undefined) ms[key] = value;
       }
-      return { startedAt: s.startedAt, ms, apps: s.apps ?? [], ...(s.firstLookAt ? { look: "delivered" as const } : s.lookSkipped ? { look: s.lookSkipped } : {}) };
+      return { startedAt: s.startedAt, ms, apps: s.apps ?? [], ...(s.firstLookAt ? { look: "delivered" as const } : s.lookSkipped ? { look: s.lookSkipped } : {}),
+        ...(s.lookFailure ? { lookFailure: s.lookFailure } : {}), ...(s.lookTries ? { lookTries: s.lookTries } : {}) };
     },
     tally,
     tick,

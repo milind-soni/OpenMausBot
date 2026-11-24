@@ -137,6 +137,7 @@ export function RoomHeader({
   onToggleFolder,
   onOpenMembers,
   membersTriggerRef,
+  feed = false,
 }: {
   group: Group;
   members: Bot[];
@@ -148,6 +149,9 @@ export function RoomHeader({
   onToggleFolder: () => void;
   onOpenMembers: () => void;
   membersTriggerRef: RefObject<HTMLButtonElement | null>;
+  /** Above the room's feed of threads: what belongs to one thread (who has it open, its pin, find, its export and the
+   * thread picker) is in that thread's own view beside it. */
+  feed?: boolean;
 }) {
   const { dragProps: headerDragProps, noDragStyle: headerNoDragStyle } = useCaptionChrome();
   const { state, dispatch } = useStore();
@@ -185,8 +189,8 @@ export function RoomHeader({
             {group.description && <p className="max-w-full truncate text-[12px] leading-4 text-ink-secondary">{group.description}</p>}
           </div>
           <div data-roomhead-controls className="flex shrink-0 items-center gap-1.5">
-            <ThreadPresenceFaces threadId={group.threadId} />
-            {pinned}
+            {!feed && <ThreadPresenceFaces threadId={group.threadId} />}
+            {!feed && pinned}
             <button
               ref={membersTriggerRef}
               type="button"
@@ -225,7 +229,7 @@ export function RoomHeader({
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
-              {!setupPending && !group.dm && <GroupTaskPicker group={group} />}
+              {!setupPending && !group.dm && !feed && <GroupTaskPicker group={group} />}
             </div>
             {group.description && <p className="truncate text-[12px] leading-4 text-ink-secondary">{group.description}</p>}
           </div>
@@ -234,9 +238,9 @@ export function RoomHeader({
           data-roomhead-controls
           className="flex items-center gap-1.5 @max-3xl/roomhead:ml-auto @max-3xl/roomhead:flex-wrap @max-3xl/roomhead:justify-end"
         >
-          <ThreadPresenceFaces threadId={group.threadId} />
-          {pinned}
-          <button
+          {!feed && <ThreadPresenceFaces threadId={group.threadId} />}
+          {!feed && pinned}
+          {!feed && <button
             type="button"
             onClick={onToggleFind}
             aria-label={t("chat.find")}
@@ -248,13 +252,13 @@ export function RoomHeader({
             title={t("chat.findShortcut")}
           >
             <Search size={16} />
-          </button>
-          <ExportTranscriptMenu
+          </button>}
+          {!feed && <ExportTranscriptMenu
             title={group.name}
             messages={group.messages}
             isGroup
-          />
-          {!setupPending && <ConversationTurnLimit group={group} />}
+          />}
+          {!setupPending && !feed && <ConversationTurnLimit group={group} />}
           <RoomHeaderCallButton group={group} members={members} />
           <GroupUsageChip usage={group.usage} />
           {!remoteClient && !setupPending && !group.dm && <RoomWorkingFolderChip group={group} onToggle={onToggleFolder} />}

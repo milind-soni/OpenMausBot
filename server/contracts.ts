@@ -150,6 +150,9 @@ export interface SendTurnInput {
   resumeCursor?: unknown;
   /** Start without the previous native context or retained process; wins over resumeCursor. */
   sessionReset?: boolean;
+  /** No later turn resumes this session (a room turn that sends the whole conversation each time), so a driver whose engine
+   * can skip saving it does: the engine's own apps list every saved session as the person's history. */
+  ephemeral?: boolean;
   /** Hold the startup ACK until prompt dispatch (Claude: first model activity); a retired transient setup failure or sign-in refusal may reject with TurnNotStartedError. */
   startupRecovery?: boolean;
   /** Given to a driver with `capabilities.engineAdmission`: awaited right before it starts an engine process ("process") or
@@ -660,6 +663,8 @@ export interface ProviderDriver<Config = unknown> {
     displayName: string;
     supportsMultipleInstances?: boolean;
     access?: EngineAccess;
+    /** Set when the app's sign-in uses a subscription on this account (Google, ChatGPT, Claude): bots may say no API key is needed. */
+    signInAccount?: string;
     /** What the engine's own CLI answers to `--version`; another answer means the CLI path runs another program. */
     cliVersion?: RegExp;
   };
