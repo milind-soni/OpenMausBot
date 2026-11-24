@@ -320,6 +320,14 @@ export function settleHeldSteeredQueue(held: HeldSteerQueue): void {
   settleChatFollowups(held.items.map((item) => item.messageId), null);
 }
 
+/** Steered items the agent turned down after all go back to the front of their queue, in order, each with its queue id and
+ * the transcript row (`rowIds`, one per item) the drain reuses instead of writing it again. */
+export function requeueSettledSteer(held: HeldSteerQueue, rowIds: readonly string[]): void {
+  const items = held.items.map((item, index) => ({ ...item, rowId: rowIds[index] }));
+  for (const item of items) saveChatFollowup({ id: item.messageId, kind: "bot", ownerId: held.botId, threadId: held.threadId, payload: item });
+  restoreHeldSteeredQueue({ ...held, items });
+}
+
 export function _queuedCount(threadId: string): number {
   return queues.get(threadId)?.items.length ?? 0;
 }

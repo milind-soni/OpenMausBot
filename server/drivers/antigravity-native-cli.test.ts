@@ -567,6 +567,9 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
     expect(thread.setups()).toEqual([expect.not.objectContaining({ meta: expect.anything() })]);
   }, 90_000);
 
+  /** The app's own message route hears a steer the CLI turns down after taking it; such a CLI steers no other caller. */
+  const hears = { refused: () => {} };
+
   /** A turn on a CLI that steers as 1.5.15 does, held after "working. " until its gate file exists. */
   async function steerable(name: string, environment: Record<string, string> = {}) {
     const fake = cli();
@@ -588,7 +591,7 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
   it("takes a message into the running turn, which ends once, with the steer's reply and its usage", async () => {
     const turn = await steerable("steer");
     expect(turn.instance.adapter.capabilities.queueing).toBe(true);
-    expect(await turn.instance.adapter.steer!(turn.threadId, "  Use pytest.  ")).toBe("steered");
+    expect(await turn.instance.adapter.steer!(turn.threadId, "  Use pytest.  ", undefined, hears)).toBe("steered");
     await vi.waitFor(() => expect(turn.steers()).toBe(1));
     writeFileSync(turn.gate, "finish");
     expect(await turn.completed()).toMatchObject({ ok: true });
@@ -600,10 +603,10 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
 
   it("takes a second message while the first steer carries the turn, which still ends once", async () => {
     const turn = await steerable("steer-twice");
-    expect(await turn.instance.adapter.steer!(turn.threadId, "Use pytest.")).toBe("steered");
+    expect(await turn.instance.adapter.steer!(turn.threadId, "Use pytest.", undefined, hears)).toBe("steered");
     // The CLI has answered the turn's own prompt, so the steer's prompt carries the turn now.
     await turn.recorder.until((event) => event.turnId === turn.turnId && event.type === "item.completed" && event.itemType === "assistant_text");
-    expect(await turn.instance.adapter.steer!(turn.threadId, "And add a README.")).toBe("steered");
+    expect(await turn.instance.adapter.steer!(turn.threadId, "And add a README.", undefined, hears)).toBe("steered");
     await vi.waitFor(() => expect(turn.steers()).toBe(2));
     writeFileSync(turn.gate, "finish");
     expect(await turn.completed()).toMatchObject({ ok: true });
@@ -614,7 +617,7 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
 
   it("stops a steered turn, recording the usage its cancelled reply reports once", async () => {
     const turn = await steerable("steer-stop");
-    expect(await turn.instance.adapter.steer!(turn.threadId, "Use pytest.")).toBe("steered");
+    expect(await turn.instance.adapter.steer!(turn.threadId, "Use pytest.", undefined, hears)).toBe("steered");
     await vi.waitFor(() => expect(turn.steers()).toBe(1));
     await turn.instance.adapter.interruptTurn(turn.threadId);
     expect(await turn.completed()).toMatchObject({ stopReason: "cancelled" });
@@ -622,9 +625,18 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
     expect(turn.usage()).toEqual([[10, 5]]);
   }, 90_000);
 
+  it("refuses, without sending it, a message from a caller that could not take it back if the CLI turned it down late", async () => {
+    const turn = await steerable("steer-unheard");
+    expect(await turn.instance.adapter.steer!(turn.threadId, "Use pytest.")).toBe("refused");
+    writeFileSync(turn.gate, "finish");
+    expect(await turn.completed()).toMatchObject({ ok: true });
+    expect(turn.steers()).toBe(0);
+    expect(turn.replies()).toEqual(["working. done"]);
+  }, 90_000);
+
   it("queues a message the CLI rejects because it waits on a permission the app has not shown, and the turn runs on", async () => {
     const turn = await steerable("steer-rejected", { FAKE_ACP_STEER_FAIL: "asking" });
-    expect(await turn.instance.adapter.steer!(turn.threadId, "Use pytest.")).toBe("refused");
+    expect(await turn.instance.adapter.steer!(turn.threadId, "Use pytest.", undefined, hears)).toBe("refused");
     writeFileSync(turn.gate, "finish");
     expect(await turn.completed()).toMatchObject({ ok: true });
     expect(turn.replies()).toEqual(["working. done"]);
@@ -634,7 +646,7 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
 
   it("refuses to steer a runtime that does not name itself as the CLI, so the message queues", async () => {
     const turn = await steerable("steer-pinned", { FAKE_ACP_AGENT_NAME: "antigravity-acp" });
-    expect(await turn.instance.adapter.steer!(turn.threadId, "Use pytest.")).toBe("refused");
+    expect(await turn.instance.adapter.steer!(turn.threadId, "Use pytest.", undefined, hears)).toBe("refused");
     writeFileSync(turn.gate, "finish");
     expect(await turn.completed()).toMatchObject({ ok: true });
     expect(turn.steers()).toBe(0);

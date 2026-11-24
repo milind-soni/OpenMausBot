@@ -29,7 +29,7 @@ import type { RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
 import { acceptedSendMatch, parseSendId } from "../send-idempotency.ts";
 import type { DirectSendInput, DirectSendReceipt } from "../direct-send.ts";
-import { cancelSteeredMessage, holdSteeredQueue, queuedSteerSender, queuedSteeredMessage, restoreHeldSteeredQueue, settleHeldSteeredQueue } from "../steer-queue.ts";
+import { cancelSteeredMessage, holdSteeredQueue, queuedSteerSender, queuedSteeredMessage, requeueSettledSteer, restoreHeldSteeredQueue, settleHeldSteeredQueue } from "../steer-queue.ts";
 import { routeRunOwners, type Actor, type RouteRunOwners } from "../host/run-owner.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { extractSteerImages } from "../turn-images.ts";
@@ -419,12 +419,12 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const prompt = (steerInput?.texts ?? held.items.map((item) => item.prompt)).join("\n\n");
       const images = steerInput?.images ?? [];
       const steerTarget = handoffs.current(bot.threadId);
-      let steered: SteerOutcome = "refused";
+      let steered: SteerOutcome = "refused", refusedEarly = false, refusedLate = (): void => { refusedEarly = true; };
       if (steerAdmission.action === "steer" && instance?.adapter.steer) {
-        steered = await (images.length > 0
-          ? instance.adapter.steer(bot.threadId, prompt, images)
-          : instance.adapter.steer(bot.threadId, prompt))
+        // The agent may still turn a steer it took down (Antigravity): before it is recorded, that only refuses it.
+        steered = await instance.adapter.steer(bot.threadId, prompt, images.length > 0 ? images : undefined, { refused: () => refusedLate() })
           .catch((): SteerOutcome => "indeterminate");
+        if (refusedEarly) steered = "refused";
       }
       // The steer awaited adapter work: re-read every ownership invariant before writing anything.
       const current = store.projectBotForTask(bot.id, bot.threadId);
@@ -454,6 +454,12 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         for (const message of messages) handoffs.steered(bot.threadId, steerTarget, instance?.instanceId, message.id);
         const queueIds = held.items.map((item) => item.messageId);
         settleHeldSteeredQueue(held);
+        // After it is recorded, each line loses its mark and waits once more, in order, at the head of the queue.
+        refusedLate = () => {
+          refusedLate = () => {};
+          for (const message of messages) store.patchMessage(bot.threadId, message.id, { steered: undefined });
+          requeueSettledSteer(held, messages.map((message) => message.id));
+        };
         return json(res, 200, { ok: true, steered: true, threadId: bot.threadId, messages, queueIds });
       }
       if (steered === "indeterminate") {

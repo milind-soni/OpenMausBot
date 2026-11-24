@@ -164,7 +164,8 @@ export function acpPromptSteering(running: () => boolean, send: (text: string) =
     pending.add(sent);
   };
   const takenOver = async (guidance: string, late?: SteerLate): Promise<SteerOutcome> => {
-    if (!guidance || (answered && !pending.size) || !running()) return "refused";
+    // A caller that could not hear a late refusal waits in its queue instead.
+    if (!guidance || !late || (answered && !pending.size) || !running()) return "refused";
     let outcome: SteerOutcome | undefined;
     let report: (verdict: SteerOutcome) => void = () => {};
     const reported = new Promise<SteerOutcome>((resolve) => { report = resolve; });
@@ -173,9 +174,8 @@ export function acpPromptSteering(running: () => boolean, send: (text: string) =
     // The CLI also answers the carrying prompt when that run ends on its own, and only then rejects the steer.
     track(reply, (error) => {
       if (!takeOver!.rejected(error)) return false;
-      if (outcome !== "steered") return true;
-      late?.refused();
-      return late !== undefined;
+      if (outcome === "steered") late.refused();
+      return true;
     });
     // A reply that comes before the carrying prompt's answer only ends a stopped turn: the agent never took the steer.
     void reply.then(() => decide(live() ? "steered" : "refused"), () => decide("refused"));

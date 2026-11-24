@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { failedTurnCause } from "../../shared/failed-turn.ts";
 import { parseConfigPatch, parseStoredConfig } from "../config.ts";
-import type { RuntimeEvent, SteerOutcome } from "../contracts.ts";
+import type { RuntimeEvent, SteerLate, SteerOutcome } from "../contracts.ts";
 import { correctiveRounds, createLoopGuard, loopGuardSettings, type LoopGuardSettings } from "./loop-guard.ts";
 
 const T = "thread-1";
@@ -41,7 +41,7 @@ const settled = () => new Promise<void>((resolve) => { setImmediate(resolve); })
 function rig(options: {
   settings?: Partial<LoopGuardSettings>;
   canSteer?: boolean;
-  steer?: (threadId: string, note: string) => Promise<SteerOutcome>;
+  steer?: (threadId: string, note: string, late: SteerLate) => Promise<SteerOutcome>;
   interrupt?: (threadId: string, cause: string) => Promise<unknown>;
 } = {}) {
   const rows: Row[] = [];
@@ -74,10 +74,10 @@ function rig(options: {
     live: () => state.live,
     waiting: () => state.waiting,
     canSteer: () => state.canSteer,
-    steer: (threadId, text) => {
+    steer: (threadId, text, late) => {
       steers.push({ threadId, note: text });
       did.push("steer");
-      return options.steer ? options.steer(threadId, text) : Promise.resolve("steered");
+      return options.steer ? options.steer(threadId, text, late) : Promise.resolve("steered");
     },
     interrupt: (threadId, cause) => {
       interrupts.push({ threadId, cause });
@@ -647,6 +647,23 @@ describe("loop guard, what it says", () => {
       r.run();
       expect(r.interrupts).toHaveLength(1);
     });
+
+  it("only logs a note the engine turns down after taking it, and neither sends it again nor stops the turn for it", async () => {
+    let late: SteerLate | undefined;
+    const r = rig({ settings: STOPS, steer: async (_threadId, _note, hears) => { late = hears; return "steered"; } });
+    r.loop(9);
+    await settled();
+    expect(() => late!.refused()).not.toThrow();
+    expect(r.steers).toHaveLength(1);
+    expect(r.interrupts).toEqual([]);
+    expect(r.logs).toEqual([
+      `[loop-guard] steer sent: thread=${T} failures-in-a-row=5`,
+      `[loop-guard] steer refused late: thread=${T} failures-in-a-row=5`,
+    ]);
+    r.run();
+    expect(r.steers).toHaveLength(1);
+    expect(r.interrupts).toHaveLength(1);
+  });
 
   it("swallows a steer that rejects or throws, says so, and carries on to the stop", async () => {
     const lost = Promise.reject(new Error("transport closed at /Users/someone/secret"));

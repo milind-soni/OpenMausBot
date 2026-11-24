@@ -330,7 +330,7 @@ export interface ProviderAdapter {
    * - "indeterminate": maybe delivered; the caller must NOT re-queue, or it could run twice.
    * A driver that cannot read an attached image refuses the whole steer. An agent can still turn down a message reported
    * "steered" while the turn runs on (Antigravity's CLI 1.5): the driver then calls `late.refused`, once, and the caller
-   * may queue the message; without `late` that ends the turn with the agent's error. */
+   * may queue the message. Such a driver refuses a steer that comes without `late`. */
   steer?(threadId: ThreadId, text: string, images?: readonly TurnImageInput[], late?: SteerLate): Promise<SteerOutcome>;
   hasSession(threadId: ThreadId): boolean;
   /** The local process running this thread's engine, while there is one: a long tool call's own processes are under it. */

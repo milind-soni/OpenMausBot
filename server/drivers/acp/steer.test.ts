@@ -169,14 +169,15 @@ describe("acpPromptSteering", () => {
       }), { rejected });
       return { steering, sent };
     }
+    const hears = { refused: () => {} };
 
     it("takes a steer in once the prompt carrying the turn is answered, then another while that steer carries it", async () => {
       const { steering, sent } = takeOver();
-      const first = steering.steer("use pytest");
+      const first = steering.steer("use pytest", hears);
       await tick();
       const ended = steering.promptAnswered();
       expect(await first).toBe("steered");
-      const second = steering.steer("add a README");
+      const second = steering.steer("add a README", hears);
       await tick();
       sent[0]!.answer({ stopReason: "end_turn" });
       expect(await second).toBe("steered");
@@ -190,7 +191,7 @@ describe("acpPromptSteering", () => {
 
     it("refuses a steer the agent rejects before taking it in, without failing the turn", async () => {
       const { steering, sent } = takeOver();
-      const outcome = steering.steer("use pytest");
+      const outcome = steering.steer("use pytest", hears);
       await tick();
       sent[0]!.fail({ code: -32603, message: "Can't add this prompt" });
       expect(await outcome).toBe("refused");
@@ -212,7 +213,7 @@ describe("acpPromptSteering", () => {
       expect(steering.failure).toBeUndefined();
     });
 
-    it("keeps any other error of a steer taken in, and the rejection of one whose caller cannot hear it", async () => {
+    it("keeps any other error of a steer taken in", async () => {
       const { steering, sent } = takeOver();
       const refused = vi.fn();
       const outcome = steering.steer("use pytest", { refused });
@@ -225,15 +226,10 @@ describe("acpPromptSteering", () => {
       expect(steering.failure).toEqual(new Error("socket closed"));
     });
 
-    it("keeps the error of a steer that fails after it was taken in", async () => {
+    it("refuses, without sending it, a steer whose caller could not hear a late refusal", async () => {
       const { steering, sent } = takeOver();
-      const outcome = steering.steer("use pytest");
-      await tick();
-      const ended = steering.promptAnswered();
-      expect(await outcome).toBe("steered");
-      sent[0]!.fail({ code: -32603, message: "Can't add this prompt" });
-      await ended;
-      expect(steering.failure).toEqual({ code: -32603, message: "Can't add this prompt" });
+      expect(await steering.steer("use pytest")).toBe("refused");
+      expect(sent).toEqual([]);
     });
 
     it("waits for the agent however long it takes, refuses a steer it rejects late, and judges the next steer by the turn's own prompt", async () => {
@@ -241,13 +237,13 @@ describe("acpPromptSteering", () => {
       try {
         const { steering, sent } = takeOver();
         let first: string | undefined;
-        void steering.steer("use pytest").then((outcome) => { first = outcome; });
+        void steering.steer("use pytest", hears).then((outcome) => { first = outcome; });
         await vi.advanceTimersByTimeAsync(60_000);
         expect(first).toBeUndefined();
         sent[0]!.fail({ code: -32603, message: "Can't add this prompt" });
         await vi.advanceTimersByTimeAsync(0);
         expect(first).toBe("refused");
-        const second = steering.steer("and a license");
+        const second = steering.steer("and a license", hears);
         await vi.advanceTimersByTimeAsync(0);
         expect(steering.promptAnswered()).not.toBeNull();
         expect(await second).toBe("steered");
@@ -264,7 +260,7 @@ describe("acpPromptSteering", () => {
       let live = true;
       const sent: Array<{ answer: (reply: unknown) => void }> = [];
       const steering = acpPromptSteering(() => live, () => new Promise((resolve) => { sent.push({ answer: resolve }); }), { rejected }, () => live);
-      const outcome = steering.steer("use pytest");
+      const outcome = steering.steer("use pytest", hears);
       await tick();
       live = false;
       sent[0]!.answer({ stopReason: "cancelled" });
@@ -276,7 +272,7 @@ describe("acpPromptSteering", () => {
 
     it("refuses a steer still out when the turn ends and its requests fail", async () => {
       const { steering, sent } = takeOver();
-      const outcome = steering.steer("use pytest");
+      const outcome = steering.steer("use pytest", hears);
       await tick();
       sent[0]!.fail(new Error("turn settled"));
       expect(await outcome).toBe("refused");

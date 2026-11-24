@@ -18,7 +18,8 @@ const posixOnly = describe.skipIf(process.platform === "win32");
 posixOnly("Antigravity CLI steer through the message route", () => {
   let child: ChildProcess;
   let home: string, tools: string;
-  // One Antigravity instance per order of the CLI's two answers, each with its own gates and log.
+  // One Antigravity instance per test, each with its own gates and log.
+  const NAMES = ["agy", "agyLate", "agyQueue", "agyRoom"];
   const cli = (name: string) => ({ finishGate: join(tools, `${name}.finish`), rejectGate: join(tools, `${name}.reject`), rpc: join(tools, `${name}.rpc.jsonl`) });
   let stderr = "";
 
@@ -31,9 +32,9 @@ posixOnly("Antigravity CLI steer through the message route", () => {
     return { status: res.status, body: await res.json() };
   };
   const getBot = async (id: string) => (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === id);
-  // The turn's own CLI, not the one the server starts in a scratch folder to read the account's memory model.
+  // The turn's own CLI (a chat's or a room's folder), not the one the server starts in a scratch folder to read the account's memory model.
   const calls = (name: string, method: string) => existsSync(cli(name).rpc) ? readFileSync(cli(name).rpc, "utf8").split("\n")
-    .filter((line) => line.includes(`"${method}"`) && line.includes("task-workspaces")).length : 0;
+    .filter((line) => line.includes(`"${method}"`) && /[/\\](task-)?workspaces[/\\]/.test(line)).length : 0;
   const waitFor = async (predicate: () => Promise<boolean> | boolean, what: string, ms = 30_000) => {
     const deadline = Date.now() + ms;
     while (!(await predicate())) {
@@ -51,7 +52,7 @@ posixOnly("Antigravity CLI steer through the message route", () => {
     const executable = join(tools, "antigravity");
     writeFileSync(executable, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(FAKE_ACP)} "$@"\n`);
     chmodSync(executable, 0o755);
-    for (const token of [antigravityCliTokenPath("agy", data), antigravityCliTokenPath("agyLate", data)]) {
+    for (const token of NAMES.map((name) => antigravityCliTokenPath(name, data))) {
       mkdirSync(dirname(token), { recursive: true });
       writeFileSync(token, "{}", { mode: 0o600 });
     }
@@ -65,7 +66,7 @@ posixOnly("Antigravity CLI steer through the message route", () => {
       },
       config: { cli: executable, fullAuto: true },
     });
-    writeFileSync(join(data, "config.json"), JSON.stringify({ instances: { agy: instance("agy"), agyLate: instance("agyLate") } }));
+    writeFileSync(join(data, "config.json"), JSON.stringify({ instances: Object.fromEntries(NAMES.map((name) => [name, instance(name)])) }));
     child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
       cwd: join(SERVER_DIR, ".."),
       env: { ...(process.env.PATH ? { PATH: process.env.PATH } : {}), HOME: home, USERPROFILE: home, OMB_PORT: String(PORT), OMB_ANTIGRAVITY_NATIVE_CLI: "1" },
@@ -146,5 +147,71 @@ posixOnly("Antigravity CLI steer through the message route", () => {
     expect(typed.some((m: any) => m.steered)).toBe(false);
     expect(bot.messages.some((m: any) => m.kind === "error")).toBe(false);
     expect(calls("agyLate", "session/prompt.rejected")).toBe(1);
+  }, 60_000);
+
+  it("the queue's Steer button: messages the CLI rejects once the turn's own run has ended lose the mark and run once, in order, as the next turn", async () => {
+    const created = (await api("POST", "/api/bots")).body.bot;
+    expect((await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "agyQueue", model: "gemini-3.8-flash" } })).status).toBe(200);
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "Build the report." })).status).toBe(202);
+    await waitFor(async () => (await getBot(created.id)).busy === true && calls("agyQueue", "session/prompt") === 1, "the turn to start");
+    const first = await api("POST", `/api/bots/${created.id}/messages`, { text: "Use pytest.", followUp: "queue" });
+    const second = await api("POST", `/api/bots/${created.id}/messages`, { text: "Add a README.", followUp: "queue" });
+    expect([first.body.queued, second.body.queued]).toEqual([true, true]);
+
+    const pressed = api("POST", `/api/bots/${created.id}/queue/${first.body.queueId}/steer`, { threadId: created.threadId });
+    await waitFor(() => calls("agyQueue", "session/prompt.held") === 1, "the CLI to hold the steer");
+    writeFileSync(cli("agyQueue").finishGate, "finish");
+    const answer = await pressed;
+    expect(answer.status).toBe(200);
+    expect(answer.body).toMatchObject({ ok: true, steered: true, queueIds: [first.body.queueId, second.body.queueId] });
+    const rows = answer.body.messages.map((m: any) => m.id);
+    expect(answer.body.messages.map((m: any) => [m.text, m.steered])).toEqual([["Use pytest.", true], ["Add a README.", true]]);
+
+    writeFileSync(cli("agyQueue").rejectGate, "reject");
+    await waitFor(async () => {
+      const bot = await getBot(created.id);
+      return !bot.busy && calls("agyQueue", "session/prompt") >= 3
+        && bot.messages.filter((m: any) => m.role === "bot" && m.kind === "text" && m.text.includes("done")).length >= 2;
+    }, "the refused messages to run after the first turn");
+    const bot = await getBot(created.id);
+    const typed = bot.messages.filter((m: any) => m.role === "user" && m.kind === "text");
+    expect(typed.map((m: any) => m.text)).toEqual(["Build the report.", "Use pytest.", "Add a README."]);
+    expect(typed.slice(1).map((m: any) => m.id)).toEqual(rows);
+    expect(typed.some((m: any) => m.steered)).toBe(false);
+    expect(bot.messages.some((m: any) => m.kind === "error")).toBe(false);
+    expect(calls("agyQueue", "session/prompt.rejected")).toBe(1);
+    expect(calls("agyQueue", "session/prompt")).toBe(3);
+  }, 60_000);
+
+  it("a room's Steer keeps its message queued: the CLI never gets a steer it could turn down after the room counted it in", async () => {
+    const created = (await api("POST", "/api/bots")).body.bot;
+    expect((await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "agyRoom", model: "gemini-3.8-flash" } })).status).toBe(200);
+    const room = (await api("POST", "/api/groups", {
+      name: "Antigravity room", memberIds: [created.id], setup: { bulletin: "", defaultResponder: { kind: "member", botId: created.id } },
+    })).body.group;
+    const getGroup = async () => (await api("GET", "/api/bots?messages=30")).body.groups.find((g: any) => g.id === room.id);
+    expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "Build the report." })).status).toBe(202);
+    await waitFor(async () => (await getGroup())?.busyBotId === created.id && calls("agyRoom", "session/prompt") === 1, "the room turn to start");
+    const queued = await api("POST", `/api/groups/${room.id}/messages`, { text: "Use pytest." });
+    expect(queued.body).toMatchObject({ ok: true, queued: true });
+
+    const still = await Promise.race([
+      api("POST", `/api/groups/${room.id}/queue/${queued.body.queueId}/steer`, { threadId: room.threadId }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("the room steer waited on the CLI")), 10_000)),
+    ]);
+    expect(still.status).toBe(200);
+    expect(still.body).toMatchObject({ ok: true, queued: true });
+    expect(calls("agyRoom", "session/prompt")).toBe(1);
+
+    writeFileSync(cli("agyRoom").finishGate, "finish");
+    await waitFor(async () => {
+      const group = await getGroup();
+      return group?.working === false && calls("agyRoom", "session/prompt") === 2
+        && group.messages.filter((m: any) => m.role === "bot" && m.kind === "text" && m.text.includes("done")).length === 2;
+    }, "the queued room message to run after the first turn");
+    const typed = (await getGroup()).messages.filter((m: any) => m.role === "user" && m.kind === "text");
+    expect(typed.map((m: any) => m.text)).toEqual(["Build the report.", "Use pytest."]);
+    expect(typed.some((m: any) => m.steered)).toBe(false);
+    expect(calls("agyRoom", "session/prompt.held")).toBe(0);
   }, 60_000);
 });

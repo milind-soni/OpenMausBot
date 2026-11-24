@@ -206,7 +206,7 @@ import {
   type RequestOutcome,
   type RuntimeEvent,
   type SendTurnInput,
-  type SteerOutcome,
+  type SteerLate, type SteerOutcome,
   newId,
 } from "./contracts.ts";
 import { RETRY_MAX_ATTEMPTS } from "./drivers/retry.ts";
@@ -6985,7 +6985,7 @@ const canSteerThread = (threadId: string) => {
   return admit("direct-busy", { pendingComputerSelection: Boolean(computerSelectionTurns.get(threadId)?.selected),
     engineCanSteer: Boolean(engine?.capabilities.queueing && engine.steer) }).action === "steer";
 };
-const steerThread = async (threadId: string, text: string) => (await loopingEngine(threadId)?.steer?.(threadId, text)) ?? "refused";
+const steerThread = async (threadId: string, text: string, late?: SteerLate) => (await loopingEngine(threadId)?.steer?.(threadId, text, undefined, late)) ?? "refused";
 const repeats = createUnattendedTurns({
   settings: (unattended) => loopGuardSettings(cfg, process.env, unattended), unattended: (threadId) => !personDriven(directRequestOwners.get(threadId)) && (isUnattended(store.botByThread(threadId)?.id, threadId) || activeRoutineRunForThread(threadId) !== null),
   append: (threadId, tool) => void store.appendMessage(threadId, { role: "bot", kind: "activity", tool }),
