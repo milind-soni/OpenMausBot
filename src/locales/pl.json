@@ -7274,7 +7274,7 @@
   "skillBurger.run.addPathFailed": "Nie udało się. Spróbuj ponownie.",
   "activity.tool.team.runWorkflow": "Uruchom Skill Burger",
   "activity.tool.team.workflowEdit": "Zmień Skill Burger",
-  "githubSignIn.pitch": "Wysyłaj pracę botów do swoich repozytoriów.",
+  "githubSignIn.pitch": "Boty wysyłają kod i otwierają pull requesty w Twoim imieniu.",
   "githubSignIn.download": "Połączenie najpierw pobiera narzędzie wiersza poleceń GitHuba (około 15 MB).",
   "githubSignIn.connectGithub": "Połącz z GitHubem",
   "githubSignIn.connectAgain": "Połącz ponownie",
@@ -7294,7 +7294,7 @@
   "githubSignIn.manage": "Zarządzaj na GitHubie",
   "githubSignIn.cliReason": "To logowanie Twojego własnego GitHub CLI. Wyloguj się w terminalu poleceniem gh auth logout.",
   "githubSignIn.invalid": "Logowanie do GitHuba przestało działać. Boty nie mogą wysyłać zmian, dopóki nie połączysz ponownie.",
-  "githubSignIn.refused": "Na tym komputerze nie można rozpocząć nowego logowania do GitHuba.",
+  "githubSignIn.refused": "Tutaj nie można rozpocząć nowego logowania do GitHuba.",
   "githubSignIn.pasteInstead": "Wklej token",
   "githubSignIn.tokenLabel": "Token GitHuba",
   "githubSignIn.tokenCreate": "Utwórz szczegółowy token na GitHubie",
@@ -7309,6 +7309,6 @@
   "server.github.card.fetch": "{bot} nie może pobrać zmian z {repo}: GitHub nie jest połączony.",
   "server.github.card.description": "Połącz z GitHubem, aby {bot} mógł wysyłać swoją pracę do Twoich repozytoriów.",
   "server.github.card.connectInApps": "Połącz z GitHubem przez tę kartę w aplikacji na komputerze albo w Aplikacjach.",
-  "githubSignIn.title": "GitHub",
+  "githubSignIn.title": "Logowanie do GitHuba",
   "githubSignIn.tokenPlaceholder": "github_pat_…"
 }

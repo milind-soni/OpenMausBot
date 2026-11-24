@@ -3983,7 +3983,7 @@
   "skillBurger.run.addPathFailed": "Impossible de le faire. Réessayez.",
   "activity.tool.team.runWorkflow": "Exécuter le Skill Burger",
   "activity.tool.team.workflowEdit": "Modifier le Skill Burger",
-  "githubSignIn.pitch": "Pousser le travail des bots vers vos dépôts.",
+  "githubSignIn.pitch": "Les bots poussent du code et ouvrent des pull requests en votre nom.",
   "githubSignIn.download": "La connexion télécharge d'abord l'outil en ligne de commande de GitHub (environ 15 Mo).",
   "githubSignIn.connectGithub": "Connecter GitHub",
   "githubSignIn.connectAgain": "Se reconnecter",
@@ -4003,7 +4003,7 @@
   "githubSignIn.manage": "Gérer sur GitHub",
   "githubSignIn.cliReason": "C'est la connexion de votre propre GitHub CLI. Déconnectez-vous dans votre terminal avec gh auth logout.",
   "githubSignIn.invalid": "La connexion à GitHub ne fonctionne plus. Les bots ne peuvent plus pousser tant que vous ne vous reconnectez pas.",
-  "githubSignIn.refused": "Une nouvelle connexion à GitHub ne peut pas démarrer sur cet ordinateur.",
+  "githubSignIn.refused": "Une nouvelle connexion à GitHub ne peut pas démarrer ici.",
   "githubSignIn.pasteInstead": "Coller un jeton à la place",
   "githubSignIn.tokenLabel": "Jeton GitHub",
   "githubSignIn.tokenCreate": "Créer un jeton à granularité fine sur GitHub",
@@ -4018,6 +4018,6 @@
   "server.github.card.fetch": "{bot} n'a pas pu récupérer {repo} : GitHub n'est pas connecté.",
   "server.github.card.description": "Connectez GitHub pour que {bot} puisse pousser son travail vers vos dépôts.",
   "server.github.card.connectInApps": "Connectez GitHub depuis cette carte dans l'app de votre ordinateur, ou dans Apps.",
-  "githubSignIn.title": "GitHub",
+  "githubSignIn.title": "Connexion à GitHub",
   "githubSignIn.tokenPlaceholder": "github_pat_…"
 }

@@ -10390,7 +10390,7 @@
   "skillBurger.run.addPathFailed": "無法完成，請再試一次。",
   "activity.tool.team.runWorkflow": "執行 Skill Burger",
   "activity.tool.team.workflowEdit": "變更 Skill Burger",
-  "githubSignIn.pitch": "將機器人的工作推送到你的儲存庫。",
+  "githubSignIn.pitch": "機器人以你的身分推送程式碼並建立提取要求。",
   "githubSignIn.download": "連線時會先下載 GitHub 的命令列工具（約 15 MB）。",
   "githubSignIn.connectGithub": "連線 GitHub",
   "githubSignIn.connectAgain": "重新連線",
@@ -10410,7 +10410,7 @@
   "githubSignIn.manage": "在 GitHub 上管理",
   "githubSignIn.cliReason": "這是你自己的 GitHub CLI 登入。請在終端機執行 gh auth logout 登出。",
   "githubSignIn.invalid": "GitHub 登入已失效。重新連線之前，機器人無法推送。",
-  "githubSignIn.refused": "無法在這台電腦上開始新的 GitHub 登入。",
+  "githubSignIn.refused": "無法在此處開始新的 GitHub 登入。",
   "githubSignIn.pasteInstead": "改為貼上權杖",
   "githubSignIn.tokenLabel": "GitHub 權杖",
   "githubSignIn.tokenCreate": "在 GitHub 上建立細緻權限的權杖",
@@ -10425,6 +10425,6 @@
   "server.github.card.fetch": "{bot} 無法從 {repo} 擷取：GitHub 尚未連線。",
   "server.github.card.description": "連線 GitHub 後，{bot} 就能把工作推送到你的儲存庫。",
   "server.github.card.connectInApps": "請在電腦上的應用程式中透過此卡片連線 GitHub，或在「應用程式」中連線。",
-  "githubSignIn.title": "GitHub",
+  "githubSignIn.title": "GitHub 登入",
   "githubSignIn.tokenPlaceholder": "github_pat_…"
 }

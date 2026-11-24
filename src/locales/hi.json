@@ -3835,7 +3835,7 @@
   "skillBurger.run.addPathFailed": "यह नहीं हो सका। फिर कोशिश करें।",
   "activity.tool.team.runWorkflow": "Skill Burger चलाएँ",
   "activity.tool.team.workflowEdit": "Skill Burger बदलें",
-  "githubSignIn.pitch": "बॉट्स का काम अपनी रिपॉज़िटरी में पुश करें।",
+  "githubSignIn.pitch": "बॉट्स आपकी ओर से कोड पुश करते हैं और पुल रिक्वेस्ट खोलते हैं।",
   "githubSignIn.download": "कनेक्ट करने पर पहले GitHub का कमांड-लाइन टूल डाउनलोड होता है (लगभग 15 MB)।",
   "githubSignIn.connectGithub": "GitHub कनेक्ट करें",
   "githubSignIn.connectAgain": "फिर से कनेक्ट करें",
@@ -3855,7 +3855,7 @@
   "githubSignIn.manage": "GitHub पर मैनेज करें",
   "githubSignIn.cliReason": "यह आपके अपने GitHub CLI का साइन-इन है। अपने टर्मिनल में gh auth logout से इससे साइन आउट करें।",
   "githubSignIn.invalid": "GitHub साइन-इन ने काम करना बंद कर दिया। जब तक आप फिर से कनेक्ट नहीं करते, बॉट्स पुश नहीं कर सकते।",
-  "githubSignIn.refused": "इस कंप्यूटर पर नया GitHub साइन-इन शुरू नहीं हो सकता।",
+  "githubSignIn.refused": "यहाँ नया GitHub साइन-इन शुरू नहीं हो सकता।",
   "githubSignIn.pasteInstead": "इसके बजाय टोकन पेस्ट करें",
   "githubSignIn.tokenLabel": "GitHub टोकन",
   "githubSignIn.tokenCreate": "GitHub पर फ़ाइन-ग्रेन्ड टोकन बनाएँ",
@@ -3870,6 +3870,6 @@
   "server.github.card.fetch": "{bot} {repo} से फ़ेच नहीं कर सका: GitHub कनेक्ट नहीं है।",
   "server.github.card.description": "GitHub कनेक्ट करें ताकि {bot} अपना काम आपकी रिपॉज़िटरी में पुश कर सके।",
   "server.github.card.connectInApps": "अपने कंप्यूटर के ऐप में इस कार्ड से, या Apps में, GitHub कनेक्ट करें।",
-  "githubSignIn.title": "GitHub",
+  "githubSignIn.title": "GitHub साइन-इन",
   "githubSignIn.tokenPlaceholder": "github_pat_…"
 }

@@ -4306,7 +4306,7 @@
   "skillBurger.run.addPathFailed": "Das hat nicht geklappt. Versuch es noch einmal.",
   "activity.tool.team.runWorkflow": "Skill Burger ausführen",
   "activity.tool.team.workflowEdit": "Skill Burger ändern",
-  "githubSignIn.pitch": "Die Arbeit der Bots in deine Repositorys pushen.",
+  "githubSignIn.pitch": "Bots pushen Code und öffnen Pull Requests in deinem Namen.",
   "githubSignIn.download": "Beim Verbinden wird zuerst das Befehlszeilentool von GitHub heruntergeladen (etwa 15 MB).",
   "githubSignIn.connectGithub": "GitHub verbinden",
   "githubSignIn.connectAgain": "Erneut verbinden",
@@ -4326,7 +4326,7 @@
   "githubSignIn.manage": "Auf GitHub verwalten",
   "githubSignIn.cliReason": "Das ist die Anmeldung deines eigenen GitHub CLI. Melde dich im Terminal mit gh auth logout davon ab.",
   "githubSignIn.invalid": "Die GitHub-Anmeldung funktioniert nicht mehr. Bots können erst wieder pushen, wenn du neu verbindest.",
-  "githubSignIn.refused": "Auf diesem Computer kann keine neue GitHub-Anmeldung starten.",
+  "githubSignIn.refused": "Hier kann keine neue GitHub-Anmeldung starten.",
   "githubSignIn.pasteInstead": "Stattdessen ein Token einfügen",
   "githubSignIn.tokenLabel": "GitHub-Token",
   "githubSignIn.tokenCreate": "Ein fein abgestuftes Token auf GitHub erstellen",
@@ -4341,6 +4341,6 @@
   "server.github.card.fetch": "{bot} konnte nicht von {repo} abrufen: GitHub ist nicht verbunden.",
   "server.github.card.description": "Verbinde GitHub, damit {bot} seine Arbeit in deine Repositorys pushen kann.",
   "server.github.card.connectInApps": "Verbinde GitHub über diese Karte in der App auf deinem Computer oder unter Apps.",
-  "githubSignIn.title": "GitHub",
+  "githubSignIn.title": "GitHub-Anmeldung",
   "githubSignIn.tokenPlaceholder": "github_pat_…"
 }

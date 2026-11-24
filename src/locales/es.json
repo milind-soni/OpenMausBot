@@ -6578,7 +6578,7 @@
   "skillBurger.run.addPathFailed": "No se pudo hacer. Inténtalo de nuevo.",
   "activity.tool.team.runWorkflow": "Ejecutar Skill Burger",
   "activity.tool.team.workflowEdit": "Cambiar Skill Burger",
-  "githubSignIn.pitch": "Sube el trabajo de los bots a tus repositorios.",
+  "githubSignIn.pitch": "Los bots suben código y abren pull requests en tu nombre.",
   "githubSignIn.download": "Al conectar, primero se descarga la herramienta de línea de comandos de GitHub (unos 15 MB).",
   "githubSignIn.connectGithub": "Conectar GitHub",
   "githubSignIn.connectAgain": "Conectar de nuevo",
@@ -6598,7 +6598,7 @@
   "githubSignIn.manage": "Gestionar en GitHub",
   "githubSignIn.cliReason": "Es la sesión de tu propio GitHub CLI. Ciérrala en tu terminal con gh auth logout.",
   "githubSignIn.invalid": "El inicio de sesión en GitHub dejó de funcionar. Los bots no pueden subir cambios hasta que vuelvas a conectar.",
-  "githubSignIn.refused": "No se puede iniciar una nueva sesión de GitHub en este ordenador.",
+  "githubSignIn.refused": "Aquí no se puede iniciar una nueva sesión de GitHub.",
   "githubSignIn.pasteInstead": "Pegar un token",
   "githubSignIn.tokenLabel": "Token de GitHub",
   "githubSignIn.tokenCreate": "Crear un token detallado en GitHub",
@@ -6613,6 +6613,6 @@
   "server.github.card.fetch": "{bot} no pudo traer cambios de {repo}: GitHub no está conectado.",
   "server.github.card.description": "Conecta GitHub para que {bot} pueda subir su trabajo a tus repositorios.",
   "server.github.card.connectInApps": "Conecta GitHub desde esta tarjeta en la app de tu ordenador o en Apps.",
-  "githubSignIn.title": "GitHub",
+  "githubSignIn.title": "Inicio de sesión en GitHub",
   "githubSignIn.tokenPlaceholder": "github_pat_…"
 }

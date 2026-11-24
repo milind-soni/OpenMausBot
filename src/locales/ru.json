@@ -7328,7 +7328,7 @@
   "skillBurger.run.addPathFailed": "Не получилось. Попробуйте ещё раз.",
   "activity.tool.team.runWorkflow": "Запустить Skill Burger",
   "activity.tool.team.workflowEdit": "Изменить Skill Burger",
-  "githubSignIn.pitch": "Отправляйте работу ботов в свои репозитории.",
+  "githubSignIn.pitch": "Боты отправляют код и открывают пул-реквесты от вашего имени.",
   "githubSignIn.download": "При подключении сначала скачивается инструмент командной строки GitHub (около 15 МБ).",
   "githubSignIn.connectGithub": "Подключить GitHub",
   "githubSignIn.connectAgain": "Подключить снова",
@@ -7348,7 +7348,7 @@
   "githubSignIn.manage": "Управлять на GitHub",
   "githubSignIn.cliReason": "Это вход вашего собственного GitHub CLI. Выйти из него можно в терминале командой gh auth logout.",
   "githubSignIn.invalid": "Вход в GitHub перестал работать. Боты не смогут отправлять изменения, пока вы не подключитесь снова.",
-  "githubSignIn.refused": "На этом компьютере нельзя начать новый вход в GitHub.",
+  "githubSignIn.refused": "Здесь нельзя начать новый вход в GitHub.",
   "githubSignIn.pasteInstead": "Вставить токен",
   "githubSignIn.tokenLabel": "Токен GitHub",
   "githubSignIn.tokenCreate": "Создать детализированный токен на GitHub",
@@ -7363,6 +7363,6 @@
   "server.github.card.fetch": "{bot} не удалось получить изменения из {repo}: GitHub не подключён.",
   "server.github.card.description": "Подключите GitHub, чтобы {bot} мог отправлять работу в ваши репозитории.",
   "server.github.card.connectInApps": "Подключите GitHub через эту карточку в приложении на компьютере или в разделе «Приложения».",
-  "githubSignIn.title": "GitHub",
+  "githubSignIn.title": "Вход в GitHub",
   "githubSignIn.tokenPlaceholder": "github_pat_…"
 }

@@ -6,8 +6,16 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { GithubSignInStatus } from "../../../shared/github-sign-in";
 
 const sent = vi.hoisted(() => [] as Array<{ path: string; init?: RequestInit }>);
+const route = vi.hoisted(() => ({ refuse: false }));
 vi.mock("@/state/store", () => ({
-  api: vi.fn(async (path: string, init?: RequestInit) => { sent.push({ path, init }); return { connected: true }; }),
+  api: vi.fn(async (path: string, init?: RequestInit) => {
+    sent.push({ path, init });
+    if (route.refuse && path.includes("/status")) {
+      const { ApiError } = await import("@/state/api");
+      throw new ApiError("This GitHub sign-in is someone else's.", 403);
+    }
+    return { connected: true };
+  }),
 }));
 
 const { setLocale } = await import("@/lib/i18n");
@@ -26,13 +34,17 @@ const message = (status: "required" | "connected" = "required", extra = {}) => (
 
 let root: Root | null = null;
 let host: HTMLElement;
-beforeEach(() => { setLocale("en"); sent.length = 0; host = document.createElement("div"); document.body.append(host); });
+beforeEach(() => { setLocale("en"); sent.length = 0; route.refuse = false; reads.length = 0; host = document.createElement("div"); document.body.append(host); });
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = null; document.body.innerHTML = ""; });
 
-async function show(answers: Array<GithubSignInStatus | InstanceType<typeof ApiError>>, card = message(), starts: GithubSignInStatus[] = [CODE]) {
+const reads: string[] = [];
+const cardStatusCalls = () => sent.filter((call) => call.path === "/api/bots/chief/connector-cards/m1/status?threadId=t1").length;
+
+async function show(answers: Array<GithubSignInStatus | InstanceType<typeof ApiError>>, card = message(), starts: Array<GithubSignInStatus | InstanceType<typeof ApiError>> = [CODE]) {
   const store = createGithubSignInStore({
     api: async (path) => {
-      if (path.endsWith("/start")) return starts.shift();
+      reads.push(path);
+      if (path.endsWith("/start")) { const next = starts.shift()!; if (next instanceof ApiError) throw next; return next; }
       const next = answers.length > 1 ? answers.shift()! : answers[0]!;
       if (next instanceof ApiError) throw next;
       return next;
@@ -44,12 +56,13 @@ async function show(answers: Array<GithubSignInStatus | InstanceType<typeof ApiE
   const { GithubChatCard } = await import("./GithubChatCard");
   await act(async () => { root!.render(createElement(ConnectorCard, { botId: "chief", threadId: "t1", message: card })); });
   await act(async () => { await Promise.resolve(); });
-  if (!(card as { connector: { dismissed?: boolean } }).connector.dismissed) {
+  if (!(card as { connector: { dismissed?: boolean } }).connector.dismissed && !route.refuse) {
     expect(host.querySelector("[data-github-connect], [data-ask-card]"), "ConnectorCard draws a github card as the GitHub card").toBeTruthy();
     expect(host.textContent).not.toContain("Connect securely");
   }
+  sent.length = 0;
   await act(async () => { root!.render(createElement(GithubChatCard, { botId: "chief", threadId: "t1", message: card, store })); });
-  await act(async () => { await Promise.resolve(); });
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
   return store;
 }
 const button = (label: string) => [...host.querySelectorAll("button")].find((candidate) => candidate.textContent === label || candidate.getAttribute("aria-label") === label);
@@ -58,7 +71,7 @@ it("says what failed and connects GitHub in place: the code, GitHub's page, then
   await show([SIGNED_OUT]);
   const card = host.querySelector("[data-ask-card='pending']")!;
   expect(card.textContent).toContain("Chief couldn't push to acme/site: GitHub isn't connected.");
-  expect(card.textContent).toContain("Push bots' work to your repositories.");
+  expect(card.textContent).toContain("Bots push code and open pull requests as you.");
   await act(async () => { button("Connect GitHub")!.click(); await Promise.resolve(); await Promise.resolve(); });
   expect(host.querySelector("[data-github-code]")!.textContent).toBe("WDJB-MJHT");
   expect(host.querySelector<HTMLAnchorElement>("[data-github-open]")!.href).toBe("https://github.com/login/device");
@@ -68,7 +81,7 @@ it("says what failed and connects GitHub in place: the code, GitHub's page, then
 it("settles on the server and becomes one quiet line once GitHub is connected", async () => {
   await show([{ state: "signed-in", login: "octo", source: "mausbot", scopes: [], checkedAt: 1 }]);
   expect(host.querySelector("[data-ask-card='settled']")!.textContent).toContain("GitHub · Connected as @octo");
-  expect(sent.some((call) => call.path === "/api/bots/chief/connector-cards/m1/status?threadId=t1")).toBe(true);
+  expect(cardStatusCalls()).toBe(1);
 });
 
 it("Not now sets the card aside through the card's own route", async () => {
@@ -99,6 +112,34 @@ it("asks again before it says connected: a sign-in revoked since Apps last looke
   expect(host.querySelector("[data-ask-card='settled']")).toBeNull();
   expect(button("Connect again")).toBeTruthy();
   expect(host.textContent).toContain("GitHub sign-in stopped working.");
-  expect(sent.some((call) => call.path.includes("/status"))).toBe(false);
+  expect(cardStatusCalls()).toBe(1);
   appsStillOpen();
+});
+
+it("is hidden when the card's own route says it is someone else's, though the viewer's own GitHub is signed out", async () => {
+  route.refuse = true;
+  await show([SIGNED_OUT]);
+  expect(host.innerHTML).toBe("");
+});
+
+it("start refused: no Connect in the footer, the token's Connect is the one primary button", async () => {
+  await show([SIGNED_OUT], message(), [new ApiError("Windows Credential Manager already holds a GitHub CLI sign-in", 409)]);
+  await act(async () => { button("Connect GitHub")!.click(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  expect(host.querySelector("[data-github-connect]")).toBeNull();
+  await act(async () => { button("Paste a token instead")!.click(); });
+  const primaries = [...host.querySelectorAll("button.ui-button-primary")];
+  expect(primaries.map((candidate) => candidate.textContent)).toEqual(["Connect"]);
+  expect(primaries[0]!.closest("[data-github-token-form]")).not.toBeNull();
+});
+
+it("an open card asks for the sign-in once; one set aside or already connected asks nothing", async () => {
+  await show([SIGNED_OUT]);
+  expect(reads.filter((path) => path.startsWith("/api/github/sign-in"))).toEqual(["/api/github/sign-in"]);
+  for (const card of [message("required", { dismissed: true }), message("connected")]) {
+    await act(async () => root!.unmount()); root = null; host.innerHTML = ""; reads.length = 0;
+    await show([SIGNED_OUT], card);
+    expect(reads).toEqual([]);
+    expect(cardStatusCalls()).toBe(0);
+  }
+  expect(host.textContent).toContain("GitHub · Connected");
 });

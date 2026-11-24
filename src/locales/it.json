@@ -11468,7 +11468,7 @@
   "skillBurger.run.addPathFailed": "Non è stato possibile. Riprova.",
   "activity.tool.team.runWorkflow": "Esegui Skill Burger",
   "activity.tool.team.workflowEdit": "Modifica Skill Burger",
-  "githubSignIn.pitch": "Invia il lavoro dei bot ai tuoi repository.",
+  "githubSignIn.pitch": "I bot inviano codice e aprono pull request a tuo nome.",
   "githubSignIn.download": "La connessione scarica prima lo strumento a riga di comando di GitHub (circa 15 MB).",
   "githubSignIn.connectGithub": "Connetti GitHub",
   "githubSignIn.connectAgain": "Connetti di nuovo",
@@ -11488,7 +11488,7 @@
   "githubSignIn.manage": "Gestisci su GitHub",
   "githubSignIn.cliReason": "È l'accesso del tuo GitHub CLI. Esci dal terminale con gh auth logout.",
   "githubSignIn.invalid": "L'accesso a GitHub ha smesso di funzionare. I bot non possono inviare modifiche finché non ti connetti di nuovo.",
-  "githubSignIn.refused": "Su questo computer non può partire un nuovo accesso a GitHub.",
+  "githubSignIn.refused": "Qui non può partire un nuovo accesso a GitHub.",
   "githubSignIn.pasteInstead": "Incolla un token",
   "githubSignIn.tokenLabel": "Token GitHub",
   "githubSignIn.tokenCreate": "Crea un token con permessi granulari su GitHub",
@@ -11503,6 +11503,6 @@
   "server.github.card.fetch": "{bot} non è riuscito a scaricare da {repo}: GitHub non è connesso.",
   "server.github.card.description": "Connetti GitHub perché {bot} possa inviare il suo lavoro ai tuoi repository.",
   "server.github.card.connectInApps": "Connetti GitHub da questa scheda nell'app sul tuo computer, oppure in App.",
-  "githubSignIn.title": "GitHub",
+  "githubSignIn.title": "Accesso a GitHub",
   "githubSignIn.tokenPlaceholder": "github_pat_…"
 }

@@ -7802,7 +7802,7 @@
   "skillBurger.run.addPathFailed": "하지 못했습니다. 다시 시도하세요.",
   "activity.tool.team.runWorkflow": "Skill Burger 실행",
   "activity.tool.team.workflowEdit": "Skill Burger 변경",
-  "githubSignIn.pitch": "봇의 작업을 내 저장소로 푸시합니다.",
+  "githubSignIn.pitch": "봇이 내 이름으로 코드를 푸시하고 풀 리퀘스트를 엽니다.",
   "githubSignIn.download": "연결하면 먼저 GitHub 명령줄 도구(약 15MB)를 내려받습니다.",
   "githubSignIn.connectGithub": "GitHub 연결",
   "githubSignIn.connectAgain": "다시 연결",
@@ -7822,7 +7822,7 @@
   "githubSignIn.manage": "GitHub에서 관리",
   "githubSignIn.cliReason": "내 GitHub CLI의 로그인입니다. 터미널에서 gh auth logout으로 로그아웃하세요.",
   "githubSignIn.invalid": "GitHub 로그인이 더 이상 작동하지 않습니다. 다시 연결할 때까지 봇이 푸시할 수 없습니다.",
-  "githubSignIn.refused": "이 컴퓨터에서는 새 GitHub 로그인을 시작할 수 없습니다.",
+  "githubSignIn.refused": "여기에서는 새 GitHub 로그인을 시작할 수 없습니다.",
   "githubSignIn.pasteInstead": "대신 토큰 붙여 넣기",
   "githubSignIn.tokenLabel": "GitHub 토큰",
   "githubSignIn.tokenCreate": "GitHub에서 세분화된 토큰 만들기",
@@ -7837,6 +7837,6 @@
   "server.github.card.fetch": "{bot}이(가) {repo}에서 가져오지 못했습니다: GitHub가 연결되지 않았습니다.",
   "server.github.card.description": "GitHub를 연결하면 {bot}이(가) 작업을 내 저장소로 푸시할 수 있습니다.",
   "server.github.card.connectInApps": "컴퓨터의 앱에서 이 카드로, 또는 앱 화면에서 GitHub를 연결하세요.",
-  "githubSignIn.title": "GitHub",
+  "githubSignIn.title": "GitHub 로그인",
   "githubSignIn.tokenPlaceholder": "github_pat_…"
 }

@@ -27,22 +27,27 @@ function setup(options: { team?: boolean; status?: GithubSignInStatus; person?: 
   const reported: string[] = [];
   const resumed: string[] = [];
   const released: string[] = [];
+  const threadOf = new Map<string, string>();
+  const clock = { at: 1_000_000 };
   const store = {
-    messagesFor: () => messages,
-    appendMessage: vi.fn((_threadId: string, message: Omit<Message, "id" | "at">) => { const row = { ...message, id: `m${messages.length + 1}`, at: 1 } as Message; messages.push(row); return row; }),
+    messagesFor: (threadId: string) => messages.filter((row) => threadOf.get(row.id) === threadId),
+    appendMessage: vi.fn((threadId: string, message: Omit<Message, "id" | "at">) => { const row = { ...message, id: `m${messages.length + 1}`, at: 1 } as Message; messages.push(row); threadOf.set(row.id, threadId); return row; }),
     patchMessage: vi.fn((_threadId: string, id: string, patch: Partial<Message>) => { const at = messages.findIndex((row) => row.id === id); messages[at] = { ...messages[at]!, ...patch }; }),
   };
-  const cards = createGithubSignInCards({
-    store,
+  const make = (turnPerson: () => string | null) => createGithubSignInCards({
+    store, now: () => clock.at,
     signIn: { status: vi.fn(async (audience: string) => { asked.push(audience); return status; }), reportAuthFailure: (audience) => { reported.push(String(audience)); } },
     team: options.team ?? false,
-    turnPerson: () => (options.person === undefined ? ADA : options.person),
+    turnPerson,
     language: () => undefined,
     threadVisible: () => true,
     resume: (threadId, resumeKey) => { resumed.push(`${threadId} ${resumeKey}`); },
     release: (threadId, messageId) => { released.push(`${threadId} ${messageId}`); },
   });
-  return { cards, messages, store, asked, reported, resumed, released, set: (next: GithubSignInStatus) => { status = next; } };
+  const cards = make(() => (options.person === undefined ? ADA : options.person));
+  /** The server again after a restart: the same transcript, nothing in memory, nobody's turn running. */
+  const restarted = () => make(() => null);
+  return { cards, restarted, clock, messages, store, asked, reported, resumed, released, set: (next: GithubSignInStatus) => { status = next; } };
 }
 const chief = { bot: { id: "chief", name: "Chief" }, threadId: "t1", from: { botId: "chief", name: "Chief", color: "blue" } } as const;
 
@@ -55,7 +60,7 @@ describe("the Connect GitHub card in a chat", () => {
   });
 
   it("says which bot could not do what to which repository, as a connector card a phone can draw as text", async () => {
-    const { cards, messages, asked } = setup();
+    const { cards, messages, asked, clock } = setup();
     const raised = await cards.raise(chief, { operation: "push", repo: "acme/site" });
     expect(raised).toEqual({ posted: true, messageId: "m1" });
     expect(asked).toEqual(["owner"]);
@@ -64,6 +69,8 @@ describe("the Connect GitHub card in a chat", () => {
     expect(card).toMatchObject({ role: "bot", kind: "connector", text: "Chief couldn't push to acme/site: GitHub isn't connected.", from: chief.from });
     expect(card.connector).toMatchObject({ source: "github", slug: GITHUB_CARD_SLUG, label: "GitHub", status: "required" });
     expect(card.connector!.resumeKey).toMatch(/^github-[\w-]{8,}$/);
+    expect(card.connector!.person).toBeUndefined();
+    clock.at += 61 * 60_000;
     await cards.raise({ ...chief, threadId: "t2", from: undefined }, { operation: "clone", repo: "acme/other.repo" });
     expect(messages[1]!.text).toBe("Chief couldn't clone acme/other.repo: GitHub isn't connected.");
   });
@@ -89,6 +96,56 @@ describe("the Connect GitHub card in a chat", () => {
     await cards.raise(chief, { operation: "push", repo: "acme/site" });
     expect(await cards.raise(chief, { operation: "push", repo: "acme/site" })).toEqual({ posted: false, reason: "open", messageId: "m1" });
     expect(messages).toHaveLength(1);
+  });
+
+  it("shows a person at most one card an hour, across chats and after Not now, so a bot can't repeat it", async () => {
+    const { cards, messages, clock } = setup();
+    await cards.raise(chief, { operation: "push", repo: "acme/site" });
+    await cards.route("dismiss", "POST", { auth: OWNER, threadId: "t1", message: messages[0]! });
+    for (let i = 0; i < 10; i++) {
+      expect(await cards.raise(chief, { operation: "push", repo: "acme/site" })).toEqual({ posted: false, reason: "cooldown" });
+      expect(await cards.raise({ ...chief, threadId: `chat-${i}` }, { operation: "push", repo: "acme/site" })).toEqual({ posted: false, reason: "cooldown" });
+    }
+    expect(messages).toHaveLength(1);
+    clock.at += 59 * 60_000;
+    expect((await cards.raise({ ...chief, threadId: "t9" }, { operation: "push", repo: "acme/site" })).posted).toBe(false);
+    clock.at += 2 * 60_000;
+    expect((await cards.raise({ ...chief, threadId: "t9" }, { operation: "push", repo: "acme/site" })).posted).toBe(true);
+  });
+
+  it("on a Team Cloud the hour is each person's own", async () => {
+    let person = ADA;
+    const { cards, messages } = setup({ team: true });
+    const other = createGithubSignInCards({ store: { messagesFor: () => [], appendMessage: (_t, m) => ({ ...m, id: "x", at: 1 }) as Message, patchMessage: () => {} },
+      signIn: { status: async () => SIGNED_OUT, reportAuthFailure: () => {} }, team: true, turnPerson: () => person, language: () => undefined,
+      threadVisible: () => true, resume: () => {}, release: () => {} });
+    expect((await other.raise(chief, { operation: "push", repo: "acme/site" })).posted).toBe(true);
+    person = personKey({ id: "", email: "bo@example.com" });
+    expect((await other.raise({ ...chief, threadId: "t2" }, { operation: "push", repo: "acme/site" })).posted).toBe(true);
+    expect(await other.raise({ ...chief, threadId: "t3" }, { operation: "push", repo: "acme/site" })).toEqual({ posted: false, reason: "cooldown" });
+    expect(messages).toEqual([]);
+    expect((await cards.raise(chief, { operation: "push", repo: "acme/site" })).posted).toBe(true);
+  });
+
+  it("refuses an operation it has no words for", async () => {
+    const { cards, messages } = setup();
+    for (const operation of ["pull", "constructor", "toString", "__proto__"]) {
+      expect(await cards.raise(chief, { operation: operation as never, repo: "acme/site" })).toEqual({ posted: false, reason: "invalid-operation" });
+    }
+    expect(messages).toEqual([]);
+  });
+
+  it("on a Team Cloud keeps whose card it is, so its member can still settle it after a restart", async () => {
+    const { cards, restarted, messages, set, resumed } = setup({ team: true });
+    await cards.raise(chief, { operation: "push", repo: "acme/site" });
+    expect(messages[0]!.connector!.person).toBe(ADA);
+    const after = restarted();
+    set(SIGNED_IN);
+    const at = (auth: RequestAuth) => ({ auth, threadId: "t1", message: messages[0]! });
+    expect((await after.route("status", "GET", at(member("bo@example.com")))).status).toBe(403);
+    expect((await after.route("status", "GET", at(member("ada@example.com")))).body).toMatchObject({ connected: true });
+    expect(messages[0]!.connector!.status).toBe("connected");
+    expect(resumed).toHaveLength(1);
   });
 
   it("refuses a repository name that isn't owner/repo, so a bot's text never reaches the card", async () => {

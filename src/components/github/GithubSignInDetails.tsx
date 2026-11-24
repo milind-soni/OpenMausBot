@@ -12,13 +12,14 @@ import {
 import { intlLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 
-export function GithubMark({ className = "size-10" }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 40 40" className={cn("shrink-0 rounded-[8px]", className)} aria-hidden="true">
-      <rect width="40" height="40" rx="10" fill="#1f2328" />
-      <path transform="translate(8 8) scale(1.5)" fill="#fff" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
-    </svg>
-  );
+const GITHUB_MARK = "M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z";
+
+/** GitHub's mark on the plate an app's tile gets when it has no logo of its own, so it reads on every skin; bare (no
+ * `plate`) where a card's small icon goes. */
+export function GithubMark({ className = "size-10", plate = true }: { className?: string; plate?: boolean }) {
+  const mark = <svg viewBox="0 0 16 16" aria-hidden="true" className={plate ? "size-[55%]" : className} fill="currentColor"><path d={GITHUB_MARK} /></svg>;
+  if (!plate) return mark;
+  return <span aria-hidden="true" className={cn("flex shrink-0 items-center justify-center rounded-[8px] bg-raised text-ink", className)}>{mark}</span>;
 }
 
 const SOURCE: Record<"mausbot" | "token" | "cli", LocaleKey> = {
@@ -35,7 +36,6 @@ const LINK = "inline-flex items-center gap-1 text-[12px] font-medium text-accent
 const FIELD = "h-8 w-full min-w-0 rounded-lg bg-inset px-2.5 text-[13px] text-ink placeholder:text-ink-tertiary focus:outline-none focus:ring-1 focus:ring-accent/50";
 const NOTE = "text-[12px] leading-4 text-ink-secondary";
 export const GITHUB_PRIMARY = "ui-button ui-button-md ui-button-pill ui-button-primary";
-export const GITHUB_SECONDARY = "ui-button ui-button-md ui-button-pill";
 
 /** The line that says where GitHub stands, beside the title. */
 export function githubHeadline(view: GithubSignInView): string {
@@ -130,7 +130,7 @@ function SignedIn({ status }: { status: Extract<GithubSignInStatus, { state: "si
     <>
       <p className={NOTE}>
         {t(SOURCE[status.source])}
-        {orgs.length > 0 && <> · {t("githubSignIn.orgs", { orgs: new Intl.ListFormat(intlLocale(), { style: "short", type: "unit" }).format(orgs) })}</>}
+        {orgs.length > 0 && <> · {t("githubSignIn.orgs", { orgs: new Intl.ListFormat(intlLocale(), { style: "narrow", type: "conjunction" }).format(orgs) })}</>}
       </p>
       {status.source === "cli" && <p data-github-cli-reason className={NOTE}>{t("githubSignIn.cliReason")}</p>}
       <a href={githubManageUrl(status.source)} target="_blank" rel="noopener noreferrer" className={LINK}
@@ -173,15 +173,18 @@ function TokenForm({ view, store }: { view: GithubSignInView; store: GithubSignI
               onChange={(event) => setDraft(event.target.value)}
               className={FIELD}
             />
-            <button type="submit" disabled={busy || !draft.trim()} className={GITHUB_SECONDARY}>
+            <button type="submit" disabled={busy || !draft.trim()} className={GITHUB_PRIMARY}>
               {busy ? <Loader2 size={14} aria-label={t("common.checking")} className="animate-spin" /> : t("connectors.action.connect")}
             </button>
           </div>
-          <a href={GITHUB_NEW_TOKEN_URL} target="_blank" rel="noopener noreferrer" className={cn(LINK, "self-start")}
-            onClick={(event) => { if (window.ogb) { event.preventDefault(); void openExternalLink(GITHUB_NEW_TOKEN_URL); } }}>
-            {t("githubSignIn.tokenCreate")}
-            <ExternalLink size={11} aria-hidden="true" />
-          </a>
+          <p className="text-[12px] leading-4">
+            <a href={GITHUB_NEW_TOKEN_URL} target="_blank" rel="noopener noreferrer"
+              className="rounded-sm font-medium text-accent-text hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              onClick={(event) => { if (window.ogb) { event.preventDefault(); void openExternalLink(GITHUB_NEW_TOKEN_URL); } }}>
+              {t("githubSignIn.tokenCreate")}
+              <ExternalLink size={11} aria-hidden="true" className="ms-1 inline-block align-[-1px]" />
+            </a>
+          </p>
         </form>
       )}
     </div>

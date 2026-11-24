@@ -10303,7 +10303,7 @@
   "skillBurger.run.addPathFailed": "无法完成，请重试。",
   "activity.tool.team.runWorkflow": "运行 Skill Burger",
   "activity.tool.team.workflowEdit": "更改 Skill Burger",
-  "githubSignIn.pitch": "将机器人的工作推送到你的仓库。",
+  "githubSignIn.pitch": "机器人以你的身份推送代码并创建拉取请求。",
   "githubSignIn.download": "连接时会先下载 GitHub 的命令行工具（约 15 MB）。",
   "githubSignIn.connectGithub": "连接 GitHub",
   "githubSignIn.connectAgain": "重新连接",
@@ -10323,7 +10323,7 @@
   "githubSignIn.manage": "在 GitHub 上管理",
   "githubSignIn.cliReason": "这是你自己的 GitHub CLI 登录。请在终端中运行 gh auth logout 退出。",
   "githubSignIn.invalid": "GitHub 登录已失效。重新连接之前，机器人无法推送。",
-  "githubSignIn.refused": "无法在这台电脑上开始新的 GitHub 登录。",
+  "githubSignIn.refused": "无法在此处开始新的 GitHub 登录。",
   "githubSignIn.pasteInstead": "改为粘贴令牌",
   "githubSignIn.tokenLabel": "GitHub 令牌",
   "githubSignIn.tokenCreate": "在 GitHub 上创建细粒度令牌",
@@ -10338,6 +10338,6 @@
   "server.github.card.fetch": "{bot} 无法从 {repo} 拉取：GitHub 未连接。",
   "server.github.card.description": "连接 GitHub 后，{bot} 就能把工作推送到你的仓库。",
   "server.github.card.connectInApps": "请在电脑上的应用中通过此卡片连接 GitHub，或在“应用”中连接。",
-  "githubSignIn.title": "GitHub",
+  "githubSignIn.title": "GitHub 登录",
   "githubSignIn.tokenPlaceholder": "github_pat_…"
 }

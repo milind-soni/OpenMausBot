@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { GithubSignInStatus } from "../../shared/github-sign-in";
 import { ApiError } from "@/state/api";
 import {
-  createGithubSignInStore, githubConnected, githubManageUrl, groupCode, INSTALLING_POLL_MS, isGithubDeviceUrl, SIGNING_IN_POLL_MS, spellCode,
+  createGithubSignInStore, EXPIRY_GRACE_MS, POLL_FAILURES_MAX, githubConnected, githubManageUrl, groupCode, INSTALLING_POLL_MS, isGithubDeviceUrl, SIGNING_IN_POLL_MS, spellCode,
 } from "./github-sign-in";
 
 const SIGNED_OUT: GithubSignInStatus = { state: "signed-out", download: false };
@@ -11,7 +11,7 @@ const CODE: GithubSignInStatus = { state: "signing-in", code: "WDJB-MJHT", verif
 const SIGNED_IN: GithubSignInStatus = { state: "signed-in", login: "octo", source: "mausbot", scopes: ["repo"], checkedAt: 1 };
 
 /** A fake server: answers in order for each path, and hand-run timers. */
-function harness(answers: Record<string, Array<GithubSignInStatus | ApiError>>) {
+function harness(answers: Record<string, Array<GithubSignInStatus | ApiError>>, clock = { at: 0 }) {
   const calls: Array<{ path: string; init?: RequestInit & { background?: boolean } }> = [];
   const api = vi.fn(async (path: string, init?: RequestInit & { background?: boolean }) => {
     calls.push({ path, init });
@@ -33,7 +33,7 @@ function harness(answers: Record<string, Array<GithubSignInStatus | ApiError>>) 
     for (const timer of due) { timer.cleared = true; timer.fn(); }
     await flush();
   };
-  const store = createGithubSignInStore({ api, timers });
+  const store = createGithubSignInStore({ api, timers, now: () => clock.at });
   return { store, calls, live, tick };
 }
 const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
@@ -191,5 +191,41 @@ describe("the shared status", () => {
     expect(JSON.stringify(store.snapshot())).not.toContain(token);
     const sent = calls.filter((call) => call.path === "/api/github/sign-in/token");
     expect(sent.map((call) => [call.init?.method, call.init?.body])).toEqual(Array(3).fill(["POST", JSON.stringify({ token })]));
+  });
+
+  it("stops asking once the code is past its expiry, whatever the server keeps saying", async () => {
+    const clock = { at: 0 };
+    const { store, live, tick, calls } = harness({ "/api/github/sign-in": [CODE] }, clock);
+    store.subscribe(() => {});
+    await flush();
+    expect(live()).toHaveLength(1);
+    clock.at = CODE.state === "signing-in" ? CODE.expiresAt + EXPIRY_GRACE_MS + 1 : 0;
+    await tick();
+    expect(live()).toEqual([]);
+    const asked = calls.length;
+    await tick();
+    expect(calls).toHaveLength(asked);
+  });
+
+  it("backs off while reads fail, then stops and offers Retry", async () => {
+    const failing = Array.from({ length: 20 }, () => new ApiError("Internal error", 500));
+    const { store, live, tick, calls } = harness({ "/api/github/sign-in": [{ ...CODE, expiresAt: Number.MAX_SAFE_INTEGER } as GithubSignInStatus, ...failing] });
+    store.subscribe(() => {});
+    await flush();
+    const waits: number[] = [];
+    for (let i = 0; i < 10 && live().length; i++) { waits.push(live()[0]!.ms); await tick(); }
+    expect(waits).toEqual(Array.from({ length: POLL_FAILURES_MAX }, (_, i) => SIGNING_IN_POLL_MS * 2 ** i));
+    expect(live()).toEqual([]);
+    expect(store.snapshot().phase).toBe("error");
+    expect(calls).toHaveLength(1 + POLL_FAILURES_MAX);
+  });
+
+  it("a card that comes into view while a read is under way shares it", async () => {
+    const { store, calls } = harness({ "/api/github/sign-in": [SIGNED_OUT] });
+    store.subscribe(() => {});
+    await store.fresh();
+    expect(calls).toHaveLength(1);
+    await store.fresh();
+    expect(calls).toHaveLength(2);
   });
 });

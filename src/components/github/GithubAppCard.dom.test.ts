@@ -55,7 +55,8 @@ describe("the GitHub row in Apps", () => {
   it("not connected: one line and Connect; the download is said only when there is one; a quiet note after an expired code", async () => {
     const { timers } = await show({ "/api/github/sign-in": [SIGNED_OUT] });
     expect(card()!.dataset.githubState).toBe("signed-out");
-    expect(card()!.textContent).toContain("Push bots' work to your repositories.");
+    expect(card()!.textContent).toContain("Bots push code and open pull requests as you.");
+    expect(card()!.textContent).toContain("GitHub sign-in");
     expect(card()!.textContent).not.toContain("15 MB");
     expect(button("Connect")).toBeTruthy();
     expect(timers).toEqual([]);
@@ -169,7 +170,8 @@ describe("the GitHub row in Apps", () => {
       "/api/github/sign-in/token": [new ApiError(`GitHub did not accept ${token}`, 400)],
     });
     await click(button("Connect"));
-    expect(host.querySelector("[data-github-refused]")!.textContent).toContain("A new GitHub sign-in can't start on this computer.");
+    expect(host.querySelector("[data-github-refused]")!.textContent).toContain("A new GitHub sign-in can't start here.");
+    expect(host.querySelector("[data-github-connect]"), "starting again gets the same refusal").toBeNull();
     expect(host.querySelector("a[href='https://github.com/settings/personal-access-tokens/new']")).toBeNull();
     await click(button("Paste a token instead"));
     const field = host.querySelector<HTMLInputElement>("input[name='github-token']")!;
@@ -228,6 +230,6 @@ describe("its words", () => {
       }
     }
     setLocale("pt-br");
-    expect(t("githubSignIn.pitch")).toBe("Envie o trabalho dos bots para os seus repositórios.");
+    expect(t("githubSignIn.pitch")).toBe("Os bots enviam código e abrem pull requests em seu nome.");
   });
 });

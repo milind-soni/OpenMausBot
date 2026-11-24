@@ -18,6 +18,8 @@ export function GithubRowAction({ view, store, className = PILL }: { view: Githu
   if (view.phase === "loading") return <button type="button" disabled className={className} aria-label={t("common.checking")}>{spinner}</button>;
   if (view.phase === "error") return <button type="button" onClick={() => void store.refresh()} className={className}>{t("connectors.action.retry")}</button>;
   const state = view.status?.state;
+  // Start was refused: starting again gets the same answer, so the token's Connect is the one action.
+  if ((state === "signed-out" || state === "invalid") && view.refused) return null;
   if (state === "signed-out" || state === "invalid") {
     return (
       <button type="button" data-github-connect disabled={view.busy !== null} onClick={() => void store.start()} className={className}>
@@ -62,7 +64,7 @@ export function GithubAppCard({ store = githubSignIn, refreshKey = 0 }: { store?
             {signedIn && <Check size={13} strokeWidth={2.5} className="shrink-0 text-success" aria-label={t("apps.connected")} />}
             {state === "installing" && <Loader2 size={13} aria-hidden="true" className="shrink-0 animate-spin text-ink-tertiary motion-reduce:animate-none" />}
           </div>
-          <p dir="auto" className="text-[13px] leading-[18px] text-ink-secondary">{headline}</p>
+          <p dir="auto" className="truncate text-[13px] leading-[18px] text-ink-secondary" title={headline}>{headline}</p>
         </div>
         <GithubRowAction view={view} store={store} />
       </div>

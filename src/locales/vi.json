@@ -6073,7 +6073,7 @@
   "skillBurger.run.addPathFailed": "Không làm được. Hãy thử lại.",
   "activity.tool.team.runWorkflow": "Chạy Skill Burger",
   "activity.tool.team.workflowEdit": "Đổi Skill Burger",
-  "githubSignIn.pitch": "Đẩy công việc của bot lên kho mã của bạn.",
+  "githubSignIn.pitch": "Bot đẩy mã và mở pull request thay bạn.",
   "githubSignIn.download": "Khi kết nối, công cụ dòng lệnh của GitHub sẽ được tải xuống trước (khoảng 15 MB).",
   "githubSignIn.connectGithub": "Kết nối GitHub",
   "githubSignIn.connectAgain": "Kết nối lại",
@@ -6093,7 +6093,7 @@
   "githubSignIn.manage": "Quản lý trên GitHub",
   "githubSignIn.cliReason": "Đây là phiên đăng nhập GitHub CLI của riêng bạn. Đăng xuất trong terminal bằng gh auth logout.",
   "githubSignIn.invalid": "Đăng nhập GitHub đã ngừng hoạt động. Bot không thể đẩy cho đến khi bạn kết nối lại.",
-  "githubSignIn.refused": "Không thể bắt đầu đăng nhập GitHub mới trên máy tính này.",
+  "githubSignIn.refused": "Không thể bắt đầu đăng nhập GitHub mới tại đây.",
   "githubSignIn.pasteInstead": "Dán token thay thế",
   "githubSignIn.tokenLabel": "Token GitHub",
   "githubSignIn.tokenCreate": "Tạo token chi tiết trên GitHub",
@@ -6108,6 +6108,6 @@
   "server.github.card.fetch": "{bot} không thể lấy dữ liệu từ {repo}: GitHub chưa được kết nối.",
   "server.github.card.description": "Kết nối GitHub để {bot} có thể đẩy công việc lên kho mã của bạn.",
   "server.github.card.connectInApps": "Kết nối GitHub từ thẻ này trong ứng dụng trên máy tính, hoặc trong Ứng dụng.",
-  "githubSignIn.title": "GitHub",
+  "githubSignIn.title": "Đăng nhập GitHub",
   "githubSignIn.tokenPlaceholder": "github_pat_…"
 }

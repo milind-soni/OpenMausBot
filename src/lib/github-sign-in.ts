@@ -13,6 +13,10 @@ export const GITHUB_TOKENS_URL = "https://github.com/settings/personal-access-to
 export const GITHUB_NEW_TOKEN_URL = "https://github.com/settings/personal-access-tokens/new";
 export const INSTALLING_POLL_MS = 1_500;
 export const SIGNING_IN_POLL_MS = 3_000;
+/** A code past its expiry by this much is not asked about again: the server has said it expired, or cannot say. */
+export const EXPIRY_GRACE_MS = 60_000;
+/** Reads that fail in a row before polling gives up and offers Retry; each failure doubles the wait. */
+export const POLL_FAILURES_MAX = 5;
 
 /** Only GitHub's own device page is ever drawn as a link: anything else the server says is not opened. */
 export function isGithubDeviceUrl(value: unknown): value is string {
@@ -48,6 +52,7 @@ export interface GithubSignInView {
 
 type Api = (path: string, init?: RequestInit & { background?: boolean }) => Promise<unknown>;
 type Timers = { set(fn: () => void, ms: number): unknown; clear(handle: unknown): void };
+type Read = Promise<void>;
 
 const statusOf = (cause: unknown): number | undefined => {
   const status = (cause as { status?: unknown } | null)?.status;
@@ -61,12 +66,15 @@ function isStatus(value: unknown): value is GithubSignInStatus {
 
 const INITIAL: GithubSignInView = { phase: "loading", status: null, busy: null, refused: false, error: null };
 
-export function createGithubSignInStore(deps: { api?: Api; timers?: Timers } = {}) {
+export function createGithubSignInStore(deps: { api?: Api; timers?: Timers; now?: () => number } = {}) {
+  const now = deps.now ?? Date.now;
   const api: Api = deps.api ?? storeApi;
   const timers: Timers = deps.timers ?? { set: (fn, ms) => setTimeout(fn, ms), clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>) };
   let view = INITIAL;
   let reads = 0;
   let timer: unknown = null;
+  let failures = 0;
+  let reading: Read | null = null;
   const listeners = new Set<() => void>();
 
   const set = (patch: Partial<GithubSignInView>) => {
@@ -82,25 +90,35 @@ export function createGithubSignInStore(deps: { api?: Api; timers?: Timers } = {
     const state = view.status?.state;
     const wait = state === "installing" ? INSTALLING_POLL_MS : state === "signing-in" ? SIGNING_IN_POLL_MS : null;
     if (wait === null || !listeners.size || view.phase !== "ready") return stopPolling();
+    if (view.status?.state === "signing-in" && now() > view.status.expiresAt + EXPIRY_GRACE_MS) return stopPolling();
     if (timer !== null) return;
     timer = timers.set(() => {
       timer = null;
       void read({ background: true });
-    }, wait);
+    }, wait * 2 ** failures);
   }
 
   /** A status answer; a 403 hides the card, anything else that fails keeps what was shown, or offers Retry. */
-  async function read(options: { check?: boolean; background?: boolean } = {}): Promise<void> {
+  function read(options: { check?: boolean; background?: boolean } = {}): Read {
+    const started = ask(options);
+    reading = started;
+    void started.finally(() => { if (reading === started) reading = null; });
+    return started;
+  }
+
+  async function ask(options: { check?: boolean; background?: boolean }): Read {
     const mine = ++reads;
     try {
       const answer = await api(`${GITHUB_SIGN_IN_PATH}${options.check ? "?check=1" : ""}`, options.background ? { background: true } : undefined);
       if (mine !== reads) return;
       if (!isStatus(answer)) throw new Error("unexpected GitHub sign-in status");
+      failures = 0;
       set({ phase: "ready", status: answer, refused: answer.state === "signed-in" ? false : view.refused });
     } catch (cause) {
       if (mine !== reads) return;
-      if (statusOf(cause) === 403) set({ phase: "hidden", status: null });
-      else if (view.status) set({});
+      if (statusOf(cause) === 403) return set({ phase: "hidden", status: null });
+      failures += 1;
+      if (view.status && failures < POLL_FAILURES_MAX) set({});
       else set({ phase: "error" });
     }
   }
@@ -112,6 +130,7 @@ export function createGithubSignInStore(deps: { api?: Api; timers?: Timers } = {
     try {
       const answer = await api(`${GITHUB_SIGN_IN_PATH}/${action}`, { method: "POST", ...(body === undefined ? {} : { body }) });
       if (!isStatus(answer)) throw new Error("unexpected GitHub sign-in status");
+      failures = 0;
       set({ phase: "ready", status: answer, busy: null, refused: action === "start" || answer.state === "signed-in" ? false : view.refused });
       return true;
     } catch (cause) {
@@ -143,7 +162,9 @@ export function createGithubSignInStore(deps: { api?: Api; timers?: Timers } = {
     },
     snapshot: (): GithubSignInView => view,
     /** Ask again now; `check` asks GitHub whether the saved sign-in still works. */
-    refresh: (check = false) => read({ check }),
+    refresh: (check = false) => { failures = 0; return read({ check }); },
+    /** The answer being read now, else a new one: a card that just came into view asks once, not twice. */
+    fresh: (): Read => reading ?? read(),
     start: () => act("start", "start"),
     cancel: () => act("cancel", "cancel"),
     signOut: () => act("sign-out", "sign-out"),
