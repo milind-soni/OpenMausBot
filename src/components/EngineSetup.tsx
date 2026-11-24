@@ -320,10 +320,16 @@ function ManagedEngineSetup({ instance, signInOnly, autoStart = false, onDone }:
         const { auth } = await api(`/api/instances/${encodeURIComponent(instance.instanceId)}/auth/status?flowId=${encodeURIComponent(flowId)}`);
         if (!live || auth.phase === "waiting" || auth.phase === "verifying") return;
         if (auth.phase !== "succeeded") return ended(auth.phase === "expired" ? t("engineSetup.googleExpired") : auth.message ?? t("engineSetup.googleFailed"));
+        if (done.current) {
+          ended(null);
+          done.current();
+          void refreshInstances().catch(() => {});
+          void refreshModels(instance.instanceId).catch(() => {});
+          return;
+        }
         await refreshInstances();
         await refreshModels(instance.instanceId);
         ended(null);
-        if (live) done.current?.();
       } catch (cause) {
         // 404: this sign-in is gone on the server (finished through the pasted redirect, or its session ended).
         if (cause instanceof ApiError && cause.status === 404) {
@@ -357,11 +363,30 @@ function ManagedEngineSetup({ instance, signInOnly, autoStart = false, onDone }:
     else window.open(link, "_blank", "noopener,noreferrer");
   };
 
+  const signedIn = async () => {
+    if (!done.current) {
+      await refreshInstances();
+      await refreshModels(instance.instanceId);
+      return;
+    }
+    done.current();
+    void refreshInstances().catch(() => {});
+    void refreshModels(instance.instanceId).catch(() => {});
+  };
+
   const cancelled = useRef(false);
-  const cancelFlow = (id: string) => api(`/api/instances/${encodeURIComponent(instance.instanceId)}/auth/cancel`, { method: "POST", body: JSON.stringify({ flowId: id }) }).catch(() => {});
+  const cancelFlow = (id: string) => api(`/api/instances/${encodeURIComponent(instance.instanceId)}/auth/cancel`, { method: "POST", body: JSON.stringify({ flowId: id }) });
   const cancel = async () => {
     cancelled.current = true;
-    if (flow) await cancelFlow(flow.flowId);
+    if (flow) {
+      try {
+        await cancelFlow(flow.flowId);
+      } catch (cause) {
+        cancelled.current = false;
+        setError(cause instanceof Error ? cause.message : String(cause));
+        return;
+      }
+    }
     onDone?.();
   };
 
@@ -370,15 +395,10 @@ function ManagedEngineSetup({ instance, signInOnly, autoStart = false, onDone }:
     signInStarted();
     const { auth } = await api(`/api/instances/${encodeURIComponent(instance.instanceId)}/auth/start`, { method: "POST" });
     if (cancelled.current) {
-      if (auth.flowId) await cancelFlow(auth.flowId);
+      if (auth.flowId) await cancelFlow(auth.flowId).catch(() => {});
       return;
     }
-    if (auth.phase === "succeeded") {
-      await refreshInstances();
-      await refreshModels(instance.instanceId);
-      onDone?.();
-      return;
-    }
+    if (auth.phase === "succeeded") return signedIn();
     if (!auth.flowId || !auth.authorizationUrl) throw new Error(t("engineSetup.googleNoLink"));
     setFlow({ flowId: auth.flowId, authorizationUrl: auth.authorizationUrl, pastedCode: auth.kind === "pasted-code" });
     await openLink(auth.authorizationUrl);
@@ -391,9 +411,7 @@ function ManagedEngineSetup({ instance, signInOnly, autoStart = false, onDone }:
       body: JSON.stringify({ flowId: flow.flowId, callbackUrl }),
     });
     setCallbackUrl("");
-    await refreshInstances();
-    await refreshModels(instance.instanceId);
-    onDone?.();
+    await signedIn();
   });
 
   const check = () => run("check", async () => {
@@ -500,7 +518,7 @@ function ManagedEngineSetup({ instance, signInOnly, autoStart = false, onDone }:
         </>
       )}
       {error && <p className="text-[12px] text-danger">{error}</p>}
-      {onDone && <button type="button" onClick={() => void cancel()} className="rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-control">{t("common.cancel")}</button>}
+      {onDone && <button type="button" disabled={busy === "complete"} onClick={() => void cancel()} className="rounded-lg disabled:opacity-50 px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-control">{t("common.cancel")}</button>}
     </div>
   );
 }

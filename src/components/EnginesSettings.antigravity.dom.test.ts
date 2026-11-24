@@ -1,6 +1,4 @@
 // @vitest-environment happy-dom
-// Settings → AI and the chat's AI sign-in card: every Google Gemini (Antigravity) account on one card, as Claude's and
-// ChatGPT's are.
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,14 +9,17 @@ const fixture = vi.hoisted(() => ({
   state: { instances: [] as InstanceInfo[], bots: [] as Bot[], config: {} as Record<string, unknown> },
   calls: [] as Array<{ path: string; method: string; body: unknown }>,
   startGate: null as Promise<void> | null,
+  completeGate: null as Promise<void> | null,
   opened: [] as string[],
+  cancelFails: false,
+  modelsFail: false,
 }));
 vi.mock("@/state/store", async (original) => ({
   ...await original<typeof import("@/state/store")>(),
   useStore: () => ({
     state: fixture.state,
     dispatch: (action: { type: string; instances?: InstanceInfo[] }) => { if (action.type === "instances" && action.instances) fixture.state = { ...fixture.state, instances: action.instances }; },
-    refreshInstances: async () => {}, refreshModels: async () => {},
+    refreshInstances: async () => {}, refreshModels: async () => { if (fixture.modelsFail) throw new Error("Could not read the models."); },
   }),
   api: async (path: string, init?: { method?: string; body?: string }) => {
     if (init?.method) fixture.calls.push({ path, method: init.method, body: init.body ? JSON.parse(init.body) : undefined });
@@ -27,6 +28,8 @@ vi.mock("@/state/store", async (original) => ({
       return { instanceId: added.instanceId, instances: [...fixture.state.instances, added] };
     }
     if (path.endsWith("/auth/start") && fixture.startGate) await fixture.startGate;
+    if (path.endsWith("/auth/complete") && fixture.completeGate) await fixture.completeGate;
+    if (path.endsWith("/auth/cancel") && fixture.cancelFails) throw new Error("The sign-in is finishing. Try again in a moment.");
     if (path.endsWith("/auth/start")) return { auth: { phase: "waiting", flowId: `flow-${path.split("/")[3]}`, authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth?state=fixture" } };
     if (path.includes("/auth/status")) return { auth: { phase: "waiting" } };
     return {};
@@ -57,7 +60,10 @@ beforeEach(() => {
   fixture.state = { instances: [google("antigravity", "Google Gemini (Antigravity)", { account: { email: "me@example.test" } })], bots: [], config: {} };
   fixture.calls = [];
   fixture.startGate = null;
+  fixture.completeGate = null;
   fixture.opened = [];
+  fixture.cancelFails = false;
+  fixture.modelsFail = false;
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
@@ -73,6 +79,13 @@ const click = async (target: Element | undefined) => { expect(target).toBeTruthy
 const row = (instanceId: string) => container.querySelector(`[data-account="${instanceId}"]`)!;
 const rows = () => [...container.querySelectorAll('[data-accounts="antigravity"] [data-account]')].map((item) => item.getAttribute("data-account"));
 const startCalls = () => fixture.calls.filter((call) => call.path.endsWith("/auth/start")).map((call) => call.path);
+async function pasteRedirect(instanceId: string) {
+  const input = row(instanceId).querySelector<HTMLInputElement>("[data-redirect-paste] input")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "http://127.0.0.1:1/?state=fixture&code=x");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
 async function openSimpleCard() {
   await render("simple");
   await click(container.querySelector('[data-simple-engine="antigravity"] button') ?? undefined);
@@ -156,14 +169,42 @@ describe("Google Gemini (Antigravity) accounts share one card", () => {
     fixture.state.instances = [google("antigravity", "Personal", { authenticated: false })];
     await render();
     await click(buttons(row("antigravity"), "Sign in")[0]);
-    const input = row("antigravity").querySelector<HTMLInputElement>("[data-redirect-paste] input")!;
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "http://127.0.0.1:1/?state=fixture&code=x");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
+    await pasteRedirect("antigravity");
     await click(buttons(row("antigravity"), "Send redirect")[0]);
     expect(fixture.calls.at(-1)).toMatchObject({ path: "/api/instances/antigravity/auth/complete", method: "POST" });
     expect(row("antigravity").querySelector("[data-account-sign-in]")).toBeNull();
+  });
+
+  it("keeps the sign-in open and says why when the server could not cancel it", async () => {
+    fixture.state.instances = [google("antigravity", "Personal", { authenticated: false })];
+    fixture.cancelFails = true;
+    await render();
+    await click(buttons(row("antigravity"), "Sign in")[0]);
+    await click(buttons(row("antigravity"), "Cancel")[0]);
+    expect(row("antigravity").querySelector("[data-account-sign-in]")?.textContent).toContain("The sign-in is finishing. Try again in a moment.");
+  });
+
+  it("offers no Cancel while a pasted redirect is being sent", async () => {
+    fixture.state.instances = [google("antigravity", "Personal", { authenticated: false })];
+    let send!: () => void;
+    fixture.completeGate = new Promise((resolve) => { send = resolve; });
+    await render();
+    await click(buttons(row("antigravity"), "Sign in")[0]);
+    await pasteRedirect("antigravity");
+    await click(buttons(row("antigravity"), "Send redirect")[0]);
+    expect(buttons(row("antigravity"), "Cancel")[0]?.disabled).toBe(true);
+    await act(async () => { send(); await fixture.completeGate; });
+  });
+
+  it("closes the panel of a sign-in the server accepted even when the models cannot be read yet", async () => {
+    fixture.state.instances = [google("antigravity", "Personal", { authenticated: false })];
+    fixture.modelsFail = true;
+    await render();
+    await click(buttons(row("antigravity"), "Sign in")[0]);
+    await pasteRedirect("antigravity");
+    await click(buttons(row("antigravity"), "Send redirect")[0]);
+    expect(row("antigravity").querySelector("[data-account-sign-in]")).toBeNull();
+    expect(container.textContent).not.toContain("Could not read the models.");
   });
 
   it("signs in an account whose status could not be read, rather than offering an install", async () => {
