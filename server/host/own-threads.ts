@@ -25,6 +25,8 @@ export function createOwnThreads(deps: Pick<SpawnLevelDeps, "sourceLevel" | "may
   hint(instanceId: string): EngineHint;
   /** Engines whose saved settings could not be read. */
   broken?(): ReadonlyArray<{ name: string; hint: EngineHint }>;
+  /** The engines with a local model the Other engine offers listed there only, and the line that says where else it runs. */
+  localOnce?(engines: readonly MenuEngine[]): { engines: MenuEngine[]; also?: string };
 }) {
   const { store } = deps;
   /** The level a new thread opened from a conversation starts at (spawn-level.ts). */
@@ -80,10 +82,12 @@ export function createOwnThreads(deps: Pick<SpawnLevelDeps, "sourceLevel" | "may
       const bot = store.bot(botId);
       if (!bot) return null;
       const current = deps.current(botId, threadId) ?? bot.modelSelection;
-      return modelMenu({ engines: deps.registry.instances(), current, pinned: [bot.modelSelection], refusal: (selection) => refusal(selection, bot),
+      const listed: { engines: readonly MenuEngine[]; also?: string } = deps.localOnce?.(deps.registry.instances()) ?? { engines: deps.registry.instances() };
+      const menu = modelMenu({ engines: listed.engines, current, pinned: [bot.modelSelection], refusal: (selection) => refusal(selection, bot),
         down: (engine) => deps.givesWay({ instanceId: engine.instanceId, model: engine.models.default }, bot.modelSelection) === "unavailable" ? deps.hint(engine.instanceId) : null,
         signedOut: (engine) => deps.givesWay({ instanceId: engine.instanceId, model: engine.models.default }, bot.modelSelection) === "signed-out" ? deps.hint(engine.instanceId) : null,
         broken: deps.broken?.() ?? [], search });
+      return listed.also ? { ...menu, localAlso: listed.also } : menu;
     },
   };
 }
