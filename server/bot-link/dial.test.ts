@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createDialer } from "./dial.ts";
+import { createDialer, WAKE_MS, WAKE_TRIES, WAKES_PER_HOUR } from "./dial.ts";
 import type { BotLink } from "./link.ts";
 import { HOLD_MS, type Numbered } from "./protocol.ts";
 
@@ -231,7 +231,7 @@ async function sleepyCloud(answer: (request: { background: boolean; wait: number
 
 /** A computer's link whose Cloud sleeps: work can be wanted, and what the dialer says of waking is kept. */
 function sleepyLink(origin: string) {
-  let wanted: () => void = () => {};
+  let wanted: (person: boolean) => void = () => {};
   const waking: boolean[] = [];
   const link = {
     dial: () => ({ origin, token: "fixture-link-token" }),
@@ -247,11 +247,11 @@ function sleepyLink(origin: string) {
     setWaking: (_peer: string, on: boolean) => { waking.push(on); },
     setTransfer: vi.fn(),
     onOutgoing: () => () => {},
-    onWanted: (listener: () => void) => { wanted = listener; return () => { wanted = () => {}; }; },
+    onWanted: (listener: (person: boolean) => void) => { wanted = listener; return () => { wanted = () => {}; }; },
     ended: () => [],
     forgetEnded: vi.fn(),
   };
-  return { link: link as unknown as BotLink, observed: link, want: () => wanted(), waking };
+  return { link: link as unknown as BotLink, observed: link, want: (person = true) => wanted(person), waking };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 150));
@@ -347,5 +347,122 @@ describe("a Cloud that sleeps", () => {
     clock = 20_000;
     dialer.sleep(1);
     expect(dialer.state()).toMatchObject({ asleep: true });
+  });
+});
+
+/** A transport to a Cloud that cannot answer (a network error, or the provider's 502), with a clock each request moves on. */
+function unanswering(kind: "network" | "502", clock: { at: number }, step: number, answerAfter = Infinity) {
+  const calls: Array<{ foreground: boolean }> = [];
+  const fetchImpl = (async (_url: string, init: RequestInit) => {
+    calls.push({ foreground: !(init.headers as Record<string, string>)["x-omb-background"] });
+    clock.at += step;
+    // Once it answers, it answers that exchange, then holds each idle poll open until it is hung up.
+    if (calls.length > answerAfter + 1) return new Promise<Response>((_resolve, reject) => init.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+    if (calls.length > answerAfter) return new Response(JSON.stringify({ session: "session-1", frames: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    if (kind === "network") throw new TypeError("fetch failed");
+    return new Response("bad gateway", { status: 502 });
+  }) as unknown as typeof fetch;
+  return { fetch: fetchImpl, calls };
+}
+
+describe("a wake for work is bounded", () => {
+  it("fails once, then answers: the work still goes, and the app's asleep meanwhile parks nothing", async () => {
+    const clock = { at: 1_000_000 };
+    const cloudSide = unanswering("502", clock, 1_000, 1);
+    const { link, observed, want } = sleepyLink("https://cloud.invalid");
+    const dialer = createDialer({ link, fetch: cloudSide.fetch, firstRetryMs: 1, holdMs: 60_000, now: () => clock.at });
+    cleanups.push(() => dialer.close());
+    dialer.start({ gentle: true });
+    want();
+    await vi.waitFor(() => expect(observed.setOnline).toHaveBeenCalledWith("cloud-peer", true));
+    expect(cloudSide.calls.slice(0, 2)).toEqual([{ foreground: true }, { foreground: true }]);
+    dialer.sleep(clock.at - 10_000);
+    expect(dialer.state()).toMatchObject({ asleep: false });
+  });
+
+  for (const kind of ["network", "502"] as const) {
+    it(`never answers (${kind}): at most ${WAKE_TRIES} foreground asks a wake, then it parks; the app's asleep parks it; ${WAKES_PER_HOUR} wakes an hour`, async () => {
+      const clock = { at: 1_000_000 };
+      const cloudSide = unanswering(kind, clock, 1_000);
+      const { link, want, waking } = sleepyLink("https://cloud.invalid");
+      const dialer = createDialer({ link, fetch: cloudSide.fetch, firstRetryMs: 1, now: () => clock.at });
+      cleanups.push(() => dialer.close());
+      dialer.start({ gentle: true });
+      const foreground = () => cloudSide.calls.filter((call) => call.foreground).length;
+      for (let wake = 1; wake <= WAKES_PER_HOUR; wake += 1) {
+        clock.at += 60_000;
+        want();
+        await vi.waitFor(() => expect(dialer.state().asleep).toBe(true), { timeout: 5_000 });
+        expect(foreground()).toBe(wake * WAKE_TRIES);
+        expect(waking.at(-1)).toBe(false);
+      }
+      await settle();
+      expect(cloudSide.calls).toHaveLength(WAKES_PER_HOUR * WAKE_TRIES);
+      // A fourth in the same hour is no wake: it asks in the background as before, and the app's asleep parks it.
+      want();
+      await vi.waitFor(() => expect(cloudSide.calls.length).toBeGreaterThan(WAKES_PER_HOUR * WAKE_TRIES));
+      dialer.sleep(clock.at);
+      expect(dialer.state()).toMatchObject({ asleep: true });
+      expect(foreground()).toBe(WAKES_PER_HOUR * WAKE_TRIES);
+      // An hour on, work may wake it again.
+      clock.at += 60 * 60_000;
+      want();
+      await vi.waitFor(() => expect(foreground()).toBe((WAKES_PER_HOUR + 1) * WAKE_TRIES), { timeout: 5_000 });
+    });
+  }
+
+  it("a wake that runs out of time parks, and the app's asleep is no longer put off", async () => {
+    const clock = { at: 1_000_000 };
+    const cloudSide = unanswering("network", clock, 0);
+    const { link, want } = sleepyLink("https://cloud.invalid");
+    const dialer = createDialer({ link, fetch: cloudSide.fetch, firstRetryMs: 60_000, now: () => clock.at });
+    cleanups.push(() => dialer.close());
+    dialer.start({ gentle: true });
+    want();
+    await vi.waitFor(() => expect(cloudSide.calls).toHaveLength(1));
+    dialer.sleep(clock.at);
+    expect(dialer.state()).toMatchObject({ asleep: false });
+    clock.at += WAKE_MS;
+    dialer.sleep(clock.at);
+    expect(dialer.state()).toMatchObject({ asleep: true });
+    expect(cloudSide.calls).toHaveLength(1);
+  });
+
+  it("work no person waits on (a routine's) unparks with background asks, as before, and the app's asleep parks it", async () => {
+    const sleepy = await sleepyCloud(() => "asleep");
+    const { link, want, waking } = sleepyLink(sleepy.origin);
+    const dialer = createDialer({ link });
+    cleanups.push(() => dialer.close());
+    dialer.start({ gentle: true });
+    want(false);
+    await sleepy.requests(1);
+    await settle();
+    expect(sleepy.seen).toEqual([{ background: true, wait: 0 }]);
+    expect(waking).toEqual([]);
+    expect(dialer.state()).toMatchObject({ asleep: true });
+  });
+
+  it("asked to sign in again while waking: the wake ends, and after pairing again the first ask is background", async () => {
+    let status = 401;
+    const seen: boolean[] = [];
+    const origin = await cloud((request, response) => {
+      request.resume();
+      seen.push(request.headers["x-omb-background"] === "1");
+      if (status === 200 && seen.length > 2) return;
+      response.writeHead(status, { "content-type": "application/json" });
+      response.end(status === 200 ? JSON.stringify({ session: "session-1", frames: [] }) : JSON.stringify({ error: "no" }));
+    });
+    const { link, want, waking } = sleepyLink(origin);
+    const dialer = createDialer({ link, holdMs: 5_000 });
+    cleanups.push(() => dialer.close());
+    dialer.start({ gentle: true });
+    want();
+    await vi.waitFor(() => expect(dialer.state().needsPairing).toBe(true));
+    expect(seen).toEqual([false]);
+    expect(waking).toEqual([true, false]);
+    status = 200;
+    dialer.start();
+    await vi.waitFor(() => expect(seen.length).toBeGreaterThan(1));
+    expect(seen[1]).toBe(true);
   });
 });

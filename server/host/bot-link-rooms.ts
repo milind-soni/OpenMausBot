@@ -75,7 +75,8 @@ export interface LinkedRoomsDeps {
   linkedBots(): ReadonlyArray<{ id: string; peer: string; place: { name: string }; kind?: "computer" | "cloud"; bot: { id: string; name: string; color?: string; title?: string; mascotBody?: string; mascotFaceColor?: string; mascotBodyColor?: string; mascotMaterial?: string } }>;
   selfName(): string;
   /** There is work for a place that is not connected: a computer asks its Cloud for it now, as for any hand-off. */
-  wanted(): void;
+  /** `person`: the room's last line is a person's own, so they wait on the turn. */
+  wanted(person: boolean): void;
   personName(threadId: string): string | undefined;
   line(threadId: string, key: ServerLineKey, params: Record<string, string>): string;
   /** The room's lines as a member of it reads them (server/host/room-transcript.ts): each with the note that says who it
@@ -235,7 +236,7 @@ export function createLinkedRooms(deps: LinkedRoomsDeps) {
           return true;
         }
       }
-      if (!online) deps.wanted();
+      if (!online) deps.wanted(workOrigin(store.activePath(threadId).findLast((message) => message.role === "user" && message.kind === "text" && Boolean(message.text))).kind === "user");
       // Said once for each wait: a second message written while the place is away adds no second line.
       if (!online && !waiting) note(threadId, member.id, "server.rooms.linkedAway", { ok: true });
       return true;

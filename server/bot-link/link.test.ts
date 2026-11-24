@@ -98,7 +98,7 @@ function place(label: string, bots: Bot[], version?: number) {
   const sockets = new Set<import("node:net").Socket>();
 
   function boot(options: { limits?: { queueMs?: number; stallMs?: number } } = {}) {
-    rooms = createLinkedRooms({ dataDir: dir, store: roomStore as never, coordinator: () => coordinator, on: () => link.on(), linked: (peer) => link.has(peer), online: (peer) => link.online(peer), linkedBots: () => link.linked(), selfName: () => link.selfName(), wanted: () => link.wanted(),
+    rooms = createLinkedRooms({ dataDir: dir, store: roomStore as never, coordinator: () => coordinator, on: () => link.on(), linked: (peer) => link.has(peer), online: (peer) => link.online(peer), linkedBots: () => link.linked(), selfName: () => link.selfName(), wanted: (person) => link.wanted(person),
       window: (threadId, reader) => createRoomTranscript({ store: roomStore as never, teammateReportContext: () => "" }).window(threadId, "Sam", undefined, reader),
       opener: (botId, threadId) => (routineThreads.has(threadId) ? { requester: { kind: "routine_run", runId: "run-1", botId, threadId }, origin: { kind: "routine", source: "routine", ref: "routine-1" } } : undefined),
       personName: () => "Sam", line: (_threadId, key, params) => `${key} ${params.bot ?? params.bots}${params.place ? ` [${params.place}]` : ""}`, follow: (_groupId, _threadId, speaker, text, hop) => { followed.push(`${speaker.name} at ${hop}: ${text}`); } });
@@ -183,9 +183,10 @@ function place(label: string, bots: Bot[], version?: number) {
 
   /** One of this place's bots takes a turn in which it hands work on; the turn then ends and waits for it. */
   async function handOff(from: string, input: CoordinateBotsCall, local: (input: CoordinateBotsCall) => Promise<{ status: number; body: Record<string, unknown> }> = async () => ({ status: 200, body: { receipts: [] } }),
-    room?: { id: string; problem?: string }) {
+    room?: { id: string; problem?: string }, byRoutine = false) {
     const id = `${label}-turn-${++generation}`, address = room ? { groupId: room.id, botId: from, threadId: `${room.id}-thread` } : { botId: from, threadId: `${from}-chat` };
-    coordinator.beginTurn({ id, address, brief: "Sort it out", level: "full", origin: { kind: "user", request: "Sort it out" } });
+    // A person's own line, or a routine's run (whose work no person waits on).
+    coordinator.beginTurn({ id, address, brief: "Sort it out", level: "full", origin: byRoutine ? { kind: "outside" } : { kind: "user", request: "Sort it out" } });
     const answer = await link.coordinate(input, { sender: bots.find((bot) => bot.id === from)!, address, generation: id, external: false, handed: () => {}, ...(room?.problem ? { problem: room.problem } : {}) }, local);
     coordinator.endTurn(id, { ok: true, text: "Handed on." });
     return { id, answer, receipts: (answer.body.receipts ?? []) as Array<{ botId: string; outcome: string; detail: string; requestId?: string }> };
@@ -1282,6 +1283,22 @@ describe("a Cloud that sleeps", () => {
     release();
     await until(() => computer.results.length === 1, "the result comes back while the app still says asleep");
     expect((await computer.fetch("PUT", STATE_PATH, { cloud: "asleep", origin: cloudOrigin, heardAt: Date.now() + 60_000 })).body).toMatchObject({ asleep: true, online: false });
+  });
+
+  it("a routine's hand-off is not work a person waits on: it does not wake the Cloud past the Admin's word, and the bot is told it waits", async () => {
+    const { computer, cloud, cloudOrigin } = await two();
+    const home = sleepyHome(cloud);
+    await asleep(computer, cloudOrigin, home);
+    const before = cloud.syncs.length;
+    home.jump(12_000);
+    const { receipts } = await computer.handOff("local-writer", call(["Analyst"], "Count the orders"), undefined, undefined, true);
+    expect(receipts[0]!.detail).toContain("My Cloud is offline now");
+    expect(receipts[0]!.detail).not.toContain("waking");
+    // As before this change: one background exchange, which a Cloud that sleeps answers with asleep, and the link parks again.
+    await until(() => cloud.syncs.length > before && computer.dialer.state().asleep, "the link asks once and parks again");
+    expect(cloud.syncs.slice(before).every((one) => one.background)).toBe(true);
+    expect(home.power.sleeping()).toBe(true);
+    expect(computer.results).toEqual([]);
   });
 
   it("background link traffic never wakes a sleeping Cloud or keeps one awake", async () => {

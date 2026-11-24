@@ -187,7 +187,8 @@ export function createBotLink(deps: BotLinkDeps) {
 
   const live = new Map<string, Live>();
   const outboundListeners = new Set<(peer: string) => void>();
-  const wantedListeners = new Set<() => void>();
+  /** `person`: the work traces to a person's own line, so they wait on it (dial.ts may wake a sleeping Cloud for it). */
+  const wantedListeners = new Set<(person: boolean) => void>();
   /** Hand-offs this side sent whose result has not come back. */
   type Pending = { peer: string; frame: HandoffFrame; files: readonly PassedFile[]; settle(result: HostTurnResult): void; threadId: string; cancelled: boolean; busy?: boolean; tries: number };
   const pending = new Map<string, Pending>();
@@ -659,8 +660,10 @@ export function createBotLink(deps: BotLinkDeps) {
         if (!duplicate && call.files?.length) deps.files?.crossed(node.id, "sent", { botId: context.sender.id, name: context.sender.name }, call.files);
         const files = call.files?.length && !deps.files ? " Its files were not sent: files do not cross to the other place here, so put what it needs in the message." : "";
         const online = isOnline(remote.peer);
-        // Said first, so a computer whose Cloud sleeps has asked it to wake before the bot is told what happens next.
-        if (!online) for (const listener of wantedListeners) listener();
+        // Said first, so a computer whose Cloud sleeps has asked it to wake before the bot is told what happens next. Only
+        // work a person's own line started may wake it; a routine's or a scheduled run's waits as before.
+        const person = coordinator.status(node.id)?.assignment?.origin?.kind === "person";
+        if (!online) for (const listener of wantedListeners) listener(person);
         const told = !online && waking.has(remote.peer) ? `Finish your turn and tell the person ${place} is waking up for it.` : `Finish your turn and tell the person it waits for ${place}.`;
         receipts.push(receipt(remote, duplicate && node.status !== "queued" ? "injected" : "queued",
           duplicate ? `already sent to ${remote.bot.name} on ${place}: it is ${node.status === "queued" ? "queued" : "under way"} and ${returns}`
@@ -884,8 +887,8 @@ export function createBotLink(deps: BotLinkDeps) {
     onOutgoing(listener: (peer: string) => void): () => void { outboundListeners.add(listener); return () => outboundListeners.delete(listener); },
     /** Work was handed to a place that is not connected: a computer asks its Cloud for it now. */
     /** There is work for a place that is not connected, handed over outside `coordinate` (a room turn). */
-    wanted(): void { for (const listener of wantedListeners) listener(); },
-    onWanted(listener: () => void): () => void { wantedListeners.add(listener); return () => wantedListeners.delete(listener); },
+    wanted(person = false): void { for (const listener of wantedListeners) listener(person); },
+    onWanted(listener: (person: boolean) => void): () => void { wantedListeners.add(listener); return () => wantedListeners.delete(listener); },
     /** The dialer is waking this place, asleep, for work a person waits on (until it answers or parks again). */
     setWaking(peer: string, on: boolean): void { if (on) waking.add(peer); else waking.delete(peer); },
     sleeps: () => state?.sleeps === true,

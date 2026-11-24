@@ -87,7 +87,7 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
   };
   /** What the app was last told of each room's far members. */
   const farTold = new Map<string, string>();
-  const rooms = createLinkedRooms({ dataDir: deps.dataDir, store, coordinator: deps.coordinator, on: () => link.on(), linked: (peer) => link.has(peer), online: (peer) => link.online(peer), linkedBots: () => link.linked(), selfName: () => link.selfName(), wanted: () => link.wanted(),
+  const rooms = createLinkedRooms({ dataDir: deps.dataDir, store, coordinator: deps.coordinator, on: () => link.on(), linked: (peer) => link.has(peer), online: (peer) => link.online(peer), linkedBots: () => link.linked(), selfName: () => link.selfName(), wanted: (person) => link.wanted(person),
     personName: deps.personName, line: deps.roomLine, window: deps.roomWindow, log: deps.log, ...(deps.roomOpener ? { opener: deps.roomOpener } : {}), ...(deps.roomFollow ? { follow: deps.roomFollow } : {}) });
   const link = createBotLink({
     dataDir: deps.dataDir, coordinator: deps.coordinator, kick: deps.kick, log: deps.log, rooms, directoryChanged: () => { syncStandIns(); }, revoke: (sessionId) => { deps.sessions.revoke(sessionId); },
