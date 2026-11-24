@@ -1,0 +1,12 @@
+unknown flag: --clipboard
+
+Usage:  gh auth login [flags]
+
+Flags:
+  -p, --git-protocol string   The protocol to use for git operations on this host: {ssh|https}
+  -h, --hostname string       The hostname of the GitHub instance to authenticate with
+      --insecure-storage      Save authentication credentials in plain text instead of credential store
+  -s, --scopes strings        Additional authentication scopes to request
+  -w, --web                   Open a browser to authenticate
+      --with-token            Read token from standard input
+  

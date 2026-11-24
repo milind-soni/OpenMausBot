@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { engineInstallRoots } from "../engine-roots.ts";
+import { githubFolders } from "../github/sign-in.ts";
 import { BOX_MUTATIONS, CPU_LIST_FILES, argvPaths, bwrapArgs, planBox, taskWorkspaceIds, under, visibleInBox, type BoxAudience, type BoxMutation, type BoxRequest, type BoxSetup } from "./plan.ts";
 
 const home = "/data";
@@ -263,6 +264,23 @@ linuxBox("the box plan", () => {
     expect(visibleInBox(ask({ XDG_CACHE_HOME: join(dataDir, "workspaces", "b", "cache") }, true), join(dataDir, "workspaces", "b", "cache", "x"))).toBe("rw");
     // An engine OpenMausBot starts keeps the home it was given there.
     expect(visibleInBox(ask({ CODEX_HOME: join(dataDir, "providers", "codex-1") }, false), join(dataDir, "providers", "codex-1", "auth.json"))).toBe("rw");
+  });
+
+  it("never shows a GitHub sign-in's folder (its token, gh's config and HOME), whatever the turn asks", () => {
+    const owner = githubFolders(dataDir, "owner"), member = githubFolders(dataDir, `p_${"a".repeat(22)}`);
+    const files = [join(owner.config, "hosts.yml"), join(owner.home, ".gitconfig"), join(member.config, "hosts.yml"), join(dataDir, "github")];
+    const memberHome = join(dataDir, "engine-homes", "member-aaaaaaaaaaaaaaaa");
+    const plans = [
+      turn(),
+      planBox(setup(), { command: "opencode", args: ["acp"], cwd, env: { HOME: home }, botThreads: true }),
+      planBox(setup(), { command: "/usr/local/bin/claude", args: [], cwd, env: { HOME: memberHome }, home: memberHome }),
+      // A command line or a configured server's environment naming the folder is not a grant.
+      planBox(setup(), { command: "/usr/bin/gh", args: ["auth", "token", join(owner.config, "hosts.yml")], cwd, env: { HOME: home }, botId: "bot-a" }),
+      planBox(setup(), { command: "sh", args: [], cwd, env: { XDG_CONFIG_HOME: owner.home, XDG_CACHE_HOME: join(dataDir, "github") }, botId: "bot-a", configured: true }),
+    ];
+    for (const plan of plans) for (const file of files) expect(visibleInBox(plan, file), file).toBe("none");
+    // The check bites: with the data folder bound, the token file is there.
+    expect(visibleInBox(turn(["bind-data"]), join(owner.config, "hosts.yml"))).toBe("rw");
   });
 
   it("each mutation opens exactly the hole it names", () => {
