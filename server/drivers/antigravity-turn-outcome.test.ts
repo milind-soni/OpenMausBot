@@ -49,7 +49,7 @@ const INVALID_SIGNATURE_ERROR = errorText(
 const NOT_FOUND_ERROR = errorText("Error 404, Message: Requested entity was not found., Status: NOT_FOUND, Details: []");
 // Antigravity 1.5 with a Google account writes "STATUS (code NNN): message", then the HTTP body.
 const STATUS_NOT_FOUND_ERROR = '\u00127NOT_FOUND (code 404): Requested entity was not found.\u001a\u0080\u0001HTTP 404 Not Found\n\n{"error":{"code":404,"message":"Requested entity was not found.","status":"NOT_FOUND"}}';
-// The model's reply quoting the agent's quota notice is an ordinary planner response.
+// The agent can return this terminal quota notice as a successful planner response without doing model work.
 const QUOTED_NOTICE = "Usage Limit Reached\n\nYou have reached your current quota for this period. Your limit will reset in 1 hour.";
 
 const scratch: string[] = [];
@@ -98,9 +98,11 @@ describe("watchAntigravityPromptOutcome", () => {
     expect(quota!.message).toMatch(new RegExp(`^This ${NAME.replace(/[()]/g, "\\$&")} account has reached its usage limit, which resets .+\\. Until then, switch this bot to another AI\\.$`));
     // A turn that adds no step is not failed by the error step the turn before it left.
     expect(await turn([])).toBeUndefined();
-    // The earlier error step is outside this turn.
+    // The earlier error step is outside this turn, but this exact terminal notice is still a quota failure.
     expect(await turn([[USER_INPUT, input], [PLANNER_RESPONSE, QUOTED_NOTICE]], { stopReason: "end_turn", usage: { inputTokens: 42, outputTokens: 3, totalTokens: 54 } }))
-      .toBeUndefined();
+      .toMatchObject({ acpUsageLimit: true, facts: { limitResetsAt: 3_600_000 } });
+    // Similar substantive model text is not intercepted.
+    expect(await turn([[USER_INPUT, input], [PLANNER_RESPONSE, `The UI said: ${QUOTED_NOTICE}`]])).toBeUndefined();
     expect(await turn([[USER_INPUT, input], [ERROR_MESSAGE, RATE_LIMIT_ERROR]])).toMatchObject({ acpUsageLimit: true, facts: { limitResetsAt: 42_000 } });
     const stamped = async (stamp: string, at: number) => {
       const check = await watchAntigravityPromptOutcome(NAME, directory, sessionId, () => at);

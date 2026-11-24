@@ -38,6 +38,7 @@ const API_ERROR = /Error (\d{3}), Message: (.+?), Status: ([A-Z_]+)/s;
 // Antigravity 1.5 with a Google account writes "STATUS (code NNN): message".
 const STATUS_ERROR = /(?<![A-Z_])([A-Z_]+) \(code (\d{3})\): (\P{Cc}+)/u;
 const QUOTA_EXHAUSTED = /\breason:QUOTA_EXHAUSTED\b/;
+const TERMINAL_QUOTA_NOTICE = /^Usage Limit Reached\s+You have reached your current quota for this period\.\s+Your limit will reset in (\d+(?:\.\d+)?) (minute|hour|day)s?\.?$/i;
 // Claude rejects a saved thinking block without a valid signature. It sits in the native history, so every later prompt
 // to that session fails the same way.
 const INVALID_THINKING_SIGNATURE = /\bmessages\.\d+\.content\.\d+(?:\.thinking\.signature: Field required|: Invalid `signature` in `thinking` block)/;
@@ -113,7 +114,7 @@ function lastStepIndex(database: DatabaseSync): number {
 const lastStepAfter = (index: number) => (database: DatabaseSync): LastStep | undefined => {
   const row = database.prepare("SELECT idx, step_type AS type, length(step_payload) AS bytes FROM steps WHERE idx > ? ORDER BY idx DESC LIMIT 1").get(index);
   if (typeof row?.type !== "number") return undefined;
-  if (row.type !== ERROR_STEP_TYPE || typeof row.bytes !== "number" || row.bytes > MAX_STEP_BYTES) return { type: row.type, payload: null };
+  if ((row.type !== ERROR_STEP_TYPE && row.type !== PLANNER_RESPONSE_STEP_TYPE) || typeof row.bytes !== "number" || row.bytes > MAX_STEP_BYTES) return { type: row.type, payload: null };
   const payload = database.prepare("SELECT substr(step_payload, 1, ?) AS payload FROM steps WHERE idx = ?").get(MAX_ERROR_PAYLOAD_BYTES, row.idx)?.payload;
   const reachedModel = database.prepare("SELECT 1 FROM steps WHERE idx > ? AND step_type = ? LIMIT 1").get(index, PLANNER_RESPONSE_STEP_TYPE) !== undefined;
   return { type: row.type, payload: payload instanceof Uint8Array ? payload : null, reachedModel };
@@ -173,6 +174,16 @@ export function antigravityTurnFailure(
   now: number,
   timeZone?: string,
 ): AcpReportedFailure | undefined {
+  if (step?.type === PLANNER_RESPONSE_STEP_TYPE && step.payload !== null) {
+    const response = new TextDecoder().decode(step.payload).trim();
+    const terminal = TERMINAL_QUOTA_NOTICE.exec(response);
+    if (terminal) {
+      const amount = Number(terminal[1]);
+      const unit = terminal[2]!.toLowerCase();
+      const unitMs = unit === "minute" ? 60_000 : unit === "hour" ? 3_600_000 : 24 * 3_600_000;
+      return restarting(usageLimit(provider, `quotaResetDelay:${amount * unitMs}ms `, now, timeZone));
+    }
+  }
   const errorText = step?.type === ERROR_STEP_TYPE ? new TextDecoder().decode(step.payload ?? new Uint8Array()) : undefined;
   // The agent maps only the SDK's QUOTA_EXHAUSTED stop reason to `refusal`.
   if (errorText === undefined && stopReason !== "refusal") return undefined;
