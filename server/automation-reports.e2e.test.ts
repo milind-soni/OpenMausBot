@@ -146,6 +146,7 @@ it("marks the notice of a run its schedule started as a scheduled report", async
   await s.settled(id);
   await s.reported(id, "posted");
   expect(await s.run(id)).toMatchObject({ triggerSource: "schedule" });
+  await expect.poll(() => s.notified().some((notification) => notification.kind === "done"), { timeout: 10_000 }).toBe(true);
   expect(s.notified().filter((notification) => notification.kind === "done")).toEqual([expect.objectContaining({ threadId: s.main, body: "Morning digest: Two new orders overnight.", routine: true })]);
 }, 120_000);
 
