@@ -2,6 +2,7 @@ import { rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { fromMarkdown } from "mdast-util-from-markdown";
 
 import { WIDGET_SAMPLES } from "../../shared/widget-samples.ts";
 import { createAgentCard, prepareWidgetPress } from "../chat-widgets.ts";
@@ -49,6 +50,22 @@ async function serve(store: Store): Promise<string> {
 }
 
 describe("GET /api/threads/:id/export", () => {
+  it.each(["```js\nconst answer = 42;", "~~~js\nconst answer = 42;"])("keeps a follow-up outside an unfinished code block: %s", async (text) => {
+    const store = new Store(() => sonnet);
+    const bot = store.createBot({ name: "Coder" }, { seedMessages: false });
+    store.appendMessage(bot.threadId, { role: "bot", kind: "text", text });
+    store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "Please use Python instead." });
+    const base = await serve(store);
+
+    const response = await fetch(`${base}/api/threads/${bot.threadId}/export`);
+    expect(response.status).toBe(200);
+    const nodes = fromMarkdown(await response.text()).children;
+    expect(nodes.filter((node) => node.type === "code").map((node) => node.value)).toEqual(["const answer = 42;"]);
+    expect(nodes.some((node) => node.type === "paragraph" && node.children.some((child) => child.type === "text" && child.value === "Please use Python instead."))).toBe(true);
+    const json = await (await fetch(`${base}/api/threads/${bot.threadId}/export?format=json`)).json() as { messages: Array<{ text: string }> };
+    expect(json.messages.map((message) => message.text)).toEqual([text, "Please use Python instead."]);
+  });
+
   it("exports a widget as its text fallback, between the lines around it", async () => {
     const store = new Store(() => sonnet);
     const bot = store.createBot({ name: "Scout" }, { seedMessages: false });

@@ -140,16 +140,16 @@ describe("message gallery", () => {
       "Plain prose /workspace/private.txt",
     ].join("\n");
     expect(collectMessageFiles(text, [image.path])).toEqual([
-      { path: "./report.pdf", name: "report.pdf", linked: true },
-      { path: "./demo.mp4", name: "demo.mp4", linked: true },
+      { path: "./report.pdf", shownPath: "./report.pdf", name: "report.pdf", linked: true },
+      { path: "./demo.mp4", shownPath: "./demo.mp4", name: "demo.mp4", linked: true },
     ]);
   });
 
   it("handles Windows and encoded paths while keeping a safe filename", () => {
     expect(collectMessageFiles("[release](file:///C:/work/release%20notes.pdf) [video](./demo.MP4#section)"))
       .toEqual([
-        { path: "file:///C:/work/release%20notes.pdf", name: "release notes.pdf", linked: true },
-        { path: "./demo.MP4#section", name: "demo.MP4", linked: true },
+        { path: "file:///C:/work/release%20notes.pdf", shownPath: "C:/work/release notes.pdf", name: "release notes.pdf", linked: true },
+        { path: "./demo.MP4#section", shownPath: "./demo.MP4", name: "demo.MP4", linked: true },
       ]);
     expect(isVideoAttachment("./demo.MP4#section")).toBe(true);
     expect(isVideoAttachment("./movie.mp4.html")).toBe(false);
@@ -157,16 +157,16 @@ describe("message gallery", () => {
 
   it("sends a Windows path with its backslash before punctuation intact", () => {
     expect(collectMessageFiles("[report](C:\\Users\\Maus\\.openmausbot\\workspaces\\bot\\report.md)")).toEqual([
-      { path: "C:\\Users\\Maus\\.openmausbot\\workspaces\\bot\\report.md", name: "report.md", linked: true },
+      { path: "C:\\Users\\Maus\\.openmausbot\\workspaces\\bot\\report.md", shownPath: "C:\\Users\\Maus\\.openmausbot\\workspaces\\bot\\report.md", name: "report.md", linked: true },
     ]);
   });
 
   it("does not decode file URLs twice or mistake filename characters for URL suffixes", () => {
     expect(collectMessageFiles("[video](file:///work/demo%23one.mp4) [percent](file:///work/r%2520.pdf) [space](file:///work/r%20.pdf)"))
       .toEqual([
-        { path: "file:///work/demo%23one.mp4", name: "demo#one.mp4", linked: true },
-        { path: "file:///work/r%2520.pdf", name: "r%20.pdf", linked: true },
-        { path: "file:///work/r%20.pdf", name: "r .pdf", linked: true },
+        { path: "file:///work/demo%23one.mp4", shownPath: "/work/demo#one.mp4", name: "demo#one.mp4", linked: true },
+        { path: "file:///work/r%2520.pdf", shownPath: "/work/r%20.pdf", name: "r%20.pdf", linked: true },
+        { path: "file:///work/r%20.pdf", shownPath: "/work/r .pdf", name: "r .pdf", linked: true },
       ]);
     expect(isVideoAttachment("file:///work/demo%23one.mp4")).toBe(true);
   });
