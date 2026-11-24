@@ -12,18 +12,21 @@
 //   FAKE_PI_PERSIST_SESSION  persist prompts to disk and load them on switch_session
 //   FAKE_PI_STEER_REFUSE  answer a steer with an explicit success:false
 //   FAKE_PI_STEER_OUT_OF_ORDER  hold the first steer until a second arrives, then refuse the first and accept the second
+//   FAKE_PI_CONTEXT_WINDOW  positive token count attached to every listed model
 
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { playStreamScript, streamScript, type StreamScript } from "./stream-script.ts";
 
 const mode = process.env.FAKE_PI_MODE ?? "happy";
+const listedWindow = Number(process.env.FAKE_PI_CONTEXT_WINDOW);
+const modelWindow = Number.isFinite(listedWindow) && listedWindow > 0 ? { contextWindow: listedWindow } : {};
 const modelPairs = (process.env.FAKE_PI_MODELS ?? "ollama-cloud/glm-5.2,openai/gpt-4o")
   .split(",")
   .filter(Boolean)
   .map((pair) => {
     const [provider, id] = pair.split("/");
-    return { provider: provider ?? "x", id: id ?? "m", name: id ?? "m" };
+    return { provider: provider ?? "x", id: id ?? "m", name: id ?? "m", ...modelWindow };
   });
 
 const argv = process.argv.slice(2);
