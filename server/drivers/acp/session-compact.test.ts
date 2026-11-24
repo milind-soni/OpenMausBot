@@ -54,9 +54,10 @@ describe("an ACP agent's own compaction of a live session", () => {
     expect(await acpCompactSession(deps)("thread", { session: SESSION })).toMatchObject({ ok: false, reason: "the agent reported no compaction" });
   });
 
-  it("returns on Stop while the pre-send check is still reading, sending neither /compact nor a cancel", async () => {
+  it("returns on Stop while the pre-send check is still reading, sending neither /compact nor a cancel and keeping the receipt", async () => {
     const { deps, acp, active } = setup(({ reply }) => reply(RESULT));
     deps.promptOutcome = () => new Promise(() => {});
+    vi.mocked(deletePromptSplitReceipt).mockClear();
     const stop = new AbortController();
     const compacting = acpCompactSession(deps)("thread", { session: SESSION, signal: stop.signal });
     await vi.waitFor(() => expect(active.has("thread")).toBe(true));
@@ -66,6 +67,7 @@ describe("an ACP agent's own compaction of a live session", () => {
     expect(acp.request).not.toHaveBeenCalled();
     expect(acp.send).not.toHaveBeenCalled();
     expect(deps.armIdle).toHaveBeenCalledWith("thread");
+    expect(deletePromptSplitReceipt).not.toHaveBeenCalled();
   });
 
   it("does not send /compact when the instance changed while the pre-send check read", async () => {
@@ -195,13 +197,6 @@ describe("an ACP agent's own compaction of a live session", () => {
     vi.mocked(deletePromptSplitReceipt).mockClear();
     expect(await acpCompactSession(deps)("thread", { session: SESSION })).toMatchObject({ ok: false, reason: "the agent exited during compaction" });
     expect(deletePromptSplitReceipt).toHaveBeenCalledWith("fixtureAgent", JSON.stringify(["thread", SESSION]));
-  });
-
-  it("keeps the prompt-split receipt when /compact was never sent", async () => {
-    const { deps } = setup(({ reply }) => reply(RESULT), { compactCommand: undefined });
-    vi.mocked(deletePromptSplitReceipt).mockClear();
-    expect(await acpCompactSession(deps)("thread", { session: SESSION })).toMatchObject({ ok: false });
-    expect(deletePromptSplitReceipt).not.toHaveBeenCalled();
   });
 
   it("keeps a reply's usage and lets no turn carry the session on when Stop cuts the failure check short", async () => {
