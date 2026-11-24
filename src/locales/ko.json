@@ -7856,5 +7856,20 @@
   "skillBurger.pill.running": "실행 중… {count}",
   "skillBurger.pill.stopped": "멈춤",
   "skillBurger.pill.addPath": "경로 추가",
-  "skillBurger.card.madeBy": "{name}이(가) 만듦"
+  "skillBurger.card.madeBy": "{name}이(가) 만듦",
+  "server.allBotsSkill.create.title": "스킬 \"{name}\"을(를) 모든 봇에 넣을까요?",
+  "server.allBotsSkill.create.done": "스킬 \"{name}\"이(가) 모든 봇에 있습니다",
+  "server.allBotsSkill.update.title": "모든 봇에서 스킬 \"{name}\"을(를) 업데이트할까요?",
+  "server.allBotsSkill.update.done": "모든 봇에서 스킬 \"{name}\"을(를) 업데이트했습니다",
+  "server.allBotsSkill.delete.title": "모든 봇에서 스킬 \"{name}\"을(를) 제거할까요?",
+  "server.allBotsSkill.delete.done": "모든 봇에서 스킬 \"{name}\"을(를) 제거했습니다",
+  "server.allBotsSkill.body": "모든 봇이 같은 사본을 사용하며, 나중에 추가하는 봇도 마찬가지입니다. 한 봇에서만 끄려면 그 봇의 스킬 페이지에서 끄세요.",
+  "server.allBotsSkill.deleteBody": "모든 봇에서 제거됩니다. 이전부터 이 스킬이 있던 봇은 자신의 사본을 유지합니다. 아래에 SKILL.md가 표시되며 비밀 정보는 가려져 있습니다.",
+  "skills.allBots.tag": "모든 봇",
+  "skills.allBots.tagHint": "모든 봇에 있으며, 나중에 추가하는 봇에도 들어갑니다. 스위치는 이 봇에서만 끕니다.",
+  "skills.allBots.use": "모든 봇에서 사용",
+  "skills.allBots.useName": "{name}을(를) 모든 봇에서 사용",
+  "skills.allBots.removeConfirm": "“{name}”을(를) 모든 봇에서 제거할까요?",
+  "skills.allBots.kept": "이 봇들은 서로 다른 자체 사본을 유지합니다: {names}",
+  "skills.allBots.failed": "이 스킬을 모든 봇에 넣지 못했습니다."
 }

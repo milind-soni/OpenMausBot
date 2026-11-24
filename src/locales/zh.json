@@ -42,7 +42,7 @@
   "server.allBotsSkill.delete.title": "要从你的所有机器人上移除技能“{name}”吗？",
   "server.allBotsSkill.delete.done": "已从你的所有机器人上移除技能“{name}”",
   "server.allBotsSkill.body": "你的所有机器人都使用同一份副本，包括以后添加的机器人。要只为某个机器人关闭，请在该机器人的技能页面操作。",
-  "server.allBotsSkill.deleteBody": "它会从你所有拥有它的机器人上移除。下面显示它的 SKILL.md，其中的机密已被隐藏。",
+  "server.allBotsSkill.deleteBody": "它会从你的所有机器人上移除；之前就有它的机器人会保留自己的副本。下面显示它的 SKILL.md，其中的机密已被隐藏。",
   "skills.allBots.tag": "所有机器人",
   "skills.allBots.tagHint": "在你的所有机器人上，包括以后添加的。开关只为这个机器人关闭它。",
   "skills.allBots.use": "用于所有机器人",

@@ -3889,5 +3889,20 @@
   "skillBurger.pill.running": "चल रहा है… {count}",
   "skillBurger.pill.stopped": "रुका",
   "skillBurger.pill.addPath": "रास्ता जोड़ें",
-  "skillBurger.card.madeBy": "{name} ने बनाया"
+  "skillBurger.card.madeBy": "{name} ने बनाया",
+  "server.allBotsSkill.create.title": "स्किल \"{name}\" को अपने सभी बॉट्स पर लगाएँ?",
+  "server.allBotsSkill.create.done": "स्किल \"{name}\" आपके सभी बॉट्स पर है",
+  "server.allBotsSkill.update.title": "अपने सभी बॉट्स पर स्किल \"{name}\" अपडेट करें?",
+  "server.allBotsSkill.update.done": "आपके सभी बॉट्स पर स्किल \"{name}\" अपडेट हो गई",
+  "server.allBotsSkill.delete.title": "स्किल \"{name}\" को अपने सभी बॉट्स से हटाएँ?",
+  "server.allBotsSkill.delete.done": "स्किल \"{name}\" आपके सभी बॉट्स से हटा दी गई",
+  "server.allBotsSkill.body": "आपके सभी बॉट्स एक ही कॉपी इस्तेमाल करते हैं, बाद में जोड़े गए बॉट्स भी। किसी एक बॉट के लिए बंद करने हेतु उस बॉट का Skills पेज खोलें।",
+  "server.allBotsSkill.deleteBody": "यह आपके सभी बॉट्स से हट जाती है; जिस बॉट के पास यह पहले से थी, वह अपनी कॉपी रखता है। इसकी SKILL.md नीचे दिखाई गई है, सभी सीक्रेट छिपे हुए हैं।",
+  "skills.allBots.tag": "सभी बॉट्स",
+  "skills.allBots.tagHint": "आपके सभी बॉट्स पर, बाद में जोड़े गए बॉट्स पर भी। स्विच इसे केवल इस बॉट के लिए बंद करता है।",
+  "skills.allBots.use": "सभी बॉट्स पर इस्तेमाल करें",
+  "skills.allBots.useName": "{name} को अपने सभी बॉट्स पर इस्तेमाल करें",
+  "skills.allBots.removeConfirm": "“{name}” को अपने सभी बॉट्स से हटाएँ?",
+  "skills.allBots.kept": "ये बॉट्स अपनी अलग कॉपी रखते हैं: {names}",
+  "skills.allBots.failed": "यह स्किल आपके सभी बॉट्स पर नहीं लगाई जा सकी।"
 }

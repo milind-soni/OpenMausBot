@@ -18,7 +18,6 @@ import { readSectionContext } from "../section-context.ts";
 import { librarySkillFilePath, librarySkillOptOuts, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, skillsLibraryEnabled } from "../skill-library.ts";
 import { findWorkflowSkill, skillBurgerEnabled, workflowSkillsPrompt } from "../skill-burger/store.ts";
 import { librarySkillFiles, ownSkillFiles, type StoredSkillFiles } from "../skill-side-files.ts";
-import { allBotsRootOfBot, allBotsSkillFile, readAllBotsSkillFile } from "../skills-for-all-bots.ts";
 import {
   conversationAssignedSkills,
   prepareShareNote,
@@ -91,7 +90,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
 
   /** The bot's own skills, and its library skills while the library is on; an imported skill of the same name yields. */
   const ownSkills = (bot: BotRecord) =>
-    resolveBotSkills(bot.id, skillsLibraryEnabled(cfg) ? bot.assignedSkills ?? [] : undefined);
+    skillsLibraryEnabled(cfg) ? resolveBotSkills(bot.id, bot.assignedSkills ?? []) : listSkills(bot.id);
   /** What the bot is for, as its settings and its department's shared instructions say: what its skills from this
    * computer are picked by. */
   const aboutBot = (bot: BotRecord): string => {
@@ -115,7 +114,6 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     if (own !== null) return own;
     // Private wins collisions: a private skill that no longer verifies must not fall through to a same-named shared one.
     if (listSkills(bot.id).some((skill) => skill.name === name)) return null;
-    if (allBotsSkillFile(bot.id, name)) return readAllBotsSkillFile(bot.id, name);
     // The library fallback is by assignment only, never by name alone.
     if (skillsLibraryEnabled(cfg) && listLibrarySkills().some((skill) => skill.name === name && (bot.assignedSkills?.includes(name) || (skill.everyBot && !librarySkillOptOuts(bot.id).has(name))))) return readLibrarySkillFile(name);
     if (readImportedSkills()[name]) return readImportedSkillFile(name);
@@ -127,8 +125,6 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
   const readBotSkillFiles = (bot: BotRecord, name: string): StoredSkillFiles => {
     if (readSkillFile(bot.id, name) !== null) return ownSkillFiles(bot.id, name);
     if (listSkills(bot.id).some((skill) => skill.name === name)) return null;
-    const everywhere = allBotsSkillFile(bot.id, name) && allBotsRootOfBot(bot.id);
-    if (everywhere) return librarySkillFiles(name, everywhere);
     if (skillsLibraryEnabled(cfg) && listLibrarySkills().some((skill) => skill.name === name && (bot.assignedSkills?.includes(name) || (skill.everyBot && !librarySkillOptOuts(bot.id).has(name))))) return librarySkillFiles(name);
     return [];
   };
@@ -321,7 +317,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       const project = thread ? projectInUse(bot, thread, cwd, instance, assigned) : [];
       return skillsSystemPrompt(bot.id, assigned, threadId === undefined ? undefined : conversationStartedAt(threadId)) +
         importedSkillsPrompt(listed, available.length - listed.length) + projectSkillsPrompt(project) +
-        (skillsLibraryEnabled(cfg) || !skillBurgerEnabled(cfg) ? "" : workflowSkillsPrompt(bot.id)); // with the library on, saved workflows are every-bot library skills already
+        (skillsLibraryEnabled(cfg) || !skillBurgerEnabled(cfg) ? "" : workflowSkillsPrompt(bot.id, undefined, new Set(listSkills(bot.id).map((skill) => skill.name)))); // with the library on, saved workflows are every-bot library skills already
     },
 
     /** The imported skills a turn links into its task folder: the same ones its index lists, so an engine that loads
@@ -363,7 +359,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       }
       if (files.size < mentioned.length) add(projectInUse(bot, threadId, cwd, instance, assigned).filter((skill) => !skill.modelOnly));
       // A Skill Burger runs exactly with run_workflow, from any bot.
-      const burgers = !skillBurgerEnabled(cfg) ? [] : mentioned.flatMap((name) => { const found = findWorkflowSkill(bot.id, name); return found ? [{ name, found }] : []; });
+      const burgers = !skillBurgerEnabled(cfg) ? [] : mentioned.flatMap((name) => { const found = !files.has(name) && findWorkflowSkill(bot.id, name); return found ? [{ name, found }] : []; });
       for (const { name } of burgers) if (!files.has(name)) files.set(name, librarySkillFilePath(name));
       const expanded = skillCommandTurnText(text, files, typed, ownStart);
       return burgers.length ? `${expanded}\n\n${burgers.map(({ name, found }) => `/${name} is a saved Skill Burger: run it with the run_workflow tool (name "${name}"), filling its args from the request, rather than by hand.${burgerInputs(found.workflow)}`).join(" ")}` : expanded;

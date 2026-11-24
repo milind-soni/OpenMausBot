@@ -284,7 +284,7 @@
   "server.allBotsSkill.delete.title": "Remove skill \"{name}\" from all your bots?",
   "server.allBotsSkill.delete.done": "Skill \"{name}\" removed from all your bots",
   "server.allBotsSkill.body": "Every bot of yours uses the same copy, including bots you add later. Turn it off for one bot on that bot's Skills page.",
-  "server.allBotsSkill.deleteBody": "It goes from every bot of yours that has it. Its SKILL.md is shown below, with any secrets hidden.",
+  "server.allBotsSkill.deleteBody": "It goes from every bot of yours; a bot that had it before keeps its own copy. Its SKILL.md is shown below, with any secrets hidden.",
   "server.mcp.listed": "Checked MCP servers",
   "server.mcp.on": "Turned on",
   "server.mcp.switchedOff": "Switched off",

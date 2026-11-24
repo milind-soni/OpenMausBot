@@ -1,11 +1,12 @@
-// Skills a person keeps on all of their bots on this server: one copy per person, read by each bot of theirs when it
-// lists its skills, so a bot made later has them too and removing one takes it off every bot at once. The copy is kept in
-// the skills library's own record format (skill-library.ts), one library root per person: the per-person form of the
-// library's every-bot flag. Off a team that person is the server's one owner and every bot here is theirs; on a Team
-// Cloud a member's root reaches only the bots that report to them (botOwner), never a bot nobody owns and never another
-// member's. A bot can turn one off for itself only (all-bots-off.json beside its own skill state). Nothing here runs at
-// server start: the store is read when a bot lists its skills, as its own skills are.
-import { createHash } from "node:crypto";
+// Skills a person keeps on all of their bots on this server. The person's record is the source of truth: one copy per
+// person, kept in the skills library's own record format (skill-library.ts) under a root of its own, the per-person form
+// of the library's every-bot flag. Each bot of theirs holds a managed copy of it among its own skills, marked as shared,
+// so everything that reads a bot's own skills (its prompt index, its engine's skill folders, a bot box, a move, a
+// template) reads it with no new path. A bot's copy is brought up to date as its skills are listed, so a bot made later
+// gets it, an update rewrites it and a removal takes it away; the bot's own switch for it stays its own.
+// Whose bots: off a team, every bot on the server; on a Team Cloud only the bots that report to the member (botOwner),
+// never a bot nobody owns and never another member's. A server several people share without a team has none.
+import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
@@ -13,8 +14,8 @@ import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import { botOwner, type OwnedBot } from "../shared/bot-owner.ts";
-import { isSkillName } from "../shared/skill-md.ts";
-import { librarySkillFilePath, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, type LibrarySkillListing } from "./skill-library.ts";
+import { readLibrarySkillFile, readSkillLibraryIndex, type SkillLibraryEntry } from "./skill-library.ts";
+import type { SharedSkillMark } from "./skills.ts";
 
 export const SKILLS_FOR_ALL_BOTS_DIR = "skills-for-all-bots";
 
@@ -23,6 +24,8 @@ export type AllBotsBot = OwnedBot & { id: string; home?: unknown };
 
 interface Wiring {
   team: boolean;
+  /** Several people sign in to this server without it being a Team Cloud: nobody's "all my bots" is known here. */
+  sharedWithoutTeam?(): boolean;
   bot(id: string): AllBotsBot | null | undefined;
   bots(): readonly AllBotsBot[];
 }
@@ -32,10 +35,17 @@ let wiring: Wiring | null = null;
 /** Set once by the server; unset (tests of one module, tools) there are no all-bots skills. */
 export function wireSkillsForAllBots(next: Wiring | null): void {
   wiring = next;
+  stores.clear();
 }
 
 export function skillsForAllBotsOnTeam(): boolean {
   return wiring?.team === true;
+}
+
+export const SHARED_WITHOUT_TEAM = "Several people use this server without it being a Team Cloud, so \"all my bots\" is not available here.";
+
+export function allBotsUnavailable(): boolean {
+  return !wiring || (!wiring.team && wiring.sharedWithoutTeam?.() === true);
 }
 
 /** Whose store: "mine" off a team; on a Team Cloud the member's own, by a digest of their address. */
@@ -45,9 +55,10 @@ export function allBotsScopeOfPerson(email: string | null | undefined, team = sk
   return key ? `person-${createHash("sha256").update(key).digest("hex").slice(0, 32)}` : null;
 }
 
-/** Null for a bot that has no all-bots skills: a stand-in, or on a Team Cloud a bot nobody owns. */
+/** Null for a bot that has no all-bots skills: a stand-in, on a Team Cloud a bot nobody owns, or any bot of a server
+ * several people share without a team. */
 export function allBotsScopeOfBot(bot: AllBotsBot | null | undefined, team = skillsForAllBotsOnTeam()): string | null {
-  if (!bot || bot.home) return null;
+  if (!bot || bot.home || allBotsUnavailable()) return null;
   return team ? allBotsScopeOfPerson(botOwner(bot), true) : "mine";
 }
 
@@ -57,83 +68,55 @@ export function allBotsRoot(scope: string, dataDir: string = DATA_DIR): string {
 
 /** The bots a store reaches: every bot of that person here, the ones made later included. */
 export function botsInAllBotsScope(scope: string): AllBotsBot[] {
-  const team = skillsForAllBotsOnTeam();
-  return (wiring?.bots() ?? []).filter((bot) => allBotsScopeOfBot(bot, team) === scope);
+  return (wiring?.bots() ?? []).filter((bot) => allBotsScopeOfBot(bot) === scope);
 }
 
-export function allBotsRootOfBot(botId: string): string | null {
-  const scope = allBotsScopeOfBot(wiring?.bot(botId));
-  return scope ? allBotsRoot(scope) : null;
-}
+/** What a bot's copy is checked against: the store's SKILL.md and the files beside it. */
+export const entryKey = (entry: Pick<SkillLibraryEntry, "sha256" | "filesSha256">): string => `${entry.sha256}:${entry.filesSha256 ?? ""}`;
 
-export interface AllBotsSkillListing {
-  name: string;
-  description: string;
-  enabled: boolean;
-  editable: false;
-  source: string;
-  sha256: string;
-  importedAt: string;
-  warnings: string[];
-  skippedFiles: string[];
-  files?: string[];
-  /** On all of the person's bots; `enabled` false here is this bot's own switch, or a copy that no longer verifies. */
-  allBots: true;
-}
+const idSchema = z.object({ id: z.string().regex(/^[a-f0-9-]{36}$/) });
+interface StoreState { id: string | null; entries: Record<string, SkillLibraryEntry> }
+/** Each store as last read, so a person with no all-bots skills costs a listing no file reads; dropped on every write. */
+const stores = new Map<string, StoreState>();
 
-function listing(skill: LibrarySkillListing, off: ReadonlySet<string>): AllBotsSkillListing {
-  return {
-    name: skill.name, description: skill.description, enabled: skill.enabled && !off.has(skill.name), editable: false,
-    source: skill.source, sha256: skill.sha256, importedAt: skill.importedAt, warnings: skill.warnings, skippedFiles: skill.skippedFiles,
-    ...(skill.files ? { files: skill.files } : {}), allBots: true,
-  };
-}
-
-/** The person's all-bots skills as this bot has them. */
-export function allBotsSkills(botId: string): AllBotsSkillListing[] {
-  const root = allBotsRootOfBot(botId);
-  if (!root) return [];
-  const off = allBotsSkillOffs(botId);
-  return listLibrarySkills(root).map((skill) => listing(skill, off));
-}
-
-/** The SKILL.md path the bot's index points at, when the person has a skill of this name on all their bots. */
-export function allBotsSkillFile(botId: string, name: string): string | null {
-  const root = allBotsRootOfBot(botId);
-  return root && isSkillName(name) && Object.hasOwn(readSkillLibraryIndex(root), name) ? librarySkillFilePath(name, root) : null;
-}
-
-/** Its SKILL.md while it still hashes as stored; null when there is none or it changed outside OpenMausBot. */
-export function readAllBotsSkillFile(botId: string, name: string): string | null {
-  const root = allBotsRootOfBot(botId);
-  return root ? readLibrarySkillFile(name, root) : null;
-}
-
-const offSchema = z.array(z.string());
-
-function offPath(botId: string): string | null {
-  return /^[\w-]+$/.test(botId) ? join(DATA_DIR, "skill-state", botId, "all-bots-off.json") : null;
-}
-
-/** The all-bots skills this one bot has switched off. A list that cannot be read counts as none: every one stays on. */
-export function allBotsSkillOffs(botId: string): ReadonlySet<string> {
-  const path = offPath(botId);
-  if (!path) return new Set();
-  try {
-    const parsed = offSchema.safeParse(JSON.parse(readFileSync(path, "utf8")));
-    return new Set(parsed.success ? parsed.data.filter(isSkillName) : []);
-  } catch {
-    return new Set();
+export function allBotsStore(scope: string): StoreState {
+  let state = stores.get(scope);
+  if (!state) {
+    let id: string | null = null;
+    try {
+      const parsed = idSchema.safeParse(JSON.parse(readFileSync(join(allBotsRoot(scope), "store.json"), "utf8")));
+      if (parsed.success) id = parsed.data.id;
+    } catch {}
+    state = { id, entries: id ? readSkillLibraryIndex(allBotsRoot(scope)) : {} };
+    stores.set(scope, state);
   }
+  return state;
 }
 
-export function setAllBotsSkillOff(botId: string, name: string, off: boolean): void {
-  const path = offPath(botId);
-  if (!path || !isSkillName(name)) return;
-  const names = new Set(allBotsSkillOffs(botId));
-  if (names.has(name) === off) return;
-  if (off) names.add(name);
-  else names.delete(name);
-  mkdirSync(join(DATA_DIR, "skill-state", botId), { recursive: true, mode: 0o700 });
-  writeFileAtomic(path, `${JSON.stringify([...names].sort(), null, 2)}\n`, { mode: 0o600 });
+/** The store's id, made on its first write: a bot's copy names it, so a copy that came from another server's store (a
+ * moved bot) is that bot's own skill here, never taken away for being missing from this store. */
+export function ensureAllBotsStore(scope: string): string {
+  const current = allBotsStore(scope).id;
+  if (current) return current;
+  const id = randomUUID();
+  mkdirSync(allBotsRoot(scope), { recursive: true, mode: 0o700 });
+  writeFileAtomic(join(allBotsRoot(scope), "store.json"), `${JSON.stringify({ id })}\n`, { mode: 0o600 });
+  stores.delete(scope);
+  return id;
+}
+
+export function forgetAllBotsStore(scope: string): void {
+  stores.delete(scope);
+}
+
+/** Whether a bot's copy belongs to the store of the bot's person here. A listing brings copies up to date first, so a
+ * current copy is of a skill the store still has. */
+export function sharedMarkCurrent(botId: string, mark: SharedSkillMark): boolean {
+  const scope = allBotsScopeOfBot(wiring?.bot(botId));
+  return Boolean(scope && allBotsStore(scope).id === mark.store);
+}
+
+/** The store's SKILL.md while it still hashes as stored. */
+export function readAllBotsSkill(scope: string, name: string): string | null {
+  return readLibrarySkillFile(name, allBotsRoot(scope));
 }

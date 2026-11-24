@@ -26,6 +26,7 @@ export interface ManagedSkill {
   origin?: "private" | "library" | "all-bots" | "imported" | "native" | "project";
   /** On all of the person's bots, a bot made later too; the switch is this bot's own. */
   allBots?: boolean;
+  canUseOnAllBots?: boolean;
   /** An imported skill that is on but not in this bot's list: the bot finds it when a task needs it. */
   listed?: boolean;
 }
@@ -33,9 +34,8 @@ export interface ManagedSkill {
 /** On all of the person's bots, with this bot's own switch. */
 export const onAllBots = (skill: ManagedSkill): boolean => skill.allBots === true;
 
-/** One of this bot's own skills, on, that it could put on all of the person's bots. */
-export const canUseOnAllBots = (skill: ManagedSkill): boolean =>
-  skill.enabled && !skill.allBots && (skill.origin === undefined || skill.origin === "private");
+/** One of this bot's own skills, on, that this person may put on all of their bots (the server says so per skill). */
+export const canUseOnAllBots = (skill: ManagedSkill): boolean => skill.canUseOnAllBots === true;
 
 /** A skill that lives in a folder of the person's, read only here. */
 const inFolder = (skill: ManagedSkill): boolean => skill.origin === "native" || skill.origin === "project";

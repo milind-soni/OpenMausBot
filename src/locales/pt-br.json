@@ -265,7 +265,7 @@
   "server.allBotsSkill.delete.title": "Remover a habilidade “{name}” de todos os seus bots?",
   "server.allBotsSkill.delete.done": "Habilidade “{name}” removida de todos os seus bots",
   "server.allBotsSkill.body": "Todos os seus bots usam a mesma cópia, inclusive os que você adicionar depois. Para desligar em um só bot, use a página Habilidades desse bot.",
-  "server.allBotsSkill.deleteBody": "Ela sai de todos os seus bots que a têm. O SKILL.md aparece abaixo, com os segredos ocultos.",
+  "server.allBotsSkill.deleteBody": "Ela sai de todos os seus bots; um bot que já a tinha antes fica com a própria cópia. O SKILL.md aparece abaixo, com os segredos ocultos.",
   "skills.allBots.tag": "Todos os bots",
   "skills.allBots.tagHint": "Em todos os seus bots, inclusive os que você adicionar depois. O botão desliga só para este bot.",
   "skills.allBots.use": "Usar em todos os bots",

@@ -7328,5 +7328,20 @@
   "skillBurger.pill.running": "Trwa… {count}",
   "skillBurger.pill.stopped": "Zatrzymano",
   "skillBurger.pill.addPath": "Dodaj ścieżkę",
-  "skillBurger.card.madeBy": "Utworzone przez {name}"
+  "skillBurger.card.madeBy": "Utworzone przez {name}",
+  "server.allBotsSkill.create.title": "Dodać umiejętność „{name}” do wszystkich Twoich botów?",
+  "server.allBotsSkill.create.done": "Umiejętność „{name}” jest na wszystkich Twoich botach",
+  "server.allBotsSkill.update.title": "Zaktualizować umiejętność „{name}” na wszystkich Twoich botach?",
+  "server.allBotsSkill.update.done": "Umiejętność „{name}” zaktualizowana na wszystkich Twoich botach",
+  "server.allBotsSkill.delete.title": "Usunąć umiejętność „{name}” ze wszystkich Twoich botów?",
+  "server.allBotsSkill.delete.done": "Umiejętność „{name}” usunięta ze wszystkich Twoich botów",
+  "server.allBotsSkill.body": "Wszystkie Twoje boty używają tej samej kopii, także te dodane później. Aby wyłączyć ją dla jednego bota, użyj strony Umiejętności tego bota.",
+  "server.allBotsSkill.deleteBody": "Znika ze wszystkich Twoich botów; bot, który miał ją wcześniej, zachowuje własną kopię. Jej SKILL.md jest pokazany poniżej, z ukrytymi sekretami.",
+  "skills.allBots.tag": "Wszystkie boty",
+  "skills.allBots.tagHint": "Na wszystkich Twoich botach, także dodanych później. Przełącznik wyłącza ją tylko dla tego bota.",
+  "skills.allBots.use": "Użyj na wszystkich botach",
+  "skills.allBots.useName": "Użyj {name} na wszystkich Twoich botach",
+  "skills.allBots.removeConfirm": "Usunąć „{name}” ze wszystkich Twoich botów?",
+  "skills.allBots.kept": "Te boty zachowują własną, inną kopię: {names}",
+  "skills.allBots.failed": "Nie udało się dodać tej umiejętności do wszystkich Twoich botów."
 }

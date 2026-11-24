@@ -7382,5 +7382,20 @@
   "skillBurger.pill.running": "Выполняется… {count}",
   "skillBurger.pill.stopped": "Остановлено",
   "skillBurger.pill.addPath": "Добавить путь",
-  "skillBurger.card.madeBy": "Создано: {name}"
+  "skillBurger.card.madeBy": "Создано: {name}",
+  "server.allBotsSkill.create.title": "Добавить навык «{name}» всем вашим ботам?",
+  "server.allBotsSkill.create.done": "Навык «{name}» есть у всех ваших ботов",
+  "server.allBotsSkill.update.title": "Обновить навык «{name}» у всех ваших ботов?",
+  "server.allBotsSkill.update.done": "Навык «{name}» обновлён у всех ваших ботов",
+  "server.allBotsSkill.delete.title": "Удалить навык «{name}» у всех ваших ботов?",
+  "server.allBotsSkill.delete.done": "Навык «{name}» удалён у всех ваших ботов",
+  "server.allBotsSkill.body": "Все ваши боты используют одну и ту же копию, включая тех, кого вы добавите позже. Чтобы выключить его только для одного бота, откройте страницу «Навыки» этого бота.",
+  "server.allBotsSkill.deleteBody": "Он удаляется у всех ваших ботов; бот, у которого он был раньше, сохраняет свою копию. Его SKILL.md показан ниже, секреты скрыты.",
+  "skills.allBots.tag": "Все боты",
+  "skills.allBots.tagHint": "У всех ваших ботов, включая добавленных позже. Переключатель выключает его только для этого бота.",
+  "skills.allBots.use": "Использовать во всех ботах",
+  "skills.allBots.useName": "Использовать {name} во всех ваших ботах",
+  "skills.allBots.removeConfirm": "Удалить «{name}» у всех ваших ботов?",
+  "skills.allBots.kept": "Эти боты сохраняют свою, другую копию: {names}",
+  "skills.allBots.failed": "Не удалось добавить этот навык всем вашим ботам."
 }

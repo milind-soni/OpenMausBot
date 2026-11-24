@@ -262,7 +262,7 @@
   "server.allBotsSkill.delete.title": "要從你所有的機器人移除技能「{name}」嗎？",
   "server.allBotsSkill.delete.done": "已從你所有的機器人移除技能「{name}」",
   "server.allBotsSkill.body": "你所有的機器人都使用同一份副本，包括之後新增的機器人。若只想為某個機器人關閉，請到該機器人的技能頁面操作。",
-  "server.allBotsSkill.deleteBody": "它會從你所有擁有它的機器人上移除。下方顯示它的 SKILL.md，並已隱藏所有機密資訊。",
+  "server.allBotsSkill.deleteBody": "它會從你所有的機器人上移除；之前就有它的機器人會保留自己的副本。下方顯示它的 SKILL.md，並已隱藏所有機密資訊。",
   "skills.allBots.tag": "所有機器人",
   "skills.allBots.tagHint": "在你所有的機器人上，包括之後新增的。開關只會為這個機器人關閉它。",
   "skills.allBots.use": "用於所有機器人",

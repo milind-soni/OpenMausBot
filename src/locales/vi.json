@@ -6127,5 +6127,20 @@
   "skillBurger.pill.running": "Đang chạy… {count}",
   "skillBurger.pill.stopped": "Đã dừng",
   "skillBurger.pill.addPath": "Thêm nhánh",
-  "skillBurger.card.madeBy": "Do {name} tạo"
+  "skillBurger.card.madeBy": "Do {name} tạo",
+  "server.allBotsSkill.create.title": "Đưa kỹ năng \"{name}\" vào tất cả bot của bạn?",
+  "server.allBotsSkill.create.done": "Kỹ năng \"{name}\" đã có trên tất cả bot của bạn",
+  "server.allBotsSkill.update.title": "Cập nhật kỹ năng \"{name}\" trên tất cả bot của bạn?",
+  "server.allBotsSkill.update.done": "Đã cập nhật kỹ năng \"{name}\" trên tất cả bot của bạn",
+  "server.allBotsSkill.delete.title": "Gỡ kỹ năng \"{name}\" khỏi tất cả bot của bạn?",
+  "server.allBotsSkill.delete.done": "Đã gỡ kỹ năng \"{name}\" khỏi tất cả bot của bạn",
+  "server.allBotsSkill.body": "Tất cả bot của bạn dùng cùng một bản sao, kể cả bot bạn thêm sau này. Để tắt cho riêng một bot, hãy dùng trang Kỹ năng của bot đó.",
+  "server.allBotsSkill.deleteBody": "Nó bị gỡ khỏi tất cả bot của bạn; bot nào đã có nó từ trước sẽ giữ bản sao riêng. SKILL.md của nó hiển thị bên dưới, các bí mật đã được ẩn.",
+  "skills.allBots.tag": "Tất cả bot",
+  "skills.allBots.tagHint": "Trên tất cả bot của bạn, kể cả bot thêm sau này. Công tắc chỉ tắt nó cho bot này.",
+  "skills.allBots.use": "Dùng trên tất cả bot",
+  "skills.allBots.useName": "Dùng {name} trên tất cả bot của bạn",
+  "skills.allBots.removeConfirm": "Gỡ “{name}” khỏi tất cả bot của bạn?",
+  "skills.allBots.kept": "Những bot này giữ bản sao riêng, khác: {names}",
+  "skills.allBots.failed": "Không thể đưa kỹ năng này vào tất cả bot của bạn."
 }

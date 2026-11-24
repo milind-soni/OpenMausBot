@@ -44,6 +44,9 @@ it("reaches only the person's own bots, and only that person can put it on or ta
   const adasWriter = await create(ada, "Ada's Writer");
   const adasResearcher = await create(ada, "Ada's Researcher");
   const olivesBot = await create(olive, "Olive's Helper");
+  const adasKeeper = await create(ada, "Ada's Keeper");
+  const different = SKILL.replace("Make the folder", "Ask first, then make the folder");
+  expect((await team.as(ada, "POST", `/api/bots/${adasKeeper.id}/skill-template`, { name: "client-onboarding", description: "", source: "test", text: different, enabled: true })).status).toBe(201);
   const added = await team.as(ada, "POST", `/api/bots/${adasWriter.id}/skill-template`, { name: "client-onboarding", description: "", source: "test", text: SKILL, enabled: true });
   expect(added.status, JSON.stringify(added.body)).toBe(201);
 
@@ -59,12 +62,10 @@ it("reaches only the person's own bots, and only that person can put it on or ta
   expect(await skillsOf(olivesBot)).toEqual([]);
 
   // A bot with a different copy of its own keeps it, and cannot silently replace the one on all of Ada's bots.
-  const different = SKILL.replace("Make the folder", "Ask first, then make the folder");
-  expect((await team.as(ada, "POST", `/api/bots/${later.id}/skill-template`, { name: "client-onboarding", description: "", source: "test", text: different, enabled: true })).status).toBe(201);
-  expect(await skillsOf(later)).toEqual([expect.not.objectContaining({ allBots: true })]);
-  expect((await allBots(ada, later)).status).toBe(409);
-  expect((await team.as(ada, "DELETE", `/api/bots/${later.id}/skills/client-onboarding`)).status).toBe(200);
-  expect(await skillsOf(later)).toEqual([expect.objectContaining({ allBots: true })]);
+  expect(await skillsOf(adasKeeper)).toEqual([expect.not.objectContaining({ allBots: true })]);
+  expect((await allBots(ada, adasKeeper)).status).toBe(409);
+  expect((await team.as(ada, "DELETE", `/api/bots/${adasKeeper.id}/skills/client-onboarding`)).status).toBe(200);
+  expect(await skillsOf(adasKeeper)).toEqual([expect.objectContaining({ allBots: true })]);
 
   expect((await team.as(olive, "DELETE", `/api/bots/${adasResearcher.id}/skills/client-onboarding`)).status).toBe(403);
   expect(await skillsOf(adasResearcher)).toHaveLength(1);
@@ -74,5 +75,7 @@ it("reaches only the person's own bots, and only that person can put it on or ta
   expect(await skillsOf(adasWriter)).toEqual([expect.objectContaining({ enabled: true })]);
 
   expect((await team.as(ada, "DELETE", `/api/bots/${adasWriter.id}/skills/client-onboarding`)).status).toBe(200);
-  for (const bot of [adasWriter, adasResearcher, later]) expect(await skillsOf(bot)).toEqual([]);
+  for (const bot of [adasResearcher, later, adasKeeper]) expect(await skillsOf(bot)).toEqual([]);
+  // The bot whose own skill it was keeps it.
+  expect(await skillsOf(adasWriter)).toEqual([expect.not.objectContaining({ allBots: true })]);
 }, hostTimeout(120_000));

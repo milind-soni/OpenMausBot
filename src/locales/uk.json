@@ -4309,5 +4309,20 @@
   "skillBurger.pill.running": "Виконується… {count}",
   "skillBurger.pill.stopped": "Зупинено",
   "skillBurger.pill.addPath": "Додати шлях",
-  "skillBurger.card.madeBy": "Створено: {name}"
+  "skillBurger.card.madeBy": "Створено: {name}",
+  "server.allBotsSkill.create.title": "Додати навичку «{name}» усім вашим ботам?",
+  "server.allBotsSkill.create.done": "Навичка «{name}» є в усіх ваших ботів",
+  "server.allBotsSkill.update.title": "Оновити навичку «{name}» в усіх ваших ботів?",
+  "server.allBotsSkill.update.done": "Навичку «{name}» оновлено в усіх ваших ботів",
+  "server.allBotsSkill.delete.title": "Видалити навичку «{name}» в усіх ваших ботів?",
+  "server.allBotsSkill.delete.done": "Навичку «{name}» видалено в усіх ваших ботів",
+  "server.allBotsSkill.body": "Усі ваші боти використовують ту саму копію, зокрема ті, яких ви додасте пізніше. Щоб вимкнути її лише для одного бота, відкрийте сторінку «Навички» цього бота.",
+  "server.allBotsSkill.deleteBody": "Її буде видалено в усіх ваших ботів; бот, який мав її раніше, зберігає власну копію. Її SKILL.md показано нижче, секрети приховано.",
+  "skills.allBots.tag": "Усі боти",
+  "skills.allBots.tagHint": "В усіх ваших ботів, зокрема доданих пізніше. Перемикач вимикає її лише для цього бота.",
+  "skills.allBots.use": "Використовувати в усіх ботах",
+  "skills.allBots.useName": "Використовувати {name} в усіх ваших ботах",
+  "skills.allBots.removeConfirm": "Видалити «{name}» в усіх ваших ботів?",
+  "skills.allBots.kept": "Ці боти зберігають власну, іншу копію: {names}",
+  "skills.allBots.failed": "Не вдалося додати цю навичку всім вашим ботам."
 }

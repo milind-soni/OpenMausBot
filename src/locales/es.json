@@ -6632,5 +6632,20 @@
   "skillBurger.pill.running": "Ejecutando… {count}",
   "skillBurger.pill.stopped": "Detenido",
   "skillBurger.pill.addPath": "Añadir camino",
-  "skillBurger.card.madeBy": "Hecho por {name}"
+  "skillBurger.card.madeBy": "Hecho por {name}",
+  "server.allBotsSkill.create.title": "¿Poner la habilidad \"{name}\" en todos tus bots?",
+  "server.allBotsSkill.create.done": "La habilidad \"{name}\" está en todos tus bots",
+  "server.allBotsSkill.update.title": "¿Actualizar la habilidad \"{name}\" en todos tus bots?",
+  "server.allBotsSkill.update.done": "Habilidad \"{name}\" actualizada en todos tus bots",
+  "server.allBotsSkill.delete.title": "¿Quitar la habilidad \"{name}\" de todos tus bots?",
+  "server.allBotsSkill.delete.done": "Habilidad \"{name}\" quitada de todos tus bots",
+  "server.allBotsSkill.body": "Todos tus bots usan la misma copia, también los que añadas más adelante. Para desactivarla en un solo bot, usa la página Habilidades de ese bot.",
+  "server.allBotsSkill.deleteBody": "Se quita de todos tus bots; un bot que ya la tenía antes conserva su propia copia. Su SKILL.md se muestra abajo, con los secretos ocultos.",
+  "skills.allBots.tag": "Todos los bots",
+  "skills.allBots.tagHint": "En todos tus bots, también los que añadas más adelante. El interruptor la desactiva solo para este bot.",
+  "skills.allBots.use": "Usar en todos los bots",
+  "skills.allBots.useName": "Usar {name} en todos tus bots",
+  "skills.allBots.removeConfirm": "¿Quitar “{name}” de todos tus bots?",
+  "skills.allBots.kept": "Estos bots conservan su propia copia, que es distinta: {names}",
+  "skills.allBots.failed": "No se pudo poner esta habilidad en todos tus bots."
 }

@@ -137,7 +137,7 @@ describe("Skills library review and assignment controls", () => {
     expect(fixture.request).toHaveBeenCalledWith("/api/bots/bot/skills/pdf", expect.objectContaining({ method: "PATCH", body: '{"enabled":false}' }));
   });
   it("puts one of the bot's own skills on all bots, and marks one already there with this bot's own switch", async () => {
-    const own = { name: "invoice-check", description: "Checks invoices", enabled: true, source: "learned:conversation", warnings: [] };
+    const own = { name: "invoice-check", description: "Checks invoices", enabled: true, source: "learned:conversation", warnings: [], canUseOnAllBots: true };
     const shared = { name: "client-onboarding", description: "Onboards clients", enabled: true, source: "learned:conversation", warnings: [], allBots: true };
     fixture.values = [[own, shared], [], [], "", [], false, "", "", null, { current: false }, "", null, "", false, ""];
     fixture.request.mockImplementation(async (url: string) => (url.endsWith("/all-bots") ? { kept: ["Keeper"] } : { skills: [own, shared] }));

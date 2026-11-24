@@ -583,7 +583,7 @@ import { createBotPatchRoutes } from "./routes/bot-patch.ts";
 import { createBotOrderRoutes } from "./routes/bot-order.ts";
 import { createGroupOrderRoutes } from "./routes/group-order.ts";
 import { createBotLifecycleRoutes } from "./routes/bot-lifecycle.ts";
-import { createBotSkillsRoutes } from "./routes/bot-skills.ts"; import { createSkillsForAllBotsRoutes } from "./routes/skills-for-all-bots.ts"; import { createSkillsForAllBotsHost } from "./host/skills-for-all-bots-host.ts"; import { wireSkillsForAllBots } from "./skills-for-all-bots.ts";
+import { createBotSkillsRoutes } from "./routes/bot-skills.ts"; import { createSkillsForAllBotsRoutes } from "./routes/skills-for-all-bots.ts"; import { createSkillsForAllBotsHost } from "./host/skills-for-all-bots-host.ts"; import { wireAllBotsSkills } from "./skills-for-all-bots-ops.ts";
 import { createSkillShareRoutes } from "./routes/skill-share.ts";
 import { createTeamContextRoutes } from "./routes/team-context.ts";
 import { createAppSuggestions } from "./host/app-suggestions.ts"; import { createAppFindRoute, createAppSuggestionRoutes } from "./routes/app-suggestions.ts"; import { appPickAvailable } from "./decider/app-picks.ts"; import { managedConnectorUnavailableReason } from "../shared/connector-availability.ts"; import { createDeciderRoutes } from "./routes/decider.ts"; import { createCloudSendRoutes } from "./routes/cloud-send.ts"; import { claudeCodeSkillInputs } from "./setup-import.ts"; import { createCloudConnectionsHost } from "./cloud-connections-host.ts";
@@ -11155,7 +11155,7 @@ function appendSkillRequestCard(args: {
   };
 }
 
-const skillSwitch = createSkillSwitchHost({ store, dataDir: DATA_DIR, persistence: skillProposalPersistence, listBotSkills, readBotSkillFile, noteSkillChange: (botId, threadId) => skillReview.noteSkillChange(botId, threadId) }); wireSkillsForAllBots({ team: Boolean(CLOUD_TEAM), bot: (id) => store.bot(id), bots: () => store.bots }); const allBotsSkills = createSkillsForAllBotsHost({ store, dataDir: DATA_DIR, persistence: skillProposalPersistence, noteSkillChange: (botId, threadId) => skillReview.noteSkillChange(botId, threadId) });
+const skillSwitch = createSkillSwitchHost({ store, dataDir: DATA_DIR, persistence: skillProposalPersistence, listBotSkills, readBotSkillFile, noteSkillChange: (botId, threadId) => skillReview.noteSkillChange(botId, threadId) }); wireAllBotsSkills({ team: Boolean(CLOUD_TEAM), sharedWithoutTeam: () => !CLOUD_TEAM && sharedMembership(), bot: (id) => store.bot(id), bots: () => store.bots }); const allBotsSkills = createSkillsForAllBotsHost({ store, dataDir: DATA_DIR, persistence: skillProposalPersistence, noteSkillChange: (botId, threadId) => skillReview.noteSkillChange(botId, threadId) });
 function resolveSkillRequest(args: {
   botId: string;
   botName?: string;
@@ -12000,7 +12000,7 @@ ROUTES.push(createBotLifecycleRoutes({
   store, routines: () => routines, interruptAllDirectThreads, cancelDirectTurnDispatch, revokeInternalCapabilitiesForThread,
   activeGroupTurnForBot, cancelGroupTurnOperations, runningTurnInstance, closeOpenApprovals, deleteBotWithLifecycle, deleteRefusal: (auth, botId) => memberDeleteRefusal(auth, store.bot(botId), Boolean(CLOUD_TEAM)),
 }));
-const skillsRoutes = createBotSkillsRoutes({ store, cfg, listBotSkills, readBotSkillFile, stagedSkillListing }); ROUTES.push(createSkillsForAllBotsRoutes({ store }), skillsRoutes);
+const skillsRoutes = createBotSkillsRoutes({ store, cfg, listBotSkills, readBotSkillFile, stagedSkillListing }); ROUTES.push(createSkillsForAllBotsRoutes({ store, host: allBotsSkills }), skillsRoutes);
 ROUTES.push(createEmailRoutes({ service: emailService }));
 ROUTES.push(phones.routes);
 ROUTES.push(createSkillShareRoutes({ enabled: () => skillsHost.mode() !== "off", botExists: (id) => Boolean(store.bot(id)),

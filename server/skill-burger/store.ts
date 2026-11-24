@@ -232,8 +232,9 @@ export function migrateBotBurgers(botIds: readonly string[], root: string = skil
 
 /** The turn's list of burgers used in every chat, for a bot that doesn't already see them through the skills library.
  * A bot's own burgers are its own skills and listed with them. */
-export function workflowSkillsPrompt(botId: string, root: string = skillsLibraryRoot()): string {
-  const optedOut = librarySkillOptOuts(botId);
+/** `taken`: names the bot's own skills already hold (one on all of the person's bots among them): theirs is the one line. */
+export function workflowSkillsPrompt(botId: string, root: string = skillsLibraryRoot(), taken: ReadonlySet<string> = new Set()): string {
+  const optedOut = new Set([...librarySkillOptOuts(botId), ...taken]);
   const lines: string[] = [];
   let bytes = 0;
   for (const saved of listWorkflowSkills(root)) {

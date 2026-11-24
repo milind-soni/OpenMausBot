@@ -284,7 +284,7 @@
   "server.allBotsSkill.delete.title": "Rimuovere l'abilità \"{name}\" da tutti i tuoi bot?",
   "server.allBotsSkill.delete.done": "Abilità \"{name}\" rimossa da tutti i tuoi bot",
   "server.allBotsSkill.body": "Tutti i tuoi bot usano la stessa copia, anche quelli che aggiungerai dopo. Per spegnerla su un solo bot, usa la pagina Abilità di quel bot.",
-  "server.allBotsSkill.deleteBody": "Sparisce da ogni tuo bot che la ha. Il suo SKILL.md è mostrato qui sotto, con tutti i segreti nascosti.",
+  "server.allBotsSkill.deleteBody": "Sparisce da tutti i tuoi bot; un bot che la aveva già prima tiene la sua copia. Il suo SKILL.md è mostrato qui sotto, con tutti i segreti nascosti.",
   "skills.allBots.tag": "Tutti i bot",
   "skills.allBots.tagHint": "Su tutti i tuoi bot, anche quelli che aggiungerai dopo. L'interruttore la spegne solo per questo bot.",
   "skills.allBots.use": "Usa su tutti i bot",
