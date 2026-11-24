@@ -46,6 +46,7 @@ function linkAt(origin: string) {
     setLevel: vi.fn(),
     setSleeps: vi.fn(),
     sleeps: () => false,
+    setWaking: vi.fn(),
     setTransfer: vi.fn(),
     onOutgoing: (listener: () => void) => { outgoing = listener; return () => { outgoing = () => {}; }; },
     onWanted: () => () => {},
@@ -200,5 +201,151 @@ describe("bot-link exchange lifetime", () => {
     const payload = await sent.promise;
     expect(transport.signals[1]!.aborted).toBe(true);
     expect(payload).toMatchObject({ fresh: false, wait: 0, frames: [{ t: "cancel", id: "cancelled-work" }] });
+  });
+});
+
+/** A Cloud that answers each exchange as `answer` says, and holds an idle poll open until it is hung up. */
+async function sleepyCloud(answer: (request: { background: boolean; wait: number }) => "ok" | "asleep" | "hold" = ({ wait }) => (wait > 0 ? "hold" : "ok")) {
+  const seen: Array<{ background: boolean; wait: number }> = [];
+  const listeners = new Set<() => void>();
+  const origin = await cloud((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { wait: number };
+      const one = { background: request.headers["x-omb-background"] === "1", wait: body.wait };
+      seen.push(one);
+      for (const listener of listeners) listener();
+      const said = answer(one);
+      if (said === "asleep") { response.writeHead(503, { "content-type": "application/json", "x-omb-cloud-power": "asleep" }); response.end(JSON.stringify({ error: "asleep" })); }
+      else if (said === "ok") { response.writeHead(200, { "content-type": "application/json" }); response.end(JSON.stringify({ session: "session-1", frames: [] })); }
+    });
+  });
+  const requests = (count: number) => new Promise<void>((resolve) => {
+    const check = () => { if (seen.length >= count) { listeners.delete(check); resolve(); } };
+    listeners.add(check);
+    check();
+  });
+  return { origin, seen, requests };
+}
+
+/** A computer's link whose Cloud sleeps: work can be wanted, and what the dialer says of waking is kept. */
+function sleepyLink(origin: string) {
+  let wanted: () => void = () => {};
+  const waking: boolean[] = [];
+  const link = {
+    dial: () => ({ origin, token: "fixture-link-token" }),
+    cloudPeer: () => "cloud-peer",
+    sessionStarted: vi.fn(),
+    outgoing: vi.fn(() => []),
+    hasOutgoing: () => false,
+    receive: vi.fn(),
+    setOnline: vi.fn(),
+    setLevel: vi.fn(),
+    setSleeps: vi.fn(),
+    sleeps: () => true,
+    setWaking: (_peer: string, on: boolean) => { waking.push(on); },
+    setTransfer: vi.fn(),
+    onOutgoing: () => () => {},
+    onWanted: (listener: () => void) => { wanted = listener; return () => { wanted = () => {}; }; },
+    ended: () => [],
+    forgetEnded: vi.fn(),
+  };
+  return { link: link as unknown as BotLink, observed: link, want: () => wanted(), waking };
+}
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 150));
+
+describe("a Cloud that sleeps", () => {
+  it("parked, nothing is asked of it: not by time, not by directory news", async () => {
+    const sleepy = await sleepyCloud();
+    const { link } = sleepyLink(sleepy.origin);
+    const dialer = createDialer({ link, holdMs: 200, firstRetryMs: 1 });
+    cleanups.push(() => dialer.close());
+    dialer.start({ gentle: true });
+    await settle();
+    expect(dialer.state()).toMatchObject({ running: true, asleep: true });
+    expect(sleepy.seen).toEqual([]);
+  });
+
+  it("work a person waits on wakes it with an exchange that is not background; the idle polls after it are background again", async () => {
+    const sleepy = await sleepyCloud();
+    const { link, observed, want, waking } = sleepyLink(sleepy.origin);
+    const dialer = createDialer({ link, holdMs: 5_000 });
+    cleanups.push(() => dialer.close());
+    dialer.start({ gentle: true });
+    want();
+    expect(waking).toEqual([true]);
+    await sleepy.requests(2);
+    expect(sleepy.seen).toEqual([{ background: false, wait: 0 }, { background: true, wait: 5_000 }]);
+    expect(observed.setOnline).toHaveBeenCalledWith("cloud-peer", true);
+  });
+
+  it("a Cloud that answers even that exchange with asleep parks the link once, with no second ask", async () => {
+    const sleepy = await sleepyCloud(() => "asleep");
+    const { link, want, waking } = sleepyLink(sleepy.origin);
+    const dialer = createDialer({ link, firstRetryMs: 1 });
+    cleanups.push(() => dialer.close());
+    dialer.start({ gentle: true });
+    want();
+    await sleepy.requests(1);
+    await settle();
+    expect(sleepy.seen).toEqual([{ background: false, wait: 0 }]);
+    expect(dialer.state()).toMatchObject({ asleep: true });
+    expect(waking).toEqual([true, false]);
+  });
+
+  it("the app's asleep heard before the Cloud last answered work parks nothing; one heard after it does", async () => {
+    let clock = 10_000;
+    const sleepy = await sleepyCloud();
+    const { link, want } = sleepyLink(sleepy.origin);
+    const transport = observeFetch();
+    const dialer = createDialer({ link, fetch: transport.fetch, holdMs: 5_000, now: () => clock });
+    cleanups.push(() => dialer.close());
+    dialer.start({ gentle: true });
+    want();
+    await sleepy.requests(2);
+    clock = 20_000;
+    dialer.sleep(5_000);
+    dialer.sleep(10_000);
+    expect(dialer.state()).toMatchObject({ asleep: false });
+    expect(transport.signals[1]!.aborted).toBe(false);
+    dialer.sleep(10_001);
+    expect(dialer.state()).toMatchObject({ asleep: true });
+    expect(transport.signals[1]!.aborted).toBe(true);
+    // Parked by the newer word: the old one is no longer stale, and a word without a time parks as before.
+    dialer.start();
+    await sleepy.requests(3);
+    dialer.sleep(5_000);
+    expect(dialer.state()).toMatchObject({ asleep: true });
+  });
+
+  it("while work is waking it, the app's asleep parks nothing, whenever it was heard", async () => {
+    const sleepy = await sleepyCloud(() => "hold");
+    const { link, want } = sleepyLink(sleepy.origin);
+    const transport = observeFetch();
+    const dialer = createDialer({ link, fetch: transport.fetch });
+    cleanups.push(() => dialer.close());
+    dialer.start({ gentle: true });
+    want();
+    await sleepy.requests(1);
+    dialer.sleep(Date.now() + 60_000);
+    dialer.sleep();
+    expect(dialer.state()).toMatchObject({ asleep: false });
+    expect(transport.signals[0]!.aborted).toBe(false);
+  });
+
+  it("an idle poll answered while the app says asleep proves nothing: the word parks it", async () => {
+    let clock = 10_000;
+    const sleepy = await sleepyCloud();
+    const { link } = sleepyLink(sleepy.origin);
+    const dialer = createDialer({ link, holdMs: 5_000, now: () => clock });
+    cleanups.push(() => dialer.close());
+    dialer.start();
+    await sleepy.requests(2);
+    expect(sleepy.seen.every((one) => one.background)).toBe(true);
+    clock = 20_000;
+    dialer.sleep(1);
+    expect(dialer.state()).toMatchObject({ asleep: true });
   });
 });

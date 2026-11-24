@@ -204,6 +204,8 @@ export function createBotLink(deps: BotLinkDeps) {
   const save = () => { if (state) writeFileAtomic(file, JSON.stringify(state), { mode: 0o600 }); };
   const linkOf = (peer: string): Live => { let one = live.get(peer); if (!one) { one = { online: false, seq: 0, outbox: [], level: 1 }; live.set(peer, one); } return one; };
   const isOnline = (peer: string) => live.get(peer)?.online === true;
+  /** Places asleep that this computer is waking for work a person waits on (the dialer says so; never persisted). */
+  const waking = new Set<string>();
   const placeName = (peer: string) => state?.peers[peer]?.place.name ?? "the other place";
   const directory = (): LinkedBot[] => deps.bots().filter((bot) => !bot.hidden && !bot.movedTo && /^[\w-]{1,128}$/u.test(bot.id)).map((bot) => ({
     id: bot.id, name: bot.name, ...(bot.title ? { title: bot.title.slice(0, 200) } : {}), ...(bot.description ? { description: bot.description.slice(0, 400) } : {}),
@@ -301,6 +303,7 @@ export function createBotLink(deps: BotLinkDeps) {
   function setOnline(peer: string, next: boolean): void {
     const peerState = state?.peers[peer];
     if (!peerState) return;
+    if (next) waking.delete(peer);
     if (next && now() - peerState.seenAt > SEEN_WRITE_MS) { peerState.seenAt = now(); save(); }
     const one = linkOf(peer);
     if (one.online === next) return;
@@ -328,7 +331,8 @@ export function createBotLink(deps: BotLinkDeps) {
     return matches.length === 1 ? matches[0] : undefined;
   }
 
-  const offlineNote = (peer: string) => `${placeName(peer)} is offline now (off, asleep or not connected), so this waits and is delivered when it is back`;
+  const offlineNote = (peer: string) => waking.has(peer) ? wakingNote(peer) : `${placeName(peer)} is offline now (off, asleep or not connected), so this waits and is delivered when it is back`;
+  const wakingNote = (peer: string) => `${placeName(peer)} was asleep and is waking up for this now, so this is delivered as soon as it answers`;
 
   function keepAlive(): void {
     if (pending.size === 0) { if (alive) { clearInterval(alive); alive = undefined; } return; }
@@ -617,6 +621,7 @@ export function createBotLink(deps: BotLinkDeps) {
     if (was.role === "acceptor") for (const known of Object.values(was.peers)) if (known.sessionId) deps.revoke?.(known.sessionId);
     const peers = [...live.keys()];
     live.clear();
+    waking.clear();
     for (const retry of retries.values()) clearTimeout(retry.timer);
     retries.clear();
     rmSync(spoolRoot, { recursive: true, force: true });
@@ -654,11 +659,13 @@ export function createBotLink(deps: BotLinkDeps) {
         if (!duplicate && call.files?.length) deps.files?.crossed(node.id, "sent", { botId: context.sender.id, name: context.sender.name }, call.files);
         const files = call.files?.length && !deps.files ? " Its files were not sent: files do not cross to the other place here, so put what it needs in the message." : "";
         const online = isOnline(remote.peer);
+        // Said first, so a computer whose Cloud sleeps has asked it to wake before the bot is told what happens next.
+        if (!online) for (const listener of wantedListeners) listener();
+        const told = !online && waking.has(remote.peer) ? `Finish your turn and tell the person ${place} is waking up for it.` : `Finish your turn and tell the person it waits for ${place}.`;
         receipts.push(receipt(remote, duplicate && node.status !== "queued" ? "injected" : "queued",
           duplicate ? `already sent to ${remote.bot.name} on ${place}: it is ${node.status === "queued" ? "queued" : "under way"} and ${returns}`
-            : online ? `sent to ${remote.bot.name} on ${place}; ${returns}.${files}` : `${offlineNote(remote.peer)}; ${returns} then. Finish your turn and tell the person it waits for ${place}.${files}`,
+            : online ? `sent to ${remote.bot.name} on ${place}; ${returns}.${files}` : `${offlineNote(remote.peer)}; ${returns} then. ${told}${files}`,
           { requestId: node.id }));
-        if (!online) for (const listener of wantedListeners) listener();
         if (!duplicate) {
           context.handed(node.id);
           deps.sentRow({ sender: context.sender, threadId: context.address.threadId, recipient: { id: linked, name: `${remote.bot.name} (${place})` }, workThreadId: threadId, nodeId: node.id, ...(context.address.groupId && !deps.rooms?.member(context.address.groupId, linked) ? { roomId: context.address.groupId } : {}),
@@ -768,7 +775,7 @@ export function createBotLink(deps: BotLinkDeps) {
     linked: () => Object.entries(state?.peers ?? {}).flatMap(([peer, known]) => known.bots.map((bot) => ({ id: linkedId(peer, bot.id), peer, place: known.place, kind: state!.role === "dialer" ? "cloud" as const : "computer" as const, online: isOnline(peer), bot }))),
     /** Other places' bots as list_bots names them. */
     agents: () => Object.entries(state?.peers ?? {}).flatMap(([peer, known]) => known.bots.map((bot) => ({ id: linkedId(peer, bot.id), name: bot.name, section: "", model: bot.model ?? "", busy: false,
-      status: isOnline(peer) ? "linked" : "offline", statusText: isOnline(peer) ? `on ${known.place.name}` : `on ${known.place.name}, offline now: work for it waits until it is back`,
+      status: isOnline(peer) ? "linked" : "offline", statusText: isOnline(peer) ? `on ${known.place.name}` : waking.has(peer) ? `on ${known.place.name}, waking up now: work for it is delivered as soon as it answers` : `on ${known.place.name}, offline now: work for it waits until it is back`,
       title: bot.title || undefined, description: bot.description || undefined }))),
     /** Turned on, on a computer: it keeps the Cloud's address, its sign-in there and the account that was for. */
     turnOn(input: { self: Place; origin: string; token: string; account?: string; peer: Place }): void {
@@ -879,6 +886,8 @@ export function createBotLink(deps: BotLinkDeps) {
     /** There is work for a place that is not connected, handed over outside `coordinate` (a room turn). */
     wanted(): void { for (const listener of wantedListeners) listener(); },
     onWanted(listener: () => void): () => void { wantedListeners.add(listener); return () => wantedListeners.delete(listener); },
+    /** The dialer is waking this place, asleep, for work a person waits on (until it answers or parks again). */
+    setWaking(peer: string, on: boolean): void { if (on) waking.add(peer); else waking.delete(peer); },
     sleeps: () => state?.sleeps === true,
     setSleeps(sleeps: boolean): void { if (state && state.role === "dialer" && (state.sleeps === true) !== sleeps) { state.sleeps = sleeps; save(); } },
     close(): void { if (alive) clearInterval(alive); alive = undefined; for (const retry of retries.values()) clearTimeout(retry.timer); retries.clear(); outboundListeners.clear(); wantedListeners.clear(); },

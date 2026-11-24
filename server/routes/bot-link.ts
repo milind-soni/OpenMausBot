@@ -29,7 +29,8 @@ const origin = z.string().max(300).regex(/^https?:\/\/[^/\s]+$/u);
 const switchBody = z.union([
   z.object({ on: z.literal(true), origin, token: z.string().min(16).max(512), name, cloud: placeSchema, account: z.string().max(200).optional() }).strict(),
   z.object({ on: z.literal(false) }).strict(),
-  z.object({ cloud: z.enum(["asleep", "awake"]), origin }).strict(),
+  /** `heardAt`: when the app first heard "asleep" (this computer's clock), so a word older than the Cloud's own answers parks nothing. */
+  z.object({ cloud: z.enum(["asleep", "awake"]), origin, heardAt: z.number().int().nonnegative().optional() }).strict(),
 ]);
 const pairBody = z.object({ computer: placeSchema, name }).strict();
 
@@ -116,7 +117,7 @@ export function createBotLinkRoutes(deps: BotLinkRouteDeps): RouteHandler {
       if (!("on" in body.data)) {
         // The word is one Cloud's: a link to another Cloud is not told it.
         if (body.data.cloud === "awake") await dialer.tellEnded(body.data.origin);
-        if (link.role() === "dialer" && link.dial()?.origin === body.data.origin) { if (body.data.cloud === "asleep") dialer.sleep(); else dialer.start(); }
+        if (link.role() === "dialer" && link.dial()?.origin === body.data.origin) { if (body.data.cloud === "asleep") dialer.sleep(body.data.heardAt); else dialer.start(); }
         return json(res, 200, state());
       }
       if (!body.data.on) {
