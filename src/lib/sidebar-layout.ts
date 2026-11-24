@@ -192,15 +192,16 @@ export function nextUnreadHold(held: UnreadHold | null, openId: string | null, u
   return same ? held : null;
 }
 
-/** Bots showing unread leave their department or the main list for one list of their own, newest first, and go back
- * once read; `held` stays listed where it was. Pinned bots and the main Chief keep their place above it. Only how the
- * list is shown changes. */
-export function unreadBotsApart<T extends UnreadListBot>(parts: { sectionChiefs: T[]; sectionedBots: T[]; unsectionedBots: T[] }, enabled = true, held: UnreadHold | null = null) {
+/** Bots showing unread or `waiting` on the person (a question for them) leave their department or the main list for one
+ * list of their own, the waiting ones first and then newest first, and go back once read and answered; `held` stays
+ * listed where it was. Pinned bots and the main Chief keep their place above it. Only how the list is shown changes. */
+export function unreadBotsApart<T extends UnreadListBot>(parts: { sectionChiefs: T[]; sectionedBots: T[]; unsectionedBots: T[] }, enabled = true, held: UnreadHold | null = null, waiting: (bot: T) => boolean = () => false) {
   if (!enabled) return { ...parts, unreadBots: [] as T[] };
-  const listed = (bot: T) => botShowsUnread(bot) || bot.id === held?.id;
+  const listed = (bot: T) => botShowsUnread(bot) || waiting(bot) || bot.id === held?.id;
   const inPlace = (bots: T[]) => bots.filter((bot) => !listed(bot));
   const unreadBots = [...parts.unsectionedBots, ...parts.sectionChiefs, ...parts.sectionedBots].filter(listed)
-    .map((bot) => ({ bot, since: held && !botShowsUnread(bot) ? held.since : unreadSince(bot) })).sort((a, b) => b.since - a.since).map(({ bot }) => bot);
+    .map((bot) => ({ bot, asks: waiting(bot), since: held && bot.id === held.id && !botShowsUnread(bot) ? held.since : unreadSince(bot) }))
+    .sort((a, b) => Number(b.asks) - Number(a.asks) || b.since - a.since).map(({ bot }) => bot);
   return { unreadBots, sectionChiefs: inPlace(parts.sectionChiefs), sectionedBots: inPlace(parts.sectionedBots), unsectionedBots: inPlace(parts.unsectionedBots) };
 }
 
@@ -208,15 +209,15 @@ export function unreadBotsApart<T extends UnreadListBot>(parts: { sectionChiefs:
  * shown bot that belongs to a department. `inPlace` is the saved order of the rows left where they belong: what a drag
  * or Alt+Up/Down arranges, so neither stores the shown order nor counts a row that Unread is listing. `unreadCount`
  * leaves out a row Unread only holds. */
-export function sidebarBotRows<T extends UnreadListBot>(saved: { pinnedBots: T[]; sectionChiefs: T[]; sectionedBots: T[]; unsectionedBots: T[] }, busy: (bot: T) => boolean, unreadApart = true, held: UnreadHold | null = null) {
+export function sidebarBotRows<T extends UnreadListBot>(saved: { pinnedBots: T[]; sectionChiefs: T[]; sectionedBots: T[]; unsectionedBots: T[] }, busy: (bot: T) => boolean, unreadApart = true, held: UnreadHold | null = null, waiting: (bot: T) => boolean = () => false) {
   const ordered = { ...saved, ...activeBotsFirst(saved, busy) };
-  const shown = unreadBotsApart(ordered, unreadApart, held);
+  const shown = unreadBotsApart(ordered, unreadApart, held, waiting);
   return {
     pinnedBots: ordered.pinnedBots,
     filed: [...ordered.sectionedBots, ...ordered.sectionChiefs],
     ...shown,
-    unreadCount: shown.unreadBots.filter(botShowsUnread).length,
-    inPlace: unreadBotsApart(saved, unreadApart, held),
+    unreadCount: shown.unreadBots.filter((bot) => botShowsUnread(bot) || waiting(bot)).length,
+    inPlace: unreadBotsApart(saved, unreadApart, held, waiting),
   };
 }
 

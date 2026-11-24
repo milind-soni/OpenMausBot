@@ -434,6 +434,20 @@ describe("the sidebar's Unread section", () => {
     expect(headers(tree).map((header) => [header.props.name, "count" in header.props])).toEqual([["Unread", true], ["Bots", false], ["Group chats", false], ["Work", false]]);
   });
 
+  it("lists first a bot whose question waits on the person, already read, and counts it, until the question is answered", () => {
+    withUnread();
+    const asking = { ...thread("eve", 10, false), activity: "waiting-on-you" as const };
+    fixture.state = { ...fixture.state, bots: fixture.state.bots.map((candidate) => (candidate.id === "eve" ? { ...candidate, tasks: [asking] } : candidate)) };
+    let tree = render().tree;
+    expect(listedBots(tree)).toEqual(["eve", "cora", "dodo", "bea", "atlas"]);
+    expect(unreadHeader(tree)!.props.count).toBe(4);
+
+    fixture.state = { ...fixture.state, bots: fixture.state.bots.map((candidate) => (candidate.id === "eve" ? { ...candidate, tasks: [{ ...asking, activity: undefined }] } : candidate)) };
+    tree = render().tree;
+    expect(listedBots(tree)).toEqual(["cora", "dodo", "bea", "atlas", "eve"]);
+    expect(unreadHeader(tree)!.props.count).toBe(3);
+  });
+
   it("keeps the bot opened from it listed in its place, and sends it back to its own place once another chat is open", () => {
     withUnread();
     render();
