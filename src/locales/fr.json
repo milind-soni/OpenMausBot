@@ -3982,12 +3982,9 @@
   "skillBurger.list.removed": "{name} retirée.",
   "skillBurger.list.removeFailed": "Impossible de retirer cette compétence. Réessayez.",
   "skillBurger.list.loadFailed": "Impossible de charger les compétences enregistrées.",
-  "skillBurger.everyChat": "Utiliser dans chaque chat",
-  "skillBurger.everyChatFailed": "Impossible de changer où ce Skill Burger est utilisé. Réessayez.",
   "skillBurger.renameFailed": "Impossible de renommer ce Skill Burger. Réessayez.",
   "skillBurger.menu.aria": "Plus pour {name}",
   "skillBurger.menu.rename": "Renommer…",
-  "skillBurger.card.everyChat": "Chaque chat",
   "skillBurger.page.empty": "Les Skill Burgers de vos bots apparaissent ici.",
   "chat.notice.savedToThread": "Enregistré dans ce fil",
   "memoryPage.thisThread": "Ce fil",
@@ -4034,5 +4031,11 @@
   "chat.botExchange.gone": "Cet échange ne peut pas être arrêté d’ici.",
   "chat.botExchange.stopFailed": "Impossible d’arrêter. Vérifiez votre connexion et réessayez.",
   "chat.botExchange.waiting": "{helper} n’a pas encore commencé. Il attend son tour.",
-  "chat.botExchange.unknown": "Impossible de savoir quels messages de la conversation de {helper} appartiennent à cet échange : aucun n’est affiché."
+  "chat.botExchange.unknown": "Impossible de savoir quels messages de la conversation de {helper} appartiennent à cet échange : aucun n’est affiché.",
+  "skillBurger.pill.cooking": "En cuisine… {count}",
+  "skillBurger.pill.add": "Ajouter",
+  "skillBurger.pill.running": "En cours… {count}",
+  "skillBurger.pill.stopped": "Arrêté",
+  "skillBurger.pill.addPath": "Ajouter le chemin",
+  "skillBurger.card.madeBy": "Créé par {name}"
 }

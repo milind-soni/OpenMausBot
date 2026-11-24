@@ -6072,12 +6072,9 @@
   "skillBurger.list.removed": "{name} kaldırıldı.",
   "skillBurger.list.removeFailed": "Bu beceri kaldırılamadı. Tekrar deneyin.",
   "skillBurger.list.loadFailed": "Kaydedilen beceriler yüklenemedi.",
-  "skillBurger.everyChat": "Her sohbette kullan",
-  "skillBurger.everyChatFailed": "Bu Skill Burger'ın kullanıldığı yer değiştirilemedi. Tekrar deneyin.",
   "skillBurger.renameFailed": "Bu Skill Burger yeniden adlandırılamadı. Tekrar deneyin.",
   "skillBurger.menu.aria": "{name} için daha fazla",
   "skillBurger.menu.rename": "Yeniden adlandır…",
-  "skillBurger.card.everyChat": "Her sohbet",
   "skillBurger.page.empty": "Botlarınızın yaptığı Skill Burger'lar burada görünür.",
   "chat.notice.savedToThread": "Bu konuşmaya kaydedildi",
   "memoryPage.thisThread": "Bu konuşma",
@@ -6124,5 +6121,11 @@
   "chat.botExchange.gone": "Bu konuşma buradan durdurulamaz.",
   "chat.botExchange.stopFailed": "Durdurulamadı. Bağlantını kontrol edip tekrar dene.",
   "chat.botExchange.waiting": "{helper} buna henüz başlamadı. Sırasını bekliyor.",
-  "chat.botExchange.unknown": "{helper} ile konuşmadaki hangi mesajların bu alışverişe ait olduğu belli değil, bu yüzden hiçbiri gösterilmiyor."
+  "chat.botExchange.unknown": "{helper} ile konuşmadaki hangi mesajların bu alışverişe ait olduğu belli değil, bu yüzden hiçbiri gösterilmiyor.",
+  "skillBurger.pill.cooking": "Pişiyor… {count}",
+  "skillBurger.pill.add": "Ekle",
+  "skillBurger.pill.running": "Çalışıyor… {count}",
+  "skillBurger.pill.stopped": "Durdu",
+  "skillBurger.pill.addPath": "Yol ekle",
+  "skillBurger.card.madeBy": "{name} tarafından yapıldı"
 }

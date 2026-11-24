@@ -11809,12 +11809,9 @@
   "skillBurger.list.removed": "Removed {name}.",
   "skillBurger.list.removeFailed": "Couldn't remove this skill. Try again.",
   "skillBurger.list.loadFailed": "Couldn't load saved skills.",
-  "skillBurger.everyChat": "Use in every chat",
-  "skillBurger.everyChatFailed": "Couldn’t change where this Skill Burger is used. Try again.",
   "skillBurger.renameFailed": "Couldn’t rename this Skill Burger. Try again.",
   "skillBurger.menu.aria": "More for {name}",
   "skillBurger.menu.rename": "Rename…",
-  "skillBurger.card.everyChat": "Every chat",
   "skillBurger.page.empty": "Skill Burgers your bots make show up here.",
   "skillBurger.run.button": "Run",
   "skillBurger.runName": "Run {name}",
@@ -11874,5 +11871,11 @@
   "settings.features.skillBurgerLine": "Save a bot's run as steps you can run again",
   "settings.features.threadTabs": "Thread tabs",
   "settings.features.threadTabsLine": "Show a bot's threads as tabs above the chat",
-  "settings.features.error": "Couldn't save that. Check your connection and try again."
+  "settings.features.error": "Couldn't save that. Check your connection and try again.",
+  "skillBurger.pill.cooking": "Cooking… {count}",
+  "skillBurger.pill.add": "Add",
+  "skillBurger.pill.running": "Running… {count}",
+  "skillBurger.pill.stopped": "Stopped",
+  "skillBurger.pill.addPath": "Add path",
+  "skillBurger.card.madeBy": "Made by {name}"
 }

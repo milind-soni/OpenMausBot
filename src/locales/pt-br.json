@@ -11809,12 +11809,9 @@
   "skillBurger.list.removed": "{name} removida.",
   "skillBurger.list.removeFailed": "Não foi possível remover esta habilidade. Tente de novo.",
   "skillBurger.list.loadFailed": "Não foi possível carregar as habilidades salvas.",
-  "skillBurger.everyChat": "Usar em todos os chats",
-  "skillBurger.everyChatFailed": "Não foi possível mudar onde este Skill Burger é usado. Tente de novo.",
   "skillBurger.renameFailed": "Não foi possível renomear este Skill Burger. Tente de novo.",
   "skillBurger.menu.aria": "Mais de {name}",
   "skillBurger.menu.rename": "Renomear…",
-  "skillBurger.card.everyChat": "Todos os chats",
   "skillBurger.page.empty": "Os Skill Burgers dos seus bots aparecem aqui.",
   "skillBurger.run.button": "Executar",
   "skillBurger.runName": "Executar {name}",
@@ -11874,5 +11871,11 @@
   "settings.features.skillBurgerLine": "Salva a execução de um bot como etapas que você pode executar de novo",
   "settings.features.threadTabs": "Abas de conversas",
   "settings.features.threadTabsLine": "Mostra as conversas de um bot como abas acima do chat",
-  "settings.features.error": "Não foi possível salvar. Verifique sua conexão e tente de novo."
+  "settings.features.error": "Não foi possível salvar. Verifique sua conexão e tente de novo.",
+  "skillBurger.pill.cooking": "Cozinhando… {count}",
+  "skillBurger.pill.add": "Adicionar",
+  "skillBurger.pill.running": "Executando… {count}",
+  "skillBurger.pill.stopped": "Parado",
+  "skillBurger.pill.addPath": "Adicionar caminho",
+  "skillBurger.card.madeBy": "Feito por {name}"
 }

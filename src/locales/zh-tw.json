@@ -10394,12 +10394,9 @@
   "skillBurger.list.removed": "已移除 {name}。",
   "skillBurger.list.removeFailed": "無法移除這個技能，請再試一次。",
   "skillBurger.list.loadFailed": "無法載入已儲存的技能。",
-  "skillBurger.everyChat": "在每個聊天中使用",
-  "skillBurger.everyChatFailed": "無法變更這個 Skill Burger 的使用範圍，請再試一次。",
   "skillBurger.renameFailed": "無法重新命名這個 Skill Burger，請再試一次。",
   "skillBurger.menu.aria": "{name} 的更多操作",
   "skillBurger.menu.rename": "重新命名…",
-  "skillBurger.card.everyChat": "每個聊天",
   "skillBurger.page.empty": "機器人製作的 Skill Burger 會顯示在這裡。",
   "skillBurger.run.button": "執行",
   "skillBurger.runName": "執行 {name}",
@@ -10442,5 +10439,11 @@
   "chat.botExchange.gone": "無法在這裡停止此交流。",
   "chat.botExchange.stopFailed": "無法停止。請檢查網路連線後再試一次。",
   "chat.botExchange.waiting": "{helper} 還沒開始，正在排隊等候。",
-  "chat.botExchange.unknown": "無法確定與 {helper} 的對話中哪些訊息屬於這次交流，因此不顯示。"
+  "chat.botExchange.unknown": "無法確定與 {helper} 的對話中哪些訊息屬於這次交流，因此不顯示。",
+  "skillBurger.pill.cooking": "烹調中… {count}",
+  "skillBurger.pill.add": "加入",
+  "skillBurger.pill.running": "執行中… {count}",
+  "skillBurger.pill.stopped": "已停止",
+  "skillBurger.pill.addPath": "加入路徑",
+  "skillBurger.card.madeBy": "由 {name} 建立"
 }

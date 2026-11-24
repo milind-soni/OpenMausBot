@@ -4325,12 +4325,9 @@
   "skillBurger.list.removed": "{name} entfernt.",
   "skillBurger.list.removeFailed": "Dieser Skill konnte nicht entfernt werden. Versuch es noch einmal.",
   "skillBurger.list.loadFailed": "Gespeicherte Skills konnten nicht geladen werden.",
-  "skillBurger.everyChat": "In jedem Chat verwenden",
-  "skillBurger.everyChatFailed": "Konnte nicht ändern, wo dieser Skill Burger verwendet wird. Versuch es noch einmal.",
   "skillBurger.renameFailed": "Dieser Skill Burger konnte nicht umbenannt werden. Versuch es noch einmal.",
   "skillBurger.menu.aria": "Mehr zu {name}",
   "skillBurger.menu.rename": "Umbenennen…",
-  "skillBurger.card.everyChat": "Jeder Chat",
   "skillBurger.page.empty": "Skill Burger deiner Bots erscheinen hier.",
   "chat.notice.savedToThread": "In diesem Thread gespeichert",
   "memoryPage.thisThread": "Dieser Thread",
@@ -4359,5 +4356,11 @@
   "settings.features.skillBurgerLine": "Speichert den Lauf eines Bots als Schritte, die du erneut ausführen kannst",
   "settings.features.threadTabs": "Thread-Tabs",
   "settings.features.threadTabsLine": "Zeigt die Threads eines Bots als Tabs über dem Chat",
-  "settings.features.error": "Das konnte nicht gespeichert werden. Prüfe deine Verbindung und versuche es erneut."
+  "settings.features.error": "Das konnte nicht gespeichert werden. Prüfe deine Verbindung und versuche es erneut.",
+  "skillBurger.pill.cooking": "Wird gekocht… {count}",
+  "skillBurger.pill.add": "Hinzufügen",
+  "skillBurger.pill.running": "Läuft… {count}",
+  "skillBurger.pill.stopped": "Angehalten",
+  "skillBurger.pill.addPath": "Weg hinzufügen",
+  "skillBurger.card.madeBy": "Erstellt von {name}"
 }
