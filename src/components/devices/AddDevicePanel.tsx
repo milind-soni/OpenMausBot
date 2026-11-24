@@ -16,7 +16,7 @@ import { StatusMark } from "./device-parts";
 const TAILSCALE_GET = "https://tailscale.com/download";
 
 let pointerAt = 0, keyAt = 0;
-if (typeof window !== "undefined") {
+if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
   window.addEventListener("pointerdown", () => { pointerAt = Date.now(); }, true);
   window.addEventListener("keydown", () => { keyAt = Date.now(); }, true);
 }

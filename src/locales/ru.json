@@ -7373,5 +7373,11 @@
   "chat.botExchange.gone": "Этот обмен нельзя остановить отсюда.",
   "chat.botExchange.stopFailed": "Не удалось остановить. Проверьте подключение и попробуйте снова.",
   "chat.botExchange.waiting": "{helper} ещё не начал. Ждёт своей очереди.",
-  "chat.botExchange.unknown": "Непонятно, какие сообщения из разговора с {helper} относятся к этому обмену, поэтому ни одно не показано."
+  "chat.botExchange.unknown": "Непонятно, какие сообщения из разговора с {helper} относятся к этому обмену, поэтому ни одно не показано.",
+  "devicesPage.network.allow": "Разрешить мои другие компьютеры",
+  "devicesPage.network.approveIn": "Одобрить в Tailscale",
+  "devicesPage.network.manageIn": "Управлять в «Телефон и устройства»",
+  "devicesPage.network.setUpTailscale": "Настроить Tailscale",
+  "devicesPage.pairedAgain": "{name} снова сопряжено.",
+  "devicesPage.removed": "{name} удалено."
 }

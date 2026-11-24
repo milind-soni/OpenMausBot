@@ -6118,5 +6118,11 @@
   "chat.botExchange.gone": "Không thể dừng cuộc trao đổi này từ đây.",
   "chat.botExchange.stopFailed": "Không thể dừng. Hãy kiểm tra kết nối rồi thử lại.",
   "chat.botExchange.waiting": "{helper} chưa bắt đầu việc này. Đang chờ đến lượt.",
-  "chat.botExchange.unknown": "Không rõ tin nhắn nào trong cuộc trò chuyện của {helper} thuộc lần trao đổi này, nên không hiển thị tin nào."
+  "chat.botExchange.unknown": "Không rõ tin nhắn nào trong cuộc trò chuyện của {helper} thuộc lần trao đổi này, nên không hiển thị tin nào.",
+  "devicesPage.network.allow": "Cho phép các máy tính khác của tôi",
+  "devicesPage.network.approveIn": "Phê duyệt trong Tailscale",
+  "devicesPage.network.manageIn": "Quản lý trong Điện thoại và thiết bị",
+  "devicesPage.network.setUpTailscale": "Thiết lập Tailscale",
+  "devicesPage.pairedAgain": "Đã ghép nối lại {name}.",
+  "devicesPage.removed": "Đã gỡ bỏ {name}."
 }

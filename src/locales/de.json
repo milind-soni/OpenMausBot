@@ -4353,5 +4353,11 @@
   "skillBurger.run.pathUndone": "Weg entfernt",
   "skillBurger.run.addPathFailed": "Das hat nicht geklappt. Versuch es noch einmal.",
   "activity.tool.team.runWorkflow": "Skill Burger ausführen",
-  "activity.tool.team.workflowEdit": "Skill Burger ändern"
+  "activity.tool.team.workflowEdit": "Skill Burger ändern",
+  "devicesPage.network.allow": "Meine anderen Computer zulassen",
+  "devicesPage.network.approveIn": "In Tailscale bestätigen",
+  "devicesPage.network.manageIn": "In Telefon & Geräte verwalten",
+  "devicesPage.network.setUpTailscale": "Tailscale einrichten",
+  "devicesPage.pairedAgain": "{name} ist wieder gekoppelt.",
+  "devicesPage.removed": "{name} wurde entfernt."
 }

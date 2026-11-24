@@ -10349,5 +10349,11 @@
   "chat.botExchange.gone": "无法在这里停止此交流。",
   "chat.botExchange.stopFailed": "无法停止。请检查网络连接后重试。",
   "chat.botExchange.waiting": "{helper} 还没开始，正在排队等候。",
-  "chat.botExchange.unknown": "无法确定与 {helper} 的对话中哪些消息属于这次交流，因此不显示。"
+  "chat.botExchange.unknown": "无法确定与 {helper} 的对话中哪些消息属于这次交流，因此不显示。",
+  "devicesPage.network.allow": "允许我的其他电脑",
+  "devicesPage.network.approveIn": "在 Tailscale 中批准",
+  "devicesPage.network.manageIn": "在“手机和设备”中管理",
+  "devicesPage.network.setUpTailscale": "设置 Tailscale",
+  "devicesPage.pairedAgain": "{name} 已重新配对。",
+  "devicesPage.removed": "已移除 {name}。"
 }

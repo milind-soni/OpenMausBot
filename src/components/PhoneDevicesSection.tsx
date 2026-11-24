@@ -261,7 +261,11 @@ function RouteCard({ route, chosen, disabled, onChoose, needs, action, hint }: {
 /** Pair a device's steps: which way the phone reaches this computer comes first, then the code. The Pair a phone dialog
  * frames them; Settings → Devices shows them in its page. `onClose` is Cancel and Done; a code still open is cancelled
  * when the steps close or go away. */
-export function PairPhoneSteps({ c, state, onClose, secureAddress = false, onStep, codeView }: {
+/** Where Pair a device starts: at the code when a way in is already on (or the HTTPS address was asked for), else at the choice. */
+export const firstPairStep = (state: CompanionState, secureAddress: boolean): PairStep =>
+  (["wifi", "relay"] as const).some((route) => state.routes?.[route]?.on) || state.routes?.tailscale?.on === true || secureAddress ? "pairing" : "consent";
+
+export function PairPhoneSteps({ c, state, onClose, secureAddress = false, onStep, codeView, cancelOnUnmount = true }: {
   c: PhoneSetupController;
   state: CompanionState;
   onClose: () => void;
@@ -270,12 +274,13 @@ export function PairPhoneSteps({ c, state, onClose, secureAddress = false, onSte
   onStep?: (step: PairStep) => void;
   /** The code in a page's own look; the page's own Back is the way out, so neither Cancel nor Done shows. */
   codeView?: ReactNode;
+  /** A code still open is cancelled when the steps go away; a frame that cancels on its own close turns this off. */
+  cancelOnUnmount?: boolean;
 }) {
   const signedIn = c.account?.status === "ready";
   const relayAvailable = c.account?.available !== false;
   const [picked, setPicked] = useState<PairRoute>(signedIn && relayAvailable ? "relay" : "wifi");
-  const anyOn = (["wifi", "relay"] as const).some((route) => state.routes?.[route]?.on) || state.routes?.tailscale?.on === true;
-  const [step, setStep] = useState<PairStep>(anyOn || secureAddress ? "pairing" : "consent");
+  const [step, setStep] = useState<PairStep>(() => firstPairStep(state, secureAddress));
   const { start } = c;
   useEffect(() => {
     if (secureAddress) start();
@@ -288,7 +293,7 @@ export function PairPhoneSteps({ c, state, onClose, secureAddress = false, onSte
     if (c.phase !== "sign-in") setStep("consent");
   }, [step, signedIn, c.phase]);
   const opened = useRef(false);
-  opened.current = step !== "consent";
+  opened.current = cancelOnUnmount && step !== "consent";
   const cancel = useRef(c.cancel);
   cancel.current = c.cancel;
   // Checked a tick later: a development remount is not a close.
@@ -345,7 +350,8 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false, pla
   placeName?: string;
   secureAddress?: boolean;
 }) {
-  const [step, setStep] = useState<PairStep>("consent");
+  const [step, setStep] = useState<PairStep>(() => firstPairStep(state, secureAddress));
+  const close = step === "consent" ? onClose : () => { c.cancel(); onClose(); };
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -359,7 +365,7 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false, pla
       const box = root.current;
       if (!box || event.defaultPrevented || event.isComposing || (event.key !== "Escape" && event.key !== "Tab")) return;
       event.preventDefault();
-      if (event.key === "Escape") { onClose(); return; }
+      if (event.key === "Escape") { close(); return; }
       const controls = [...box.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((control) => control.getClientRects().length);
       if (!controls.length) return;
       const at = controls.indexOf(document.activeElement as HTMLElement);
@@ -368,15 +374,15 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false, pla
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [onClose]);
+  }, [close]);
   // An ancestor with backdrop-filter becomes the containing block for `fixed`, so it renders through Layer, on the body.
   const title = t("phone.pair.dialogTitle", { place: placeName });
   return <Layer modal>
     <div ref={root} role="dialog" aria-modal="true" aria-label={title}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" data-pair-dialog={step} data-settings-look="simple">
       <div className="relative flex max-h-full w-full max-w-[440px] flex-col gap-4 overflow-y-auto rounded-2xl border-[0.5px] border-(--settings-edge) bg-app p-6 shadow-xl">
-        <DialogTitle title={title} onClose={onClose} />
-        <PairPhoneSteps c={c} state={state} onClose={onClose} secureAddress={secureAddress} onStep={setStep} />
+        <DialogTitle title={title} onClose={close} />
+        <PairPhoneSteps c={c} state={state} onClose={close} secureAddress={secureAddress} onStep={setStep} cancelOnUnmount={false} />
       </div>
     </div>
   </Layer>;

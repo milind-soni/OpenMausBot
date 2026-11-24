@@ -6118,5 +6118,11 @@
   "chat.botExchange.gone": "Bu konuşma buradan durdurulamaz.",
   "chat.botExchange.stopFailed": "Durdurulamadı. Bağlantını kontrol edip tekrar dene.",
   "chat.botExchange.waiting": "{helper} buna henüz başlamadı. Sırasını bekliyor.",
-  "chat.botExchange.unknown": "{helper} ile konuşmadaki hangi mesajların bu alışverişe ait olduğu belli değil, bu yüzden hiçbiri gösterilmiyor."
+  "chat.botExchange.unknown": "{helper} ile konuşmadaki hangi mesajların bu alışverişe ait olduğu belli değil, bu yüzden hiçbiri gösterilmiyor.",
+  "devicesPage.network.allow": "Diğer bilgisayarlarıma izin ver",
+  "devicesPage.network.approveIn": "Tailscale'de onayla",
+  "devicesPage.network.manageIn": "Telefon ve cihazlar'da yönet",
+  "devicesPage.network.setUpTailscale": "Tailscale'i kur",
+  "devicesPage.pairedAgain": "{name} yeniden eşlendi.",
+  "devicesPage.removed": "{name} kaldırıldı."
 }

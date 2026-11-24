@@ -4028,5 +4028,11 @@
   "chat.botExchange.gone": "Cet échange ne peut pas être arrêté d’ici.",
   "chat.botExchange.stopFailed": "Impossible d’arrêter. Vérifiez votre connexion et réessayez.",
   "chat.botExchange.waiting": "{helper} n’a pas encore commencé. Il attend son tour.",
-  "chat.botExchange.unknown": "Impossible de savoir quels messages de la conversation de {helper} appartiennent à cet échange : aucun n’est affiché."
+  "chat.botExchange.unknown": "Impossible de savoir quels messages de la conversation de {helper} appartiennent à cet échange : aucun n’est affiché.",
+  "devicesPage.network.allow": "Autoriser mes autres ordinateurs",
+  "devicesPage.network.approveIn": "Approuver dans Tailscale",
+  "devicesPage.network.manageIn": "Gérer dans Téléphone et appareils",
+  "devicesPage.network.setUpTailscale": "Configurer Tailscale",
+  "devicesPage.pairedAgain": "{name} est de nouveau associé.",
+  "devicesPage.removed": "{name} a été retiré."
 }

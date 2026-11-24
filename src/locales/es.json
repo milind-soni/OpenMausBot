@@ -6623,5 +6623,11 @@
   "chat.botExchange.gone": "Este intercambio no se puede detener desde aquí.",
   "chat.botExchange.stopFailed": "No se pudo detener. Comprueba tu conexión e inténtalo de nuevo.",
   "chat.botExchange.waiting": "{helper} aún no ha empezado con esto. Está esperando su turno.",
-  "chat.botExchange.unknown": "No está claro qué mensajes de la conversación de {helper} pertenecen a este intercambio, así que no se muestra ninguno."
+  "chat.botExchange.unknown": "No está claro qué mensajes de la conversación de {helper} pertenecen a este intercambio, así que no se muestra ninguno.",
+  "devicesPage.network.allow": "Permitir mis otros ordenadores",
+  "devicesPage.network.approveIn": "Aprobar en Tailscale",
+  "devicesPage.network.manageIn": "Gestionar en Teléfono y dispositivos",
+  "devicesPage.network.setUpTailscale": "Configurar Tailscale",
+  "devicesPage.pairedAgain": "{name} está emparejado de nuevo.",
+  "devicesPage.removed": "Se quitó {name}."
 }

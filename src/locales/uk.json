@@ -4300,5 +4300,11 @@
   "chat.botExchange.gone": "Цей обмін не можна зупинити звідси.",
   "chat.botExchange.stopFailed": "Не вдалося зупинити. Перевірте з’єднання і спробуйте ще раз.",
   "chat.botExchange.waiting": "{helper} ще не почав. Чекає своєї черги.",
-  "chat.botExchange.unknown": "Незрозуміло, які повідомлення з розмови з {helper} належать до цього обміну, тому жодне не показано."
+  "chat.botExchange.unknown": "Незрозуміло, які повідомлення з розмови з {helper} належать до цього обміну, тому жодне не показано.",
+  "devicesPage.network.allow": "Дозволити мої інші комп’ютери",
+  "devicesPage.network.approveIn": "Схвалити в Tailscale",
+  "devicesPage.network.manageIn": "Керувати в «Телефон і пристрої»",
+  "devicesPage.network.setUpTailscale": "Налаштувати Tailscale",
+  "devicesPage.pairedAgain": "{name} знову з’єднано.",
+  "devicesPage.removed": "{name} вилучено."
 }

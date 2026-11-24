@@ -30,7 +30,7 @@ export function StatusLine({ device, now, className }: { device: Device; now: nu
   const mark = markOf(device);
   return (
     <span data-device-state={mark} className={cn("flex min-w-0 items-start gap-1.5 text-[13px] leading-[18px]", className)}>
-      <span className="flex h-[18px] w-3.5 shrink-0 items-center"><StatusMark status={mark} /></span>
+      {mark !== "unknown" && <span className="flex h-[18px] w-3.5 shrink-0 items-center"><StatusMark status={mark} /></span>}
       <span className="min-w-0">
         {words && <span className={mark === "attention" ? "text-ink" : "text-ink-secondary"}>{words}</span>}
         {words && route && <span aria-hidden="true" className="text-ink-tertiary @max-[479px]/rows:hidden">{" · "}</span>}

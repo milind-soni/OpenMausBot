@@ -111,7 +111,7 @@ export function DeviceDetails({ device, onAction, onRemoved, now, pairing, onPai
       {device.usesThisComputer && !lend && <p className="text-[13px] leading-[18px] text-ink-secondary">{t("servers.share.on", { name: device.name })}</p>}
       {lend && <LendComputerSwitch id={lend} look="setting" />}
       {/* The editor names its server by its SSH name, which the details above already show. */}
-      {vps && <div data-device-ssh-editor="" className="flex flex-col gap-2 [&_[data-vps-server]_span.font-mono]:hidden [&_[data-vps-server]_button:last-of-type]:ms-auto">
+      {vps && <div data-device-ssh-editor="" className="flex flex-col gap-2 [&_[data-vps-server]_span.font-mono]:hidden [&_[data-vps-server]_button:last-of-type]:ms-auto [&_[data-vps-server]_button:last-of-type]:text-danger">
         <p className="text-[13px] font-medium leading-[18px] text-ink">{t("devicesPage.detail.sshEditorTitle")}</p>
         <p className="-mt-1 text-[13px] leading-[18px] text-ink-secondary">{t("devicesPage.detail.sshEditorLine")}</p>
         <VpsServerEditor serverId={vps} onRemoved={onRemoved} />

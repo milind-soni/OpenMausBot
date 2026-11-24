@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { productName } from "@/lib/brand";
@@ -49,6 +49,17 @@ export function PhoneCodeCard({ link, code, expiresAt, connected, children }: { 
  * starting up) is the flow's own view. */
 export function PhoneCodeInline({ c }: { c: PhoneSetupController }) {
   const pairing = c.state?.pairing;
+  // Add a phone already asked for a code: a way in that is on goes straight to it, with no second "Pair" press.
+  const started = useRef(false);
+  const { phase, start, useLocal, useTailscale } = c;
+  const routes = c.state?.routes;
+  useEffect(() => {
+    if (started.current || phase !== "intro" || !routes) return;
+    started.current = true;
+    if (routes.wifi?.on || routes.relay?.on) useLocal();
+    else if (routes.tailscale?.on) useTailscale();
+    else start();
+  }, [phase, routes, start, useLocal, useTailscale]);
   if (c.phase === "qr" && c.pairingExpired) {
     return <div className="flex flex-col items-start gap-3">
       <p className="text-[13px] leading-[18px] text-ink-secondary">{t("remote.serverPairing.expired")}</p>

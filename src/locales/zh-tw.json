@@ -10436,5 +10436,11 @@
   "chat.botExchange.gone": "無法在這裡停止此交流。",
   "chat.botExchange.stopFailed": "無法停止。請檢查網路連線後再試一次。",
   "chat.botExchange.waiting": "{helper} 還沒開始，正在排隊等候。",
-  "chat.botExchange.unknown": "無法確定與 {helper} 的對話中哪些訊息屬於這次交流，因此不顯示。"
+  "chat.botExchange.unknown": "無法確定與 {helper} 的對話中哪些訊息屬於這次交流，因此不顯示。",
+  "devicesPage.network.allow": "允許我的其他電腦",
+  "devicesPage.network.approveIn": "在 Tailscale 中核准",
+  "devicesPage.network.manageIn": "在「手機和裝置」中管理",
+  "devicesPage.network.setUpTailscale": "設定 Tailscale",
+  "devicesPage.pairedAgain": "{name} 已重新配對。",
+  "devicesPage.removed": "已移除 {name}。"
 }

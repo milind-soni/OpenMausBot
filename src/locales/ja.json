@@ -8157,5 +8157,11 @@
   "chat.botExchange.gone": "このやり取りはここからは停止できません。",
   "chat.botExchange.stopFailed": "停止できませんでした。接続を確認してもう一度お試しください。",
   "chat.botExchange.waiting": "{helper} はまだ着手していません。順番を待っています。",
-  "chat.botExchange.unknown": "{helper} の会話のどのメッセージがこのやり取りのものか判別できないため、表示していません。"
+  "chat.botExchange.unknown": "{helper} の会話のどのメッセージがこのやり取りのものか判別できないため、表示していません。",
+  "devicesPage.network.allow": "ほかのコンピューターを許可",
+  "devicesPage.network.approveIn": "Tailscale で承認",
+  "devicesPage.network.manageIn": "スマホとデバイスで管理",
+  "devicesPage.network.setUpTailscale": "Tailscale を設定",
+  "devicesPage.pairedAgain": "{name} をもう一度ペアリングしました。",
+  "devicesPage.removed": "{name} を削除しました。"
 }
