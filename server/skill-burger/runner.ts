@@ -223,7 +223,7 @@ export async function runFrom(state: Omit<RunState, "waiting" | "createdAt"> & {
     deps.events.ended(id, name, step, result);
   };
   const hand = (step: WorkflowStep, type: HandedType, missing?: { decide: string; case: string }, extra: { prompt?: string; input?: string; delegation?: RunState["delegation"] } = {}): RunEnvelope => {
-    if (type !== "teammates" && type !== "review") results[step.id] = { state: "handed", ...(missing ? { case: missing.case, output: { case: missing.case } } : {}) };
+    if (type !== "teammates" && type !== "review") results[step.id] = { ...(type === "check" ? results[step.id] : {}), state: "handed", ...(missing ? { case: missing.case, output: { case: missing.case } } : {}) };
     if (type !== "missing_case") deps.events.started(id, name, step);
     const { delegation: _old, ...rest } = state as typeof state & { delegation?: unknown };
     deps.save({ ...rest, results, waiting: { step: step.id, type }, ...(extra.delegation ? { delegation: extra.delegation } : {}), createdAt: now() });
