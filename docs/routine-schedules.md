@@ -252,7 +252,8 @@ use an appropriate event/webhook workflow instead of a fake weekly schedule.
   questions were open. Without one, the default applies to every run, whether
   the schedule, an event or **Run now** started it: 3 hours of work for a
   bot's run, 12 hours for a room goal's run (which stays running across every
-  member's turn). Work is the time the run spent running since its current
+  member's turn). A server whose routines run longer may set another default
+  (`OMB_ROUTINE_RUN_LIMIT_HOURS`). Work is the time the run spent running since its current
   start: the time it is queued (behind a busy bot, for its one retry, for a
   usage limit's reset) and the time it waits (on your approval or answer, on a
   conversation left with you, on work it handed to teammates) is not in it.

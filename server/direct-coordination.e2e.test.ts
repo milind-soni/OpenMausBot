@@ -752,6 +752,36 @@ it("runs two assignments to one teammate from one turn in its thread, one after 
   expect(transcript).toContain("Benchmark the exporter");
 }), 60_000);
 
+it("starts a later send in a parallel work thread while the teammate's standing thread is busy, instead of queueing it", () => fixture(async f => {
+  const gate = join(f.session.info.dataDir, "first-assignment.gate");
+  f.plan[f.lead.id] = { gateFile: gate, reply: "Done" };
+  f.plan[f.chief.id] = { turns: [
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Implement the CSV export", reply: "none" } }], reply: "Assigned the build" },
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Export the invoices", reply: "none" } }], reply: "Assigned the invoices" },
+  ] };
+  f.save();
+  const leadNodes = () => f.nodes().filter((node: any) => node.botId === f.lead.id);
+  try {
+    await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Ask Engineering to build the CSV export.");
+    expect((await f.wait()).status).toBe("settled");
+    await expect.poll(() => leadNodes()[0]?.status, { timeout: 15_000 }).toBe("running");
+    await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Now ask them to export the invoices.");
+    expect((await f.wait()).status).toBe("settled");
+    await expect.poll(() => leadNodes()[1]?.status, { timeout: 15_000 }).toBe("running");
+    const [first, second] = leadNodes();
+    expect(first.status, "the first assignment still runs").toBe("running");
+    expect(second.threadId).not.toBe(first.threadId);
+    writeFileSync(gate, "go");
+    await expect.poll(() => leadNodes().map((node: any) => node.status), { timeout: 15_000 }).toEqual(["completed", "completed"]);
+    const work = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks.filter((task: any) => task.openedBy?.kind === "work");
+    expect(work.map((task: any) => task.threadId).sort()).toEqual([first.threadId, second.threadId].sort());
+    for (const task of work) expect(task).toMatchObject({ title: "@Clive · work", openedBy: { botId: f.chief.id, threadId: f.chief.activeTaskId } });
+    expect(sendReceipts(f, f.chief.id).map((receipt: any) => receipt.threadId)).toEqual([first.threadId, second.threadId]);
+  } finally {
+    writeFileSync(gate, "go");
+  }
+}), 60_000);
+
 it("gives another conversation of the same Chief its own thread with the teammate", () => fixture(async f => {
   f.plan[f.lead.id] = { turns: [{ reply: "Export implemented" }, { reply: "Invoices exported" }] };
   f.plan[f.chief.id] = { turns: [

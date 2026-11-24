@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { TaskRecord } from "../store.ts";
 import { OUTSIDE_STAYS_HERE } from "./outside-lineage.ts";
-import { workThreadFor } from "./work-thread.ts";
+import { besideBusy, workThreadFor } from "./work-thread.ts";
 
 const by = (botId: string, name: string, threadId: string): TaskRecord["openedBy"] => ({ botId, name, threadId, kind: "work", at: 0 });
 const task = (threadId: string, openedBy?: TaskRecord["openedBy"], more: Partial<TaskRecord> = {}): TaskRecord =>
@@ -76,5 +76,35 @@ describe("workThreadFor", () => {
       thread: "nope", notice: true, answering: undefined, also: () => true, reach: () => true, any: true })).toThrow(/is not an open thread of Bugfixer/);
     expect(() => workThreadFor({ ...store, taskByThread: () => task("x") }, { botId: "bugfixer", botName: "Bugfixer", fromBotId: "liaison", fromThreadId: "liaison-chat",
       thread: "x", notice: true, answering: undefined, also: () => true, reach: () => false, any: true })).toThrow(OUTSIDE_STAYS_HERE);
+  });
+});
+
+describe("besideBusy", () => {
+  // Liaison's chat "liaison-chat" opened two work threads on Bugfixer earlier: "standing" and "spare".
+  const opened = [task("standing", by("liaison", "Liaison", "liaison-chat")), task("spare", by("liaison", "Liaison", "liaison-chat"))];
+  const workStore = { workThread: (_bot: string, _from: string, _thread: string, _room = false, also: (task: TaskRecord) => boolean = () => true) => opened.find(also) };
+  const into = (busy: string[], more: { full?: boolean; kept?: string[]; holding?: string[]; fits?: (task: TaskRecord) => boolean } = {}) => besideBusy(workStore, opened[0]!, {
+    botId: "bugfixer", fromBotId: "liaison", fromThreadId: "liaison-chat", fits: more.fits ?? (() => true), busy: (threadId) => busy.includes(threadId), idle: (threadId) => !busy.includes(threadId) && !(more.holding ?? []).includes(threadId),
+    full: more.full ?? false, keeps: (threadId) => (more.kept ?? []).includes(threadId) })?.threadId;
+
+  it("keeps the standing thread while nothing runs there", () => {
+    expect(into([])).toBe("standing");
+    expect(into(["spare"])).toBe("standing");
+  });
+
+  it("runs beside a busy standing thread: in an idle work thread it opened, else a new one", () => {
+    expect(into(["standing"])).toBe("spare");
+    expect(into(["standing", "spare"])).toBeUndefined();
+    expect(into(["standing"], { fits: (task) => task.threadId !== "spare" })).toBeUndefined();
+    expect(into(["standing"], { holding: ["spare"] }), "a thread with queued or waiting work is not idle").toBeUndefined();
+  });
+
+  it("queues in the standing thread when the teammate could not start it anyway", () => {
+    expect(into(["standing"], { full: true })).toBe("standing");
+  });
+
+  it("keeps a send behind work this turn handed on or this conversation still waits on, wherever that runs", () => {
+    expect(into(["standing"], { kept: ["standing"] })).toBe("standing");
+    expect(into(["standing", "spare"], { kept: ["spare"] })).toBe("spare");
   });
 });

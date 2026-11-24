@@ -16,7 +16,7 @@ export function createRunStates(dir: string, now: () => number = Date.now) {
     try {
       for (const name of readdirSync(dir)) {
         const path = join(dir, name);
-        if (now() - statSync(path).mtimeMs > RUN_STATE_TTL_MS) rmSync(path, { force: true });
+        if (name !== "history.json" && now() - statSync(path).mtimeMs > RUN_STATE_TTL_MS) rmSync(path, { force: true });
       }
     } catch {
       // Nothing saved yet.
@@ -27,6 +27,26 @@ export function createRunStates(dir: string, now: () => number = Date.now) {
       mkdirSync(dir, { recursive: true, mode: 0o700 });
       writeFileAtomic(file(state.id), JSON.stringify(state), { mode: 0o600 });
       sweep();
+    },
+    /** The newest run in `threadId` paused on the teammates' replies to `handoffs`, if any: the turn those replies resume
+     * is pointed back into it. A run waiting on other hand-offs, or abandoned, is never named. */
+    waitingIn(threadId: string, handoffs: readonly string[]): RunState | null {
+      let newest: RunState | null = null;
+      try {
+        for (const name of readdirSync(dir)) {
+          if (!name.endsWith(".json") || name === "history.json") continue;
+          try {
+            const seen = JSON.parse(readFileSync(join(dir, name), "utf8")) as RunState;
+            const ours = seen.delegation?.requests.some((request) => handoffs.includes(request.requestId));
+            if (seen.threadId === threadId && seen.waiting?.type === "teammates" && ours && now() - seen.createdAt <= RUN_STATE_TTL_MS && (!newest || seen.createdAt > newest.createdAt)) newest = seen;
+          } catch {
+            // Not a run's file.
+          }
+        }
+      } catch {
+        // Nothing saved yet.
+      }
+      return newest;
     },
     /** The paused run, taken so nobody else can resume it; null when it is gone, too old, or another bot's. */
     take(id: string, botId: string): RunState | null {
