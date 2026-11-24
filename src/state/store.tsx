@@ -61,7 +61,7 @@ import { forgetLiveTurns, noteRuntimeTurn, sendStop } from "@/lib/stop-turn";
 import { readLastConversation, rememberConversation } from "@/lib/last-conversation";
 import { readLastBotSection, rememberBotSection } from "@/lib/last-bot-section";
 import { showNotification } from "@/lib/notify";
-import { actionSound, errorSound, frameSound } from "./store-sounds";
+import { actionSound, approvalSound, errorSound, frameSound } from "./store-sounds";
 import { randomUuid } from "@/lib/random-uuid";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { speechOwner, spokenReplyStream } from "@/lib/spoken-reply-stream";
@@ -2421,7 +2421,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   body: JSON.stringify(owner ? { threadId: action.threadId, allowKey: action.alwaysAllow.key } : { alwaysAllow: next }),
                 });
               }
-              const response = await respond();
+              const response = approvalSound(await respond());
               if (response?.settlementPending && typeof response.message === "string") {
                 showError(new Error(response.message));
               }
