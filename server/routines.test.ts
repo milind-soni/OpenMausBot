@@ -305,7 +305,7 @@ describe("bounded scheduled overlap and run health", () => {
     const h = harness(start);
     const routine = h.manager.create({ ...input(), enabled: false });
     const event = (threadId: string, patch: Record<string, unknown>) => h.manager.handleRuntimeEvent({ eventId: `e-${Math.random()}`, provider: "fake", threadId, createdAt: new Date().toISOString(), ...patch } as Parameters<typeof h.manager.handleRuntimeEvent>[0]);
-    const attempt = async (threadId: string, partial: boolean, { reply = true, cutOff = false, stopReason } = {}) => {
+    const attempt = async (threadId: string, partial: boolean, { reply = true, cutOff = false, stopReason }: { reply?: boolean; cutOff?: boolean; stopReason?: string } = {}) => {
       h.manager.runNow(routine.id); await h.manager.tick();
       if (reply) event(threadId, { type: "item.completed", itemType: "assistant_text", itemId: "reply", text: "Here is the summary." });
       event(threadId, { type: "runtime.error", message: "Stopped because the tool call “read_file” failed.", terminal: true, ...(partial ? { partial: true } : {}) });
