@@ -135,6 +135,6 @@ function topLevelMemberCount(text) {
   return count;
 }
 
-// Review policy adapted from @deepseek-ai/dsh-experimental-auto-review (MIT).
+// Review policy adapted from DeepSeek Harness (MIT).
 const POLICY = ${JSON.stringify(reviewPolicy)};
 `;

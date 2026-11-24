@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 
 import { DATA_DIR } from "../../config.ts";
@@ -23,6 +23,8 @@ import {
   parseDeepSeekCatalog,
 } from "./deepseek.ts";
 import { DSH_APPROVAL_PLUGIN } from "./dsh-approval-plugin.ts";
+
+const FAKE_CLI = fileURLToPath(new URL("../../testing/fake-acp-cli.ts", import.meta.url));
 
 describe("DeepSeek model ids", () => {
   it("maps a picker id to dsh's JSON pair and back", () => {
@@ -186,28 +188,61 @@ describe("DeepSeek key detection", () => {
   });
 });
 
-describe("DeepSeek ACP support", () => {
+describe("DeepSeek approval patch", () => {
   const dir = join(DATA_DIR, "engines", "dsh");
   const plugin = join(dir, "approval-preset.mjs");
+  const cli = "fixture-dsh";
+  let bin: string;
+  beforeEach(() => {
+    bin = mkdtempSync(join(tmpdir(), "omb-dsh-version-"));
+    writeFileSync(join(bin, cli), '#!/usr/bin/env node\nconsole.log(process.env.FAKE_ACP_VERSION);\n', { mode: 0o755 });
+    if (process.platform === "win32") writeFileSync(join(bin, cli + ".cmd"), '@node "%~dp0\\fixture-dsh" %*\r\n');
+  });
+  afterEach(() => Promise.all([removeTempDir(bin), removeTempDir(dir)]));
+
+  const resolveCommand = (version: string, config: { cli: string; fullAuto: boolean }) =>
+    deepseekSupport.resolveCommand!({ PATH: [bin, process.env.PATH].join(delimiter), SystemRoot: process.env.SystemRoot, FAKE_ACP_VERSION: version }, config, "deepseek");
+
   it.each([
-    ["ask", "sandbox", false], ["auto", "review", true], ["full", "sandbox", false], [undefined, "sandbox", false],
-  ] as const)("loads the ACP profile and its approval patch for mode %s", (approvalMode, name, review) => {
-    const patch = join(dir, `approval-${name}.patch.yml`);
-    expect(deepseekSupport.spawnArgs({ cli: "dsh", fullAuto: approvalMode === "full" }, { threadId: "t", text: "hi", approvalMode }))
+    ["0.2.2-rc.2", "auto"], ["0.2.2-rc.5", "auto"], ["0.2.3-alpha.2", "auto"],
+    ["0.2.2-rc.2", "ask"], ["0.2.2-rc.2", "full"], ["0.2.2-rc.2", undefined],
+  ] as const)("loads only the local plugin on dsh %s in mode %s", async (version, approvalMode) => {
+    const config = { cli, fullAuto: approvalMode === "full" };
+    const review = approvalMode === "auto";
+    const patch = join(dir, review ? "approval-review.patch.yml" : "approval-sandbox.patch.yml");
+    expect(await resolveCommand(version, config)).toEqual({
+      command: cli, ro: [plugin, join(dir, "approval-review.patch.yml"), join(dir, "approval-sandbox.patch.yml")],
+    });
+    expect(deepseekSupport.spawnArgs(config, { threadId: "t", text: "hi", approvalMode }))
       .toEqual(["--profile", "acp", "--patch", patch]);
     expect(parse(readFileSync(patch, "utf8"))).toEqual([{ insert: [
-      { id: "auto-review", name: "@deepseek-ai/dsh-experimental-auto-review" },
       { id: "openmausbot-approval-preset", name: plugin, config: { review, dataDir: DATA_DIR } },
     ] }]);
     expect(readFileSync(plugin, "utf8")).toBe(DSH_APPROVAL_PLUGIN);
   });
 
-  it("exposes only the plugin and both patches as read-only mounts", async () => {
-    expect(await deepseekSupport.resolveCommand!({}, { cli: "fixture-dsh", fullAuto: false }, "deepseek")).toEqual({
-      command: "fixture-dsh", ro: [plugin, join(dir, "approval-review.patch.yml"), join(dir, "approval-sandbox.patch.yml")],
-    });
-  });
+  it.each(["0.2.2-rc.1", "0.2.1-rc.2", "unknown", ""])(
+    "uses the plain ACP profile without writing or mounting files for version %j", async (version) => {
+      const config = { cli, fullAuto: false };
+      expect(await resolveCommand(version, config)).toEqual({ command: cli });
+      expect(deepseekSupport.spawnArgs(config, { threadId: "t", text: "hi", approvalMode: "auto" })).toEqual(["--profile", "acp"]);
+      expect(existsSync(dir)).toBe(false);
+    },
+  );
 
+  it("keeps the same patch and mounts when that CLI temporarily reports no version", async () => {
+    const supported = { cli, fullAuto: false };
+    const missing = { cli: join(dir, "missing-dsh"), fullAuto: false };
+    const turn = { threadId: "t", text: "hi", approvalMode: "auto" } as const;
+    const launch = await resolveCommand("0.2.2-rc.2", supported);
+    expect(await resolveCommand("", supported)).toEqual(launch);
+    expect(await resolveCommand("", missing)).toEqual({ command: missing.cli });
+    expect(deepseekSupport.spawnArgs(missing, turn)).toEqual(["--profile", "acp"]);
+    expect(deepseekSupport.spawnArgs(supported, turn)).toEqual(["--profile", "acp", "--patch", join(dir, "approval-review.patch.yml")]);
+  });
+});
+
+describe("DeepSeek ACP support", () => {
   it("selects the model and variants over ACP", () => {
     expect(deepseekSupport.driverKind).toBe("deepseekAgent");
     expect(deepseekSupport.displayName).toBe("DeepSeek Harness");
@@ -428,7 +463,6 @@ process.stdin.on("data", (chunk) => {
 });
 
 describe("DeepSeek Harness after a provider was added in dsh since its process started", () => {
-  const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "testing", "fake-acp-cli.ts");
   const base = '["deepseek-official","deepseek-v4-flash"]';
   const addedPicker = "deepseek-official/deepseek-v4-pro";
   const added = '["deepseek-official","deepseek-v4-pro"]';
@@ -449,7 +483,7 @@ describe("DeepSeek Harness after a provider was added in dsh since its process s
       config: { cli: FAKE_CLI, fullAuto: false, workspace: scratch },
       environment: {
         HOME: scratch, USERPROFILE: scratch, DSH_HOME: join(scratch, "dsh"), DEEPSEEK_API_KEY: "sk-fixture",
-        FAKE_ACP_MODELS_FILE: modelsFile, FAKE_ACP_LAUNCH_COUNT_FILE: join(scratch, "launches"),
+        FAKE_ACP_MODELS_FILE: modelsFile,
         FAKE_ACP_RPC_APPEND_FILE: join(scratch, "rpc.jsonl"),
       },
     });
@@ -460,10 +494,9 @@ describe("DeepSeek Harness after a provider was added in dsh since its process s
       const done = await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
       return { done, events: recorder.events.filter((event) => event.turnId === turnId) };
     };
-    const launches = () => Number(readFileSync(join(scratch, "launches"), "utf8"));
-    const prompts = () => readFileSync(join(scratch, "rpc.jsonl"), "utf8").trim().split("\n")
-      .filter((line) => (JSON.parse(line) as { method: string }).method === "session/prompt").length;
-    return { run, launches, prompts, modelsFile };
+    const countRequests = (method: string) => readFileSync(join(scratch, "rpc.jsonl"), "utf8").trim().split("\n")
+      .filter((line) => (JSON.parse(line) as { method: string }).method === method).length;
+    return { run, countRequests, modelsFile };
   };
 
   it("sends the wire pair for the picker id and reports it on session.started", async () => {
@@ -481,17 +514,16 @@ describe("DeepSeek Harness after a provider was added in dsh since its process s
     expect(stale.done).toMatchObject({ ok: false });
     expect(stale.events.some((event) => event.type === "runtime.notice")).toBe(false);
     expect(stale.events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expect.stringContaining("deepseek-v4-pro") });
-    expect(f.prompts()).toBe(1);
+    expect(f.countRequests("session/prompt")).toBe(1);
     const retry = await f.run(addedPicker);
     expect(retry.done).toMatchObject({ ok: true });
-    expect(f.launches()).toBe(2);
+    expect(f.countRequests("initialize")).toBe(2);
   });
 });
 
 // dsh 0.2 refuses session/resume of a session still open in the same process (-32602 "session is already active"),
 // so a turn whose tools changed must not resume on the live process: the message went unanswered.
 describe("DeepSeek Harness when a turn's tools change", () => {
-  const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "testing", "fake-acp-cli.ts");
   let cleanup: (() => Promise<void>) | null = null;
   afterEach(async () => {
     await cleanup?.();
@@ -506,7 +538,7 @@ describe("DeepSeek Harness when a turn's tools change", () => {
       environment: {
         HOME: scratch, USERPROFILE: scratch, DSH_HOME: join(scratch, "dsh"), DEEPSEEK_API_KEY: "sk-fixture",
         FAKE_ACP_REJECT_LIVE_LOAD_FILE: join(scratch, "reject"), FAKE_ACP_REJECT_LIVE_LOAD_DSH: "1",
-        FAKE_ACP_LAUNCH_COUNT_FILE: join(scratch, "launches"), FAKE_ACP_RPC_APPEND_FILE: join(scratch, "rpc.jsonl"),
+        FAKE_ACP_RPC_APPEND_FILE: join(scratch, "rpc.jsonl"),
         FAKE_ACP_DUMP: join(scratch, "dump"),
       },
     });
@@ -530,7 +562,7 @@ describe("DeepSeek Harness when a turn's tools change", () => {
     expect(calls.filter((call) => call.method === "session/new")).toHaveLength(1);
     expect(calls.filter((call) => call.method === "session/resume").map((call) => call.sessionId)).toEqual(["fake-acp-session"]);
     expect(calls.filter((call) => call.method === "session/prompt")).toHaveLength(2);
-    expect(Number(readFileSync(join(scratch, "launches"), "utf8"))).toBe(2);
+    expect(new Set(calls.filter((call) => call.method === "initialize").map((call) => call.pid)).size).toBe(2);
     const servers = JSON.parse(readFileSync(join(scratch, "dump.mcp.json"), "utf8")) as Array<{ name: string }>;
     const agentsServer = JSON.stringify(servers.find((server) => server.name === "agents"));
     expect(agentsServer).toContain("OMB_COMMS_TOKEN");

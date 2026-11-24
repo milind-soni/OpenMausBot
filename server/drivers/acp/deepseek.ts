@@ -20,10 +20,9 @@
 //     it downloaded the dependency tree, so the catalog is only probed on an
 //     explicit Refresh, never at app startup).
 //
-// With @deepseek-ai/dsh 0.2.2-rc.5 (verified 2026-11-24), Approve for me keeps
-// workspace-write, adds the bot's memory directory and reviews sandbox escalations
-// with the session model. The official plugin registers the auto-review purpose
-// and the auto preset dsh needs to restore a session before switching it back.
+// Approve for me requires dsh 0.2.2-rc.2 to register the bot's memory directory
+// with the workspace-write sandbox. The session model reviews sandbox escalations.
+// Verified with dsh 0.2.2-rc.2, 0.2.2-rc.5 and 0.2.3-alpha.2 on 2026-11-24.
 //
 // Picker ids are `<provider>/<model>` so bot settings, badges and config.json
 // stay readable; resolveTurnModel turns them into dsh's wire pair just before
@@ -33,6 +32,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parse as parseYaml, stringify } from "yaml";
 
+import { cliVersionProbe } from "../../cli-version-probe.ts";
 import { DATA_DIR } from "../../config.ts";
 import type { ModelCatalog } from "../../contracts.ts";
 import { harnessHome } from "../../env-path.ts";
@@ -40,6 +40,7 @@ import { killCliTree, resolveCli, spawnCli } from "../../procs.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 import { acpVariantOption } from "./config-options.ts";
 import { DSH_APPROVAL_PLUGIN } from "./dsh-approval-plugin.ts";
+import { semVerAtLeast } from "./version-probe.ts";
 
 export const DEEPSEEK_MODELS: ModelCatalog = {
   default: "deepseek-official/deepseek-v4-flash",
@@ -310,6 +311,10 @@ export function fetchDeepSeekCatalog(
   });
 }
 
+// dsh first exposes ctx.sandboxPolicy.registerWritableRoot in 0.2.2-rc.2.
+const MIN_APPROVAL_VERSION = "0.2.2-rc.2";
+const versionProbes = new Map<string, ReturnType<typeof cliVersionProbe>>();
+const clisWithApprovalPatch = new Set<string>();
 const approvalDir = resolve(DATA_DIR, "engines", "dsh");
 const approvalPlugin = join(approvalDir, "approval-preset.mjs");
 const reviewPatch = join(approvalDir, "approval-review.patch.yml");
@@ -320,7 +325,6 @@ function approvalPatch(review: boolean): string {
   mkdirSync(approvalDir, { recursive: true });
   writeFileSync(approvalPlugin, DSH_APPROVAL_PLUGIN);
   writeFileSync(patch, stringify([{ insert: [
-    { id: "auto-review", name: "@deepseek-ai/dsh-experimental-auto-review" },
     { id: "openmausbot-approval-preset", name: approvalPlugin, config: { review, dataDir: DATA_DIR } },
   ] }]));
   return patch;
@@ -348,8 +352,25 @@ export const deepseekSupport: AcpSupport = {
     settings: "connections",
   },
 
-  spawnArgs: (_config, turn) => ["--profile", "acp", "--patch", approvalPatch(turn.approvalMode === "auto")],
-  resolveCommand: async (_env, { cli }) => ({ command: cli, ro: [approvalPlugin, reviewPatch, sandboxPatch] }),
+  resolveCommand: async (env, { cli }) => {
+    let probe = versionProbes.get(cli);
+    if (!probe) {
+      probe = cliVersionProbe(cli);
+      versionProbes.set(cli, probe);
+    }
+    const result = await probe(env);
+    if ("version" in result && semVerAtLeast(result.version, MIN_APPROVAL_VERSION)) {
+      clisWithApprovalPatch.add(cli);
+      return { command: cli, ro: [approvalPlugin, reviewPatch, sandboxPatch] };
+    }
+    clisWithApprovalPatch.delete(cli);
+    return { command: cli };
+  },
+  spawnArgs: ({ cli }, turn) => {
+    const args = ["--profile", "acp"];
+    if (clisWithApprovalPatch.has(cli)) args.push("--patch", approvalPatch(turn.approvalMode === "auto"));
+    return args;
+  },
   updateFilter: (calls) => (update) => {
     const { sessionUpdate, toolCallId, status } = update;
     if ((sessionUpdate === "tool_call" || sessionUpdate === "tool_call_update") && toolCallId) {
