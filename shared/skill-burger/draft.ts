@@ -109,12 +109,14 @@ interface Recorded { id: string; output: unknown; read: boolean }
 
 export interface DraftOptions {
   summary?: string;
+  /** Inputs of the workflow being extended: recorded values reuse these defaults or take a free name. */
+  existingArgs?: Workflow["args"];
   /** Who a teammate is, from the id or name the run used: its name and role now. */
   teammate?: (idOrName: string) => { id?: string; name: string; role?: string } | undefined;
 }
 
 class Drafter {
-  readonly args: Workflow["args"] = {};
+  readonly args: Workflow["args"];
   readonly steps: WorkflowStep[] = [];
   private readonly recorded: Recorded[] = [];
   private readonly ask: string;
@@ -124,6 +126,7 @@ class Drafter {
   private readonly options: DraftOptions;
 
   constructor(ask: string, summary: string, options: DraftOptions = {}) {
+    this.args = { ...options.existingArgs };
     this.askText = ask;
     this.ask = ask.toLowerCase();
     this.summary = summary;

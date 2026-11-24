@@ -198,8 +198,8 @@ export function createSkillBurgerRoutes(deps: SkillBurgerRouteDeps): RouteHandle
       if (!found || !sha256) return json(res, 404, { error: "No such skill." });
       const layers = fixLayers(deps.messages(threadId), run);
       if (!layers.length) return json(res, 422, { error: "The bot did nothing to fix it that could be saved." });
-      const fix = draftFromLayers(layers, askOf(deps.messages(threadId)) ?? "", found.workflow.summary, deps.teammate ? { teammate: deps.teammate } : {}).steps;
-      const next = insertFix(found.workflow, step, fix);
+      const fix = draftFromLayers(layers, askOf(deps.messages(threadId)) ?? "", found.workflow.summary, { existingArgs: found.workflow.args, ...(deps.teammate ? { teammate: deps.teammate } : {}) });
+      const next = insertFix({ ...found.workflow, args: fix.args }, step, fix.steps);
       if ("error" in next) return json(res, 422, next);
       const saved = replaceWorkflowSkill({ name: burger, workflow: next, sha256, root: deps.root });
       if ("stale" in saved) return stale();
@@ -218,8 +218,8 @@ export function createSkillBurgerRoutes(deps: SkillBurgerRouteDeps): RouteHandle
       if (!found || !sha256) return json(res, 404, { error: "No such skill." });
       const layers = judgementLayers(deps.messages(threadId), run);
       if (!layers.length) return json(res, 422, { error: "The bot did nothing for this case that could be saved." });
-      const steps = draftFromLayers(layers, askOf(deps.messages(threadId)) ?? "", found.workflow.summary).steps;
-      const next = applyEdit(found.workflow, { action: "add_case", decide: { id: decide }, case: chosen, steps });
+      const recorded = draftFromLayers(layers, askOf(deps.messages(threadId)) ?? "", found.workflow.summary, { existingArgs: found.workflow.args });
+      const next = applyEdit({ ...found.workflow, args: recorded.args }, { action: "add_case", decide: { id: decide }, case: chosen, steps: recorded.steps });
       if ("error" in next) return json(res, 422, next);
       const saved = replaceWorkflowSkill({ name: burger, workflow: next, sha256, root: deps.root });
       if ("stale" in saved) return stale();
