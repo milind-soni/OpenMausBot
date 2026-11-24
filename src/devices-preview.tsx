@@ -82,7 +82,7 @@ const environments: Array<{ id: string; kind: "local" | "remote"; name: string; 
 const statuses = full ? [
   { id: "home", state: "connected", since: now - 9e8, version: "0.1.180", behind: false, install: null },
   { id: "mini", state: "connected", since: now - 9e8, version: "0.1.171", behind: true, install: "global" },
-  { id: "vps", state: "cantReach", since: now - 40 * MIN, version: "0.1.180", behind: false, install: "docker" },
+  { id: "vps", state: params.get("vpsState") ?? "cantReach", since: now - 40 * MIN, version: "0.1.180", behind: false, install: "docker" },
 ] : [];
 const lendViews: Record<string, DesktopLendView> = {
   mini: { name: "Studio Mac mini", lendable: true, on: true, connected: true, paused: false },
