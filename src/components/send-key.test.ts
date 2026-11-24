@@ -380,6 +380,8 @@ describe("a message sent while a one-to-one bot works", () => {
     render(createElement(Composer, { group: { ...room, busyBotId: "bot" }, members: [bot] }));
     type(textarea(), "held");
     press(textarea());
-    expect(sends().at(-1)).toMatchObject({ type: "sendGroup", followUp: "queue" });
+    // A speaking engine that cannot steer: no follow-up at all, so the room queues the line as it always has.
+    expect(sends().at(-1)).toMatchObject({ type: "sendGroup", text: "held" });
+    expect(sends().at(-1)).not.toHaveProperty("followUp");
   });
 });
