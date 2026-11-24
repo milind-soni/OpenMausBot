@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
-import { ChevronRight, Clock3, Loader2, Plus, X } from "lucide-react";
+import { ChevronRight, Clock3, Loader2, Pin, Plus, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { nextRename } from "@/lib/rename";
@@ -8,7 +8,7 @@ import { localizedTaskTitle } from "@/lib/task-title";
 import { setThreadsUnfolded, useThreadsUnfolded } from "@/lib/thread-fold-preferences";
 import type { Action, AppState, Bot } from "@/state/store";
 import { botOpensTo } from "@/state/thread-navigation";
-import { canUnfold, threadLabels, type LabelRow } from "./sidebar-thread-labels";
+import { canUnfold, openThreadPinned, threadLabels, type LabelRow } from "./sidebar-thread-labels";
 import { isWorking } from "./SidebarThreadRow";
 import { showAllConversations } from "./bot-panel/Conversations";
 import { reducedMotion } from "./MenuMotion";
@@ -25,6 +25,7 @@ const STAGGER_STEPS = 3;
 const YIELDS = "group-hover/label:[mask-image:linear-gradient(to_left,transparent_20px,black_36px)] rtl:group-hover/label:[mask-image:linear-gradient(to_right,transparent_20px,black_36px)]";
 
 type FoldBot = Pick<Bot, "id" | "name" | "tasks">;
+type FillBot = FoldBot & Pick<Bot, "threadId" | "switchingTo">;
 
 export const threadLabelsId = (botId: string) => `thread-labels-${botId}`;
 
@@ -45,10 +46,10 @@ export function ThreadFoldChevron({ bot, dispatch }: { bot: FoldBot; dispatch: D
   );
 }
 
-/** Whether one of the bot's unfolded rows carries the selected fill instead of its row: not while its blank New thread
- * chat (`drafting`) is open, which has no row of its own yet. */
-export function useRowUnfolded(bot: FoldBot, drafting = false): boolean {
-  return useThreadsUnfolded(bot.id) && canUnfold(bot) && !drafting;
+/** Whether one of the rows under the bot carries the selected fill instead of its row (it is unfolded, or the open thread
+ * is pinned): not while its blank New thread chat (`drafting`) is open, which has no row of its own yet. */
+export function useFillOnLabel(bot: FillBot, drafting = false): boolean {
+  return ((useThreadsUnfolded(bot.id) && canUnfold(bot)) || openThreadPinned(bot)) && !drafting;
 }
 
 function StatusMark({ row }: { row: LabelRow }) {
@@ -175,7 +176,9 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
                 className="-ms-1.5 h-7 min-w-0 flex-1 rounded-md border border-focus bg-transparent px-1.5 text-[13px] text-ink outline-none" />
             ) : <>
               <span dir="auto" className={cn("min-w-0 flex-1 truncate", hideable(row) && YIELDS)}>{title}</span>
-              <span className={cn("flex shrink-0 items-center", hideable(row) && "transition-opacity duration-[120ms] group-hover/label:opacity-0 motion-reduce:transition-none")}><StatusMark row={row} /></span>
+              <span className={cn("flex shrink-0 items-center gap-1.5", hideable(row) && "transition-opacity duration-[120ms] group-hover/label:opacity-0 motion-reduce:transition-none")}>
+                {row.pinned && <Pin size={11} role="img" aria-label={t("task.pinned")} className="shrink-0 text-ink-secondary" />}<StatusMark row={row} />
+              </span>
               {hideable(row) && (
                 <button type="button" tabIndex={-1} aria-label={t("sidebar.threads.hide", { title })} title={t("sidebar.threads.hideShort")}
                   onClick={(event) => { event.stopPropagation(); hide(row); }}

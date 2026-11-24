@@ -9206,6 +9206,7 @@
   "shortcuts.new-thread": "Start a new thread with the selected bot",
   "shortcuts.jump-bot": "Jump to bot 1–9 in the roster",
   "shortcuts.switch-bot": "Switch to previous / next bot",
+  "shortcuts.switch-thread": "Switch to the bot's next / previous thread",
   "shortcuts.find-conversation": "Find in conversation",
   "shortcuts.send-message": "Send message",
   "shortcuts.new-line": "Insert new line without sending",

@@ -22,7 +22,7 @@ import { copyText } from "@/lib/copy-text";
 import type { LocaleKey } from "@/locales";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { BulkSelectFilters, ThreadListFooter, deleteThreadsInBulk, retitleThreadsInBulk, useBulkSelect } from "./BulkSelectBar";
-import { SidebarThreadLabels, ThreadFoldChevron, useRowUnfolded } from "./SidebarThreadLabels";
+import { SidebarThreadLabels, ThreadFoldChevron, useFillOnLabel } from "./SidebarThreadLabels";
 import { RoomMark, StackedMauses } from "./StackedMauses";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { nextRename } from "@/lib/rename";
@@ -707,7 +707,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const iconOnly = density === "icons";
   const expanded = showThreads && !iconOnly && threadsOpen && hasThreadList;
   useEffect(() => { if (iconOnly) setRenaming(false); }, [iconOnly]);
-  const simpleRow = !advanced && !showThreads && density === "comfortable", unfolded = useRowUnfolded(bot, props.drafting) && simpleRow, rowSelected = selected && !unfolded;
+  const simpleRow = !advanced && !showThreads && density === "comfortable", fillOnLabel = useFillOnLabel(bot, props.drafting) && simpleRow, rowSelected = selected && !fillOnLabel;
   const simpleList = !advanced && !iconOnly;
   const railTile = iconOnly && !advanced;
   const avatarSize = iconOnly ? (railTile ? 36 : 44) : showThreads ? 32 : simpleRow ? 36 : 44;
