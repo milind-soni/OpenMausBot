@@ -122,6 +122,19 @@ describe("the app's viewer window", () => {
     expect(reloaded.viewerClosedRelease("scout")).toEqual({ action: "release", controlLeaseId: requests[0]!.lease });
   });
 
+  it("opens the native viewer with a whole address when the server names its viewer page by path", async () => {
+    const open = vi.fn(async () => true);
+    vi.stubGlobal("ogb", { desktopViewer: { open } });
+    await openProviderDesktop({
+      botId: "scout", title: "Scout's live desktop", request, current: () => true,
+      join: async () => ({ joinUrl: "/desktop-viewer#target=vps/scout" }),
+    });
+    expect(open).toHaveBeenCalledWith(
+      new URL("/desktop-viewer#target=vps/scout", location.href).toString(), "Scout's live desktop", "scout",
+    );
+    expect(requests.map((entry) => entry.action)).toEqual(["take"]);
+  });
+
   it("gives back, once the reopened viewer closes, the hold of an open a reload of the page cut off during its join", async () => {
     vi.stubGlobal("ogb", { desktopViewer: { open: vi.fn(async () => true) } });
     void openProviderDesktop({ botId: "scout", title: "Scout's live desktop", request, current: () => true, join: () => new Promise(() => {}) });
