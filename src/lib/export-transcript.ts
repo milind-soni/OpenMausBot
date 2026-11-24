@@ -1,4 +1,5 @@
 import type { Message } from "@/state/store";
+import { closeUnfinishedCodeFence } from "../../shared/markdown-code-fence";
 import { splitTranscriptAttachments } from "./composer-attachments";
 import { copyText } from "./copy-text";
 
@@ -80,7 +81,7 @@ export function formatTranscriptMarkdown(options: ExportTranscriptOptions): stri
     const userContent = isUser ? splitTranscriptAttachments(message.text ?? "", false, false) : null;
     const text = userContent?.display ?? message.text;
     if (text?.trim()) {
-      messageLines.push(text);
+      messageLines.push(closeUnfinishedCodeFence(text));
     }
 
     // Export display names, never private storage paths or actionable image URLs.

@@ -4,6 +4,7 @@ import { pipeline } from "node:stream/promises";
 
 import type { BotsResponse, SearchResponse, WireBot, WireGroup } from "../../shared/wire.ts";
 import { NO_SUCH_BOT } from "../../shared/bot-read.ts";
+import { closeUnfinishedCodeFence } from "../../shared/markdown-code-fence.ts";
 import { KEPT_ORIGINALS_DIR, keptOriginal } from "../attachment-originals.ts";
 import {
   ATTACHMENTS_DIR, attachmentStorageUsage, clearAttachments, deleteAttachment, extensionForMime, FILE_MAX_BYTES, IMAGE_MAX_BYTES,
@@ -591,7 +592,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         const who = msg.role === "user"
           ? msg.via === "api" ? `${sentBy} (via the local API)` : sentBy
           : (msg.from?.name ?? bot?.name ?? "Bot");
-        if ((msg.kind === "text" || msg.kind === "widget" || msg.kind === "app") && msg.text) lines.push(`**${who}:**`, "", msg.text, "");
+        if ((msg.kind === "text" || msg.kind === "widget" || msg.kind === "app") && msg.text) lines.push(`**${who}:**`, "", closeUnfinishedCodeFence(msg.text), "");
         else if (msg.kind === "activity" && msg.tool) lines.push(`> ${msg.tool.name}`, "");
         else if (msg.kind === "screen") lines.push("> [screen capture]", "");
         else if (msg.kind === "options" && msg.card) {
