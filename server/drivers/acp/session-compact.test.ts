@@ -1,6 +1,9 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 
+vi.mock("../prompt-split.ts", () => ({ deletePromptSplitReceipt: vi.fn() }));
+
+import { deletePromptSplitReceipt } from "../prompt-split.ts";
 import { acpCompactSession, type AcpCompactDeps } from "./session-compact.ts";
 import type { AcpSession } from "./turn-state.ts";
 
@@ -170,6 +173,20 @@ describe("an ACP agent's own compaction of a live session", () => {
     stop.abort();
     expect(await compacting).toMatchObject({ ok: false, reason: "stopped", usage: { input: 900, output: 50 } });
     expect(active.has("thread")).toBe(false);
+  });
+
+  it("forgets the prompt-split receipt of a session it keeps after a Stop cut the failure check short", async () => {
+    const { deps, active, sessions } = setup(({ heard, reply }) => { heard({ sessionUpdate: "usage_update", used: 950 }); reply(RESULT); });
+    deps.promptOutcome = async () => () => new Promise(() => {});
+    vi.mocked(deletePromptSplitReceipt).mockClear();
+    const stop = new AbortController();
+    const compacting = acpCompactSession(deps)("thread", { session: SESSION, signal: stop.signal });
+    await vi.waitFor(() => expect(active.has("thread")).toBe(true));
+    await new Promise((resolve) => setImmediate(resolve));
+    stop.abort();
+    expect(await compacting).toMatchObject({ ok: false, reason: "stopped" });
+    expect(sessions.has("thread")).toBe(true);
+    expect(deletePromptSplitReceipt).toHaveBeenCalledWith("fixtureAgent", JSON.stringify(["thread", SESSION]));
   });
 
   it("keeps a reply's usage and lets no turn carry the session on when Stop cuts the failure check short", async () => {
