@@ -134,7 +134,6 @@ export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback
                 type="button"
                 onClick={() => onChange(chain.filter((_, at) => at !== index))}
                 aria-label={t("model.fallback.remove", { name: nameOf(entry.instanceId) })}
-                disabled={state.switchingOff}
                 className="shrink-0 rounded p-0.5 text-ink-secondary hover:text-ink"
               >
                 <X size={13} />

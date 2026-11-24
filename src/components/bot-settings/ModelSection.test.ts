@@ -32,14 +32,21 @@ const bot = (fallback: Bot["fallback"]) => ({ id: "bot-1", modelSelection: { ins
 describe("a bot's backup models", () => {
   instances.splice(0, instances.length, engine("primary", "Primary", ["p"]), engine("codex", "Codex", ["gpt-a", "gpt-b"]));
 
-  it("keeps saved backups visible and disables editing when switching is off", () => {
+  it("allows removing saved backups while automatic switching is off", () => {
     quota.enabled = false;
     try {
-      const markup = renderToStaticMarkup(createElement(FallbackChain, { bot: bot([{ instanceId: "codex", model: "gpt-a" }]), onChange: vi.fn() }));
+      const onChange = vi.fn();
+      const tree = FallbackChain({ bot: bot([{ instanceId: "codex", model: "gpt-a" }]), onChange });
+      const markup = renderToStaticMarkup(tree);
       expect(markup).toContain("Automatic model switching is off. Saved backups will not be used.");
       expect(markup).toContain("GPT-A");
       expect(markup.match(/<select[^>]*disabled/g)).toHaveLength(2);
-      expect(markup.match(/<button[^>]*aria-label="Remove Codex from the fallback list"[^>]*>/)?.[0]).toContain("disabled");
+      const button = markup.match(/<button[^>]*aria-label="Remove Codex from the fallback list"[^>]*>/)?.[0];
+      expect(button).toBeDefined();
+      expect(button).not.toContain("disabled");
+      const remove = control(tree, "Remove Codex from the fallback list") as unknown as { props: { onClick(): void } };
+      remove.props.onClick();
+      expect(onChange).toHaveBeenCalledWith([]);
     } finally {
       quota.enabled = true;
     }

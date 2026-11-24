@@ -86,7 +86,7 @@ export function turnLimitScope(event: SettledTurn, flags: { limit?: TakeoverScop
 
 export function quotaSwitchEnabled(env: NodeJS.ProcessEnv = process.env, persisted?: boolean): boolean {
   const override = env.OMB_QUOTA_SWITCH;
-  return override === undefined ? persisted === true : override.trim() === "1";
+  return override === undefined ? persisted === true : override === "1";
 }
 
 const nameOf = (engine: QuotaSwitchEngine): string => engine.displayName || engine.driverKind;

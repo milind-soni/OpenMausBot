@@ -33,8 +33,8 @@ describe("quotaSwitchEnabled", () => {
 
   it("is off by default and requires explicit opt-in", () => {
     expect(quotaSwitchEnabled({})).toBe(false);
-    for (const flag of ["1", " 1 "]) expect(quotaSwitchEnabled({ OMB_QUOTA_SWITCH: flag })).toBe(true);
-    for (const flag of ["0", " 0 ", "", "false", "off", "no", "true"]) {
+    expect(quotaSwitchEnabled({ OMB_QUOTA_SWITCH: "1" })).toBe(true);
+    for (const flag of ["0", " 0 ", "", " 1 ", "false", "off", "no", "true"]) {
       expect(quotaSwitchEnabled({ OMB_QUOTA_SWITCH: flag }), JSON.stringify(flag)).toBe(false);
     }
   });
@@ -46,6 +46,7 @@ describe("quotaSwitchEnabled", () => {
     const { quotaSwitch } = loadConfig();
     expect(quotaSwitchEnabled({}, quotaSwitch)).toBe(true);
     expect(quotaSwitchEnabled({ OMB_QUOTA_SWITCH: "0" }, quotaSwitch)).toBe(false);
+    expect(quotaSwitchEnabled({ OMB_QUOTA_SWITCH: "" }, quotaSwitch)).toBe(false);
     expect(quotaSwitchEnabled({ OMB_QUOTA_SWITCH: "typo" }, quotaSwitch)).toBe(false);
     expect(quotaSwitchEnabled({ OMB_QUOTA_SWITCH: "1" }, false)).toBe(true);
   });

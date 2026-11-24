@@ -1492,8 +1492,9 @@ such an error among other words stays a reply.
 
 Automatic model switching is off by default. To enable it across app launches
 and restarts, set the top-level `"quotaSwitch": true` in `config.json`. The
-server reads this at startup. An explicit `OMB_QUOTA_SWITCH=1` enables switching
-for that process and `OMB_QUOTA_SWITCH=0` disables it, overriding the file.
+server reads this at startup. If `OMB_QUOTA_SWITCH` is set, only the exact value
+`1` enables switching. Every other value, including an empty string, overrides
+the file and disables switching.
 This also controls switching to an Automatic recovery backup after a startup
 refusal. Settings shows whether switching is available.
 
