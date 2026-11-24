@@ -75,6 +75,42 @@ Staff, hands Mira work. Expected:
   When a webhook starts Clive's turn, the question is not listed either. The person can still change Clive's
   answer on the card, and Mira gets a new turn with it.
 
+## A line typed in the bot's own chat while its card waits
+
+```sh
+pnpm exec vitest run server/question-card-typed-line.e2e.test.ts
+```
+
+One server of the person's own, no teammate handing work on, exactly one question card live in that chat. Expected:
+
+- With the scripted fake engine, a bot's `ask_user` card waits; a line the person types in that chat answers the card
+  (no steer): the line stays in the chat under the card (`replyToId`), the card reads as answered with the typed words,
+  and the bot's turn goes on with them. The engine reads exactly those words as the card's answer
+  (`room-plan.json.evidence.jsonl`), as if they were typed in the card's own text field.
+- The same POST sent again (same `sendId`, same text) returns 202 with the first line and touches no card; the same
+  `sendId` with other words is refused with 409, as a normal send is.
+- With the fake ACP CLI on a question of set options (the shape Antigravity asks with, an engine that takes no message
+  mid-turn), the typed line closes the card without the "isn't one of the choices" note, the turn ends with
+  `session/cancel`, and the line is the next prompt in the same conversation, without waiting for the card to expire.
+  The card reads "Closed without an answer" (`answered: "unavailable"`, `dismissed: true`), not "Denied", and the
+  decision log under `decisions/` records no verdict for it.
+- With the fake Claude CLI holding a turn, Claude's own `AskUserQuestion` of two questions waits; the typed line closes
+  it the same way, the waiting tool gets a plain decline, and the line is steered into the turn.
+
+Two or more question cards live in the chat, Stop, a line with a file or image, a reply to another line, rooms and work
+handed on keep their own paths. A card reads closed only when the engine took the close's own decline, which is what
+the delivery returns, whatever source the engine reports for it: with the ACP fake set to ask only once
+(`FAKE_ACP_QUESTION_ONCE=1`), the next turn answers without a new card and the first card still reads closed. If the
+close is refused, or the engine did not take it, the card stays open and can still be tapped, and the line is sent as
+before. Sends that close the same request share one decline. The card settles the moment its request resolves, the
+close's own decline included, so for that instant it reads "Denied"; the close's outcome then turns it closed. In the
+unit tests of `server/host/ask-cards.test.ts`, with the engine held mid-delivery: a tap, Stop or the turn ending that
+wins settles the card as it always does, and an explicit decline that wins stays "Denied", even when a newer question
+opens before the close returns, and takes no second answer. The default fakes settle a decline as soon as they take it,
+so these races are not run end to end. Two tries of one send that arrive together close
+or answer one card, even when another opens before the line is written. That holds for 60 seconds after the first try
+took effect: a send whose line was never written, tried again after that, may close or answer the card open then.
+
 Unit tests for the relay's rules (which thread, which sender, sign-ins, work handed out this turn, an engine that cannot
 take a message mid-turn) are in `server/host/question-routing.test.ts`.
 

@@ -4,13 +4,13 @@
 // the person's inbox, which has the card itself. At Full access a teammate's question goes to its requester instead: its
 // card says who decides and what was picked, and blocks nothing. A card whose work ended, or that a newer question
 // replaced, closes, so nothing stale waits on the person.
-import { formatQuestionAnswers, isPersistentQuestionCard } from "../../shared/ask-question.ts";
+import { formatQuestionAnswers, isPersistentQuestionCard, shouldSettleRequestCard } from "../../shared/ask-question.ts";
 import { liveCardKind } from "../../shared/live-approval.ts";
 import { allowsTool, type ToolIdentity } from "../../shared/tool-scope.ts";
 import type { PersonWait } from "../../shared/person-wait.ts";
 import type { OptionCardData } from "../../shared/wire.ts";
 import { noticeTool, type ChatNoticeKey } from "../chat-notices.ts";
-import type { RuntimeEvent } from "../contracts.ts";
+import type { RequestOutcome, RuntimeEvent } from "../contracts.ts";
 import type { HandoffView } from "../coordinator.ts";
 import { buildNotification, type Notification } from "../notify.ts";
 import type { RequestAuth } from "../request-auth.ts";
@@ -24,6 +24,10 @@ import { settledWaitingChip } from "../waiting-on-person.ts";
 const OPEN_QUESTION = "needs-input-";
 const DAY_MS = 24 * 60 * 60_000;
 const NEEDS_INPUT_LINE = /^needs input:/i;
+const hasAttachment = (text: string): boolean => text.includes("<attached-image") || text.includes("<attached-file");
+/** How long a send that answered or closed a card keeps it from touching another, while its line is not yet written. */
+const SPENT_SEND_MS = 60_000;
+type Typed = { status: number; message?: Message; error?: string } | null;
 
 export interface AskCardsDeps {
   store: Pick<Store, "bot" | "messagesFor" | "activePath" | "appendMessage" | "patchMessage" | "taskByThread" | "patchTask" | "group"
@@ -41,7 +45,7 @@ export interface AskCardsDeps {
   /** The parked node's next turn carries the person's answer. */
   answerNode(id: string, text: string): boolean;
   /** Answers a card as a tap on it would, with the same checks on who may answer, through an inbox copy too. */
-  answerCard(input: { auth: RequestAuth; threadId: string; requestId: string; behavior: "answer"; message: string }): Promise<{ ok: true } | { ok: false; status: number; error: string }>;
+  answerCard(input: { auth: RequestAuth; threadId: string; requestId: string; behavior: "answer" | "close"; message?: string }): Promise<{ ok: true } | { ok: false; status: number; error: string }>;
   /** The conversation a card in `threadId` was asked in: an inbox copy's original. */
   answeredIn(threadId: string, requestId: string): string;
   now?: () => number;
@@ -66,6 +70,54 @@ const typedAnswer = (card: OptionCardData, text: string): string => {
   const questions = card.questionRequest?.questions;
   return questions ? formatQuestionAnswers(questions, [[text]]) : text;
 };
+
+type Resolved = Extract<RuntimeEvent, { type: "request.resolved" }>;
+type CardStore = Pick<Store, "messagesFor" | "patchMessage">;
+
+export function resolvedCard(card: OptionCardData, resolved: Resolved): OptionCardData {
+  const persistent = isPersistentQuestionCard(card);
+  return { ...card, answered: resolved.behavior, dismissed: persistent ? false : resolved.source !== "user", ...(resolved.source === "timeout" && !persistent ? { expired: true } : {}) };
+}
+
+/** Settles a card as its request resolved, the moment it resolves: a decline a close sent included, which the close's
+ * own outcome then turns into closed without an answer. */
+export function settleRequestCard(store: CardStore, resolved: Resolved, messageId: string): void {
+  const card = store.messagesFor(resolved.threadId).find((message) => message.id === messageId)?.card;
+  if (card && !card.answered && shouldSettleRequestCard(card, resolved.source)) store.patchMessage(resolved.threadId, messageId, { card: resolvedCard(card, resolved) });
+}
+
+/** Declines a question the person moved past without an answer, once per request however many sends close it. An
+ * outcome other than `unavailable` means the engine took this decline, so the refusal the card may already show was the
+ * close's: it reads closed without an answer, whatever source the engine reported. Otherwise a tap, an explicit decline,
+ * Stop or the turn ending came first and settled the card as usual; a decline that never landed leaves the card and the
+ * request alone. */
+export function closeCard(input: { store: CardStore; threadId: string; requestId: string; live: ReadonlyMap<string, string>;
+  closing: Map<string, Promise<RequestOutcome>>; decline: () => Promise<RequestOutcome> }): Promise<RequestOutcome> {
+  const key = `${input.threadId}:${input.requestId}`;
+  const running = input.closing.get(key);
+  if (running) return running;
+  const messageId = input.live.get(key);
+  if (!messageId) return Promise.resolve("unavailable");
+  const close = async (): Promise<RequestOutcome> => {
+    let outcome: RequestOutcome;
+    try {
+      outcome = await input.decline();
+    } catch {
+      outcome = "unavailable";
+    } finally {
+      input.closing.delete(key);
+    }
+    const card = input.store.messagesFor(input.threadId).find((message) => message.id === messageId)?.card;
+    if (outcome !== "unavailable" && card && (!card.answered || card.answered === "deny")) {
+      const { answeredBy: _refuser, ...open } = card;
+      input.store.patchMessage(input.threadId, messageId, { card: { ...open, answered: "unavailable", dismissed: true } });
+    }
+    return outcome;
+  };
+  const outcome = Promise.resolve().then(close);
+  input.closing.set(key, outcome);
+  return outcome;
+}
 
 /** The reply up to its NEEDS INPUT line; empty when the line is the whole reply. */
 function beforeQuestion(text: string): string {
@@ -299,24 +351,62 @@ export function createAskCards(deps: AskCardsDeps) {
     return true;
   }
 
-  /** A person's line answers an inbox copy it replies to, or, in work a teammate handed on, the question card the bot's
-   * turn waits on, as a tap would; null leaves the line to be sent (steered or queued) as usual. */
-  async function typed(auth: RequestAuth, threadId: string, text: string, target: Message | undefined,
-    line: { sendId?: string; sender?: Message["sender"] }): Promise<{ status: number; message?: Message; error?: string } | null> {
+  /** A person's line answers an inbox copy it replies to, or the question card the bot's turn waits on, as a tap would.
+   * In the bot's own chat that is the one question card a turn waits on there, and one that takes no words closes
+   * instead, the line going on as the next message. Null leaves the line to be sent (steered or queued) as usual. Tries
+   * of one send run one after another, and one that answered or closed a card touches no other. */
+  const typing = new Map<string, Promise<Typed>>();
+  const spent = new Map<string, number>();
+  function typed(auth: RequestAuth, threadId: string, text: string, target: Message | undefined,
+    line: { sendId?: string; sender?: Message["sender"] }): Promise<Typed> {
+    if (!line.sendId) return typedOnce(auth, threadId, text, target, line);
+    const key = `${threadId}:${line.sendId}`;
+    const run = (typing.get(key) ?? Promise.resolve(null)).catch(() => null).then(() => typedOnce(auth, threadId, text, target, line));
+    typing.set(key, run);
+    void run.catch(() => null).finally(() => { if (typing.get(key) === run) typing.delete(key); });
+    return run;
+  }
+
+  async function typedOnce(auth: RequestAuth, threadId: string, text: string, target: Message | undefined,
+    line: { sendId?: string; sender?: Message["sender"] }): Promise<Typed> {
     if (store.groupByThread(threadId) || isStopCommand(text)) return null;
+    const thread = store.messagesFor(threadId);
+    // A send tried again touches no card: the same line that answered one is its receipt; anything else goes on to the
+    // usual send, which matches the line it wrote or refuses other words under the same id.
+    const again = line.sendId ? thread.find((message) => message.sendId === line.sendId) : undefined;
+    const key = line.sendId ? `${threadId}:${line.sendId}` : "";
+    for (const [send, at] of spent) if ((again && send === key) || now() - at > SPENT_SEND_MS) spent.delete(send);
+    if (spent.has(key)) return null;
+    if (again) {
+      const answeredCard = again.text === text && (!target || target.id === again.replyToId)
+        && thread.some((message) => message.id === again.replyToId && message.card?.requestId);
+      return answeredCard ? { status: 202, message: again } : null;
+    }
     const delegator = delegatorOf(threadId);
     const handedOn = Boolean(delegator && delegator.threadId !== threadId);
+    const waiting = thread.filter((message) => !message.inbox && liveCardKind(message.card) === "question" && deps.live(threadId, message.card!.requestId!));
+    const only = waiting.length === 1 ? waiting[0]! : undefined;
+    const ownChat = !handedOn && !hasAttachment(text) && Boolean(only) && (!target || target.id === only!.id);
+    if (ownChat && !answerableInWords(only!.card)) {
+      // Closed or not, the line goes on as the next message, steered into the waiting turn or queued behind it.
+      if (key) spent.set(key, now());
+      if (!(await deps.answerCard({ auth, threadId, requestId: only!.card!.requestId!, behavior: "close" })).ok) spent.delete(key);
+      return null;
+    }
     const asked = target
       ? answerableInWords(target.card) ? target : undefined
-      : handedOn ? store.messagesFor(threadId).findLast((message) => answerableInWords(message.card) && deps.live(threadId, message.card!.requestId!)) : undefined;
+      : ownChat ? only
+        : handedOn ? thread.findLast((message) => answerableInWords(message.card) && deps.live(threadId, message.card!.requestId!)) : undefined;
     if (!asked?.card?.requestId) return null;
     const requestId = asked.card.requestId;
     const origin = deps.answeredIn(threadId, requestId);
-    if (origin === threadId && !(handedOn && deps.live(threadId, requestId))) return null;
-    const again = line.sendId ? store.messagesFor(threadId).find((message) => message.sendId === line.sendId) : undefined;
-    if (again) return { status: 202, message: again };
+    if (origin === threadId && !((handedOn || ownChat) && deps.live(threadId, requestId))) return null;
+    if (key) spent.set(key, now());
     const answered = await deps.answerCard({ auth, threadId, requestId, behavior: "answer", message: typedAnswer(asked.card, text) });
-    if (!answered.ok) return { status: answered.status, error: answered.error };
+    if (!answered.ok) {
+      spent.delete(key);
+      return { status: answered.status, error: answered.error };
+    }
     const posted = store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId: asked.id,
       ...(line.sendId ? { sendId: line.sendId } : {}), ...(line.sender ? { sender: line.sender } : {}) });
     return { status: 202, message: posted };
