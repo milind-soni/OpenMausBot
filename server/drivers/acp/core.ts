@@ -27,7 +27,7 @@ import { acpCapabilities } from "./capabilities.ts"; import { readAcpMediaLinks 
 import { acpNativeLogMessage } from "./tool-log.ts";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
 import { formatQuietLimit, lastSeenPhrase, LIMIT_WORDS, promptIdleTimeoutMs, type LogSignal } from "./quiet-status.ts"; import { startAcpQuietWatch } from "./quiet-watch.ts"; import { AppliedConfig } from "./applied-config.ts"; import { modelRefused, roomForReadBeside, startupRefresh } from "./startup-refresh.ts"; import { stderrFailureOf, watchStderrFailure, type StderrFailure } from "./harness-failure.ts"; import { timed, turnStartClock, type TurnStartClock } from "../../perf/turn-starts.ts";
-import { acpMissingSession } from "./rpc-error.ts";
+import { acpMissingSession, retryTransient } from "./rpc-error.ts";
 import { readSessionReport } from "./session-reports.ts";
 import { promptTokenUsage } from "./prompt-usage.ts";
 import { advertisedCommands, turnAnswers, turnSteering, type AcpSteerSupport } from "./steer.ts";
@@ -1096,7 +1096,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 const methodId = support.pickAuthMethod(methods, spawnEnv);
                 if (methodId) {
                   try {
-                    await session.host.once("authenticate", () => request("authenticate", { methodId }, INIT_TIMEOUT));
+                    await session.host.once("authenticate", () => retryTransient(request, "authenticate", { methodId }, INIT_TIMEOUT));
                     session.authenticated = true;
                   } catch (error) {
                     const failed = signIn.authenticateFailed(error, support.authFailure); if (failed) throw failed;
