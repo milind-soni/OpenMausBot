@@ -618,7 +618,7 @@ function judge(command: Command, source: string, pass: Pass, mode: Mode, depth: 
   }
 
   if (mode === "posix") {
-    if (program === "eval") return run(args.join(" "), "posix");
+    if (program === "eval") return run((args[0] === "--" ? args.slice(1) : args).join(" "), "posix");
     if (program === "rm") {
       for (const target of rmTargets(args) ?? []) {
         // Git Bash also takes a drive path (C:/Users); nothing else does.

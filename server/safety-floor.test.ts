@@ -136,6 +136,8 @@ const BLOCKED: Case[] = [
   ["bash -o pipefail -c 'rm -rf /'", "delete-root"],
   ["sudo sh -c \"bash -c 'rm -rf /'\"", "delete-root"],
   ["eval 'rm -rf /'", "delete-root"],
+  ["eval -- 'rm -rf /'", "delete-root"],
+  ["eval -- rm -rf ~", "delete-home"],
   // chains
   ["ls; rm -rf /", "delete-root"],
   ["cd /tmp && rm -rf /", "delete-root"],
@@ -378,6 +380,7 @@ const ALLOWED: Array<[command: string, on?: Platform | "posix"]> = [
   // env hands rm a directory named "~": nothing expands it without a shell
   ["env -S 'rm -rf ~'"],
   ["printf '%s\\n' 'rm -rf /' > notes.txt"],
+  ["eval -- echo rm -rf /"],
   ["grep -r 'mkfs' ."],
   ['rg "dd if=/dev/zero of=/dev/sda" docs'],
   ['git log --grep="rm -rf /"'],
