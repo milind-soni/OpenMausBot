@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { appVersion } from "@/lib/app-links";
 import { pageIsThisComputer } from "@/lib/companion-bridge";
-import { skillsLibraryEnabled } from "@/lib/feature-flags";
+import { savedStepsHere, skillsLibraryEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
 export { useSettingsPlace, type PlaceKind, type SettingsPlace } from "./settings-place";
 import { useAdvancedMode } from "@/lib/interface-mode";
@@ -30,10 +30,10 @@ export function useSettingsContext(): SettingsContext {
   const organization = Boolean(ogb?.organization) && !client;
   const environments = Boolean(ogb?.environments);
   const installations = workspacesAvailable(config);
-  const skills = skillsLibraryEnabled(config);
+  const skills = skillsLibraryEnabled(config), savedSteps = savedStepsHere(config);
   const storage = useStorageReport({ enabled: admin && !client }).status === "ready";
-  return useMemo(() => ({ desktop, here, home, cloud, team, client, admin, places: placesShown, plan, organization, environments, installations, skills, advanced, storage }),
-    [desktop, here, home, cloud, team, client, admin, placesShown, plan, organization, environments, installations, skills, advanced, storage]);
+  return useMemo(() => ({ desktop, here, home, cloud, team, client, admin, places: placesShown, plan, organization, environments, installations, skills, advanced, storage, savedSteps }),
+    [desktop, here, home, cloud, team, client, admin, placesShown, plan, organization, environments, installations, skills, advanced, storage, savedSteps]);
 }
 
 /** How many places this app knows (a hidden rail's included), from main's environments list. */
