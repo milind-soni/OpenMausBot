@@ -7,7 +7,7 @@ import { api, type Bot, type Message } from "@/state/store";
 import { ASK_SECONDARY_BUTTON, askPrimary, AskCard, AskSettledLine } from "../AskCard";
 import { githubHeadline, GithubMark, GithubSignInDetails } from "./GithubSignInDetails";
 
-/** The card a chat shows after a clone, fetch or push failed because GitHub isn't connected: the same sign-in as Apps,
+/** The card a chat shows after a clone, a fetch or a push failed because GitHub isn't connected: the same sign-in as Apps,
  * right where the work stopped. A client that does not draw it shows the message's text instead. */
 export function GithubChatCard({ botId, color, threadId, message, store = githubSignIn }: {
   botId: string;
