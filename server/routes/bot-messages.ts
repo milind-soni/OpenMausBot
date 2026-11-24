@@ -29,6 +29,7 @@ import type { RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
 import { acceptedSendMatch, parseSendId } from "../send-idempotency.ts";
 import type { DirectSendInput, DirectSendReceipt } from "../direct-send.ts";
+import { failedNoticeTool } from "../chat-notices.ts";
 import { cancelSteeredMessage, holdSteeredQueue, queuedSteerSender, queuedSteeredMessage, requeueSettledSteer, restoreHeldSteeredQueue, settleHeldSteeredQueue } from "../steer-queue.ts";
 import { routeRunOwners, type Actor, type RouteRunOwners } from "../host/run-owner.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
@@ -454,13 +455,16 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         for (const message of messages) handoffs.steered(bot.threadId, steerTarget, instance?.instanceId, message.id);
         const queueIds = held.items.map((item) => item.messageId);
         settleHeldSteeredQueue(held);
-        // After it is recorded, each line waits once more, in order, at the head of the queue, then loses its mark; a
-        // queue that could not be written keeps the lines as delivered, as they were.
+        // After it is recorded, each line loses its mark and waits once more, in order, at the head of the queue; one that
+        // could not be written says so in the thread, its row left to send again.
         refusedLate = () => {
           refusedLate = () => {};
-          try { requeueSettledSteer(held, messages.map((message) => message.id)); }
-          catch (error) { console.warn("steer: could not queue a steer the agent turned down", error); return; }
           for (const message of messages) store.patchMessage(bot.threadId, message.id, { steered: undefined });
+          try { requeueSettledSteer(held, messages.map((message) => message.id)); }
+          catch (error) {
+            console.warn("steer: could not queue a steer the agent turned down", error);
+            store.appendMessage(bot.threadId, { role: "bot", kind: "activity", tool: failedNoticeTool("chat.notice.unreadMessage") });
+          }
         };
         return json(res, 200, { ok: true, steered: true, threadId: bot.threadId, messages, queueIds });
       }

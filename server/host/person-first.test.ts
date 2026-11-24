@@ -126,6 +126,22 @@ describe("the person's message goes first", () => {
     expect(h.stops).toHaveLength(1);
   });
 
+  it("keeps the turn running while the message cannot be saved back in the queue, and stops once it is", async () => {
+    const h = harness();
+    h.turnStarted();
+    h.toolStarted("poll");
+    await h.advance(2 * MIN);
+    let full = true;
+    h.first.wait(T, { requeue: (note) => { if (full) throw new Error("disk full"); h.requeued.push(note ?? ""); } });
+    await h.advance(0);
+    expect(h.stops).toEqual([]);
+    expect(h.requeued).toEqual([]);
+    full = false;
+    await h.advance(10_000);
+    expect(h.stops).toHaveLength(1);
+    expect(h.requeued).toHaveLength(1);
+  });
+
   it("only stops for a message already in the queue: the queue runs it next", async () => {
     const h = harness();
     h.turnStarted();

@@ -226,7 +226,7 @@ export interface ChatFollowup {
   payload: FollowupPayload;
 }
 
-/** A 202/cancel/dispatch claim must reach disk (FULL sync) before its result is published; nested, it joins the outer commit. */
+/** A 202/cancel/dispatch claim must reach disk (FULL sync) before its result is published; nested, it joins the outer commit, at the outer write's sync. */
 export function writeFollowups(write: (connection: DatabaseSync) => void): void {
   if (transactionDepth > 0) return transaction(write);
   const connection = db();

@@ -96,11 +96,19 @@ export function createPersonFirst(deps: PersonFirstDeps) {
   };
 
   const act = (threadId: string, watch: Watch, tool: RunningTool) => {
-    watch.acted = true;
     const ran = now() - tool.at;
-    const waits = watch.waits.splice(0);
-    const noted = waits.findLast((wait) => wait.requeue);
-    for (const wait of waits) wait.requeue?.(wait === noted ? stoppedNote(tool.label, ran) : undefined);
+    const noted = watch.waits.findLast((wait) => wait.requeue);
+    // A message that could not be saved back in the queue keeps its wait, and the turn that holds it keeps running until a
+    // later look saves it: stopping now would drop it.
+    watch.waits = watch.waits.filter((wait) => {
+      try { wait.requeue?.(wait === noted ? stoppedNote(tool.label, ran) : undefined); return false; }
+      catch (error) { console.warn("person-first: could not queue a waiting message again", error); return true; }
+    });
+    if (watch.waits.length > 0) {
+      watch.cancel = schedule(() => check(threadId), RECHECK_MS);
+      return;
+    }
+    watch.acted = true;
     void Promise.resolve().then(() => deps.stop(threadId, stoppedLine(ran, conversationLanguage(threadId)))).catch(() => {});
   };
 
