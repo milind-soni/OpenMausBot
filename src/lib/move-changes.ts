@@ -15,9 +15,9 @@ export function namedList(names: readonly string[]): string {
 export function moveChangeText(line: MoveChangeLine, facts: Pick<MoveFacts, "folders">): string {
   switch (line.kind) {
     case "teammates":
-      // With "This computer and My Cloud together" on, the line claims nothing about hand-offs either way.
-      if (line.names.length === 1) return t(line.reach ? "cloudSend.changes.teammatesHereOne" : "cloudSend.changes.teammatesOne", { names: line.names[0]! });
-      return t(line.reach ? "cloudSend.changes.teammatesHere" : "cloudSend.changes.teammates", { names: namedList(line.names) });
+      // With "This computer and My Cloud together" on, or chosen here, work still reaches them while this computer is on.
+      if (line.names.length === 1) return t(line.reach ? "cloudSend.changes.teammatesReachOne" : "cloudSend.changes.teammatesOne", { names: line.names[0]! });
+      return t(line.reach ? "cloudSend.changes.teammatesReach" : "cloudSend.changes.teammates", { names: namedList(line.names) });
     case "folder": {
       const many = facts.folders > 1;
       // The home folder itself, as a person calls it.

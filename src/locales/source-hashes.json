@@ -4392,8 +4392,11 @@
       "cloudSend.changes.skills": "7e78af7c6469b933eaf58a18771d1bc6d55489b4cdf8913fd7cd4080cdc8d3be",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.changes.title": "9dd79074c5c5a7a3f5995f7ee5c4f1b35b313259a85770368d9338a412b14b5d",
-      "cloudSend.changes.teammatesHere": "f8a8decf22aa133589110c2d90faadd7901d20066cb368a58abfc9790dbf748a",
-      "cloudSend.changes.teammatesHereOne": "2a672339bf10343487480522320d208d47966de8288b3d6a903f399ecedb07f9"
+      "cloudSend.changes.teammatesReach": "e20958efb20213f727b23bc8bdac4e95e216419f7daf8f372edde608f2506c75",
+      "cloudSend.changes.teammatesReachOne": "5a7b06e889acd2950232a015812834d8ba0e36b16a1c94b7cb1f2d57d63109a4",
+      "cloudSend.botMove.together": "87785bcd95b6070b5314903a9f0e8c018bd559b4f8ac2147c495d31f67c64929",
+      "cloudSend.changes.togetherHint": "078559999725a2c3c47d2f639a868f802cd8288efe98e6ca7010b0788ad73100",
+      "cloudSend.changes.together": "2863c05d97718b1d5e6d6cbfcca58bf26772f341eb5a939995cca177f5729350"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -11056,8 +11059,11 @@
       "cloudSend.changes.skills": "7e78af7c6469b933eaf58a18771d1bc6d55489b4cdf8913fd7cd4080cdc8d3be",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.changes.title": "9dd79074c5c5a7a3f5995f7ee5c4f1b35b313259a85770368d9338a412b14b5d",
-      "cloudSend.changes.teammatesHere": "f8a8decf22aa133589110c2d90faadd7901d20066cb368a58abfc9790dbf748a",
-      "cloudSend.changes.teammatesHereOne": "2a672339bf10343487480522320d208d47966de8288b3d6a903f399ecedb07f9"
+      "cloudSend.changes.teammatesReach": "e20958efb20213f727b23bc8bdac4e95e216419f7daf8f372edde608f2506c75",
+      "cloudSend.changes.teammatesReachOne": "5a7b06e889acd2950232a015812834d8ba0e36b16a1c94b7cb1f2d57d63109a4",
+      "cloudSend.botMove.together": "87785bcd95b6070b5314903a9f0e8c018bd559b4f8ac2147c495d31f67c64929",
+      "cloudSend.changes.togetherHint": "078559999725a2c3c47d2f639a868f802cd8288efe98e6ca7010b0788ad73100",
+      "cloudSend.changes.together": "2863c05d97718b1d5e6d6cbfcca58bf26772f341eb5a939995cca177f5729350"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -15125,8 +15131,11 @@
       "cloudSend.changes.skills": "7e78af7c6469b933eaf58a18771d1bc6d55489b4cdf8913fd7cd4080cdc8d3be",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.changes.title": "9dd79074c5c5a7a3f5995f7ee5c4f1b35b313259a85770368d9338a412b14b5d",
-      "cloudSend.changes.teammatesHere": "f8a8decf22aa133589110c2d90faadd7901d20066cb368a58abfc9790dbf748a",
-      "cloudSend.changes.teammatesHereOne": "2a672339bf10343487480522320d208d47966de8288b3d6a903f399ecedb07f9"
+      "cloudSend.changes.teammatesReach": "e20958efb20213f727b23bc8bdac4e95e216419f7daf8f372edde608f2506c75",
+      "cloudSend.changes.teammatesReachOne": "5a7b06e889acd2950232a015812834d8ba0e36b16a1c94b7cb1f2d57d63109a4",
+      "cloudSend.botMove.together": "87785bcd95b6070b5314903a9f0e8c018bd559b4f8ac2147c495d31f67c64929",
+      "cloudSend.changes.togetherHint": "078559999725a2c3c47d2f639a868f802cd8288efe98e6ca7010b0788ad73100",
+      "cloudSend.changes.together": "2863c05d97718b1d5e6d6cbfcca58bf26772f341eb5a939995cca177f5729350"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -19046,8 +19055,11 @@
       "cloudSend.changes.skills": "7e78af7c6469b933eaf58a18771d1bc6d55489b4cdf8913fd7cd4080cdc8d3be",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.changes.title": "9dd79074c5c5a7a3f5995f7ee5c4f1b35b313259a85770368d9338a412b14b5d",
-      "cloudSend.changes.teammatesHere": "f8a8decf22aa133589110c2d90faadd7901d20066cb368a58abfc9790dbf748a",
-      "cloudSend.changes.teammatesHereOne": "2a672339bf10343487480522320d208d47966de8288b3d6a903f399ecedb07f9"
+      "cloudSend.changes.teammatesReach": "e20958efb20213f727b23bc8bdac4e95e216419f7daf8f372edde608f2506c75",
+      "cloudSend.changes.teammatesReachOne": "5a7b06e889acd2950232a015812834d8ba0e36b16a1c94b7cb1f2d57d63109a4",
+      "cloudSend.botMove.together": "87785bcd95b6070b5314903a9f0e8c018bd559b4f8ac2147c495d31f67c64929",
+      "cloudSend.changes.togetherHint": "078559999725a2c3c47d2f639a868f802cd8288efe98e6ca7010b0788ad73100",
+      "cloudSend.changes.together": "2863c05d97718b1d5e6d6cbfcca58bf26772f341eb5a939995cca177f5729350"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -27244,8 +27256,11 @@
       "cloudSend.changes.skills": "7e78af7c6469b933eaf58a18771d1bc6d55489b4cdf8913fd7cd4080cdc8d3be",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.changes.title": "9dd79074c5c5a7a3f5995f7ee5c4f1b35b313259a85770368d9338a412b14b5d",
-      "cloudSend.changes.teammatesHere": "f8a8decf22aa133589110c2d90faadd7901d20066cb368a58abfc9790dbf748a",
-      "cloudSend.changes.teammatesHereOne": "2a672339bf10343487480522320d208d47966de8288b3d6a903f399ecedb07f9"
+      "cloudSend.changes.teammatesReach": "e20958efb20213f727b23bc8bdac4e95e216419f7daf8f372edde608f2506c75",
+      "cloudSend.changes.teammatesReachOne": "5a7b06e889acd2950232a015812834d8ba0e36b16a1c94b7cb1f2d57d63109a4",
+      "cloudSend.botMove.together": "87785bcd95b6070b5314903a9f0e8c018bd559b4f8ac2147c495d31f67c64929",
+      "cloudSend.changes.togetherHint": "078559999725a2c3c47d2f639a868f802cd8288efe98e6ca7010b0788ad73100",
+      "cloudSend.changes.together": "2863c05d97718b1d5e6d6cbfcca58bf26772f341eb5a939995cca177f5729350"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -39154,10 +39169,13 @@
       "cloudSend.changes.lendCommandsHint": "f2454f4eb2cd204a3de88bf81670931a3906f8783641dbd990d3ec0738c7cfa3",
       "cloudSend.changes.teammatesOne": "307ffa519b47b1950d291f6c98af7133454e547f99a82bc2fc6e3f6b5f700883",
       "cloudSend.changes.skillsOne": "faaf4f1c54857a0e4af75ce9555ee2eef889548c72f5b9b9e8cdad88990677e8",
+      "cloudSend.changes.together": "2863c05d97718b1d5e6d6cbfcca58bf26772f341eb5a939995cca177f5729350",
+      "cloudSend.changes.togetherHint": "078559999725a2c3c47d2f639a868f802cd8288efe98e6ca7010b0788ad73100",
+      "cloudSend.botMove.together": "87785bcd95b6070b5314903a9f0e8c018bd559b4f8ac2147c495d31f67c64929",
       "cloudSend.botMove.commandsFailed": "35ec603ad7cca5ae5c0a8cd90cfaecdec5cd59e7cf8b933ae96de22657cf0042",
       "cloudSend.changes.homeFolder": "a0111e9d26c26a83d3584b3bed1a86cca697b38554ecdeb8b436a271d8c3188b",
-      "cloudSend.changes.teammatesHere": "f8a8decf22aa133589110c2d90faadd7901d20066cb368a58abfc9790dbf748a",
-      "cloudSend.changes.teammatesHereOne": "2a672339bf10343487480522320d208d47966de8288b3d6a903f399ecedb07f9"
+      "cloudSend.changes.teammatesReach": "e20958efb20213f727b23bc8bdac4e95e216419f7daf8f372edde608f2506c75",
+      "cloudSend.changes.teammatesReachOne": "5a7b06e889acd2950232a015812834d8ba0e36b16a1c94b7cb1f2d57d63109a4"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -49546,8 +49564,11 @@
       "cloudSend.changes.skills": "7e78af7c6469b933eaf58a18771d1bc6d55489b4cdf8913fd7cd4080cdc8d3be",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.changes.title": "9dd79074c5c5a7a3f5995f7ee5c4f1b35b313259a85770368d9338a412b14b5d",
-      "cloudSend.changes.teammatesHere": "f8a8decf22aa133589110c2d90faadd7901d20066cb368a58abfc9790dbf748a",
-      "cloudSend.changes.teammatesHereOne": "2a672339bf10343487480522320d208d47966de8288b3d6a903f399ecedb07f9"
+      "cloudSend.changes.teammatesReach": "e20958efb20213f727b23bc8bdac4e95e216419f7daf8f372edde608f2506c75",
+      "cloudSend.changes.teammatesReachOne": "5a7b06e889acd2950232a015812834d8ba0e36b16a1c94b7cb1f2d57d63109a4",
+      "cloudSend.botMove.together": "87785bcd95b6070b5314903a9f0e8c018bd559b4f8ac2147c495d31f67c64929",
+      "cloudSend.changes.togetherHint": "078559999725a2c3c47d2f639a868f802cd8288efe98e6ca7010b0788ad73100",
+      "cloudSend.changes.together": "2863c05d97718b1d5e6d6cbfcca58bf26772f341eb5a939995cca177f5729350"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -60023,8 +60044,11 @@
       "cloudSend.changes.skills": "7e78af7c6469b933eaf58a18771d1bc6d55489b4cdf8913fd7cd4080cdc8d3be",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.changes.title": "9dd79074c5c5a7a3f5995f7ee5c4f1b35b313259a85770368d9338a412b14b5d",
-      "cloudSend.changes.teammatesHere": "f8a8decf22aa133589110c2d90faadd7901d20066cb368a58abfc9790dbf748a",
-      "cloudSend.changes.teammatesHereOne": "2a672339bf10343487480522320d208d47966de8288b3d6a903f399ecedb07f9"
+      "cloudSend.changes.teammatesReach": "e20958efb20213f727b23bc8bdac4e95e216419f7daf8f372edde608f2506c75",
+      "cloudSend.changes.teammatesReachOne": "5a7b06e889acd2950232a015812834d8ba0e36b16a1c94b7cb1f2d57d63109a4",
+      "cloudSend.botMove.together": "87785bcd95b6070b5314903a9f0e8c018bd559b4f8ac2147c495d31f67c64929",
+      "cloudSend.changes.togetherHint": "078559999725a2c3c47d2f639a868f802cd8288efe98e6ca7010b0788ad73100",
+      "cloudSend.changes.together": "2863c05d97718b1d5e6d6cbfcca58bf26772f341eb5a939995cca177f5729350"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -64364,8 +64388,11 @@
       "cloudSend.changes.skills": "7e78af7c6469b933eaf58a18771d1bc6d55489b4cdf8913fd7cd4080cdc8d3be",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.changes.title": "9dd79074c5c5a7a3f5995f7ee5c4f1b35b313259a85770368d9338a412b14b5d",
-      "cloudSend.changes.teammatesHere": "f8a8decf22aa133589110c2d90faadd7901d20066cb368a58abfc9790dbf748a",
-      "cloudSend.changes.teammatesHereOne": "2a672339bf10343487480522320d208d47966de8288b3d6a903f399ecedb07f9"
+      "cloudSend.changes.teammatesReach": "e20958efb20213f727b23bc8bdac4e95e216419f7daf8f372edde608f2506c75",
+      "cloudSend.changes.teammatesReachOne": "5a7b06e889acd2950232a015812834d8ba0e36b16a1c94b7cb1f2d57d63109a4",
+      "cloudSend.botMove.together": "87785bcd95b6070b5314903a9f0e8c018bd559b4f8ac2147c495d31f67c64929",
+      "cloudSend.changes.togetherHint": "078559999725a2c3c47d2f639a868f802cd8288efe98e6ca7010b0788ad73100",
+      "cloudSend.changes.together": "2863c05d97718b1d5e6d6cbfcca58bf26772f341eb5a939995cca177f5729350"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -70523,8 +70550,11 @@
       "cloudSend.changes.skills": "7e78af7c6469b933eaf58a18771d1bc6d55489b4cdf8913fd7cd4080cdc8d3be",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.changes.title": "9dd79074c5c5a7a3f5995f7ee5c4f1b35b313259a85770368d9338a412b14b5d",
-      "cloudSend.changes.teammatesHere": "f8a8decf22aa133589110c2d90faadd7901d20066cb368a58abfc9790dbf748a",
-      "cloudSend.changes.teammatesHereOne": "2a672339bf10343487480522320d208d47966de8288b3d6a903f399ecedb07f9"
+      "cloudSend.changes.teammatesReach": "e20958efb20213f727b23bc8bdac4e95e216419f7daf8f372edde608f2506c75",
+      "cloudSend.changes.teammatesReachOne": "5a7b06e889acd2950232a015812834d8ba0e36b16a1c94b7cb1f2d57d63109a4",
+      "cloudSend.botMove.together": "87785bcd95b6070b5314903a9f0e8c018bd559b4f8ac2147c495d31f67c64929",
+      "cloudSend.changes.togetherHint": "078559999725a2c3c47d2f639a868f802cd8288efe98e6ca7010b0788ad73100",
+      "cloudSend.changes.together": "2863c05d97718b1d5e6d6cbfcca58bf26772f341eb5a939995cca177f5729350"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -76682,8 +76712,11 @@
       "cloudSend.changes.skills": "7e78af7c6469b933eaf58a18771d1bc6d55489b4cdf8913fd7cd4080cdc8d3be",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.changes.title": "9dd79074c5c5a7a3f5995f7ee5c4f1b35b313259a85770368d9338a412b14b5d",
-      "cloudSend.changes.teammatesHere": "f8a8decf22aa133589110c2d90faadd7901d20066cb368a58abfc9790dbf748a",
-      "cloudSend.changes.teammatesHereOne": "2a672339bf10343487480522320d208d47966de8288b3d6a903f399ecedb07f9"
+      "cloudSend.changes.teammatesReach": "e20958efb20213f727b23bc8bdac4e95e216419f7daf8f372edde608f2506c75",
+      "cloudSend.changes.teammatesReachOne": "5a7b06e889acd2950232a015812834d8ba0e36b16a1c94b7cb1f2d57d63109a4",
+      "cloudSend.botMove.together": "87785bcd95b6070b5314903a9f0e8c018bd559b4f8ac2147c495d31f67c64929",
+      "cloudSend.changes.togetherHint": "078559999725a2c3c47d2f639a868f802cd8288efe98e6ca7010b0788ad73100",
+      "cloudSend.changes.together": "2863c05d97718b1d5e6d6cbfcca58bf26772f341eb5a939995cca177f5729350"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -84042,8 +84075,11 @@
       "cloudSend.changes.skills": "7e78af7c6469b933eaf58a18771d1bc6d55489b4cdf8913fd7cd4080cdc8d3be",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.changes.title": "9dd79074c5c5a7a3f5995f7ee5c4f1b35b313259a85770368d9338a412b14b5d",
-      "cloudSend.changes.teammatesHere": "f8a8decf22aa133589110c2d90faadd7901d20066cb368a58abfc9790dbf748a",
-      "cloudSend.changes.teammatesHereOne": "2a672339bf10343487480522320d208d47966de8288b3d6a903f399ecedb07f9"
+      "cloudSend.changes.teammatesReach": "e20958efb20213f727b23bc8bdac4e95e216419f7daf8f372edde608f2506c75",
+      "cloudSend.changes.teammatesReachOne": "5a7b06e889acd2950232a015812834d8ba0e36b16a1c94b7cb1f2d57d63109a4",
+      "cloudSend.botMove.together": "87785bcd95b6070b5314903a9f0e8c018bd559b4f8ac2147c495d31f67c64929",
+      "cloudSend.changes.togetherHint": "078559999725a2c3c47d2f639a868f802cd8288efe98e6ca7010b0788ad73100",
+      "cloudSend.changes.together": "2863c05d97718b1d5e6d6cbfcca58bf26772f341eb5a939995cca177f5729350"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -91456,8 +91492,11 @@
       "cloudSend.changes.skills": "7e78af7c6469b933eaf58a18771d1bc6d55489b4cdf8913fd7cd4080cdc8d3be",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.changes.title": "9dd79074c5c5a7a3f5995f7ee5c4f1b35b313259a85770368d9338a412b14b5d",
-      "cloudSend.changes.teammatesHere": "f8a8decf22aa133589110c2d90faadd7901d20066cb368a58abfc9790dbf748a",
-      "cloudSend.changes.teammatesHereOne": "2a672339bf10343487480522320d208d47966de8288b3d6a903f399ecedb07f9"
+      "cloudSend.changes.teammatesReach": "e20958efb20213f727b23bc8bdac4e95e216419f7daf8f372edde608f2506c75",
+      "cloudSend.changes.teammatesReachOne": "5a7b06e889acd2950232a015812834d8ba0e36b16a1c94b7cb1f2d57d63109a4",
+      "cloudSend.botMove.together": "87785bcd95b6070b5314903a9f0e8c018bd559b4f8ac2147c495d31f67c64929",
+      "cloudSend.changes.togetherHint": "078559999725a2c3c47d2f639a868f802cd8288efe98e6ca7010b0788ad73100",
+      "cloudSend.changes.together": "2863c05d97718b1d5e6d6cbfcca58bf26772f341eb5a939995cca177f5729350"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -103285,10 +103324,13 @@
       "cloudSend.changes.lendCommandsHint": "f2454f4eb2cd204a3de88bf81670931a3906f8783641dbd990d3ec0738c7cfa3",
       "cloudSend.changes.teammatesOne": "307ffa519b47b1950d291f6c98af7133454e547f99a82bc2fc6e3f6b5f700883",
       "cloudSend.changes.skillsOne": "faaf4f1c54857a0e4af75ce9555ee2eef889548c72f5b9b9e8cdad88990677e8",
+      "cloudSend.changes.together": "2863c05d97718b1d5e6d6cbfcca58bf26772f341eb5a939995cca177f5729350",
+      "cloudSend.changes.togetherHint": "078559999725a2c3c47d2f639a868f802cd8288efe98e6ca7010b0788ad73100",
+      "cloudSend.botMove.together": "87785bcd95b6070b5314903a9f0e8c018bd559b4f8ac2147c495d31f67c64929",
       "cloudSend.botMove.commandsFailed": "35ec603ad7cca5ae5c0a8cd90cfaecdec5cd59e7cf8b933ae96de22657cf0042",
       "cloudSend.changes.homeFolder": "a0111e9d26c26a83d3584b3bed1a86cca697b38554ecdeb8b436a271d8c3188b",
-      "cloudSend.changes.teammatesHere": "f8a8decf22aa133589110c2d90faadd7901d20066cb368a58abfc9790dbf748a",
-      "cloudSend.changes.teammatesHereOne": "2a672339bf10343487480522320d208d47966de8288b3d6a903f399ecedb07f9"
+      "cloudSend.changes.teammatesReach": "e20958efb20213f727b23bc8bdac4e95e216419f7daf8f372edde608f2506c75",
+      "cloudSend.changes.teammatesReachOne": "5a7b06e889acd2950232a015812834d8ba0e36b16a1c94b7cb1f2d57d63109a4"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -111175,8 +111217,11 @@
       "cloudSend.changes.skills": "7e78af7c6469b933eaf58a18771d1bc6d55489b4cdf8913fd7cd4080cdc8d3be",
       "cloudSend.changes.engine": "5cb26111535a50b4390e44357b933b4f72576dc81f3ab2f4e0026b28a4de864a",
       "cloudSend.changes.title": "9dd79074c5c5a7a3f5995f7ee5c4f1b35b313259a85770368d9338a412b14b5d",
-      "cloudSend.changes.teammatesHere": "f8a8decf22aa133589110c2d90faadd7901d20066cb368a58abfc9790dbf748a",
-      "cloudSend.changes.teammatesHereOne": "2a672339bf10343487480522320d208d47966de8288b3d6a903f399ecedb07f9"
+      "cloudSend.changes.teammatesReach": "e20958efb20213f727b23bc8bdac4e95e216419f7daf8f372edde608f2506c75",
+      "cloudSend.changes.teammatesReachOne": "5a7b06e889acd2950232a015812834d8ba0e36b16a1c94b7cb1f2d57d63109a4",
+      "cloudSend.botMove.together": "87785bcd95b6070b5314903a9f0e8c018bd559b4f8ac2147c495d31f67c64929",
+      "cloudSend.changes.togetherHint": "078559999725a2c3c47d2f639a868f802cd8288efe98e6ca7010b0788ad73100",
+      "cloudSend.changes.together": "2863c05d97718b1d5e6d6cbfcca58bf26772f341eb5a939995cca177f5729350"
     }
   }
 }

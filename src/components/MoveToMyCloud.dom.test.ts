@@ -244,3 +244,70 @@ it("the line says how the move goes, and Try again and Open My Cloud reach main"
   await click(all("button").find((button) => button.textContent === "Open My Cloud") ?? null);
   expect(page.openMyCloud).toHaveBeenCalled();
 });
+
+const placesTogether = (on: boolean) => {
+  const state = { v: 1, available: true, on, here: "computer", other: null };
+  return { state: vi.fn(async () => state), set: vi.fn(async (next: boolean) => ({ ...state, on: next })), onChanged: vi.fn(() => () => {}) };
+};
+
+it("for a bot with teammates here, offers This computer and My Cloud together, off, and turns it on with Move when chosen", async () => {
+  const together = placesTogether(false);
+  const moveChanges = vi.fn(async () => ({ facts: { ...facts, folder: null, folders: 0, engine: null, tools: [], skills: [], hidden: [] }, lending: noLending }));
+  window.ogb = { cloudSendPage: { ...page, moveChanges }, placesTogether: together } as never;
+  await menu({ id: "ada", name: "Ada" });
+  await click(q("[data-item]"));
+  await act(async () => {});
+  const toggle = q('[data-move-choice="together"] [role="switch"]');
+  expect(q('[data-move-choice="together"]')!.textContent).toContain("Keep working with this computer's bots");
+  expect(toggle!.getAttribute("aria-checked")).toBe("false");
+  expect(q("[data-move-change=teammates]")!.textContent).toBe("Proofreader stays on this computer, so work can't be handed to it from My Cloud.");
+  await click(toggle);
+  expect(q("[data-move-change=teammates]")!.textContent).toBe("Proofreader stays on this computer; work still reaches it while it's on.");
+  expect(together.set).not.toHaveBeenCalled();
+  await click(all("button").find((button) => button.textContent === "Move") ?? null);
+  expect(page.moveBots).toHaveBeenCalledWith(["ada"], { commands: false, together: true });
+  expect(together.set).toHaveBeenCalledWith(true);
+});
+
+it("with the link on already, offers nothing and says work still reaches the teammates; Cancel turns nothing on", async () => {
+  const together = placesTogether(true);
+  const moveChanges = vi.fn(async () => ({ facts: { ...facts, folder: null, folders: 0, engine: null, tools: [], skills: [], hidden: [] }, lending: noLending }));
+  window.ogb = { cloudSendPage: { ...page, moveChanges }, placesTogether: together } as never;
+  await menu({ id: "ada", name: "Ada" });
+  await click(q("[data-item]"));
+  await act(async () => {});
+  expect(q("[data-move-choice]")).toBeNull();
+  expect(q("[data-move-change=teammates]")!.textContent).toContain("work still reaches it");
+  await click(all("button").find((button) => button.textContent === "Cancel") ?? null);
+  expect(together.set).not.toHaveBeenCalled();
+});
+
+it("once moved, the line offers one tap to work with this computer's bots: only after a move of bots with teammates here, and only while the link is off", async () => {
+  const move = { bot: { id: "bots-1", name: "Ada" }, team: { id: "my-cloud", name: "My Cloud" }, phase: "done" as const, bots: 1 };
+  const moveWith = async (teammates: string[]) => {
+    const moveChanges = vi.fn(async () => ({ facts: { ...facts, folder: null, folders: 0, engine: null, tools: [], skills: [], hidden: [], teammates }, lending: noLending }));
+    window.ogb = { cloudSendPage: { ...page, moveChanges }, placesTogether: placesTogether(false) } as never;
+    await menu({ id: "ada", name: "Ada" });
+    await click(q("[data-item]"));
+    await act(async () => {});
+    await click(all("button").find((button) => button.textContent === "Move") ?? null);
+  };
+  const line = async (on: boolean) => {
+    const together = placesTogether(on);
+    window.ogb = { cloudSendPage: page, placesTogether: together } as never;
+    await act(async () => root.render(createElement(BotMoveLine, { move, onChange: vi.fn() })));
+    await act(async () => {});
+    return together;
+  };
+  await moveWith([]);
+  await line(false);
+  expect(q("[data-bot-move-together]")).toBeNull();
+  await moveWith(["Proofreader"]);
+  const off = await line(false);
+  expect(q("[data-bot-move-together]")!.textContent).toBe("Work with this computer's bots");
+  await click(q("[data-bot-move-together]"));
+  expect(off.set).toHaveBeenCalledWith(true);
+  expect(q("[data-bot-move-together]")).toBeNull();
+  await line(true);
+  expect(q("[data-bot-move-together]")).toBeNull();
+});

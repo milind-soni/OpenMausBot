@@ -7,6 +7,7 @@ import { ArrowRightLeft, Check, Cloud, Loader2, X } from "lucide-react";
 import type { BotMoveState, BotMoveView } from "../../electron/cloud-send.mjs";
 import { botMoveLine, filterBots, ipcErrorText, CHOOSER_PAGE, MY_CLOUD_TEAM } from "@/lib/cloud-send";
 import { t } from "@/lib/i18n";
+import { setPlacesTogether, usePlacesTogether } from "@/lib/places-together";
 import type { Bot } from "@/state/store";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useMoveChanges } from "./MoveChanges";
@@ -15,6 +16,17 @@ import { NotNowButton, PRIMARY_BUTTON } from "./NoticeCard";
 type MenuItem = (icon: ReactNode, label: string, onClick?: () => void, opts?: { disabled?: boolean; hint?: string }) => ReactNode;
 
 const bridge = () => (!window.ogb?.remoteClient?.active ? window.ogb?.cloudSendPage : undefined);
+
+/** A move whose bots hand work to bots that stay here started from this window: its line offers to keep working with them.
+ * Not kept across a restart, so after one the line offers nothing rather than guess. */
+let movedWithTeammates = false;
+
+/** After the move starts, "This computer and My Cloud together" goes on when the person chose it in the move step. */
+const joinPlaces = (changes: { choice: { together: boolean } | null; teammates: boolean }) => async <T,>(moved: T): Promise<T> => {
+  movedWithTeammates = changes.teammates;
+  if (changes.choice?.together) await setPlacesTogether(true).catch(() => {});
+  return moved;
+};
 
 /** Which bots go to My Cloud: any of them, found by name, or everything with one press. */
 export function MoveChooser({ onClose }: { onClose: () => void }) {
@@ -90,7 +102,7 @@ export function MoveChooser({ onClose }: { onClose: () => void }) {
       <p className="mt-2 text-[12px] text-ink-tertiary">{t("cloudSend.choose.rooms")}</p>
       {changes.view && <div data-move-chooser-changes="" className="mt-2 flex-none text-[13px] leading-5 text-ink-secondary">{changes.view}</div>}
       {error && <p role="alert" className="mt-2 text-[13px] text-danger">{error}</p>}
-      <button type="button" disabled={busy || !chosen.size} data-move-chosen="" className="ui-button mt-3 w-full justify-center py-1.5 text-[14px]" onClick={() => go(page?.moveBots && (() => page.moveBots!([...chosen], changes.choice ?? undefined)))}>
+      <button type="button" disabled={busy || !chosen.size} data-move-chosen="" className="ui-button mt-3 w-full justify-center py-1.5 text-[14px]" onClick={() => go(page?.moveBots && (() => page.moveBots!([...chosen], changes.choice ?? undefined).then(joinPlaces(changes))))}>
         {busy && <Loader2 size={14} aria-hidden="true" className="me-1.5 animate-spin" />}
         {chosen.size === 1 ? t("cloudSend.choose.moveOne") : t("cloudSend.choose.moveSome", { count: chosen.size })}
       </button>
@@ -127,7 +139,7 @@ export function useMoveToMyCloud() {
     if (!asked || !page?.moveBots) return;
     setBusy(true);
     setError(null);
-    void page.moveBots([asked.id], changes.choice ?? undefined).then(() => setAsked(null), (cause: unknown) => setError(ipcErrorText(cause) ?? t("cloudSend.choose.failed"))).finally(() => setBusy(false));
+    void page.moveBots([asked.id], changes.choice ?? undefined).then(joinPlaces(changes)).then(() => setAsked(null), (cause: unknown) => setError(ipcErrorText(cause) ?? t("cloudSend.choose.failed"))).finally(() => setBusy(false));
   };
   const names = { bot: asked?.name ?? "" };
   return {
@@ -163,12 +175,15 @@ export function MovedToMyCloudRow({ bots }: { bots: readonly Bot[] }) {
 export function BotMoveLine({ move, onChange }: { move: BotMoveView; onChange(next: BotMoveView | null): void }) {
   const page = bridge();
   const line = botMoveLine(move);
+  const together = usePlacesTogether();
   const link = "font-medium text-accent-text underline underline-offset-2 hover:text-ink";
   return <div role="status" data-cloud-send-strip={line.kind} data-bot-move-line={move.phase} className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary">
     {line.kind === "sending" ? <Loader2 size={14} aria-hidden="true" className="animate-spin" /> : <ArrowRightLeft size={14} aria-hidden="true" />}
     <span dir="auto" data-cloud-send-strip-line>{line.text}</span>
     {move.commandsError && <span dir="auto" role="alert" data-bot-move-commands-failed="" className="text-danger">{t("cloudSend.botMove.commandsFailed", { error: move.commandsError })}</span>}
     {line.kind === "done" && page?.openMyCloud && <button type="button" className={link} onClick={() => { void page.openMyCloud!().catch(() => {}); }}>{t("cloudSend.botMove.open")}</button>}
+    {line.kind === "done" && movedWithTeammates && together?.available && together.here === "computer" && !together.on && <button type="button" data-bot-move-together="" className={link}
+      onClick={() => { void setPlacesTogether(true).catch(() => {}); }}>{t("cloudSend.botMove.together")}</button>}
     {line.kind === "failed" && page?.botMoveRetry && <button type="button" className={link} onClick={() => { void page.botMoveRetry!().then(onChange).catch(() => {}); }}>{t("cloudSend.strip.retry")}</button>}
     {line.kind !== "sending" && <button type="button" className="hover:text-ink" onClick={() => { void page?.dismiss("bot-move").then(() => onChange(null)).catch(() => {}); }}>{t("cloudSend.strip.close")}</button>}
   </div>;

@@ -19,9 +19,8 @@ describe("the move step's lines, in words", () => {
   it("says each one in one short sentence", () => {
     expect(say({ teammates: ["Reviewer"] })).toEqual(["Reviewer stays on this computer, so work can't be handed to it from My Cloud."]);
     expect(say({ teammates: ["Proofreader", "Reviewer"] })).toEqual(["Proofreader and Reviewer stay on this computer, so work can't be handed to them from My Cloud."]);
-    // With This computer and My Cloud together on, no claim either way about hand-offs.
-    expect(say({ teammates: ["Reviewer"] }, { together: "on" })).toEqual(["Reviewer stays on this computer."]);
-    expect(say({ teammates: ["Proofreader", "Reviewer"] }, { together: "on" })).toEqual(["Proofreader and Reviewer stay on this computer."]);
+    expect(say({ teammates: ["Reviewer"] }, { together: "on" })).toEqual(["Reviewer stays on this computer; work still reaches it while it's on."]);
+    expect(say({ teammates: ["Proofreader", "Reviewer"] }, { together: "off" }, { folder: false, commands: false, together: true })).toEqual(["Proofreader and Reviewer stay on this computer; work still reaches them while it's on."]);
     expect(say({ folder: "~/code/app", folders: 1 }, { folderLent: true, terminal: true })).toEqual(["~/code/app stays on this computer; My Cloud reaches it while this computer is on."]);
     expect(say({ folder: "~/code/app", folders: 1 }, { terminal: true })).toEqual(["~/code/app stays on this computer, out of My Cloud's reach."]);
     expect(say({ folder: "~/code/app", folders: 1 }, { paused: true })[0]).toBe("~/code/app stays on this computer; lending to My Cloud is paused, so it can't reach it.");

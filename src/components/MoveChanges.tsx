@@ -39,7 +39,7 @@ const READ_AFTER_MS = 250;
 
 /** What moving `ids` changes, as the confirm or the chooser shows it; `bot` names the one bot moving. `choice` is what the
  * person lets them use, which the caller passes to Move; what they set themselves stays set while the bots ticked change. */
-export function useMoveChanges(ids: readonly string[], bot: string | null): { view: ReactNode; choice: MoveOptions | null } {
+export function useMoveChanges(ids: readonly string[], bot: string | null): { view: ReactNode; choice: MoveOptions | null; teammates: boolean } {
   const key = ids.join(",");
   const [known, setKnown] = useState<{ key: string; value: Known | null } | null>(null);
   const [mine, setMine] = useState<Partial<MoveChoice>>({});
@@ -64,14 +64,15 @@ export function useMoveChanges(ids: readonly string[], bot: string | null): { vi
   const value = known?.value ?? null;
   const lending: MoveLending | null = value ? { ...value.lending, together } : null;
   const fresh = known?.key === key;
-  if (!value || !lending) return { view: null, choice: key ? { ...(mine.folder === false ? { folder: false } : {}), commands: mine.commands === true, together: mine.together === true } : null };
+  if (!value || !lending) return { view: null, choice: key ? { ...(mine.folder === false ? { folder: false } : {}), commands: mine.commands === true, together: mine.together === true } : null, teammates: false };
   const offers = moveOffers(value.facts, lending);
   const choice: MoveChoice = { ...defaultMoveChoice(value.facts, lending), ...mine };
   const options: MoveOptions = fresh
     ? { ...(offers.folder ? { folder: choice.folder } : {}), commands: offers.commands && choice.commands, together: offers.together && choice.together }
     : { ...(mine.folder === false ? { folder: false } : {}), commands: mine.commands === true, together: mine.together === true };
   const lines = moveChanges(value.facts, lending, { folder: offers.folder ? choice.folder : false, commands: options.commands, together: options.together });
-  if (!lines.length && !offers.folder && !offers.commands) return { view: null, choice: options };
+  const teammates = fresh && value.facts.teammates.length > 0;
+  if (!lines.length && !offers.folder && !offers.commands && !offers.together) return { view: null, choice: options, teammates };
   const shown = all ? lines : lines.slice(0, MOVE_LINES_SHOWN);
   const set = (change: Partial<MoveChoice>) => setMine({ ...mine, ...change });
   const view = <span data-move-changes={lines.map((line) => line.kind).join(" ")} className="mt-1 flex flex-col">
@@ -86,12 +87,14 @@ export function useMoveChanges(ids: readonly string[], bot: string | null): { vi
       {lines.length > shown.length && <button type="button" data-move-changes-more="" onClick={() => setAll(true)}
         className="mt-1 self-start text-[12px] font-medium text-accent-text hover:text-ink">{t("cloudSend.changes.more", { count: lines.length - shown.length })}</button>}
     </>}
-    {(offers.folder || offers.commands) && <span className="mt-2.5 flex flex-col border-t border-hairline/40 pt-1.5">
+    {(offers.folder || offers.commands || offers.together) && <span className="mt-2.5 flex flex-col border-t border-hairline/40 pt-1.5">
       {offers.folder && value.facts.folder && <Choice id="folder" on={choice.folder} onChange={(on) => set({ folder: on })}
         label={value.facts.folders > 1 ? t("cloudSend.changes.lendFolders") : bot ? t("cloudSend.changes.lendFolder", { bot, folder: value.facts.folder }) : t("cloudSend.changes.lendFolderMany", { folder: value.facts.folder })} />}
       {offers.commands && <Choice id="commands" on={choice.commands} onChange={(on) => set({ commands: on })}
         label={t("cloudSend.changes.lendCommands")} hint={t("cloudSend.changes.lendCommandsHint")} />}
+      {offers.together && <Choice id="together" on={choice.together} onChange={(on) => set({ together: on })}
+        label={t("cloudSend.changes.together")} hint={t("cloudSend.changes.togetherHint")} />}
     </span>}
   </span>;
-  return { view, choice: options };
+  return { view, choice: options, teammates };
 }
