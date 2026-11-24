@@ -55,7 +55,15 @@ export function applyEdit(workflow: Workflow, edit: WorkflowEdit): Workflow | { 
     const at = steps.findIndex((step) => step.id === edit.decide);
     const decide = steps[at];
     if (decide?.kind !== "decide") return { error: `there is no decide step ${edit.decide}` };
-    const kept = steps.filter((step) => { const on = caseOf(step); return !(on?.decide === edit.decide && on.case === edit.case); });
+    const removed = new Set<string>();
+    const kept = steps.filter((step) => {
+      const on = caseOf(step);
+      if (on && ((on.decide === edit.decide && on.case === edit.case) || removed.has(on.decide))) {
+        removed.add(step.id);
+        return false;
+      }
+      return true;
+    });
     const cases = decide.cases.filter((one) => one !== edit.case);
     const rules = decide.rules?.filter((rule) => rule.case !== edit.case);
     const next = { ...decide, cases, ...(rules ? { rules } : {}), ...(decide.otherwise === edit.case ? { otherwise: undefined } : {}) };
