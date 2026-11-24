@@ -14,14 +14,16 @@ function Shell({ place }: { place: DrawerPlace }) {
   const drawer = useBotListDrawer(place);
   return h("div", { onClickCapture: drawer.open ? drawer.noteAction : undefined, onKeyDownCapture: drawer.open ? drawer.noteAction : undefined },
     h("button", { "aria-label": "Open bot list", "aria-expanded": drawer.open, onClick: drawer.show }),
-    h("aside", null,
+    h("aside", { "data-back-steps": drawer.backSteps },
       h("div", { "data-team-side": "me" }, h("button", { "data-option": "team" })),
       h("button", { "data-row": "thread" }),
-      h("button", { "data-row": "close", onClick: drawer.hide })));
+      h("button", { "data-row": "close", onClick: drawer.hide })),
+    h("button", { "data-back": "", onClick: drawer.back }));
 }
 
 const show = (place: DrawerPlace) => act(async () => root.render(h(Shell, { place })));
 const press = (selector: string) => act(async () => container.querySelector<HTMLElement>(selector)!.click());
+const backSteps = () => Number(container.querySelector("aside")!.getAttribute("data-back-steps"));
 const expanded = () => container.querySelector('[aria-label="Open bot list"]')!.getAttribute("aria-expanded");
 
 beforeEach(async () => {
@@ -97,4 +99,53 @@ it.each([
   await press('[aria-label="Open bot list"]');
   await show({ ...START, ...change });
   expect(expanded()).toBe("false");
+});
+
+it("gives back nothing to do on the chat the app opened with", () => {
+  expect(backSteps()).toBe(0);
+});
+
+it("closes the list opened from the menu with one step back", async () => {
+  await press('[aria-label="Open bot list"]');
+  expect(backSteps()).toBe(1);
+  await press("[data-back]");
+  expect(expanded()).toBe("false");
+  expect(backSteps(), "back again leaves the app").toBe(0);
+});
+
+it("goes back from a chat picked in the list to the list, and from there out of the app", async () => {
+  await press('[aria-label="Open bot list"]');
+  await press('[data-row="thread"]');
+  await show({ ...START, botThread: "picked" });
+  expect(expanded()).toBe("false");
+  expect(backSteps(), "the picked chat goes back to the list").toBe(1);
+  await press("[data-back]");
+  expect(expanded()).toBe("true");
+  expect(backSteps(), "the list is the first screen now").toBe(0);
+});
+
+it("counts the list opened over a picked chat as one more step", async () => {
+  await show({ ...START, selectedId: "other" });
+  await press('[aria-label="Open bot list"]');
+  await show({ ...START, selectedId: "picked" });
+  await press('[aria-label="Open bot list"]');
+  expect(backSteps()).toBe(2);
+  await press("[data-back]");
+  expect(expanded(), "first back shows the picked chat").toBe("false");
+  expect(backSteps()).toBe(1);
+});
+
+it("keeps no step when the list is closed without going anywhere", async () => {
+  await press('[aria-label="Open bot list"]');
+  await press('[data-row="close"]');
+  expect(backSteps()).toBe(0);
+});
+
+it("comes back from the apps page reached from the list, and stays open as the page closes", async () => {
+  await press('[aria-label="Open bot list"]');
+  await show({ ...START, pluginsOpen: true });
+  expect(backSteps()).toBe(1);
+  await press("[data-back]");
+  await show(START);
+  expect(expanded(), "closing the apps page is not going somewhere").toBe("true");
 });
