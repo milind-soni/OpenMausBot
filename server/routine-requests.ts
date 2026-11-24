@@ -1,7 +1,7 @@
 import { instructionsUpdateRefusal } from "./automation-instructions.ts";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { ROUTINE_RUN_LIMIT_MINUTES } from "../shared/routines.ts";
+import { routineRunLimits } from "./routine-run-limits.ts";
 import { formatInstant, routineCronText } from "./routine-cron-text.ts";
 import { conversationLanguage, serverLine } from "./server-lines.ts";
 import { plainClock, plainTimeZone, plainWeekdays } from "../shared/plain-time-zone.ts";
@@ -677,7 +677,7 @@ function cardCopy(
   // Credential-shaped values never travel back through the bot's MCP response or into the transcript.
   const visibleInstructions = redactSecretsInText(definition.instructions);
   const runLimit = definition.timeoutMinutes === undefined
-    ? `default run limit (${ROUTINE_RUN_LIMIT_MINUTES / 60} hours of work)`
+    ? `default run limit (${routineRunLimits().runMinutes / 60} hours of work)`
     : `${definition.timeoutMinutes} min limit`;
   return {
     title,
