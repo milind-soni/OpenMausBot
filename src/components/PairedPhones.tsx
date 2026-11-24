@@ -18,7 +18,7 @@ export function phoneSubtitle(device: PhoneDevice, connected: boolean, e2eEnable
   if (device.route) parts.push(t("remote.devices.connected", { route: t(ROUTE_LABEL[device.route]) }));
   else if (connected) parts.push(e2eEnabled && !device.e2eAt ? t("remote.devices.connectedLegacy") : t("remote.devices.connectedNow"));
   else parts.push(t("remote.devices.lastSeen", { when: relative(device.lastSeenAt) }));
-  if (e2eEnabled && device.routes === "local") parts.push(t("remote.devices.localOnly"));
+  if (e2eEnabled && device.routes === "local") parts.push(t("remote.devices.homeOrPrivate"));
   return parts.join(" · ");
 }
 
@@ -62,7 +62,7 @@ export function PhoneControls({ device, c, onPairAgain, onChanged }: { device: P
                 onClick={() => act((companion) => (companion.routes ? companion.routes(device.id, routes) : companion.state()))}
                 className={`h-6 cursor-pointer rounded-full px-3 text-[13px] leading-5 ${(device.routes ?? "any") === routes ? "bg-menu font-medium text-ink shadow-[inset_0_0_0_0.5px_var(--settings-edge)]" : "text-ink-secondary"}`}
               >
-                {routes === "any" ? t("remote.devices.anywhere") : t("remote.devices.localOnly")}
+                {routes === "any" ? t("remote.devices.anywhere") : t("remote.devices.homeOrPrivate")}
               </button>
             ))}
           </div>

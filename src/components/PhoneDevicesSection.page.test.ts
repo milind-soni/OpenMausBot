@@ -38,10 +38,10 @@ beforeEach(() => {
 });
 
 describe("How your phone reaches this computer", () => {
-  it("with nothing paired and no way in on, folds the ways in into one row that says Add a phone turns them on", () => {
+  it("with nothing paired and no way in on, folds the ways in into one row that says adding a phone turns them on", () => {
     const html = page(true);
     expect(html).toContain("How your phone reaches this computer");
-    expect(html).toContain("Add a phone turns these on for you. Change them here later.");
+    expect(html).toContain("Adding a phone turns these on. You can change them here.");
     expect(html).toContain("data-reach-fold");
     expect(html).not.toContain('data-route-row="wifi"');
     expect(html).toContain('data-settings-block="more-ways"');
@@ -53,16 +53,18 @@ describe("How your phone reaches this computer", () => {
     expect(page(false)).not.toContain('data-route-row="wifi"');
   });
 
-  it("in Advanced, with a way on, shows the ways in and keeps More ways in folded", () => {
+  it("in Advanced, with a way on, shows the ways in and the HTTPS address, and no Tailscale switch: the private network row has it", () => {
     f.state = state({ routes: routes({ wifi: true }) });
     const html = page(false);
-    expect(html).toMatch(/data-route-row="wifi"[\s\S]*?data-route-row="relay"[\s\S]*?Keep this computer awake[\s\S]*?More ways in/);
-    expect(html).toMatch(/data-settings-disclosure="more-ways"[\s\S]*?aria-expanded="false"/);
+    expect(html).toMatch(/data-route-row="wifi"[\s\S]*?data-route-row="relay"[\s\S]*?Keep this computer awake[\s\S]*?data-settings-block="more-ways"[\s\S]*?HTTPS address/);
+    expect(html).not.toContain('data-route-row="tailscale"');
+    expect(html).not.toContain("More ways in");
   });
 
-  it("in Simple, opens More ways in, marked as an Advanced setting, only when search or a link asks for it", () => {
-    expect(page(true, true)).toMatch(/data-settings-block="more-ways"[\s\S]*?aria-expanded="true"[\s\S]*?Advanced setting[\s\S]*?data-route-row="tailscale"/);
-    expect(page(true)).not.toContain('data-settings-disclosure="more-ways"');
+  it("in Simple, shows the HTTPS address only when search or a link asks for it", () => {
+    expect(page(true, true)).toMatch(/data-settings-block="more-ways"[\s\S]*?HTTPS address[\s\S]*?data-route-row="https"/);
+    f.state = state({ routes: routes({ wifi: true }) });
+    expect(page(true)).not.toContain('data-route-row="https"');
     expect(page(false)).not.toContain("Advanced setting");
   });
 
@@ -70,7 +72,7 @@ describe("How your phone reaches this computer", () => {
     f.state = state({ routes: routes({ wifi: true, tailscale: true }) });
     let html = page(true);
     expect(html).toMatch(/Same Wi-Fi[\s\S]*?data-route-row="wifi"[\s\S]*?aria-checked="true"[\s\S]*?On · waiting for a paired device/);
-    expect(html).toMatch(/data-settings-disclosure="more-ways"[\s\S]*?aria-expanded="true"[\s\S]*?More ways in/);
+    expect(html).not.toContain('data-route-row="tailscale"');
     f.state = state({ enabled: true, routes: routes({ wifi: true }), devices: [phone] });
     html = page(true);
     expect(html, "a switch that is on needs no line saying so").not.toContain("On · since");
@@ -103,7 +105,7 @@ describe("the HTTPS address row", () => {
     for (const enabled of [false, true]) {
       f.state = state({ enabled, routes: routes({ wifi: true, tailscale: true }) });
       const html = page(false);
-      expect(html).toMatch(/data-settings-disclosure="more-ways"[\s\S]*?aria-expanded="true"[\s\S]*?data-route-row="tailscale"/);
+      expect(html).toContain('data-settings-block="more-ways"');
       expect(html).not.toContain('data-route-row="https"');
       expect(html).not.toContain("HTTPS address");
     }
@@ -158,7 +160,7 @@ describe("route words", () => {
     expect(routeStateText(off, 0)).toBe("Off");
     expect(routeStateText({ on: true, since: NOV_7 }, 0)).toBe("On · waiting for a paired device");
     expect(reachLine({ routes: routes() })).toBe("No way in is on yet.");
-    expect(reachLine({ routes: routes({ tailscale: true, relay: true }) })).toBe("Reaches this computer on your tailnet and anywhere through MausBot.");
+    expect(reachLine({ routes: routes({ tailscale: true, relay: true }) })).toBe("Reaches this computer on your private network and anywhere through MausBot.");
   });
 });
 

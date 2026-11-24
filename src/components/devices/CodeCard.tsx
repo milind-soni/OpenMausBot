@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { productName } from "@/lib/brand";
+import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { codeUntil } from "@/lib/pairing-time";
 import { reachLine } from "../PhoneDevicesSection";
@@ -28,7 +29,16 @@ export function TypedCode({ label, code, expiresAt }: { label: string; code: str
   );
 }
 
-/** A phone's code: the QR on its white plate, with what to do, the code to type instead and the wait beside it. */
+/** Copy link, for a phone that can't scan: the link opened on the phone pairs it the same way. */
+export function CopyPhoneLink({ link }: { link: string }) {
+  const { state, copy } = useCopyFeedback(link);
+  return <button type="button" onClick={copy} data-copy-link="" className="ui-button ui-button-sm w-fit">
+    {t(state === "copied" ? "remote.serverPairing.copied" : state === "failed" ? "common.copyFailed" : "remote.serverPairing.copyLink")}
+  </button>;
+}
+
+/** A phone's code: the QR on its white plate, with what to do, the code to type instead (or, with none, until when the
+ * QR works) and the wait beside it. */
 export function PhoneCodeCard({ link, code, expiresAt, connected, children }: { link: string; code: string | null; expiresAt: number | null; connected: string | null; children?: ReactNode }) {
   return (
     <div data-pair-panel="phone" className="flex flex-wrap items-start gap-4">
@@ -37,7 +47,8 @@ export function PhoneCodeCard({ link, code, expiresAt, connected, children }: { 
       </div>
       <div className="flex min-w-[min(100%,13rem)] flex-1 flex-col gap-3">
         <p className="text-[13px] leading-[18px] text-ink">{t("phone.code.installAndScan", { app: productName() })}</p>
-        {code && expiresAt && <TypedCode label={t("devicesPage.addFlow.orType")} code={code} expiresAt={expiresAt} />}
+        {code && expiresAt ? <TypedCode label={t("devicesPage.addFlow.orType")} code={code} expiresAt={expiresAt} />
+          : expiresAt && <span data-pair-until="" className="text-[12px] leading-4 text-ink-tertiary">{codeUntil(expiresAt)}</span>}
         <Waiting connected={connected} waiting={t("devicesPage.addFlow.waitingPhone")} />
         {children}
       </div>
@@ -67,7 +78,12 @@ export function PhoneCodeInline({ c, started: asked = false }: { c: PhoneSetupCo
     </div>;
   }
   if (c.phase === "qr" && c.pairingLink && c.state) {
-    return <PhoneCodeCard link={c.pairingLink} code={c.state.e2e?.enabled ? null : pairing?.code ?? null} expiresAt={pairing?.expiresAt ?? null} connected={null}>
+    const code = c.state.e2e?.enabled ? null : pairing?.code ?? null;
+    return <PhoneCodeCard link={c.pairingLink} code={code} expiresAt={pairing?.expiresAt ?? null} connected={null}>
+      <span className="flex flex-col items-start gap-1.5">
+        {!code && <span data-pair-cant-scan="" className="text-[12px] leading-4 text-ink-secondary">{t("devicesPage.addFlow.cantScan")}</span>}
+        <CopyPhoneLink link={c.pairingLink} />
+      </span>
       <p className="text-[12px] leading-4 text-ink-tertiary">{reachLine(c.state)}</p>
     </PhoneCodeCard>;
   }

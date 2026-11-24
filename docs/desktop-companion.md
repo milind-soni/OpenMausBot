@@ -25,8 +25,8 @@ behaving as expected. A computer needs the link below.
 4. Choose **Add a computer** in **Computers**. Its last step shows **Copy link** and a 12-character code. The code works
    once, and the step says until when.
 
-In Advanced mode the same page also has **How your phone reaches this computer → More ways in → Tailscale**, the
-switch step 2 turns on for you.
+The private network row in **You're here** on the same page is where Tailscale is set up; while it is on, phones reach
+this computer over it too, and **Turn off for phones** turns it off once the share is off.
 
 ## Connect the client
 

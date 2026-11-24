@@ -167,8 +167,8 @@ direct LAN requires choosing that computer or address again.
 ### Tailscale
 
 Tailscale is an optional route away from home and on Wi-Fi networks that
-isolate clients. In desktop **Settings → Devices → How your phone reaches this computer**, open
-**More ways in** and turn **Tailscale** on: until you do, the app never runs Tailscale.
+isolate clients. In desktop **Settings → Devices**, choose **Set up Tailscale** on the **Private network** row:
+until you do, the app never runs Tailscale.
 Install or open Tailscale on both devices, sign in to the same tailnet and
 leave MagicDNS enabled, then choose **Pair a device**. OpenMausBot places the
 computer's tailnet name in the QR beside its other ways in; it never silently

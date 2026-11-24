@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, Cloud, Laptop } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { phoneAppChips, type PublicPhone } from "@/lib/phones";
 import type { SessionState } from "@/lib/session";
@@ -7,10 +7,9 @@ import { api } from "@/state/api";
 import { ComputerNameRow } from "../ComputerNameRow";
 import { PlaceMark } from "../PlacesRail";
 import { pairingBlockedReason } from "../ServerPairingCard";
-import { SettingsGroup, SettingsLinkRow, SettingsRows } from "../SettingsPrimitives";
+import { SettingsGroup, SettingsLinkRow, SettingsMark, SettingsRows } from "../SettingsPrimitives";
 import { useCloudPhoneDestination } from "../SidebarProfileMenu";
 import { TeamPhoneCard } from "../TeamPhoneCard";
-import { PlaceBadge } from "../settings/SettingsNav";
 import { useOtherPlaces } from "../settings/settings-context";
 import { useSettingsShell } from "../settings/settings-shell";
 import { Detail } from "./DeviceDetails";
@@ -40,8 +39,8 @@ export function PairWithCloudRow() {
   );
 }
 
-/** The phones of the person's other places, one row each. A Cloud already offered by Pair with My Cloud is left out, so
- * the page never has two doors to the same place. */
+/** The way to each other place's phones, one row each, marked like a device row. A Cloud already offered by Pair with
+ * My Cloud is left out, so the page never has two doors to the same place's phones. */
 export function OtherPlacesSection() {
   const { ctx } = useSettingsShell();
   const { cloud, bridge } = useCloudPhoneDestination(ctx.here);
@@ -49,11 +48,11 @@ export function OtherPlacesSection() {
   const others = useOtherPlaces("phone").filter((place) => !(callout && place.kind === "cloud"));
   if (!ctx.desktop || ctx.client || others.length === 0) return null;
   return (
-    <SettingsGroup label={t("settings.otherPlaces")} block="other-places">
+    <SettingsGroup label={t("devicesPage.otherPlaces.title")} block="other-places">
       <SettingsRows icons>
         {others.map((place) => (
-          <SettingsLinkRow key={place.key} title={place.name} subtitle={t("phone.otherPlace.line", { place: place.name })}
-            leading={<PlaceBadge place={{ kind: place.kind === "computer" ? "computer" : "cloud", name: place.name, color: place.color }} size={24} />}
+          <SettingsLinkRow key={place.key} title={place.name} subtitle={t("devicesPage.otherPlaces.line")}
+            leading={<SettingsMark>{place.kind === "computer" ? <Laptop /> : <Cloud />}</SettingsMark>}
             external onClick={place.open} data={{ "data-other-place": place.key }} />
         ))}
       </SettingsRows>

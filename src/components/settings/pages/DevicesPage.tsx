@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Laptop, Loader2 } from "lucide-react";
-import { privateNetwork, groupByKind, type Device, type DeviceAction, type DeviceGroup, type PrivateNetwork } from "@/lib/devices";
+import { deviceGroup, privateNetwork, groupByKind, type Device, type DeviceAction, type DeviceGroup, type PrivateNetwork } from "@/lib/devices";
 import { copyText } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { showTunnelRetiredNotice } from "@/lib/phone-link";
@@ -11,14 +11,14 @@ import type { CompanionState } from "@/lib/companion-types";
 import { api } from "@/state/api";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { AddDevicePanel, lastInputWasKeys, withinPage, type AddKind } from "../../devices/AddDevicePanel";
-import { GroupSection, HereSection, type NetworkAction, type NetworkShare, type Opened } from "../../devices/DeviceRows";
+import { DevicesNotice, GroupSection, HereSection, type NetworkAction, type NetworkShare, type Opened } from "../../devices/DeviceRows";
 import { PhoneCodeInline } from "../../devices/CodeCard";
 import { usePairAccess } from "../../devices/PairCodePanel";
 import { ComputerNameMore, OtherPlacesSection, PairWithCloudRow, PhoneAppFacts, ServerPhoneNotes } from "../../devices/PhoneSections";
 import { networkLine } from "../../devices/device-words";
 import { AlwaysOnHomeSection } from "../../AlwaysOnHomeSection";
 import { PhoneControls } from "../../PairedPhones";
-import { OpenCodeRow, PairPhoneSteps, ReachSection, RouteNotices, shouldResumePausedAddress, type PairAsk } from "../../PhoneDevicesSection";
+import { OpenCodeRow, PairPhoneSteps, ReachSection, RouteNotices, setCompanionTailscale, shouldResumePausedAddress, type PairAsk } from "../../PhoneDevicesSection";
 import { companionAccountBridge, usePhoneSetupController } from "../../PhoneSetupFlow";
 import { canPairDevices, pairingBlockedReason } from "../../ServerPairingCard";
 import { SettingsGroup, SettingsMark } from "../../SettingsPrimitives";
@@ -72,8 +72,11 @@ export function DevicesPage() {
   const [adding, setAdding] = useState<Adding | null>(null);
   const [problem, setProblem] = useState<CompanionState["tailscaleProblem"] | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ text: string; group: DeviceGroup | null } | null>(null);
   const asked = useRef(0);
+  const refreshNow = useRef(refresh);
+  refreshNow.current = refresh;
+  useEffect(() => { if (c.state) refreshNow.current(); }, [c.state]);
   const policy = config?.managedPolicy?.remoteAccess === false ? config.managedPolicy.organizationName : null;
   const blocked = policy ? t("policy.managedBy", { organization: policy }) : null;
   const companion = ctx.here ? c.state ?? polled : null;
@@ -107,6 +110,11 @@ export function DevicesPage() {
     void accountAct((remote) => remote.prepare?.() ?? remote.state());
   }, [resumePaused, accountAct]);
 
+  const showReach = () => window.requestAnimationFrame(() => {
+    const reach = document.querySelector<HTMLElement>("[data-settings-block=reach]");
+    reach?.scrollIntoView?.({ block: "start" });
+    reach?.querySelector<HTMLElement>("[role=switch]:not([disabled])")?.focus({ preventScroll: true });
+  });
   const focusNode = (id: string) => window.requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-device-node="${CSS.escape(id)}"]`)?.focus());
   const startAdding = useCallback((start: AddKind | null, from: string, ask: PairAsk = null) => { setNotice(null); setFailure(null); setAdding({ start, from, keys: lastInputWasKeys(), ask }); }, []);
 
@@ -147,6 +155,7 @@ export function DevicesPage() {
         case "copy-address": await copyText(action.address); return;
         case "copy-update": setOpen(device.id); setPairing(false); return;
         case "manage": go(action.page, action.anchor); return;
+        case "turn-on-way": showReach(); return;
         case "remove": {
           // A phone is removed whole: its pairing and its app's registration are the same phone.
           const sources = device.kind === "phone" ? device.actions.flatMap((one) => (one.type === "remove" ? [one.source] : [])) : [action.source];
@@ -157,7 +166,7 @@ export function DevicesPage() {
             else if (source.type === "session") await api(`/api/auth/sessions/${encodeURIComponent(source.id)}`, { method: "DELETE" });
           }
           if (open === device.id) setOpen(null);
-          setNotice(t("devicesPage.removed", { name: device.name }));
+          setNotice({ text: t("devicesPage.removed", { name: device.name }), group: deviceGroup(device) });
           break;
         }
       }
@@ -203,8 +212,8 @@ export function DevicesPage() {
     id: open, pairing,
     toggle: (id) => { setNotice(null); setPairing(false); setOpen((now) => (now === id ? null : id)); },
     close,
-    onPairing: (device, on, connected) => { setPairing(on); if (connected) { setNotice(t("devicesPage.pairedAgain", { name: device.name })); refresh(); } },
-    onRemoved: (text) => { setOpen(null); setNotice(text); refresh(); },
+    onPairing: (device, on, connected) => { setPairing(on); if (connected) { setNotice({ text: t("devicesPage.pairedAgain", { name: device.name }), group: deviceGroup(device) }); refresh(); } },
+    onRemoved: (text, device) => { setOpen(null); setNotice(text ? { text, group: deviceGroup(device) } : null); refresh(); },
     extra: phoneExtra,
   };
 
@@ -235,9 +244,11 @@ export function DevicesPage() {
   const secondary = network && !blocked && networkAction?.href
     ? <button type="button" className="settings-quiet cursor-pointer" disabled={c.busy} onClick={() => void check()}>{c.busy ? t("common.checking") : t("remote.checkAgain")}</button> : null;
   // Once Tailscale is on here, Your other computers is the row's switch, and it turns off as readily as on.
-  const share: NetworkShare | null = network && (network.state === "ready" || network.shared) ? {
+  const tailscaleOn = companion?.routes?.tailscale?.on === true;
+  const share: NetworkShare | null = network && (network.state === "ready" || network.shared || tailscaleOn) ? {
     on: network.shared, busy: c.busy, blocked: Boolean(blocked),
     onToggle: () => void (network.shared ? c.act((bridge) => bridge.setTailscaleComputers?.(false) ?? bridge.state()).then(refresh) : check()),
+    onPhonesOff: tailscaleOn && !network.shared ? () => void c.act((bridge) => setCompanionTailscale(bridge, false)).then(refresh) : null,
   } : null;
   const phoneBlocked = policy ? t("policy.remoteBlocked", { organization: policy }) : null;
   const teamMember = access.session?.kind === "session" && Boolean(access.session.team);
@@ -250,10 +261,11 @@ export function DevicesPage() {
     teamBlocked={policy ? t("policy.teamRemoteBlocked", { organization: policy }) : null} />;
   const startPhone = (ask: PairAsk) => startAdding("phone", PHONES_ADD, ask);
   const error = failure ?? (ctx.here ? c.error ?? state?.error ?? null : null);
+  const noticeLine = notice && <DevicesNotice text={notice.text} onDismiss={() => setNotice(null)} />;
   return <>
     {state && <RouteNotices c={c} notices={state.notices ?? []} />}
     {error && <p role="alert" className="px-4 text-[13px] leading-[18px] text-danger">{error}</p>}
-    {notice && <p role="status" data-devices-notice="" className="px-4 text-[13px] leading-[18px] text-ink-secondary">{notice}</p>}
+    {notice && !notice.group && noticeLine}
     <HereSection device={here} mark={mark} opened={opened} onAction={onAction} onAdd={() => startAdding(null, "[data-add-device]")} now={now}
       network={network && { network, line: blocked ?? networkLine(network), action: network.state === "ready" ? null : networkAction, secondary, share }} pending={ctx.here}
       more={!ctx.here && ctx.advanced && !ctx.cloud && access.pairingCodes === true && canPairDevices(access.session) ? <ComputerNameMore /> : null} />
@@ -261,7 +273,7 @@ export function DevicesPage() {
       const phones = entry.group === "phones";
       return <div key={entry.group} className="contents">
         <GroupSection group={entry.group} devices={entry.devices} opened={opened} onAction={onAction} now={now}
-          block={phones ? "phones" : undefined} notes={phones ? phoneNotes : undefined}
+          block={phones ? "phones" : undefined} notes={phones ? phoneNotes : undefined} notice={notice?.group === entry.group ? noticeLine : undefined}
           lead={phones && ctx.here ? <><PairWithCloudRow />{state && <OpenCodeRow c={c} state={state} />}</> : undefined}
           addLabel={phones && !canAddPhone ? null : t(ADD_LABEL[entry.group])}
           onAdd={() => startAdding(ADD_KIND[entry.group], `[data-add-group="${entry.group}"]`)} />

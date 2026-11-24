@@ -26,12 +26,12 @@ describe("paired phones", () => {
     expect(row(phone(), state())).not.toContain("Connect from");
     const markup = row(phone({ routes: "local" }), state({ e2e }));
     expect(markup).toContain("Connect from");
-    expect(markup).toMatch(/aria-checked="true"[^>]*>Wi-Fi and Tailscale only</);
+    expect(markup).toMatch(/aria-checked="true"[^>]*>Only at home or on my private network</);
   });
 
   it("says the live route, or when it was last seen, in one line", () => {
     expect(phoneSubtitle(phone({ route: "relay", e2eAt: NOW }), true, true)).toBe("Connected · Relay");
-    expect(phoneSubtitle(phone({ route: "tailscale", routes: "local", e2eAt: NOW }), true, true)).toBe("Connected · Tailscale · Wi-Fi and Tailscale only");
+    expect(phoneSubtitle(phone({ route: "tailscale", routes: "local", e2eAt: NOW }), true, true)).toBe("Connected · Tailscale · Only at home or on my private network");
     expect(phoneSubtitle(phone(), true, true)).toBe("Connected · update the app to encrypt");
     expect(phoneSubtitle(phone(), true, false)).toBe("Connected");
     expect(phoneSubtitle(phone(), false, true)).toMatch(/^Last seen /);

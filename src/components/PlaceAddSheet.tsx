@@ -2,13 +2,14 @@
 // organization on the Team plan the person pays for (when they run one), buy a Cloud (the buying sheet: another Cloud right
 // here, or the first one on this computer's own sheet), or connect to another computer of the person's own.
 import { useEffect, useEffectEvent, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { Building2, Check, Cloud, Copy, Laptop, Loader2, Server, UserRound, X } from "lucide-react";
+import { Building2, Check, CircleAlert, Cloud, Copy, Laptop, Loader2, Server, UserRound, X } from "lucide-react";
 import type { CloudSwatch } from "../../electron/cloud-list.mjs";
 import type { RailAddChoices, RailPlace } from "../../electron/cloud-rail.mjs";
 import { EXAMPLE_ADDRESS, parseServerInput } from "../../electron/server-address.mjs";
 import { CONNECT_PROBLEM_KEYS, type ServerProbe, type ServerProbeProblem } from "../../electron/server-probe.mjs";
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
+import { nameKey } from "@/lib/devices";
 import { CLOUD_LIST_NAME_LIMIT, CLOUD_SWATCH_ORDER, SWATCH_COLOR, swatchFill } from "@/lib/cloud-extra";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { productName } from "@/lib/brand";
@@ -61,12 +62,14 @@ const TRANSPORT_KEY = { https: "connect.found.https", tailscale: "connect.found.
 /** Connect to another computer: a link, or an address with the pairing code typed apart (a code pasted alone is moved to its
  * field). Main looks the address up as the person types and connects only to the server it found, opening that server's
  * own /pair page with the code. `connect`: a server of theirs that signed in with their account, not connected yet. */
-export function OwnServerLink({ onBack, onConnected, connect = null, start = null, inline = false, aside = null }: { onBack: (() => void) | null; onConnected: () => void; connect?: { name: string } | null;
+export function OwnServerLink({ onBack, onConnected, connect = null, start = null, inline = false, aside = null, expect = null }: { onBack: (() => void) | null; onConnected: () => void; connect?: { name: string } | null;
   start?: { address: string; locked: boolean; title: string } | null;
   /** In a page that gives it its own heading (Settings → Devices): no sheet padding, heading or other-computer hint. */
   inline?: boolean;
   /** Beside Connect: the page's own way out (Cancel). */
-  aside?: ReactNode }) {
+  aside?: ReactNode;
+  /** The server this form pairs again: a link that finds another one is said to, before Connect. */
+  expect?: string | null }) {
   const [address, setAddress] = useState(start?.address ?? "");
   const [code, setCode] = useState("");
   const [movedCode, setMovedCode] = useState(false);
@@ -165,6 +168,9 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
     {shownProblem && !inline && <p role="alert" data-connect-problem className="text-[13px] text-danger">{shownProblem}</p>}
     {canProbe && probing && !found && !shownProblem && <p data-connect-checking className="inline-flex items-center gap-1.5 text-[13px] text-ink-secondary">
       <Loader2 size={13} className="animate-spin" aria-hidden="true" />{t("connect.checking")}
+    </p>}
+    {found && expect && nameKey(found.label) !== nameKey(expect) && <p data-connect-other-server="" className="flex items-start gap-1.5 text-[13px] leading-[18px] text-ink">
+      <CircleAlert size={14} aria-hidden="true" className="mt-0.5 shrink-0 text-warning" />{t("servers.pairAgainOther", { found: found.label, name: expect })}
     </p>}
     <div className="flex flex-wrap items-center gap-2"><button type="submit" data-own-server-connect disabled={busy || !address.trim() || (canProbe && !found)} className="ui-button ui-button-primary inline-flex items-center gap-2">
       {busy && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}{found ? t("connect.to", { name: found.label }) : t("rail.connect")}

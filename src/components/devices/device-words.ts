@@ -30,6 +30,7 @@ export function statusText(device: Device, now = Date.now()): string {
   if (device.note === "insecure") return t("devicesPage.note.insecure");
   if (device.note === "unreachable") return t("devicesPage.note.unreachable");
   if (device.note === "reconnecting") return t("devicesPage.note.reconnecting");
+  if (device.note === "no-way-in") return t("devicesPage.note.noWayIn");
   if (device.kind === "vm") return device.desktop ? t(DESKTOP[device.desktop]) : "";
   if (device.status === "online") return t("devicesPage.status.online");
   if (device.status === "offline") return device.lastSeen ? t("devicesPage.status.seen", { when: lastSeen(device.lastSeen, now) }) : t("devicesPage.status.offline");
@@ -48,10 +49,10 @@ const NETWORK_SHORT: Record<PrivateNetworkState, LocaleKey> = {
   "needs-permission": "devicesPage.network.short.needsPermission", magicdns: "devicesPage.network.short.magicdns", ready: "devicesPage.network.short.ready",
 };
 /** Two or three words for the map. */
-export const networkShort = (network: PrivateNetwork): string => (network.state === "ready" && !network.shared ? t("devicesPage.network.short.notShared") : t(NETWORK_SHORT[network.state]));
+export const networkShort = (network: PrivateNetwork): string => (network.state === "ready" && !network.shared ? t("devicesPage.network.short.computersOff") : t(NETWORK_SHORT[network.state]));
 
 /** A computer's name on the private network without the network's own suffix: "ada-macbook", not "ada-macbook.tail4c2e.ts.net". */
-const shortName = (name: string | null) => ((name ?? "").split(".")[0] ?? "").replace(/-/g, "\u2011");
+export const shortName = (name: string | null) => ((name ?? "").split(".")[0] ?? "").replace(/-/g, "\u2011");
 
 /** The whole next step, in the Tailscale check's own words where it has them. */
 export function networkLine(network: PrivateNetwork): string {
@@ -63,7 +64,7 @@ export function networkLine(network: PrivateNetwork): string {
     case "not-running": return t("remote.tailscale.notRunning");
     case "needs-approval": return t("devicesPage.network.line.needsApproval");
     case "needs-permission": return t("remote.tailscale.needsPermission", { app: productName() });
-    case "magicdns": return `${t("remote.tailscale.magicDns")}. ${t("remote.tailscale.magicDnsDetail")}`;
-    case "ready": return network.shared ? t("devicesPage.network.line.readyShort", { name: shortName(network.name) }) : t("devicesPage.network.line.notSharedShort", { name: shortName(network.name) });
+    case "magicdns": return t("devicesPage.network.line.magicdns");
+    case "ready": return t(network.shared ? "devicesPage.network.line.readyShort" : "devicesPage.network.line.onFor", { name: shortName(network.name) });
   }
 }

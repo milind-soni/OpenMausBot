@@ -42,7 +42,7 @@ function Step({ n, title, state = "now", children }: { n: number; title: string;
         {state === "done" ? <Check size={12} strokeWidth={2.5} /> : n}
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-2">
-        <span className={cn("text-[13px] font-medium leading-5", state === "later" ? "text-ink-tertiary" : "text-ink")}>
+        <span className={cn("text-[13px] font-medium leading-5 [text-wrap-style:auto]!", state === "later" ? "text-ink-tertiary" : "text-ink")}>
           <span className="sr-only">{t("devicesPage.addFlow.stepOf", { n })}</span>{title}
         </span>
         {state !== "later" && children}
@@ -55,12 +55,16 @@ function Steps({ children }: { children: ReactNode }) {
   return <ol className="flex flex-col gap-5">{children}</ol>;
 }
 
+/** Under the step's own why, the next step alone: what Tailscale is was said once already. */
+const stepLine = (network: PrivateNetwork) => (network.state === "unknown" ? t("devicesPage.network.line.setUpChecks")
+  : network.state === "not-installed" ? t("devicesPage.network.line.notInstalled") : networkLine(network));
+
 /** The private network's state and its one button, as a step of adding a computer. */
 function NetworkStep({ network, action, waiting, onCheck, checking }: { network: PrivateNetwork; action: NetworkAction | null; waiting: boolean; onCheck?: () => void; checking: boolean }) {
   return (
     <div data-add-network={waiting ? "waiting" : network.state} className="flex flex-col items-start gap-2">
       <span className="flex items-center gap-1.5 text-[13px] leading-[18px] text-ink"><StatusMark status={network.state === "ready" ? "online" : network.state === "unknown" ? "unknown" : "attention"} />{networkShort(network)}</span>
-      <span className={BODY}>{waiting ? t("devices.computers.waiting", { app: productName() }) : networkLine(network)}</span>
+      <span className={BODY}>{waiting ? t("devices.computers.waiting", { app: productName() }) : stepLine(network)}</span>
       <span className="flex flex-wrap items-center gap-2">
         {action && (action.href
           ? <a href={action.href} target="_blank" rel="noreferrer" className="ui-button ui-button-sm" data-network-action="">{action.label}</a>
@@ -174,7 +178,7 @@ export function AddDevicePanel(props: AddDeviceProps) {
     return () => window.removeEventListener("keydown", onKey, true);
   }, []);
   useEffect(() => {
-    setSub?.({ title, short: kind === "server" ? t("devicesPage.add.server") : undefined, back: backTo, onBack: () => backRef.current() });
+    setSub?.({ title, back: backTo, onBack: () => backRef.current() });
   }, [setSub, title, backTo]);
   useEffect(() => () => setSub?.(null), [setSub]);
   return (

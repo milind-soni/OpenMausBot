@@ -184,6 +184,33 @@ describe("the Devices page", () => {
     expect($("[data-devices-empty=computers]")?.textContent).toBe("No other computers yet");
   });
 
+  it("names a phone's way in only while that way is on", async () => {
+    companion = { ...companion, routes: { wifi: off, relay: { on: true, since: NOW }, tailscale: off, https: off } };
+    await render();
+    expect($("[data-device-row='phone:iphone'] [data-device-route]")?.textContent).toBe("Anywhere, through MausBot");
+  });
+
+  it("names no way for a phone kept to home whose ways are off, while Anywhere is on, and asks nothing of the person", async () => {
+    companion = { ...companion, devices: [{ ...companion.devices[0]!, routes: "local" }], routes: { wifi: off, relay: { on: true, since: NOW }, tailscale: off, https: off } };
+    await render();
+    const iphone = $("[data-device-row='phone:iphone']")!;
+    expect(iphone.querySelector("[data-device-route]")).toBeNull();
+    expect(iphone.querySelector("[data-row-action]")).toBeNull();
+    expect(iphone.getAttribute("data-device-status")).not.toBe("attention");
+  });
+
+  it("marks a phone as needing the person while no way in is on, and its button goes to the ways in", async () => {
+    companion = { ...companion, routes: { wifi: off, relay: off, tailscale: off, https: off } };
+    await render();
+    const iphone = $("[data-device-row='phone:iphone']")!;
+    expect(iphone.querySelector("[data-device-state]")?.textContent).toBe("Can’t reach it: no way in is on");
+    expect(iphone.querySelector("[data-device-route]")).toBeNull();
+    await click("[data-device-row='phone:iphone'] [data-row-action=turn-on-way]");
+    await wait(20);
+    expect(document.activeElement?.closest("[data-settings-block=reach]")).not.toBeNull();
+    expect($("[data-remote-access-headline]")?.textContent).toBeTruthy();
+  });
+
   it("puts the one thing a device needs on its row, and leads its details with it once they are open", async () => {
     await render();
     await click("[data-device-row='place:vps'] [data-row-action=retry]");
@@ -247,7 +274,9 @@ describe("the Devices page", () => {
     expect(bridge.revoke).toHaveBeenCalledWith("iphone");
     expect(requests.some((request) => request.startsWith("DELETE /api/phones"))).toBe(true);
     await click("[data-device-node='place:vps']");
-    expect([...document.querySelectorAll("[data-device-details='place:vps'] [data-device-action=remove]")].map((one) => one.textContent)).toEqual(["Remove", "Sign it out"]);
+    expect([...document.querySelectorAll("[data-device-details='place:vps'] [data-device-action=remove]")].map((one) => one.textContent)).toEqual(["Remove from this app", "Sign it out"]);
+    expect($("[data-device-details='place:vps'] [data-device-removes]")?.lastElementChild?.textContent).toBe("Sign it out");
+    expect($("[data-device-details='place:vps'] [data-device-remove-hint]")?.textContent).toContain("ends the sign-in");
     await click("[data-device-details='place:vps'] [data-device-action=remove]");
     expect(environments.forget).toHaveBeenCalledWith("vps");
     expect(requests).not.toContain("DELETE /api/auth/sessions/s-vps");
@@ -271,6 +300,8 @@ describe("the Devices page", () => {
     await click("[data-device-details='place:vps'] [data-device-action=pair-again]");
     expect($("[data-device-details='place:vps'] [data-device-pair-again] [data-own-server-link]")).not.toBeNull();
     expect($<HTMLInputElement>("[data-own-server-link]")?.readOnly).toBe(true);
+    await wait(450);
+    expect($("[data-connect-other-server]")?.textContent).toBe("This link reaches Garage NUC, not Hetzner box.");
     expect(layers()).toBe(0);
     await click("[data-pair-again-cancel]");
     expect($("[data-device-pair-again]")).toBeNull();
@@ -432,7 +463,7 @@ describe("Add a device, in the page", () => {
     await click("[data-add-device]");
     expect(setSub).toHaveBeenLastCalledWith(expect.objectContaining({ title: "Add a device", back: "Devices" }));
     await click("[data-add-kind=server]");
-    expect(setSub).toHaveBeenLastCalledWith(expect.objectContaining({ title: "Add your own server", short: "Your own server", back: "Add a device" }));
+    expect(setSub).toHaveBeenLastCalledWith({ title: "Add your own server", back: "Add a device", onBack: expect.any(Function) });
     expect($("[data-add-back]")).toBeNull();
     act(() => setSub.mock.lastCall![0]!.onBack());
     await settle();
@@ -469,8 +500,24 @@ describe("Add a device, in the page", () => {
     expect(bridge.pairing).toHaveBeenCalledOnce();
     expect($("[data-add-panel] [data-pair-panel=phone] [data-pair-qr]")).not.toBeNull();
     expect($("[data-pairing-code]")?.textContent).toBe("482913");
+    expect($("[data-add-panel] [data-copy-link]")).not.toBeNull();
     expect(layers()).toBe(0);
     expect(requests).not.toContain("POST /api/auth/pairing");
+  });
+
+  it("offers Copy link and until when the encrypted QR works, which has no code to type", async () => {
+    companion = { ...companion, lan: "192.168.1.5", hosts: ["192.168.1.5"], e2e: { enabled: true, relay: "connected", node: "relay1", descriptor: null } };
+    bridge.pairing.mockImplementation(async (open: boolean) => {
+      companion = { ...companion, pairing: open ? { code: "482913", token: `omb_pair_${"a".repeat(43)}`, expiresAt: NOW + 600_000 } : null };
+      return companion;
+    });
+    await render();
+    await click("[data-add-group=phones]");
+    expect($("[data-pair-qr]")).not.toBeNull();
+    expect($("[data-pairing-code]")).toBeNull();
+    expect($("[data-pair-cant-scan]")?.textContent).toContain("Copy the link");
+    expect($("[data-add-panel] [data-copy-link]")?.textContent).toBe("Copy link");
+    expect($("[data-pair-until]")?.textContent).toBeTruthy();
   });
 
   it("asks for the private network first when Add a computer comes before it, with the later steps shown but quiet", async () => {
@@ -652,10 +699,8 @@ describe("phones and how they reach this computer, on Devices", () => {
     expect(bridge.setRoute).toHaveBeenCalledWith("wifi", false);
     await click("[data-settings-block=reach] [role=switch][aria-label^='Keep this computer awake']");
     expect(bridge.keepAwake).toHaveBeenCalledWith(true);
-    await click("[data-settings-disclosure=more-ways] button");
-    await click("[data-route-row=tailscale] [role=switch]");
-    expect(bridge.setTailscale).toHaveBeenCalledWith(true);
-    expect(bridge.setTailscaleComputers).not.toHaveBeenCalled();
+    expect($("[data-route-row=tailscale]")).toBeNull();
+    expect($("[data-settings-disclosure=more-ways]")).toBeNull();
     expect(layers()).toBe(0);
   });
 
@@ -670,7 +715,6 @@ describe("phones and how they reach this computer, on Devices", () => {
 
   it("opens Add a phone in the page from the HTTPS address's Set up, never a Wi-Fi code", async () => {
     await render({ advanced: true });
-    await click("[data-settings-disclosure=more-ways] button");
     await click("[data-route-row=https] button");
     expect($("[data-add-panel]")?.getAttribute("data-add-step")).toBe("phone");
     expect($("[data-pair-turn-on]")).toBeNull();
@@ -725,6 +769,26 @@ describe("Your other computers, on the private network row", () => {
     expect($("[data-network-share]")?.getAttribute("aria-checked")).toBe("false");
     await click("[data-network-share]");
     expect(bridge.setTailscaleComputers).toHaveBeenCalledWith(true);
+  });
+
+  it("says in words that agree with the switch when Tailscale is on but the share is off, and turns it off for phones from one button", async () => {
+    companion = { ...companion, routes: { ...companion.routes!, tailscale: { on: true, since: NOW, name: "ada.tail1.ts.net", computers: false } } };
+    await render();
+    const row = $("[data-private-network]")!;
+    expect($("[data-network-state]")?.textContent).toBe("Your other computers can’t connect yet");
+    expect(row.querySelector("label")?.textContent).toBe("Let my other computers connect");
+    expect(row.textContent).not.toMatch(/tailnet|\.ts\.net|\bhost\b/);
+    await click("[data-network-phones-off]");
+    expect(bridge.setTailscale).toHaveBeenCalledWith(false);
+    expect(bridge.setTailscaleComputers).not.toHaveBeenCalled();
+  });
+
+  it("is the one place Tailscale is turned on or off: How your phone reaches it has no switch of its own", async () => {
+    companion = { ...companion, routes: { ...companion.routes!, tailscale: { on: true, since: NOW, name: "ada.tail1.ts.net", computers: true } } };
+    await render({ advanced: true });
+    expect($("[data-settings-block=reach]")?.textContent).not.toContain("Tailscale");
+    expect($("[data-network-phones-off]")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/tailnet|\.ts\.net|\bhost\b|being paired/);
   });
 
   it("still turns off where an organization keeps remote access off, though it never turns on there", async () => {
@@ -868,11 +932,11 @@ describe("Settings sends every old phone address to its block on Devices", () =>
     expect($(`[data-settings-block=${anchor}]`)).not.toBeNull();
   });
 
-  it("finds More ways in under Devices, open when asked for even in Simple", async () => {
-    expect(searchSettings("https", { ...ctx, advanced: true }, (entry) => entry.id, (page) => page.id).find((hit) => hit.entry.id === "tailscale")?.entry)
+  it("finds the HTTPS address under Devices, shown when asked for even in Simple", async () => {
+    expect(searchSettings("https", { ...ctx, advanced: true }, (entry) => entry.id, (page) => page.id).find((hit) => hit.entry.id === "https-address")?.entry)
       .toMatchObject({ page: "devices", anchor: "more-ways" });
     await render({}, { anchor: "more-ways" });
-    expect($("[data-settings-disclosure=more-ways]")).not.toBeNull();
+    expect($("[data-settings-block=more-ways] [data-route-row=https]")).not.toBeNull();
   });
 });
 

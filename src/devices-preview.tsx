@@ -6,9 +6,10 @@
 //  &join=phone|computer (a new device signs in a few seconds after a code shows)&tailscale=…|not-running|needs-permission
 //  &code=1 (a phone code still open) &notice=1 (an update kept Same Wi-Fi on) &retired=1 (an older phone app's link ended)
 //  &home=on|off (Always-on home on this computer) &vps=default (a default SSH server too; page=ai&advanced=1 shows the
-//  Self-hosted VPS panel under AI's computers)
+//  Self-hosted VPS panel under AI's computers) &e2e=0 (an older phone link: a typed code beside the QR)
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { parseServerInput } from "../electron/server-address.mjs";
 import { SettingsModal } from "@/components/SettingsModal";
 import type { CompanionState } from "@/lib/companion-types";
 import { loadLocale } from "@/lib/i18n";
@@ -49,9 +50,9 @@ let companion: CompanionState = {
     ] : []),
   ] : shown === "one" ? [{ id: "iphone", name: "Ada’s iPhone 16", createdAt: now - 9e8, lastSeenAt: now - MIN, cloudDesktopAccess: false, e2eAt: now - 5e8, routes: "any", route: "wifi" }] : [],
   connectedDeviceIds: full ? ["iphone", ...(ten ? ["ipad"] : [])] : shown === "one" ? ["iphone"] : [],
-  routes: { wifi: { on: full, since: now - 9e8 }, relay: { on: full, since: now - 9e8 }, tailscale: tailRoute, https: { on: false, since: null } },
+  routes: { wifi: { on: full || shown === "one", since: now - 9e8 }, relay: { on: full, since: now - 9e8 }, tailscale: tailRoute, https: { on: false, since: null } },
   tailnetShare: ready && tailscale !== "unshared" ? { on: true, origin: "http://ada-macbook.tail4c2e.ts.net:8799", https: false, problem: null } : undefined,
-  e2e: { enabled: true, relay: "connected", node: "relay1.openmausbot.com", descriptor: null },
+  e2e: { enabled: params.get("e2e") !== "0", relay: "connected", node: "relay1.openmausbot.com", descriptor: null },
   ...(params.get("code") === "1" ? { pairing: { code: "482913", token: "omb_pair_PreviewPreviewPreviewPreviewPreviewPreviewP", expiresAt: now + 10 * MIN } } : {}),
   ...(params.get("notice") === "1" ? { notices: ["wifi" as const] } : {}),
 };
@@ -108,7 +109,13 @@ const ogb = {
         environments.push({ id: "new-server", kind: "remote", name: "Garage NUC", origin: address ?? "https://maus.example.org" });
         return { outcome: "connected" };
       },
-      probe: async (address: string) => (connectOk && address.trim() ? { outcome: "found", label: "Garage NUC", version: "0.1.180", transport: "https" } : { outcome: "problem", problem: address.trim() ? "unreachable" : "empty", host: hostOf(address) }) },
+      probe: async (address: string, code?: string) => {
+        const parsed = parseServerInput(address, code ?? "");
+        if (!parsed.ok) return { outcome: "problem", problem: parsed.problem, host: hostOf(address) };
+        if (!connectOk) return { outcome: "problem", problem: "unreachable", host: hostOf(address) };
+        const saved = environments.find((entry) => entry.origin && hostOf(entry.origin) === hostOf(address));
+        return { outcome: "found", label: saved?.name ?? "Garage NUC", version: "0.1.180", transport: "https" };
+      } },
   } : {}),
 };
 (globalThis as unknown as { ogb: unknown }).ogb = ogb;

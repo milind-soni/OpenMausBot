@@ -16,8 +16,12 @@ export function StatusMark({ status }: { status: Device["status"] }) {
   return null;
 }
 
-/** How it connects, after its state; a Cloud leaves it out, and a cloud desktop says what it is instead. */
-export const routeOf = (device: Device): string | null => (device.here || device.kind === "cloud" ? null : device.kind === "vm" ? kindLabel("vm") : routeLabel(device.route));
+/** How it connects, after its state: only a way that is open. A Cloud leaves it out, and a cloud desktop says what it is. */
+export const routeOf = (device: Device): string | null => {
+  if (device.here || device.kind === "cloud") return null;
+  if (device.kind === "vm") return kindLabel("vm");
+  return device.routes.includes(device.route) ? routeLabel(device.route) : null;
+};
 
 /** What the mark shows: a device that can't be reached or needs a step is marked as needing the person, even while away. */
 export const markOf = (device: Device): Device["status"] => (device.note && device.note !== "reconnecting" ? "attention" : device.status);
@@ -71,7 +75,9 @@ export const botsLabel = (bots: ReturnType<typeof useBotsOn>) => (bots.length ? 
 
 /** The one thing a device needs, on its row, by what it needs. An update is a command to run there, so its button opens
  * the details that show it. */
-const NEED: Partial<Record<NonNullable<Device["note"]>, DeviceAction["type"]>> = { update: "copy-update", "signed-out": "pair-again", insecure: "pair-again", unreachable: "retry" };
+const NEED: Partial<Record<NonNullable<Device["note"]>, DeviceAction["type"]>> = {
+  update: "copy-update", "signed-out": "pair-again", insecure: "pair-again", unreachable: "retry", "no-way-in": "turn-on-way",
+};
 export const needOf = (device: Device) => {
   const type = device.note && NEED[device.note];
   return type ? device.actions.find((action) => action.type === type) : undefined;

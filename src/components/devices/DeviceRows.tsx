@@ -1,5 +1,5 @@
-import { useId, type ReactNode } from "react";
-import { ChevronRight, Waypoints } from "lucide-react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
+import { Check, ChevronRight, Waypoints, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { Device, DeviceAction, DeviceGroup, PrivateNetwork } from "@/lib/devices";
@@ -22,7 +22,7 @@ export interface Opened {
   toggle: (id: string) => void;
   close: () => void;
   onPairing: (device: Device, open: boolean, connected?: boolean) => void;
-  onRemoved: (notice: string | null) => void;
+  onRemoved: (notice: string | null, device: Device) => void;
   /** More of an open device's details, from what only the page reads (a phone's own controls). */
   extra?: (device: Device) => DeviceExtra | undefined;
 }
@@ -63,13 +63,14 @@ function DeviceRow({ device, mark, opened, onAction, now }: {
       </div>
       <div id={detailsId} hidden={!open} data-device-details={open ? device.id : undefined} className="ps-[60px] pe-4 pb-4 motion-safe:animate-fade-in">
         {open && <DeviceDetails device={device} onAction={onAction} now={now} pairing={opened.pairing} extra={opened.extra?.(device)}
-          onPairing={(on, connected) => opened.onPairing(device, on, connected)} onRemoved={opened.onRemoved} />}
+          onPairing={(on, connected) => opened.onPairing(device, on, connected)} onRemoved={(text) => opened.onRemoved(text, device)} />}
       </div>
     </div>
   );
 }
 
 const NETWORK_MARK: Partial<Record<PrivateNetwork["state"], Device["status"]>> = { ready: "online", unknown: "unknown" };
+const networkMark = (network: PrivateNetwork): Device["status"] => (network.state === "ready" && !network.shared ? "offline" : NETWORK_MARK[network.state] ?? "attention");
 
 /** Your other computers on the private network, as a switch once Tailscale is on: on lets them open this computer. */
 export interface NetworkShare {
@@ -78,10 +79,13 @@ export interface NetworkShare {
   /** The organization keeps remote access off: it can be turned off, never on. */
   blocked: boolean;
   onToggle: () => void;
+  /** Tailscale stays on for phones after the share is off: this turns it off for them too. */
+  onPhonesOff: (() => void) | null;
 }
 
 /** The private network on this computer: its state, the whole next step in words, and the one control for it. */
 function NetworkRow({ network, line, action, secondary, share }: { network: PrivateNetwork; line: string; action: NetworkAction | null; secondary?: ReactNode; share?: NetworkShare | null }) {
+  const shareLabel = t("devicesPage.network.shareSwitch");
   return (
     <div data-settings-block="computers" className="contents">
       <div data-settings-block="network" data-private-network="" className="flex scroll-mt-4 flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
@@ -90,11 +94,15 @@ function NetworkRow({ network, line, action, secondary, share }: { network: Priv
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="flex flex-wrap items-center gap-x-2 text-[14px] leading-5 text-ink">
               {t("devicesPage.network.title")}
-              <span data-network-state={network.state} className={cn("flex items-center gap-1.5 text-[13px] leading-[18px]", (network.state === "ready" && network.shared) || network.state === "unknown" ? "text-ink-secondary" : "text-ink")}>
-                <StatusMark status={network.state === "ready" && !network.shared ? "attention" : NETWORK_MARK[network.state] ?? "attention"} />{networkShort(network)}
+              <span data-network-state={network.state} className={cn("flex items-center gap-1.5 text-[13px] leading-[18px]", networkMark(network) === "attention" ? "text-ink" : "text-ink-secondary")}>
+                <StatusMark status={networkMark(network)} />{networkShort(network)}
               </span>
             </span>
             <span data-network-line={network.state} aria-live="polite" className="text-[13px] leading-[18px] text-ink-secondary">{line}</span>
+            {share?.onPhonesOff && <span data-network-phones="" className="flex flex-wrap items-center gap-x-2 text-[13px] leading-[18px] text-ink-secondary">
+              {t("devicesPage.network.phonesStill")}
+              <button type="button" data-network-phones-off="" className="settings-quiet -ms-1.5 cursor-pointer" disabled={share.busy} onClick={share.onPhonesOff}>{t("devicesPage.network.phonesOff")}</button>
+            </span>}
           </div>
         </div>
         {(action || secondary || share) && (
@@ -103,8 +111,11 @@ function NetworkRow({ network, line, action, secondary, share }: { network: Priv
               ? <a href={action.href} target="_blank" rel="noreferrer" className="ui-button ui-button-sm" data-network-action="">{action.label}</a>
               : <button type="button" className="ui-button ui-button-sm" data-network-action="" disabled={action.busy} onClick={action.run}>{action.label}</button>)}
             {secondary}
-            {share && <Switch checked={share.on} aria-label={t("devices.computers.title")} title={t("devices.computers.title")} data-network-share={share.on ? "on" : "off"}
-              disabled={share.busy || (share.blocked && !share.on)} onClick={share.onToggle} />}
+            {share && <label className="flex cursor-pointer items-center gap-2 text-[13px] leading-[18px] text-ink">
+              {shareLabel}
+              <Switch checked={share.on} aria-label={shareLabel} data-network-share={share.on ? "on" : "off"}
+                disabled={share.busy || (share.blocked && !share.on)} onClick={share.onToggle} />
+            </label>}
           </span>
         )}
       </div>
@@ -134,16 +145,30 @@ export function HereSection({ device, mark, network, pending = false, opened, on
   );
 }
 
+/** What just happened to a device (removed, paired again), by the list it happened in, until it is closed or the page moves on. */
+export function DevicesNotice({ text, onDismiss }: { text: string; onDismiss: () => void }) {
+  const line = useRef<HTMLDivElement>(null);
+  useEffect(() => { line.current?.scrollIntoView?.({ block: "nearest" }); }, [text]);
+  return (
+    <div ref={line} role="status" className="flex scroll-mt-4 items-center gap-3 rounded-[12px] bg-menu py-1.5 ps-4 pe-2 shadow-[inset_0_0_0_0.5px_var(--settings-edge)]">
+      <span aria-hidden="true" className="flex size-5 shrink-0 items-center justify-center rounded-full bg-success"><Check size={12} strokeWidth={2.5} /></span>
+      <span data-devices-notice="" className="min-w-0 flex-1 py-1 text-[13px] font-medium leading-[18px] text-ink">{text}</span>
+      <button type="button" data-devices-notice-close="" aria-label={t("notice.dismiss")} title={t("notice.dismiss")} onClick={onDismiss} className="ui-icon-button size-7 shrink-0"><X size={14} aria-hidden="true" /></button>
+    </div>
+  );
+}
+
 /** One group of devices by what a person calls them, with its own Add and a line while it has none. `notes` sit under its
  * title; `lead` rows come before its devices in the same card. */
-export function GroupSection({ group, devices, addLabel, onAdd, opened, onAction, now, block = `group-${group}`, notes, lead }: {
+export function GroupSection({ group, devices, addLabel, onAdd, opened, onAction, now, block = `group-${group}`, notes, lead, notice }: {
   group: DeviceGroup; devices: readonly Device[]; addLabel: string | null; onAdd: () => void; opened: Opened;
-  onAction: (device: Device, action: DeviceAction) => void; now: number; block?: string; notes?: ReactNode; lead?: ReactNode;
+  onAction: (device: Device, action: DeviceAction) => void; now: number; block?: string; notes?: ReactNode; lead?: ReactNode; notice?: ReactNode;
 }) {
   return (
     <SettingsGroup label={groupLabel(group)} block={block}
       actions={addLabel && <button type="button" data-add-group={group} data-phone-pairing-action={group === "phones" ? "" : undefined} onClick={onAdd} className="settings-quiet cursor-pointer">{addLabel}</button>}>
       {notes}
+      {notice}
       <SettingsRows icons>
         {lead}
         {devices.length
