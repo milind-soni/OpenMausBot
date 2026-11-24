@@ -6436,6 +6436,9 @@ bus.subscribe((event: RuntimeEvent) => {
       }
       break;
     case "request.opened": {
+      // A provider that repeats an ask it already showed (a broker reconnect, a re-delivered event) must not post a
+      // second identical card and notification; the live card is still the one to answer.
+      if (event.requestId && askMessageByRequest.has(`${event.threadId}:${event.requestId}`)) break;
       // A structured ask is a question whatever channel carried it, and no approval mode answers a question for the person (at Full access one nobody is there for is not asked).
       const permission = event.requestType === "permission" && !event.questions?.length;
       // The provider's own mode already ran; only Full access, an exact saved command or an exact remembered MCP tool that sends nothing answers here.
