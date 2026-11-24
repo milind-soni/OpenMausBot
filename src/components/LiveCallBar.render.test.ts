@@ -229,3 +229,28 @@ describe("LiveKeySetup", () => {
     expect(markup).not.toContain("stays on your computer");
   });
 });
+
+describe("LiveCallSettings history limits", () => {
+  function renderWithLive(live: LiveSettings) {
+    const config = { cloudHome: false, live } as AppState["config"];
+    const value = { state: { ...initialState, config }, dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+    return renderToStaticMarkup(createElement(BotEditorStore, { value, children: createElement(LiveCallSettings, { onClose: vi.fn() }) }));
+  }
+
+  it("shows configurable history selects capped by the active provider", () => {
+    const openai = renderWithLive({ configured: true, provider: "openai", voice: "marin", readTypedReplies: true, idleMinutes: 5 });
+    expect(openai).toContain("Chat history messages");
+    expect(openai).toContain("Chars per message");
+    expect(openai).toContain("Total history chars");
+    const messagesSelect = /Chat history messages[\s\S]*?<select[\s\S]*?<\/select>/.exec(openai)?.[0] ?? "";
+    expect(messagesSelect).toContain('value="128"');
+    expect(messagesSelect).not.toContain('value="200"');
+    expect(openai).toContain('value="24000"');
+    expect(openai).not.toContain('value="60000"');
+
+    const gemini = renderWithLive({ configured: true, provider: "gemini", voice: "marin", readTypedReplies: true, idleMinutes: 5, historyMessages: 200, historyMessageChars: 12_000, historyTotalChars: 60_000 });
+    const geminiMessagesSelect = /Chat history messages[\s\S]*?<select[\s\S]*?<\/select>/.exec(gemini)?.[0] ?? "";
+    expect(geminiMessagesSelect).toContain('value="200"');
+    expect(gemini).toContain('value="60000"');
+  });
+});

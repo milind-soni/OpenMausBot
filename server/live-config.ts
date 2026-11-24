@@ -1,5 +1,6 @@
 // Live calls' settings in config.json: schema, type and environment overrides, kept out of server/config.ts.
 import { z } from "zod";
+import { liveHistoryLimitError } from "../shared/live-call.ts";
 
 export const LIVE_KEY_NEEDS_ENDPOINT = "Save the Azure endpoint first: a Live key works only with the endpoint it was saved for.";
 export const LIVE_KEY_NEEDS_CUSTOM_ENDPOINT = "Save the custom endpoint first: a Live key works only with the endpoint it was saved for.";
@@ -23,6 +24,9 @@ export const liveConfigSchema = z.object({
   geminiVoice: z.string().trim().max(40).regex(/^[A-Za-z]*$/, "a Gemini Live voice is a built-in voice name").optional(),
   readTypedReplies: z.boolean().optional(),
   idleMinutes: z.number().int().min(1).max(60).optional(),
+  historyMessages: z.number().int().min(0).max(200).optional(),
+  historyMessageChars: z.number().int().min(100).max(12_000).optional(),
+  historyTotalChars: z.number().int().min(500).max(60_000).optional(),
 });
 
 export interface LiveConfig {
@@ -42,6 +46,9 @@ export interface LiveConfig {
   geminiVoice?: string;
   readTypedReplies?: boolean;
   idleMinutes?: number;
+  historyMessages?: number;
+  historyMessageChars?: number;
+  historyTotalChars?: number;
 }
 
 /** Where a key saved now may go: "openai", "azure:<host>" or "custom:<host>"; null while Azure or a custom endpoint is chosen
@@ -68,6 +75,8 @@ export function usableLiveKey(live: LiveConfig | undefined): string | undefined 
  * OMB_OPENAI_LIVE_KEY at the next launch: "nowhere" keeps that copy unusable until a key is saved again. */
 export function liveSavePatch(current: LiveConfig | undefined, patch: LiveConfig): LiveConfig {
   const { keyFor: _fromRequest, ...asked } = patch;
+  const historyError = liveHistoryLimitError(asked, asked.provider ?? current?.provider);
+  if (historyError) throw Object.assign(new Error(historyError), { status: 400 });
   const target = liveKeyTarget({ ...current, ...asked });
   if (asked.key?.trim()) {
     if (!target) throw Object.assign(new Error({ ...current, ...asked }.provider === "custom" ? LIVE_KEY_NEEDS_CUSTOM_ENDPOINT : LIVE_KEY_NEEDS_ENDPOINT), { status: 400 });

@@ -303,3 +303,16 @@ describe("a Fish Audio call", () => {
     expect(fishRelay).not.toHaveBeenCalled();
   });
 });
+
+describe("live history limit route validation", () => {
+  it("accepts history limits within the provider's cap and rejects exceeding or out-of-range values", async () => {
+    const d = deps();
+    expect(await request(d, "PATCH", "/api/live/settings", { historyMessages: 32, historyMessageChars: 2_000, historyTotalChars: 12_000 }))
+      .toMatchObject({ status: 200, body: { live: { historyMessages: 32, historyMessageChars: 2_000, historyTotalChars: 12_000 } } });
+    expect((await request(d, "PATCH", "/api/live/settings", { historyMessages: 200 })).status).toBe(400);
+    expect((await request(d, "PATCH", "/api/live/settings", { historyMessageChars: 99 })).status).toBe(400);
+    expect((await request(d, "PATCH", "/api/live/settings", { historyTotalChars: 499 })).status).toBe(400);
+    expect(await request(d, "PATCH", "/api/live/settings", { provider: "gemini", historyMessages: 200 }))
+      .toMatchObject({ status: 200, body: { live: { provider: "gemini", historyMessages: 200 } } });
+  });
+});

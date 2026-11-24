@@ -1,3 +1,4 @@
+import type { LiveHistoryLimits } from "../shared/wire.ts";
 import { productName } from "./brand.ts";
 import type { LiveCallDeps } from "./live-call-controller.ts";
 import { openLiveSocket, relayedProvider } from "./live-call-controller.ts";
@@ -22,6 +23,7 @@ export interface LiveSessionWiringInput {
   fishAgentLanguage?(): string | undefined;
   /** The name a person reads, which names the agent on their account; the brand's own by default. */
   productName?(): string;
+  historyLimits?(): Partial<LiveHistoryLimits> | undefined;
   env?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
 }
@@ -63,7 +65,7 @@ export function liveSessionWiring(input: LiveSessionWiringInput): {
   };
 
   const startFish = async (key: string, endpoint: LiveEndpoint, botId: string, threadId: string) => {
-    const session = { key, bot: input.bot(botId), history: input.history(threadId), cloudHome: input.cloudHome, fetchImpl };
+    const session = { key, bot: input.bot(botId), history: input.history(threadId), cloudHome: input.cloudHome, historyLimits: input.historyLimits?.(), fetchImpl };
     const language = fishSpeakingLanguage(input.language?.());
     if (endpoint.model) await speakLanguage(key, endpoint, language);
     let agent = endpoint.model ? endpoint : await setUpAgent(key, endpoint, language);
@@ -85,7 +87,7 @@ export function liveSessionWiring(input: LiveSessionWiringInput): {
   };
 
   const startElevenLabs = async (key: string, endpoint: LiveEndpoint, botId: string, threadId: string) => {
-    const session = { key, bot: input.bot(botId), history: input.history(threadId), cloudHome: input.cloudHome, fetchImpl };
+    const session = { key, bot: input.bot(botId), history: input.history(threadId), cloudHome: input.cloudHome, historyLimits: input.historyLimits?.(), fetchImpl };
     try {
       return await createElevenLabsLiveSession({ ...session, endpoint: endpoint.model ? endpoint : await setUpElevenLabs(key, endpoint) });
     } catch (error) {
@@ -102,8 +104,9 @@ export function liveSessionWiring(input: LiveSessionWiringInput): {
       geminiRefusal: (auth) => geminiLiveCallRefusal(auth, { othersOnLoopback: input.othersOnLoopback() }),
       elevenlabsRefusal: (auth) => elevenLabsLiveCallRefusal(auth, { othersOnLoopback: input.othersOnLoopback() }),
       createSession: async ({ key, endpoint, sdp, botId, threadId, voice }) => {
+        const historyLimits = input.historyLimits?.();
         if (endpoint.provider === "gemini") {
-          const session = await createGeminiLiveSession({ key, endpoint, voice, bot: input.bot(botId), history: input.history(threadId), cloudHome: input.cloudHome, fetchImpl });
+          const session = await createGeminiLiveSession({ key, endpoint, voice, bot: input.bot(botId), history: input.history(threadId), cloudHome: input.cloudHome, historyLimits, fetchImpl });
           // Gemini has nothing to end: the session ends when the client closes it, and the token is single use.
           const { token } = relays.open(session.session_id, async () => undefined);
           return { sessionId: session.session_id, gemini: { type: "gemini", session, relayToken: token } };
@@ -115,7 +118,7 @@ export function liveSessionWiring(input: LiveSessionWiringInput): {
           return { sessionId: session.session_id, elevenlabs: { type: "elevenlabs", session, relayToken: token } };
         }
         if (endpoint.provider !== "fish") {
-          return createLiveSession({ key, endpoint, sdp, voice, bot: input.bot(botId), history: input.history(threadId), cloudHome: input.cloudHome });
+          return createLiveSession({ key, endpoint, sdp, voice, bot: input.bot(botId), history: input.history(threadId), cloudHome: input.cloudHome, historyLimits, fetchImpl });
         }
         const { agent, token: session } = await startFish(key, endpoint, botId, threadId);
         const { token } = relays.open(session.session_id, () => endFishLiveSession(session.session_id, key, agent, fetchImpl));

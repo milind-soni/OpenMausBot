@@ -427,3 +427,48 @@ describe("spokenHangUp", () => {
     }
   });
 });
+
+describe("configurable live startup history limits", () => {
+  it("applies custom limits, supports zero messages, and clamps to the provider cap", async () => {
+    const { selectLiveHistory } = await import("./live-call.ts");
+    const history = Array.from({ length: 150 }, (_, index) => ({
+      role: index % 2 ? "assistant" as const : "user" as const,
+      text: `msg-${index} ${"a".repeat(250)}`,
+    }));
+
+    expect(liveInitialInput(history, { historyMessages: 16, historyMessageChars: 100, historyTotalChars: 1_600 })).toHaveLength(16);
+    expect(liveInitialInput(history, { historyMessages: 16, historyMessageChars: 80, historyTotalChars: 1_500 })).toHaveLength(15);
+    expect(liveInitialInput(history, { historyMessages: 0 })).toEqual([]);
+
+    const picked = selectLiveHistory(history, { historyMessages: 200, historyMessageChars: 150, historyTotalChars: 60_000 }, "openai");
+    expect(picked).toHaveLength(128);
+    expect(picked.at(-1)?.text.startsWith("msg-149 ")).toBe(true);
+    for (const item of picked) expect(item.text.length).toBeLessThanOrEqual(150);
+
+    const cappedByTotal = selectLiveHistory(history, { historyMessages: 200, historyMessageChars: 200, historyTotalChars: 60_000 }, "openai");
+    expect(cappedByTotal).toHaveLength(120);
+
+    const longNewest = [{ role: "user" as const, text: "older" }, { role: "assistant" as const, text: `lead-${"q".repeat(7_000)}` }];
+    const singleOversized = selectLiveHistory(longNewest, { historyMessages: 8, historyMessageChars: 8_000, historyTotalChars: 6_000 }, "openai");
+    expect(singleOversized).toHaveLength(1);
+    expect(singleOversized[0]).toEqual({ role: "assistant", text: `lead-${"q".repeat(5_995)}` });
+  });
+
+  it("forwards historyLimits into createLiveSession input", async () => {
+    const fetchImpl = okFetch();
+    const history = Array.from({ length: 20 }, (_, index) => ({ role: "user" as const, text: `line ${index} ${"z".repeat(400)}` }));
+    await createLiveSession({
+      key: "sk-test",
+      sdp: OFFER,
+      bot: BOT,
+      history,
+      cloudHome: false,
+      historyLimits: { historyMessages: 12, historyMessageChars: 120, historyTotalChars: 2_000 },
+      fetchImpl,
+    });
+    const body = JSON.parse(String(fetchImpl.mock.calls[0][1]?.body));
+    expect(body.session.input).toHaveLength(12);
+    expect(body.session.input[0].content[0].text).toMatch(/^line 8 /);
+    expect(body.session.input[0].content[0].text.length).toBe(120);
+  });
+});

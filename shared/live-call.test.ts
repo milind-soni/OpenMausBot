@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { botCallVoice, clampAppend, commentaryChunks, formatCallDuration, FULL_ANSWER_IN_CHAT, geminiLiveVoice, isBotLiveVoice, joinFragments, LIVE_VOICE_OPTIONS, LiveTranscript, liveCallRowText, SpokenLines } from "./live-call.ts";
+import {
+  botCallVoice, clampAppend, commentaryChunks, DEFAULT_LIVE_HISTORY_LIMITS, formatCallDuration, FULL_ANSWER_IN_CHAT,
+  geminiLiveVoice, isBotLiveVoice, joinFragments, LIVE_HISTORY_MIN, LIVE_HISTORY_PROVIDER_CAPS, LIVE_VOICE_OPTIONS,
+  LiveTranscript, liveCallRowText, liveHistoryCaps, resolveLiveHistoryLimits, SpokenLines,
+} from "./live-call.ts";
 
 describe("Live call voices", () => {
   it.each(["nuri", "juni", "flitz", "brise", "sillage", "nira", "harema", "shida", "noeul"])("offers %s as a bot's OpenAI voice without using it for Gemini", (voice) => {
@@ -188,5 +192,36 @@ describe("a call's length", () => {
   it("writes the call row's line for clients that do not know the row", () => {
     expect(liveCallRowText("Ada", 102)).toBe("Call with Ada · 1:42");
     expect(liveCallRowText("Ada", 3_725)).toBe("Call with Ada · 1:02:05");
+  });
+});
+
+describe("Live call history limits", () => {
+  it("starts at the existing defaults and exposes provider ceilings", () => {
+    expect(DEFAULT_LIVE_HISTORY_LIMITS).toEqual({
+      historyMessages: 8,
+      historyMessageChars: 600,
+      historyTotalChars: 6_000,
+    });
+    expect(LIVE_HISTORY_MIN).toEqual({
+      historyMessages: 0,
+      historyMessageChars: 100,
+      historyTotalChars: 500,
+    });
+    expect(liveHistoryCaps(undefined)).toEqual(LIVE_HISTORY_PROVIDER_CAPS.openai);
+    expect(liveHistoryCaps("openai")).toEqual({ maxMessages: 128, maxMessageChars: 8_000, maxTotalChars: 24_000 });
+    expect(liveHistoryCaps("fish")).toEqual({ maxMessages: 100, maxMessageChars: 4_000, maxTotalChars: 20_000 });
+    expect(liveHistoryCaps("gemini")).toEqual({ maxMessages: 200, maxMessageChars: 12_000, maxTotalChars: 60_000 });
+  });
+
+  it("clamps configured limits between provider bounds and ignores non-finite values", () => {
+    expect(resolveLiveHistoryLimits(undefined, "openai")).toEqual(DEFAULT_LIVE_HISTORY_LIMITS);
+    expect(resolveLiveHistoryLimits({ historyMessages: 0, historyMessageChars: 200, historyTotalChars: 1_500 }, "openai"))
+      .toEqual({ historyMessages: 0, historyMessageChars: 200, historyTotalChars: 1_500 });
+    expect(resolveLiveHistoryLimits({ historyMessages: 200, historyMessageChars: 12_000, historyTotalChars: 60_000 }, "gemini"))
+      .toEqual({ historyMessages: 200, historyMessageChars: 12_000, historyTotalChars: 60_000 });
+    expect(resolveLiveHistoryLimits({ historyMessages: 200, historyMessageChars: 12_000, historyTotalChars: 60_000 }, "openai"))
+      .toEqual({ historyMessages: 128, historyMessageChars: 8_000, historyTotalChars: 24_000 });
+    expect(resolveLiveHistoryLimits({ historyMessages: -5, historyMessageChars: Number.NaN, historyTotalChars: 50 }, "openai"))
+      .toEqual({ historyMessages: 0, historyMessageChars: 600, historyTotalChars: 500 });
   });
 });

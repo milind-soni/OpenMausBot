@@ -2,7 +2,7 @@
 // *that* it wants help, never *what*: `session.delegation.created` carries an id
 // and a timeline offset, so the request is rebuilt from the input transcript.
 
-import type { LiveSpokenLine } from "./live-call-wire.ts";
+import type { LiveHistoryLimits, LiveProvider, LiveSpokenLine } from "./live-call-wire.ts";
 
 export interface TranscriptSegment {
   text: string;
@@ -225,4 +225,75 @@ export function formatCallDuration(seconds: number): string {
  * shows as a plain line ("Call with Ada · 1:42"). */
 export function liveCallRowText(botName: string, seconds: number): string {
   return `Call with ${botName} · ${formatCallDuration(seconds)}`;
+}
+
+export interface LiveHistoryCaps {
+  maxMessages: number;
+  maxMessageChars: number;
+  maxTotalChars: number;
+}
+
+export const DEFAULT_LIVE_HISTORY_LIMITS: LiveHistoryLimits = {
+  historyMessages: 8,
+  historyMessageChars: 600,
+  historyTotalChars: 6_000,
+};
+
+export const LIVE_HISTORY_MIN: LiveHistoryLimits = {
+  historyMessages: 0,
+  historyMessageChars: 100,
+  historyTotalChars: 500,
+};
+
+export const LIVE_HISTORY_PROVIDER_CAPS: Record<LiveProvider, LiveHistoryCaps> = {
+  openai: { maxMessages: 128, maxMessageChars: 8_000, maxTotalChars: 24_000 },
+  azure: { maxMessages: 128, maxMessageChars: 8_000, maxTotalChars: 24_000 },
+  custom: { maxMessages: 128, maxMessageChars: 8_000, maxTotalChars: 24_000 },
+  fish: { maxMessages: 100, maxMessageChars: 4_000, maxTotalChars: 20_000 },
+  elevenlabs: { maxMessages: 100, maxMessageChars: 4_000, maxTotalChars: 20_000 },
+  gemini: { maxMessages: 200, maxMessageChars: 12_000, maxTotalChars: 60_000 },
+};
+
+/** Maximum history limits supported by `provider` (defaults to OpenAI's ceilings). */
+export function liveHistoryCaps(provider?: LiveProvider): LiveHistoryCaps {
+  return provider ? LIVE_HISTORY_PROVIDER_CAPS[provider] : LIVE_HISTORY_PROVIDER_CAPS.openai;
+}
+
+function clampHistoryLimit(value: unknown, fallback: number, min: number, max: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(value)));
+}
+
+/** Clamps partial history limits into valid bounds for `provider`, filling missing or non-finite values with defaults. */
+export function resolveLiveHistoryLimits(
+  limits?: Partial<LiveHistoryLimits>,
+  provider?: LiveProvider,
+): LiveHistoryLimits {
+  const caps = liveHistoryCaps(provider);
+  return {
+    historyMessages: clampHistoryLimit(limits?.historyMessages, DEFAULT_LIVE_HISTORY_LIMITS.historyMessages, LIVE_HISTORY_MIN.historyMessages, caps.maxMessages),
+    historyMessageChars: clampHistoryLimit(limits?.historyMessageChars, DEFAULT_LIVE_HISTORY_LIMITS.historyMessageChars, LIVE_HISTORY_MIN.historyMessageChars, caps.maxMessageChars),
+    historyTotalChars: clampHistoryLimit(limits?.historyTotalChars, DEFAULT_LIVE_HISTORY_LIMITS.historyTotalChars, LIVE_HISTORY_MIN.historyTotalChars, caps.maxTotalChars),
+  };
+}
+
+/** Validates user-supplied history limits against `provider`'s ceiling, returning a descriptive error or null. */
+export function liveHistoryLimitError(
+  limits: Partial<LiveHistoryLimits>,
+  provider?: LiveProvider,
+): string | null {
+  const caps = liveHistoryCaps(provider);
+  const checks: Array<[keyof LiveHistoryLimits, number, number, string]> = [
+    ["historyMessages", LIVE_HISTORY_MIN.historyMessages, caps.maxMessages, "messages"],
+    ["historyMessageChars", LIVE_HISTORY_MIN.historyMessageChars, caps.maxMessageChars, "chars per message"],
+    ["historyTotalChars", LIVE_HISTORY_MIN.historyTotalChars, caps.maxTotalChars, "total chars"],
+  ];
+  for (const [key, min, max, label] of checks) {
+    const value = limits[key];
+    if (value === undefined) continue;
+    if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) {
+      return `Chat history ${label} must be between ${min} and ${max} for this voice provider.`;
+    }
+  }
+  return null;
 }

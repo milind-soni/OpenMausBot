@@ -166,4 +166,20 @@ describe("an ElevenLabs Live call's voice", () => {
     const fetchImpl = fakeElevenLabs({ "/v1/convai/agents/agent_1": () => new Response("", { status: 404 }) });
     await expect(withVoice(fetchImpl, VOICE)).rejects.toMatchObject({ elevenlabsStatus: 404 });
   });
+
+  it("forwards configurable historyLimits up to ElevenLabs' ceiling", async () => {
+    const fetchImpl = fakeElevenLabs();
+    const history = Array.from({ length: 15 }, (_, i) => ({ role: "user" as const, text: `el-${i}` }));
+    const session = await createElevenLabsLiveSession({
+      key: "k",
+      endpoint: elevenLabsLiveEndpoint("agent_1", {}),
+      bot: { name: "Rigel" },
+      history,
+      cloudHome: false,
+      historyLimits: { historyMessages: 12, historyMessageChars: 1_000, historyTotalChars: 10_000 },
+      fetchImpl,
+      now: () => NOW,
+    });
+    expect(session.instructions.match(/^User: /gm)).toHaveLength(12);
+  });
 });

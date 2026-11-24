@@ -1,9 +1,9 @@
 // Fish Audio Live 3 calls. The Fish key never leaves the harness: the client gets only Fish's single-use session token,
 // and Fish has no server sideband, so the client relays what was said and the harness answers through FishRelay.
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import type { LiveFishRelayCommand, LiveFishRelayEvent, LiveFishSessionToken } from "../shared/wire.ts";
+import type { LiveFishRelayCommand, LiveFishRelayEvent, LiveFishSessionToken, LiveHistoryLimits, LiveProvider } from "../shared/wire.ts";
 import type { LiveSocket } from "./live-call-controller.ts";
-import { liveInstructions, LiveSessionError, type LiveBot, type LiveEndpoint, type LiveHistoryMessage } from "./live-call.ts";
+import { liveInstructions, LiveSessionError, selectLiveHistory, type LiveBot, type LiveEndpoint, type LiveHistoryMessage } from "./live-call.ts";
 import type { LiveConfig } from "./live-config.ts";
 
 const FISH_BASE = "https://api.fish.audio";
@@ -12,9 +12,6 @@ const END_TIMEOUT_MS = 5_000;
 const SETUP_TIMEOUT_MS = 8_000;
 /** Fish agent ids as the dashboard and `GET /v1/agent/agents` show them. */
 const AGENT_ID = /^[\w-]{1,128}$/;
-const HISTORY_MESSAGES = 8;
-const HISTORY_MESSAGE_CHARS = 600;
-const HISTORY_TOTAL_CHARS = 6_000;
 export const FISH_DELEGATE_TOOL = "delegate";
 /** What a "fish" call reports as its voice: the voice is set on the Fish agent, not per call. */
 export const FISH_AGENT_VOICE = "agent";
@@ -117,7 +114,17 @@ async function fishSetupRequest(fetchImpl: typeof fetch, key: string, method: st
 }
 
 /** The Fish agent's system prompt for this call: the GPT-Live instructions, how this agent delegates, and the recent chat. */
-export function fishInstructions(bot: LiveBot, history: LiveHistoryMessage[], { cloudHome = false }: { cloudHome?: boolean } = {}): string {
+export interface FishInstructionsOptions {
+  cloudHome?: boolean;
+  historyLimits?: Partial<LiveHistoryLimits>;
+  provider?: LiveProvider;
+}
+
+export function fishInstructions(
+  bot: LiveBot,
+  history: LiveHistoryMessage[],
+  { cloudHome = false, historyLimits, provider = "fish" }: FishInstructionsOptions = {},
+): string {
   const lines = [
     liveInstructions(bot, { cloudHome }),
     "",
@@ -125,26 +132,12 @@ export function fishInstructions(bot: LiveBot, history: LiveHistoryMessage[], { 
     `A user message that starts with ${FISH_UPDATE_PREFIX} is not the user speaking: it is a later result or a status note from your work. Speak it to the user naturally, in the first person, without reading the prefix.`,
     "Do not end the call yourself. When the user asks to hang up, delegate it.",
   ];
-  const recent = recentHistory(history);
+  const recent = selectLiveHistory(history, historyLimits, provider);
   if (recent.length) {
     lines.push("", "The conversation so far, most recent last:");
     for (const message of recent) lines.push(`${message.role === "user" ? "User" : "You"}: ${message.text}`);
   }
   return lines.join("\n");
-}
-
-function recentHistory(history: LiveHistoryMessage[]): LiveHistoryMessage[] {
-  const picked: LiveHistoryMessage[] = [];
-  let total = 0;
-  for (const message of [...history].reverse()) {
-    if (picked.length >= HISTORY_MESSAGES) break;
-    const text = message.text.replace(/\s+/g, " ").trim().slice(0, HISTORY_MESSAGE_CHARS);
-    if (!text) continue;
-    if (total + text.length > HISTORY_TOTAL_CHARS) break;
-    total += text.length;
-    picked.unshift({ role: message.role, text });
-  }
-  return picked;
 }
 
 export interface CreateFishSessionInput {
@@ -153,6 +146,7 @@ export interface CreateFishSessionInput {
   bot: LiveBot;
   history: LiveHistoryMessage[];
   cloudHome: boolean;
+  historyLimits?: Partial<LiveHistoryLimits>;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
 }
@@ -165,7 +159,13 @@ export async function createFishLiveSession(input: CreateFishSessionInput): Prom
   const body = {
     agent_id: input.endpoint.model,
     // Fish refuses an override the agent's `overrides_allowed` does not list (400).
-    overrides: { system_prompt: fishInstructions(input.bot, input.history, { cloudHome: input.cloudHome }) },
+    overrides: {
+      system_prompt: fishInstructions(input.bot, input.history, {
+        cloudHome: input.cloudHome,
+        historyLimits: input.historyLimits,
+        provider: "fish",
+      }),
+    },
   };
   let response: Response;
   try {

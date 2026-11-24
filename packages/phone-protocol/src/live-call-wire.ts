@@ -67,6 +67,12 @@ export type LiveProvider = "openai" | "azure" | "fish" | "gemini" | "elevenlabs"
  * `elevenlabs`: the person's own ElevenLabs key from Settings → API keys, the only key an ElevenLabs call uses. */
 export type LiveKeySource = "live" | "openai" | "fishAudio" | "gemini" | "elevenlabs";
 
+export interface LiveHistoryLimits {
+  historyMessages: number;
+  historyMessageChars: number;
+  historyTotalChars: number;
+}
+
 /** Non-secret Live settings, as GET /api/config and PATCH /api/live/settings report them. */
 export interface LiveSettings {
   /** A Live call has everything it needs: a key (`keySource` says which; never the key itself), and for Azure a valid endpoint and deployment. */
@@ -88,6 +94,9 @@ export interface LiveSettings {
   geminiVoice?: string;
   readTypedReplies: boolean;
   idleMinutes: number;
+  historyMessages?: number;
+  historyMessageChars?: number;
+  historyTotalChars?: number;
 }
 
 /** The single-use token Fish Audio returns for one agent session (Fish API v1 `LiveKitSessionToken`), passed verbatim to
