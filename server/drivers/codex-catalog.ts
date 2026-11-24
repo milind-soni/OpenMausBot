@@ -95,18 +95,24 @@ function supportedEffortLevels(row: CodexAppServerModel): readonly EffortLevel[]
         : undefined;
     if (isEffortLevel(raw)) present.add(raw);
   }
-  return EFFORT_LEVELS.filter((level) => present.has(level));
+  return present.size ? EFFORT_LEVELS.filter((level) => present.has(level)) : undefined;
 }
 
-/** The model's Fast tier (codex-cli 0.167 lists `{id: "priority", name: "Fast"}`), unless it already runs on it. */
-function fastTier(row: CodexAppServerModel): { id: string; name: string } | null {
-  if (!Array.isArray(row.serviceTiers)) return null;
+/** Non-default fast tiers the model advertises (e.g. Fast, Ultrafast), in advertised order without duplicates. */
+function fastTiers(row: CodexAppServerModel): Array<{ id: string; name: string }> {
+  if (!Array.isArray(row.serviceTiers)) return [];
+  const tiers: Array<{ id: string; name: string }> = [];
+  const seen = new Set<string>();
   for (const tier of row.serviceTiers) {
-    const id = tier?.id, name = tier?.name;
-    if (typeof id !== "string" || typeof name !== "string" || !FAST_TIER.test(name) || !PROVIDER_ID.test(id)) continue;
-    return id === row.defaultServiceTier ? null : { id, name };
+    if (!tier || typeof tier !== "object") continue;
+    const { id, name } = tier as { id?: unknown; name?: unknown };
+    const trimmedName = typeof name === "string" ? name.trim() : "";
+    if (typeof id !== "string" || !trimmedName || !FAST_TIER.test(trimmedName) || !PROVIDER_ID.test(id)) continue;
+    if (id === row.defaultServiceTier || seen.has(id)) continue;
+    seen.add(id);
+    tiers.push({ id, name: trimmedName });
   }
-  return null;
+  return tiers;
 }
 
 /** The installed Codex CLI's own ChatGPT catalog, every page: it changes more often than our releases. */
@@ -193,16 +199,24 @@ export function readCodexAppServerModelCatalog(
 
         const options: ModelCatalog["options"] = [];
         const seen = new Set<string>();
+        const seenOptions = new Set<string>();
         let defaultModel: string | null = null;
         for (const row of models) {
-          if (row.hidden === true || typeof row.id !== "string" || !MODEL_ID.test(row.id) || seen.has(row.id)) continue;
+          if (row.hidden === true || typeof row.id !== "string" || !MODEL_ID.test(row.id) || seenOptions.has(row.id)) continue;
           seen.add(row.id);
+          seenOptions.add(row.id);
           const label = typeof row.displayName === "string" && row.displayName.trim() ? row.displayName : row.id;
           const effortLevels = supportedEffortLevels(row);
           const meta = effortLevels !== undefined ? { effortLevels } : {};
           options.push({ id: row.id, label, ...meta });
-          const fast = fastTier(row);
-          if (fast && !TIERED_ID.test(row.id)) options.push({ id: `${row.id}+${fast.id}`, label: `${label} · ${fast.name}`, ...meta });
+          if (!TIERED_ID.test(row.id)) {
+            for (const tier of fastTiers(row)) {
+              const tierId = `${row.id}+${tier.id}`;
+              if (seenOptions.has(tierId)) continue;
+              seenOptions.add(tierId);
+              options.push({ id: tierId, label: `${label} · ${tier.name}`, ...meta });
+            }
+          }
           if (row.isDefault === true) defaultModel = row.id;
         }
         if (!options.length) {

@@ -58,7 +58,7 @@
 //   FAKE_CODEX_TEXT_BLOCK  `codex exec`: comma-separated models answered with the 403 OpenAI sends a region it does not serve
 //   FAKE_CODEX_LUNA  "1": model/list also offers gpt-6-luna
 //   FAKE_CODEX_TIERS  "1": model/list rows list a Fast service tier, as codex-cli 0.167.2 does; gpt-page-two
-//     already runs on it by default
+//     already runs on it by default. Set FAKE_CODEX_ULTRAFAST="1" alongside it to also include Ultrafast.
 //   FAKE_CODEX_EFFORTS  "1": model/list rows declare supportedReasoningEfforts (gpt-fake-default includes "ultra", gpt-page-two stops at "max")
 //   FAKE_CODEX_UPDATED_FILE  while this file exists, the CLI was updated in place: --version answers codex-cli 0.162.1
 //     and model/list also offers gpt-6.1-sol
@@ -91,7 +91,20 @@ import { appendFileSync, existsSync, readFileSync, renameSync, unlinkSync, write
 const mode = process.env.FAKE_CODEX_MODE ?? "happy";
 const tiers = process.env.FAKE_CODEX_TIERS === "1";
 const efforts = process.env.FAKE_CODEX_EFFORTS === "1";
-const FAST_TIERS = [{ id: "priority", name: "Fast", description: "Fastest inference with increased plan usage" }];
+const ultrafastTier = process.env.FAKE_CODEX_ULTRAFAST === "1";
+const FAST_TIERS = [
+  { id: "priority", name: "Fast", description: "Fastest inference with increased plan usage" },
+  ...(ultrafastTier
+    ? [
+        null,
+        { id: "flex", name: "Flex", description: "Non-fast tier should not be emitted." },
+        { id: "bad tier", name: "Fast", description: "Invalid tier id should be ignored." },
+        { id: "blank", name: "   ", description: "Whitespace-only tier name should be ignored." },
+        { id: "ultrafast", name: "Ultrafast", description: "The fastest available responses for latency-sensitive work." },
+        { id: "ultrafast", name: "Ultrafast", description: "Duplicate entry to verify deduplication." },
+      ]
+    : []),
+];
 
 // Follow the spawning server down; on Windows ppid does not change after parent exit.
 {

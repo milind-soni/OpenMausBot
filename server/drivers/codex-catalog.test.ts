@@ -48,11 +48,16 @@ describe("decodeCodexSelection", () => {
     });
   });
 
-  it("reads a Fast row as its base model on the Fast tier", () => {
+  it("reads a Fast or Ultrafast row as its base model on that service tier", () => {
     expect(decodeCodexSelection("gpt-5.6-sol+priority")).toEqual({
       model: "gpt-5.6-sol",
       modelProvider: OFFICIAL_CODEX_PROVIDER,
       serviceTier: "priority",
+    });
+    expect(decodeCodexSelection("gpt-6.2-sol+ultrafast")).toEqual({
+      model: "gpt-6.2-sol",
+      modelProvider: OFFICIAL_CODEX_PROVIDER,
+      serviceTier: "ultrafast",
     });
   });
 
@@ -219,6 +224,55 @@ name = "oMLX"
       custom: true,
       effortLevels: ["low", "medium", "high", "xhigh", "max"],
     });
+  });
+
+  it("emits every distinct non-default fast tier (Fast and Ultrafast) without dropping later tiers", async () => {
+    chmodSync(FAKE_CLI, 0o755);
+    const catalog = await readCodexModelCatalog(
+      {
+        HOME: join(tmpdir(), "omb-codex-app-server-ultrafast"),
+        PATH: process.env.PATH,
+        FAKE_CODEX_TIERS: "1",
+        FAKE_CODEX_ULTRAFAST: "1",
+      },
+      fetch,
+      FAKE_CLI,
+    );
+
+    expect(catalog).toEqual({
+      default: "gpt-fake-default",
+      options: [
+        { id: "gpt-fake-default", label: "GPT Fake Default" },
+        { id: "gpt-fake-default+priority", label: "GPT Fake Default · Fast" },
+        { id: "gpt-fake-default+ultrafast", label: "GPT Fake Default · Ultrafast" },
+        { id: "gpt-page-two", label: "GPT Page Two" },
+        { id: "gpt-page-two+ultrafast", label: "GPT Page Two · Ultrafast" },
+      ],
+    });
+  });
+
+  it("strips all tiered options when model_catalog_json routes models to a custom provider", async () => {
+    chmodSync(FAKE_CLI, 0o755);
+    const home = scratchHome({
+      "config.toml": [
+        'model = "gpt-fake-default"',
+        'model_provider = "gw"',
+        "model_catalog_json = 'gw-models.json'",
+        "",
+        "[model_providers.gw]",
+        'name = "My gateway"',
+        'base_url = "http://127.0.0.1:9/v1"',
+        "",
+      ].join("\n"),
+    });
+
+    const catalog = await readCodexModelCatalog(
+      { HOME: home, PATH: process.env.PATH, FAKE_CODEX_TIERS: "1", FAKE_CODEX_ULTRAFAST: "1" },
+      fetch,
+      FAKE_CLI,
+    );
+
+    expect(catalog.options.map((option) => option.id)).toEqual(["gw::gpt-fake-default", "gw::gpt-page-two"]);
   });
 
   it("appends the configured local model and cached catalog slugs as custom", async () => {
