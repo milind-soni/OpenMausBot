@@ -75,11 +75,12 @@ export function markVisibleBotThreadsRead(state: AppState, bot: BotAnnouncement,
   const selected = chatShows(state, bot.id) ? state.bots.find((candidate) => candidate.id === bot.id) : undefined;
   const shown = selected?.switchingTo ?? selected?.threadId;
   const visibleThreads = visibleThreadIds(state, "bot", bot.id, shown);
+  if (visibleThreads.length === 0) return;
   let held = false;
   for (const threadId of visibleThreads) {
     const task = bot.tasks?.find((candidate) => candidate.threadId === threadId);
     if (task && task.heldUnread === undefined) reopened.delete(threadId);
-    if (!task?.unread && (bot.tasks || !bot.unread)) continue;
+    if (!task?.unread && (bot.tasks || !bot.unread || threadId !== shown)) continue;
     if (serverHolds(task)) {
       held = true;
       continue;
@@ -97,7 +98,7 @@ export function markVisibleBotThreadsRead(state: AppState, bot: BotAnnouncement,
     post(`/api/bots/${bot.id}/read`, threadId, task?.updatedAt ?? 0, task?.heldUnread !== undefined ? "open" : "seen");
   }
   if (bot.tasks) bot.unread = botShowsUnread(bot);
-  else if (!held) bot.unread = false;
+  else if (!held && shown) bot.unread = false;
 }
 
 export function markVisibleGroupThreadsRead(state: AppState, group: Partial<Group> & { id: string }, focused: boolean,
@@ -106,11 +107,13 @@ export function markVisibleGroupThreadsRead(state: AppState, group: Partial<Grou
   const room = chatShows(state, group.id) ? state.groups.find((candidate) => candidate.id === group.id) : undefined;
   const shown = room && !roomFeedShows(state.config, room) ? room.threadId : undefined;
   const visibleThreads = visibleThreadIds(state, "group", group.id, shown);
+  if (visibleThreads.length === 0) return;
   for (const threadId of visibleThreads) {
     const task = group.tasks?.find((candidate) => candidate.threadId === threadId);
-    if (!task?.unread && (group.tasks || !group.unread)) continue;
+    if (!task?.unread && (group.tasks || !group.unread || threadId !== shown)) continue;
     if (task) task.unread = false;
     post(`/api/groups/${group.id}/read`, threadId, task?.updatedAt ?? 0, "seen");
   }
-  group.unread = group.tasks ? group.tasks.some((task) => task.unread) : false;
+  if (group.tasks) group.unread = group.tasks.some((task) => task.unread);
+  else if (shown) group.unread = false;
 }

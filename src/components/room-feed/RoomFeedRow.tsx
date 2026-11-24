@@ -91,8 +91,7 @@ export const RoomFeedRow = memo(function RoomFeedRow({ row, bots, you, now, open
   const label = [speaker.name, text || t("room.feed.attachment"), row.replies > 0 ? replies : t("room.feed.noReplies"), markLabel].filter(Boolean).join(", ");
   return (
     <li data-feed-thread={row.threadId} className={cn("group relative flex gap-3 rounded-xl px-3 py-2.5 transition-colors duration-[120ms] motion-reduce:transition-none",
-      open ? "bg-raised [--feed-row:var(--color-raised)]"
-        : "[--feed-row:var(--color-app)] hover:bg-ink/[0.06] hover:[--feed-row:color-mix(in_srgb,var(--color-ink)_6%,var(--color-app))] active:bg-ink/[0.08]")}>
+      open ? "bg-raised" : "hover:bg-ink/[0.06] active:bg-ink/[0.08]")}>
       <button type="button" aria-label={label} aria-current={open ? "true" : undefined} onClick={() => onOpen(row.threadId)}
         className="absolute inset-0 z-[1] rounded-xl" />
       <span className="mt-0.5 flex shrink-0"><Face who={speaker} size={32} /></span>
@@ -116,8 +115,8 @@ export const RoomFeedRow = memo(function RoomFeedRow({ row, bots, you, now, open
             </span>
           ) : row.replies > 0 ? (
             <>
-              <span aria-hidden="true" className="flex shrink-0 items-center -space-x-1">
-                {repliers.map((one) => <span key={one.key} className="inline-flex rounded-full ring-2 ring-(--feed-row)"><Face who={one} size={16} /></span>)}
+              <span aria-hidden="true" data-feed-repliers="" className="flex shrink-0 items-center gap-0.5">
+                {repliers.map((one) => <span key={one.key} className="inline-flex"><Face who={one} size={18} /></span>)}
               </span>
               <span className="shrink-0 font-medium text-ink-secondary tabular-nums">{replies}</span>
               {row.lastReplyAt !== null && <span className="min-w-0 truncate text-ink-tertiary">{t("room.feed.lastReply", { when: threadUpdatedLabel(row.lastReplyAt, now) })}</span>}

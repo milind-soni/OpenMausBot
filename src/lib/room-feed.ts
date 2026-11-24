@@ -17,7 +17,8 @@ export function roomFeedShows(config: AppState["config"] | undefined, group: Fee
   return Boolean(group) && roomFeedEnabled(config) && !group!.dm && wide && !settingUp(group!);
 }
 
-export const openFeedThread = (groupId: string, threadId: string): Action => ({ type: "openForkPanel", kind: "group", ownerId: groupId, threadId });
+export const openFeedThread = (groupId: string, threadId: string, focusComposer = false): Action =>
+  ({ type: "openForkPanel", kind: "group", ownerId: groupId, threadId, ...(focusComposer ? { focusComposer } : {}) });
 
 /** A room's thread asked for from anywhere in the app opens beside its feed rather than becoming the room's current
  * thread, which is everyone's. A new thread there starts from the feed's composer. Null: nothing more to do. */

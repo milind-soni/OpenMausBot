@@ -45,11 +45,6 @@ export function ForkPanel() {
   return (
     <aside ref={asideRef} tabIndex={panel.focusComposer ? -1 : undefined} aria-label={label} data-thread-panel={panel.threadId}
       style={beside ? { width, ["--side-panel-w" as string]: `${width}px` } : undefined}
-      onKeyDown={beside ? (event) => {
-        if (event.key !== "Escape" || event.defaultPrevented) return;
-        event.stopPropagation();
-        close();
-      } : undefined}
       className={cn("relative flex h-full flex-col bg-app", beside
         ? "shrink-0 border-s-[0.5px] border-edge md:animate-panel-beside-in motion-reduce:animate-none"
         : "w-[min(48vw,640px)] min-w-[360px] border-s border-hairline")}>

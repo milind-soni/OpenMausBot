@@ -69,11 +69,12 @@ export function RoomFeedView({ group }: { group: Group }) {
       repliers: [], mark: null, working: false, workingBotId: null } satisfies FeedRowData];
   }, [threads, pending, group]);
 
-  const started = useCallback((text: string, threadId: string | null) => {
-    setPending(threadId === null ? { text, at: Date.now(), threadId: null } : (current) => current && current.text === text ? { ...current, threadId } : current);
+  const waiting = useCallback((text: string | null) => {
+    setPending(text === null ? null : { text, at: Date.now(), threadId: null });
     atFoot.current = true;
   }, []);
-  const open = useCallback((threadId: string) => { if (threadId) dispatch(openFeedThread(group.id, threadId)); }, [dispatch, group.id]);
+  const started = useCallback((threadId: string) => setPending((current) => current && { ...current, threadId }), []);
+  const open = useCallback((threadId: string) => { if (threadId) dispatch(openFeedThread(group.id, threadId, true)); }, [dispatch, group.id]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -127,7 +128,7 @@ export function RoomFeedView({ group }: { group: Group }) {
           </div>
         </div>
         <div ref={composerDockRef} className="absolute inset-x-0 bottom-0 z-[2] chat-column-dock">
-          <FeedComposer group={group} members={members} onStarted={started} />
+          <FeedComposer group={group} members={members} onPending={waiting} onStarted={started} />
         </div>
       </GlassScrollFrame>
     </main>

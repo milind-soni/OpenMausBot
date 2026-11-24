@@ -43,6 +43,7 @@ describe("room thread summaries", () => {
     add("a", { role: "bot", kind: "text", text: "thinking out loud", from: { botId: "kiwi", name: "Kiwi", color: "blue" }, turnId: "t-mid" });
     add("a", { role: "bot", kind: "activity", tool: { name: "Bash", ok: true } } as Partial<Message> & Pick<Message, "role" | "kind">);
     add("a", person("asked for Ana", { peerAsk: { botId: "kiwi", name: "Kiwi" } }));
+    add("a", person("[peer context]", { aside: true }));
     add("a", answer("pip", "Here is the plan"));
     add("a", person("Thanks", { sender: { id: "ana@example.com", name: "Ana" } }));
     const last = add("a", answer("kiwi", "Done"));

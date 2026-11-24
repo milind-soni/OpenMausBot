@@ -41,7 +41,7 @@ describe("a room feed row", () => {
     render(row({ replies: 4, lastReplyAt: NOW - 5 * 60_000, repliers: [{ botId: "kiwi" }, { person: { name: "Ana" } }, { botId: "pip" }, { botId: "kiwi" }] }));
     expect(item().textContent).toContain("4 replies");
     expect(item().textContent).toContain("Last reply 5 min ago");
-    expect(item().querySelectorAll(".ring-2")).toHaveLength(3);
+    expect(item().querySelector("[data-feed-repliers]")!.children).toHaveLength(3);
     act(() => root!.unmount());
     render(row({ replies: 1, lastReplyAt: NOW - 30_000, repliers: [{ botId: "kiwi" }] }));
     expect(item().textContent).toContain("1 reply");

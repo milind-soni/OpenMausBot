@@ -1,9 +1,10 @@
 import { ORDERING_ROW, prepared } from "./message-db.ts";
 import { ROOM_THREAD_FIRST_CHARS, ROOM_THREAD_REPLIERS, type RoomThreadSpeaker, type RoomThreadSummary } from "../shared/room-threads.ts";
 
-/** A thread's conversation lines: a person's text that no bot asked on their behalf, and each bot turn's final answer.
+/** A thread's conversation lines: a person's text that no bot asked or slipped into a running turn for them, and each
+ * bot turn's final answer.
  * ORDERING_ROW is repeated verbatim so SQLite can read messages_thread_order, whose partial WHERE it is. */
-const LINES = `FROM messages INDEXED BY messages_thread_order WHERE thread_id IN (SELECT value FROM json_each(?)) AND ${ORDERING_ROW} AND (role = 'bot' OR kind = 'text')`;
+const LINES = `FROM messages INDEXED BY messages_thread_order WHERE thread_id IN (SELECT value FROM json_each(?)) AND ${ORDERING_ROW} AND (role = 'bot' OR (kind = 'text' AND json_extract(json, '$.aside') IS NULL))`;
 const BOT = "json_extract(json, '$.from.botId')";
 const SENDER_ID = "json_extract(json, '$.sender.id')";
 const SENDER_NAME = "json_extract(json, '$.sender.name')";

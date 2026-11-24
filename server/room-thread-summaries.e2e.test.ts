@@ -73,6 +73,17 @@ describe("a room's thread summaries", () => {
     expect((await as("ada", "POST", `/api/groups/${room}/read`, { threadId: thread })).body.group.threadId).toBe(roomThread);
   });
 
+  it("leaves out an archived thread", async () => {
+    const created = await as("ada", "POST", `/api/groups/${room}/tasks`, { activate: false });
+    const thread = created.body.task.threadId as string;
+    expect((await as("ada", "POST", `/api/groups/${room}/messages`, { text: "Old idea", threadId: thread })).status).toBeLessThan(300);
+    await until(async () => ((await as("ada", "GET", `/api/groups/${room}/threads/summary`)).body.threads as RoomThreadSummary[]).some((row) => row.threadId === thread && row.first));
+    expect((await as("ada", "PATCH", `/api/groups/${room}/tasks/${thread}`, { archivedAt: Date.now() })).status).toBe(200);
+    const after = (await as("ada", "GET", `/api/groups/${room}/threads/summary`)).body.threads as RoomThreadSummary[];
+    expect(after.map((row) => row.threadId)).not.toContain(thread);
+    expect(after.map((row) => row.threadId)).toContain(roomThread);
+  });
+
   it("answers someone who cannot see the room as if it did not exist", async () => {
     expect((await as("eve", "GET", `/api/groups/${room}/threads/summary`)).status).toBe(404);
     expect((await as("bob", "GET", "/api/groups/no-such-room/threads/summary")).status).toBe(404);
