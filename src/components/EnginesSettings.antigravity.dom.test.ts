@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, createElement } from "react";
+import { StrictMode, act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, InstanceInfo } from "@/state/store";
@@ -10,6 +10,7 @@ const fixture = vi.hoisted(() => ({
   calls: [] as Array<{ path: string; method: string; body: unknown }>,
   startGate: null as Promise<void> | null,
   completeGate: null as Promise<void> | null,
+  cancelGate: null as Promise<void> | null,
   opened: [] as string[],
   cancelFails: false,
   modelsFail: false,
@@ -29,6 +30,7 @@ vi.mock("@/state/store", async (original) => ({
     }
     if (path.endsWith("/auth/start") && fixture.startGate) await fixture.startGate;
     if (path.endsWith("/auth/complete") && fixture.completeGate) await fixture.completeGate;
+    if (path.endsWith("/auth/cancel") && fixture.cancelGate) await fixture.cancelGate;
     if (path.endsWith("/auth/cancel") && fixture.cancelFails) throw new Error("The sign-in is finishing. Try again in a moment.");
     if (path.endsWith("/auth/start")) return { auth: { phase: "waiting", flowId: `flow-${path.split("/")[3]}`, authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth?state=fixture" } };
     if (path.includes("/auth/status")) return { auth: { phase: "waiting" } };
@@ -61,6 +63,7 @@ beforeEach(() => {
   fixture.calls = [];
   fixture.startGate = null;
   fixture.completeGate = null;
+  fixture.cancelGate = null;
   fixture.opened = [];
   fixture.cancelFails = false;
   fixture.modelsFail = false;
@@ -69,9 +72,10 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
 
 const more = { id: "more", open: false, onToggle: () => {} };
-const render = async (view: "full" | "simple" | "chat" = "full") => {
+const render = async (view: "full" | "simple" | "chat" | "strict" = "full") => {
   await act(async () => {
-    root.render(view === "chat" ? createElement(AiSignInSettings) : view === "simple" ? createElement(EnginesSettings, { simple: true, more }) : createElement(EnginesSettings));
+    root.render(view === "chat" ? createElement(AiSignInSettings) : view === "simple" ? createElement(EnginesSettings, { simple: true, more })
+      : view === "strict" ? createElement(StrictMode, null, createElement(EnginesSettings)) : createElement(EnginesSettings));
   });
 };
 const buttons = (scope: ParentNode, label: string) => [...scope.querySelectorAll("button")].filter((item) => item.textContent === label);
@@ -201,8 +205,8 @@ describe("Google Gemini (Antigravity) accounts share one card", () => {
     expect(document.activeElement).toBe(typing);
   });
 
-  it("moves focus into the sign-in of an account just added", async () => {
-    await render();
+  it("moves focus into the sign-in of an account just added, also under StrictMode", async () => {
+    await render("strict");
     await click(buttons(container, "Add Google account")[0]);
     const input = container.querySelector<HTMLInputElement>("form[data-add-account] input")!;
     await act(async () => {
@@ -210,9 +214,23 @@ describe("Google Gemini (Antigravity) accounts share one card", () => {
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await click(buttons(container, "Add and sign in")[0]);
-    await render();
+    await render("strict");
     await nextFrame();
     expect(row("antigravity-work").querySelector("[data-account-sign-in]")?.contains(document.activeElement)).toBe(true);
+  });
+
+  it("holds every control of a sign-in while it is being cancelled", async () => {
+    fixture.state.instances = [google("antigravity", "Personal", { authenticated: false })];
+    let cancelled!: () => void;
+    fixture.cancelGate = new Promise((resolve) => { cancelled = resolve; });
+    await render();
+    await click(buttons(row("antigravity"), "Sign in")[0]);
+    await pasteRedirect("antigravity");
+    await click(buttons(row("antigravity"), "Cancel")[0]);
+    const panel = row("antigravity").querySelector("[data-account-sign-in]")!;
+    expect([...panel.querySelectorAll("button")].filter((button) => !button.disabled).map((button) => button.textContent)).toEqual([]);
+    await act(async () => { cancelled(); await fixture.cancelGate; });
+    expect(row("antigravity").querySelector("[data-account-sign-in]")).toBeNull();
   });
 
   it("keeps the sign-in open and says why when the server could not cancel it", async () => {

@@ -229,9 +229,7 @@ function AccountRow({ group, instance, several, signingIn, onSignIn, onSignInDon
     const opened = signingIn && !wasSigningIn.current, closed = !signingIn && wasSigningIn.current;
     wasSigningIn.current = signingIn;
     if (closed && document.activeElement === document.body) signInButton.current?.focus();
-    if (!opened) return;
-    const frame = requestAnimationFrame(() => signInPanel.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus());
-    return () => cancelAnimationFrame(frame);
+    if (opened) requestAnimationFrame(() => signInPanel.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus());
   }, [signingIn]);
 
   return (

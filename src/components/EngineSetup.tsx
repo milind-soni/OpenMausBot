@@ -298,7 +298,7 @@ function ManagedEngineSetup({ instance, signInOnly, autoStart = false, onDone }:
 }) {
   const { state, refreshInstances, refreshModels } = useStore();
   const signInStarted = useSignInStarted(instance.instanceId);
-  const [busy, setBusy] = useState<"install" | "signin" | "complete" | "check" | null>(null);
+  const [busy, setBusy] = useState<"install" | "signin" | "complete" | "check" | "cancel" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [flow, setFlow] = useState<{ flowId: string; authorizationUrl: string; pastedCode: boolean } | null>(null);
   const [callbackUrl, setCallbackUrl] = useState("");
@@ -379,10 +379,13 @@ function ManagedEngineSetup({ instance, signInOnly, autoStart = false, onDone }:
   const cancel = async () => {
     cancelled.current = true;
     if (flow) {
+      setBusy("cancel");
+      setError(null);
       try {
         await cancelFlow(flow.flowId);
       } catch (cause) {
         cancelled.current = false;
+        setBusy(null);
         setError(cause instanceof Error ? cause.message : String(cause));
         return;
       }
@@ -518,7 +521,7 @@ function ManagedEngineSetup({ instance, signInOnly, autoStart = false, onDone }:
         </>
       )}
       {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
-      {onDone && <button type="button" disabled={busy === "complete"} onClick={() => void cancel()} className="rounded-lg disabled:opacity-50 px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-control">{t("common.cancel")}</button>}
+      {onDone && <button type="button" disabled={busy === "complete" || busy === "cancel"} onClick={() => void cancel()} className="rounded-lg disabled:opacity-50 px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-control">{t("common.cancel")}</button>}
     </div>
   );
 }
