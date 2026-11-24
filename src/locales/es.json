@@ -6101,7 +6101,6 @@
   "devicesPage.kind.server": "Tu propio servidor",
   "devicesPage.kind.cloud": "Cloud",
   "devicesPage.kind.phone": "Teléfono",
-  "devicesPage.kind.vm": "Ordenador del bot",
   "devicesPage.group.computers": "Ordenadores",
   "devicesPage.group.servers": "Clouds y tus propios servidores",
   "devicesPage.group.phones": "Teléfonos",

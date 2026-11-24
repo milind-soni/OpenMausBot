@@ -20,6 +20,7 @@ import { NewOrganization } from "./cloud-buy/NewOrganization";
 import { BackLink, FIELD, Heading, PRIMARY_WIDE } from "./cloud-buy/parts";
 import { Layer, useIsTopLayer } from "./Layer";
 import { SwatchRadios } from "./SwatchRadios";
+import { AddFormLendSwitch } from "./LendComputerSwitch";
 
 const PAIR_COMMAND = "npx openmausbot pair";
 
@@ -127,6 +128,8 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
         className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[14px] font-normal text-ink outline-none focus:border-accent/50" />
       <span className="flex flex-col gap-1 text-[12px] font-normal text-ink-secondary">{t("connect.noCode")}<CommandLine command={PAIR_COMMAND} /></span>
     </label>}
+    {/* The question after pairing lives here: on, a server of the person's own may use this computer once paired. */}
+    {!start?.locked && address.trim() && <AddFormLendSwitch address={address} />}
     {shownProblem && <p role="alert" data-connect-problem className="text-[13px] text-danger">{shownProblem}</p>}
     {canProbe && probing && !found && !shownProblem && <p data-connect-checking className="inline-flex items-center gap-1.5 text-[13px] text-ink-secondary">
       <Loader2 size={13} className="animate-spin" aria-hidden="true" />{t("connect.checking")}

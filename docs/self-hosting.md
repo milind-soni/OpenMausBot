@@ -924,18 +924,23 @@ chats. A link copied elsewhere also works from the **Server** menu's **Add
 Server from Copied Pairing Link…** (on Windows and Linux, press Alt to show
 the menu bar).
 
-**Let your server use this computer.** When the desktop pairs with a code for
-everything (the server's owner), it asks once: **Let <server> use this
-computer?** with **Allow** or **Not now**. Allow lets the server's bots see and
-use the apps on this computer's screen, and run the MCP servers you keep for
-it, while the app is open. Folders and the terminal are added in **Settings →
-Servers**, where each server of yours has a **Share this computer** switch and
+**Let your server use this computer** (Windows x64, macOS 13 or later, Linux).
+When the desktop is paired with a code for everything (the server's owner), one
+switch, **Let <server>'s bots use this computer**, lets the server's bots see
+and use the apps on this computer's screen, and run the MCP servers you keep
+for it, while the app is open. It is in the add form (**Connect to a server**),
+on the server's row in **Settings → This app → Your computers**, on its card in
+**Settings → Devices**, and in the Screen panel on the server's own page (which
+asks once more in a native window, since that page comes from the server). On
+a Mac, macOS asks for Accessibility and Screen Recording the first time; on
+Windows there is nothing more. Folders and the terminal are added with
 **Choose what it can use**; the switch turns it off at once, and the menu bar's
-OpenMausBot item pauses it with your Clouds. The server needs nothing turned on:
+or tray's MausBot item pauses it with your Clouds. See
+`apps/docs/content/docs/computers/lend-to-your-server.mdx`. The server needs nothing turned on:
 it takes a computer from its owner's pairings only, and a phone code or another
 person's pairing is never asked. Set `features.sharedComputers` to `false` in the
 server's config to turn this off, or to `true` to let every paired session lend
-its computer. Nothing is shared without that Allow, unless you make the server
+its computer. Nothing is shared until you turn that switch on, unless you make the server
 your bots' home (below). In **Settings → Servers → Computer
 access**, choose read-only folders and optionally allow edits. Unrestricted
 terminal and screen/app control are separate opt-ins, confirmed in a native

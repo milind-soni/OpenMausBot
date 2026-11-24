@@ -5593,7 +5593,6 @@
   "devicesPage.kind.server": "Máy chủ của riêng bạn",
   "devicesPage.kind.cloud": "Cloud",
   "devicesPage.kind.phone": "Điện thoại",
-  "devicesPage.kind.vm": "Máy tính của bot",
   "devicesPage.group.computers": "Máy tính",
   "devicesPage.group.servers": "Cloud và máy chủ của riêng bạn",
   "devicesPage.group.phones": "Điện thoại",

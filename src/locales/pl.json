@@ -6795,7 +6795,6 @@
   "devicesPage.kind.server": "Własny serwer",
   "devicesPage.kind.cloud": "Chmura",
   "devicesPage.kind.phone": "Telefon",
-  "devicesPage.kind.vm": "Komputer bota",
   "devicesPage.group.computers": "Komputery",
   "devicesPage.group.servers": "Chmury i własne serwery",
   "devicesPage.group.phones": "Telefony",

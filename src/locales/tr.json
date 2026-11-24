@@ -5593,7 +5593,6 @@
   "devicesPage.kind.server": "Kendi sunucunuz",
   "devicesPage.kind.cloud": "Cloud",
   "devicesPage.kind.phone": "Telefon",
-  "devicesPage.kind.vm": "Botun bilgisayarı",
   "devicesPage.group.computers": "Bilgisayarlar",
   "devicesPage.group.servers": "Cloud'lar ve kendi sunucularınız",
   "devicesPage.group.phones": "Telefonlar",

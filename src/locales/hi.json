@@ -3296,7 +3296,6 @@
   "devicesPage.kind.server": "आपका अपना सर्वर",
   "devicesPage.kind.cloud": "Cloud",
   "devicesPage.kind.phone": "फ़ोन",
-  "devicesPage.kind.vm": "बॉट का कंप्यूटर",
   "devicesPage.group.computers": "कंप्यूटर",
   "devicesPage.group.servers": "Cloud और आपके अपने सर्वर",
   "devicesPage.group.phones": "फ़ोन",

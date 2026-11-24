@@ -3731,7 +3731,6 @@
   "devicesPage.kind.server": "Власний сервер",
   "devicesPage.kind.cloud": "Cloud",
   "devicesPage.kind.phone": "Телефон",
-  "devicesPage.kind.vm": "Комп’ютер бота",
   "devicesPage.group.computers": "Комп’ютери",
   "devicesPage.group.servers": "Cloud і власні сервери",
   "devicesPage.group.phones": "Телефони",

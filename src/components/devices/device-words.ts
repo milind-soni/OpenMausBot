@@ -9,7 +9,7 @@ export const KIND_ICON: Record<DeviceKind, LucideIcon> = { laptop: Laptop, deskt
 
 const KIND: Record<DeviceKind, LocaleKey> = {
   laptop: "devicesPage.kind.laptop", desktop: "devicesPage.kind.desktop", server: "devicesPage.kind.server", cloud: "devicesPage.kind.cloud",
-  phone: "devicesPage.kind.phone", vm: "devicesPage.kind.vm",
+  phone: "devicesPage.kind.phone", vm: "devicesPage.kind.cloudDesktop",
 };
 export const kindLabel = (kind: DeviceKind): string => t(KIND[kind]);
 
@@ -30,6 +30,7 @@ export function statusText(device: Device, now = Date.now()): string {
   if (device.note === "insecure") return t("devicesPage.note.insecure");
   if (device.note === "unreachable") return t("devicesPage.note.unreachable");
   if (device.note === "reconnecting") return t("devicesPage.note.reconnecting");
+  if (device.kind === "vm") return device.desktop ? t(DESKTOP[device.desktop]) : "";
   if (device.status === "online") return t("devicesPage.status.online");
   if (device.status === "offline") return device.lastSeen ? t("devicesPage.status.seen", { when: lastSeen(device.lastSeen, now) }) : t("devicesPage.status.offline");
   if (device.route === "ssh") return t("devicesPage.status.ssh");
@@ -37,8 +38,9 @@ export function statusText(device: Device, now = Date.now()): string {
   return device.home ? t("servers.homeTag") : t("devicesPage.status.unknown");
 }
 
-/** The dot's colour by status; none while nothing says how it is. */
-export const DOT: Record<Device["status"], string | null> = { online: "bg-success", attention: "bg-warning", offline: "bg-ink-tertiary", unknown: null };
+const DESKTOP: Record<NonNullable<Device["desktop"]>, LocaleKey> = {
+  ready: "devicesPage.desktop.ready", asleep: "devicesPage.desktop.asleep", starting: "devicesPage.desktop.starting", unreachable: "devicesPage.note.unreachable",
+};
 
 const NETWORK_SHORT: Record<PrivateNetworkState, LocaleKey> = {
   unknown: "devicesPage.network.short.unknown", "not-installed": "devicesPage.network.short.notInstalled", "no-cli": "devicesPage.network.short.noCli",
@@ -62,6 +64,3 @@ export function networkLine(network: PrivateNetwork): string {
     case "ready": return network.shared ? t("devicesPage.network.line.ready", { name: network.name ?? "" }) : t("devicesPage.network.line.notShared", { name: network.name ?? "" });
   }
 }
-
-/** Where to get Tailscale for this computer's system. */
-export const TAILSCALE_DOWNLOAD = "https://tailscale.com/download";
