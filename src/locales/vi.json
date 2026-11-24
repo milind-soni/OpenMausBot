@@ -2628,12 +2628,7 @@
   "decider.openrouter.error.malformed": "Mô hình đã gửi câu trả lời mà {app} không thể đọc. Hãy thử mô hình khác.",
   "decider.openrouter.error.credits": "Tài khoản OpenRouter của bạn đã hết số dư. Hãy nạp thêm tại openrouter.ai/credits.",
   "decider.test.slow": "Tốc độ phản hồi chậm hơn mức 1.5 giây cần thiết cho phòng, do đó phòng sẽ chuyển về dùng bot trưởng. Hãy thử một mô hình nhanh hơn.",
-  "keys.vps.label": "VPS tự quản trị",
-  "keys.vps.descBefore": "Bí danh cấu hình SSH cho máy chủ ảo Linux VPS. {app} sử dụng cấu hình SSH và agent thông thường của bạn; ứng dụng không lưu trữ khóa hay mật khẩu. Hãy xem ",
   "keys.vps.descLink": "hướng dẫn thiết lập",
-  "keys.vps.descAfter": " để biết định dạng bí danh SSH bắt buộc.",
-  "keys.vps.anyMachine": "Mọi máy Linux có Docker mà bạn truy cập được qua SSH đều dùng được, kể cả máy trong mạng Tailscale của bạn: dùng tên Tailscale của máy làm HostName cho alias.",
-  "keys.vps.aria": "Bí danh cấu hình SSH của VPS tự quản trị",
   "usage.title": "Mức sử dụng",
   "planUsage.title": "Mức sử dụng gói",
   "planUsage.subtitle": "Hạn mức còn lại trên mỗi nhà cung cấp đã đăng nhập. Khung thời gian 5 giờ và hàng tuần, nếu gói đó có áp dụng.",
@@ -5651,7 +5646,6 @@
   "devicesPage.detail.version": "Phiên bản",
   "devicesPage.detail.lastSeen": "Hoạt động lần cuối",
   "devicesPage.detail.bots": "Bot",
-  "devicesPage.detail.reachesBots": "Trò chuyện với các bot ở đây",
   "devicesPage.action.copyUpdate": "Sao chép lệnh cập nhật",
   "devicesPage.action.manage": "Quản lý",
   "devicesPage.action.removeApps": "Gỡ các ứng dụng của nó",
@@ -6147,5 +6141,6 @@
   "devices.reach.sameWifi": "trên cùng Wi-Fi",
   "phone.reach.offAdding": "Tắt · Thêm điện thoại sẽ bật các mục này",
   "settings.nav.devicesNeedYou": "Một thiết bị hoặc mạng riêng cần bạn",
-  "settings.nav.phoneConnectedAllClear": "Một điện thoại đang kết nối, và không có gì cần bạn"
+  "settings.nav.phoneConnectedAllClear": "Một điện thoại đang kết nối, và không có gì cần bạn",
+  "keys.vps.ownServer": "Máy chủ của riêng bạn (SSH)"
 }

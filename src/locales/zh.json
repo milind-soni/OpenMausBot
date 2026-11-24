@@ -3866,12 +3866,7 @@
   "decider.openrouter.error.malformed": "模型返回了 {app} 无法读取的回答。请换一个模型。",
   "decider.openrouter.error.credits": "你的 OpenRouter 账户额度已用完。请到 openrouter.ai/credits 充值。",
   "decider.test.slow": "这比群组聊天决策允许的 1.5 秒更慢，群组聊天会改为由负责人回应。请换一个更快的模型。",
-  "keys.vps.label": "自建 VPS",
-  "keys.vps.descBefore": "Linux VPS 的 SSH config 别名。{app} 使用你平时的 SSH 配置和代理，不会保存密钥或密码。所需的别名格式见",
   "keys.vps.descLink": "安装指南",
-  "keys.vps.descAfter": "。",
-  "keys.vps.anyMachine": "任何可通过 SSH 访问、装有 Docker 的 Linux 机器都可以，包括你 Tailscale 网络中的电脑：把它的 Tailscale 名称填为别名的 HostName。",
-  "keys.vps.aria": "自建 VPS 的 SSH config 别名",
   "usage.title": "用量",
   "planUsage.title": "方案用量",
   "planUsage.subtitle": "每个已登录提供方的剩余额度；若该方案有 5 小时和每周时间窗，也会显示。",
@@ -8299,7 +8294,6 @@
   "devicesPage.detail.version": "版本",
   "devicesPage.detail.lastSeen": "上次活动",
   "devicesPage.detail.bots": "机器人",
-  "devicesPage.detail.reachesBots": "与这里的机器人通信",
   "devicesPage.action.copyUpdate": "复制更新命令",
   "devicesPage.action.manage": "管理",
   "devicesPage.action.removeApps": "移除它的应用",
@@ -10376,5 +10370,6 @@
   "devices.reach.sameWifi": "在同一 Wi-Fi 上",
   "phone.reach.offAdding": "已关闭 · 添加手机会开启这些",
   "settings.nav.devicesNeedYou": "有设备或私有网络需要你处理",
-  "settings.nav.phoneConnectedAllClear": "有一部手机已连接，没有需要你处理的事"
+  "settings.nav.phoneConnectedAllClear": "有一部手机已连接，没有需要你处理的事",
+  "keys.vps.ownServer": "你自己的服务器 (SSH)"
 }

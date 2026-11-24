@@ -42,7 +42,8 @@ export function statusText(device: Device, now = Date.now()): string {
   if (device.kind === "vm") return device.desktop ? t(DESKTOP[device.desktop]) : "";
   if (device.status === "online") return t("devicesPage.status.online");
   if (device.status === "offline") return device.lastSeen ? t("devicesPage.status.seen", { when: lastSeen(device.lastSeen, now) }) : t("devicesPage.status.offline");
-  if (device.route === "ssh" || device.kind === "cloud") return t("devicesPage.status.notCheckedHere");
+  if (device.route === "ssh") return t("devicesPage.status.checkedByBots");
+  if (device.kind === "cloud") return t("devicesPage.status.checkedWhenOpened");
   return device.home ? t("servers.homeTag") : t("devicesPage.status.unknown");
 }
 
@@ -58,6 +59,10 @@ const NETWORK_SHORT: Record<PrivateNetworkState, LocaleKey> = {
 /** Two or three words for the map. */
 export const networkShort = (network: PrivateNetwork): string => (network.state === "ready" && !network.shared ? t("devicesPage.network.short.computersOff") : t(NETWORK_SHORT[network.state]));
 
+/** The Devices anchor that opens a named SSH server's row, from wherever else the server is listed. */
+export const sshServerAnchor = (alias: string) => `ssh:${alias}`;
+export const sshAliasOfAnchor = (anchor: string | null) => (anchor?.startsWith("ssh:") ? anchor.slice(4) || null : null);
+
 /** A computer's name on the private network without the network's own suffix: "ada-macbook", not "ada-macbook.tail4c2e.ts.net". */
 export const shortName = (name: string | null) => ((name ?? "").split(".")[0] ?? "").replace(/-/g, "\u2011");
 
@@ -72,6 +77,6 @@ export function networkLine(network: PrivateNetwork): string {
     case "needs-approval": return t("devicesPage.network.line.needsApproval");
     case "needs-permission": return t("remote.tailscale.needsPermission", { app: productName() });
     case "magicdns": return t("devicesPage.network.line.magicdns");
-    case "ready": return t(network.shared ? "devicesPage.network.line.readyShort" : "devicesPage.network.line.onFor", { name: shortName(network.name) });
+    case "ready": return t(network.shared ? "devicesPage.network.line.readyAs" : "devicesPage.network.line.onFor", { name: shortName(network.name) });
   }
 }

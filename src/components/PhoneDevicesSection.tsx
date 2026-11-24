@@ -217,7 +217,7 @@ const PAIR_ROUTES: readonly PairRoute[] = ["wifi", "relay"];
 /** A short line keeps compound words such as "End-to-end" whole: its hyphens never break a line. */
 const keepWhole = (text: string) => text.replace(/(\p{L})-(?=\p{L})/gu, "$1\u2011");
 
-/** One way in to pick, as a checkbox card: the name, a line, and what it still needs. A picked card has a 1 px ink edge. */
+/** One way in to pick, as a checkbox row: the name, a line, and what it still needs. Rows after the first part with a hairline. */
 function RouteCard({ route, chosen, disabled, onChoose, needs, action, hint }: {
   route: PairRoute; chosen: boolean; disabled?: boolean; onChoose: (on: boolean) => void; needs?: ReactNode;
   /** under the needs line, at the text's edge: Sign in */
@@ -227,7 +227,7 @@ function RouteCard({ route, chosen, disabled, onChoose, needs, action, hint }: {
 }) {
   return (
     <div data-route-card={route} data-chosen={chosen ? "" : undefined}
-      className={cn("flex flex-col gap-1 rounded-[12px] bg-menu px-4 py-3", chosen ? "shadow-[inset_0_0_0_1px_var(--color-ink)]" : "shadow-[inset_0_0_0_0.5px_var(--settings-edge)]")}>
+      className="flex flex-col gap-1 py-3 [&+&]:shadow-[inset_0_0.5px_0_var(--settings-edge)]">
       <label className={cn("flex items-start gap-3", disabled ? "cursor-default" : "cursor-pointer")}>
         <input type="checkbox" name="pair-route" value={route} checked={chosen} disabled={disabled} onChange={(event) => onChoose(event.target.checked)}
           className="mt-0.5 size-4 shrink-0 accent-[var(--color-ink)] disabled:opacity-40" />
@@ -301,7 +301,7 @@ export function PairPhoneSteps({ c, state, ask = null, codeView }: { c: PhoneSet
   if (step === "pairing") return <>{codeView}</>;
   return <>
     <p className="text-[13px] leading-[18px] text-ink-secondary">{t("phone.pair.howReach")}</p>
-    <div role="group" aria-label={t("phone.pair.howReach")} className="flex flex-col gap-2">
+    <div role="group" aria-label={t("phone.pair.howReach")} className="-my-3 flex flex-col">
       <RouteCard route="wifi" chosen={picked.has("wifi")} onChoose={(on) => pick("wifi", on)}
         hint={localHint ? <span data-local-network-hint="">{t("phone.pair.localNetworkHint", { app: productName() })}</span> : undefined} />
       {relayAvailable && (

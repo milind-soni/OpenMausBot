@@ -33,14 +33,12 @@ export type AddKind = "phone" | "computer" | "server" | "cloud";
 const CARD = "settings-card relative flex flex-col gap-5 rounded-[12px] bg-menu p-4 after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:shadow-[inset_0_0_0_0.5px_var(--settings-edge)] after:content-['']";
 const BODY = "text-[13px] leading-[18px] text-ink-secondary";
 
-/** One numbered step: its number (a check once done), its title, and what to do under it. A step still to come is quiet;
- * one that gets the other device ready (`prep`) has an outlined number, so the step that connects stands out. */
-function Step({ n, title, state = "now", children }: { n: number; title: string; state?: "done" | "prep" | "now" | "later"; children?: ReactNode }) {
+/** One numbered step: its number (a check once done), its title, and what to do under it. A step still to come is quiet. */
+function Step({ n, title, state = "now", children }: { n: number; title: string; state?: "done" | "now" | "later"; children?: ReactNode }) {
   return (
     <li data-step={n} data-step-state={state} className="flex gap-3">
       <span aria-hidden="true" className={cn("flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-medium leading-none tabular-nums",
-        state === "done" ? "bg-success" : state === "now" ? "bg-ink text-app" : state === "prep" ? "shadow-[inset_0_0_0_1px_var(--color-ink-secondary)] text-ink"
-          : "shadow-[inset_0_0_0_1px_var(--settings-edge)] text-ink-tertiary")}>
+        state === "done" ? "bg-success" : state === "now" ? "bg-ink text-app" : "shadow-[inset_0_0_0_1px_var(--settings-edge)] text-ink-tertiary")}>
         {state === "done" ? <Check size={12} strokeWidth={2.5} /> : n}
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-2">
@@ -216,7 +214,7 @@ export function AddDevicePanel(props: AddDeviceProps) {
                     <NetworkStep network={network} action={stepAction} waiting={Boolean(shared && !tailnetAddress)} onCheck={onCheck} checking={checking} />
                   </>}
                 </Step>}
-                <Step n={here && network ? 2 : 1} title={t(here && network ? "devicesPage.addFlow.installOther" : "devicesPage.addFlow.installStep", { app: productName() })} state={!here || networkReady ? "prep" : "later"}>
+                <Step n={here && network ? 2 : 1} title={t(here && network ? "devicesPage.addFlow.installOther" : "devicesPage.addFlow.installStep", { app: productName() })} state={!here || networkReady ? "now" : "later"}>
                   {here && network && <p data-add-install-why="" className={BODY}>{t("devicesPage.addFlow.installOtherLine")}</p>}
                   <span className="flex flex-wrap gap-2">
                     <a href={DESKTOP_DOWNLOAD_URL} target="_blank" rel="noreferrer" className="ui-button ui-button-sm w-fit">{t("computerAsk.action.getApp", { app: productName() })}</a>
@@ -229,9 +227,9 @@ export function AddDevicePanel(props: AddDeviceProps) {
               </Steps>)}
             {kind === "server" && <Steps>
               <Step n={1} title={t("devicesPage.addFlow.serverRunTerminal")}>
+                <p data-add-server-why="" className={BODY}>{t("devicesPage.addFlow.serverCommandsLine", { app: productName() })}</p>
                 <CommandRow label={t("devicesPage.route.anywhere", { app: productName() })} command={SERVER_COMMANDS.anywhere} />
                 <CommandRow label={t("devicesPage.addFlow.serverPrivate")} command={SERVER_COMMANDS.tailscale} />
-                <p className="text-[12px] leading-4 text-ink-secondary">{t("devicesPage.addFlow.serverHowPlain")}</p>
               </Step>
               <Step n={2} title={t("devicesPage.addFlow.pasteLink")}>
                 {canConnectServer

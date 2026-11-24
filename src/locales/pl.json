@@ -3220,12 +3220,7 @@
   "decider.openrouter.error.malformed": "Model wysłał odpowiedź, której {app} nie mógł odczytać. Wypróbuj inny model.",
   "decider.openrouter.error.credits": "Na twoim koncie OpenRouter skończyły się kredyty. Dodaj je na openrouter.ai/credits.",
   "decider.test.slow": "To jest wolniejsze niż 1,5 s potrzebne na decyzję w pokoju, więc pokoje wrócą do lidera. Wypróbuj szybszy model.",
-  "keys.vps.label": "Samodzielnie hostowany VPS",
-  "keys.vps.descBefore": "Alias w konfiguracji SSH dla VPS z Linuksem. {app} używa twojej zwykłej konfiguracji i agenta SSH; nie przechowuje kluczy ani haseł. Zobacz ",
   "keys.vps.descLink": "przewodnik konfiguracji",
-  "keys.vps.descAfter": " aby poznać wymagany format aliasu SSH.",
-  "keys.vps.anyMachine": "Działa każdy komputer z Linuksem i Dockerem dostępny przez SSH, także komputer w Twojej sieci Tailscale: jako HostName aliasu podaj jego nazwę w Tailscale.",
-  "keys.vps.aria": "Alias konfiguracji SSH samodzielnie hostowanego VPS",
   "usage.title": "Wykorzystanie",
   "planUsage.title": "Wykorzystanie planu",
   "planUsage.subtitle": "Pozostały limit u każdego zalogowanego dostawcy. Okna 5-godzinne i tygodniowe, jeśli plan je ma.",
@@ -6853,7 +6848,6 @@
   "devicesPage.detail.version": "Wersja",
   "devicesPage.detail.lastSeen": "Ostatnia aktywność",
   "devicesPage.detail.bots": "Boty",
-  "devicesPage.detail.reachesBots": "Rozmawia z botami tutaj",
   "devicesPage.action.copyUpdate": "Kopiuj polecenie aktualizacji",
   "devicesPage.action.manage": "Zarządzaj",
   "devicesPage.action.removeApps": "Usuń jego aplikacje",
@@ -7348,5 +7342,6 @@
   "devices.reach.sameWifi": "w tej samej sieci Wi-Fi",
   "phone.reach.offAdding": "Wyłączone · Dodanie telefonu włącza te opcje",
   "settings.nav.devicesNeedYou": "Urządzenie lub sieć prywatna wymaga uwagi",
-  "settings.nav.phoneConnectedAllClear": "Telefon jest połączony i nic nie wymaga uwagi"
+  "settings.nav.phoneConnectedAllClear": "Telefon jest połączony i nic nie wymaga uwagi",
+  "keys.vps.ownServer": "Własny serwer (SSH)"
 }

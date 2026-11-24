@@ -17,7 +17,7 @@ import { DeviceMap, deviceMapShown } from "../../devices/DeviceMap";
 import { usePairAccess } from "../../devices/PairCodePanel";
 import { ComputerNameMore, OtherPlacesSection, PairWithCloudRow, PhoneAppFacts, ServerPhoneNotes } from "../../devices/PhoneSections";
 import { needsFirst, needsPerson } from "../../devices/device-parts";
-import { networkLine } from "../../devices/device-words";
+import { networkLine, sshAliasOfAnchor } from "../../devices/device-words";
 import { AlwaysOnHomeSection } from "../../AlwaysOnHomeSection";
 import { PhoneControls } from "../../PairedPhones";
 import { OpenCodeRow, PairPhoneSteps, ReachSection, RouteNotices, setCompanionTailscale, shouldResumePausedAddress, type PairAsk } from "../../PhoneDevicesSection";
@@ -142,6 +142,30 @@ export function DevicesPage() {
     pairAsked.current = false;
     if (anchor && !kept) setAdding(null);
   }, [anchor]);
+  const openRow = (id: string) => {
+    setNotice(null);
+    setPairing(false);
+    setOpen(id);
+    window.requestAnimationFrame(() => {
+      const row = document.querySelector<HTMLElement>(`[data-device-row="${CSS.escape(id)}"]`);
+      const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      row?.scrollIntoView?.({ block: "start", behavior: still ? "auto" : "smooth" });
+      row?.querySelector<HTMLElement>("[data-device-node]")?.focus({ preventScroll: true });
+    });
+  };
+  // A named server's row asked for from another page (its link on AI) opens once, when the server is listed.
+  const openedFor = useRef<string | null>(null);
+  const openRowNow = useRef(openRow);
+  openRowNow.current = openRow;
+  useEffect(() => {
+    const alias = sshAliasOfAnchor(anchor);
+    if (!alias) { openedFor.current = null; return; }
+    if (openedFor.current === anchor) return;
+    const server = devices.find((device) => device.sources.some((source) => source.type === "vps" && source.id === alias));
+    if (!server) return;
+    openedFor.current = anchor;
+    openRowNow.current(server.id);
+  }, [anchor, devices]);
   const networkAction = nextNetworkStep(network, { check: () => void check() },
     { busy: c.busy, blocked: Boolean(blocked), platform: window.ogb?.platform });
   const groups = groupByKind(devices, { all: true }).map((entry) => ({ ...entry, devices: needsFirst(entry.devices) }));
@@ -259,17 +283,6 @@ export function DevicesPage() {
   const mark = place.kind === "computer" ? <SettingsMark><Laptop /></SettingsMark> : <PlaceBadge place={place} size={28} />;
   const now = Date.now();
   const onAction = (device: Device, action: DeviceAction) => void act(device, action);
-  const openRow = (id: string) => {
-    setNotice(null);
-    setPairing(false);
-    setOpen(id);
-    window.requestAnimationFrame(() => {
-      const row = document.querySelector<HTMLElement>(`[data-device-row="${CSS.escape(id)}"]`);
-      const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-      row?.scrollIntoView?.({ block: "start", behavior: still ? "auto" : "smooth" });
-      row?.querySelector<HTMLElement>("[data-device-node]")?.focus({ preventScroll: true });
-    });
-  };
   const openNetwork = () => window.requestAnimationFrame(() => {
     const row = document.querySelector<HTMLElement>("[data-private-network]");
     const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;

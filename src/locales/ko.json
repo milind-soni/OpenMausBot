@@ -3495,12 +3495,7 @@
   "decider.openrouter.error.malformed": "모델이 {app}이 읽을 수 없는 응답을 보냈어요. 다른 모델을 써 보세요.",
   "decider.openrouter.error.credits": "OpenRouter 계정의 크레딧이 떨어졌어요. openrouter.ai/credits에서 충전하세요.",
   "decider.test.slow": "대화방 판단에 허용되는 1.5초보다 느려서, 대화방이 리더에게 넘어가게 돼요. 더 빠른 모델을 써 보세요.",
-  "keys.vps.label": "직접 호스팅하는 VPS",
-  "keys.vps.descBefore": "Linux VPS의 SSH 설정 별칭이에요. {app}은 평소 쓰는 SSH 설정과 에이전트를 쓰며, 키나 비밀번호를 저장하지 않아요. 필요한 SSH 별칭 형식은 ",
   "keys.vps.descLink": "설정 안내",
-  "keys.vps.descAfter": "를 참고하세요.",
-  "keys.vps.anyMachine": "SSH로 접속할 수 있고 Docker가 있는 Linux 컴퓨터라면 무엇이든 됩니다. Tailscale 네트워크의 컴퓨터도 가능합니다. 별칭의 HostName에 그 Tailscale 이름을 넣으세요.",
-  "keys.vps.aria": "직접 호스팅하는 VPS의 SSH 설정 별칭",
   "usage.title": "사용량",
   "planUsage.title": "요금제 사용량",
   "planUsage.subtitle": "로그인한 각 제공자의 남은 허용량이에요. 요금제에 있으면 5시간 단위와 주간 단위로 보여 줘요.",
@@ -7431,7 +7426,6 @@
   "devicesPage.detail.version": "버전",
   "devicesPage.detail.lastSeen": "마지막 접속",
   "devicesPage.detail.bots": "봇",
-  "devicesPage.detail.reachesBots": "이곳의 봇과 대화함",
   "devicesPage.action.copyUpdate": "업데이트 명령 복사",
   "devicesPage.action.manage": "관리",
   "devicesPage.action.removeApps": "앱 제거",
@@ -7876,5 +7870,6 @@
   "devices.reach.sameWifi": "같은 Wi-Fi에서",
   "phone.reach.offAdding": "꺼짐 · 휴대폰을 추가하면 이 설정이 켜져요",
   "settings.nav.devicesNeedYou": "기기나 사설 네트워크를 확인해야 해요",
-  "settings.nav.phoneConnectedAllClear": "휴대폰이 연결되어 있고 확인할 것이 없어요"
+  "settings.nav.phoneConnectedAllClear": "휴대폰이 연결되어 있고 확인할 것이 없어요",
+  "keys.vps.ownServer": "내 서버 (SSH)"
 }

@@ -82,7 +82,7 @@ export function SettingsPageHeader({ page, ctx, place, narrow, missing, peek = f
         </button>
       )}
       {!narrow && (
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex h-6 min-w-0 items-center gap-2">
           <h2 id="settings-page-title" className="min-w-0 truncate text-[17px] font-semibold leading-6 tracking-[-0.01em] text-ink">{sub?.title ?? title}</h2>
           {peek && <AdvancedSettingTag />}
           {shownAction}

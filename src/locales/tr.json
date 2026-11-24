@@ -2628,12 +2628,7 @@
   "decider.openrouter.error.malformed": "Model, {app}'un okuyamadığı bir yanıt gönderdi. Başka bir model deneyin.",
   "decider.openrouter.error.credits": "OpenRouter hesabınızın kredisi bitti. openrouter.ai/credits adresinden kredi ekleyin.",
   "decider.test.slow": "Bu, bir oda kararı için izin verilen 1,5 sn'den daha yavaş; bu durumda odalar lidere geri döner. Daha hızlı bir model deneyin.",
-  "keys.vps.label": "Kendi barındırdığınız VPS",
-  "keys.vps.descBefore": "Linux VPS için SSH yapılandırma takma adı. {app} normal SSH yapılandırmanızı ve SSH ajanınızı kullanır; anahtarları veya şifreleri saklamaz. Gerekli SSH takma ad biçimi için ",
   "keys.vps.descLink": "kurulum kılavuzuna",
-  "keys.vps.descAfter": " bakın.",
-  "keys.vps.anyMachine": "SSH ile ulaştığınız ve Docker çalıştıran her Linux makinesi olur, Tailscale ağınızdaki bir bilgisayar da: takma adın HostName değerine onun Tailscale adını yazın.",
-  "keys.vps.aria": "Kendi barındırdığınız VPS SSH yapılandırma takma adı",
   "usage.title": "Kullanım",
   "planUsage.title": "Plan kullanımı",
   "planUsage.subtitle": "Oturum açılmış her sağlayıcıdaki kalan hak. Planda mevcut olduğunda 5 saatlik ve haftalık pencereler.",
@@ -5651,7 +5646,6 @@
   "devicesPage.detail.version": "Sürüm",
   "devicesPage.detail.lastSeen": "Son görülme",
   "devicesPage.detail.bots": "Botlar",
-  "devicesPage.detail.reachesBots": "Buradaki botlarla konuşur",
   "devicesPage.action.copyUpdate": "Güncelleme komutunu kopyala",
   "devicesPage.action.manage": "Yönet",
   "devicesPage.action.removeApps": "Uygulamalarını kaldır",
@@ -6147,5 +6141,6 @@
   "devices.reach.sameWifi": "aynı Wi-Fi'da",
   "phone.reach.offAdding": "Kapalı · Telefon eklemek bunları açar",
   "settings.nav.devicesNeedYou": "Bir cihazın veya özel ağın ilgilenmenize ihtiyacı var",
-  "settings.nav.phoneConnectedAllClear": "Bir telefon bağlı ve hiçbir şeyin ilgilenmenize ihtiyacı yok"
+  "settings.nav.phoneConnectedAllClear": "Bir telefon bağlı ve hiçbir şeyin ilgilenmenize ihtiyacı yok",
+  "keys.vps.ownServer": "Kendi sunucunuz (SSH)"
 }

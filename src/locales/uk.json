@@ -1595,12 +1595,7 @@
   "decider.master": "Використовувати швидкі рішення та видобування",
   "decider.provider.label": "Інший ключ",
   "decider.provider.line": "Або використайте для цих невеликих моделей ключ іншого постачальника.",
-  "keys.vps.label": "Власний VPS",
-  "keys.vps.descBefore": "Аліас SSH-конфігу для Linux-VPS. {app} використовує ваш звичайний SSH-конфіг і агент; ключі чи паролі він не зберігає. Див. ",
   "keys.vps.descLink": "гід налаштування",
-  "keys.vps.descAfter": " для потрібної форми SSH-аліаса.",
-  "keys.vps.anyMachine": "Підійде будь-який комп'ютер на Linux із Docker, доступний через SSH, зокрема комп'ютер у вашій мережі Tailscale: вкажіть його ім'я в Tailscale як HostName псевдоніма.",
-  "keys.vps.aria": "Аліас SSH-конфігу власного VPS",
   "usage.title": "Використання",
   "usage.bot.empty": "Для цього бота ще не записано використання.",
   "usage.bot.unpriced": "Цей провайдер не повідомляє ціну; токени підраховуються.",
@@ -3791,7 +3786,6 @@
   "devicesPage.detail.version": "Версія",
   "devicesPage.detail.lastSeen": "Остання поява",
   "devicesPage.detail.bots": "Боти",
-  "devicesPage.detail.reachesBots": "Спілкується з ботами тут",
   "devicesPage.action.copyUpdate": "Копіювати команду оновлення",
   "devicesPage.action.manage": "Керувати",
   "devicesPage.action.removeApps": "Видалити його застосунки",
@@ -4332,5 +4326,6 @@
   "devices.reach.sameWifi": "у тій самій Wi-Fi",
   "phone.reach.offAdding": "Вимк. · Додавання телефона вмикає їх",
   "settings.nav.devicesNeedYou": "Пристрою або приватній мережі потрібна ваша увага",
-  "settings.nav.phoneConnectedAllClear": "Телефон під’єднано, і ніщо не потребує вашої уваги"
+  "settings.nav.phoneConnectedAllClear": "Телефон під’єднано, і ніщо не потребує вашої уваги",
+  "keys.vps.ownServer": "Власний сервер (SSH)"
 }

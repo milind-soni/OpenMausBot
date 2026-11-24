@@ -101,7 +101,7 @@ function BotsDetail({ device }: { device: Device }) {
       {bots.map((bot) => <li key={bot.id} className="flex min-w-0 items-baseline gap-1.5 text-ink"><span className="self-center"><BotAvatar bot={bot} size={16} /></span><span className="break-words">{bot.name}</span></li>)}
     </ul>;
   }
-  return <>{device.canRunBots ? t("devicesPage.detail.runsOwnBots") : device.canHostComputer ? t("devicesPage.detail.botsWorkOnIt") : t("devicesPage.detail.reachesBots")}</>;
+  return <>{device.canRunBots ? t("devicesPage.detail.runsOwnBots") : device.canHostComputer ? t("devicesPage.detail.botsWorkOnIt") : t("devicesPage.detail.usesBots")}</>;
 }
 
 /**
@@ -132,7 +132,7 @@ export function DeviceDetails({ device, onAction, onRemoved, now, pairing, onPai
   return (
     <div className="flex flex-col gap-4">
       <dl className="flex flex-col gap-2">
-        <Detail label={t("devicesPage.detail.type")}>{kindLabel(device.kind)}</Detail>
+        <Detail label={t("devicesPage.detail.type")}>{vps ? t("keys.vps.ownServer") : kindLabel(device.kind)}</Detail>
         {!device.here && (device.routes.length > 0 || signOut) && <ConnectedBy device={device} signOut={signOut} onAction={onAction} />}
         {device.address && <Detail label={t("devicesPage.detail.address")}><span className="select-text break-all font-mono text-[12px]">{device.address}</span></Detail>}
         {device.version && <Detail label={t("devicesPage.detail.version")}>{device.version}</Detail>}
