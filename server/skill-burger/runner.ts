@@ -285,7 +285,9 @@ export async function runFrom(state: Omit<RunState, "waiting" | "createdAt"> & {
 
     deps.events.started(id, name, step);
     const limit = step.timeoutMs ?? STEP_TIMEOUT_MS;
-    const outcome = await timed(limit, deps.signal, (signal) => execute(step, args, results, deps.exec, signal));
+    const outcome = await timed(limit, deps.signal, (signal) => execute(step, args, results, deps.exec, signal))
+      .catch((error: unknown): ExecResult => ({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+    if (deps.signal?.aborted) return envelope({ status: "cancelled" });
     if (outcome === "timeout") return fail(step, "timeout", `"${step.label}" took longer than ${Math.round(limit / 1000)} s and was stopped.`);
     if (!outcome.ok) return fail(step, outcome.tooLarge ? "output_too_large" : "step_failed", clip(redactSecretsInText(outcome.error), ERROR_MAX));
     const output = parsed(outcome.output);
