@@ -98,9 +98,6 @@ export function WorkspacePanes({ primary, title, children }: { primary: string; 
         onPointerDownCapture={activate} onFocusCapture={activate}
         style={{ left: box.x + "%", top: box.y + "%", width: box.w + "%", height: box.h + "%" }}
         className={desktop ? "absolute flex min-h-0 min-w-0 flex-col overflow-hidden outline-none [container:workspace-pane/size]" : "contents"}>
-        {panes && (layout !== MAIN_PANE || ids.some(id => id !== MAIN_PANE && !emptyPane(id))) &&
-          <button type="button" aria-label={t("chat.closePane", { title: name ?? "" })} onClick={close}
-            className="absolute end-2 top-3 z-30 flex size-7 items-center justify-center rounded-full text-ink-secondary hover:bg-raised focus-visible:ring-2 focus-visible:ring-focus"><X size={16} /></button>}
         {vacant ? <button type="button" onClick={activate} className="flex flex-1 flex-col items-center justify-center gap-1 text-sm text-ink-secondary focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-focus">
           <span className="text-xs font-medium">{name}</span>
           {t("chat.dropThread")}
@@ -109,6 +106,9 @@ export function WorkspacePanes({ primary, title, children }: { primary: string; 
             {panel ? <PanelChat panel={panel} /> : children}
           </TiledPaneTitle>
         </div>}
+        {panes && (layout !== MAIN_PANE || ids.some(id => id !== MAIN_PANE && !emptyPane(id))) &&
+          <button type="button" aria-label={t("chat.closePane", { title: name ?? "" })} onClick={close}
+            className="workspace-pane-close absolute end-2 top-3 z-30 flex size-7 items-center justify-center rounded-full text-ink-secondary hover:bg-raised focus-visible:ring-2 focus-visible:ring-focus"><X size={16} /></button>}
         {preview?.target === layout && <div aria-hidden="true" data-drop-preview={preview.edge}
           className={`pointer-events-none absolute z-20 rounded-lg border-2 border-focus bg-accent/15 ${previewArea[preview.edge]}`} />}
       </section>);

@@ -37,15 +37,16 @@ async function verify() {
     const survivor = closing === gmail ? icloud : gmail;
     await click(node(row(icloud) + " [data-thread-split-menu] button"));
     await click(button("Open beside"));
-    await until(composer(icloud));
+    await until(`document.activeElement === ${composer(icloud)}`);
     await click(composer(survivor));
+    await until(`document.activeElement === ${composer(survivor)}`);
     await win.webContents.insertText(survivor);
     await until(`${composer(survivor)}?.value === "${survivor}"`);
     await until(node("[data-pane-id] [data-window-drag]"));
     await click(label("Close pane for " + closing));
     await until(`!document.querySelector("[data-workspace-thread]") && ${composer(survivor)}?.value === "${survivor}"`);
     await click(node(row(closing)));
-    await until(node(`section[aria-label="${closing}"] [data-mid]`));
+    await until(`[...document.querySelectorAll('section[aria-label="${closing}"] [data-mid]')].some(row => row.innerText.includes("${closing}"))`);
     await click(node(row(gmail)));
   }
   await click(label("Pane layout"));
