@@ -8936,7 +8936,6 @@
   "mascot.useExpression": "Use {expression} expression",
   "mascot.useColor": "Use {color} mascot color",
   "mascot.useCustomColor": "Pick a custom body color",
-  "mascot.avatarCredit": "Avatar designs from Open Bot Avatar by Dominik Scholz",
   "mascot.useBody": "Use the {name} body",
   "mascot.label": "{name} mascot",
   "avatar.alt": "{name} avatar",
