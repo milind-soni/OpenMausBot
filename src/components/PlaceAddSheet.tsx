@@ -136,7 +136,7 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
     {shownProblem && inline && <p ref={problemLine} role="alert" data-connect-problem className="-mt-2 text-[13px] leading-[18px] text-danger">{shownProblem}
     </p>}
     {shownProblem && inline && !failure && <div className="-mt-2"><button type="button" data-connect-retry="" className="ui-button ui-button-sm" disabled={probing} onClick={() => setAsks((n) => n + 1)}>{probing ? t("common.checking") : t("remote.checkAgain")}</button></div>}
-    {!connect && !start && !inline && <p data-connect-other-computer className="text-[12px] leading-4 text-ink-secondary">{t("connect.otherComputer", { app: productName() })}</p>}
+    {!connect && !start && !inline && <p data-connect-other-computer className="text-[12px] leading-4 text-ink-secondary">{t("connect.otherComputerDevices", { app: productName() })}</p>}
     {codeOnlyHint && <p data-connect-hint className="text-[13px] text-ink-secondary">{t("connect.addAddress", { example: EXAMPLE_ADDRESS })}</p>}
     {found && <p data-connect-found className={cn("text-[13px] text-ink-secondary", inline && "flex items-center gap-1.5")}>
       {inline ? <Check size={14} aria-hidden="true" className="shrink-0 text-success" /> : "✓"} {found.version ? t("connect.found", { name: found.label, version: found.version }) : found.label}{!inline && <> · {t(TRANSPORT_KEY[found.transport])}</>}

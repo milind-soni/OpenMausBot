@@ -190,8 +190,8 @@ export function SettingsNav({ ctx, place, pages, current, query, hits, keyHits, 
     account: { badge: <YouAvatar size={24} />, name: t("settings.page.account"), line: accountLine(account, { browser: !ctx.desktop, place: place.name, openSource }), page: "account" },
     app: { badge: <AppIcon size={24} />, name: ctx.desktop ? t("settings.page.app") : t("settings.page.browser"), line: appLine, page: "app" },
   };
-  const dot = (page: SettingsPageId) => page === "phone" && phone.kind === "paired" && phone.connected ? "success" as const
-    : page === "phone" && phone.kind === "attention" ? "warning" as const : null;
+  const dot = (page: SettingsPageId) => page === "devices" && phone.kind === "paired" && phone.connected ? "success" as const
+    : page === "devices" && phone.kind === "attention" ? "warning" as const : null;
   const searching = query.trim() !== "";
   return (
     <nav aria-label={t("settings.title")} className={cn("flex min-h-0 flex-col", narrow ? "flex-1" : "w-[220px] shrink-0 shadow-[inset_-0.5px_0_0_var(--settings-edge)]")}>
@@ -320,17 +320,17 @@ function HitRow({ ctx, place, hit, query, onHit }: { ctx: SettingsContext; place
 }
 
 const PAGE_OWNER: Record<SettingsPageId, SettingsOwner> = {
-  overview: "place", devices: "place", phone: "place", ai: "place", bots: "place", desktops: "place", vault: "place", usage: "place", transfer: "place", storage: "place",
+  overview: "place", devices: "place", ai: "place", bots: "place", desktops: "place", vault: "place", usage: "place", transfer: "place", storage: "place",
   data: "place", people: "place", installations: "place", account: "account", plan: "account", app: "app", general: "app", appearance: "app",
 };
 
 const PAGE_KEY: Partial<Record<SettingsPageId, Parameters<typeof t>[0]>> = {
-  devices: "settings.page.devices", phone: "settings.section.phoneDevices", ai: "settings.group.ai", bots: "settings.page.bots", desktops: "settings.page.desktops",
+  devices: "settings.page.devices", ai: "settings.group.ai", bots: "settings.page.bots", desktops: "settings.page.desktops",
   vault: "settings.section.vault", usage: "settings.page.spending", transfer: "settings.page.importExport", storage: "settings.page.storage", data: "settings.page.data", people: "settings.section.people",
   installations: "settings.section.workspaces", plan: "settings.page.plan", general: "settings.section.general", appearance: "settings.section.appearance",
 };
 
-/** A result's second line: its owner and its page ("This computer › Phone & devices"), or what a jump opens. */
+/** A result's second line: its owner and its page ("This computer › Devices"), or what a jump opens. */
 export function searchWhere(hit: SearchHit, place: SettingsPlace, ctx: SettingsContext): { owner: string; page?: string } | null {
   const entry = hit.entry;
   if (entry.jump) return { owner: searchLocation(hit, place, ctx) };
@@ -341,7 +341,7 @@ export function searchWhere(hit: SearchHit, place: SettingsPlace, ctx: SettingsC
   return { owner: ownerName, ...(pageKey && !entry.id.startsWith("page:") ? { page: t(pageKey) } : {}) };
 }
 
-/** The full path, owner first ("This computer › Phone & devices › How your phone reaches this computer"): the tooltip. */
+/** The full path, owner first ("This computer › Devices › How your phone reaches this computer"): the tooltip. */
 export function searchLocation(hit: SearchHit, place: SettingsPlace, ctx: SettingsContext): string {
   const entry = hit.entry;
   if (entry.jump === "apps") return t("settings.search.opensApps");

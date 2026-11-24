@@ -6,7 +6,7 @@ description: "Why the MausBot phone app can't reach the person's computer, and w
 # When the phone can't reach their computer
 
 The MausBot phone app reaches the person's computer, where the OpenMausBot
-desktop app runs, in the ways turned on in Settings → Phone & devices:
+desktop app runs, in the ways turned on in Settings → Devices:
 
 - **Same Wi-Fi**: the phone and the computer are on the same network. Every
   version of the phone app can use it.
@@ -27,12 +27,12 @@ can't tell why.
    paired phone still has an older app. Then that is the cause. Tell them to
    update the MausBot app on that phone from its app store, then open it once
    on the same Wi-Fi as this computer: that upgrades its pairing by itself. If
-   that doesn't reconnect it, they pair it again in Settings → Phone & devices
+   that doesn't reconnect it, they pair it again in Settings → Devices
    (the phone's row there has Pair again), then remove its old entry.
 2. With no such line, never say the link ended or that their app is too old.
    Check the usual things, one at a time: the computer is on and awake with
    OpenMausBot open; on the same Wi-Fi the phone connects; Anywhere, through
-   MausBot is on in Settings → Phone & devices; the phone is in the paired list
+   MausBot is on in Settings → Devices; the phone is in the paired list
    and its Connect from is Anywhere, not Wi-Fi and Tailscale only.
 3. If you run on My Cloud, phones reach the Cloud through its own web address,
    not these ways: this guide is about the desktop app on their computer.

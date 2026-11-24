@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { CONNECTING_DELAY_MS, MIN_VISIBLE_MS, PhoneRow, phoneSubtitle, relayStatusLine, sortPhones, steadyAt } from "./PairedPhones";
+import { CONNECTING_DELAY_MS, MIN_VISIBLE_MS, PhoneControls, phoneSubtitle, relayStatusLine, sortPhones, steadyAt } from "./PairedPhones";
 import type { CompanionState, PhoneDevice, PhoneSetupController } from "./PhoneSetupFlow";
 
 const NOW = Date.now();
@@ -10,7 +10,7 @@ const phone = (extra: Partial<PhoneDevice> = {}): PhoneDevice => ({ id: "phone-1
 const state = (extra: Partial<CompanionState> = {}): CompanionState => ({ enabled: true, keepAwake: false, port: 8810, devices: [], pairing: null, ...extra });
 const c = { busy: false, act: async () => {} } as unknown as PhoneSetupController;
 const row = (device: PhoneDevice, companion: CompanionState) =>
-  renderToStaticMarkup(createElement(PhoneRow, { device, connected: false, state: companion, c, onRemoved: () => {}, defaultOpen: true }));
+  renderToStaticMarkup(createElement(PhoneControls, { device, c: { ...c, state: companion } as PhoneSetupController }));
 
 describe("paired phones", () => {
   it("keeps browser access separately off until granted, including old sidecar snapshots", () => {
@@ -40,10 +40,10 @@ describe("paired phones", () => {
   it("on a phone whose older app lost its way in, says to update and pair again, with Pair again right there", () => {
     const retired = { ...c, account: { available: true, status: "ready", tunnelRetired: true } } as unknown as PhoneSetupController;
     const rowFor = (device: PhoneDevice, controller: PhoneSetupController, onPairAgain?: () => void) =>
-      createElement(PhoneRow, { device, connected: false, state: state(), c: controller, onRemoved: () => {}, onPairAgain });
+      createElement(PhoneControls, { device, c: { ...controller, state: state() } as PhoneSetupController, onPairAgain });
     const markup = renderToStaticMarkup(rowFor(phone(), retired, () => {}));
     expect(markup).toContain("This phone has an older MausBot app. Update the app, then open it once on the same Wi-Fi as this computer. If that doesn&#x27;t reconnect it, pair it again here.");
-    expect(markup).toMatch(/<button type="button"[^>]*>Pair again<\/button>/);
+    expect(markup).toMatch(/<button type="button"[^>]*data-pair-again=""[^>]*>Pair again<\/button>/);
     expect(renderToStaticMarkup(rowFor(phone(), retired)), "no way to pair from here: no button").not.toContain("Pair again");
     expect(renderToStaticMarkup(rowFor(phone({ e2eAt: NOW }), retired, () => {})), "a phone on the encrypted connection").not.toContain("older MausBot app");
     expect(renderToStaticMarkup(rowFor(phone(), c, () => {})), "the link not ended").not.toContain("older MausBot app");

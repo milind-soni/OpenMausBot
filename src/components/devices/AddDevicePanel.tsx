@@ -38,7 +38,7 @@ function Step({ n, title, state = "now", children }: { n: number; title: string;
   return (
     <li data-step={n} data-step-state={state} className="flex gap-3">
       <span aria-hidden="true" className={cn("flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-medium leading-none tabular-nums",
-        state === "done" ? "bg-success text-success-ink" : state === "now" ? "bg-ink text-app" : "shadow-[inset_0_0_0_1px_var(--settings-edge)] text-ink-tertiary")}>
+        state === "done" ? "bg-success" : state === "now" ? "bg-ink text-app" : "shadow-[inset_0_0_0_1px_var(--settings-edge)] text-ink-tertiary")}>
         {state === "done" ? <Check size={12} strokeWidth={2.5} /> : n}
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-2">
@@ -78,7 +78,7 @@ function Connected({ device, onDone }: { device: Device; onDone: (id: string) =>
   return (
     <div role="status" data-add-connected={device.id} className="flex flex-col items-start gap-3">
       <span className="flex items-center gap-2 text-[14px] font-medium leading-5 text-ink">
-        <span aria-hidden="true" className="flex size-5 items-center justify-center rounded-full bg-success text-success-ink"><Check size={12} strokeWidth={2.5} /></span>
+        <span aria-hidden="true" className="flex size-5 items-center justify-center rounded-full bg-success"><Check size={12} strokeWidth={2.5} /></span>
         {t("devicesPage.addFlow.connected", { name: device.name })}
       </span>
       <p className={BODY}>{t("devicesPage.addFlow.connectedLine")}</p>
@@ -110,8 +110,10 @@ export interface AddDeviceProps {
   /** Back to the list; with an id, that new device's row opens. */
   onBack: (opened?: string) => void;
   onConnected: () => void;
-  /** On This computer: Pair a phone's own steps, shown here. */
-  phoneSteps: ((onClose: () => void) => ReactNode) | null;
+  /** On This computer: its own steps for a phone, shown here in place of a code. */
+  phoneSteps: ReactNode | null;
+  /** Advanced mode: a Cloud's or server's phone code may be for chat and approvals only. */
+  advanced?: boolean;
   canConnectServer: boolean;
   onGetCloud: (() => void) | null;
   onCheck?: () => void;
@@ -125,7 +127,7 @@ export interface AddDeviceProps {
 /**
  * Add a device, in the page: what kind, then that kind's few steps, numbered, with the next one always in view, and a
  * confirmation once the new device shows up. Back (or Escape) goes up one step and then to the list. Nothing opens over
- * Settings: a phone on This computer gets Pair a phone's own steps, a server Connect to a server's own form.
+ * Settings: a phone on This computer gets its own steps, a server Connect to a server's own form.
  */
 export function AddDevicePanel(props: AddDeviceProps) {
   const { here, cloud, devices, network, networkAction, tailnetAddress, start, onBack, onConnected, phoneSteps, canConnectServer, onGetCloud, onCheck, checking = false, setSub } = props;
@@ -198,7 +200,7 @@ export function AddDevicePanel(props: AddDeviceProps) {
       {kind && (
         <div data-add-card="" className={CARD}>
           {joined ? <Connected device={joined} onDone={(id) => onBack(id)} /> : <>
-            {kind === "phone" && (phoneSteps ? phoneSteps(() => onBack()) : <PairCodePanel kind="phone" address={null} onConnected={onConnected} />)}
+            {kind === "phone" && (phoneSteps ?? <PairCodePanel kind="phone" address={null} onConnected={onConnected} cloudHome={cloud} advanced={props.advanced} />)}
             {kind === "computer" && (cloud
               ? <p className={BODY}>{t("devicesPage.addFlow.computerCloud", { app: productName() })}</p>
               : <Steps>

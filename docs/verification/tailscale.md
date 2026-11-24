@@ -49,7 +49,7 @@ Use a disposable workspace on the host.
 ### The desktop app as host, without HTTPS certificates
 
 1. Leave HTTPS Certificates off at https://login.tailscale.com/admin/dns.
-2. On the host, open Settings → Phone & devices and turn on **Your other computers**. With Tailscale off in the app,
+2. On the host, open Settings → Devices and turn on **Your other computers** (the switch on the Private network row). With Tailscale off in the app,
    that one switch turns it on first. Turn it off again with nothing paired: expect Tailscale under More ways in to go
    off with it. Then turn Tailscale on yourself, turn the share on and off: expect Tailscale to stay on. Leave the
    share on. Expect `Ready at http://$NAME:8799`. Do this once in Simple mode: the row is

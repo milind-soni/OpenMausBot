@@ -70,7 +70,7 @@ export function PairingFailureCheck({ account, state, setupTimedOut }: { account
   return <RemoteAccessSteps className="mt-4" diagnosis={diagnoseRemoteAccess(remoteAccessFacts(account, state, setupTimedOut, true))} />;
 }
 
-/** Settings → Phone & devices: a closed row whose value is the headline; open, the steps. */
+/** Settings → Devices: a closed row whose value is the headline; open, the steps. */
 export function RemoteAccessCheckRow({ account, state }: { account: CompanionAccountState | null; state: CompanionState }) {
   const [open, setOpen] = useState(false);
   const diagnosis = diagnoseRemoteAccess(remoteAccessFacts(account, state));

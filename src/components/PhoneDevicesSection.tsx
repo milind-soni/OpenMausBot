@@ -1,12 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { t } from "@/lib/i18n";
-import { SettingsSkeletonCard } from "./settings/SettingsStates";
 import { cn } from "@/lib/cn";
 import type { CompanionAccountState } from "../types/ogb";
 import {
   PhoneSetupFlowView,
   companionAccountActionError,
-  companionAccountBridge,
   companionBridge,
   loadCompanionBridgeState,
   shouldHydrateCompanionEmail,
@@ -14,23 +12,15 @@ import {
   type CompanionRoute,
   type CompanionState,
   type PhoneSetupController,
-  usePhoneSetupController,
 } from "./PhoneSetupFlow";
 import { companionPairingMode } from "../lib/phone-setup";
-import { revealPhonePairing, takePairOnOpen } from "../lib/phone-pairing";
 import { showTunnelRetiredNotice } from "../lib/phone-link";
-import { PhonesList } from "./PhonesList";
-import { PairedPhones } from "./PairedPhones";
-import { TailnetComputers } from "./TailnetComputers";
-import { AlwaysOnHomeSection } from "./AlwaysOnHomeSection";
 import { RemoteAccessCheckRow } from "./RemoteAccessCheck";
 import { LearnMore, SettingRow, SettingsFoldRow, SettingsGroup, SettingsLinkRow, SettingsRows, Switch } from "./SettingsPrimitives";
-import { Layer } from "./Layer";
 import { DialogTitle } from "./settings/SettingsDialog";
 import { AdvancedSettingTag } from "./settings/AdvancedSection";
 export { DialogTitle };
 import { productName } from "../lib/brand";
-import { useStore } from "@/state/store";
 
 export {
   companionAccountActionError,
@@ -190,7 +180,7 @@ export function routeStateText(route: { on: boolean; since: number | null } | un
   return route.since ? t("devices.route.onSince", { date: new Date(route.since).toLocaleDateString(undefined, { month: "short", day: "numeric" }) }) : t("devices.route.on");
 }
 
-function setRoute(companion: CompanionBridge, route: CompanionRoute, on: boolean): Promise<CompanionState> {
+export function setRoute(companion: CompanionBridge, route: CompanionRoute, on: boolean): Promise<CompanionState> {
   if (route === "tailscale") return setCompanionTailscale(companion, on);
   return companion.setRoute?.(route, on) ?? (on ? companion.start([route]) : companion.state());
 }
@@ -226,8 +216,6 @@ function RouteRow({ c, state, route, blocked, onSignIn }: { c: PhoneSetupControl
 export type PairStep = "consent" | "sign-in" | "pairing";
 type PairRoute = "wifi" | "relay";
 
-const FOCUSABLE = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
-
 /** A short line keeps compound words such as "End-to-end" whole: its hyphens never break a line. */
 const keepWhole = (text: string) => text.replace(/(\p{L})-(?=\p{L})/gu, "$1\u2011");
 
@@ -258,42 +246,39 @@ function RouteCard({ route, chosen, disabled, onChoose, needs, action, hint }: {
   );
 }
 
-/** Pair a device's steps: which way the phone reaches this computer comes first, then the code. The Pair a phone dialog
- * frames them; Settings → Devices shows them in its page. `onClose` is Cancel and Done; a code still open is cancelled
- * when the steps close or go away. */
-/** Where Pair a device starts: at the code when a way in is already on (or the HTTPS address was asked for), else at the choice. */
+/** Where Add a phone starts: at the code when a way in is already on (or the HTTPS address was asked for), else at the choice. */
 export const firstPairStep = (state: CompanionState, secureAddress: boolean): PairStep =>
   (["wifi", "relay"] as const).some((route) => state.routes?.[route]?.on) || state.routes?.tailscale?.on === true || secureAddress ? "pairing" : "consent";
 
-export function PairPhoneSteps({ c, state, onClose, secureAddress = false, onStep, codeView, cancelOnUnmount = true }: {
-  c: PhoneSetupController;
-  state: CompanionState;
-  onClose: () => void;
-  /** HTTPS address → Set up: the free web address, with its sign-in, before the code. */
-  secureAddress?: boolean;
-  onStep?: (step: PairStep) => void;
-  /** The code in a page's own look; the page's own Back is the way out, so neither Cancel nor Done shows. */
-  codeView?: ReactNode;
-  /** A code still open is cancelled when the steps go away; a frame that cancels on its own close turns this off. */
-  cancelOnUnmount?: boolean;
-}) {
+/** What a control outside the steps asked them to start with: the free web address (HTTPS Set up) or the sign-in Anywhere needs. */
+export type PairAsk = "https" | "sign-in" | null;
+
+/**
+ * Add a phone's steps on This computer: which way the phone reaches it comes first, then the code (`codeView`, in the
+ * page's own look). The page's Back is the way out; a code still open is cancelled when the steps go away.
+ */
+export function PairPhoneSteps({ c, state, ask = null, codeView }: { c: PhoneSetupController; state: CompanionState; ask?: PairAsk; codeView: ReactNode }) {
   const signedIn = c.account?.status === "ready";
   const relayAvailable = c.account?.available !== false;
   const [picked, setPicked] = useState<PairRoute>(signedIn && relayAvailable ? "relay" : "wifi");
-  const [step, setStep] = useState<PairStep>(() => firstPairStep(state, secureAddress));
+  const [step, setStep] = useState<PairStep>(() => (ask === "sign-in" && !signedIn ? "sign-in" : firstPairStep(state, ask === "https")));
   const { start } = c;
+  const startAsked = useRef(ask === "https" || (ask === "sign-in" && !signedIn));
   useEffect(() => {
-    if (secureAddress) start();
-  }, [secureAddress, start]);
-  useEffect(() => { onStep?.(step); }, [step, onStep]);
+    if (!startAsked.current) return;
+    startAsked.current = false;
+    start();
+  }, [start]);
   // Back from the sign-in: with it, Anywhere is chosen; cancelled, the same screen as before.
+  const signingIn = useRef(false);
   useEffect(() => {
     if (step !== "sign-in") return;
     if (signedIn) { setPicked("relay"); setStep("consent"); return; }
-    if (c.phase !== "sign-in") setStep("consent");
+    if (c.phase === "sign-in") signingIn.current = true;
+    else if (signingIn.current) { signingIn.current = false; setStep("consent"); }
   }, [step, signedIn, c.phase]);
   const opened = useRef(false);
-  opened.current = cancelOnUnmount && step !== "consent";
+  opened.current = step !== "consent";
   const cancel = useRef(c.cancel);
   cancel.current = c.cancel;
   // Checked a tick later: a development remount is not a close.
@@ -309,16 +294,7 @@ export function PairPhoneSteps({ c, state, onClose, secureAddress = false, onSte
   };
   const localHint = picked === "wifi" && !state.routes?.wifi?.on && typeof window !== "undefined" && window.ogb?.platform === "darwin";
   if (step === "sign-in") return <PhoneSetupFlowView controller={c} />;
-  if (step === "pairing" && codeView) return <>{codeView}</>;
-  if (step === "pairing") {
-    return <>
-      <PhoneSetupFlowView controller={c} />
-      <div className="text-[12px] leading-4 text-ink-secondary">{reachLine(state)}</div>
-      <div className="flex justify-end">
-        <button type="button" className="ui-button ui-button-primary" onClick={onClose}>{t("devices.pair.done")}</button>
-      </div>
-    </>;
-  }
+  if (step === "pairing") return <>{codeView}</>;
   return <>
     <p className="text-[13px] leading-[18px] text-ink-secondary">{t("phone.pair.howReach")}</p>
     <div role="radiogroup" aria-label={t("phone.pair.howReach")} className="flex flex-col gap-2">
@@ -333,59 +309,12 @@ export function PairPhoneSteps({ c, state, onClose, secureAddress = false, onSte
           )} />
       )}
     </div>
-    <p className="text-[12px] leading-4 text-ink-secondary">{t("phone.pair.footShort")}</p>
+    <p className="text-[12px] leading-4 text-ink-secondary">{t("phone.pair.footHere")}</p>
     {c.error && <p role="alert" className="text-[12px] leading-4 text-danger">{c.error}</p>}
-    <div className={cn("flex gap-2", codeView ? "justify-start" : "justify-end")}>
-      {!codeView && <button type="button" className="ui-button" onClick={onClose}>{t("common.cancel")}</button>}
+    <div className="flex gap-2">
       <button type="button" disabled={c.busy} onClick={() => void begin()} className="ui-button ui-button-primary" data-pair-turn-on="">{t("phone.pair.turnOnShow")}</button>
     </div>
   </>;
-}
-
-/** Pair a device, as a dialog over Phone & devices. */
-export function PairDeviceDialog({ c, state, onClose, secureAddress = false, placeName = t("rail.thisComputer") }: {
-  c: PhoneSetupController;
-  state: CompanionState;
-  onClose: () => void;
-  placeName?: string;
-  secureAddress?: boolean;
-}) {
-  const [step, setStep] = useState<PairStep>(() => firstPairStep(state, secureAddress));
-  const close = step === "consent" ? onClose : () => { c.cancel(); onClose(); };
-  const root = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const box = root.current;
-    if (box && !box.contains(document.activeElement)) box.querySelector<HTMLElement>(FOCUSABLE)?.focus();
-    return () => { if (before?.isConnected) before.focus(); };
-  }, []);
-  // Settings also handles Escape and Tab; capture them first so they act on this dialog only.
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      const box = root.current;
-      if (!box || event.defaultPrevented || event.isComposing || (event.key !== "Escape" && event.key !== "Tab")) return;
-      event.preventDefault();
-      if (event.key === "Escape") { close(); return; }
-      const controls = [...box.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((control) => control.getClientRects().length);
-      if (!controls.length) return;
-      const at = controls.indexOf(document.activeElement as HTMLElement);
-      const next = at < 0 ? (event.shiftKey ? -1 : 0) : at + (event.shiftKey ? -1 : 1);
-      controls.at(next % controls.length)!.focus();
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [close]);
-  // An ancestor with backdrop-filter becomes the containing block for `fixed`, so it renders through Layer, on the body.
-  const title = t("phone.pair.dialogTitle", { place: placeName });
-  return <Layer modal>
-    <div ref={root} role="dialog" aria-modal="true" aria-label={title}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" data-pair-dialog={step} data-settings-look="simple">
-      <div className="relative flex max-h-full w-full max-w-[440px] flex-col gap-4 overflow-y-auto rounded-2xl border-[0.5px] border-(--settings-edge) bg-app p-6 shadow-xl">
-        <DialogTitle title={title} onClose={close} />
-        <PairPhoneSteps c={c} state={state} onClose={close} secureAddress={secureAddress} onStep={setStep} cancelOnUnmount={false} />
-      </div>
-    </div>
-  </Layer>;
 }
 
 /** A pairing code still open: anyone holding it can pair until it runs out, so it can be revoked here. */
@@ -417,151 +346,75 @@ export function reachLine(state: Pick<CompanionState, "routes">): string {
   return t("devices.reach.line", { ways: new Intl.ListFormat(undefined, { type: "conjunction" }).format(ways) });
 }
 
-export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simple = false, moreWaysAsked = false, placeName = t("rail.thisComputer"), top = null }: {
-  profileEmail?: string; focusRequest?: number; simple?: boolean; placeName?: string;
+/** How a phone reaches this computer: nothing paired and no way on reads as one closed row; More ways holds Tailscale and
+ * the HTTPS address. Sign in and HTTPS Set up open Add a phone's steps at what they asked for. */
+export function ReachSection({ c, state, simple, moreWaysAsked, managedBy, onPair }: {
+  c: PhoneSetupController; state: CompanionState; simple: boolean; managedBy: string | null; onPair: (ask: PairAsk) => void;
   /** search or a link asked for More ways in, which Simple leaves out until Tailscale or HTTPS is on */
-  moreWaysAsked?: boolean;
-  /** what leads the page: the door to pairing with My Cloud, when there is one */
-  top?: React.ReactNode;
+  moreWaysAsked: boolean;
 }) {
-  const c = usePhoneSetupController(profileEmail);
-  const state = c.state;
-  const pairingFlow = useRef<HTMLDivElement>(null);
-  const revealed = useRef(0);
-  const loaded = Boolean(state);
-  const [pairing, setPairing] = useState<false | "device" | "https">(false);
-  // Both modes start the same way: nothing paired and no way on reads as one closed row; Advanced only adds depth inside.
   const [showRoutes, setShowRoutes] = useState(false);
   const [moreOpenAsked, setMoreOpen] = useState<boolean | null>(null);
-  useEffect(() => {
-    if (!focusRequest) revealed.current = 0;
-    else if (revealed.current !== focusRequest && revealPhonePairing(pairingFlow.current)) {
-      revealed.current = focusRequest;
-      if (takePairOnOpen()) setPairing("device");
-    }
-  }, [focusRequest, loaded]);
-  const resumeAsked = useRef(false);
-  const resumePaused = shouldResumePausedAddress(c.account, state);
-  const { accountAct } = c;
-  useEffect(() => {
-    if (!resumePaused || resumeAsked.current || !companionAccountBridge()?.prepare) return;
-    resumeAsked.current = true;
-    void accountAct((remote) => remote.prepare?.() ?? remote.state());
-  }, [resumePaused, accountAct]);
-  const managedPolicy = useStore().state.config?.managedPolicy;
-  const remoteBlocked = managedPolicy?.remoteAccess === false ? t("policy.remoteBlocked", { organization: managedPolicy.organizationName }) : null;
-  const managedBy = managedPolicy?.remoteAccess === false ? t("policy.managedBy", { organization: managedPolicy.organizationName }) : null;
-
-  if (!companionBridge()) return null;
-
-  if (!state) {
-    return (
-      <div className="flex flex-col gap-6" ref={pairingFlow} tabIndex={-1} data-phone-pairing="computer">
-        {top}
-        <SettingsGroup block="pair">
-          <SettingsSkeletonCard place={placeName} />
-        </SettingsGroup>
-      </div>
-    );
-  }
-
-  const pairedCount = state.devices.length;
   const accountActionError = companionAccountActionError(c.account, c.accountError);
   const tailscaleStatus = deriveTailscalePairingStatus(state);
   const tailscaleOn = state.routes?.tailscale?.on === true;
   const httpsOn = state.routes?.https?.on === true;
   const hosted = state.endpoints?.find((endpoint) => endpoint.kind === "hosted");
   const anyRoute = companionRoutesOn(state);
-  const reachOpen = showRoutes || pairedCount > 0 || anyRoute || moreWaysAsked;
   const moreWaysPeek = simple && moreWaysAsked && !tailscaleOn && !httpsOn;
   const moreWays = !simple || tailscaleOn || httpsOn || moreWaysPeek;
   const moreOpen = moreOpenAsked ?? (tailscaleOn || httpsOn || moreWaysPeek);
-  const pairAgain = c.busy || remoteBlocked ? undefined : () => setPairing("device");
-  const pairButton = (
-    <button type="button" aria-disabled={c.busy || Boolean(remoteBlocked) || undefined} disabled={c.busy} title={managedBy ?? undefined}
-      onClick={() => { if (!remoteBlocked) setPairing("device"); }}
-      className={cn("ui-button ui-button-primary", remoteBlocked && "opacity-40")} data-pair-device="" data-phone-pairing-action="" data-settings-drop="">
-      {t("phone.pair.button")}
-    </button>
-  );
-
+  if (!(showRoutes || state.devices.length > 0 || anyRoute || moreWaysAsked)) {
+    return (
+      <SettingsGroup block="reach" footnote={t("phone.reach.foot")}>
+        <SettingsRows>
+          <SettingsLinkRow title={t("phone.reach.title")} value={t("devices.route.off")} onClick={() => setShowRoutes(true)} data={{ "data-reach-fold": "" }} />
+        </SettingsRows>
+        <span data-settings-block="more-ways" className="contents" />
+      </SettingsGroup>
+    );
+  }
   return (
-    <div className="flex flex-col gap-6 focus:outline-none" ref={pairingFlow} tabIndex={-1} data-phone-pairing="computer">
-      {top}
-      <RouteNotices c={c} notices={state.notices ?? []} />
-      {pairing && <PairDeviceDialog c={c} state={state} placeName={placeName} onClose={() => setPairing(false)} secureAddress={pairing === "https"} />}
-
-      {pairedCount === 0 && !state.pairing ? (
-        <SettingsGroup block="pair">
-          <SettingsRows>
-            <PairRow reason={remoteBlocked}>{pairButton}</PairRow>
-          </SettingsRows>
-        </SettingsGroup>
-      ) : (
-        <SettingsGroup label={t("devices.paired")} block="paired" actions={pairButton}>
-          {showTunnelRetiredNotice(c.account, state) && (
-            <p role="status" data-devices-notice="tunnel-retired" className="px-4 text-[12px] leading-4 text-warning">{t("remote.devices.retiredShort")}</p>
-          )}
-          {remoteBlocked && <p role="status" className="px-4 text-[12px] leading-4 text-ink-secondary">{remoteBlocked}</p>}
-          {state.pairing && <SettingsRows><OpenCodeRow c={c} state={state} /></SettingsRows>}
-          <PairedPhones c={c} state={state} onPairAgain={pairAgain} />
-        </SettingsGroup>
-      )}
-
-      <AlwaysOnHomeSection c={c} state={state} blocked={managedBy} onAddPhone={() => { if (!remoteBlocked) setPairing("device"); }} />
-
-      {!reachOpen ? (
-        <SettingsGroup block="reach" footnote={t("phone.reach.foot")}>
-          <SettingsRows>
-            <SettingsLinkRow title={t("phone.reach.title")} value={t("devices.route.off")} onClick={() => setShowRoutes(true)} data={{ "data-reach-fold": "" }} />
-          </SettingsRows>
-        </SettingsGroup>
-      ) : (
-        <SettingsGroup label={t("phone.reach.title")} block="reach">
-          <SettingsRows>
-            <RouteRow c={c} state={state} route="wifi" blocked={managedBy} />
-            <RouteRow c={c} state={state} route="relay" blocked={managedBy} onSignIn={() => setPairing("device")} />
-            <SettingRow title={t("remote.keepAwake")} subtitle={t("phone.reach.awakeLine")} inert={!anyRoute ? t("remote.keepAwakeNeedsRoute") : undefined}>
-              <Switch checked={state.keepAwake} aria-label={t("remote.keepAwakeAria")} disabled={c.busy || !anyRoute}
-                onClick={() => void c.act((companion) => companion.keepAwake(!state.keepAwake))} />
+    <SettingsGroup label={t("phone.reach.title")} block="reach">
+      <SettingsRows>
+        <RouteRow c={c} state={state} route="wifi" blocked={managedBy} />
+        <RouteRow c={c} state={state} route="relay" blocked={managedBy} onSignIn={() => onPair("sign-in")} />
+        <SettingRow title={t("remote.keepAwake")} subtitle={t("phone.reach.awakeLine")} inert={!anyRoute ? t("remote.keepAwakeNeedsRoute") : undefined}>
+          <Switch checked={state.keepAwake} aria-label={t("remote.keepAwakeAria")} disabled={c.busy || !anyRoute}
+            onClick={() => void c.act((companion) => companion.keepAwake(!state.keepAwake))} />
+        </SettingRow>
+        <RemoteAccessCheckRow account={c.account} state={state} />
+        <div data-settings-block="more-ways" className="contents">
+          {moreWays && <SettingsFoldRow id="more-ways" title={t("devices.moreWays")} value={moreWaysPeek ? <AdvancedSettingTag /> : undefined} open={moreOpen} onToggle={() => setMoreOpen(!moreOpen)}>
+            <SettingRow title="Tailscale" subtitle={<>{t("remote.tailscaleSwitch.short", { app: productName() })}{" "}<LearnMore href={TAILSCALE_HELP} /></>}
+              message={tailscaleStatus.kind !== "off" ? <span data-tailscale-status={tailscaleStatus.kind} aria-live="polite">{tailscaleStatus.title}{tailscaleStatus.detail ? ` ${tailscaleStatus.detail}` : ""}</span> : undefined}>
+              <span data-route-row="tailscale" className="contents">
+                {tailscaleStatus.kind === "not-installed" && <a href="https://tailscale.com/download" target="_blank" rel="noreferrer" className="ui-button">{t("remote.tailscale.getIt")}</a>}
+                {tailscaleOn && tailscaleStatus.kind !== "error" && tailscaleStatus.kind !== "not-installed" && (
+                  <button type="button" className="settings-quiet cursor-pointer" disabled={c.busy || c.accountBusy} onClick={c.refreshTailscale}>{c.busy ? t("common.checking") : t("remote.checkAgain")}</button>
+                )}
+                <Switch checked={tailscaleOn} aria-label="Tailscale" disabled={c.busy || c.accountBusy || (Boolean(managedBy) && !tailscaleOn)}
+                  onClick={() => void c.act((companion) => setCompanionTailscale(companion, !tailscaleOn))} />
+              </span>
             </SettingRow>
-            <RemoteAccessCheckRow account={c.account} state={state} />
-            {moreWays && <div data-settings-block="more-ways" className="contents">
-              <SettingsFoldRow id="more-ways" title={t("devices.moreWays")} value={moreWaysPeek ? <AdvancedSettingTag /> : undefined} open={moreOpen} onToggle={() => setMoreOpen(!moreOpen)}>
-                <SettingRow title="Tailscale" subtitle={<>{t("remote.tailscaleSwitch.short", { app: productName() })}{" "}<LearnMore href={TAILSCALE_HELP} /></>}
-                  message={tailscaleStatus.kind !== "off" ? <span data-tailscale-status={tailscaleStatus.kind} aria-live="polite">{tailscaleStatus.title}{tailscaleStatus.detail ? ` ${tailscaleStatus.detail}` : ""}</span> : undefined}>
-                  <span data-route-row="tailscale" className="contents">
-                    {tailscaleStatus.kind === "not-installed" && <a href="https://tailscale.com/download" target="_blank" rel="noreferrer" className="ui-button">{t("remote.tailscale.getIt")}</a>}
-                    {tailscaleOn && tailscaleStatus.kind !== "error" && tailscaleStatus.kind !== "not-installed" && (
-                      <button type="button" className="settings-quiet cursor-pointer" disabled={c.busy || c.accountBusy} onClick={c.refreshTailscale}>{c.busy ? t("common.checking") : t("remote.checkAgain")}</button>
-                    )}
-                    <Switch checked={tailscaleOn} aria-label="Tailscale" disabled={c.busy || c.accountBusy || (Boolean(managedBy) && !tailscaleOn)}
-                      onClick={() => void c.act((companion) => setCompanionTailscale(companion, !tailscaleOn))} />
-                  </span>
-                </SettingRow>
-                {showHttpsAddressRow(state, c.account, companionBridge()) && <SettingRow title={t("devices.route.https")} subtitle={t("devices.route.httpsDetail", { app: productName() })}
-                  message={(httpsOn && hosted) || c.account?.status === "ready" || accountActionError ? <>
-                    {httpsOn && hosted ? t("devices.route.httpsOn", { address: endpointHost(hosted.url) }) : null}
-                    {c.account?.status === "ready" && <span className="block">{t("devices.route.httpsAccount", { app: productName() })}</span>}
-                    {accountActionError && <span className="block text-danger">{accountActionError}</span>}
-                  </> : undefined}>
-                  <span data-route-row="https" className="contents">
-                    {httpsOn ? (
-                      <button type="button" className="ui-button" disabled={c.busy} onClick={() => void c.act((companion) => setRoute(companion, "https", false))}>{t("devices.route.turnOff")}</button>
-                    ) : (
-                      <button type="button" className="ui-button" disabled={c.busy || c.accountBusy || Boolean(managedBy)} onClick={() => setPairing("https")}>{t("devices.route.setUp")}</button>
-                    )}
-                  </span>
-                </SettingRow>}
-              </SettingsFoldRow>
-            </div>}
-          </SettingsRows>
-        </SettingsGroup>
-      )}
-      <TailnetComputers c={c} state={state} blocked={managedBy} simple={simple} status={tailscaleStatus} />
-      <PhonesList />
-      {(c.error || state.error) && <div className="px-4 text-[12px] leading-4 text-danger">{c.error ?? state.error}</div>}
-    </div>
+            {showHttpsAddressRow(state, c.account, companionBridge()) && <SettingRow title={t("devices.route.https")} subtitle={t("devices.route.httpsDetail", { app: productName() })}
+              message={(httpsOn && hosted) || c.account?.status === "ready" || accountActionError ? <>
+                {httpsOn && hosted ? t("devices.route.httpsOn", { address: endpointHost(hosted.url) }) : null}
+                {c.account?.status === "ready" && <span className="block">{t("devices.route.httpsAccount", { app: productName() })}</span>}
+                {accountActionError && <span className="block text-danger">{accountActionError}</span>}
+              </> : undefined}>
+              <span data-route-row="https" className="contents">
+                {httpsOn ? (
+                  <button type="button" className="ui-button" disabled={c.busy} onClick={() => void c.act((companion) => setRoute(companion, "https", false))}>{t("devices.route.turnOff")}</button>
+                ) : (
+                  <button type="button" className="ui-button" disabled={c.busy || c.accountBusy || Boolean(managedBy)} onClick={() => onPair("https")}>{t("devices.route.setUp")}</button>
+                )}
+              </span>
+            </SettingRow>}
+          </SettingsFoldRow>}
+        </div>
+      </SettingsRows>
+    </SettingsGroup>
   );
 }
 

@@ -20,11 +20,16 @@ export function actionLabel(action: DeviceAction, device?: Device): string {
     case "pair-again": return t("servers.pairAgain");
     case "copy-address": return t("servers.copyAddress");
     case "copy-update": return t("devicesPage.action.howToUpdate");
-    case "manage": return action.page === "phone" ? t("devicesPage.action.openPhonePage") : t("devicesPage.action.manage");
+    case "manage": return t("devicesPage.action.manage");
     case "remove":
       if (device && device.kind !== "phone" && device.sources.length > 1 && action.source.type === "session") return t("devicesPage.action.signOut");
       return t("remote.devices.removeShort");
   }
+}
+
+export interface DeviceExtra {
+  facts?: ReactNode;
+  controls?: ReactNode;
 }
 
 /** A server bots reach over SSH: the id its editor takes. */
@@ -36,7 +41,7 @@ export const vpsOf = (device: Device): string | null => {
 /** A server saved by hand on This computer's own page: the saved id its lend switch is about. */
 const lendsHere = (device: Device) => (window.ogb?.lendComputer?.wish && device.address && device.kind !== "cloud" ? device.sources.find((source) => source.type === "place")?.id ?? null : null);
 
-function Detail({ label, children }: { label: string; children: ReactNode }) {
+export function Detail({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5 @min-[440px]/rows:flex-row @min-[440px]/rows:items-baseline @min-[440px]/rows:gap-3">
       <dt className="shrink-0 text-[12px] leading-4 text-ink-tertiary @min-[440px]/rows:w-24">{label}</dt>
@@ -76,11 +81,13 @@ function BotsDetail({ device }: { device: Device }) {
  * A device's details, open under its row: what it is, how it connects and which bots work on it; the update command when
  * it needs one; the lend switch or a server's own editor; then its other actions. Pair again opens its form right here.
  */
-export function DeviceDetails({ device, onAction, onRemoved, now, pairing, onPairing }: {
+export function DeviceDetails({ device, onAction, onRemoved, now, pairing, onPairing, extra }: {
   device: Device; onAction: (device: Device, action: DeviceAction) => void; onRemoved: (notice: string | null) => void; now: number;
   /** Pair again's form is open in place of the actions. */
   pairing: boolean;
   onPairing: (open: boolean, connected?: boolean) => void;
+  /** What only the page knows of it: more facts for the list, and its own controls (a paired phone's). */
+  extra?: DeviceExtra;
 }) {
   const need = needOf(device);
   const update = device.actions.find((action) => action.type === "copy-update");
@@ -101,8 +108,12 @@ export function DeviceDetails({ device, onAction, onRemoved, now, pairing, onPai
         {device.address && <Detail label={t("devicesPage.detail.address")}><span className="select-text break-all font-mono text-[12px]">{device.address}</span></Detail>}
         {device.version && <Detail label={t("devicesPage.detail.version")}>{device.version}</Detail>}
         {device.lastSeen && device.status !== "online" && <Detail label={t("devicesPage.detail.lastSeen")}>{lastSeen(device.lastSeen, now)}</Detail>}
+        {device.access && <Detail label={t("devicesPage.detail.access")}>{t(device.access === "full" ? "remote.serverPairing.scope.admin" : "remote.serverPairing.scope.client")}</Detail>}
+        {device.email && <Detail label={t("devicesPage.detail.email")}><span className="select-text">{device.email}</span></Detail>}
+        {extra?.facts}
         <Detail label={t("devicesPage.detail.bots")}><BotsDetail device={device} /></Detail>
       </dl>
+      {extra?.controls}
       {update?.type === "copy-update" && (
         <div data-device-update="" className="flex flex-col gap-1.5">
           <p className="text-[13px] leading-[18px] text-ink">{t("devicesPage.update.runPlain", { name: device.name, app: productName() })}</p>

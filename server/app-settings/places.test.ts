@@ -20,7 +20,7 @@ describe("places", () => {
 
   it("find a place by the person's words", () => {
     expect(findPlaces("api key")[0]).toBe("Settings → AI → Other services");
-    expect(findPlaces("pair my phone")[0]).toMatch(/^Settings → Phone & devices/);
+    expect(findPlaces("pair my phone")[0]).toMatch(/^Settings → Devices/);
     expect(findPlaces("connect gmail")[0]).toMatch(/^the Apps panel/);
     expect(findPlaces("zz")).toEqual([]);
   });
@@ -75,7 +75,7 @@ describe("menu paths in our own text", () => {
   it("tell a stale path from a real one", () => {
     expect(inventedPaths('"Add it in Settings → API keys."')).toEqual(["Settings → API keys.\""]);
     expect(inventedPaths('"Sign in again in Settings → AI to keep using it."')).toEqual([]);
-    expect(inventedPaths('"open Settings → Phone & devices → Your other computers in MausBot"')).toEqual([]);
+    expect(inventedPaths('"open Settings → Devices → Private network → Your other computers in MausBot"')).toEqual([]);
     expect(inventedPaths('"open Settings → AI → API keys"')).toEqual(["Settings → AI → API keys\""]);
     expect(inventedPaths('"in System Settings → Privacy & Security"')).toEqual([]);
     expect(inventedPaths("// Settings → Computers, a comment only")).toEqual([]);

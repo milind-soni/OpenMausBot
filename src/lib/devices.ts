@@ -31,7 +31,7 @@ export type DeviceAction =
   | { type: "pair-again"; placeId: string; address: string }
   | { type: "retry"; placeId: string }
   | { type: "copy-update"; install: ServerInstall | null }
-  | { type: "manage"; page: "phone" | "ai" | "desktops" | "app"; anchor?: string };
+  | { type: "manage"; page: "ai" | "desktops" | "app"; anchor?: string };
 
 export interface Device {
   /** Stable across reads: the first source's type and its own id there, never the name. */
@@ -52,6 +52,9 @@ export interface Device {
   canRunBots: boolean;
   /** Bots can work on it: this desktop, a computer lent to this place, a server bots reach over SSH. */
   canHostComputer: boolean;
+  /** A device signed in with a code: what it may do here, and whose email it signed in with. */
+  access?: "full" | "chat";
+  email?: string;
   here?: true;
   /** The place the bots live: My Cloud, or a server the person made their home. */
   home?: true;
@@ -183,7 +186,7 @@ function fromPhone(device: PhoneDevice, connected: ReadonlySet<string>, routes: 
   return {
     id: `phone:${device.id}`, kind: "phone", name: device.name, status: now ? "online" : "offline", ...(now ? { live: true as const } : {}),
     route, routes: [route], lastSeen: device.lastSeenAt, sources: [{ type: "phone", id: device.id }], canRunBots: false, canHostComputer: false,
-    actions: [{ type: "remove", source: { type: "phone", id: device.id } }, { type: "manage", page: "phone", anchor: "paired" }],
+    actions: [{ type: "remove", source: { type: "phone", id: device.id } }],
   };
 }
 
@@ -201,6 +204,7 @@ function fromSession(session: SignedInDevice, route: DeviceRoute, now: number): 
   return {
     id: `session:${session.id}`, kind: kindFromLabel(session.label), name, status: now - session.lastSeenAt < SESSION_ONLINE_MS ? "online" : "offline",
     route, routes: [route], lastSeen: session.lastSeenAt, sources: [{ type: "session", id: session.id }], canRunBots: false, canHostComputer: false,
+    access: session.scopes.includes("admin") ? "full" : "chat", ...(session.email && session.email !== session.person ? { email: session.email } : {}),
     actions: [{ type: "remove", source: { type: "session", id: session.id } }],
   };
 }

@@ -47,10 +47,10 @@ export function PhoneCodeCard({ link, code, expiresAt, connected, children }: { 
 
 /** Pair a phone's code on This computer, in the Devices page's own look; any other moment of the flow (signing in,
  * starting up) is the flow's own view. */
-export function PhoneCodeInline({ c }: { c: PhoneSetupController }) {
+export function PhoneCodeInline({ c, started: asked = false }: { c: PhoneSetupController; /** the steps already started the flow (HTTPS Set up) */ started?: boolean }) {
   const pairing = c.state?.pairing;
   // Add a phone already asked for a code: a way in that is on goes straight to it, with no second "Pair" press.
-  const started = useRef(false);
+  const started = useRef(asked);
   const { phase, start, useLocal, useTailscale } = c;
   const routes = c.state?.routes;
   useEffect(() => {

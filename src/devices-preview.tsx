@@ -4,6 +4,8 @@
 //  &check=1 (presses the private network's button once loaded) &select=<device id> &add=choose|phone|computer|server|cloud
 //  &skin=midnight|daylight&advanced=1&page=<Settings page id>&long=1 (long names)&connect=ok (a server link connects)
 //  &join=phone|computer (a new device signs in a few seconds after a code shows)&tailscale=…|not-running|needs-permission
+//  &code=1 (a phone code still open) &notice=1 (an update kept Same Wi-Fi on) &retired=1 (an older phone app's link ended)
+//  &home=on|off (Always-on home on this computer)
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { SettingsModal } from "@/components/SettingsModal";
@@ -24,6 +26,8 @@ const skin = params.get("skin") ?? "midnight";
 const long = params.get("long") === "1";
 const join = params.get("join");
 const connectOk = params.get("connect") === "ok";
+const homeParam = params.get("home");
+const retired = params.get("retired") === "1";
 applySkinChoice(SKIN_IDS.includes(skin as SkinId) ? (skin as SkinId) : "midnight");
 setAdvancedMode(params.get("advanced") === "1");
 await loadLocale(params.get("lang") ?? "en");
@@ -37,7 +41,7 @@ let companion: CompanionState = {
   enabled: true, keepAwake: false, port: 8810, pairing: null, addresses: ["192.168.1.23"], lan: "192.168.1.23", hosts: ["192.168.1.23"],
   devices: full ? [
     { id: "iphone", name: "Ada’s iPhone 16", createdAt: now - 9e8, lastSeenAt: now - MIN, cloudDesktopAccess: false, e2eAt: now - 5e8, routes: "any", route: "wifi" },
-    { id: "pixel", name: long ? "Theo’s Samsung Galaxy S24 Ultra (the family tablet stand)" : "Pixel 9", createdAt: now - 9e8, lastSeenAt: now - 26 * 60 * MIN, cloudDesktopAccess: false, e2eAt: now - 5e8, routes: "any", route: null },
+    { id: "pixel", name: long ? "Theo’s Samsung Galaxy S24 Ultra (the family tablet stand)" : "Pixel 9", createdAt: now - 9e8, lastSeenAt: now - 26 * 60 * MIN, cloudDesktopAccess: true, browserControlAccess: true, ...(retired ? {} : { e2eAt: now - 5e8 }), routes: "local", route: null },
     ...(ten ? [
       { id: "ipad", name: "Ada’s iPad Pro", createdAt: now - 9e8, lastSeenAt: now - MIN, cloudDesktopAccess: false, e2eAt: now - 5e8, routes: "any" as const, route: "tailscale" as const },
       { id: "kid", name: "Theo’s Galaxy A54 with a very long name", createdAt: now - 9e8, lastSeenAt: now - 3 * 24 * 60 * MIN, cloudDesktopAccess: false, e2eAt: now - 5e8, routes: "local" as const, route: null },
@@ -46,7 +50,11 @@ let companion: CompanionState = {
   connectedDeviceIds: full ? ["iphone", ...(ten ? ["ipad"] : [])] : shown === "one" ? ["iphone"] : [],
   routes: { wifi: { on: full, since: now - 9e8 }, relay: { on: full, since: now - 9e8 }, tailscale: tailRoute, https: { on: false, since: null } },
   tailnetShare: ready && tailscale !== "unshared" ? { on: true, origin: "http://ada-macbook.tail4c2e.ts.net:8799", https: false, problem: null } : undefined,
+  e2e: { enabled: true, relay: "connected", node: "relay1.openmausbot.com", descriptor: null },
+  ...(params.get("code") === "1" ? { pairing: { code: "482913", token: "omb_pair_PreviewPreviewPreviewPreviewPreviewPreviewP", expiresAt: now + 10 * MIN } } : {}),
+  ...(params.get("notice") === "1" ? { notices: ["wifi" as const] } : {}),
 };
+const alwaysOnHome = { available: true, on: homeParam === "on", platform: "darwin", openAtLogin: homeParam === "on", awake: homeParam === "on" ? "holding" as const : "off" as const, updates: "by-itself" as const };
 const problem = ["not-installed", "no-cli", "signed-out", "needs-approval", "not-running", "needs-permission"].includes(tailscale) ? tailscale as CompanionState["tailscaleProblem"] : undefined;
 const reply = async (next?: Partial<CompanionState>) => { companion = { ...companion, ...next }; return companion; };
 const companionBridge = {
@@ -58,7 +66,9 @@ const companionBridge = {
     if (open && join === "phone") window.setTimeout(() => void reply({ pairing: null, devices: [...companion.devices, { id: "new-phone", name: "Ada’s Pixel 10", createdAt: Date.now(), lastSeenAt: Date.now(), cloudDesktopAccess: false, e2eAt: Date.now(), routes: "any", route: "wifi" }], connectedDeviceIds: [...(companion.connectedDeviceIds ?? []), "new-phone"] }), 2500);
     return reply({ pairing: open ? { code: "482913", token: "omb_pair_PreviewPreviewPreviewPreviewPreviewPreviewP", expiresAt: Date.now() + 10 * MIN } : null });
   },
-  cloudDesktop: () => reply(), browserControl: () => reply(), routes: () => reply(),
+  cloudDesktop: (id: string, on: boolean) => reply({ devices: companion.devices.map((device) => (device.id === id ? { ...device, cloudDesktopAccess: on } : device)) }),
+  browserControl: (id: string, on: boolean) => reply({ devices: companion.devices.map((device) => (device.id === id ? { ...device, browserControlAccess: on } : device)) }),
+  routes: (id: string, routes: "any" | "local") => reply({ devices: companion.devices.map((device) => (device.id === id ? { ...device, routes } : device)) }),
   revoke: (id: string) => reply({ devices: companion.devices.filter((device) => device.id !== id) }),
 };
 const environments: Array<{ id: string; kind: "local" | "remote"; name: string; origin?: string; home?: boolean; color?: string }> = full ? [
@@ -82,14 +92,15 @@ const ogb = {
   app: { version: "0.1.180" },
   ...(place === "computer" ? {
     companion: companionBridge,
-    companionAccount: { state: async () => ({ available: true, status: "ready", email: "ada@example.com" }) },
+    companionAccount: { state: async () => ({ available: true, status: "ready", email: "ada@example.com", ...(retired ? { tunnelRetired: true } : {}) }) },
+    ...(homeParam ? { alwaysOnHome: { state: async () => alwaysOnHome, set: async (on: boolean) => Object.assign(alwaysOnHome, { on, openAtLogin: on, awake: on ? "holding" : "off" }) } } : {}),
     environments: { state: async () => ({ localOrigin: "http://127.0.0.1:8799", remote: false, packaged: true, activeId: "local", environments: [...environments] }), status: async () => statuses,
       switch: async () => {}, forget: async () => {}, retry: async () => {}, addFromLink: async () => {}, create: async () => ({ ok: true, state: null }), pickDir: async () => ({ ok: false }) },
     computerSharing: { servers: async () => (full ? [{ id: "mini", enabled: true, connected: true, paused: false }] : []) },
     // The one lend switch on a server's card (src/lib/use-lend-computer.ts): the Mac mini lends, the VPS doesn't yet.
     lendComputer: { state: async (id: string | null) => lendViews[id ?? ""] ?? lendViews.vps!, set: async (id: string | null, on: boolean) => (lendViews[id ?? ""] = { ...(lendViews[id ?? ""] as Extract<DesktopLendView, { lendable: true }>), on, connected: on }),
       allowScreen: async (id: string | null) => lendViews[id ?? ""]!, wish: async () => true },
-    workspaces: { state: () => new Promise(() => {}), places: () => new Promise(() => {}),
+    workspaces: { state: () => new Promise(() => {}), places: () => new Promise(() => {}), homeOffers: async () => [], onChanged: () => () => {},
       add: async (how: string, address?: string) => {
         if (how !== "link") return;
         if (!connectOk) return { outcome: "problem", problem: "unreachable", host: hostOf(address ?? "") };
@@ -124,7 +135,7 @@ const ANSWERS: Record<string, unknown> = {
   "/api/computers/bots": { now, rows: botRows },
   "/api/auth/session": { kind: "loopback", trust: "owner" },
   "/api/auth/sessions": { sessions, current: null },
-  "/api/phones": { phones: full ? [{ key: "k1", registration: { installId: "i1", name: "Ada’s iPhone 16", platform: "ios", appVersion: "2.4.0", timeZone: "UTC", capabilities: {} }, registeredAt: now - 9e8, seen: now - MIN, lastUsedAt: null, online: true, busy: false }] : [] },
+  "/api/phones": { phones: full ? [{ key: "k1", registration: { installId: "i1", name: "Ada’s iPhone 16", platform: "ios", appVersion: "2.4.0", timeZone: "UTC", capabilities: { calendar: true, reminders: true, location: true } }, registeredAt: now - 9e8, seen: now - MIN, lastUsedAt: null, online: true, busy: false }] : [] },
   "/api/auth/pairing": { id: "p1", code: "7KQ2-M9XD-H4TP", expiresAt: now + 10 * MIN, url: "http://ada-macbook.tail4c2e.ts.net:8799/pair#code=7KQ2-M9XD-H4TP", hint: null },
 };
 const config = {

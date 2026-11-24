@@ -10,13 +10,6 @@ import type { CompanionState, PhoneSetupController } from "./PhoneSetupFlow";
 
 const sessions = vi.hoisted(() => ({ list: [] as unknown[] }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: { config: {} } }), api: async () => ({ sessions: sessions.list }) }));
-vi.mock("./PlaceAddSheet", async () => {
-  const { createElement: h } = await import("react");
-  return {
-    RailSheet: ({ children }: { children: unknown }) => h("div", { "data-rail-sheet": "" }, children as never),
-    OwnServerLink: () => h("div", { "data-own-server-link": "" }),
-  };
-});
 
 const { AlwaysOnHomeSection, alwaysOnLines, homeStatusLine, recentSessions, RECENT_SESSION_MS, systemSettingLines } = await import("./AlwaysOnHomeSection");
 
@@ -48,10 +41,10 @@ afterEach(() => {
 });
 
 type Act = (call: (companion: unknown) => Promise<CompanionState>) => Promise<CompanionState>;
-function render(state: CompanionState, { act = vi.fn<Act>(async () => state), onAddPhone = vi.fn() } = {}) {
+function render(state: CompanionState, { act = vi.fn<Act>(async () => state), onAddPhone = vi.fn(), onAddComputer = vi.fn(), onConnect = vi.fn() } = {}) {
   const c = { busy: false, accountBusy: false, act } as unknown as PhoneSetupController;
-  flushSync(() => root.render(createElement(AlwaysOnHomeSection, { c, state, onAddPhone })));
-  return { act, onAddPhone };
+  flushSync(() => root.render(createElement(AlwaysOnHomeSection, { c, state, onAddPhone, onAddComputer, onConnect })));
+  return { act, onAddPhone, onAddComputer, onConnect };
 }
 
 describe("what the switch says it did", () => {
@@ -116,17 +109,15 @@ describe("on the spare computer", () => {
     expect(onAddPhone).toHaveBeenCalledOnce();
   });
 
-  it("Add your other computer turns on Your other computers in one tap; once on, it points at Pair a computer", async () => {
+  it("Add your other computer opens the page's own steps for a computer, whether or not the share is on yet", async () => {
     (globalThis as { ogb?: unknown }).ogb = { platform: "darwin", alwaysOnHome: { state: async () => home({ on: true, openAtLogin: true, awake: "holding" }), set: vi.fn() } };
-    const setTailscaleComputers = vi.fn(async () => companionState(0, true));
-    const { act } = render(companionState(0), { act: vi.fn<Act>(async (call) => call({ setTailscaleComputers, state: vi.fn() })) });
+    const { act, onAddComputer } = render(companionState(0));
     await vi.waitFor(() => expect($("[data-always-on-add-computer]")).not.toBeNull());
     flushSync(() => $<HTMLButtonElement>("[data-always-on-add-computer]")!.click());
-    await vi.waitFor(() => expect(setTailscaleComputers).toHaveBeenCalledWith(true));
-    expect(act).toHaveBeenCalledOnce();
+    expect(onAddComputer).toHaveBeenCalledOnce();
+    expect(act).not.toHaveBeenCalled();
     render(companionState(0, true));
-    await vi.waitFor(() => expect($("[data-always-on-add-computer]")).toBeNull());
-    expect(text()).toContain("choose Pair a computer under Your other computers");
+    await vi.waitFor(() => expect($("[data-always-on-add-computer]")).not.toBeNull());
   });
 
   it("with no way in on, the status says nothing can reach it yet", async () => {
@@ -139,7 +130,7 @@ describe("on the spare computer", () => {
   it("an organization that keeps remote access off: neither next step turns a way in on, and it says why", async () => {
     (globalThis as { ogb?: unknown }).ogb = { platform: "darwin", alwaysOnHome: { state: async () => home({ on: true, openAtLogin: true, awake: "holding" }), set: vi.fn() } };
     const c = { busy: false, accountBusy: false, act: vi.fn() } as unknown as PhoneSetupController;
-    flushSync(() => root.render(createElement(AlwaysOnHomeSection, { c, state: companionState(0), onAddPhone: vi.fn(), blocked: "Managed by Acme" })));
+    flushSync(() => root.render(createElement(AlwaysOnHomeSection, { c, state: companionState(0), onAddPhone: vi.fn(), onAddComputer: vi.fn(), onConnect: vi.fn(), blocked: "Managed by Acme" })));
     await vi.waitFor(() => expect($("[data-always-on-add-phone]")).not.toBeNull());
     expect($<HTMLButtonElement>("[data-always-on-add-phone]")!.disabled).toBe(true);
     expect($<HTMLButtonElement>("[data-always-on-add-computer]")!.disabled).toBe(true);
@@ -169,7 +160,7 @@ describe("on the main computer", () => {
     flushSync(() => $<HTMLButtonElement>("[data-settings-disclosure=add-always-on] button")!.click());
   };
 
-  it("walks through adding one: the steps, Connect opens the existing pairing sheet", async () => {
+  it("walks through adding one: the steps, then Connect, which is Add your own server's steps", async () => {
     const env = environments([{ id: "local", name: "This computer", kind: "local" }]);
     (globalThis as { ogb?: unknown }).ogb = { platform: "darwin", environments: env, workspaces: { probe: vi.fn(), makeHome: vi.fn() } };
     render(companionState(0));
@@ -178,8 +169,10 @@ describe("on the main computer", () => {
     flushSync(() => $<HTMLButtonElement>("[data-settings-disclosure=add-always-on] button")!.click());
     expect($("[data-always-on-steps]")?.textContent).toContain("Use this Mac as an always-on home");
     expect($("[data-always-on-steps]")?.textContent).toContain("Tailscale");
+    const { onConnect } = render(companionState(0));
     flushSync(() => $<HTMLButtonElement>("[data-always-on-connect]")!.click());
-    expect($("[data-rail-sheet] [data-own-server-link]")).not.toBeNull();
+    expect(onConnect).toHaveBeenCalledOnce();
+    expect(document.querySelector("[role=dialog]")).toBeNull();
   });
 
   it("once added: how it is doing, Open its bots, and Make … my home in one tap while main offers it, as on the rail", async () => {
