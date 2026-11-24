@@ -22,7 +22,7 @@ import { deletePromptSplitReceipt, writePromptSplitReceipt } from "../prompt-spl
 import { liveSessionKey, sessionSystem, turnPrompt } from "./session-system.ts";
 import type { PromptSplitReceipt } from "../prompt-split.ts";
 import { boxAudienceKey, describeSpawnFailure, execCli, killCliTree, sharedBoxScope, spawnCli } from "../../procs.ts"; import { stopEngineTree, stopEngineTrees } from "../../engine-stop.ts";
-import { applyOneShotEnv, runAcpOneShot } from "./background-text.ts"; import type { AcpBackgroundWork } from "./background-work.ts";
+import { applyOneShotEnv, oneShotTurnModel, runAcpOneShot } from "./background-text.ts"; import type { AcpBackgroundWork } from "./background-work.ts";
 import { acpCapabilities } from "./capabilities.ts"; import { readAcpMediaLinks } from "./media-links.ts";
 import { acpNativeLogMessage } from "./tool-log.ts";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
@@ -156,7 +156,7 @@ export interface AcpSupport extends AcpDriverHooks {
    * confirms it; an approval change never respawns the process. */
   sessionScopedApproval?: boolean;
   /** False when this engine cannot run memory upkeep's one-shot text call cleanly; oneShotFolder holds a one-shot's folder. */
-  backgroundText?: false; oneShotFolder?(): Promise<string>; /** Work the agent goes on with after its turn: ended at Stop and when it wakes a turn between ours. */ backgroundWork?: AcpBackgroundWork;
+  backgroundText?: false; oneShotFolder?(): Promise<string>; oneShotModel?(model: string, env: Record<string, string | undefined>, models: ModelCatalog): string | undefined; /** Work the agent goes on with after its turn: ended at Stop and when it wakes a turn between ours. */ backgroundWork?: AcpBackgroundWork;
   /** Mutate the child env in place. `instanceEnvironment` tells a key put there on purpose from one
    *  riding along in the server's own env. */
   transformEnv?(
@@ -1449,8 +1449,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const authenticated = await support.isAuthenticated(env, config, instanceId, instanceEnvNames(input.environment, env)); return { state: "available", version: probe.version, authenticated, ...apiKeyAccount(env, support.credentialEnv, authenticated) };
       };
 
-    /** Memory upkeep's one-shot: a fresh process and session, no MCP servers, an empty folder, and
-     * every tool, file or permission request refused. */
+    /** Memory upkeep's one-shot: a fresh process and session, no MCP servers, an empty folder, every tool/permission refused. */
       const generateMemoryText = async (prompt: string, options: TextGenerationOptions = {}): Promise<string> => {
         if (startupModelRefresh) await startupModelRefresh;
         const turnConfig: AcpConfig = { ...config, fullAuto: false };
@@ -1460,8 +1459,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         }
         const cwd = mkdtempSync(join(await support.oneShotFolder?.() ?? tmpdir(), "omb-acp-memory-"));
         try {
-          const turn = { threadId: `memory-text-${newId()}`, text: prompt, approvalMode: "ask", cwd } as SendTurnInput;
-          const model = applyOneShotEnv(support, env, options, catalog.models, { fullAuto: false, cwd, threadId: turn.threadId, mcpServers: [] });
+          const turnModel = oneShotTurnModel(support, env, options, catalog.models);
+          const turn = { threadId: `memory-text-${newId()}`, text: prompt, approvalMode: "ask", cwd, ...(turnModel ? { model: turnModel } : {}) } as SendTurnInput;
+          const model = applyOneShotEnv(support, env, options, catalog.models, { fullAuto: false, cwd, threadId: turn.threadId, mcpServers: [], ...(turnModel ? { model: turnModel } : {}) });
           const launch: { command: string; args?: string[]; env?: Record<string, string | undefined>; ro?: readonly string[] } = support.resolveCommand ? await support.resolveCommand(env, turnConfig, instanceId) : { command: turnConfig.cli };
           const spawnEnv = launch.env ?? env;
           return await runAcpOneShot({
@@ -1472,9 +1472,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             env: spawnEnv,
             cwd,
             prompt,
-            defaultModel: catalog.models.default, model,
+            defaultModel: turnModel ?? catalog.models.default, model, ...(turnModel ? { configuredModel: turnModel } : {}),
             pickAuthMethod: (methods) => support.skipsAuthenticate?.(instanceId) ? null : support.pickAuthMethod(methods, spawnEnv),
-            authRequired: !support.skipsAuthenticate?.(instanceId) && (support.authFailure === "fail-request" ? "if-requested" : support.authFailure === "fail"),
+            authRequired: turnModel && skipSubscriptionAuthForLocalInject(options.model ?? options.fallback?.model) ? false : !support.skipsAuthenticate?.(instanceId) && (support.authFailure === "fail-request" ? "if-requested" : support.authFailure === "fail"),
             loginNote: support.loginNote, signInRefused: support.skipsAuthenticate?.(instanceId) && support.signInRequest ? (error) => { const refused = support.signInRequest!.rpcError(error, instanceId); if (refused) support.signInRequest!.required(instanceId); return refused; } : undefined,
             clientCapabilitiesMeta: support.clientCapabilitiesMeta,
             ...(support.configureSession ? {
