@@ -8,7 +8,7 @@ import { isArchived, orderedSidebarThreads, orderedThreadList, threadRecency, th
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 import { localizedTaskTitle } from "@/lib/task-title";
 import { endedOnFailure } from "@/lib/mascot";
-import { rowSelectedSurface } from "./SidebarRowMarkers";
+import { MainThreadMark, rowSelectedSurface } from "./SidebarRowMarkers";
 import { handoffStatusText } from "./HandoffStatusChip";
 
 export function sidebarBotActivityTasks(bot: Bot, queued: Record<string, unknown[]>, archivedApprovals = false): Array<Task & { queued: boolean }> {
@@ -257,7 +257,7 @@ export function SidebarBotActivity({ bot, rowThreadId, density, pendingQueued, d
         onClick={() => dispatch({ type: "switchTask", botId: bot.id, threadId: task.threadId })}
         className={cn("flex min-h-7 w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-left text-[13px] leading-[18px] outline-none hover:bg-ink/[0.06] focus-visible:ring-1 focus-visible:ring-accent/60", iconOnly && "justify-center", waiting ? "text-warning" : "text-ink-secondary")}>
         <Icon size={14} aria-hidden="true" className={cn("shrink-0", working && "animate-spin text-success", teammateWait && "text-warning", task.unread && !waiting && !working && !teammateWait && "text-accent")} />
-        {!iconOnly && <><span className="min-w-0 flex-1 truncate">{title}</span>{!pinnedOnly && <span className="shrink-0 text-[12px] leading-4">{waiting ? t("task.waiting") : status}</span>}
+        {!iconOnly && <><span className="min-w-0 flex-1 truncate">{title}</span>{task.threadId === bot.mainThreadId && <MainThreadMark />}{!pinnedOnly && <span className="shrink-0 text-[12px] leading-4">{waiting ? t("task.waiting") : status}</span>}
           {task.unread && (waiting || working || teammateWait || task.queued) && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true" />}</>}
       </button>;
     })}

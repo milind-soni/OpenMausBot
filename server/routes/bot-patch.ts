@@ -242,6 +242,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       // Same 400 for unknown and ineligible ids, so a private thread's existence is not revealed.
       if (body.mainThreadChoice !== undefined) {
         const chosen = typeof body.mainThreadChoice === "string" ? deps.mainThreadTasks(m[1]).find((task) => task.threadId === body.mainThreadChoice) : null;
+        patch.mainThreadKept = undefined;
         if (body.mainThreadChoice === null) patch.mainThreadChoice = undefined;
         else if (chosen && !chosen.routineRunId && chosen.archivedAt === undefined) patch.mainThreadChoice = chosen.threadId;
         else return json(res, 400, { error: "mainThreadChoice must be one of this bot's conversations" });

@@ -11680,6 +11680,7 @@
   "sidebar.threads.hideShort": "Ocultar",
   "sidebar.threads.running": "+{count} em andamento",
   "sidebar.threads.more": "mais {count}",
+  "sidebar.threads.main": "Principal",
   "skillBurger.aria": "Skill Burger",
   "skillBurger.layers": "Etapas",
   "skillBurger.layersOne": "1 etapa",
