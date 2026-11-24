@@ -31,6 +31,7 @@ let go: ReturnType<typeof vi.fn<SettingsShell["go"]>>;
 let setSub: ReturnType<typeof vi.fn<NonNullable<SettingsShell["setSub"]>>>;
 let workspaces: Record<string, ReturnType<typeof vi.fn>>;
 let lendWish: ReturnType<typeof vi.fn>;
+let phoneApps: unknown[];
 let saved: Array<{ id: string; kind: string; name: string; origin?: string; home?: boolean }>;
 
 const reply = async () => companion;
@@ -75,6 +76,7 @@ beforeEach(() => {
   setLocale("en");
   forgetSharedSession();
   requests = [];
+  phoneApps = [];
   session = { kind: "loopback", trust: "owner" };
   sessions = [];
   openCodes = ["p1"];
@@ -97,7 +99,7 @@ beforeEach(() => {
     if (path === "/api/auth/sessions") return Response.json({ sessions, current: null });
     if (path === "/api/auth/pairing" && init?.method === "POST") return Response.json({ id: "p1", code: "7KQ2-M9XD-H4TP", expiresAt: NOW + 600_000, url: null, hint: null });
     if (path === "/api/auth/pairing") return Response.json({ pairings: openCodes.map((id) => ({ id })) });
-    if (path === "/api/phones") return Response.json({ phones: [] });
+    if (path === "/api/phones") return Response.json({ phones: phoneApps });
     if (path === "/api/computers/bots") return botRows === "forbidden" ? Response.json({ error: "admin only" }, { status: 403 }) : Response.json({ now: NOW, rows: botRows });
     if (path === "/api/config" && init?.method === "PUT") return Response.json({ notice: "GPU box is no longer used. Its desktops stay on it.", vps: { configured: false, sshAlias: "", servers: [] } });
     if (path === "/api/config") return Response.json({ membership: { authority: "local", pairingCodes: true } });
@@ -213,6 +215,32 @@ describe("the Devices page", () => {
     expect(document.activeElement?.getAttribute("data-device-node")).toBe("phone:iphone");
     // Nothing open: Escape is Settings' own.
     expect(await press("[data-device-node='phone:iphone']", "Escape")).toBe(true);
+  });
+
+  it("removes a phone whole, its pairing and its app together, and keeps a computer's sign-in its own action", async () => {
+    phoneApps = [{ key: "k1", registration: { installId: "i1", name: "Ada’s iPhone", platform: "ios", appVersion: "2.4.0", timeZone: "UTC", capabilities: {} }, registeredAt: NOW, seen: NOW, lastUsedAt: null, online: true, busy: false }];
+    sessions = [{ id: "s-vps", label: "Hetzner box", scopes: ["admin", "client"], lastSeenAt: NOW }];
+    await render();
+    await click("[data-device-node='phone:iphone']");
+    expect(document.querySelectorAll("[data-device-details='phone:iphone'] [data-device-action=remove]")).toHaveLength(1);
+    await click("[data-device-details='phone:iphone'] [data-device-action=remove]");
+    expect(bridge.revoke).toHaveBeenCalledWith("iphone");
+    expect(requests.some((request) => request.startsWith("DELETE /api/phones"))).toBe(true);
+    await click("[data-device-node='place:vps']");
+    expect([...document.querySelectorAll("[data-device-details='place:vps'] [data-device-action=remove]")].map((one) => one.textContent)).toEqual(["Remove", "Sign it out"]);
+    await click("[data-device-details='place:vps'] [data-device-action=remove]");
+    expect(environments.forget).toHaveBeenCalledWith("vps");
+    expect(requests).not.toContain("DELETE /api/auth/sessions/s-vps");
+  });
+
+  it("closes the open details on an Escape pressed with focus nowhere, as after Pair again's Cancel", async () => {
+    await render();
+    await click("[data-device-node='place:vps']");
+    await click("[data-device-details='place:vps'] [data-device-action=pair-again]");
+    await click("[data-pair-again-cancel]");
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(await press(document.body, "Escape")).toBe(false);
+    expect($("[data-device-details]")).toBeNull();
   });
 
   it("pairs a saved server again inside its details, with nothing over the page", async () => {
@@ -341,6 +369,40 @@ describe("Add a device, in the page", () => {
     expect($("[data-add-panel]")).toBeNull();
     await new Promise((resolve) => window.requestAnimationFrame(() => resolve(null)));
     expect(document.activeElement?.hasAttribute("data-add-device")).toBe(true);
+  });
+
+  it("steps back on an Escape pressed with focus nowhere or on the header's Back, as after a step swaps its controls", async () => {
+    await render({}, { setSub });
+    await click("[data-add-device]");
+    await click("[data-add-kind=computer]");
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(await press(document.body, "Escape")).toBe(false);
+    expect($("[data-add-panel]")?.getAttribute("data-add-step")).toBe("choose");
+    const header = document.createElement("header");
+    header.setAttribute("data-settings-header", "");
+    const back = document.createElement("button");
+    header.append(back);
+    document.body.append(header);
+    back.focus();
+    expect(await press(back, "Escape")).toBe(false);
+    expect($("[data-add-panel]")).toBeNull();
+    // A field elsewhere in Settings (its search) keeps its own Escape.
+    await click("[data-add-device]");
+    const search = document.createElement("input");
+    document.body.append(search);
+    search.focus();
+    expect(await press(search, "Escape")).toBe(true);
+    expect($("[data-add-panel]")).not.toBeNull();
+  });
+
+  it("shows no device as just joined that was already there when Add opened before the lists answered", async () => {
+    const shell: SettingsShell = { ctx: fullContext({ advanced: false }), place: { name: "This computer", kind: "computer", color: null, named: false }, page: "devices", anchor: null, go };
+    act(() => root.render(createElement(StoreContext.Provider, { value: { state: { ...initialState, config: config as never, bots: BOTS as never }, dispatch: vi.fn() } as never },
+      createElement(SettingsShellContext.Provider, { value: shell }, createElement(DevicesPage)))));
+    act(() => $("[data-add-device]")!.click());
+    act(() => $("[data-add-kind=phone]")!.click());
+    await settle();
+    expect($("[data-add-connected]")).toBeNull();
   });
 
   it("names each step in a narrow window's own header, with its way back, and leaves out the page's copy of it", async () => {

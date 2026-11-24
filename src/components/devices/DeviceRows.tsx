@@ -1,4 +1,4 @@
-import { useId, type KeyboardEvent, type ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { ChevronRight, Waypoints } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -29,7 +29,7 @@ const SLOT = "flex size-8 shrink-0 items-center justify-center text-ink-secondar
 
 /**
  * One device: its kind's mark, its name, its state and how it connects in one line, the bots on it, and the one thing it
- * needs. The whole row opens its details right under it, in the same card; Escape there closes them.
+ * needs. The whole row opens its details right under it, in the same card; Escape closes them (the page listens).
  */
 function DeviceRow({ device, mark, opened, onAction, now }: {
   device: Device; mark?: ReactNode; opened: Opened; onAction: (device: Device, action: DeviceAction) => void; now: number;
@@ -41,14 +41,8 @@ function DeviceRow({ device, mark, opened, onAction, now }: {
   const detailsId = useId();
   const node = device.here ? "here" : device.id;
   const label = [device.name, statusText(device, now), botsLabel(bots)].filter(Boolean).join(", ");
-  const onKey = (event: KeyboardEvent) => {
-    if (!open || event.key !== "Escape") return;
-    event.preventDefault();
-    event.stopPropagation();
-    opened.close();
-  };
   return (
-    <div data-device-row={device.id} data-device-status={device.status} data-open={open ? "" : undefined} onKeyDown={onKey}>
+    <div data-device-row={device.id} data-device-status={device.status} data-open={open ? "" : undefined}>
       <div className="relative flex min-h-11 items-center gap-3 px-4 py-3">
         <span aria-hidden="true" className={SLOT}>{mark ?? <SettingsMark><Icon /></SettingsMark>}</span>
         <button type="button" data-device-node={node} aria-expanded={open} aria-controls={detailsId} aria-label={label} title={device.name}

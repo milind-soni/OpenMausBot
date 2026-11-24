@@ -13,7 +13,7 @@ import { needOf, useBotsOn } from "./device-parts";
 import { CommandRow } from "./PairCodePanel";
 import { kindLabel, routeLabel } from "./device-words";
 
-export function actionLabel(action: DeviceAction): string {
+export function actionLabel(action: DeviceAction, device?: Device): string {
   switch (action.type) {
     case "switch": return t("devicesPage.action.goToBots");
     case "retry": return t("devicesPage.action.reconnect");
@@ -22,6 +22,7 @@ export function actionLabel(action: DeviceAction): string {
     case "copy-update": return t("devicesPage.action.howToUpdate");
     case "manage": return action.page === "phone" ? t("devicesPage.action.openPhonePage") : t("devicesPage.action.manage");
     case "remove":
+      if (device && device.kind !== "phone" && device.sources.length > 1 && action.source.type === "session") return t("devicesPage.action.signOut");
       return t("remote.devices.removeShort");
   }
 }
@@ -47,15 +48,15 @@ function Detail({ label, children }: { label: string; children: ReactNode }) {
 export function ActionButton({ device, action, onAction, main = false }: { device: Device; action: DeviceAction; onAction: (device: Device, action: DeviceAction) => void; main?: boolean }) {
   return (
     <button type="button" data-device-action={action.type} data-danger={action.type === "remove" ? "" : undefined} onClick={() => onAction(device, action)}
-      aria-label={`${actionLabel(action)}: ${device.name}`} className={action.type === "remove" ? "ui-button ms-auto shrink-0 text-danger!" : main ? "ui-button ui-button-primary shrink-0" : "ui-button shrink-0"}>{actionLabel(action)}</button>
+      aria-label={`${actionLabel(action, device)}: ${device.name}`} className={action.type === "remove" ? "ui-button ms-auto shrink-0 text-danger!" : main ? "ui-button ui-button-primary shrink-0" : "ui-button shrink-0"}>{actionLabel(action, device)}</button>
   );
 }
-/** What it needs first, then the harmless actions, then one Remove, which takes every way the device is joined here. */
+/** What it needs first, then the harmless actions, then Remove (one for a phone, which takes its pairing and its app). */
 function orderActions(device: Device): DeviceAction[] {
   const need = needOf(device);
   const removes = device.actions.filter((action) => action.type === "remove");
   const rest = device.actions.filter((action) => action.type !== "remove" && action !== need);
-  return [...(need ? [need] : []), ...rest, ...removes.slice(0, 1)];
+  return [...(need ? [need] : []), ...rest, ...(device.kind === "phone" ? removes.slice(0, 1) : removes)];
 }
 
 const actionKey = (action: DeviceAction) => `${action.type}:${"source" in action ? action.source.id : ""}`;

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, ChevronLeft, Cloud, Laptop, Server, Smartphone } from "lucide-react";
 import { productName } from "@/lib/brand";
 import { cn } from "@/lib/cn";
@@ -22,6 +22,11 @@ if (typeof window !== "undefined" && typeof window.addEventListener === "functio
 }
 /** Whether the last thing the person did was press a key rather than point. */
 export const lastInputWasKeys = () => keyAt > pointerAt;
+
+/** Focus on nothing, on the Settings page's own body or on its header: a key there belongs to this page. A field or menu
+ * elsewhere (the Settings search, another layer) keeps its own Escape. */
+export const withinPage = (element: Element | null) =>
+  !element || element === document.body || Boolean(element.closest("[data-settings-page-body], [data-settings-header], [data-add-panel], [data-devices-page]"));
 
 export type AddKind = "phone" | "computer" | "server" | "cloud";
 
@@ -95,6 +100,8 @@ export interface AddDeviceProps {
   /** A MausBot Cloud's page: another computer opens it by signing in, with no code. */
   cloud: boolean;
   devices: readonly Device[];
+  /** Every source has answered at least once. */
+  loaded: boolean;
   network: PrivateNetwork | null;
   networkAction: NetworkAction | null;
   /** Where another computer on the private network opens this one. */
@@ -123,7 +130,9 @@ export interface AddDeviceProps {
 export function AddDevicePanel(props: AddDeviceProps) {
   const { here, cloud, devices, network, networkAction, tailnetAddress, start, onBack, onConnected, phoneSteps, canConnectServer, onGetCloud, onCheck, checking = false, setSub } = props;
   const [kind, setKind] = useState<AddKind | null>(start);
-  const [known] = useState(() => new Set(devices.map((device) => device.id)));
+  // The devices there before this step, read once every source has answered: one that joins after is the new one.
+  const [known, setKnown] = useState<ReadonlySet<string> | null>(() => (props.loaded ? new Set(devices.map((device) => device.id)) : null));
+  useEffect(() => { if (props.loaded && !known) setKnown(new Set(devices.map((device) => device.id))); }, [props.loaded, known, devices]);
   const heading = useRef<HTMLDivElement>(null);
   const left = useRef<AddKind | null>(null);
   // Keys move focus to the step's first control; a pointer leaves it on the step itself, with no ring.
@@ -142,13 +151,7 @@ export function AddDevicePanel(props: AddDeviceProps) {
     onBack();
   };
   const backTo = kind && !start ? t("devicesPage.add") : t("settings.page.devices");
-  const onKey = (event: KeyboardEvent) => {
-    if (event.key !== "Escape" || event.defaultPrevented) return;
-    event.preventDefault();
-    event.stopPropagation();
-    back();
-  };
-  const joined = kind ? devices.find((device) => !known.has(device.id) && GROUP_OF[kind](device)) : undefined;
+  const joined = kind && known ? devices.find((device) => !known.has(device.id) && GROUP_OF[kind](device)) : undefined;
   const shared = network?.state === "ready" && network.shared;
   const networkReady = Boolean(shared && tailnetAddress);
   // On and shared, but nothing answers at the address yet: the step is to check again.
@@ -157,12 +160,23 @@ export function AddDevicePanel(props: AddDeviceProps) {
   const lede = kind ? t(LEDE[kind], { app: productName() }) : t("devicesPage.addFlow.chooseLede");
   const backRef = useRef(back);
   backRef.current = back;
+  // Escape steps back wherever focus is in this page or its header (or nowhere, after a step swapped), never past it.
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || !withinPage(document.activeElement)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      backRef.current();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
   useEffect(() => {
     setSub?.({ title, short: kind === "server" ? t("devicesPage.add.server") : undefined, back: backTo, onBack: () => backRef.current() });
   }, [setSub, title, backTo]);
   useEffect(() => () => setSub?.(null), [setSub]);
   return (
-    <div data-add-panel="" data-add-step={kind ?? "choose"} onKeyDown={onKey} className="flex flex-col gap-4">
+    <div data-add-panel="" data-add-step={kind ?? "choose"} className="flex flex-col gap-4">
       <div ref={heading} tabIndex={-1} role="group" aria-label={title} className="flex flex-col gap-1 px-4 outline-none!">
         {!setSub && <>
           <button type="button" data-add-back="" onClick={back} aria-label={kind && !start ? t("devicesPage.addFlow.backToChoose") : t("devicesPage.addFlow.backToList")}

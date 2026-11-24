@@ -8,7 +8,7 @@ import { useDevices } from "@/lib/use-devices";
 import type { CompanionState } from "@/lib/companion-types";
 import { api } from "@/state/api";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
-import { AddDevicePanel, lastInputWasKeys, type AddKind } from "../../devices/AddDevicePanel";
+import { AddDevicePanel, lastInputWasKeys, withinPage, type AddKind } from "../../devices/AddDevicePanel";
 import { GroupSection, HereSection, type NetworkAction, type Opened } from "../../devices/DeviceRows";
 import { PhoneCodeInline } from "../../devices/CodeCard";
 import { networkLine } from "../../devices/device-words";
@@ -52,7 +52,7 @@ export function DevicesPage() {
   const { ctx, place, go, setSub } = useSettingsShell();
   const dispatch = useStoreDispatch();
   const config = useStoreSelector((state) => state.config);
-  const { devices, companion, refresh } = useDevices({ here: ctx.here, client: ctx.client, name: place.name, kind: place.kind });
+  const { devices, companion, loaded, refresh } = useDevices({ here: ctx.here, client: ctx.client, name: place.name, kind: place.kind });
   const c = usePhoneSetupController(config?.profile?.email);
   const [open, setOpen] = useState<string | null>(null);
   const [pairing, setPairing] = useState(false);
@@ -102,9 +102,8 @@ export function DevicesPage() {
         case "copy-update": setOpen(device.id); setPairing(false); return;
         case "manage": go(action.page, action.anchor); return;
         case "remove": {
-          // A device is removed whole: every way it is joined here goes (a phone's pairing and its app, a saved server and
-          // its sign-in).
-          const sources = device.actions.flatMap((one) => (one.type === "remove" ? [one.source] : []));
+          // A phone is removed whole: its pairing and its app's registration are the same phone.
+          const sources = device.kind === "phone" ? device.actions.flatMap((one) => (one.type === "remove" ? [one.source] : [])) : [action.source];
           for (const source of sources) {
             if (source.type === "place") await environments?.forget(source.id);
             else if (source.type === "phone") await c.act((bridge) => bridge.revoke(source.id));
@@ -128,6 +127,20 @@ export function DevicesPage() {
     setPairing(false);
     if (id) focusNode(id === "here" ? "here" : id);
   };
+  // Escape closes the open details wherever focus is in the page (or nowhere, after Pair again closed), never Settings.
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  useEffect(() => {
+    if (!open || adding) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || !withinPage(document.activeElement)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeRef.current();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [open, adding]);
   const opened: Opened = {
     id: open, pairing,
     toggle: (id) => { setNotice(null); setPairing(false); setOpen((now) => (now === id ? null : id)); },
@@ -144,7 +157,7 @@ export function DevicesPage() {
       if (id) { setOpen(id); focusNode(id); }
       else window.requestAnimationFrame(() => document.querySelector<HTMLElement>(from)?.focus());
     };
-    return <AddDevicePanel here={ctx.here} cloud={ctx.cloud} devices={devices} network={network} networkAction={networkAction}
+    return <AddDevicePanel here={ctx.here} cloud={ctx.cloud} devices={devices} loaded={loaded} network={network} networkAction={networkAction}
       tailnetAddress={companion?.tailnetShare?.origin ?? null} start={adding.start} viaKeys={adding.keys} onBack={leave} onConnected={refresh}
       phoneSteps={ctx.here && c.state ? (onClose) => <PairPhoneSteps c={c} state={c.state!} onClose={() => { refresh(); onClose(); }} codeView={<PhoneCodeInline c={c} />} /> : null}
       setSub={setSub}
