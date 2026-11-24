@@ -3635,6 +3635,7 @@
   "accounts.removeBodyAntigravity": "To usunie konto i jego logowanie z {app}. Twoje pozostałe konta Antigravity pozostaną połączone.",
   "accounts.addClaude": "Dodaj inne konto Claude",
   "accounts.addChatgpt": "Dodaj inne konto ChatGPT",
+  "accounts.chatgptDeviceHint": "Zanim wpiszesz kod, sprawdź, czy ChatGPT pokazuje konto, którego chcesz tu użyć. Jeśli pokazuje inne, najpierw przełącz tam konto.",
   "accounts.nameLabel": "Nazwa konta",
   "accounts.namePlaceholder": "Praca",
   "accounts.addSubmit": "Dodaj i zaloguj się",

@@ -8800,6 +8800,7 @@
   "engines.unhideAria": "重新显示 {name}",
   "engines.unhiding": "正在重新显示…",
   "accounts.addChatgptWorkspaceNote": "ChatGPT Business 和 Enterprise 组织可能禁止在这里添加账号（OpenAI 会返回 3p_delegated_access_policy_denied）。",
+  "accounts.chatgptDeviceHint": "输入代码前，请确认 ChatGPT 显示的是你要在这里使用的账户。如果显示的是其他账户，请先在那里切换账户。",
   "claudeEndpoints.title": "自定义终结点",
   "claudeEndpoints.hint": "让这个账号的机器人在 DeepSeek、GLM 或任何兼容 Claude Code API 的主机上运行。它是一个独立的引擎，所以这台电脑上的 Claude Code 及其登录不受影响。",
   "claudeEndpoints.empty": "还没有自定义终结点。",

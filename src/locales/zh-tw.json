@@ -4293,6 +4293,7 @@
   "accounts.addChatgpt": "新增其他 ChatGPT 帳號",
   "accounts.addChatgptWorkspaceNote": "ChatGPT Business 和 Enterprise 組織可能會封鎖在這裡新增帳號（OpenAI 會顯示 3p_delegated_access_policy_denied）。",
   "accounts.chatgptSharedSetupNote": "使用這些帳號的機器人也會共用你自己的 Codex 設定：config.toml、技能和外掛，但不包括你自己的指示（AGENTS.md）。",
+  "accounts.chatgptDeviceHint": "輸入代碼前，請確認 ChatGPT 顯示的是你要在這裡使用的帳戶。如果顯示的是其他帳戶，請先在那裡切換帳戶。",
   "accounts.nameLabel": "帳號名稱",
   "accounts.namePlaceholder": "工作",
   "accounts.addSubmit": "新增並登入",
