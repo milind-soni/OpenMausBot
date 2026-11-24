@@ -1,0 +1,4 @@
+
+! First copy your one-time code: 926F-1B66
+Open this URL to continue in your web browser: https://github.com/login/device
+failed to authenticate via web browser: Post "https://github.com/login/oauth/access_token": read tcp 192.0.2.10:62513->192.0.2.20:443: read: operation timed out
