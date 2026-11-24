@@ -40,7 +40,11 @@ the computer's credential does.
 On a Team Cloud each person's phone gets only the alerts that person's own
 event stream would carry (their own private chats, rooms and bots they can
 see), the same rule as the stream (`pushReaches` in `server/index.ts`, tested
-in `server/cloud-team-phone-push.e2e.test.ts`).
+in `server/cloud-team-phone-push.e2e.test.ts`). Live Activities and Android's
+ongoing notification are not offered on a Team Cloud: a bot's state there
+(working, waiting on an ask) is everyone's, not one person's, so it could show
+one person another's private work. A Team Cloud keeps no activity token and
+pushes no activity; closed-app alerts are unaffected.
 
 **Switching it off.** `features.phonePush: false` in `config.json`, or
 `OMB_PHONE_PUSH=0` in the server's environment, turns it off on that machine
@@ -87,7 +91,8 @@ person.
      the event stream uses: bot visibility, rooms, admin-only frames, a Team
      Cloud's per-person frames);
    - has it had a push for the same kind and conversation in the last
-     10 seconds, or 30 pushes in the last 10 minutes.
+     10 seconds, or 60 pushes in the last hour (40 for a finished reply; see
+     "Rate limits").
 5. **The server asks the control plane to send**
    (`POST /v1/installations/self/push/send`) with the kind, a title made from
    names, ids, the phone's tag for this computer, and a notification
@@ -112,16 +117,16 @@ carry it (`400 invalid_request`, not silently dropped).
 | Field | Example | Notes |
 | --- | --- | --- |
 | kind | `approval` | `approval`, `question`, `sign-in`, `done` |
-| title | `Scout needs approval` | the server's own notification line for that kind, from names only, in the conversation's language |
+| title | `Scout needs approval` | the server's own notification line for that kind, from the bot's name only (never the room's), in the conversation's language |
 | bot id, bot name | `bot_…`, `Scout` | |
 | thread id | `th_…` | which conversation to open |
-| room id, room name | `grp_…`, `Launch` | only in a room |
+| room id, room name | `grp_…`, `Launch` | only in a room; for the app once it is open, not on the lock screen |
 | pairing | the phone's random tag for this computer | so a tap opens the right one of several saved computers |
 | collapse id | `openmaus.<thread>.<seq>` | see "No duplicates" |
 
 What the lock screen reads, by kind:
 
-- approval: "Scout needs approval" (in a room: "Scout in Launch needs approval")
+- approval: "Scout needs approval" (in a room too: the room is left out)
 - question: "Scout has a question"
 - sign-in: "Scout needs you to sign in to a website" (the website is left out)
 - finished reply: "Scout finished"
@@ -214,23 +219,26 @@ phone then still gets "Scout finished" from that computer; a tap opens
 nothing, because the computer is no longer saved.
 
 **Rate limits.** On the server: one push per phone, kind and conversation in
-10 seconds, 30 per phone in 10 minutes. In the control plane: 600 sends per
-installation and 60 per token per hour, 120 registrations per hour, 50 tokens
-per installation; the same per Cloud home, plus 20,000 sends and 6,000
-registrations an hour across every Cloud home together. The Admin applies the
-same per-home and fleet limits before it forwards anything.
+10 seconds, and 60 pushes per phone an hour, alerts and Live Activity changes
+together, the same as the control plane allows a token. Finished replies and
+activity changes stop at 40 in that hour, so a bot looping finished replies
+leaves the last 20 for approvals, questions and sign-ins. When the relay answers
+`429`, only that phone is left alone for the wait it names (a minute) and only
+its waiting pushes are dropped; every other phone's go on. In the control
+plane: 600 sends per installation and 60 per token per hour, 120 registrations
+per hour, 50 tokens per installation. A Cloud home gets 200 sends an hour (1% of
+the fleet's), 60 per token, 120 registrations and 50 tokens, and every Cloud
+home together 20,000 sends and 6,000 registrations an hour. The Admin applies
+the same per-home and fleet limits before it forwards anything, and alerts its
+operators once in an hour when the fleet reaches half of its sends.
 
-With phone push on by default these stay as they are. Every limit but the
-fleet's is per phone, per installation or per home, so more machines with push
-on do not bring any of them closer. Only phones that registered cost anything,
-and a phone sends an unchanged registration again only about once a day, so
-the registration limits are far off. The fleet's 20,000 sends an hour are
-shared by every Cloud home: about 66 an hour each if 300 homes push at once,
-where one person's closed phone gets an alert per approval, question, sign-in
-or finished reply. That count is the one to watch as Clouds grow. One known
-mismatch is older than the default: a server allows a phone up to 180 pushes an
-hour (30 in 10 minutes), the control plane 60 per token, and its `429` pauses
-all of that server's pushes for a minute and drops the waiting ones.
+With phone push on by default, every limit but the fleet's is per phone, per
+installation or per home, so more machines with push on do not bring any of
+them closer. Only phones that registered cost anything, and a phone sends an
+unchanged registration again only about once a day, so the registration limits
+are far off. The fleet's 20,000 sends an hour are shared by every Cloud home;
+with each home held to 1%, it takes a hundred homes at their own limit to use
+them all, and the Admin's alert comes at fifty.
 
 **Replay and forgery.** Every relay call needs the installation credential.
 A send reaches only a token that the same installation registered, so a
@@ -274,9 +282,12 @@ on.
   outbox, retries and back-off: `503 push_unavailable`, a `401` or a `404` (an
   Admin with its switch off, or an older one) leaves it alone for an hour. On by
   default like every server; `features.phonePush: false` or `OMB_PHONE_PUSH=0`
-  on the home turns it off there. A home cannot see the Admin's switch, so while
-  that switch is off it still tells its phones `on` and its pushes are refused.
-  The Admin does not write `OMB_PHONE_PUSH` into a home's environment.
+  on the home turns it off there. When the Admin refuses (`404` other than
+  `push_device_unknown`, or `503 push_unavailable`), the home tells its phones
+  `off` for that hour, so a phone shows its "hasn't turned on" line and registers
+  again at each connect; once the hour is over the next registration tries the
+  Admin again. The Admin does not write `OMB_PHONE_PUSH` into a home's
+  environment.
 - **The Admin** checks the signature, takes the machine id from it, checks the
   body against the control plane's own strict schemas (no field for message
   text), applies the limits, and forwards the parsed body. Its switch is

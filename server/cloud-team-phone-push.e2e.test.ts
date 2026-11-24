@@ -1,7 +1,9 @@
 // Phone push on a Team Cloud, on by default (docs/phone-push.md): a stand-in Admin records what the Cloud asks it to relay.
 // Acme's Owner Cleo and a member Ben each pair a phone and register it for closed-app alerts, with no switch set anywhere
 // on the Cloud. A reply that finishes in one person's own private chat wakes only that person's phone, signed as this
-// Cloud's machine, with names only and never the words. Disposable homes; nothing leaves this machine.
+// Cloud's machine, with names only and never the words. Live Activities are not offered on a Team Cloud (a bot's state
+// there is everyone's, not one person's): a phone's activity tokens are neither kept nor registered, and no activity is
+// ever pushed. Disposable homes; nothing leaves this machine.
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -17,6 +19,8 @@ const BEN = { email: "ben@acme.test", role: "member" as const };
 const TEAM_MACHINE = "0d9e8f7a-6b5c-4d3e-9f8a-7b6c5d4e3f2a";
 const CLEO_TOKEN = "c1".repeat(32);
 const BEN_TOKEN = "b2".repeat(32);
+const START_TOKEN = "5a".repeat(40);
+const ACTIVITY_TOKEN = "ac".repeat(40);
 const ENGINE = `process.env.FAKE_CLAUDE_DUMP = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/dump.json";
 process.env.FAKE_CLAUDE_REPLY_FILE = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/reply.txt";`;
 
@@ -99,6 +103,18 @@ it("with no switch set, both phones register through the Admin, signed as this C
   ]);
 }, hostTimeout(60_000));
 
+it("offers no Live Activities: a phone's activity tokens are neither kept nor registered", async () => {
+  for (const token of [cleo, ben]) {
+    const put = await team.as(token, "PUT", "/api/push/activity", {
+      scheme: "openmausbot", headlines: { needsYou: "{name} needs you", working: "{name} is working" },
+      startToken: START_TOKEN, activities: [{ botId: scout.id, token: ACTIVITY_TOKEN }],
+    });
+    expect(put.status, JSON.stringify(put.body)).toBe(200);
+    expect(put.body).toEqual({ push: "on", activity: null });
+  }
+  expect(relayed.filter((call) => call.action !== "register" || call.body.purpose !== undefined)).toEqual([]);
+}, hostTimeout(60_000));
+
 it("a reply finishing in one person's private chat wakes only that person's phone, with names and never the words", async () => {
   const bensThread = await privateTurn(ben, "Ben and Scout", "Draft my resignation letter for Globex", "Here is the letter.");
   await until(() => sends().length >= 1, 30_000);
@@ -115,4 +131,6 @@ it("a reply finishing in one person's private chat wakes only that person's phon
   ]);
   expect(sends()[0]!.body.notification).toEqual({ kind: "done", title: "Scout finished", botId: scout.id, botName: "Scout", threadId: bensThread });
   expect(relayed.map((call) => call.raw).join("")).not.toMatch(/resignation|Globex|letter|salary|summary|board|Ben and Scout|Cleo and Scout/);
+  // Neither person's phone was sent another's work, or anyone's, as a Live Activity.
+  expect(relayed.filter((call) => call.action === "activity")).toEqual([]);
 }, hostTimeout(120_000));

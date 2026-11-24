@@ -328,9 +328,10 @@ that runs it checks the home's own signature and relays its calls here, keyed
 by the home's machine id:
 
 - `POST /v1/cloud-homes/<machine id>/push/register`, `unregister`, `send` and
-  `activity` take exactly the installation routes' bodies, schemas, answers and
-  limits (50 tokens, 120 registrations, 600 sends and 60 per token an hour,
-  each per machine), and send through the same path to APNs and FCM. A send
+  `activity` take exactly the installation routes' bodies, schemas and answers,
+  and their limits per machine (50 tokens, 120 registrations and 60 sends per
+  token an hour) except sends: 200 an hour per machine (`CLOUD_HOME_SEND_LIMIT`,
+  1% of the fleet's), not 600, and send through the same path to APNs and FCM. A send
   reaches only a token registered under the same machine id (`404
   push_device_unknown` otherwise), never an installation's.
 - `POST /v1/cloud-homes/<machine id>/push/forget` deletes every token and rate

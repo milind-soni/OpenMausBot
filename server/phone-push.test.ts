@@ -9,7 +9,9 @@ import {
   PHONE_PUSH_DESKTOP_MESSAGE,
   PHONE_PUSH_FILE,
   PUSH_COALESCE_MS,
+  PUSH_DEVICE_LOW_MAX,
   PUSH_DEVICE_WINDOW_MAX,
+  PUSH_DEVICE_WINDOW_MS,
   PUSH_MAX_AGE_MS,
   PUSH_RETRY_MS,
   PhonePush,
@@ -278,7 +280,7 @@ describe("offering a notify frame", () => {
     ]);
   });
 
-  it("names the room, and leaves a frame alone that is not a notification", async () => {
+  it("names the room beside the push but never in the lock screen's title, and leaves a frame alone that is not a notification", async () => {
     const { push, relay } = harness({ room: () => ({ id: "grp_1", name: "Launch\nteam" }) });
     await push.register(PHONE, { platform: "apns", token: APNS });
     push.offer({ notification: notification(), seq: 1 }, everyone);
@@ -287,7 +289,7 @@ describe("offering a notify frame", () => {
     push.offer({ notification: notification({ botId: "bad id" }), seq: 4 }, everyone);
     await push.flush();
     expect(relay.sends().map((call) => call.body.notification)).toEqual([
-      { kind: "approval", title: "Scout in Launch team needs approval", botId: "bot_1", botName: "Scout", threadId: "th_1", roomId: "grp_1", roomName: "Launch team" },
+      { kind: "approval", title: "Scout needs approval", botId: "bot_1", botName: "Scout", threadId: "th_1", roomId: "grp_1", roomName: "Launch team" },
     ]);
   });
 
@@ -305,12 +307,41 @@ describe("offering a notify frame", () => {
     expect(relay.sends().map((call) => call.body.collapseId)).toEqual(["openmaus.th_1.1", "openmaus.th_1.3", "openmaus.th_1.4"]);
   });
 
-  it("stops a looping bot buzzing a pocket", async () => {
+  it("stops a looping bot buzzing a pocket: 60 an hour, as the relay allows a phone", async () => {
+    expect([PUSH_DEVICE_WINDOW_MAX, PUSH_DEVICE_WINDOW_MS]).toEqual([60, 60 * 60_000]);
     const { push, relay } = harness();
     await push.register(PHONE, { platform: "apns", token: APNS });
     for (let seq = 0; seq < PUSH_DEVICE_WINDOW_MAX + 5; seq += 1) push.offer({ notification: notification({ threadId: `th_${seq}` }), seq }, everyone);
     await push.flush();
     expect(relay.sends()).toHaveLength(PUSH_DEVICE_WINDOW_MAX);
+    await advance(push, PUSH_DEVICE_WINDOW_MS);
+    push.offer({ notification: notification({ threadId: "th_later" }), seq: 99 }, everyone);
+    await push.flush();
+    expect(relay.sends()).toHaveLength(PUSH_DEVICE_WINDOW_MAX + 1);
+  });
+
+  it("near the cap, a finished reply gives way so approvals, questions and sign-ins still get through", async () => {
+    const { push, relay } = harness();
+    await push.register(PHONE, { platform: "apns", token: APNS });
+    for (let seq = 0; seq < PUSH_DEVICE_WINDOW_MAX; seq += 1) push.offer({ notification: notification({ kind: "done", threadId: `th_${seq}` }), seq }, everyone);
+    await push.flush();
+    expect(relay.sends()).toHaveLength(PUSH_DEVICE_LOW_MAX);
+    const asks = ["approval", "question", "sign-in"] as const;
+    for (let seq = 0; seq < PUSH_DEVICE_WINDOW_MAX; seq += 1) push.offer({ notification: notification({ kind: asks[seq % 3], threadId: `ask_${seq}` }), seq: 100 + seq }, everyone);
+    await push.flush();
+    expect(relay.sends()).toHaveLength(PUSH_DEVICE_WINDOW_MAX);
+    expect(relay.sends().slice(PUSH_DEVICE_LOW_MAX).every((call) => (call.body.notification as { kind: string }).kind !== "done")).toBe(true);
+  });
+
+  it("a Live Activity change counts against the same hour, at the lower priority", async () => {
+    const { push, relay } = harness();
+    await push.register(PHONE, { platform: "apns", token: APNS });
+    for (let index = 0; index < PUSH_DEVICE_LOW_MAX; index += 1) expect(await push.callFor(PHONE, "/v1/installations/self/push/activity", { v: 1 })).toMatchObject({ status: 200 });
+    expect(await push.callFor(PHONE, "/v1/installations/self/push/activity", { v: 1 })).toBe("capped");
+    push.offer({ notification: notification({ kind: "done" }), seq: 1 }, everyone);
+    push.offer({ notification: notification({ kind: "approval", threadId: "th_2" }), seq: 2 }, everyone);
+    await push.flush();
+    expect(relay.sends().map((call) => (call.body.notification as { kind: string }).kind)).toEqual(["approval"]);
   });
 });
 
@@ -374,15 +405,25 @@ describe("the outbox", () => {
     expect(relay.sends()).toHaveLength(1);
     await advance(push, 1);
     expect(relay.sends()).toHaveLength(1);
+  });
 
+  it("over a limit, leaves only that phone alone for the relay's wait, and keeps every other phone's pushes", async () => {
+    const { push, relay } = harness();
+    await push.register(PHONE, { platform: "apns", token: APNS });
+    await push.register(OTHER, { platform: "fcm", token: FCM });
     relay.answers.push({ status: 429, error: "rate_limited", retryAfter: 120 });
+    // The first send (PHONE's) is refused; OTHER's, waiting behind it, still goes.
     push.offer({ notification: notification({ threadId: "th_3" }), seq: 3 }, everyone);
     await push.flush();
+    expect(relay.sends().map((call) => call.body.token)).toEqual([APNS, FCM]);
     push.offer({ notification: notification({ threadId: "th_4" }), seq: 4 }, everyone);
-    await advance(push, 119_000);
-    expect(relay.sends()).toHaveLength(2);
-    await advance(push, 1_000);
-    expect(relay.sends().at(-1)!.body.collapseId).toBe("openmaus.th_4.4");
+    await push.flush();
+    expect(relay.sends().map((call) => call.body.token)).toEqual([APNS, FCM, FCM]);
+    expect(push.pending()).toBe(0);
+    await advance(push, 120_000);
+    push.offer({ notification: notification({ threadId: "th_5" }), seq: 5 }, everyone);
+    await push.flush();
+    expect(relay.sends().slice(3).map((call) => [call.body.token, call.body.collapseId])).toEqual([[APNS, "openmaus.th_5.5"], [FCM, "openmaus.th_5.5"]]);
   });
 
   it("never throws into the server", async () => {

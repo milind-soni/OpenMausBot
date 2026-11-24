@@ -168,6 +168,46 @@ describe("a Cloud home's pushes through its Admin", () => {
     }
   });
 
+  it("tells its phones `off` while the Admin refuses (switch off, or no relay), and `on` again once it takes them", async () => {
+    for (const refusal of [{ status: 404, error: "Not found." }, { status: 503, error: "push_unavailable" }]) {
+      const { push, admin } = harness();
+      admin.answers.push(refusal);
+      // Refused at registration: the phone hears `off` (its "hasn't turned on" line) and registers again at its next sync.
+      expect(await push.register(PHONE, { platform: "apns", token: APNS })).toMatchObject({ push: "off", relay: "pending" });
+      expect(push.status()).toBe("off");
+      expect((await push.register(PHONE, { platform: "apns", token: APNS })).push).toBe("off");
+      push.offer({ notification: notification("th_1"), seq: 1 }, everyone);
+      await push.flush();
+      expect(admin.calls).toHaveLength(1);
+      await advance(push, RELAY_UNAVAILABLE_PAUSE_MS);
+      expect(push.status()).toBe("on");
+      expect(await push.register(PHONE, { platform: "apns", token: APNS })).toMatchObject({ push: "on", relay: "registered" });
+      rmSync(join(dataDir, "push-devices.json"), { force: true });
+    }
+    // Refused while sending: the same.
+    const { push, admin } = harness();
+    await push.register(PHONE, { platform: "apns", token: APNS });
+    admin.answers.push({ status: 404, error: "Not found." });
+    push.offer({ notification: notification("th_1"), seq: 1 }, everyone);
+    await push.flush();
+    expect(push.status()).toBe("off");
+    // A lost token (404 push_device_unknown) is not a refusal.
+    const other = harness();
+    await other.push.register(PHONE, { platform: "apns", token: APNS });
+    other.admin.answers.push({ status: 404, error: "push_device_unknown" });
+    other.push.offer({ notification: notification("th_1"), seq: 1 }, everyone);
+    await other.push.flush();
+    expect(other.push.status()).toBe("on");
+  });
+
+  it("an installation's refusal leaves the answer `on`: its relay's switch is the control plane's, as before", async () => {
+    const credential = { controlPlane: "https://accounts.openmausbot.com", credential: CREDENTIAL };
+    const { push, admin } = harness({ access: () => credential });
+    admin.answers.push({ status: 503, error: "push_unavailable" });
+    await push.register(PHONE, { platform: "apns", token: APNS });
+    expect(push.status()).toBe("on");
+  });
+
   it("registers again and retries once when the control plane has lost the token", async () => {
     const { push, admin } = harness();
     await push.register(PHONE, { platform: "apns", token: APNS });
