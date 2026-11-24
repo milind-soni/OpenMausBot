@@ -27,6 +27,8 @@ export interface ShotsOptions {
   url: string;
   out: string;
   wait: string;
+  /** A selector the pointer rests on before each picture, for a look that shows on hover. */
+  hover?: string;
 }
 
 export interface Shot {
@@ -39,7 +41,7 @@ export interface Shot {
   scheme: (typeof SKINS)[number]["scheme"];
 }
 
-const USAGE = "usage: pnpm shots [PATH] [--name NAME] [--url http://127.0.0.1:5199] [--out shots] [--wait SELECTOR]";
+const USAGE = "usage: pnpm shots [PATH] [--name NAME] [--url http://127.0.0.1:5199] [--out shots] [--wait SELECTOR] [--hover SELECTOR]";
 
 /** "/room-card-preview.html?state=memory" → "room-card-preview-state-memory"; the app's own page is "app". */
 export const nameFor = (path: string) => path.replace(/\.html\b/, "").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "app";
@@ -53,6 +55,7 @@ export function parseShotsArgs(argv: string[]): ShotsOptions {
       url: { type: "string", default: "http://127.0.0.1:5199" },
       out: { type: "string", default: "shots" },
       wait: { type: "string", default: "#root > *" },
+      hover: { type: "string" },
     },
   });
   if (positionals.length > 1) throw new Error(USAGE);
@@ -61,7 +64,7 @@ export function parseShotsArgs(argv: string[]): ShotsOptions {
   // "//host/page" and "/\host/page" start with "/" too, yet name another site.
   if (new URL(path, values.url).origin !== new URL(values.url!).origin) throw new Error(`PATH is a page of ${values.url}, not another site\n${USAGE}`);
   if (values.name !== undefined && !/^[\w-]+$/.test(values.name)) throw new Error("--name takes letters, digits, - and _");
-  return { path, name: values.name ?? nameFor(path), url: values.url!, out: values.out!, wait: values.wait! };
+  return { path, name: values.name ?? nameFor(path), url: values.url!, out: values.out!, wait: values.wait!, ...(values.hover ? { hover: values.hover } : {}) };
 }
 
 /** Every size in every skin: the page's address with `skin=` set (the previews read it) and the picture's file. */
@@ -92,6 +95,12 @@ async function main(argv: string[]): Promise<void> {
       if (!went.loaderId) await page.send("Page.reload");
       await page.until(`!globalThis.ombShotsLeft && document.readyState === "complete" && document.querySelector(${JSON.stringify(options.wait)})`, 30_000);
       await page.evaluate("document.fonts.ready.then(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))");
+      if (options.hover) {
+        const at = await page.evaluate(`(() => { const box = document.querySelector(${JSON.stringify(options.hover)})?.getBoundingClientRect(); return box ? { x: box.x + box.width / 2, y: box.y + box.height / 2 } : null; })()`);
+        if (!at) throw new Error(`${shot.url} has nothing at ${options.hover} to hover`);
+        await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y });
+        await page.evaluate("new Promise((done) => setTimeout(done, 300))");
+      }
       const worn = await page.evaluate("globalThis.ombShotsChecked = true, document.documentElement.dataset.skin");
       if (worn !== shot.skin) throw new Error(`${shot.url} wears "${worn}", not ${shot.skin}`);
       const png = await page.capture();
