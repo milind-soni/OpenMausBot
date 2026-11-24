@@ -1,5 +1,5 @@
 // The workspaces of this computer's own on the rail (each a profile, clean-workspace.mjs): their names and colours, a new
-// one from the rail's ＋, and switching between them. One runs at a time, on this computer's one server: opening another
+// one from the rail's ＋, and switching between them. In the main window, switching the server to another
 // stops the one that runs once the work under way in it has finished (as the move waits for it, server/move-waits.ts),
 // or at once on a second click on the place that waits, when its server notes each turn cut short as a quit does.
 //
@@ -137,13 +137,14 @@ export function createProfileRegistry({ dataDir, fs = nodeFs, now = Date.now, ra
  * the workspace that opened, or null once This computer's own copy is back.
  */
 export function createLocalProfiles({ registry, clean, dataDir, home, window: shown, showLocal, onLocal, busy, trash, reserved = () => null, allowed = () => true,
-  remember = () => {}, changed = () => {}, log = () => {}, fs = nodeFs, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), now = Date.now }) {
+  focusWindow = () => false, holdsWindow = () => false, remember = () => {}, changed = () => {}, log = () => {}, fs = nodeFs, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), now = Date.now }) {
   /** Each switch asked for; a newer one (another tile, My Cloud) ends the wait of the one before. */
   let turn = 0;
   /** The workspace a switch waits to open (null: This computer's own copy), and for whom. */
   let settling = null;
+  const removing = new Set();
   const listed = (id) => registry.list().find((entry) => entry.id === id && offered(entry.id)) ?? null;
-  const offered = (id) => (home() === "cloud" ? true : home() === "local" ? id !== DEFAULT_PROFILE : false);
+  const offered = (id) => !removing.has(id) && (home() === "cloud" ? true : home() === "local" ? id !== DEFAULT_PROFILE : false);
   const running = () => clean.profile();
   const tell = () => { try { changed(); } catch {} };
 
@@ -177,6 +178,9 @@ export function createLocalProfiles({ registry, clean, dataDir, home, window: sh
     const again = settling?.id === id;
     const mine = ++turn;
     if (!allowed() || !listed(id)) return false;
+    const dir = profileDir(dataDir(), id);
+    if (focusWindow(dir)) return true;
+    if (holdsWindow(dir)) return false;
     const stops = running() !== id && (home() === "local" || running() !== null);
     if (!(again ? hurry() : await settle(mine, id, stops))) return null;
     const opened = home() === "cloud" ? await shown.openProfile(id) : running() === id ? (await showLocal(), true) : await clean.open(id);
@@ -200,6 +204,8 @@ export function createLocalProfiles({ registry, clean, dataDir, home, window: sh
     open,
     /** Back to This computer's own copy from a workspace (no home but this computer). */
     async computer() {
+      if (focusWindow(dataDir())) return true;
+      if (holdsWindow(dataDir())) return false;
       const again = settling?.id === null;
       const mine = ++turn;
       if (running() === null) { await showLocal(); remember(null); return true; }
@@ -234,23 +240,28 @@ export function createLocalProfiles({ registry, clean, dataDir, home, window: sh
      * to the Trash, then its entry. */
     async remove(id) {
       if (!listed(id)) return { outcome: "gone" };
-      turn++;
-      if (running() === id) {
-        if (!(await clean.leave()) || running() === id) return { outcome: "failed" };
-        if (home() === "cloud") await shown.showCloud();
-      }
-      const dir = profileDir(dataDir(), id);
+      if (holdsWindow(profileDir(dataDir(), id))) return { outcome: "failed" };
+      removing.add(id);
       try {
-        if (fs.existsSync(dir)) await trash(dir);
-      } catch (error) {
-        log(`local profiles: ${id} could not go to the Trash (${error?.message ?? error})`);
-        try { fs.renameSync(dir, path.join(profilesDir(dataDir()), `.removed-${id}-${now()}`)); }
-        catch { return { outcome: "failed" }; }
-      }
-      registry.remove(id);
-      tell();
-      if (home() === "local" && running() === null && !onLocal()) await showLocal();
-      return { outcome: "removed" };
+        turn++;
+        if (running() === id) {
+          const openCloud = home() === "cloud";
+          if (!(await clean.leave({ showLocal: !openCloud })) || running() === id) return { outcome: "failed" };
+          if (openCloud) await shown.showCloud();
+        }
+        const dir = profileDir(dataDir(), id);
+        try {
+          if (fs.existsSync(dir)) await trash(dir);
+        } catch (error) {
+          log(`local profiles: ${id} could not go to the Trash (${error?.message ?? error})`);
+          try { fs.renameSync(dir, path.join(profilesDir(dataDir()), `.removed-${id}-${now()}`)); }
+          catch { return { outcome: "failed" }; }
+        }
+        registry.remove(id);
+        tell();
+        if (home() === "local" && running() === null && !onLocal()) await showLocal();
+        return { outcome: "removed" };
+      } finally { removing.delete(id); }
     },
     /** What the window's top bar and line call the workspace that runs: its own name, or null for This Mac's. */
     name: (id) => registry.get(id)?.name ?? null,

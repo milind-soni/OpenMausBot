@@ -59,11 +59,15 @@ test("main forks what the helper picks and hands only the server the cache direc
 test("every server child of one launch gets that launch's id, never one from the shell", () => {
   const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   assert.match(main, /\nconst desktopLaunchId = randomUUID\(\);\n/);
-  const start = main.indexOf("async function startServerOn(port,");
-  const body = main.slice(start, main.indexOf("utilityProcess.fork(entry", start));
+  const start = main.indexOf("function desktopServerEnvironment()");
+  const body = main.slice(start, main.indexOf("async function startServerOn(port,", start));
   const spread = body.indexOf("...process.env,");
   const launch = body.indexOf("OMB_DESKTOP_LAUNCH_ID: desktopLaunchId,");
   assert.ok(spread > 0 && launch > spread, "the launch id is set after, so over, the inherited environment");
+  assert.match(main, /\.\.\.desktopServerEnvironment\(\)/);
+  assert.match(main, /environment: desktopServerEnvironment,/);
+  const profile = readFileSync(new URL("./profile-server.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(profile, /OMB_DESKTOP_LAUNCH_ID/);
 });
 
 // A staged copy of the bootstrap beside a stand-in index.js that reports what the server would see.

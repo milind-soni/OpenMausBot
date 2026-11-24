@@ -16,10 +16,16 @@ function computer(t, { home = "cloud", frozen = home === "cloud" } = {}) {
   mkdirSync(dataDir, { recursive: true });
   if (frozen) writeFileSync(join(dataDir, "moved.json"), JSON.stringify({ v: 1, at: 1, cloud: "https://omb-t-1.fly.dev" }));
   let clock = 1_000;
-  const w = { dataDir, running: dataDir, swaps: [], home, shown: null, onScreen: "cloud", busy: [], trashed: [], trashFails: false, changes: 0, logs: [], waits: 0, remembered: [] };
+  const w = { dataDir, running: dataDir, swaps: [], localPages: [], home, shown: null, onScreen: "cloud", busy: [], trashed: [], trashFails: false, changes: 0, logs: [], waits: 0, remembered: [] };
   w.now = () => clock;
   w.clean = createCleanWorkspace({ dataDir: () => dataDir, running: () => w.running,
-    swap: async (dir) => { w.swaps.push(dir); await new Promise((resolve) => setImmediate(resolve)); w.running = dir; w.onScreen = "local"; return { ok: true }; } });
+    swap: async (dir, { showLocal = true } = {}) => {
+      w.swaps.push(dir);
+      await new Promise((resolve) => setImmediate(resolve));
+      w.running = dir;
+      if (showLocal) { w.localPages.push(dir); w.onScreen = "local"; }
+      return { ok: true };
+    } });
   w.registry = createProfileRegistry({ dataDir: () => dataDir, now: w.now, random: () => "abc123" });
   w.profiles = createLocalProfiles({ registry: w.registry, clean: w.clean, dataDir: () => dataDir, home: () => w.home,
     window: {
@@ -28,6 +34,7 @@ function computer(t, { home = "cloud", frozen = home === "cloud" } = {}) {
       showCloud: async () => { w.shown = null; w.onScreen = "cloud"; },
     },
     showLocal: () => { w.onScreen = "local"; }, onLocal: () => w.onScreen === "local",
+    focusWindow: dir => w.focused === dir, holdsWindow: dir => w.held === dir,
     busy: async () => w.busy[0] ?? null,
     trash: async (dir) => { if (w.trashFails) throw new Error("no Trash here"); w.trashed.push(dir); rmSync(dir, { recursive: true, force: true }); },
     reserved: () => "This Mac", remember: (place) => w.remembered.push(place), changed: () => { w.changes++; }, log: (line) => w.logs.push(line), now: w.now,
@@ -239,6 +246,7 @@ test("removing the workspace on screen: the window goes to My Cloud and its serv
   assert.deepEqual(await w.profiles.remove("work"), { outcome: "removed" });
   assert.equal(w.running, w.dataDir, "stopped before anything was removed");
   assert.equal(w.onScreen, "cloud");
+  assert.ok(!w.localPages.includes(w.dataDir), "the frozen copy cannot redirect the window away from My Cloud");
   assert.deepEqual(w.trashed, [profileDir(w.dataDir, "work")]);
   assert.deepEqual(w.registry.list().map((entry) => entry.id), ["default"]);
   assert.deepEqual(await w.profiles.remove("work"), { outcome: "gone" });
@@ -303,4 +311,18 @@ test("the workspace that opened is the place the next launch opens; one that did
   assert.equal(await local.profiles.open("work"), true);
   assert.equal(await local.profiles.computer(), true);
   assert.deepEqual(local.remembered, [{ profile: "work" }, null]);
+});
+
+test("a separately opened local workspace keeps its server and folder while a window uses it", async t => {
+  const w = computer(t, { home: "local" });
+  w.registry.create({ name: "Work" });
+  w.held = profileDir(w.dataDir, "work");
+  assert.equal(await w.profiles.open("work"), false);
+  assert.deepEqual(await w.profiles.remove("work"), { outcome: "failed" });
+  w.focused = w.held;
+  assert.equal(await w.profiles.open("work"), true);
+  assert.deepEqual(w.swaps, []);
+  assert.deepEqual(w.trashed, []);
+  w.held = w.focused = null;
+  assert.deepEqual(await w.profiles.remove("work"), { outcome: "removed" });
 });

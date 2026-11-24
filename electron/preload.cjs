@@ -166,6 +166,10 @@ const bridge = {
   // Safe on a cloud page: the person chooses in a native menu, or a circle of the rail main listed (only for this app's
   // page and a hosted Cloud's, never addresses), and only from their click; no saved-list reads, host files or secrets.
   workspaces: {
+    ...(isLocalPage ? {
+      openWindow: id => navigator.userActivation?.isActive === true
+        ? ipcRenderer.invoke("workspace-window:place", id) : Promise.resolve(false),
+    } : {}),
     state: () => ipcRenderer.invoke("workspaces:state"),
     menu: (options) => ipcRenderer.invoke("workspaces:menu", ...(options?.from === "howto" ? ["howto"] : [])),
     line: () => ipcRenderer.invoke("workspaces:line"),
