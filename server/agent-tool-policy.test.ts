@@ -19,6 +19,7 @@ describe("built-in agent tool read policy", () => {
       "list_unread_notifications",
       "usage_limits",
       "what_changed",
+      "board_list",
     ]);
     for (const name of READ_ONLY_AGENT_TOOL_NAMES) {
       expect(isReadOnlyAgentTool(name)).toBe(true);
