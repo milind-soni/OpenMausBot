@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
-import { ChevronDown, Pin, Plus } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { ChevronDown, Pin, Plus, Star } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { localizedTaskTitle } from "@/lib/task-title";
@@ -9,6 +9,7 @@ import { BOT_PANEL_ID } from "./bot-panel/side-panel";
 import { ELEVATED_FLOAT } from "./elevated";
 import { edgeFade } from "./HeaderThreadTabs";
 import { reducedMotion } from "./MenuMotion";
+import { mainThreadFirst } from "./SidebarThreadRow";
 import { openTabId, type ThreadTab } from "./thread-tabs";
 
 const RESIZE_MS = 240;
@@ -17,6 +18,10 @@ const CLEAR_OF_CONTROLS = 24;
 const WIDEST = 720;
 const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 const PART = "flex h-full min-w-0 items-center rounded-full outline-none transition-colors duration-[120ms] hover:bg-ink/[0.06] active:bg-ink/[0.08] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
+/** At rest the bot's face and name carry no fill of their own: hovering them tints the whole pill, as the plain pill does. */
+const FACE = "flex h-full items-center rounded-full outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus";
+const NAME_HOVER = "transition-colors duration-[120ms] motion-reduce:transition-none has-[[data-chathead-pill]:hover]:bg-[color-mix(in_srgb,var(--color-composer),var(--color-ink)_7%)]";
+const ICON = "size-7 shrink-0 justify-center text-ink-secondary hover:text-ink";
 const CHIP = "flex h-7 max-w-42 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] leading-[18px] outline-none transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
 
 /** The widest the open pill may be while staying centred in the header and clear of the controls on either side. */
@@ -58,9 +63,9 @@ function useGlidingWidth(key: unknown) {
 }
 
 /**
- * Simple mode's pill for a bot with two threads or more: its face and name open the bot panel as ever, and the open
- * thread's name beside them widens the pill in place into the bot's threads, to pick one or start one. A pick, Escape
- * or a click elsewhere folds it back.
+ * Simple mode's pill for a bot with two threads or more: its face and name open the bot panel as ever, a chevron beside
+ * them widens the pill in place into the bot's threads (its main thread first) and folds it back, and a plus starts a
+ * thread either way. A pick, Escape or a click elsewhere folds it too.
  */
 export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle }: {
   bot: Bot; tabs: ThreadTab[]; head: ReactNode; label: string; panelOpen: boolean; onToggle: () => void;
@@ -73,7 +78,8 @@ export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle
   const toggle = useRef<HTMLButtonElement>(null);
   const [fade, setFade] = useState<string | undefined>();
   const active = openTabId(bot);
-  const current = tabs.find((tab) => tab.threadId === active);
+  const main = bot.mainThreadId;
+  const shown = useMemo(() => mainThreadFirst(tabs, main), [tabs, main]);
   const canWrite = bot.yourAccess !== "view";
 
   const close = (refocus: boolean) => {
@@ -117,20 +123,27 @@ export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle
     event.preventDefault();
     chips[to]?.focus();
   };
+  const unfold = () => {
+    if (box.current) setRoom(centredRoom(box.current));
+    setOpen(true);
+  };
+  const toggleLabel = t(open ? "task.collapseNamed" : "task.expandNamed", { name: bot.name });
 
   return (
     <div ref={box} data-chathead-switch={open ? "open" : "closed"} onKeyDown={open ? onKey : undefined}
-      className={cn("flex h-[39px] min-w-0 items-center overflow-hidden rounded-full p-[5.5px] text-ink", ELEVATED_FLOAT, !open && "max-w-full")} style={open ? { maxWidth: room } : undefined}>
-      {open ? (
-        <div key="open" className="flex min-w-0 animate-fade-in items-center gap-1 motion-reduce:animate-none">
-          <button type="button" data-chathead-pill data-tour="bot-pill" onClick={onToggle} title={t("chat.openBotPanel")} aria-label={label}
-            aria-expanded={panelOpen} aria-controls={panelOpen ? BOT_PANEL_ID : undefined} className={cn(PART, "shrink-0")}>
-            {head}
-          </button>
+      className={cn("flex h-[39px] min-w-0 items-center overflow-hidden rounded-full p-[5.5px] text-ink", ELEVATED_FLOAT, !open && cn("max-w-full", NAME_HOVER))}
+      style={open ? { maxWidth: room } : undefined}>
+      <div className="flex min-w-0 items-center gap-0.5">
+        <button type="button" data-chathead-pill data-tour="bot-pill" onClick={onToggle} title={t("chat.openBotPanel")} aria-label={label}
+          aria-expanded={panelOpen} aria-controls={panelOpen ? BOT_PANEL_ID : undefined}
+          className={cn(open ? PART : FACE, "min-w-0", open && "shrink-0")}>
+          {head}
+        </button>
+        {open && (
           <div ref={list} role="listbox" aria-label={t("task.namedList", { name: bot.name })} aria-orientation="horizontal"
             onScroll={(event) => setFade(edgeFade(event.currentTarget, LIST_FADE))} style={{ maskImage: fade, WebkitMaskImage: fade }}
-            className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {tabs.map((tab) => {
+            className="flex min-w-0 animate-fade-in items-center gap-1 overflow-x-auto [scrollbar-width:none] motion-reduce:animate-none [&::-webkit-scrollbar]:hidden">
+            {shown.map((tab) => {
               const selected = tab.threadId === active;
               const title = tabTitle(tab);
               return (
@@ -138,35 +151,27 @@ export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle
                   data-thread-chip={tab.threadId} onClick={() => pick(tab)}
                   className={cn(CHIP, selected ? "bg-ink/[0.1] text-ink" : "text-ink-secondary hover:bg-ink/[0.06] hover:text-ink")}>
                   {tab.working ? <span role="img" aria-label={t("chat.activity.working")} className="size-1.5 shrink-0 animate-pulse rounded-full bg-success motion-reduce:animate-none" />
+                    : tab.threadId === main ? <Star size={12} role="img" aria-label={t("sidebar.threads.main")} data-thread-chip-main className="shrink-0 fill-current text-ink-tertiary" />
                     : tab.pinned ? <Pin size={12} role="img" aria-label={t("task.pinned")} className="shrink-0 text-ink-tertiary" /> : null}
                   <span dir="auto" className="min-w-0 truncate">{title}</span>
                 </button>
               );
             })}
           </div>
-          {canWrite && (
-            <button type="button" data-thread-chip-new aria-label={t("task.newShort")} title={t("task.newShort")}
-              onClick={() => { dispatch({ type: "newTask", botId: bot.id }); close(false); }}
-              className={cn(PART, "size-7 shrink-0 justify-center text-ink-secondary hover:text-ink")}>
-              <Plus size={16} aria-hidden="true" />
-            </button>
-          )}
-        </div>
-      ) : (
-        <div key="closed" className="flex min-w-0 items-center">
-          <button type="button" data-chathead-pill data-tour="bot-pill" onClick={onToggle} title={t("chat.openBotPanel")} aria-label={label}
-            aria-expanded={panelOpen} aria-controls={panelOpen ? BOT_PANEL_ID : undefined} className={cn(PART, "shrink-0")}>
-            {head}
+        )}
+        <button ref={toggle} type="button" data-chathead-threads aria-haspopup="listbox" aria-expanded={open}
+          aria-label={toggleLabel} title={toggleLabel} onClick={() => (open ? close(false) : unfold())}
+          className={cn(PART, ICON)}>
+          <ChevronDown size={16} aria-hidden="true" className={cn("transition-transform duration-[120ms] motion-reduce:transition-none", open && "rotate-180")} />
+        </button>
+        {canWrite && (
+          <button type="button" data-thread-chip-new aria-label={t("task.newShort")} title={t("task.newShort")} aria-keyshortcuts="Meta+T Control+T"
+            onClick={() => { dispatch({ type: "newTask", botId: bot.id }); close(false); }}
+            className={cn(PART, ICON)}>
+            <Plus size={16} aria-hidden="true" />
           </button>
-          <button ref={toggle} type="button" data-chathead-threads aria-haspopup="listbox" aria-expanded={false}
-            aria-label={t("task.namedList", { name: bot.name })} onClick={() => { if (box.current) setRoom(centredRoom(box.current)); setOpen(true); }}
-            className={cn(PART, "gap-1.5 pe-2.5 ps-1.5 text-[14px] font-medium leading-5 text-ink-secondary hover:text-ink")}>
-            <span aria-hidden="true" className="text-ink-tertiary">·</span>
-            <span data-chathead-conversation dir="auto" className="min-w-0 max-w-[180px] truncate">{current ? tabTitle(current) : ""}</span>
-            <ChevronDown size={12} aria-hidden="true" className="shrink-0 text-ink-tertiary" />
-          </button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
