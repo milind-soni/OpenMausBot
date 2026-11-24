@@ -2106,6 +2106,7 @@
   "sidebar.preview.signedOut": "{name} 未登录",
   "sidebar.preview.you": "你：{text}",
   "sidebar.section.pinned": "已置顶",
+  "sidebar.section.unread": "未读",
   "sidebar.section.channels": "群组聊天",
   "sidebar.section.botChats": "机器人对话",
   "sidebar.section.bots": "机器人",

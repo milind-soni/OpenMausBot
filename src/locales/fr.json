@@ -625,6 +625,7 @@
   "sidebar.preview.signedOut": "{name} n’est pas connecté",
   "sidebar.preview.you": "Vous : {text}",
   "sidebar.section.pinned": "Épinglés",
+  "sidebar.section.unread": "Non lus",
   "sidebar.section.botChats": "Fils entre bots",
   "sidebar.section.bots": "Bots",
   "sidebar.section.moved": "{name} déplacé en position {position} sur {count}",

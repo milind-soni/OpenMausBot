@@ -1688,6 +1688,7 @@
   "sidebar.preview.signedOut": "{name}: brak zalogowania",
   "sidebar.preview.you": "Ty: {text}",
   "sidebar.section.pinned": "Przypięte",
+  "sidebar.section.unread": "Nieprzeczytane",
   "sidebar.section.channels": "Czaty grupowe",
   "sidebar.section.botChats": "Wątki botów",
   "sidebar.section.bots": "Boty",

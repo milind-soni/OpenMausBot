@@ -1777,6 +1777,7 @@
   "sidebar.preview.signedOut": "{name}이(가) 로그인되어 있지 않아요",
   "sidebar.preview.you": "나: {text}",
   "sidebar.section.pinned": "고정됨",
+  "sidebar.section.unread": "읽지 않음",
   "sidebar.section.channels": "그룹 채팅",
   "sidebar.section.botChats": "봇 스레드",
   "sidebar.section.bots": "봇",

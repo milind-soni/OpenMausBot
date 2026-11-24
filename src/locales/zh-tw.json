@@ -2006,6 +2006,7 @@
   "sidebar.preview.signedOut": "{name} 未登入",
   "sidebar.preview.you": "你：{text}",
   "sidebar.section.pinned": "已釘選",
+  "sidebar.section.unread": "未讀",
   "sidebar.section.channels": "聊天室",
   "sidebar.section.botChats": "機器人對話",
   "sidebar.section.bots": "機器人",
