@@ -8,7 +8,7 @@ import { dirname, isAbsolute, relative, resolve as resolvePath } from "node:path
 
 import { appToolCall } from "../connector-app-tools.ts";
 import { toolData } from "../connected-reads.ts";
-import { spawnCli } from "../procs.ts";
+import { killCliTree, spawnCli } from "../procs.ts";
 import type { ExecResult, StepExecutors } from "./runner.ts";
 
 const MULTI_EXECUTE = "COMPOSIO_MULTI_EXECUTE_TOOL";
@@ -77,14 +77,14 @@ function runInBox(context: ExecutorContext, input: Parameters<StepExecutors["she
     const take = (into: Buffer[]) => (chunk: Buffer) => {
       size += chunk.length;
       if (size > input.maxBytes) {
-        if (!over) { over = true; child.kill("SIGKILL"); }
+        if (!over) { over = true; void killCliTree(child, 0); }
         return;
       }
       into.push(chunk);
     };
     child.stdout.on("data", take(out));
     child.stderr.on("data", take(err));
-    const stop = () => child.kill("SIGKILL");
+    const stop = () => { void killCliTree(child, 0); };
     input.signal.addEventListener("abort", stop, { once: true });
     child.on("error", (error) => done({ ok: false, error: error.message }));
     child.on("close", (code) => {
