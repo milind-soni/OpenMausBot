@@ -62,6 +62,21 @@ describe("patchBot unread targeting", () => {
     expect(store.taskByThread(bot.id, chosenOpen.threadId)!.unread).toBe(true);
   });
 
+  it("marks the main conversation kept for the bot unread when the active one is archived and no choice was made", async () => {
+    const { store } = await freshStore();
+    const bot = store.createBot();
+    const first = bot.threadId;
+    const kept = store.createTask(bot.id, "Kept main", false)!;
+    expect(store.keepMainThread(bot.id, () => kept.threadId)).toBe(kept.threadId);
+    const oldTask = store.createTask(bot.id, "Closed chat", true)!;
+    store.patchTask(bot.id, oldTask.threadId, { archivedAt: 1_000, unread: false });
+
+    expect(store.patchBot(bot.id, { unread: true })!.unread).toBe(true);
+    expect(store.taskByThread(bot.id, kept.threadId)!.unread).toBe(true);
+    expect(store.taskByThread(bot.id, first)!.unread).toBe(false);
+    expect(store.taskByThread(bot.id, oldTask.threadId)!.unread).toBe(false);
+  });
+
   it("leaves bot.unread false when every non-routine conversation is archived", async () => {
     const { store } = await freshStore();
     const bot = store.createBot();

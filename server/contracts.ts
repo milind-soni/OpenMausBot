@@ -395,6 +395,8 @@ export interface ProviderSnapshot {
   notEngineCli?: true;
   /** The account runs Google's native Antigravity CLI, not the pinned (Classic) runtime. */
   nativeCli?: true;
+  /** Not ready because its runtime is being installed on this computer right now. */
+  installing?: true;
   /** Display identity from the provider CLI, never credentials; `method` is a personal login or the workspace API key. */
   account?: { email?: string; organization?: string; method?: "login" | "api-key" };
   version?: string | null;
