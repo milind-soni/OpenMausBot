@@ -23,7 +23,8 @@ const condition = z.object({
 
 /** Text with values in it: plain text, or parts where an arg or an earlier step's output fills a gap. Never a template
  * string, so a value can't change the words around it. */
-const text = z.union([z.string().min(1).max(8_000), z.array(z.union([z.string().max(8_000), ref])).min(1).max(40)]);
+const textSchema = (max: number) => z.union([z.string().min(1).max(max), z.array(z.union([z.string().max(max), ref])).min(1).max(40)]);
+const text = textSchema(8_000);
 export type WorkflowText = z.infer<typeof text>;
 
 /** What "done" means for a step: `says` in words, and, where a rule on the step's own output can tell, that rule. A step
@@ -65,7 +66,7 @@ export const workflowStepSchema = z.discriminatedUnion("kind", [
   z.object({ ...common, kind: z.literal("shell"), run: z.string().min(1).max(20_000), cwd: z.string().max(1_000).optional(), stdin: ref.optional() }).strict(),
   z.object({ ...common, kind: z.literal("app"), app: z.string().min(1).max(64), tool: z.string().min(1).max(200), args: z.record(z.string(), z.unknown()), account: z.string().max(200).optional() }).strict(),
   z.object({ ...common, kind: z.literal("browser"), action: z.literal("open"), url: z.union([z.string().url(), ref]) }).strict(),
-  z.object({ ...common, kind: z.literal("file"), path: z.string().min(1).max(1_000), content: z.union([z.string(), ref]) }).strict(),
+  z.object({ ...common, kind: z.literal("file"), path: textSchema(1_000), content: z.union([z.string(), ref]) }).strict(),
   z.object({
     ...common, kind: z.literal("ai"), deterministic: z.literal(false), prompt: z.string().min(1).max(4_000),
     input: ref.optional(), example: z.string().max(4_000).optional(),
@@ -160,7 +161,7 @@ function stepLine(step: WorkflowStep, args: Workflow["args"]): string {
   const where = step.kind === "app" ? appMeta(step.app).label : step.kind === "ai" ? "AI" : step.kind === "shell" ? "Command" : step.kind === "file" ? "File" : "Browser";
   const used = Object.keys(args).filter((name) => JSON.stringify(step).includes(`"$arg":"${name}"`) || (step.kind === "shell" && step.run.includes(`OMB_ARG_${name.toUpperCase()}`)));
   const detail = used.map((name) => `${args[name]!.label ?? name}: ${name}${args[name]!.default === undefined ? "" : `, default ${JSON.stringify(args[name]!.default)}`}`);
-  const what = step.kind === "shell" ? ` \`${step.run.split("\n", 1)[0]!.slice(0, 120)}\`` : step.kind === "app" ? ` (${step.tool})` : "";
+  const what = step.kind === "shell" ? ` \`${step.run.split("\n", 1)[0]!.slice(0, 120)}\`` : step.kind === "app" ? ` (${step.tool})` : step.kind === "file" && Array.isArray(step.path) ? ` \`${textLine(step.path)}\`` : "";
   const place = step.where && PLACE[step.where] && !(step.kind === "browser" && step.where === "browser") ? ` ${PLACE[step.where]}` : "";
   const fork = caseOf(step);
   const done = step.check && typeof step.check === "object" ? ` (done when: ${step.check.says.replace(/\s+/g, " ").slice(0, 200)})` : "";

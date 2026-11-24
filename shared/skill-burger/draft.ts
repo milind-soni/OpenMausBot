@@ -200,13 +200,16 @@ class Drafter {
   }
 
   /** A message with the ask's typed values in it as parts: ["QA-test ", {"$arg": "site"}, " for…"]. */
-  private text(message: string): WorkflowText {
+  private text(message: string, mode: "message" | "path" = "message"): WorkflowText {
     const parts: Array<string | WorkflowRef> = [message];
     for (const { value } of this.typed) {
       for (let i = 0; i < parts.length; i += 1) {
         const part = parts[i];
         if (typeof part !== "string" || !part.includes(value)) continue;
-        const pieces = part.split(value);
+        const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const before = FILE_EXT.test(value) ? "[\\w.-]" : "[\\w./-]";
+        const pieces = mode === "path" ? part.split(new RegExp(`(?<!${before})${escaped}(?![\\w./-])`, "g")) : part.split(value);
+        if (pieces.length < 2) continue;
         const ref = this.askArg(value, undefined);
         parts.splice(i, 1, ...pieces.flatMap((piece, index) => (index ? [ref, piece] : [piece])));
         i += pieces.length * 2 - 2;
@@ -337,7 +340,7 @@ class Drafter {
     } else if (layer.kind === "file") {
       const content = String(layer.args.content ?? "");
       const path = String(layer.args.path).replace(CONVERSATION_FOLDER, ".");
-      this.steps.push({ id, kind: "file", label, path, content: (this.value(id, content, "content", layer.afterRead, path.split(/[\\/]/).pop()) as string | WorkflowRef) });
+      this.steps.push({ id, kind: "file", label, path: this.text(path, "path"), content: (this.value(id, content, "content", layer.afterRead, path.split(/[\\/]/).pop()) as string | WorkflowRef) });
     } else if (layer.kind === "browser") {
       const url = String(layer.args.url);
       this.steps.push({ id, kind: "browser", label, action: "open", url: this.inAsk(url) ? this.askArg(url, "url") : url });

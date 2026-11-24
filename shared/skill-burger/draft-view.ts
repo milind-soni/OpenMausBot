@@ -70,7 +70,7 @@ function detailOf(step: WorkflowStep): string | undefined {
     case "shell": return step.run.split("\n").find((line) => line.trim() && !/^cd\s/.test(line.trim()))?.trim().slice(0, 200);
     case "app": return step.tool;
     case "browser": return typeof step.url === "string" ? step.url : `{${"$arg" in step.url ? step.url.$arg : step.url.$step}}`;
-    case "file": return step.path;
+    case "file": return textLine(step.path);
     default: return undefined;
   }
 }

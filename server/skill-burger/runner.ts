@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { caseOf, teammateNames, type Workflow, type WorkflowRef, type WorkflowStep } from "../../shared/skill-burger/format.ts";
 import { redactSecretsInText } from "../../shared/redact.ts";
 import { appMeta } from "../../shared/skill-burger/apps.ts";
-import { collect, matchTeammates, missingPrompt, readReassignment, readReview, repliesText, reviewPrompt, sendRound, type DelegateExecutors, type DelegationState } from "./delegate-step.ts";
+import { collect, matchTeammates, missingPrompt, readReassignment, readReview, repliesText, reviewPrompt, sendRound, textOf, type DelegateExecutors, type DelegationState } from "./delegate-step.ts";
 
 export const STEP_TIMEOUT_MS = 60_000;
 export const RUN_TIMEOUT_MS = 15 * 60_000;
@@ -321,8 +321,11 @@ async function execute(step: WorkflowStep, args: Record<string, unknown>, result
       const url = asText(resolve(step.url, args, results));
       return /^https?:\/\//i.test(url) ? exec.browser({ url, signal }) : { ok: false, error: `not a web address: ${clip(url, 80)}` };
     }
-    case "file":
-      return exec.file({ path: step.path, content: asText(resolve(step.content, args, results)), signal });
+    case "file": {
+      const path = textOf(step.path, (ref) => resolve(ref, args, results));
+      if (!path || path.length > 1_000) return { ok: false, error: "a file target must be between 1 and 1000 characters" };
+      return exec.file({ path, content: asText(resolve(step.content, args, results)), signal });
+    }
     default:
       return { ok: false, error: "this step can't run on its own" };
   }
