@@ -98,7 +98,7 @@ import { useLiveMedia } from "@/lib/live-call-media";
 import { LiveCallPill, liveBadgeFor } from "./LiveCallPill";
 import { ShortcutHint } from "./ShortcutHint";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
-import { useAdvancedMode } from "@/lib/interface-mode"; import { useRoomFeed } from "./room-feed/use-room-feed";
+import { useAdvancedMode } from "@/lib/interface-mode"; import { useRoomFeed } from "./room-feed/use-room-feed"; import { feedPreview } from "@/lib/room-feed";
 import { myDefaultBot, useViewerEmail, useWelcomingBot } from "@/lib/default-bot";
 import { PinnedBotRoster, PinnedCircleThreadSection } from "./PinnedCircleThreads";
 import { archiveBotWithNotice, onArchiveNotice } from "./bot-archive";
@@ -202,7 +202,7 @@ export const GroupListItem = memo(function GroupListItem({
           {simpleRow && !expanded && group.unread && <RowDot />}
         </div>
         {!expanded && <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-[13px] leading-[18px] text-ink-secondary">{group.description || groupPreview(group, bots, instances, advanced)}</span>
+          <span className="truncate text-[13px] leading-[18px] text-ink-secondary">{group.description || (feed && feedPreview(group)) || groupPreview(group, bots, instances, advanced)}</span>
           {!simpleRow && group.unread && <span className="size-2 shrink-0 rounded-full bg-accent" />}
         </div>}
         {simpleRow && <RowStatusText unread={group.unread} />}

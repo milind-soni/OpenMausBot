@@ -45,3 +45,9 @@ export function openThreadBeside(dispatch: (action: Action) => void, threadId: s
   dispatch({ type: "openForkPanel", kind: group ? "group" : "bot", ownerId: owner.id, threadId });
   return true;
 }
+
+/** A feed room's line in the sidebar: the title of its thread that moved last, since its current thread need not be. */
+export function feedPreview(group: Pick<Group, "tasks">): string | undefined {
+  const said = (group.tasks ?? []).filter((task) => task.archivedAt === undefined && task.lastThreadOrderAt !== undefined);
+  return said.sort((a, b) => (b.lastThreadOrderAt ?? 0) - (a.lastThreadOrderAt ?? 0))[0]?.title;
+}

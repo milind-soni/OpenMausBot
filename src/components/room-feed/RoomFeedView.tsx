@@ -23,6 +23,8 @@ import { useRoomThreads, type FeedThread } from "./use-room-threads";
 
 /** How near the foot the feed counts as being read there, so a new thread keeps it at the foot. */
 const FOOT_PX = 48;
+/** Only the person scrolling takes the feed off its foot; a row opening beside it or a window resize never does. */
+const INTENT_MS = 1_000;
 
 const toRow = (group: Group, { task, summary }: FeedThread): FeedRowData => ({
   threadId: task.threadId,
@@ -79,6 +81,8 @@ export function RoomFeedView({ group }: { group: Group }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const atFoot = useRef(true);
+  const scrolledAt = useRef(0);
+  const moved = useCallback(() => { scrolledAt.current = Date.now(); }, []);
   useLayoutEffect(() => {
     const scroller = scrollRef.current, content = contentRef.current;
     if (!scroller || !content) return;
@@ -107,7 +111,11 @@ export function RoomFeedView({ group }: { group: Group }) {
           {folderOpen && <div className="w-full px-5"><div className="mb-1"><RoomWorkingFolder group={group} /></div></div>}
         </GlassBar>
         <div ref={scrollRef} className="glass-scroller h-full overflow-x-hidden overflow-y-auto px-4 [overflow-anchor:none]"
-          onScroll={(event) => { const el = event.currentTarget; atFoot.current = el.scrollHeight - el.scrollTop - el.clientHeight < FOOT_PX; }}>
+          onWheel={moved} onTouchMove={moved} onKeyDown={moved} onPointerDown={moved}
+          onScroll={(event) => {
+            const el = event.currentTarget, foot = el.scrollHeight - el.scrollTop - el.clientHeight < FOOT_PX;
+            if (foot || Date.now() - scrolledAt.current < INTENT_MS) atFoot.current = foot;
+          }}>
           <div ref={contentRef} className="glass-scroller-content chat-column flex min-h-full w-full flex-col justify-end" style={{ paddingBottom: composerDock.pad }}>
             {rows === null ? (
               failed && (

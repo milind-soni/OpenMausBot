@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppState, Group } from "@/state/store";
 import { markVisibleGroupThreadsRead } from "@/state/read-visible";
 import { openThread, visibleNotificationThread } from "@/state/thread-navigation";
-import { feedThreadAction, openThreadBeside, roomFeedShows } from "./room-feed";
+import { feedPreview, feedThreadAction, openThreadBeside, roomFeedShows } from "./room-feed";
 
 const on = { features: { roomFeed: true } } as AppState["config"];
 const off = { features: { roomFeed: false } } as AppState["config"];
@@ -87,5 +87,18 @@ describe("what the feed counts as read and on screen", () => {
     expect(visibleNotificationThread(state(on), "current")).toBeNull();
     expect(visibleNotificationThread(state(off), "current")).toBe("current");
     expect(visibleNotificationThread(state(on, { selectedId: "kiwi", forkPanel: { kind: "group", ownerId: "room", threadId: "other" } as AppState["forkPanel"] }), "other")).toBe("other");
+  });
+});
+
+describe("a feed room's sidebar line", () => {
+  it("is the title of the thread that moved last, never an empty or archived one", () => {
+    const tasks = [
+      { threadId: "a", title: "Launch checklist", createdAt: 1, lastThreadOrderAt: 5 },
+      { threadId: "b", title: "Old idea", createdAt: 2, lastThreadOrderAt: 9, archivedAt: 10 },
+      { threadId: "c", title: "New task", createdAt: 3 },
+      { threadId: "d", title: "Logo files", createdAt: 4, lastThreadOrderAt: 7 },
+    ];
+    expect(feedPreview({ tasks })).toBe("Logo files");
+    expect(feedPreview({ tasks: [tasks[2]!] })).toBeUndefined();
   });
 });
