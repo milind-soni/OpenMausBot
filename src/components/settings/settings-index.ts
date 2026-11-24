@@ -1,5 +1,5 @@
 import {
-  Archive, ArrowLeftRight, Bot, Coins, CreditCard, LockKeyhole, Monitor, Network, Palette, Server, SlidersHorizontal, Smartphone, Sparkles, Users,
+  Archive, ArrowLeftRight, Bot, Coins, CreditCard, HardDrive, LockKeyhole, Monitor, Network, Palette, Server, SlidersHorizontal, Smartphone, Sparkles, Users,
   type LucideIcon,
 } from "lucide-react";
 import type { LocaleKey } from "@/locales";
@@ -32,6 +32,8 @@ export interface SettingsContext {
   installations: boolean;
   skills: boolean;
   advanced: boolean;
+  /** this place's server answers with a storage report (a Cloud home), read only by an owner or admin */
+  storage?: boolean;
 }
 
 export interface SettingsPage {
@@ -49,8 +51,9 @@ const notClient = (ctx: SettingsContext) => !ctx.client;
 const adminPage = (ctx: SettingsContext) => !ctx.client && !(ctx.team && !ctx.admin);
 /** A page Simple mode leaves out: its everyday rows show elsewhere in Simple (Overview, This app, Plan & billing). */
 const advancedOnly = (when: (ctx: SettingsContext) => boolean) => (ctx: SettingsContext) => ctx.advanced && when(ctx);
-/** Simple mode's eleven entries: the place (Overview, Devices, Phone & devices, AI, Vault, Spending, Import & export), Your account
- * (Plan & billing) and This app (Appearance). Advanced adds You and your bots, Desktops & browser, Data and General. */
+/** Simple mode's eleven entries: the place (Overview, Devices, Phone & devices, AI, Vault, Spending, Import & export, and Storage
+ * on a Cloud), Your account (Plan & billing) and This app (Appearance). Advanced adds You and your bots, Desktops & browser,
+ * Data and General. */
 export const ADVANCED_PAGES: readonly SettingsPageId[] = ["bots", "desktops", "data", "general"];
 
 export const SETTINGS_PAGES: readonly SettingsPage[] = [
@@ -71,6 +74,8 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     synonyms: ["spending", "usage", "cost", "costs", "tokens", "money", "runs", "export csv"] },
   { id: "transfer", owner: "place", labelKey: "settings.page.importExport", icon: ArrowLeftRight, when: adminPage,
     synonyms: ["import", "export", "backup", "backups", "restore", "grok", "grok bot", "move from", "bring"] },
+  { id: "storage", owner: "place", labelKey: "settings.page.storage", icon: HardDrive, when: (ctx) => ctx.storage === true && adminPage(ctx),
+    synonyms: ["storage", "disk", "disk space", "space", "full", "free space", "volume", "what uses space", "cache", "downloads"] },
   { id: "data", owner: "place", labelKey: "settings.page.data", icon: Archive, when: advancedOnly(adminPage),
     synonyms: ["data", "storage", "attachments", "activity", "audit"] },
   { id: "people", owner: "place", labelKey: "settings.section.people", icon: Users,
