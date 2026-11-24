@@ -37,7 +37,13 @@ export interface ConfigStatus {
   anthropic?: SavedKey & { everyClaudeBot?: boolean };
   openai?: SavedKey;
   openrouter?: SavedKey;
-  openaiCompat?: SavedKey & { url?: string };
+  openaiCompat?: SavedKey & {
+    url?: string;
+    customHeaders?: {
+      enabled: boolean;
+      headers: Array<{ name: string; value?: string; configured: boolean; required: boolean; secret: boolean }>;
+    };
+  };
   /** what this server is entitled to; Settings shows only what works here.
    * `license` reaches admins only, and only while the key is inside its
    * warning window or grace period. */

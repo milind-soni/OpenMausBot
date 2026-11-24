@@ -30,6 +30,7 @@ import { settledFileCache, settledFileStamp } from "./settled-file.ts";
 import { isRemoteMcpServer, mcpServerServes, parseStoredMcpServer } from "./mcp-registry.ts"; import { postizKeyHeaders } from "./postiz/connection.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 import { deciderConfigSchema, type DeciderConfig } from "./decider/config.ts";
+import { applyOpenAiCompatHeaderDefaults, openAiCompatConfigHeadersSchema, type OpenAICompatCustomHeadersConfig } from "./drivers/openai-compat-headers.ts";
 import { fishKeyFromLiveKey, liveConfigSchema, liveConfigWithEnv, liveSettingEnv, type LiveConfig } from "./live-config.ts"; import { hearingConfigShape } from "./tts/hearing-config.ts";
 import { browserEngineConfigSchema, isValidCdpTarget, type BrowserEngineConfig } from "./browser/config.ts";
 import { roomContextSettings } from "./room-context-settings.ts"; import { usageCapsSchema, type UsageCapsConfig } from "./usage-caps-config.ts";
@@ -338,9 +339,7 @@ const appConfigSchema = z.object({
     })
     .optional(),
   /** `model` seeds the default selection; `provider` pins an OpenRouter upstream (e.g. "fireworks"). */
-  openaiCompat: z
-    .object({ key: optionalText, url: optionalText, model: optionalText, provider: optionalText })
-    .optional(),
+  openaiCompat: z.object({ key: optionalText, url: optionalText, model: optionalText, provider: optionalText, customHeaders: openAiCompatConfigHeadersSchema.optional() }).optional(),
   /** Composio project key; `userId`/`sessionId` reuse one Composio Session. */
   composio: z.object({ apiKey: optionalText, userId: optionalText, sessionId: optionalText }).optional(),
   box: z.object({ token: optionalText }).optional(),
@@ -449,7 +448,7 @@ export interface AppConfig extends HelperConfig {
   loopGuard?: LoopGuardConfig;
   safetyFloor?: { enabled?: boolean };
   billing?: { currency?: string; prices?: Record<string, { inputPerMillion: number; outputPerMillion: number; cachedInputPerMillion?: number }> };
-  openaiCompat?: { key?: string; url?: string; model?: string; provider?: string };
+  openaiCompat?: { key?: string; url?: string; model?: string; provider?: string; customHeaders?: OpenAICompatCustomHeadersConfig };
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
   /** Boat token (ascii.dev renamed Box to Boat); config key "box", env BOX_TOKEN. */
   box?: { token?: string };
@@ -1179,16 +1178,16 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
       if (cfg.openaiCompat.url) defaults.url = cfg.openaiCompat.url;
       if (cfg.openaiCompat.model) defaults.model = cfg.openaiCompat.model;
       if (cfg.openaiCompat.provider) defaults.provider = cfg.openaiCompat.provider;
-      if (Object.keys(defaults).length) {
+      if (Object.keys(defaults).length || (!ownsRouting && cfg.openaiCompat.customHeaders)) {
         const raw = entry.config;
-        const current =
-          typeof raw === "object" && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+        const current = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
         const merged = { ...current };
         for (const [k, v] of Object.entries(defaults)) {
           // An empty provider means "no upstream pin"; never fill it from the workspace.
           if (k === "provider" && typeof merged[k] === "string") continue;
           if (typeof merged[k] !== "string" || !(merged[k] as string).trim()) merged[k] = v;
         }
+        applyOpenAiCompatHeaderDefaults(merged, ownsRouting ? undefined : cfg.openaiCompat.customHeaders);
         entry.config = merged;
       }
     }

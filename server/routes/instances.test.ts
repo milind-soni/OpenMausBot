@@ -349,6 +349,92 @@ describe("a server's reply wait", () => {
     expect(persisted.at(-1)!.openaiCompat).toEqual({ driver: "openai-compat", config: { replyWaitMinutes: 30 } });
     expect(instanceConfigs(cfg as unknown as AppConfig).openaiCompat!.config).toMatchObject({ url: "http://127.0.0.1:11434/v1", replyWaitMinutes: 30 });
   });
+
+  it("saves custom request headers per OpenAI-compatible instance, preserves existing secret values, masks summaries, and enforces validation + owner/admin access", async () => {
+    const persisted: Array<Record<string, { driver: string; config?: Record<string, unknown> }>> = [];
+    const cfg = {
+      instances: {
+        a: { driver: "fake" },
+        "openai-compat-1": { driver: "openai-compat", config: { url: "https://gw.example/v1", key: "k" } },
+      },
+    };
+    const { call, base } = await serve({
+      cfg: cfg as unknown as AppConfig,
+      describeInstances: async () => [
+        { instanceId: "a", driverKind: "fake" },
+        { instanceId: "openai-compat-1", driverKind: "openai-compat" },
+      ],
+      persistProviderInstance: async (_id: string, instances: typeof persisted[number]) => {
+        persisted.push(structuredClone(instances));
+        (cfg as { instances: unknown }).instances = instances;
+      },
+    });
+    const saved = await call("PATCH", "/api/instances/openai-compat-1", {
+      customHeaders: {
+        enabled: true,
+        headers: [
+          { name: "X-Maus-Thread-ID", value: "{threadId}", required: true },
+          { name: "X-Gateway-Token", value: "gw-secret-value-123", secret: true },
+        ],
+      },
+    });
+    expect(persisted.at(-1)!["openai-compat-1"]!.config).toMatchObject({
+      customHeaders: {
+        enabled: true,
+        headers: [
+          { name: "X-Maus-Thread-ID", value: "{threadId}", required: true, secret: false },
+          { name: "X-Gateway-Token", value: "gw-secret-value-123", required: true, secret: true },
+        ],
+      },
+    });
+    const listText = JSON.stringify(saved);
+    expect(listText).not.toContain("gw-secret-value-123");
+    const updated = await call("PATCH", "/api/instances/openai-compat-1", {
+      customHeaders: {
+        enabled: true,
+        headers: [
+          { name: "X-Maus-Thread-ID", value: "{threadId}", required: true },
+          { name: "X-Gateway-Token", keepExisting: true, secret: true },
+        ],
+      },
+    });
+    expect(persisted.at(-1)!["openai-compat-1"]!.config).toMatchObject({
+      customHeaders: {
+        enabled: true,
+        headers: [
+          { name: "X-Maus-Thread-ID", value: "{threadId}", required: true, secret: false },
+          { name: "X-Gateway-Token", value: "gw-secret-value-123", required: true, secret: true },
+        ],
+      },
+    });
+    expect(JSON.stringify(updated)).not.toContain("gw-secret-value-123");
+
+    const status = async (id: string, body: unknown) => (await fetch(`${base}/api/instances/${id}`, {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    })).status;
+    expect(await status("a", { customHeaders: { enabled: true, headers: [{ name: "X-Ok", value: "1" }] } })).toBe(400);
+    expect(await status("openai-compat-1", { customHeaders: { enabled: true, headers: [{ name: "Authorization", value: "Bearer bad" }] } })).toBe(400);
+    expect(await status("openai-compat-1", { customHeaders: { enabled: true, headers: [{ name: "X-Bad", value: "line1\r\nline2" }] } })).toBe(400);
+
+    await call("PATCH", "/api/instances/openai-compat-1", {
+      customHeaders: { enabled: true, headers: [{ name: "X-Tenant-Pin", value: "pin-987654", secret: true }] },
+    });
+    expect(await status("openai-compat-1", {
+      customHeaders: { enabled: true, headers: [{ name: "X-Tenant-Pin", keepExisting: true, secret: false }] },
+    })).toBe(400);
+
+    await call("PATCH", "/api/instances/openai-compat-1", { customHeaders: null });
+    expect(persisted.at(-1)!["openai-compat-1"]!.config).toEqual({ url: "https://gw.example/v1", key: "k" });
+
+    const nonOwner = await serve(
+      { cfg: cfg as unknown as AppConfig, persistProviderInstance: async () => {} },
+      { kind: "loopback", scopes: ["admin"], trust: "service" },
+    );
+    expect((await fetch(`${nonOwner.base}/api/instances/openai-compat-1`, {
+      method: "PATCH", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ customHeaders: { enabled: true, headers: [] } }),
+    })).status).toBe(403);
+  });
 });
 
 describe("hiding a provider", () => {

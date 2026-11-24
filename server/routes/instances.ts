@@ -29,6 +29,7 @@ import {
 import { updateClaudeCli } from "../claude-update.ts";
 import { persistableInstanceConfigs, saveConfig, withInstanceCli, type AppConfig } from "../config.ts";
 import { addEndpoint, addEndpointSchema, changeEndpointAddress, endpointBaseUrl, endpointModelsReadable, isAddedEndpoint, localServerAlreadyAdded, withEndpointUrls } from "../openai-compat-endpoints.ts";
+import { CustomHeaderValidationError, mergeCustomHeadersPatch, type OpenAICompatCustomHeadersConfig } from "../drivers/openai-compat-headers.ts";
 import { findOllama, probeOllama } from "../drivers/ollama.ts";
 import type { InstanceConfigMap, ModelSelection, ProviderInstance } from "../contracts.ts";
 import { removeAntigravityProfile } from "../drivers/antigravity-acp.ts";
@@ -198,10 +199,15 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         // Checked again here, inside the busy section, so two quick adds cannot both pass the settings check.
         const duplicate = parsed.data.catalog ? localServerAlreadyAdded(instances, parsed.data.url) : null;
         if (duplicate) return json(res, 409, { error: duplicate });
-        const added = addEndpoint(instances, parsed.data);
-        if ("error" in added) return json(res, 400, { error: added.error });
-        await persistProviderInstance(added.instanceId, instances);
-        return json(res, 201, { instanceId: added.instanceId, instances: await describeInstances() });
+        try {
+          const added = addEndpoint(instances, parsed.data);
+          if ("error" in added) return json(res, 400, { error: added.error });
+          await persistProviderInstance(added.instanceId, instances);
+          return json(res, 201, { instanceId: added.instanceId, instances: await describeInstances() });
+        } catch (error) {
+          if (error instanceof CustomHeaderValidationError) return json(res, 400, { error: error.message });
+          throw error;
+        }
       } finally { providerConfigBusy.set(false); }
     }
 
@@ -516,6 +522,19 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           if (entry.driver !== "openai-compat") return json(res, 400, { ...userError("serverError.instance.replyWaitUnsupported") });
           const { replyWaitMinutes: _previous, ...rest } = (entry.config ?? {}) as Record<string, unknown>;
           entry.config = body.replyWaitMinutes === null ? rest : { ...rest, replyWaitMinutes: body.replyWaitMinutes };
+        }
+        if (body.customHeaders !== undefined) {
+          if (!ownerOrAdmin(auth)) return json(res, 403, { error: "Only the owner or an admin can configure custom headers." });
+          if (entry.driver !== "openai-compat") return json(res, 400, { error: "Custom request headers are available for OpenAI-compatible instances only." });
+          const { customHeaders: previous, ...rest } = (entry.config ?? {}) as Record<string, unknown>;
+          try {
+            entry.config = body.customHeaders === null
+              ? rest
+              : { ...rest, customHeaders: mergeCustomHeadersPatch(body.customHeaders, previous as OpenAICompatCustomHeadersConfig | undefined) };
+          } catch (error) {
+            if (error instanceof CustomHeaderValidationError) return json(res, 400, { error: error.message });
+            throw error;
+          }
         }
         if (body.models !== undefined) {
           if (!isAddedEndpoint(instanceId, entry)) return json(res, 400, { ...userError("serverError.instance.modelsUnsupported") });

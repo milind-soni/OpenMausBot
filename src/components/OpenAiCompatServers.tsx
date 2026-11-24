@@ -6,6 +6,7 @@ import { keySaved } from "@/lib/product-events";
 import { addedServers } from "@/lib/openai-compat-endpoints";
 import { cn } from "@/lib/cn";
 import { KEY_FIELD } from "./keys/KeyRow";
+import { OpenAiCompatCustomHeaders } from "./OpenAiCompatCustomHeaders";
 import { Select } from "./Select";
 
 export function modelIds(text: string): string[] {
@@ -234,6 +235,7 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
               </div>
               {error?.at === server.instanceId && <div role="alert" className="text-[12px] leading-4 text-danger">{error.text}</div>}
               {unreadable === server.instanceId && <p role="status" className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.modelsUnreadable")}</p>}
+              <OpenAiCompatCustomHeaders server={server} disabled={busy !== null} />
             </div>
           )}
         </div>

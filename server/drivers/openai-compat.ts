@@ -7,6 +7,7 @@ import { lmStudioV1Catalog } from "./local-inject.ts";
 import { isContextName, isOllama, pickedName, serveWithWindow } from "./ollama-context.ts";
 import { isOllamaServer, OLLAMA_PLACEHOLDER_KEY, ollamaOrigin, ollamaUnavailable, onOllamaPort, probeOllama, thinkingEffort, type OllamaModel, type OllamaStatus } from "./ollama.ts";
 import { createOpenAIChatRuntime } from "./openai-chat.ts";
+import { decodeCustomHeaders, type OpenAICompatCustomHeadersConfig } from "./openai-compat-headers.ts";
 import { decodeReasoningEfforts, reasoningBody, reasoningCatalog, reasoningChoices, rememberReasoning, waitForCatalog, type ReasoningChoices } from "./compat-reasoning.ts";
 import {
   freeDefault, freeFallbackCatalog, freeLabel, freeToolModels, freeToolsFirst, isOpenRouterOrigin, openRouterFreeTier,
@@ -106,6 +107,8 @@ export interface OpenAICompatConfig {
   reasoningEfforts?: Record<string, string[]>;
   /** How long a turn waits for the next piece of a reply before giving up; unset follows the server's default. */
   replyWaitMinutes?: number;
+  /** Opt-in outbound HTTP headers with trusted runtime variables such as {threadId}. */
+  customHeaders?: OpenAICompatCustomHeadersConfig;
 }
 
 const CATALOGS = ["openai", "lmstudio", "ollama"] as const;
@@ -169,6 +172,7 @@ function decodeConfig(raw: unknown): OpenAICompatConfig {
     ...(config.managedModels ? { managedModels: config.managedModels as string[] } : {}),
     ...(reasoningEfforts ? { reasoningEfforts } : {}),
     ...(isReplyWait(config.replyWaitMinutes) ? { replyWaitMinutes: config.replyWaitMinutes } : {}),
+    ...(config.customHeaders !== undefined ? { customHeaders: decodeCustomHeaders(config.customHeaders) } : {}),
     url: (typeof config.url === "string" && config.url ? config.url : envUrl || "https://openrouter.ai/api/v1")
       .replace(/\/+$/, ""),
     apiKeyEnv: typeof config.apiKeyEnv === "string" && config.apiKeyEnv
@@ -432,6 +436,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       missingKeyError: missingKey,
       unavailableReason: missingKey,
       timeoutMs: config.replyWaitMinutes ? config.replyWaitMinutes * 60_000 : idleTimeoutMs(),
+      ...(config.customHeaders ? { customHeaders: config.customHeaders } : {}),
       ...(onThisNetwork(config.url) ? { livenessEveryMs: livenessEveryMs(), localModel: true } : {}),
       reasoning: true,
       billing: "metered",

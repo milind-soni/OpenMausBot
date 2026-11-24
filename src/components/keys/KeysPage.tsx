@@ -9,6 +9,7 @@ import { BoatOfferPanel } from "../BoatOffer";
 import { LiveProviderSettings } from "../LiveProviderSettings";
 import { VoiceEveryReplySetting } from "../VoiceEveryReplySetting";
 import { VoiceHearingSetting } from "../VoiceHearingSetting";
+import { BuiltInCustomHeaders } from "../OpenAiCompatCustomHeaders";
 import { BuiltInReplyWait, LmStudioServer, OtherOpenAiCompatServers } from "../OpenAiCompatServers";
 import { OllamaServer } from "../OllamaServer";
 import { KEY_CATALOG, KEY_SECTIONS, keyHidden, keyMatches, savedState, type KeyEntry, type KeyId, type KeySectionId } from "./key-catalog";
@@ -30,7 +31,7 @@ const PANELS: Partial<Record<KeyId, (visible: boolean) => ReactNode>> = {
 
 const EXTRAS: Partial<Record<KeyId, () => ReactNode>> = {
   anthropic: () => <AnthropicEveryClaudeBot />,
-  openaiCompat: () => <><OpenAiCompatUrl /><BuiltInReplyWait /><OtherOpenAiCompatServers /></>,
+  openaiCompat: () => <><OpenAiCompatUrl /><BuiltInReplyWait /><BuiltInCustomHeaders /><OtherOpenAiCompatServers /></>,
   box: () => <BoatOfferPanel />,
   liveKey: () => <LiveProviderSettings />,
 };

@@ -1334,3 +1334,114 @@ describe("how long a turn waits for a reply", () => {
   });
 });
 
+describe("opt-in custom OpenAI-compatible request headers", () => {
+  it("preserves standard headers when disabled and injects per-thread/bot/turn/provider headers consistently across threads, compaction, retries, non-streaming, and secret scrubbing", async () => {
+    const seenRequests: Array<{ url: string; headers: Record<string, string>; body: Record<string, unknown> }> = [];
+    let chatAttempt = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const target = String(url);
+      if (target.endsWith("/models")) return Response.json({ data: [] });
+      const rawHeaders = Object.fromEntries(new Headers(init?.headers).entries());
+      seenRequests.push({ url: target, headers: rawHeaders, body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown> });
+      chatAttempt++;
+      if (chatAttempt === 4) {
+        return new Response("", { status: 200, headers: { "content-type": "text/event-stream" } });
+      }
+      if (JSON.parse(String(init?.body ?? "{}")).stream === false) {
+        return new Response(JSON.stringify({ choices: [{ message: { content: "non-stream ok" }, finish_reason: "stop" }] }), { headers: { "content-type": "application/json" } });
+      }
+      return new Response(
+        `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "ok gw-secret-token-xyz " } }] })}\n\n` +
+        `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1 } })}\n\n`,
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    }));
+
+      // 1. Disabled by default: standard headers only
+      const offInst = await OpenAICompatDriver.create({
+        instanceId: "gw-off", displayName: "Off", enabled: true,
+        config: OpenAICompatDriver.decodeConfig({
+          url: "https://gw.example/v1", model: "m1",
+          customHeaders: { enabled: false, headers: [{ name: "X-Maus-Thread-ID", value: "{threadId}" }] },
+        }),
+        environment: { OPENAI_COMPAT_API_KEY: "test-api-key-123456" },
+      });
+      const recOff = recordEvents(offInst.adapter);
+      await offInst.adapter.sendTurn({ threadId: "t-off", botId: "b1", text: "hi" });
+      await recOff.until((e) => e.type === "turn.completed");
+      expect(seenRequests[0]!.headers["x-maus-thread-id"]).toBeUndefined();
+      recOff.stop();
+      await offInst.dispose();
+
+      // 2. Enabled: two separate threads -> distinct headers; second turn / compacted turn on thread-1 keeps same threadId; retry preserves turnId
+      const onInst = await OpenAICompatDriver.create({
+        instanceId: "gw-on", displayName: "On", enabled: true,
+        config: OpenAICompatDriver.decodeConfig({
+          url: "https://gw.example/v1", model: "m1",
+          customHeaders: {
+            enabled: true,
+            headers: [
+              { name: "X-Maus-Thread-ID", value: "{threadId}", required: true },
+              { name: "X-Maus-Bot-ID", value: "{botId}", required: false },
+              { name: "X-Maus-Turn-ID", value: "{turnId}", required: false },
+              { name: "X-Provider-ID", value: "{providerInstanceId}", required: true },
+              { name: "X-Gateway-Token", value: "gw-secret-token-xyz", secret: true },
+            ],
+          },
+        }),
+        environment: { OPENAI_COMPAT_API_KEY: "test-api-key-123456" },
+      });
+      const recOn = recordEvents(onInst.adapter);
+      const completedCount = () => recOn.events.filter((e) => e.type === "turn.completed").length;
+      await onInst.adapter.sendTurn({ threadId: "thread-alpha", botId: "bot-one", text: "first" });
+      await recOn.until(() => completedCount() >= 1);
+      await onInst.adapter.sendTurn({ threadId: "thread-beta", botId: "bot-two", text: "second" });
+      await recOn.until(() => completedCount() >= 2);
+      await onInst.adapter.sendTurn({ threadId: "thread-alpha", botId: "bot-one", text: "compacted", transcript: [{ role: "user", text: "summary" }] });
+      await recOn.until(() => completedCount() >= 3);
+
+      const chatReqs = seenRequests.slice(1);
+      expect(chatReqs[0]!.headers["x-maus-thread-id"]).toBe("thread-alpha");
+      expect(chatReqs[0]!.headers["x-maus-bot-id"]).toBe("bot-one");
+      expect(chatReqs[0]!.headers["x-provider-id"]).toBe("gw-on");
+      expect(chatReqs[0]!.headers["x-gateway-token"]).toBe("gw-secret-token-xyz");
+      expect(chatReqs[1]!.headers["x-maus-thread-id"]).toBe("thread-beta");
+      // chatAttempt === 4 was truncated, so retried once on attempt 5 for thread-alpha: same turnId!
+      expect(chatReqs[2]!.headers["x-maus-thread-id"]).toBe("thread-alpha");
+      expect(chatReqs[3]!.headers["x-maus-thread-id"]).toBe("thread-alpha");
+      expect(chatReqs[2]!.headers["x-maus-turn-id"]).toBe(chatReqs[3]!.headers["x-maus-turn-id"]);
+      // Echoed sensitive custom header value must be scrubbed from streamed deltas.
+      const completed = recOn.events.filter((e) => e.type === "item.completed");
+      expect(completed.some((e) => JSON.stringify(e).includes("gw-secret-token-xyz"))).toBe(false);
+      expect(completed.some((e) => JSON.stringify(e).includes("[redacted]"))).toBe(true);
+
+      // 3. Non-streaming generateText without threadId fails cleanly when {threadId} is required, never sending an empty header
+      const countBeforeFail = seenRequests.length;
+      await expect(onInst.generateText!("summarize")).rejects.toThrow(/threadId/);
+      expect(seenRequests).toHaveLength(countBeforeFail);
+
+      // Non-streaming generateText with optional {threadId} omits it cleanly and still sends static/{providerInstanceId} headers
+      const optInst = await OpenAICompatDriver.create({
+        instanceId: "gw-opt", displayName: "Opt", enabled: true,
+        config: OpenAICompatDriver.decodeConfig({
+          url: "https://gw.example/v1", model: "m1",
+          customHeaders: {
+            enabled: true,
+            headers: [
+              { name: "X-Maus-Thread-ID", value: "{threadId}", required: false },
+              { name: "X-Gateway-Client", value: "maus", required: true },
+            ],
+          },
+        }),
+        environment: { OPENAI_COMPAT_API_KEY: "test-api-key-123456" },
+      });
+      await expect(optInst.generateText!("summarize")).resolves.toBe("non-stream ok");
+      const nonStreamReq = seenRequests.at(-1)!;
+      expect(nonStreamReq.headers["x-gateway-client"]).toBe("maus");
+      expect(nonStreamReq.headers["x-maus-thread-id"]).toBeUndefined();
+      await optInst.dispose();
+      recOn.stop();
+      await onInst.dispose();
+  });
+});
+

@@ -1322,6 +1322,44 @@ describe("Instance CLI override", () => {
     (persisted.custom.config as Record<string, unknown>).url = "https://changed.example.test/v1";
     expect(cfg.instances!.custom.config).toMatchObject({ url: "https://custom.example.test/v1" });
   });
+
+  it("validates openaiCompat.customHeaders in config and propagates them only to non-overridden non-built-in compat instances", () => {
+    const parsed = parseStoredConfig({
+      openaiCompat: {
+        url: "https://gw.example/v1",
+        customHeaders: { enabled: true, headers: [{ name: "X-Maus-Thread-ID", value: "{threadId}" }] },
+      },
+    });
+    expect(parsed.openaiCompat?.customHeaders).toEqual({
+      enabled: true,
+      headers: [{ name: "X-Maus-Thread-ID", value: "{threadId}", required: true, secret: false }],
+    });
+    expect(() => parseConfigPatch({
+      openaiCompat: { customHeaders: { enabled: true, headers: [{ name: "Authorization", value: "Bearer evil" }] } },
+    })).toThrow();
+    expect(() => parseConfigPatch({
+      openaiCompat: { customHeaders: { enabled: true, headers: [{ name: "X-Bad", value: "a\r\nb" }] } },
+    })).toThrow();
+
+    const cfg: AppConfig = {
+      openaiCompat: parsed.openaiCompat,
+      instances: {
+        openaiCompat: { driver: "openai-compat", config: {} },
+        inherited: { driver: "openai-compat" },
+        openai: { driver: "openai-compat", config: { url: "https://api.openai.com/v1", apiKeyEnv: "OMB_OPENAI_API_KEY" } },
+        openrouter: { driver: "openai-compat", config: { url: "https://openrouter.ai/api/v1", apiKeyEnv: "OMB_OPENROUTER_API_KEY" } },
+        "openai-compat-added": { driver: "openai-compat", config: { url: "https://generativelanguage.googleapis.com/v1beta/openai", key: "gemini-key" } },
+        override: { driver: "openai-compat", config: { url: "https://other.example/v1", customHeaders: { enabled: false, headers: [] } } },
+      },
+    };
+    const resolved = instanceConfigs(cfg);
+    expect(resolved.openaiCompat!.config).toMatchObject({ customHeaders: parsed.openaiCompat!.customHeaders });
+    expect(resolved.inherited!.config).toMatchObject({ customHeaders: parsed.openaiCompat!.customHeaders });
+    expect(resolved.openai!.config).not.toHaveProperty("customHeaders");
+    expect(resolved.openrouter!.config).not.toHaveProperty("customHeaders");
+    expect(resolved["openai-compat-added"]!.config).not.toHaveProperty("customHeaders");
+    expect(resolved.override!.config).toMatchObject({ customHeaders: { enabled: false, headers: [] } });
+  });
 });
 
 describe("OpenCode Go configuration", () => {
