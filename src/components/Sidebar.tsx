@@ -851,7 +851,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
 
   return (
     <>
-    <div className={cn("group relative", railTile && "mx-auto w-[54px]", botRowDropClass(drop, dragging))} data-bot-drop={drop ?? undefined} {...(drag && !renaming ? drag.row(bot.id) : {})}
+    <div className={cn("group relative", railTile && "mx-auto w-[54px]", botRowDropClass(drop, false), dragging && "popover-surface rounded-[8px]")} data-bot-drop={drop ?? undefined} {...(drag && !renaming ? drag.row(bot.id) : {})}
       title={railTile ? botTooltip(bot, instances) : iconOnly ? [bot.name, bot.title?.trim()].filter(Boolean).join(" · ") : undefined}><BotDropLine place={drop} />
       {/* Keep this wrapper mounted: replacing it remounts RenameTitle and leaves the row stuck in rename mode. */}
       <div
@@ -1077,7 +1077,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
 
   const q = query.trim().toLowerCase();
   const sections = useSidebarSections({ simple, rail, density, query: q, label: sectionLabel, sidebarRef });
-  const botDrag = useSidebarBotDrag({ dispatch, announce: sections.announce, onNamed: sections.focusHeader, onRenamed: sections.renamed,
+  const botDrag = useSidebarBotDrag({ dispatch, announce: sections.announce, selected: state.activeView === "chat" ? state.selectedId : null, onNamed: sections.focusHeader, onRenamed: sections.renamed,
     onError: (text) => setTeamFeedback({ error: true, text }), onCancelled: () => sidebarRef.current?.focus() }), roomDrag = useSidebarRoomDrag({ dispatch, announce: sections.announce, enabled: (sections.interactive || density === "icons") && !phone && !q, groups: state.groups });
 
   const sideLists = useTeamSideLists(state), matchingBots = sideLists.bots
@@ -1409,7 +1409,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
               <div
                 key={id}
                 data-sidebar-section-id={id}
-                {...drops.zone(id, layout.zone(id))}
+                {...layout.zone(id)}
                 className={cn(
                   "flex flex-col",
                   advanced || simpleDesk ? "gap-0.5" : "gap-1",

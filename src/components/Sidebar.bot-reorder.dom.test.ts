@@ -22,7 +22,6 @@ vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => true }));
 const { Sidebar } = await import("./Sidebar");
 const { BotEditorStore, initialState } = await import("@/state/store");
 const { setLocale } = await import("@/lib/i18n");
-const BOT_TYPE = "application/x-openmausbot-sidebar-bot";
 
 const bot = (id: string, extra: Partial<Bot> = {}): Bot => ({
   id, name: id[0]!.toUpperCase() + id.slice(1), threadId: `${id}-t`, title: "", description: "", color: "green", unread: false,
@@ -38,33 +37,23 @@ const render = (bots: Bot[]) => flushSync(() => root.render(createElement(BotEdi
   children: createElement(Sidebar, { open: true, onClose: () => {} }),
 })));
 
-function dataTransfer() {
-  const data = new Map<string, string>();
-  return { data, effectAllowed: "all", dropEffect: "none", get types() { return [...data.keys()]; },
-    setData: (type: string, value: string) => { data.set(type, value); }, getData: (type: string) => data.get(type) ?? "",
-    setDragImage: () => {}, files: [], items: [] };
-}
-function fire(target: Element, type: string, transfer: ReturnType<typeof dataTransfer>, clientY = 0) {
-  const event = new Event(type, { bubbles: true, cancelable: true });
-  Object.defineProperty(event, "dataTransfer", { value: transfer });
-  Object.defineProperty(event, "clientY", { value: clientY });
-  flushSync(() => target.dispatchEvent(event));
-  return event;
-}
-/** The draggable element around a bot's row: the one carrying the drag handlers. */
-const dragHost = (id: string) => document.querySelector(`[data-sidebar-bot-row="${id}"]`)?.closest('[draggable="true"]') ?? null;
+const dragHost = (id: string) => document.querySelector<HTMLElement>(`[data-bot-drag-row="${id}"]`);
+const pointer = (type: string, clientY: number) => new PointerEvent(type, { bubbles: true, cancelable: true, button: 0, pointerId: 1, pointerType: "mouse", clientX: 10, clientY });
+let under: Element | null = null;
 
 beforeEach(() => {
   dispatch.mockReset();
   localStorage.clear();
   vi.stubGlobal("fetch", () => new Promise(() => {}));
+  under = null;
+  document.elementFromPoint = () => under;
   setLocale("en");
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
   // Each row 50px tall, one under another, so a drop on a row's lower edge lands after it.
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-    const rows = [...document.querySelectorAll('[draggable="true"]')];
+    const rows = [...document.querySelectorAll("[data-bot-drag-row]")];
     const index = Math.max(0, rows.indexOf(this));
     return { top: index * 50, bottom: index * 50 + 50, height: 50, left: 0, right: 200, width: 200, x: 0, y: index * 50, toJSON: () => ({}) } as DOMRect;
   });
@@ -77,19 +66,21 @@ afterEach(() => {
 });
 
 const order = () => [...document.querySelectorAll<HTMLElement>("[data-sidebar-bot-row]")].map((row) => row.dataset.sidebarBotRow);
-/** Drags `moving` onto the top or bottom edge of `onto`'s row and lets go. */
-function dragOnto(moving: string, onto: string, edge: "top" | "bottom") {
+/** Presses `moving`'s row, drags it over the top or bottom edge of `onto`'s row and lets go, or presses Escape first. */
+function dragOnto(moving: string, onto: string, edge: "top" | "bottom", cancel = false) {
   const from = dragHost(moving), target = dragHost(onto);
   expect(from, `${moving} is draggable`).not.toBeNull();
   expect(target, `${onto} is draggable`).not.toBeNull();
-  const transfer = dataTransfer();
-  fire(from!, "dragstart", transfer);
-  expect(transfer.types).toContain(BOT_TYPE);
+  const start = from!.getBoundingClientRect().top + 25;
+  flushSync(() => from!.dispatchEvent(pointer("pointerdown", start)));
   const box = target!.getBoundingClientRect();
   const y = edge === "top" ? box.top + 2 : box.bottom - 2;
-  fire(target!, "dragover", transfer, y);
-  fire(target!, "drop", transfer, y);
-  fire(from!, "dragend", transfer);
+  under = target;
+  flushSync(() => window.dispatchEvent(pointer("pointermove", y)));
+  expect(from!.style.pointerEvents).toBe("none");
+  if (cancel) flushSync(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
+  flushSync(() => window.dispatchEvent(pointer("pointerup", y)));
+  expect(from!.style.transform).toBe("");
 }
 const saved = () => dispatch.mock.calls.map(([action]) => action).filter((action) => action.type === "botsOrdered");
 
@@ -123,6 +114,25 @@ for (const advanced of [false, true]) {
       press("alpha", "ArrowDown");
       expect(saved()).toEqual([{ type: "botsOrdered", botIds: ["bravo", "alpha", "delta"] }]);
       expect(document.body.textContent).toContain("Alpha moved to position 3 of 3");
+    });
+
+    it("moves the open bot with Alt+Up/Down while typing is elsewhere, but not over text being written", () => {
+      render([bot("alpha"), bot("bravo"), bot("charlie")]);
+      const field = document.createElement("textarea");
+      document.body.append(field);
+      const press = (key: string) => flushSync(() => field.dispatchEvent(new KeyboardEvent("keydown", { key, altKey: true, bubbles: true, cancelable: true })));
+      press("ArrowDown");
+      expect(saved()).toEqual([{ type: "botsOrdered", botIds: ["bravo", "alpha", "charlie"] }]);
+      field.value = "draft";
+      press("ArrowDown");
+      expect(saved()).toHaveLength(1);
+      field.remove();
+    });
+
+    it("puts the bot back when Escape is pressed mid-drag", () => {
+      render([bot("alpha"), bot("bravo"), bot("charlie")]);
+      dragOnto("charlie", "alpha", "top", true);
+      expect(saved()).toEqual([]);
     });
 
     it("moves a bot below a waiting one's place among the rows as drawn", () => {
