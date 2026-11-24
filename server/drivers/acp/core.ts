@@ -1499,9 +1499,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           provider: DRIVER_KIND,
           capabilities: acpCapabilities(support),
           sendTurn,
-          interruptTurn: async (threadId) => active.get(threadId)?.interrupt(),
-          ...(support.inPlaceCompaction ? { compactSession: acpCompactSession({ driverKind: DRIVER_KIND, instanceId, sessions, active, turnId: newId, refusal: () => disposing ? `${support.displayName} is shutting down` : null,
-            promptOutcome: support.promptOutcome, closeSession, endUncancelled, armIdle, holdIdle: (threadId, session) => { stopIdleClose(`${instanceId}\0${threadId}`, session.idleTimer); session.idleTimer = null; } }) } : {}),
+          interruptTurn: async (threadId) => active.get(threadId)?.interrupt(), ...(support.inPlaceCompaction ? { compactSession: acpCompactSession({ driverKind: DRIVER_KIND, instanceId, sessions, active, turnId: newId, refusal: () => disposing ? `${support.displayName} is shutting down` : null, promptOutcome: support.promptOutcome, closeSession, endUncancelled, armIdle }) } : {}),
           ...(support.steer ? { steer: async (threadId: string, text: string, images?: readonly TurnImageInput[]) =>
             images?.length ? "refused" as const : await sessions.get(threadId)?.current?.steering?.steer(text) ?? "refused" } : {}),
           respondToRequest: async (threadId, requestId, decision) => {

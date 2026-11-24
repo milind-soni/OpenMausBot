@@ -25,7 +25,7 @@ function setup(answer: (link: { heard: (update: object) => void; reply: (result:
   const active: AcpCompactDeps["active"] = new Map();
   const deps: AcpCompactDeps = {
     driverKind: "fixtureAgent", instanceId: "fixture", sessions, active, turnId: () => "turn", refusal: () => null,
-    closeSession: vi.fn((threadId: string) => { sessions.delete(threadId); }), endUncancelled: vi.fn(async () => true), holdIdle: vi.fn(), armIdle: vi.fn(),
+    closeSession: vi.fn((threadId: string) => { sessions.delete(threadId); }), endUncancelled: vi.fn(async () => true), armIdle: vi.fn(),
   };
   return { session, acp, deps, active, sessions };
 }

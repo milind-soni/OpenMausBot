@@ -1,6 +1,7 @@
 import type { EngineCompactResult } from "../../contracts.ts";
 import { deletePromptSplitReceipt } from "../prompt-split.ts";
 import { promptTokenUsage } from "./prompt-usage.ts";
+import { stopIdleClose } from "../session-idle.ts";
 import type { AcpAskFinish, AcpSession } from "./turn-state.ts";
 
 const DEFAULT_TIMEOUT_MS = 300_000;
@@ -25,7 +26,6 @@ export interface AcpCompactDeps {
   promptOutcome?: (instanceId: string, sessionId: string) => Promise<(result: unknown) => Promise<Error | undefined>>;
   closeSession: (threadId: string, why: string) => void;
   endUncancelled: (threadId: string, session: AcpSession) => Promise<boolean>;
-  holdIdle: (threadId: string, session: AcpSession) => void;
   armIdle: (threadId: string) => void;
 }
 
@@ -65,7 +65,8 @@ export function acpCompactSession(deps: AcpCompactDeps) {
     const settled = new Promise<void>((resolve) => { finished = resolve; });
     const entry: ActiveEntry = { stop, interrupt: async () => { stop(); await settled; }, turnId: deps.turnId(), asks: new Map() };
     deps.active.set(threadId, entry);
-    deps.holdIdle(threadId, session);
+    stopIdleClose(`${deps.instanceId}\0${threadId}`, session.idleTimer);
+    session.idleTimer = null;
     const onAbort = () => stop();
     options.signal?.addEventListener("abort", onAbort, { once: true });
     let markGone!: () => void;
