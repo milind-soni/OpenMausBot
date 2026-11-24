@@ -1,0 +1,95 @@
+// @vitest-environment happy-dom
+import { act, createElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Action, Bot, Task } from "@/state/store";
+
+const feature = vi.hoisted(() => ({ on: true }));
+const dispatch = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/use-feature", () => ({ useFeature: (name: string) => name === "threadTabs" && feature.on }));
+vi.mock("@/state/store-select", () => ({ useStoreDispatch: () => dispatch, useStoreSelector: () => false }));
+
+import { ThreadTabStrip } from "./ThreadTabStrip";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const task = (threadId: string, title: string, at: number, extra: Partial<Task> = {}): Task => ({ threadId, title, createdAt: at, lastThreadOrderAt: at, ...extra });
+const kiwi = (tasks: Task[], threadId: string): Bot => ({ id: "kiwi", name: "Kiwi", threadId, mainThreadId: "main", tasks, messages: [] } as unknown as Bot);
+const FIVE = [
+  task("main", "Weekly sales", 5, { busy: true }), task("launch", "Launch plan", 1, { pinned: true }),
+  task("invoice", "Invoice for Acme", 4), task("trip", "Berlin trip", 3), task("notes", "Call notes", 2),
+];
+
+let root: Root | null = null;
+const render = (bot: Bot) => {
+  root = createRoot(document.body.appendChild(document.createElement("div")));
+  act(() => root!.render(createElement(ThreadTabStrip, { bot })));
+};
+const tabs = () => [...document.querySelectorAll<HTMLElement>('[role="tab"]')];
+const tab = (title: string) => tabs().find((element) => element.textContent?.includes(title))!;
+const closeOf = (title: string) => tab(title).querySelector<HTMLButtonElement>("button")!;
+const sent = () => dispatch.mock.calls.map(([action]) => action as Action);
+
+beforeEach(() => { feature.on = true; dispatch.mockClear(); });
+afterEach(() => { act(() => root?.unmount()); root = null; document.body.innerHTML = ""; });
+
+describe("thread tab strip", () => {
+  it("is not there while Thread tabs is off, or for a bot with one thread", () => {
+    feature.on = false;
+    render(kiwi(FIVE, "launch"));
+    expect(document.querySelector("[data-thread-tabs]")).toBeNull();
+    act(() => root!.unmount());
+    feature.on = true;
+    render(kiwi([task("main", "Only", 1)], "main"));
+    expect(document.querySelector("[data-thread-tabs]")).toBeNull();
+  });
+
+  it("lists pinned threads first, then by recent use, with the open one selected", () => {
+    render(kiwi(FIVE, "launch"));
+    expect(tabs().map((element) => element.textContent)).toEqual(["Launch plan", "Weekly sales", "Invoice for Acme", "Berlin trip", "Call notes"]);
+    expect(tab("Launch plan").getAttribute("aria-selected")).toBe("true");
+    expect(tab("Weekly sales").querySelector('[aria-label="Working"]')).not.toBeNull();
+    expect(tab("Launch plan").querySelector('[aria-label="Pinned"]')).not.toBeNull();
+    expect(closeOf("Weekly sales"), "no close on the main or a running thread").toBeNull();
+  });
+
+  it("archives with ✕, never deletes, and gives Undo", () => {
+    render(kiwi(FIVE, "launch"));
+    act(() => closeOf("Berlin trip").click());
+    expect(sent()).toEqual([expect.objectContaining({ type: "updateTask", botId: "kiwi", threadId: "trip", patch: { archivedAt: expect.any(Number) } })]);
+    expect(sent().some((action) => action.type === "deleteTask" || action.type === "switchTask")).toBe(false);
+    const undo = [...document.querySelectorAll("button")].find((button) => button.textContent === "Undo")!;
+    act(() => undo.click());
+    expect(sent().at(-1)).toMatchObject({ type: "updateTask", threadId: "trip", patch: { archivedAt: null } });
+  });
+
+  it("moves to the neighbouring tab when the open one is archived", () => {
+    render(kiwi(FIVE, "invoice"));
+    act(() => closeOf("Invoice for Acme").click());
+    expect(sent().map((action) => action.type)).toEqual(["switchTask", "updateTask"]);
+    expect(sent()[0]).toMatchObject({ botId: "kiwi", threadId: "trip" });
+  });
+
+  it("archives on a middle click", () => {
+    render(kiwi(FIVE, "launch"));
+    act(() => { tab("Call notes").dispatchEvent(new MouseEvent("auxclick", { bubbles: true, button: 1 })); });
+    expect(sent()).toEqual([expect.objectContaining({ type: "updateTask", threadId: "notes", patch: { archivedAt: expect.any(Number) } })]);
+  });
+
+  it("opens a tab on click and makes a new thread with +", () => {
+    render(kiwi(FIVE, "launch"));
+    act(() => tab("Berlin trip").click());
+    act(() => document.querySelector<HTMLButtonElement>("[data-thread-tabs-new]")!.click());
+    expect(sent()).toEqual([{ type: "switchTask", botId: "kiwi", threadId: "trip" }, { type: "newTask", botId: "kiwi" }]);
+  });
+
+  it("renames a tab in place on a double-click", () => {
+    render(kiwi(FIVE, "launch"));
+    act(() => { tab("Call notes").dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); });
+    const input = document.querySelector<HTMLInputElement>('input[aria-label="Rename thread"]')!;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    act(() => { setValue.call(input, "Call with Dana"); input.dispatchEvent(new Event("input", { bubbles: true })); });
+    act(() => { input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+    expect(sent()).toEqual([{ type: "renameTask", botId: "kiwi", threadId: "notes", title: "Call with Dana" }]);
+  });
+});
