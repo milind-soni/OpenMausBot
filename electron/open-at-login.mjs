@@ -70,7 +70,7 @@ export function createOpenAtLogin({ app, file, platform = process.platform, env 
         }
         if (platform === "win32") {
           const settings = { args: [HIDDEN_ARG] };
-          if (on && saved().declined === true) return;
+          if (on && (saved().declined === true || windowsStartsApp().some(item => item.name === CHOSEN_NAME))) return;
           if (app.getLoginItemSettings(settings).openAtLogin !== on) app.setLoginItemSettings({ openAtLogin: on, ...settings });
           return;
         }
@@ -79,6 +79,19 @@ export function createOpenAtLogin({ app, file, platform = process.platform, env 
         else if (!on && set && added()) { app.setLoginItemSettings({ openAtLogin: false }); remember(false); }
         else if (!set && added()) remember(false);
       } catch {}
+    },
+    initialize() {
+      if (!login.available()) return;
+      const prefs = saved();
+      if (prefs.initialized === true) return;
+      const previouslyDisabled = prefs.declined === true
+        || (platform === "darwin" && prefs.added === false)
+        || (platform === "win32" && (app.getLoginItemSettings().launchItems ?? []).some(item => item.enabled === false));
+      if (!previouslyDisabled && !login.starts()) {
+        choose(true);
+        if (!login.chosen()) throw new Error("The system did not enable the login item");
+      }
+      store({ initialized: true });
     },
     available: () => app.isPackaged,
     chosen() {
@@ -90,7 +103,9 @@ export function createOpenAtLogin({ app, file, platform = process.platform, env 
     },
     /** The person's own choice, from Settings or the app menu. */
     choose(on) {
+      if (!login.available()) return;
       choose(on);
+      store({ initialized: true });
       whenChosen();
     },
     /** Called after each `choose`: the person has taken the item over from the always-on home. */

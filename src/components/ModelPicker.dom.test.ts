@@ -352,3 +352,33 @@ describe("while the bot is working", () => {
     expect(chip().disabled).toBe(true);
   });
 });
+
+it("keeps the reasoning menu in the same modal layer and accepts a pointer selection", async () => {
+  const dialog = document.createElement("dialog");
+  document.body.append(dialog);
+  dialog.showModal();
+  dialog.append(host);
+  try {
+    await openWith("click");
+    const picker = menu()!;
+    expect(dialog.contains(picker)).toBe(true);
+    const trigger = picker.querySelector<HTMLButtonElement>('button[aria-label="Reasoning effort"]')!;
+    flushSync(() => trigger.click());
+    await settle();
+    const choices = dialog.querySelector<HTMLElement>('[role="menu"][aria-label="Reasoning effort"]')!;
+    expect(choices.parentElement).toBe(picker.parentElement);
+    expect(choices.classList.contains("z-[81]")).toBe(true);
+    const high = [...choices.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find(row => row.textContent === "High")!;
+    flushSync(() => high.dispatchEvent(new Event("pointerdown", { bubbles: true })));
+    expect(menu()).toBe(picker);
+    flushSync(() => high.click());
+    expect(fixture.dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      type: "setModel", selection: { ...scout().modelSelection, effort: "high" },
+    }));
+    expect(menu()).toBe(picker);
+  } finally {
+    dialog.close();
+    document.body.append(host);
+    dialog.remove();
+  }
+});

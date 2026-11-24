@@ -37,6 +37,7 @@ import { USAGE_WARN_WIDENS, UsageBars, UsageMenuRows } from "./EngineUsage";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { PhoneModelSheet } from "./PhoneModelSheet";
 import { Select } from "./Select";
+import { NestedMenuHost } from "./SidebarPopoverMenu";
 
 const COMPACT_MODEL_COUNT = 5;
 
@@ -74,7 +75,7 @@ export function EffortRow({
   if (!levels?.length) return null;
 
   if (compact) return (
-    <label className={cn("flex items-center justify-between gap-3", className)}>
+    <div className={cn("flex items-center justify-between gap-3", className)}>
       {label}
       <Select size="sm" variant="quiet" className="max-w-[65%]" aria-label={t("model.effort.label")} value={selection.effort ?? ""}
         onChange={(event) => dispatch({ type: "setModel", botId: bot.id, threadId, ...(updateBotDefault ? { updateBotDefault: true } : {}),
@@ -82,7 +83,7 @@ export function EffortRow({
         <option value="">{t("model.effort.default")}</option>
         {levels.map((level) => <option key={level} value={level}>{effortLabel(level)}</option>)}
       </Select>
-    </label>
+    </div>
   );
 
   return (
@@ -244,13 +245,14 @@ export function ModelPicker({
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuHost = useRef<HTMLDivElement>(null);
   const refreshingRef = useRef(false);
   const lastClaudeIdRef = useRef<string | null>(null);
   const lastOpenaiIdRef = useRef<string | null>(null);
   const focusOnPlace = useRef<string | null>(null);
   const typed = useRef<Typeahead | null>(null);
   const menuId = useId();
-  const inside = useRef({ contains: (target: unknown) => [rootRef.current, menuRef.current].some((node) => node?.contains(target as Node)) });
+  const inside = useRef({ contains: (target: unknown) => [rootRef.current, menuHost.current].some((node) => node?.contains(target as Node)) });
 
   const floating = typeof document !== "undefined";
 
@@ -876,31 +878,35 @@ export function ModelPicker({
       ) : undefined}
     </PhoneModelSheet>
   ) : motion.shown && (
-    <div
-      ref={menuRef}
-      id={menuId}
-      data-model-picker-content
-      role="dialog"
-      aria-label={t("model.choose")}
-      aria-modal="false"
-      tabIndex={-1}
-      {...motion.exitProps}
-      onKeyDown={onMenuKey}
-      onPointerMove={modelMenuPointerMove}
-      style={floating ? {
-        position: "fixed",
-        left: placement?.left ?? 0,
-        top: placement?.top,
-        bottom: placement?.bottom,
-        width: placement?.width ?? popoverWidth,
-        maxHeight: placement?.maxHeight,
-        transformOrigin: placement?.origin,
-        visibility: placement ? undefined : "hidden",
-      } : { width: popoverWidth }}
-      className={cn("menu-surface z-[80] flex flex-col overflow-hidden", motion.className)}
-    >
-      <UsageMenuRows engine={selection.instanceId} />
-      {bot.busy ? <BusyModelMenu bot={shown} threadId={threadId} updateBotDefault={busyUpdatesBotDefault} variants={Boolean(active?.capabilities?.modelVariants)} /> : fullPane}
+    <div ref={menuHost} className="contents">
+      <NestedMenuHost.Provider value={menuHost}>
+        <div
+          ref={menuRef}
+          id={menuId}
+          data-model-picker-content
+          role="dialog"
+          aria-label={t("model.choose")}
+          aria-modal="false"
+          tabIndex={-1}
+          {...motion.exitProps}
+          onKeyDown={onMenuKey}
+          onPointerMove={modelMenuPointerMove}
+          style={floating ? {
+            position: "fixed",
+            left: placement?.left ?? 0,
+            top: placement?.top,
+            bottom: placement?.bottom,
+            width: placement?.width ?? popoverWidth,
+            maxHeight: placement?.maxHeight,
+            transformOrigin: placement?.origin,
+            visibility: placement ? undefined : "hidden",
+          } : { width: popoverWidth }}
+          className={cn("menu-surface z-[80] flex flex-col overflow-hidden", motion.className)}
+        >
+          <UsageMenuRows engine={selection.instanceId} />
+          {bot.busy ? <BusyModelMenu bot={shown} threadId={threadId} updateBotDefault={busyUpdatesBotDefault} variants={Boolean(active?.capabilities?.modelVariants)} /> : fullPane}
+        </div>
+      </NestedMenuHost.Provider>
     </div>
   );
 
@@ -914,7 +920,7 @@ export function ModelPicker({
       ) : (
         trigger
       )}
-      {menu && floating ? createPortal(menu, document.body) : menu}
+      {menu && floating ? createPortal(menu, triggerRef.current?.closest("dialog[open]") ?? document.body) : menu}
       {!contained && changedBotModel && !open && ownModelThreads > 0 && (
         <div data-thread-models-notice role="status"
           className="menu-surface absolute right-0 top-full z-30 mt-1 flex w-max max-w-[min(300px,calc(100vw-2rem))] items-center gap-2 py-1.5 pl-3 pr-1.5 text-[13px] leading-[18px]">

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ComponentProps, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { createContext, useContext, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ComponentProps, type RefObject, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -174,6 +174,8 @@ function MenuRows({
 const closesOnEscape = (event: ReactKeyboardEvent) =>
   popoverClosesOnKey({ key: event.key, defaultPrevented: event.defaultPrevented, isComposing: event.nativeEvent.isComposing });
 
+export const NestedMenuHost = createContext<RefObject<HTMLElement | null> | null>(null);
+
 export function SidebarPopoverMenu({
   items,
   ariaLabel,
@@ -205,6 +207,7 @@ export function SidebarPopoverMenu({
   onOpenChange?: (open: boolean) => void;
   renderTrigger: (state: { open: boolean }) => React.ReactNode;
 }) {
+  const host = useContext(NestedMenuHost);
   const [open, setOpen] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [submenu, setSubmenu] = useState<string | null>(null);
@@ -391,7 +394,7 @@ export function SidebarPopoverMenu({
       style={anchored ? { position: "fixed", left: position?.left ?? 0, top: position?.top ?? 0, minWidth: width ? undefined : MENU_MIN_WIDTH, width: width ? `min(${position?.fit ?? width}px, calc(100vw - var(--rail-beside, 0px) - ${EDGE_MARGIN * 2}px))` : "max-content", maxWidth: width ? undefined : `min(${MENU_MAX_WIDTH}px, calc(100vw - ${EDGE_MARGIN * 2}px))`, maxHeight: `calc(100vh - ${EDGE_MARGIN * 2}px)`, visibility: position ? undefined : "hidden" } : undefined}
       className={cn(
         sheetClass,
-        anchored ? "z-[60] overflow-y-auto" : "absolute z-40",
+        anchored ? cn("overflow-y-auto", host ? "z-[81]" : "z-[60]") : "absolute z-40",
         placement === "below" && "top-full right-0 mt-1 w-72 max-w-[calc(100vw-2rem)]",
         motion.className,
       )}
@@ -423,7 +426,7 @@ export function SidebarPopoverMenu({
       onFocus={() => setEngaged(true)}
       onBlur={(event) => { if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) setEngaged(false); }}
       style={{ position: "fixed", left: subPosition?.left ?? 0, top: subPosition?.top ?? 0, minWidth: 200, width: dense ? 240 : "max-content", maxWidth: `min(${MENU_MAX_WIDTH}px, calc(100vw - ${EDGE_MARGIN * 2}px))`, maxHeight: `calc(100vh - ${EDGE_MARGIN * 2}px)`, visibility: subPosition ? undefined : "hidden" }}
-      className={cn(sheetClass, "z-[61] animate-pop-in overflow-y-auto")}
+      className={cn(sheetClass, "animate-pop-in overflow-y-auto", host ? "z-[82]" : "z-[61]")}
     >
       <MenuRows
         dense={dense}
@@ -488,7 +491,7 @@ export function SidebarPopoverMenu({
       </button>
 
       {anchored
-        ? typeof document !== "undefined" && sheet ? createPortal(<>{sheet}{subSheet}</>, triggerRef.current?.closest("dialog[open]") ?? document.body) : null
+        ? typeof document !== "undefined" && sheet ? createPortal(<>{sheet}{subSheet}</>, host?.current ?? triggerRef.current?.closest("dialog[open]") ?? document.body) : null
         : <>{sheet}{typeof document !== "undefined" && subSheet ? createPortal(subSheet, document.body) : null}</>}
     </div>
   );

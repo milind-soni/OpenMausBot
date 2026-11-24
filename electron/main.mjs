@@ -2803,6 +2803,7 @@ app.whenReady().then(async () => {
     }
   }
   hiddenStart = loginItem.startedHidden() || reopenedOutOfSight(); launchAnalytics.stage("started", { hidden: hiddenStart });
+  try { loginItem.initialize(); } catch (error) { slog(`login item initialization: ${error?.message ?? error}`); }
   startupScreen = hiddenStart ? null : createStartupScreen({
     BrowserWindow, iconPath: APP_ICON, isQuitting: () => desktopShutdownStarted, t: nativeT, lang: nativeText.intlTag(),
     onQuit: () => app.quit(),

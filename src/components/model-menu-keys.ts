@@ -12,7 +12,7 @@ export function modelMenuKey(event: ReactKeyboardEvent<HTMLElement>, { query, ty
   typed: { current: Typeahead | null };
   close: () => void;
 }): void {
-  if (!(event.target instanceof HTMLElement)) return;
+  if (event.defaultPrevented || !(event.target instanceof HTMLElement) || !event.currentTarget.contains(event.target)) return;
   const menu = event.currentTarget;
   const target = event.target;
   const handled = () => {

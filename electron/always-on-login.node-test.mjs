@@ -69,11 +69,11 @@ test("Windows: the person's earlier Off is put back when the switch goes off", t
   assert.deepEqual(w.names(), [], "lending still adds nothing, as before the switch");
 });
 
-test("Windows: off while lending leaves lending's entry; on while lending adds none of its own", t => {
+test("Windows: always-on and lending share one login entry, handing it off as needed", t => {
   const w = world(t, "win32");
   w.home.set(true);
   w.lend(true);
-  assert.deepEqual(w.names(), [CHOSEN, "app"]);
+  assert.deepEqual(w.names(), [CHOSEN]);
   w.home.set(false);
   assert.deepEqual(w.names(), ["app"]);
   w.lend(false);

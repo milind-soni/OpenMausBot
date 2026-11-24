@@ -103,7 +103,7 @@ test("Windows: turning it off removes every entry that starts the app, and lendi
   assert.equal(login.chosen(), false, "lending keeps to the person's choice");
   login.choose(true);
   login.follow(true);
-  assert.deepEqual([...app.items].sort(), [["OpenMausBot at login", { args: [], enabled: true }], ["electron.app.OpenMausBot", { args: ["--omb-hidden"], enabled: true }]]);
+  assert.deepEqual([...app.items], [["OpenMausBot at login", { args: [], enabled: true }]]);
 });
 
 test("Linux: the person's autostart entry has no hidden flag and no lending mark, and lending never removes it", async t => {
@@ -136,4 +136,27 @@ test("a build that cannot add a login item offers no switch and changes nothing"
   assert.deepEqual(await handlers.get("open-at-login:set")({}, true), { available: true, on: true });
   assert.deepEqual(await handlers.get("open-at-login:set")({}, "yes"), { available: true, on: false }, "only a real true turns it on");
   assert.equal(redraws, 3, "the app menu's item is drawn again after each change");
+});
+
+test("packaged desktops default to opening at login once and honor later opt-outs across restarts", async t => {
+  const dir = await temp(t);
+  for (const platform of ["darwin", "win32", "linux"]) {
+    const app = fakeApp();
+    const open = () => createOpenAtLogin({ app, file: path.join(dir, platform + ".json"), platform, home: dir });
+    const login = open();
+    login.initialize();
+    assert.equal(login.chosen(), true, platform);
+    login.choose(false);
+    const afterRestart = open();
+    afterRestart.initialize();
+    assert.equal(afterRestart.starts(), false, platform);
+  }
+});
+
+test("initialization respects a Windows login item disabled from system settings", async t => {
+  const dir = await temp(t);
+  const app = windowsApp([{ name: "OpenMausBot at login", enabled: false }]);
+  const login = createOpenAtLogin({ app, file: path.join(dir, "win.json"), platform: "win32", home: dir });
+  login.initialize();
+  assert.equal(login.chosen(), false);
 });
