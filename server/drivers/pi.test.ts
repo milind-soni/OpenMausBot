@@ -23,6 +23,7 @@ import {
   PiDriver,
   PiRpcChunks,
   piLineReader,
+  piThinkingLevel,
   preferPiInjectRows,
   splitPiModel,
   updatePiModelCatalog,
@@ -838,6 +839,7 @@ describe("PiDriver turns (fake CLI)", () => {
     await create();
     expect(instance.adapter.capabilities.images).toBe(true);
     expect(instance.adapter.capabilities.effortLevels).toEqual(["none", "low", "medium", "high", "xhigh", "max"]);
+    expect(piThinkingLevel("ultra")).toBe("max");
   });
 
   it("pins reasoning effort via set_thinking_level after the model", async () => {

@@ -4570,7 +4570,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     ]);
   });
 
-  it("sends effort on turn/start, and omits the key when unset", async () => {
+  it("sends effort (including ultra) on turn/start, and omits the key when unset", async () => {
     await create();
     const dump = join(scratch, "effort.json");
     process.env.FAKE_CODEX_DUMP = dump;
@@ -4581,6 +4581,13 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     const turnStart = seen.calls.find((c: any) => c.method === "turn/start");
     expect(turnStart.params.effort).toBe("xhigh");
+
+    const ultraDump = join(scratch, "effort-ultra.json");
+    process.env.FAKE_CODEX_DUMP = ultraDump;
+    await instance.adapter.sendTurn({ threadId: "t-effort-ultra", text: "hi", effort: "ultra" });
+    await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-effort-ultra");
+    const ultraSeen = JSON.parse(readFileSync(ultraDump, "utf8"));
+    expect(ultraSeen.calls.find((c: any) => c.method === "turn/start").params.effort).toBe("ultra");
   });
 
   it("sends no effort key when the turn has none", async () => {

@@ -118,6 +118,22 @@ describe("startup model catalogs", () => {
     expect(readStartupModelCache("org-blocked")?.options[1]).toEqual({ id: "b", label: "B", orgBlocked: true });
   });
 
+  it("preserves per-model effortLevels in the saved list so warm restarts do not leak unsupported efforts", () => {
+    writeStartupModelCache("per-model-efforts", {
+      default: "gpt-5.4",
+      options: [
+        { id: "gpt-5.4", label: "GPT-5.4", effortLevels: ["low", "high", "ultra"] },
+        { id: "gpt-5.3", label: "GPT-5.3", effortLevels: ["low", "high"] },
+        { id: "gpt-4o", label: "GPT-4o", effortLevels: [] },
+      ],
+    });
+    expect(readStartupModelCache("per-model-efforts")?.options).toEqual([
+      { id: "gpt-5.4", label: "GPT-5.4", effortLevels: ["low", "high", "ultra"] },
+      { id: "gpt-5.3", label: "GPT-5.3", effortLevels: ["low", "high"] },
+      { id: "gpt-4o", label: "GPT-4o", effortLevels: [] },
+    ]);
+  });
+
   it("does not wait for a slow refresh when a later start already has a catalog", async () => {
     seedBots();
     writeStartupModelCache("slow", CACHED, STALE);

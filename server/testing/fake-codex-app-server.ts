@@ -59,6 +59,7 @@
 //   FAKE_CODEX_LUNA  "1": model/list also offers gpt-6-luna
 //   FAKE_CODEX_TIERS  "1": model/list rows list a Fast service tier, as codex-cli 0.167.2 does; gpt-page-two
 //     already runs on it by default
+//   FAKE_CODEX_EFFORTS  "1": model/list rows declare supportedReasoningEfforts (gpt-fake-default includes "ultra", gpt-page-two stops at "max")
 //   FAKE_CODEX_UPDATED_FILE  while this file exists, the CLI was updated in place: --version answers codex-cli 0.162.1
 //     and model/list also offers gpt-6.1-sol
 //   FAKE_CODEX_MCP_START  "1": on thread/start, start each `-c mcp_servers.*` mount as codex-cli 0.160.1 does
@@ -89,6 +90,7 @@ import { appendFileSync, existsSync, readFileSync, renameSync, unlinkSync, write
 
 const mode = process.env.FAKE_CODEX_MODE ?? "happy";
 const tiers = process.env.FAKE_CODEX_TIERS === "1";
+const efforts = process.env.FAKE_CODEX_EFFORTS === "1";
 const FAST_TIERS = [{ id: "priority", name: "Fast", description: "Fastest inference with increased plan usage" }];
 
 // Follow the spawning server down; on Windows ppid does not change after parent exit.
@@ -624,7 +626,10 @@ process.stdin.on("data", (chunk) => {
               data: [
                 { id: "gpt-hidden", displayName: "Hidden", hidden: true, isDefault: false },
                 { id: "gpt-page-two", displayName: "GPT Page Two", hidden: false, isDefault: false,
-                  ...(tiers ? { serviceTiers: FAST_TIERS, defaultServiceTier: "priority" } : {}) },
+                  ...(tiers ? { serviceTiers: FAST_TIERS, defaultServiceTier: "priority" } : {}),
+                  ...(efforts
+                    ? { supportedReasoningEfforts: [{ reasoningEffort: "low" }, { reasoningEffort: "medium" }, { reasoningEffort: "high" }, { reasoningEffort: "xhigh" }, { reasoningEffort: "max" }] }
+                    : {}) },
               ],
               nextCursor: null,
             },
@@ -640,7 +645,8 @@ process.stdin.on("data", (chunk) => {
                   ? [{ id: "gpt-6-astra", displayName: "GPT-6 Astra", hidden: false, isDefault: true }]
                   : []),
                 { id: "gpt-fake-default", displayName: "GPT Fake Default", hidden: false, isDefault: !hasAstra,
-                  ...(tiers ? { serviceTiers: FAST_TIERS, defaultServiceTier: null } : {}) },
+                  ...(tiers ? { serviceTiers: FAST_TIERS, defaultServiceTier: null } : {}),
+                  ...(efforts ? { supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"] } : {}) },
                 ...(process.env.FAKE_CODEX_LUNA === "1"
                   ? [{ id: "gpt-6-luna", displayName: "GPT-6 Luna", hidden: false, isDefault: false }]
                   : []),
