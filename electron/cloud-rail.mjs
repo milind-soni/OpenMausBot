@@ -214,14 +214,14 @@ export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, bes
     if (!rename) return { outcome: "unsupported" };
     try { return { outcome: rename(place.id, plain(name)) ? "saved" : "name" }; } catch { return { outcome: "failed" }; }
   });
-  // Make … my home, from a circle's menu or Settings → Phone & devices on this computer's own page (`trusted`): only a server
+  // Make … my home, from a circle's menu or Settings → Devices on this computer's own page (`trusted`): only a server
   // main listed with it, by main's own word for it.
   handle("workspaces:make-home", (_event, id) => {
     const place = places().find(entry => entry.id === plain(id) && entry.makeHome);
     if (!place || !makeHome) throw new Error(t("native.home.notAvailable"));
     return makeHome(place.id);
   });
-  // The servers main offers Make … my home for now, by id: Settings → Phone & devices shows the button only for those.
+  // The servers main offers Make … my home for now, by id: Settings → Devices shows the button only for those.
   handle("workspaces:home-offers", () => (makeHome ? places().filter(entry => entry.makeHome).map(entry => entry.id) : []));
   // A workspace of this computer's own: a new one from ＋ (on the rail's page, or this computer's own from the Server menu),
   // and a name, a colour or its removal from its circle's menu, only for one main listed.

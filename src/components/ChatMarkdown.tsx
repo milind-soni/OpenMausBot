@@ -363,7 +363,7 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
 // source: the original a delivered copy came from, offered on right-click (Show in Finder) like in the gallery.
 function LocalFileLink({ filePath, shownPath, shownName, name, source, children, message }: { filePath: string; shownPath: string; shownName: string; name?: string; source?: string; children?: ReactNode; message?: MessageAttachmentContext }) {
   const save = useLocalFileSave(filePath, name, message);
-  const preview = useHtmlPreview(filePath, shownName, message);
+  const preview = useHtmlPreview(filePath, shownName, message, shownPath);
   const revealMenu = useRevealOriginalMenu();
   const fileOutsideWorkspace = useMessageFileOutsideWorkspace(filePath, message);
   const revealHere = typeof window !== "undefined" && Boolean(window.ogb?.revealInFolder) && !window.ogb?.remoteClient?.active;
@@ -402,7 +402,7 @@ function LocalFileLink({ filePath, shownPath, shownName, name, source, children,
       {revealMenu.menu}
       {preview.opens
         ? <SaveIconButton name={shownName} save={save} retryable={save.retryable} />
-        : <FilePreviewButton path={filePath} name={shownName} message={message} />}
+        : <FilePreviewButton path={filePath} shownPath={shownPath} name={shownName} message={message} />}
       <button
         type="button"
         onClick={(event) => void pathAction(event)}
@@ -714,12 +714,12 @@ function MarkdownLink({ href, children, ...rest }: { href?: string; children?: R
   const localPath = localFilePath(href);
   if (localPath) {
     const copy = delivered && Object.hasOwn(delivered, fileName(localPath)) ? delivered[fileName(localPath)] : undefined;
-    const source = copy && originals && Object.hasOwn(originals, copy) ? originals[copy] : undefined;
     // localFilePath already decodes a file:// URL; a plain path link is still encoded and gets the server's single decode.
     // A delivered copy keeps its literal name.
     const shownPath = copy ?? (/^file:\/\//i.test(href) ? localPath : decodedLinkPath(localPath));
+    const original = copy && originals && Object.hasOwn(originals, copy) ? originals[copy] : undefined;
     const shownName = copy ? fileName(localPath) : fileName(shownPath);
-    return <LocalFileLink filePath={copy ?? localPath} shownPath={shownPath} shownName={shownName} name={copy ? fileName(localPath) : undefined} source={source} message={message}>{children}</LocalFileLink>;
+    return <LocalFileLink filePath={copy ?? localPath} shownPath={shownPath} shownName={shownName} name={copy ? fileName(localPath) : undefined} source={copy ? original : shownPath} message={message}>{children}</LocalFileLink>;
   }
   if (!/^https?:\/\//i.test(href)) {
     return (

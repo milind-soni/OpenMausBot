@@ -72,7 +72,7 @@ it("a team's Cloud is called by the team's name, a person's own Cloud My Cloud",
 
 it("names a wrong kind of code instead of letting it be sent as a wrong one", () => {
   expect(codeProblem("1234 5678")).toBe(en["serverError.pair.emailCode"]);
-  expect(codeProblem("123456")).toBe(en["serverError.pair.oldCode"]);
+  expect(codeProblem("123456")).toBe(en["serverError.pair.oldCodeDevices"]);
   expect(codeProblem(`omb_sess_${"a".repeat(43)}`)).toBe(en["serverError.pair.scriptKey"]);
   expect(codeProblem("7KQ2-M9XD")).toBeNull();
   expect(codeReady("7kq2 m9xd h4tp")).toBe(true);

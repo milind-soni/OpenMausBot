@@ -25,6 +25,11 @@ const __APP_VERSION__: string;
   type DesktopSharedFolder = import("../../electron/computer-sharing.mjs").SharedFolder;
   type DesktopComputerSharing = import("../../electron/computer-sharing.mjs").SharingState;
   type DesktopLendingActivity = import("../../electron/computer-sharing.mjs").LendingActivityEntry;
+  /** Lending this computer to one server, as the switch shows it (electron/server-lending.mjs view). `why`: what keeps it
+   * from being lent there. `screen`: why its apps and screen don't work yet while it is on (screen-status.mjs). */
+  type DesktopLendView =
+    | { name: string; lendable: true; on: boolean; connected: boolean; paused: boolean; screen?: "starting" | "permissions" | "blocked" | "off" | "not-running" | "unsupported" }
+    | { name: string; lendable: false; why: "team" | "cloud" | "not-owner" | "shared" | "old" | "unreachable" | "settings" };
 
   type DesktopCapabilities = {
     host: {
@@ -62,6 +67,8 @@ const __APP_VERSION__: string;
       driverSource?: "bundled" | "environment" | "user-local" | "path" | "system-package";
       session?: "x11" | "wayland" | "headless" | "unknown";
       compositor?: "gnome-mutter" | "hyprland";
+      /** Set with the Wayland seat-safety block: false on a desktop that isn't Ubuntu, which may have no Xorg session. */
+      ubuntuDesktop?: boolean;
     };
   };
 
@@ -313,6 +320,17 @@ const __APP_VERSION__: string;
         pause?(): Promise<void>;
         resume?(): Promise<void>;
       };
+      /** The one switch for lending this computer to a server of the person's own (electron/server-lending.mjs). On this
+       * app's own page `id` names the saved server; on a server's own page it is that server, whatever `id` says. */
+      lendComputer?: {
+        state(id: string | null): Promise<DesktopLendView>;
+        set(id: string | null, on: boolean): Promise<DesktopLendView>;
+        /** macOS: asks for Accessibility and Screen Recording, the one step the system itself requires. */
+        allowScreen(id: string | null): Promise<DesktopLendView>;
+        /** The add form's switch (this app's own page only): lend to the server about to be paired at `address` if it
+         * turns out to be the person's own. */
+        wish?(address: string, on: boolean): Promise<boolean>;
+      };
       confirm(message: string): Promise<boolean>;
       getCapabilities(): Promise<DesktopCapabilities>;
       onCapabilitiesChanged(cb: (capabilities: DesktopCapabilities) => void): () => void;
@@ -426,7 +444,7 @@ const __APP_VERSION__: string;
        * app Settings. Every server's page in the window receives it, and the
        * bridge is absent in the browser. "cloud" is the
        * openmausbot://cloud link (Settings → OMB Cloud, opened by the link). */
-      onOpenAppSettings?(cb: (section?: "organization" | "cloud" | "cloud-settings" | "cloud-add" | "cloud-add-howto" | import("../state/store").SettingsPageId) => void): () => void;
+      onOpenAppSettings?(cb: (section?: "organization" | "cloud" | "cloud-settings" | "cloud-add" | "cloud-add-howto" | "phone" | import("../state/store").SettingsPageId) => void): () => void;
       /** Updates the native Dock/taskbar unread indicator. */
       setUnreadCount?(count: number): void;
       /** Opens a live desktop as a sandboxed window owned by OpenMausBot. */

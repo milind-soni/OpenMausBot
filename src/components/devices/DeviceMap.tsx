@@ -1,135 +1,127 @@
-import { Plus } from "lucide-react";
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
+import { Waypoints } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { groupByRoute, type Device, type DeviceRoute, type PrivateNetwork } from "@/lib/devices";
-import { DOT, KIND_ICON, kindLabel, networkShort, routeLabel, statusText } from "./device-words";
+import { groupByKind, type Device, type DeviceGroup, type PrivateNetwork } from "@/lib/devices";
+import type { LocaleKey } from "@/locales";
+import { networkMark } from "./DeviceRows";
+import { BotFaces, botsLabel, markOf, routeOf, StatusMark, useBotsOn } from "./device-parts";
+import { kindLabel, networkShort, statusText } from "./device-words";
 
-const NODE = "relative flex w-48 min-w-0 cursor-pointer items-center gap-3 rounded-xl bg-menu px-3 py-2 text-start transition-colors hover:bg-ink/[0.06] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus motion-safe:animate-fade-in @max-[480px]/map:w-full";
+/** The picture of this place's devices above the list. Flip to false to ship the page without it. */
+export const SHOW_DEVICE_MAP = true;
 
-/** One device on the map: its mark with a status dot, its name and one line. Choosing it opens its row below. */
-export function DeviceNode({ device, selected, onSelect, now }: { device: Device; selected: boolean; onSelect: (id: string) => void; now: number }) {
-  const Icon = KIND_ICON[device.kind];
-  const dot = DOT[device.status];
-  const line = statusText(device, now);
-  return (
-    <button type="button" data-device-node={device.id} data-device-status={device.status} aria-pressed={selected} onClick={() => onSelect(device.id)}
-      aria-label={`${device.name}, ${kindLabel(device.kind)}, ${line}`} title={device.name}
-      className={cn(NODE, selected ? "shadow-[inset_0_0_0_1px_var(--color-ink)]" : "shadow-[inset_0_0_0_0.5px_var(--settings-edge)]")}>
-      <span className="relative flex size-5 shrink-0 items-center justify-center text-ink-secondary">
-        <Icon size={16} aria-hidden="true" />
-        {dot && <span aria-hidden="true" className={cn("absolute -bottom-0.5 -end-0.5 size-2 rounded-full ring-2 ring-(--color-menu)", dot)} />}
-      </span>
-      <span className="flex w-full min-w-0 flex-col">
-        <span className="truncate text-[13px] font-medium leading-[18px] text-ink">{device.name}</span>
-        <span className={cn("truncate text-[12px] leading-4", device.status === "attention" ? "text-warning" : "text-ink-secondary")}>{line}</span>
-      </span>
-    </button>
-  );
+let shownOverride: boolean | null = null;
+/** For the preview and tests, which show both variants: null goes back to `SHOW_DEVICE_MAP`. */
+export function overrideDeviceMap(shown: boolean | null) {
+  shownOverride = shown;
 }
+export const deviceMapShown = () => shownOverride ?? SHOW_DEVICE_MAP;
 
-/** The root of the map: the place whose Settings these are, with the same mark as the rail and the nav. */
-export function HereNode({ device, mark, selected, onSelect }: { device: Device; mark: ReactNode; selected: boolean; onSelect: (id: string) => void }) {
+const LINE = "border-ink-secondary/35";
+const away = (devices: readonly Device[]) => devices.length > 0 && devices.every((device) => device.status === "offline");
+
+const GROUP: Record<DeviceGroup, LocaleKey> = { phones: "devicesPage.group.phones", computers: "devicesPage.group.computers", servers: "devicesPage.map.servers" };
+const COUNT: Record<DeviceGroup, [LocaleKey, LocaleKey]> = {
+  phones: ["devicesPage.map.phonesOne", "devicesPage.map.phonesMany"],
+  computers: ["devicesPage.map.computersOne", "devicesPage.map.computersMany"],
+  servers: ["devicesPage.map.serversOne", "devicesPage.map.serversMany"],
+};
+
+const NODE = "relative flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 rounded-full text-start transition-colors hover:bg-ink/[0.05] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
+
+/** This place, where every line starts: its mark, name, the bots on it and, on This computer, the private network as part of it. */
+function Hub({ device, mark, network, onOpen }: { device: Device; mark: ReactNode; network: PrivateNetwork | null; onOpen: (id: string) => void }) {
+  const bots = useBotsOn(device);
+  const label = [device.name, t("devicesPage.status.here"), network && `${t("devicesPage.network.title")}: ${networkShort(network)}`, botsLabel(bots)].filter(Boolean).join(", ");
   return (
-    <button type="button" data-device-node="here" aria-pressed={selected} onClick={() => onSelect(device.id)} title={device.name}
-      aria-label={`${device.name}, ${statusText(device)}`}
-      className={cn("flex min-w-0 max-w-full cursor-pointer items-center gap-3 rounded-xl bg-menu px-3 py-2 text-start transition-colors hover:bg-ink/[0.06] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
-        selected ? "shadow-[inset_0_0_0_1px_var(--color-ink)]" : "shadow-[inset_0_0_0_0.5px_var(--settings-edge)]")}>
-      <span className="flex size-8 shrink-0 items-center justify-center text-ink-secondary">{mark}</span>
-      <span className="flex min-w-0 flex-col">
+    <button type="button" data-map-node="here" aria-label={label} title={device.name} onClick={() => onOpen(device.id)}
+      className={cn(NODE, "-m-1.5 w-[calc(100%+0.75rem)] max-w-none flex-wrap gap-x-3 gap-y-1 rounded-xl p-1.5")}>
+      <span aria-hidden="true" className="flex size-8 shrink-0 items-center justify-center text-ink-secondary">{mark}</span>
+      <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-[14px] font-medium leading-5 text-ink">{device.name}</span>
-        <span className="truncate text-[12px] leading-4 text-ink-secondary">{statusText(device)}</span>
+        <span className="text-[12px] leading-4 text-ink-tertiary">{t("devicesPage.status.here")}</span>
       </span>
+      {network && <span data-map-network={network.state} className="flex shrink-0 items-center gap-1.5 rounded-full bg-ink/[0.05] px-2 py-0.5 text-[12px] leading-4 text-ink-secondary">
+        <Waypoints size={12} aria-hidden="true" />{t("devicesPage.network.title")}<StatusMark status={networkMark(network)} />
+      </span>}
+      <BotFaces bots={bots} size={20} />
     </button>
   );
 }
 
-/** A route's branch off the trunk: its name where the line meets it, then its devices. Dashed while none is online. */
-function Branch({ route, last, quiet, label, aside, children, boxed }: { route: DeviceRoute; last: boolean; quiet: boolean; label: ReactNode; aside?: ReactNode; children: ReactNode; boxed?: boolean }) {
-  // The stub meets the group's first row: the private network's header, or a plain group's devices (its name sits
-  // beside them when the map is wide, above them when it is narrow).
-  const stub = boxed ? "top-6" : "top-2 @min-[560px]/map:top-6";
+/** One device on the map: a status mark, its whole name (wrapping) and the bots on it. Its edge is solid while it is
+ * reachable and dashed while it is away. */
+function Node({ device, now, onOpen }: { device: Device; now: number; onOpen: (id: string) => void }) {
+  const bots = useBotsOn(device);
+  const mark = markOf(device);
+  const label = [device.name, kindLabel(device.kind), statusText(device, now), routeOf(device), botsLabel(bots)].filter(Boolean).join(", ");
   return (
-    <li data-device-route={route} className="relative pb-3 ps-6">
-      <span aria-hidden="true" className={cn("absolute start-0 top-0 w-0 border-s border-(--settings-edge)", last ? (boxed ? "h-6" : "h-2 @min-[560px]/map:h-6") : "h-full", quiet && "border-dashed")} />
-      <span aria-hidden="true" className={cn("absolute start-0 w-5 border-t border-(--settings-edge)", stub, quiet && "border-dashed")} />
-      {boxed ? (
-        <div className="flex flex-col gap-2 rounded-xl border border-dashed border-(--settings-edge) px-3 py-3" data-private-network="">
-          <div className="flex min-h-6 flex-wrap items-center justify-between gap-x-3 gap-y-1">
-            <span className="text-[12px] font-medium leading-4 text-ink-secondary">{label}</span>
-            {aside}
-          </div>
-          {children}
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2 @min-[560px]/map:flex-row @min-[560px]/map:items-start">
-          <span className="text-[12px] font-medium leading-4 text-ink-secondary @min-[560px]/map:mt-4 @min-[560px]/map:w-28 @min-[560px]/map:shrink-0">{label}</span>
-          {children}
-        </div>
-      )}
+    <li className="min-w-0 max-w-full">
+      <button type="button" data-map-node={device.id} data-map-line={device.status === "offline" ? "away" : "on"} aria-label={label} title={device.name}
+        onClick={() => onOpen(device.id)} className={cn(NODE, "min-h-7 rounded-[14px] border py-[4px] ps-2.5 pe-2", LINE, device.status === "offline" && "border-dashed")}>
+        {mark !== "unknown" && <StatusMark status={mark} />}
+        <span className="min-w-0 break-words text-[13px] leading-[18px] text-ink [overflow-wrap:anywhere]">{device.name}</span>
+        <BotFaces bots={bots} size={14} />
+      </button>
     </li>
   );
 }
 
-export interface NetworkAction {
-  label: string;
-  run?: () => void;
-  href?: string;
-  busy?: boolean;
+/** A group hangs off the line from the hub: its own line down the side, solid while any of it is reachable. */
+function Group({ group, devices, last, now, onOpen }: { group: DeviceGroup; devices: readonly Device[]; last: boolean; now: number; onOpen: (id: string) => void }) {
+  const id = useId();
+  const dashed = away(devices) && "border-dashed";
+  return (
+    <div data-map-group={group} className="relative min-w-0 ps-8 pt-3">
+      {!last && <span aria-hidden="true" className={cn("absolute start-4 top-0 w-[calc(100%+1rem)] border-t", LINE)} />}
+      <span aria-hidden="true" className={cn("absolute start-4 top-0 bottom-3.5 border-s", LINE, dashed)} />
+      <span aria-hidden="true" className={cn("absolute start-4 top-[22px] w-3 border-t", LINE, dashed)} />
+      <span id={id} className="block pb-2 text-[12px] font-medium leading-4 text-ink-secondary">{t(GROUP[group])}</span>
+      <ul aria-labelledby={id} className="flex flex-wrap gap-1.5">
+        {devices.map((device) => <Node key={device.id} device={device} now={now} onOpen={onOpen} />)}
+      </ul>
+    </div>
+  );
+}
+
+/** The same picture in one line, for a window too narrow to draw it. */
+export function mapSummary(devices: readonly Device[]): string {
+  const groups = groupByKind(devices);
+  if (groups.length === 0) return t("devicesPage.map.nothingYet");
+  return groups.map(({ group, devices: some }) => t(COUNT[group][some.length === 1 ? 0 : 1], { count: some.length })).join(" · ");
 }
 
 /**
- * The map: this place at the root, a trunk down its left, and one branch per way devices reach it, named where the line
- * meets it. The private network (Tailscale) is a dashed group of its own, always drawn on This computer, with its state
- * and the one next step. In a narrow window every device becomes a full-width row: the same tree, read as a list.
+ * A compact picture at the top of Devices: this place as the hub with the private network on it, and every other device
+ * as a small node in its group, joined by a line that is solid while it is reachable and dashed while it is away. It has
+ * no actions of its own: a node opens that device's row below. In a narrow window it is one line of words.
  */
-export function DeviceMap({ devices, network, networkAction, selected, onSelect, onAdd, here, now = Date.now() }: {
-  devices: readonly Device[];
-  network: PrivateNetwork | null;
-  networkAction: NetworkAction | null;
-  selected: string | null;
-  onSelect: (id: string) => void;
-  onAdd: () => void;
-  here: ReactNode;
+export function DeviceMap({ devices, mark, network, loaded, onOpen, now = Date.now() }: {
+  devices: readonly Device[]; mark: ReactNode; network: PrivateNetwork | null;
+  /** every source has answered: until then nothing is said about what isn't there */
+  loaded: boolean;
+  onOpen: (id: string) => void;
   now?: number;
 }) {
-  const groups = groupByRoute(devices);
-  const shown = network && !groups.some((group) => group.route === "tailscale") ? [{ route: "tailscale" as const, devices: [] as Device[] }, ...groups] : groups;
-  const alone = groups.length === 0;
-  const action = networkAction && (networkAction.href
-    ? <a href={networkAction.href} target="_blank" rel="noreferrer" className="ui-button ui-button-sm" data-network-action="">{networkAction.label}</a>
-    : <button type="button" className="ui-button ui-button-sm" data-network-action="" disabled={networkAction.busy} onClick={networkAction.run}>{networkAction.label}</button>);
+  const here = devices.find((device) => device.here);
+  if (!here) return null;
+  const groups = groupByKind(devices);
+  const everyoneAway = groups.length > 0 && groups.every((entry) => away(entry.devices));
   return (
-    <div data-settings-block="map" className="@container/map flex scroll-mt-4 flex-col" role="group" aria-label={t("devicesPage.mapLabel")}>
-      <div className="flex flex-wrap items-center justify-between gap-3 pb-2">
-        {here}
-        <button type="button" data-settings-block="add" data-add-device="" onClick={onAdd} className="ui-button ui-button-primary inline-flex scroll-mt-4 items-center gap-1.5">
-          <Plus size={14} aria-hidden="true" />{t("devicesPage.add")}
-        </button>
+    <div data-settings-block="map" role="group" aria-label={t("devicesPage.mapLabel")} className="@container/map">
+      <div data-device-map="" className="settings-card relative flex flex-col rounded-[12px] bg-menu p-4 shadow-[inset_0_0_0_0.5px_var(--settings-edge)] @max-[519px]/map:hidden">
+        <Hub device={here} mark={mark} network={network} onOpen={onOpen} />
+        {groups.length > 0 && <>
+          <span aria-hidden="true" className={cn("ms-4 mt-1.5 h-3 border-s", LINE, everyoneAway && "border-dashed")} />
+          <div data-map-groups="" className="grid items-start gap-x-4" style={{ gridTemplateColumns: `repeat(${groups.length}, minmax(0, 1fr))` }}>
+            {groups.map((entry, index) => <Group key={entry.group} group={entry.group} devices={entry.devices} last={index === groups.length - 1} now={now} onOpen={onOpen} />)}
+          </div>
+        </>}
+        {groups.length === 0 && loaded && <p data-map-empty="" className="ps-11 pt-1 text-[13px] leading-[18px] text-ink-tertiary">{t("devicesPage.map.nothingYet")}</p>}
+        {groups.length > 0 && <p data-map-legend="" className="pt-3 text-[12px] leading-4 text-ink-tertiary">{t("devicesPage.map.legend")}</p>}
       </div>
-      {shown.length > 0 && (
-        <ul className="ms-4 flex flex-col" data-device-tree="">
-          {shown.map((group, index) => {
-            const quiet = group.devices.every((device) => device.status !== "online");
-            const isNetwork = group.route === "tailscale" && network;
-            return (
-              <Branch key={group.route} route={group.route} last={index === shown.length - 1} quiet={quiet} boxed={Boolean(isNetwork)}
-                label={isNetwork ? <>{t("devicesPage.network.title")}<span className="font-normal text-ink-tertiary">{" · Tailscale"}</span></> : routeLabel(group.route)}
-                aside={isNetwork ? <span className="flex items-center gap-2">
-                  <span data-network-state={network.state} className={cn("text-[12px] leading-4", network.state === "ready" ? "text-ink-secondary" : network.state === "unknown" ? "text-ink-tertiary" : "text-warning")}>{networkShort(network)}</span>
-                  {action}
-                </span> : undefined}>
-                {group.devices.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {group.devices.map((device) => <DeviceNode key={device.id} device={device} selected={selected === device.id} onSelect={onSelect} now={now} />)}
-                  </div>
-                )}
-              </Branch>
-            );
-          })}
-        </ul>
-      )}
-      {alone && <p data-devices-empty="" className="ps-4 pt-1 text-[13px] leading-[18px] text-ink-secondary">{t("devicesPage.empty")}</p>}
+      {loaded && <p data-map-summary="" className="hidden px-4 text-[13px] leading-[18px] text-ink-secondary @max-[519px]/map:block">{mapSummary(devices)}</p>}
     </div>
   );
 }

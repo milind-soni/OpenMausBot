@@ -301,24 +301,33 @@ describe("bounded scheduled overlap and run health", () => {
     await h.manager.tick();
   });
 
-  it("keeps a run that failed only on a step, after its reply came back, failed but marked partly done", async () => {
+  it("keeps a run that failed only on a step, after its reply came back, failed but marked partly done; only a safety-floor block after the reply completes it", async () => {
     const h = harness(start);
     const routine = h.manager.create({ ...input(), enabled: false });
     const event = (threadId: string, patch: Record<string, unknown>) => h.manager.handleRuntimeEvent({ eventId: `e-${Math.random()}`, provider: "fake", threadId, createdAt: new Date().toISOString(), ...patch } as Parameters<typeof h.manager.handleRuntimeEvent>[0]);
-    const attempt = async (threadId: string, partial: boolean, { reply = true, cutOff = false } = {}) => {
+    const attempt = async (threadId: string, partial: boolean, { reply = true, cutOff = false, stopReason, blocked = false }: { reply?: boolean; cutOff?: boolean; stopReason?: string; blocked?: boolean } = {}) => {
       h.manager.runNow(routine.id); await h.manager.tick();
       if (reply) event(threadId, { type: "item.completed", itemType: "assistant_text", itemId: "reply", text: "Here is the summary." });
-      event(threadId, { type: "runtime.error", message: "Stopped because the tool call “read_file” failed.", terminal: true, ...(partial ? { partial: true } : {}) });
+      const message = blocked ? "Stopped because the tool call “shell_exec” wasn't allowed." : "Stopped because the tool call “read_file” failed.";
+      event(threadId, { type: "runtime.error", message, terminal: true, ...(partial ? { partial: true } : {}), ...(blocked ? { blockedAfterReply: true } : {}) });
       if (cutOff) h.manager.failThread(threadId, "Provider settings changed");
-      else event(threadId, { type: "turn.completed", ok: false, stopReason: partial ? "tool_error" : "refusal" });
+      else event(threadId, { type: "turn.completed", ok: false, stopReason: stopReason ?? (partial ? "tool_error" : "refusal"), ...(blocked ? { denials: ["shell_exec"] } : {}) });
     };
     await attempt("thread-1", true);
     await attempt("thread-2", false);
     await attempt("thread-3", true, { reply: false });
     await attempt("thread-4", true, { cutOff: true });
-    const [partly, failed, silent, cutOff] = h.manager.listRuns().sort((a, b) => a.threadId!.localeCompare(b.threadId!));
+    await attempt("thread-5", true, { blocked: true });
+    await attempt("thread-6", true, { blocked: true, reply: false });
+    await attempt("thread-7", true, { blocked: true, stopReason: "refusal" });
+    const [partly, failed, silent, cutOff, blocked, blockedSilent, blockedOtherStop] = h.manager.listRuns().sort((a, b) => a.threadId!.localeCompare(b.threadId!));
+    // A step that broke after the reply: the reply is no proof, so the run fails, marked partly done.
     expect(partly).toMatchObject({ status: "failed", partial: true, output: "Here is the summary.", error: expect.stringContaining("read_file") });
     expect([failed, silent, cutOff].map((run) => [run.status, run.partial])).toEqual([["failed", undefined], ["failed", undefined], ["queued", undefined]]);
+    // Every failed call was blocked by the safety floor after the reply: nothing ran, the run completes partly done.
+    expect(blocked).toMatchObject({ status: "completed", partial: true, output: "Here is the summary.", error: expect.stringContaining("shell_exec"), denials: ["shell_exec"] });
+    // With no reply, or another stop, a block still fails the run.
+    expect([blockedSilent, blockedOtherStop].map((run) => [run.status, run.partial])).toEqual([["failed", undefined], ["failed", true]]);
   });
 
   it("tells of a failure once per streak, and again when it changes or after a run completes", async () => {

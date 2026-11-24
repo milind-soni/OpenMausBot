@@ -90,7 +90,7 @@ describe("marking the shown chat read while a read is in flight", () => {
     expect(seen.activeView).toBe("chat");
 
     sendUnread();
-    expect(reads.map((read) => read.body)).toEqual([{ threadId: "thread" }]);
+    expect(reads.map((read) => read.body)).toEqual([{ threadId: "thread", reason: "seen" }]);
 
     sendUnread();
     sendUnread();
@@ -100,7 +100,7 @@ describe("marking the shown chat read while a read is in flight", () => {
 
     reads[0]!.answer();
     await settle();
-    expect(reads.map((read) => read.body)).toEqual([{ threadId: "thread" }, { threadId: "thread" }]);
+    expect(reads.map((read) => read.body)).toEqual([{ threadId: "thread", reason: "seen" }, { threadId: "thread", reason: "seen" }]);
 
     reads[1]!.answer();
     await settle();

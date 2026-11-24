@@ -2,10 +2,11 @@
 // scheduled run queued behind its busy bot is given up after an hour, and stopping a turn never keeps the scheduler
 // from its other routines. Each ends with its reason on the run's row. The work and the busy wait are added up one
 // scheduler pass at a time, each step capped, so the hours a computer slept, or a clock that jumped, are in neither.
-import { ROUTINE_GOAL_RUN_LIMIT_MINUTES, ROUTINE_RUN_LIMIT_MINUTES } from "../shared/routines.ts";
+import type { RoutineRunLimits } from "../shared/routines.ts";
 import { DUE_CLOCK_MS } from "./due-timer.ts";
 import { codedLine, type RoutineLine } from "./routine-lines.ts";
 import { ROUTINE_BUSY_WAIT_MS } from "./routine-recovery.ts";
+import { routineRunLimits } from "./routine-run-limits.ts";
 import { activeMs } from "./routine-waits.ts";
 import type { RoutineManagerOptions, RoutineRun } from "./routines.ts";
 
@@ -60,26 +61,26 @@ export class RunClock {
 }
 
 type Started = Pick<RoutineRun, "status" | "startedAt" | "timeoutMinutes" | "waitedMs" | "workedMs" | "asked" | "target">;
-const defaultLimitMs = (run: Pick<RoutineRun, "target">) => (run.target === "room-goal" ? ROUTINE_GOAL_RUN_LIMIT_MINUTES : ROUTINE_RUN_LIMIT_MINUTES) * 60_000;
+const defaultLimitMs = (run: Pick<RoutineRun, "target">, limits: RoutineRunLimits) => (run.target === "room-goal" ? limits.goalMinutes : limits.runMinutes) * 60_000;
 const started = (run: Started) => run.startedAt != null && (run.status === "running" || run.status === "waiting");
 
 /** When the scheduler must next look at a started run: when a routine's own limit is reached, or, under the default
  * limit, at the next step of counting its work. Null while neither applies (it is not started, it waits under the
  * default limit, or a request of its own is open, which no limit counts). */
-export function runLimitAt(run: Started, now: number): number | null {
+export function runLimitAt(run: Started, now: number, limits = routineRunLimits()): number | null {
   if (!started(run)) return null;
   if (run.timeoutMinutes != null) return run.asked ? null : now + Math.max(0, run.timeoutMinutes * 60_000 - activeMs(run, now));
-  return run.status === "running" ? now + Math.min(COUNT_STEP_MS, Math.max(0, defaultLimitMs(run) - (run.workedMs ?? 0))) : null;
+  return run.status === "running" ? now + Math.min(COUNT_STEP_MS, Math.max(0, defaultLimitMs(run, limits) - (run.workedMs ?? 0))) : null;
 }
 
 /** Counts this pass's work for a running run, and says why a started run must stop now; null while it is within its
  * limit. A routine's own limit counts as it always has (`activeMs`: the time since the run started, less its open
  * approvals and questions). The default one counts work only, so it never ends a run that waits. */
-export function runOverLimit(run: RoutineRun, clock: RunClock, now: number): RoutineLine | null {
+export function runOverLimit(run: RoutineRun, clock: RunClock, now: number, limits = routineRunLimits()): RoutineLine | null {
   if (!started(run)) return null;
   const worked = run.status === "running" ? clock.count(run, "workedMs", now) : run.workedMs ?? 0;
   if (run.timeoutMinutes != null) return activeMs(run, now) >= run.timeoutMinutes * 60_000 ? codedLine("error", "routines.server.overOwnLimit", { minutes: run.timeoutMinutes }) : null;
-  return run.status === "running" && worked >= defaultLimitMs(run) ? codedLine("error", "routines.server.overLimit", { hours: defaultLimitMs(run) / 3_600_000 }) : null;
+  return run.status === "running" && worked >= defaultLimitMs(run, limits) ? codedLine("error", "routines.server.overLimit", { hours: defaultLimitMs(run, limits) / 3_600_000 }) : null;
 }
 
 /** A queued run that cannot start because its bot is busy. While `counts` (a scheduled occurrence, not one of checked

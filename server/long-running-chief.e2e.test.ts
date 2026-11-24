@@ -263,7 +263,7 @@ it("carries a consult-and-implement job over several teammate turns, through a s
     expect(f.prompt(f.turn(key))).not.toMatch(DISTRUST);
   }
   const mainThreads = Object.fromEntries(((await f.api("GET", "/api/bots?messages=0")).body.bots as any[]).map((bot) => [bot.id, bot.mainThreadId]));
-  expect(mainThreads).toMatchObject({ [f.clive.id]: job, [f.mira.id]: f.mira.activeTaskId, [f.eli.id]: f.eli.activeTaskId });
+  expect(mainThreads).toMatchObject({ [f.clive.id]: f.clive.activeTaskId, [f.mira.id]: f.mira.activeTaskId, [f.eli.id]: f.eli.activeTaskId });
 }), hostTimeout(120_000));
 
 it("tells the Chief what happened to each approval: allowed or denied, and parks a hand-off on the person when nobody answered", () => chiefJob(async (f) => {

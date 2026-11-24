@@ -3,6 +3,7 @@ import { createServer as createHttpServer, type IncomingHttpHeaders } from "node
 import { connect, createServer as createNetServer, type AddressInfo, type Socket } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
+import { CLAUDE_IMAGE_LIMIT, FOLD_BACKUP_SUFFIX, transcriptPath } from "./claude-transcript-images.ts";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -3868,6 +3869,62 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(dump.argv).toContain("--resume");
     expect(dump.argv).toContain("claude-other");
   });
+
+  /** A thread whose transcript gains a page image every turn, on a custom endpoint or first-party Anthropic. */
+  const imageThread = async (endpoint: boolean) => {
+    const configDir = join(scratch, "claude-config");
+    const cwd = join(scratch, "work");
+    mkdirSync(cwd, { recursive: true });
+    await create(undefined, endpoint ? { ANTHROPIC_BASE_URL: "https://endpoint.example.test", ANTHROPIC_API_KEY: "endpoint-token", ANTHROPIC_AUTH_TOKEN: "endpoint-token" } : {},
+      endpoint ? { configDir, requireApiKey: true, endpointModels: ["deepseek-chat"] } : { configDir });
+    const threadId = `t-images-${endpoint ? "endpoint" : "anthropic"}`;
+    await instance.adapter.sendTurn({ threadId, text: "one", cwd });
+    await recorder.until((e) => e.type === "turn.completed");
+    const announced = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
+    // what Claude Code itself would have written: a page image on every turn
+    const file = transcriptPath(configDir, cwd, announced);
+    mkdirSync(dirname(file), { recursive: true });
+    const row = (n: number) => JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: `page ${n}` },
+      { type: "image", source: { type: "base64", media_type: "image/png", data: `img${n}` } }] } });
+    const write = (count: number) => writeFileSync(file, Array.from({ length: count }, (_, i) => row(i)).join("\n") + "\n");
+    const imagePath = join(scratch, "page.png");
+    writeFileSync(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const turn = async (text: string, images = 0) => {
+      const sent = await instance.adapter.sendTurn({ threadId, text, cwd, resumeCursor: announced,
+        ...(images ? { images: Array.from({ length: images }, () => ({ path: imagePath, mime: "image/png", bytes: 4 })) } : {}) });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === sent.turnId);
+    };
+    const closes = () => readFileSync(join(NATIVE_DIR, `${threadId}.ndjson`), "utf8").split("\n").filter(Boolean)
+      .map((line) => { try { return JSON.parse(line).msg?.close; } catch { return undefined; } }).filter(Boolean);
+    return { file, write, turn, closes };
+  };
+
+  it("on a custom endpoint, does not reuse a warm process whose next request would carry more than 20 images: a fresh one resumes the folded transcript", async () => {
+    const t = await imageThread(true);
+    t.write(19);
+    // 19 held + none new: still the warm process
+    await t.turn("two");
+    expect(t.closes()).toEqual([]);
+    // 16 held + 5 new: over, so a fresh process resumes a transcript that leaves room for this turn's own
+    t.write(16);
+    const before = readFileSync(t.file, "utf8");
+    await t.turn("three", 5);
+    expect(t.closes()).toEqual(["images over the request limit"]);
+    const kept = readFileSync(t.file, "utf8");
+    expect(kept.split('"type":"image"').length - 1).toBe(CLAUDE_IMAGE_LIMIT - 5);
+    // the transcript as it was stays beside it
+    expect(readFileSync(`${t.file}${FOLD_BACKUP_SUFFIX}`, "utf8")).toBe(before);
+  }, 20_000);
+
+  it("on first-party Anthropic, keeps every image and the warm process, and never touches the transcript", async () => {
+    const t = await imageThread(false);
+    t.write(25);
+    const before = readFileSync(t.file);
+    await t.turn("two", 5);
+    expect(t.closes()).toEqual([]);
+    expect(readFileSync(t.file).equals(before)).toBe(true);
+    expect(existsSync(`${t.file}${FOLD_BACKUP_SUFFIX}`)).toBe(false);
+  }, 20_000);
 
   it("names the changed contract fields when a warm process is replaced", async () => {
     await create();

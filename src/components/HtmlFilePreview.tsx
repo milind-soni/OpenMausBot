@@ -1,14 +1,14 @@
 import { Component, lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, Code2, Download, ExternalLink, Eye, LoaderCircle, RotateCcw } from "lucide-react";
 import { requestMessageFile, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
+import { OutsideWorkspacePreview, refusedAsOutsideWorkspace } from "./OutsideWorkspacePreview";
 import { TableDialog } from "./RichTable";
 import { readTableResponse, TableFileContent } from "./TableFilePreview";
 import { cn } from "@/lib/cn";
 import { useFileBesideChat, type FilePreview } from "@/lib/file-preview";
 import { t } from "@/lib/i18n";
 import { tableDelimiter } from "@/lib/table-data";
-
-export const HTML_PREVIEW_MAX_BYTES = 2 * 1024 * 1024;
+import { PREVIEW_MAX_BYTES } from "../../shared/upload-limits";
 
 /** Security: the frame may draw what the file carries inline, and fetch nothing at all. */
 export const HTML_PREVIEW_CSP = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; media-src data:";
@@ -53,7 +53,7 @@ export function htmlBrowserBridge(): ((source: string, name: string) => Promise<
 
 /** The preview for an HTML or Markdown file in a message, opened by the eye button or by the file's name: beside the chat
  * when the window has room for it, else in a dialog. */
-export function useHtmlPreview(path: string, name: string, message?: MessageAttachmentContext) {
+export function useHtmlPreview(path: string, name: string, message?: MessageAttachmentContext, shownPath = path) {
   const [open, setOpen] = useState(false);
   const opener = useRef<HTMLElement | null>(null);
   const beside = useFileBesideChat();
@@ -65,31 +65,31 @@ export function useHtmlPreview(path: string, name: string, message?: MessageAtta
     label: t(kind === "markdown" ? "markdown.preview" : "html.preview", { name }),
     show: (event: { currentTarget: HTMLElement }) => {
       opener.current = event.currentTarget;
-      if (kind && message && beside({ kind, path, name, message, opener: event.currentTarget })) return;
+      if (kind && message && beside({ kind, path, shownPath, name, message, opener: event.currentTarget })) return;
       setOpen(true);
     },
     dialog: kind && open && message
       ? <TableDialog title={name} returnFocus={opener.current} onClose={() => setOpen(false)}>
-        <FilePreviewContent kind={kind} path={path} name={name} message={message} />
+        <FilePreviewContent kind={kind} path={path} shownPath={shownPath} name={name} message={message} />
       </TableDialog>
       : null,
   };
 }
 
 /** A file's preview, in the dialog or in the pane beside the chat, which it fills. */
-export function FilePreviewContent({ kind, path, name, message, original, fill = false }: Pick<FilePreview, "kind" | "path" | "name" | "message" | "original"> & { fill?: boolean }) {
+export function FilePreviewContent({ kind, path, shownPath = path, name, message, original, fill = false }: Pick<FilePreview, "kind" | "path" | "shownPath" | "name" | "message" | "original"> & { fill?: boolean }) {
   const key = `${message.threadId}:${message.messageId}:${path}`;
   if (kind === "changes") return original ? <MarkdownPreviewBoundary><Suspense fallback={<div role="status" className="flex items-center justify-center gap-2 p-12 text-sm text-ink-secondary"><LoaderCircle size={16} className="animate-spin" />{t("changes.loading")}</div>}><WhatChangedContent key={`${key}:${original.path}`} edited={{ path, name, message }} original={{ path: original.path, name: original.name, message: { threadId: message.threadId, messageId: original.messageId } }} fill={fill} /></Suspense></MarkdownPreviewBoundary> : null;
-  if (kind === "html") return <HtmlFileContent key={key} path={path} name={name} message={message} fill={fill} />;
+  if (kind === "html") return <HtmlFileContent key={key} path={path} shownPath={shownPath} name={name} message={message} fill={fill} />;
   if (kind === "table") {
     const delimiter = tableDelimiter(name) ?? tableDelimiter(path);
-    return delimiter && <TableFileContent key={key} path={path} name={name} message={message} delimiter={delimiter} />;
+    return delimiter && <TableFileContent key={key} path={path} shownPath={shownPath} name={name} message={message} delimiter={delimiter} />;
   }
-  return <MarkdownPreviewBoundary><Suspense fallback={<div role="status" className="flex items-center justify-center gap-2 p-12 text-sm text-ink-secondary"><LoaderCircle size={16} className="animate-spin" />{t("markdown.loading")}</div>}><MarkdownFileContent key={key} path={path} name={name} message={message} fill={fill} /></Suspense></MarkdownPreviewBoundary>;
+  return <MarkdownPreviewBoundary><Suspense fallback={<div role="status" className="flex items-center justify-center gap-2 p-12 text-sm text-ink-secondary"><LoaderCircle size={16} className="animate-spin" />{t("markdown.loading")}</div>}><MarkdownFileContent key={key} path={path} shownPath={shownPath} name={name} message={message} fill={fill} /></Suspense></MarkdownPreviewBoundary>;
 }
 
-export function HtmlFileButton({ path, name, message }: { path: string; name: string; message: MessageAttachmentContext }) {
-  const preview = useHtmlPreview(path, name, message);
+export function HtmlFileButton({ path, shownPath, name, message }: { path: string; shownPath?: string; name: string; message: MessageAttachmentContext }) {
+  const preview = useHtmlPreview(path, name, message, shownPath);
   return <>
     <button type="button" className="table-action" title={preview.label} aria-label={preview.label} onClick={preview.show}><Eye size={14} /></button>
     {preview.dialog}
@@ -130,10 +130,10 @@ export function OpenInBrowserButton({ source, name, onError }: { source: string;
   }}><ExternalLink size={14} /></button>;
 }
 
-function HtmlFileContent({ path, name, message, fill }: { path: string; name: string; message: MessageAttachmentContext; fill: boolean }) {
+function HtmlFileContent({ path, shownPath, name, message, fill }: { path: string; shownPath: string; name: string; message: MessageAttachmentContext; fill: boolean }) {
   const [attempt, setAttempt] = useState(0);
   const [source, setSource] = useState<string | null>(null);
-  const [error, setError] = useState<"size" | "load" | { reason: string } | null>(null);
+  const [error, setError] = useState<"size" | "load" | "outside" | { reason: string } | null>(null);
   const [showSource, setShowSource] = useState(false);
   const [openFailed, setOpenFailed] = useState("");
   const save = useLocalFileSave(path, name, message);
@@ -146,18 +146,20 @@ function HtmlFileContent({ path, name, message, fill }: { path: string; name: st
       try {
         const response = await requestMessageFile(path, message, controller.signal);
         answered = true;
-        const text = await readTableResponse(response, controller.signal, HTML_PREVIEW_MAX_BYTES);
+        const text = await readTableResponse(response, controller.signal, PREVIEW_MAX_BYTES);
         if (!controller.signal.aborted) setSource(text);
       } catch (reason) {
         if (controller.signal.aborted) return;
         // A refusal from the server says why; only a request that got no answer (TypeError) is the connection.
-        if (!answered && reason instanceof Error && !(reason instanceof TypeError)) setError({ reason: reason.message });
+        if (refusedAsOutsideWorkspace(reason)) setError("outside");
+        else if (!answered && reason instanceof Error && !(reason instanceof TypeError)) setError({ reason: reason.message });
         else setError(reason instanceof Error && reason.message === "size" ? "size" : "load");
       }
     })();
     return () => controller.abort();
   }, [path, message.threadId, message.messageId, attempt]);
-  if (error) return <div className="p-8 text-center text-sm"><p role="alert" className="mb-3 text-ink-secondary">{typeof error === "object" ? t("html.refused", { reason: error.reason }) : t(error === "size" ? "html.tooLarge" : "html.loadFailed")}</p><button type="button" className="rounded-lg border border-hairline px-3 py-2 hover:bg-raised" onClick={() => setAttempt(attempt + 1)}>{t("chat.retry")}</button></div>;
+  if (error === "outside") return <OutsideWorkspacePreview filePath={shownPath} />;
+  if (error) return <div className="p-8 text-center text-sm"><p role="alert" className="mb-3 text-ink-secondary">{typeof error === "object" ? t("html.refused", { reason: error.reason }) : t(error === "size" ? "attach.fileTooLarge" : "html.loadFailed")}</p><button type="button" className="rounded-lg border border-hairline px-3 py-2 hover:bg-raised" onClick={() => setAttempt(attempt + 1)}>{t("chat.retry")}</button></div>;
   if (source === null) return <div role="status" className="flex items-center justify-center gap-2 p-12 text-sm text-ink-secondary"><LoaderCircle size={16} className="animate-spin" />{t("html.loading")}</div>;
   return <div className={cn("flex flex-col gap-2", fill && "min-h-0 flex-1")}>
     <div className="flex items-center justify-end gap-1">

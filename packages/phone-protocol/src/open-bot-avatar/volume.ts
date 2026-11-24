@@ -18,8 +18,9 @@
  * the renderer shows whichever stack faces the viewer more, so no plane is
  * ever seen edge-on. Everything here is pure and cached by the renderer.
  */
-import { contourLoops, loopsToPath, simplifyLoop } from './contour.ts';
-import { bounds, insideRow, isInside } from './path.ts';
+import { RUN, contourOutlines, loopsToPath, runRange, runsOf, simplifiedLoop } from './contour.ts';
+import { EdgeIndex, segDist2 } from './distance.ts';
+import { bounds, edgeBands, isInside } from './path.ts';
 import type { Bounds, Point } from './path.ts';
 import { EYE_H, EYE_W, GAZE_X, GAZE_Y, analyzeBody, drawnEyesFit, eyeCenters, eyeClearance, gazeRange } from './validate.ts';
 import type { BodyAnalysis, GazeRange } from './validate.ts';
@@ -69,17 +70,15 @@ export interface Volume {
   bounds: Bounds;
   /** Index of the part carrying the eyes. */
   eyePart: number;
-  /** Depth of each eye's plane: the highest surface under the eye and its gaze travel. */
+  /** Highest host surface under each eye and its gaze travel, for socket mapping. */
   eyeZ: [number, number];
   /** Drawn eye scale: the definition's scale enlarged as far as the body allows (see EYE_BOOST). */
   eyeScale: number;
-  /**
-   * Host surface normals under each eye (left edge, center, right edge). On a
-   * curved host an eye is hidden once any of them turns away, so a flat eye
-   * never hangs past the curved silhouette.
-   */
-  eyeNormals: [Vec3[], Vec3[]];
+  /** Tangent plane at each eye center for the flat, projected marks. */
+  eyePlanes: [EyePlane, EyePlane];
 }
+
+export interface EyePlane { x: number; y: number; z: number; dzdx: number; dzdy: number }
 
 export type Vec3 = [number, number, number];
 
@@ -112,15 +111,6 @@ const THIN_REACH = 5;
 const THIN_MARGIN = 2;
 /** Depth spacing of refinement slices, units. */
 const FINE_Z = 0.6;
-
-function segDist2(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
-  const dx = bx - ax, dy = by - ay;
-  const len = dx * dx + dy * dy;
-  let t = len > 0 ? ((px - ax) * dx + (py - ay) * dy) / len : 0;
-  t = t < 0 ? 0 : t > 1 ? 1 : t;
-  const ex = ax + t * dx - px, ey = ay + t * dy - py;
-  return ex * ex + ey * ey;
-}
 
 function segDist(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
   return Math.sqrt(segDist2(px, py, ax, ay, bx, by));
@@ -226,6 +216,30 @@ function radiusAt(p: Profile, s: number): number {
 }
 
 /**
+ * What gives a part its depth, as plain data: an inflated part's edge fillet, or a revolved
+ * part's radius profile about its axis. One function reads it for every part (surfaceHeight), so
+ * the loops that call it per sample are compiled once instead of once per part's own closure.
+ */
+interface Surface {
+  kind: PartKind;
+  /** Inflated parts: depth and fillet radii, as surfaceZ and insetAt take them. */
+  fillet: { depth: number; rxy: number; rz: number };
+  /** Revolved parts: radius along the axis, the axis itself and the volume scale. */
+  profile: Profile | null;
+  axis: number;
+  v: number;
+}
+
+/** Front surface height at a point inside the part, `sd` from its outline (used by inflated parts only). */
+function surfaceHeight(s: Surface, x: number, y: number, sd: number): number {
+  if (s.kind === 'inflate') return surfaceZ(s.fillet, sd);
+  const p = s.profile as Profile;
+  return s.kind === 'revolve-x'
+    ? s.v * Math.sqrt(Math.max(0, radiusAt(p, x) ** 2 - (y - s.axis) ** 2))
+    : s.v * Math.sqrt(Math.max(0, radiusAt(p, y) ** 2 - (x - s.axis) ** 2));
+}
+
+/**
  * Horizontal axis of revolution, if the body looks like a turned object seen
  * from the side: at least two parts, wider than tall, mirror-symmetric about
  * y = axis and with every part centered on it.
@@ -243,9 +257,10 @@ export function revolveAxis(body: BodyAnalysis): number | null {
   const xs: number[] = [];
   for (let x = b.minX + 0.5; x < b.maxX; x += 1) xs.push(x);
   const top = new Uint8Array(xs.length), bottom = new Uint8Array(xs.length);
+  const index = edgeBands(body.polys);
   for (let y = b.minY + 0.5; y < axis; y += 1) {
-    insideRow(body.polys, y, xs, top);
-    insideRow(body.polys, 2 * axis - y, xs, bottom);
+    index.insideRow(y, xs, top);
+    index.insideRow(2 * axis - y, xs, bottom);
     for (let k = 0; k < xs.length; k++) {
       if (top[k] || bottom[k]) filled++;
       if (top[k] !== bottom[k]) off++;
@@ -255,84 +270,43 @@ export function revolveAxis(body: BodyAnalysis): number | null {
 }
 
 /** Sampled signed distance (positive inside) and height over a part's bounds. */
-interface Grid { x0: number; y0: number; step: number; nx: number; ny: number; sd: Float64Array; h: Float64Array }
+interface Grid { x0: number; y0: number; step: number; nx: number; ny: number; sd: Float64Array; h: Float64Array; inside: Uint8Array }
 
-/** Edges bucketed on a coarse grid, for nearest-edge queries that only visit nearby buckets. */
-class EdgeIndex {
-  private readonly cell = 6;
-  private readonly buckets = new Map<number, number[]>();
-  private readonly e: number[] = [];
-  private readonly ox: number;
-  private readonly oy: number;
-  private readonly span: number;
-
-  constructor(polys: Point[][], b: Bounds) {
-    this.ox = b.minX - 4; this.oy = b.minY - 4;
-    this.span = Math.ceil((Math.max(b.maxX - b.minX, b.maxY - b.minY) + 8) / this.cell) + 1;
-    for (const poly of polys) {
-      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-        const k = this.e.length;
-        this.e.push(poly[j][0], poly[j][1], poly[i][0], poly[i][1]);
-        const [x0, x1] = [Math.min(poly[j][0], poly[i][0]), Math.max(poly[j][0], poly[i][0])];
-        const [y0, y1] = [Math.min(poly[j][1], poly[i][1]), Math.max(poly[j][1], poly[i][1])];
-        for (let cy = this.cy(y0); cy <= this.cy(y1); cy++) {
-          for (let cx = this.cx(x0); cx <= this.cx(x1); cx++) {
-            const key = cy * this.span + cx;
-            (this.buckets.get(key) ?? this.buckets.set(key, []).get(key)!).push(k);
-          }
-        }
-      }
-    }
-  }
-
-  private cx(x: number) { return Math.max(0, Math.min(this.span - 1, Math.floor((x - this.ox) / this.cell))); }
-  private cy(y: number) { return Math.max(0, Math.min(this.span - 1, Math.floor((y - this.oy) / this.cell))); }
-
-  /** Distance to the nearest edge, searching rings of buckets outward until no closer edge can exist. */
-  distance(x: number, y: number): number {
-    const bx = this.cx(x), by = this.cy(y);
-    let best = Infinity;
-    const e = this.e;
-    for (let r = 0; r < this.span; r++) {
-      for (let cy = by - r; cy <= by + r; cy++) {
-        if (cy < 0 || cy >= this.span) continue;
-        const edgeRow = cy === by - r || cy === by + r;
-        for (let cx = bx - r; cx <= bx + r; cx += edgeRow ? 1 : 2 * r || 1) {
-          if (cx < 0 || cx >= this.span) continue;
-          const list = this.buckets.get(cy * this.span + cx);
-          if (!list) continue;
-          for (const k of list) {
-            const d = segDist2(x, y, e[k], e[k + 1], e[k + 2], e[k + 3]);
-            if (d < best) best = d;
-          }
-        }
-      }
-      // Every bucket outside ring r is at least r cells away (best is squared).
-      if (best <= (r * this.cell) ** 2) break;
-    }
-    return Math.sqrt(best);
-  }
-}
-
-function sampleGrid(polys: Point[][], b: Bounds, step: number, height: (x: number, y: number, sd: number) => number): Grid {
+/** A part's sample grid with its signed distances, before any height is known. */
+function sampleGrid(polys: Point[][], b: Bounds, step: number, index: EdgeIndex): Grid {
   const pad = 1;
   const x0 = b.minX - pad, y0 = b.minY - pad;
   const nx = Math.ceil((b.maxX - b.minX + 2 * pad) / step) + 1;
   const ny = Math.ceil((b.maxY - b.minY + 2 * pad) / step) + 1;
-  const sd = new Float64Array(nx * ny), h = new Float64Array(nx * ny);
-  const index = new EdgeIndex(polys, b);
+  const sd = index.distances({ x0, y0, step, nx, ny }), inside = new Uint8Array(nx * ny);
   const xs = Array.from({ length: nx }, (_, i) => x0 + i * step);
-  const inside = new Uint8Array(nx);
+  const row = new Uint8Array(nx);
+  const rows = edgeBands(polys);
   for (let j = 0; j < ny; j++) {
-    const y = y0 + j * step;
-    insideRow(polys, y, xs, inside);
-    for (let i = 0; i < nx; i++) {
-      const d = index.distance(xs[i], y);
-      sd[j * nx + i] = inside[i] ? d : -d;
-      h[j * nx + i] = inside[i] ? height(xs[i], y, d) : 0;
+    rows.insideRow(y0 + j * step, xs, row);
+    inside.set(row, j * nx);
+    for (let i = 0; i < nx; i++) if (!row[i]) sd[j * nx + i] = -sd[j * nx + i];
+  }
+  return { x0, y0, step, nx, ny, sd, h: new Float64Array(nx * ny), inside };
+}
+
+/** Twice the largest inward distance over the samples of a grid like sampleGrid's, at `step`. */
+function gridThickness(polys: Point[][], b: Bounds, step: number, index: EdgeIndex): number {
+  const pad = 1;
+  const nx = Math.ceil((b.maxX - b.minX + 2 * pad) / step) + 1;
+  const ny = Math.ceil((b.maxY - b.minY + 2 * pad) / step) + 1;
+  return 2 * index.widest({ x0: b.minX - pad, y0: b.minY - pad, step, nx, ny }, edgeBands(polys));
+}
+
+/** Fill in the grid's heights: the surface at every sample inside the outline, 0 outside. */
+function sampleHeights(g: Grid, surface: Surface): void {
+  for (let j = 0; j < g.ny; j++) {
+    const y = g.y0 + j * g.step;
+    for (let i = 0; i < g.nx; i++) {
+      const k = j * g.nx + i;
+      if (g.inside[k]) g.h[k] = surfaceHeight(surface, g.x0 + i * g.step, y, g.sd[k]);
     }
   }
-  return { x0, y0, step, nx, ny, sd, h };
 }
 
 function loopBox(loops: Point[][]): VolumeSlice['box'] {
@@ -347,33 +321,88 @@ interface CellBox { i0: number; i1: number; j0: number; j1: number }
 interface ThinBox extends CellBox { top: number }
 
 /**
- * A part's cross-section at `level` as a field that is positive inside it, zero on its edge and
- * roughly a distance in viewBox units: smooth across the rim, so contours interpolated between grid
- * samples follow the real edge instead of the grid. (Height itself is steep at the rim and zero
- * outside, and contouring it left the outline faceted and stair-stepped.)
+ * A part's cross-section at a level, clipped to the outline (and to a box, if given), as loops.
+ *
+ * It is the zero contour of a field that is positive inside the cross-section, zero on its edge
+ * and roughly a distance in viewBox units: smooth across the rim, so contours interpolated between
+ * grid samples follow the real edge instead of the grid. (Height itself is steep at the rim and
+ * zero outside, and contouring it left the outline faceted and stair-stepped.) The field is capped
+ * by the signed distance to the outline; both are continuous across it, so the smaller is too.
  */
-type LevelField = (x: number, y: number, sd: number, level: number) => number;
+type LevelCut = (level: number, box?: CellBox) => Point[][];
 
-/** Cross-section at `level` clipped to the outline (and to `box`, if given), as loops. */
-function levelLoops(g: Grid, level: number, field: LevelField, box?: CellBox): Point[][] {
-  // A box is contoured on its own samples plus one ring outside it, where the clip is negative.
-  const i0 = box ? Math.max(0, box.i0 - 1) : 0, i1 = box ? Math.min(g.nx - 1, box.i1 + 1) : g.nx - 1;
-  const j0 = box ? Math.max(0, box.j0 - 1) : 0, j1 = box ? Math.min(g.ny - 1, box.j1 + 1) : g.ny - 1;
-  const nx = i1 - i0 + 1, ny = j1 - j0 + 1;
-  const values = new Float64Array(nx * ny);
+/**
+ * Cross-sections of an inflated part. Height grows with distance from the outline, so a level is
+ * reached at a fixed inset: the field is the signed distance less that inset, which is the
+ * distance grid itself contoured at the inset.
+ */
+function insetCuts(g: Grid, fillet: Surface['fillet']): LevelCut {
+  const whole = { values: g.sd, nx: g.nx, ny: g.ny, x0: g.x0, y0: g.y0, step: g.step };
+  const range = runRange(g.sd, g.nx, g.ny);
+  const flat = new Uint8Array(range.min.length);
+  return (level, box) => {
+    const drop = insetAt(fillet, level);
+    if (!box) {
+      // Subtracting keeps order, so a run whose extremes are on one side of the inset is all on it.
+      for (let k = 0; k < flat.length; k++) flat[k] = range.min[k] - drop >= 0 || range.max[k] - drop < 0 ? 1 : 0;
+      return contourOutlines(whole, drop, 0.04, flat);
+    }
+    // A box is contoured on its own samples plus one ring outside it, where the clip is negative.
+    const i0 = Math.max(0, box.i0 - 1), i1 = Math.min(g.nx - 1, box.i1 + 1);
+    const j0 = Math.max(0, box.j0 - 1), j1 = Math.min(g.ny - 1, box.j1 + 1);
+    const nx = i1 - i0 + 1, ny = j1 - j0 + 1;
+    const values = new Float64Array(nx * ny);
+    for (let j = 0; j < ny; j++) {
+      for (let i = 0; i < nx; i++) {
+        const sd = g.sd[(j + j0) * g.nx + i + i0];
+        const v = Math.min(sd - drop, sd);
+        values[j * nx + i] = Math.min(v, g.step * Math.min(i + i0 - box.i0, box.i1 - i - i0, j + j0 - box.j0, box.j1 - j - j0));
+      }
+    }
+    return contourOutlines({ values, nx, ny, x0: g.x0 + i0 * g.step, y0: g.y0 + j0 * g.step, step: g.step }, 0, 0.04);
+  };
+}
+
+/**
+ * Cross-sections of a revolved part. With r the radius at a sample and t its offset from the
+ * axis, height ≥ level where t² ≤ r² - (level / v)²: that difference over twice the radius is
+ * about a distance, and it is the field.
+ */
+function revolveCuts(g: Grid, surface: Surface): LevelCut {
+  const { nx, ny } = g;
+  const { v, axis } = surface, p = surface.profile as Profile, alongX = surface.kind === 'revolve-x';
+  // The field is (base - (level / v)²) / over: only the middle term changes with the level.
+  const base = new Float64Array(nx * ny), over = new Float64Array(nx * ny);
   for (let j = 0; j < ny; j++) {
+    const y = g.y0 + j * g.step;
     for (let i = 0; i < nx; i++) {
-      const k = (j + j0) * g.nx + i + i0;
-      const sd = g.sd[k];
-      // Both terms are continuous across the outline, so the min is too.
-      let v = Math.min(field(g.x0 + (i + i0) * g.step, g.y0 + (j + j0) * g.step, sd, level), sd);
-      if (box) v = Math.min(v, g.step * Math.min(i + i0 - box.i0, box.i1 - i - i0, j + j0 - box.j0, box.j1 - j - j0));
-      values[j * nx + i] = v;
+      const x = g.x0 + i * g.step;
+      const r = radiusAt(p, alongX ? x : y), t = alongX ? y - axis : x - axis;
+      base[j * nx + i] = r * r - t * t;
+      over[j * nx + i] = 2 * Math.max(r, 0.5);
     }
   }
-  return contourLoops({ values, nx, ny, x0: g.x0 + i0 * g.step, y0: g.y0 + j0 * g.step, step: g.step }, 0)
-    .map((l) => simplifyLoop(l, 0.04))
-    .filter((l) => l.length >= 3);
+  const values = new Float64Array(nx * ny);
+  const field = { values, nx, ny, x0: g.x0, y0: g.y0, step: g.step };
+  const rise = runRange(base, nx, ny), edge = runRange(g.sd, nx, ny);
+  const runs = runsOf(nx);
+  const flat = new Uint8Array(rise.min.length);
+  return (level) => {
+    const drop = (level / Math.max(v, 1e-6)) ** 2;
+    for (let k = 0; k < flat.length; k++) {
+      // Subtracting keeps order and `over` is positive, so the extremes of a run tell its sign.
+      const out = rise.max[k] - drop < 0 || edge.max[k] < 0, within = rise.min[k] - drop >= 0 && edge.min[k] >= 0;
+      flat[k] = out || within ? 1 : 0;
+      if (flat[k]) continue;
+      // Only runs the contour may cross are read, so only they are filled in.
+      const r = k % runs, j = (k - r) / runs;
+      for (let q = j * nx + r * RUN, end = j * nx + Math.min(nx - 1, (r + 1) * RUN); q <= end; q++) {
+        values[q] = Math.min((base[q] - drop) / over[q], g.sd[q]);
+        values[q + nx] = Math.min((base[q + nx] - drop) / over[q + nx], g.sd[q + nx]);
+      }
+    }
+    return contourOutlines(field, 0, 0.04, flat);
+  };
 }
 
 /**
@@ -385,23 +414,19 @@ function levelLoops(g: Grid, level: number, field: LevelField, box?: CellBox): P
 function thinBoxes(g: Grid): ThinBox[] {
   const { nx, ny } = g;
   const reach = Math.ceil(THIN_REACH / g.step);
-  // Largest inward distance within `reach` samples (a square window, rows then columns).
-  const rows = new Float64Array(nx * ny), widest = new Float64Array(nx * ny);
+  // Whether a sample THIN or more inside the outline lies within `reach` samples (a square
+  // window, rows then columns): the largest inward distance there is THIN or more exactly then.
+  const wide = new Uint8Array(nx * ny), near = new Uint8Array(nx * ny);
+  const count = new Int32Array(Math.max(nx, ny) + 1);
   for (let j = 0; j < ny; j++) {
-    for (let i = 0; i < nx; i++) {
-      let m = 0;
-      for (let k = Math.max(0, i - reach), e = Math.min(nx - 1, i + reach); k <= e; k++) m = Math.max(m, g.sd[j * nx + k]);
-      rows[j * nx + i] = m;
-    }
+    for (let i = 0; i < nx; i++) count[i + 1] = count[i] + (g.sd[j * nx + i] >= THIN ? 1 : 0);
+    for (let i = 0; i < nx; i++) wide[j * nx + i] = count[Math.min(nx, i + reach + 1)] > count[Math.max(0, i - reach)] ? 1 : 0;
   }
   for (let i = 0; i < nx; i++) {
-    for (let j = 0; j < ny; j++) {
-      let m = 0;
-      for (let k = Math.max(0, j - reach), e = Math.min(ny - 1, j + reach); k <= e; k++) m = Math.max(m, rows[k * nx + i]);
-      widest[j * nx + i] = m;
-    }
+    for (let j = 0; j < ny; j++) count[j + 1] = count[j] + wide[j * nx + i];
+    for (let j = 0; j < ny; j++) near[j * nx + i] = count[Math.min(ny, j + reach + 1)] > count[Math.max(0, j - reach)] ? 1 : 0;
   }
-  const thin = (k: number) => g.sd[k] > 0 && widest[k] < THIN;
+  const thin = (k: number) => g.sd[k] > 0 && !near[k];
   const seen = new Uint8Array(nx * ny);
   const grow = Math.ceil(THIN_MARGIN / g.step);
   const boxes: ThinBox[] = [];
@@ -448,10 +473,10 @@ function thinBoxes(g: Grid): ThinBox[] {
  * height across the slab, so a stack of these seen side-on adds up to the
  * solid's side silhouette instead of one tooth per column where the outline
  * slopes. Where a row run meets the outline the profile ends at the surface
- * height right there (`edgeHeight`: the wall of an inflated part, the rim of a
- * revolved one), not at the last sample's.
+ * height right there (the wall of an inflated part, the rim of a revolved
+ * one), not at the last sample's.
  */
-function columnLoops(g: Grid, c0: number, c1: number, edgeHeight: (x: number, y: number) => number): Point[][] {
+function columnLoops(g: Grid, c0: number, c1: number, surface: Surface): Point[][] {
   const loops: Point[][] = [];
   const sd = new Float64Array(g.ny).fill(-Infinity), h = new Float64Array(g.ny);
   for (let j = 0; j < g.ny; j++) {
@@ -461,30 +486,41 @@ function columnLoops(g: Grid, c0: number, c1: number, edgeHeight: (x: number, y:
       if (g.sd[k] > 0 && g.h[k] > h[j]) h[j] = g.h[k];
     }
   }
-  const yAt = (jj: number) => g.y0 + jj * g.step;
-  // Where the outline crosses between an inside and an outside sample, and the surface height there.
-  const edge = (inside: number, outside: number) => yAt(inside) + ((yAt(outside) - yAt(inside)) * sd[inside]) / (sd[inside] - sd[outside]);
-  const rim = (y: number, j: number) => {
-    let top = 0;
-    for (let c = c0; c <= c1; c++) top = Math.max(top, edgeHeight(g.x0 + c * g.step, y));
-    return Math.min(h[j], top);
-  };
+  // One run of rows at a time: its right side (u, y in turn) from top to bottom, then the mirror image back up.
+  const xy = new Float64Array(4 * (g.ny + 2));
   let j = 0;
   while (j < g.ny) {
     if (sd[j] <= 0) { j++; continue; }
     const j0 = j;
     while (j < g.ny && sd[j] > 0) j++;
     const j1 = j - 1;
-    const yTop = j0 > 0 ? edge(j0, j0 - 1) : yAt(j0);
-    const yBot = j1 < g.ny - 1 ? edge(j1, j1 + 1) : yAt(j1);
-    const right: Point[] = [[j0 > 0 ? rim(yTop, j0) : h[j0], yTop]];
-    for (let k = j0; k <= j1; k++) right.push([h[k], yAt(k)]);
-    right.push([j1 < g.ny - 1 ? rim(yBot, j1) : h[j1], yBot]);
-    if (Math.max(...right.map((p) => p[0])) < 0.05) continue;
-    const left = right.map(([u, y]) => [-u, y] as Point).reverse();
-    loops.push(simplifyLoop([...right, ...left], 0.04));
+    let n = 0;
+    if (j0 > 0) n = rimPoint(g, c0, c1, surface, sd, h, j0, j0 - 1, xy, n);
+    else { xy[n++] = h[j0]; xy[n++] = g.y0 + j0 * g.step; }
+    for (let k = j0; k <= j1; k++) { xy[n++] = h[k]; xy[n++] = g.y0 + k * g.step; }
+    if (j1 < g.ny - 1) n = rimPoint(g, c0, c1, surface, sd, h, j1, j1 + 1, xy, n);
+    else { xy[n++] = h[j1]; xy[n++] = g.y0 + j1 * g.step; }
+    let top = -Infinity;
+    for (let k = 0; k < n; k += 2) top = Math.max(top, xy[k]);
+    if (top < 0.05) continue;
+    for (let k = n - 2, m = n; k >= 0; k -= 2) { xy[m++] = -xy[k]; xy[m++] = xy[k + 1]; }
+    loops.push(simplifiedLoop(xy, n, 0.04));
   }
   return loops;
+}
+
+/**
+ * The end of a row run of columnLoops, written to xy[n]: where the outline crosses between the
+ * run's last sample `inside` and its neighbor `outside`, and the surface height there, capped by
+ * the sample's. Returns the next free slot.
+ */
+function rimPoint(g: Grid, c0: number, c1: number, surface: Surface, sd: Float64Array, h: Float64Array, inside: number, outside: number, xy: Float64Array, n: number): number {
+  const yIn = g.y0 + inside * g.step;
+  const y = yIn + ((g.y0 + outside * g.step - yIn) * sd[inside]) / (sd[inside] - sd[outside]);
+  let top = 0;
+  for (let c = c0; c <= c1; c++) top = Math.max(top, surfaceHeight(surface, g.x0 + c * g.step, y, 0));
+  xy[n] = Math.min(h[inside], top); xy[n + 1] = y;
+  return n + 2;
 }
 
 /** Depth levels in (flat, flat + round): even in angle over the rounded part of the profile. */
@@ -520,36 +556,23 @@ export function buildVolume(def: AvatarDefinition, volume = 1, body: BodyAnalysi
       if (profile) kind = 'revolve-y';
     }
 
-    let thickness: number, depth: number, rxy = 0, rz = 0;
-    let heightOf: (x: number, y: number, sd: number) => number;
-    let levelField: LevelField;
+    const index = new EdgeIndex(polys, b);
+    let thickness: number, depth: number, rxy = 0, rz = 0, axis = 0;
     if (kind === 'inflate' || !profile) {
-      const coarse = sampleGrid(polys, b, Math.max(step, 0.6), () => 0);
-      thickness = 2 * coarse.sd.reduce((m, d) => Math.max(m, d), 0);
+      thickness = gridThickness(polys, b, Math.max(step, 0.6), index);
       depth = partDepth(thickness, b, v);
       rxy = Math.min(thickness / 2, depth / 2) * 0.9;
       rz = (depth / 2) * 0.85;
-      const shape = { depth, rxy, rz };
-      heightOf = (_x, _y, sd) => surfaceZ(shape, sd);
-      // Height grows with distance from the outline, so a level is reached at a fixed inset.
-      levelField = (_x, _y, sd, level) => sd - insetAt(shape, level);
     } else {
-      const p = profile;
-      const axis = kind === 'revolve-x' ? (xAxis as number) : center[0];
-      const radius = Math.max(...p.r);
+      axis = kind === 'revolve-x' ? (xAxis as number) : center[0];
+      const radius = Math.max(...profile.r);
       thickness = 2 * radius;
       depth = 2 * radius * v;
-      heightOf = kind === 'revolve-x'
-        ? (x, y) => v * Math.sqrt(Math.max(0, radiusAt(p, x) ** 2 - (y - axis) ** 2))
-        : (x, y) => v * Math.sqrt(Math.max(0, radiusAt(p, y) ** 2 - (x - axis) ** 2));
-      // Height ≥ level where t² ≤ R² - (level / v)²: that difference over 2R is about a distance.
-      levelField = (x, y, _sd, level) => {
-        const r = radiusAt(p, kind === 'revolve-x' ? x : y), t = kind === 'revolve-x' ? y - axis : x - axis;
-        return (r * r - t * t - (level / Math.max(v, 1e-6)) ** 2) / (2 * Math.max(r, 0.5));
-      };
     }
+    const surface: Surface = { kind, fillet: { depth, rxy, rz }, profile, axis, v };
+    const filled = edgeBands(polys);
     const height = (x: number, y: number) =>
-      isInside(polys, x, y) ? heightOf(x, y, kind === 'inflate' ? edgeDistance(polys, x, y) : 0) : 0;
+      filled.winding(x, y) !== 0 ? surfaceHeight(surface, x, y, kind === 'inflate' ? index.distance(x, y) : 0) : 0;
 
     const core: VolumeSlice = {
       axis: 'z', at: 0, d: o.d + cuts.map((h) => h.d).join(''), loops: polys, evenOdd: false,
@@ -559,17 +582,20 @@ export function buildVolume(def: AvatarDefinition, volume = 1, body: BodyAnalysi
     const xSlices: VolumeSlice[] = [];
     const half = depth / 2;
     if (half > 0.05) {
-      const g = sampleGrid(polys, b, step, heightOf);
+      const g = sampleGrid(polys, b, step, index);
+      sampleHeights(g, surface);
       const steps = kind === 'inflate'
         ? Math.max(4, Math.min(14, Math.round(rz / 0.8)))
         : Math.max(5, Math.min(18, Math.round(half / 1.1)));
       // Inflated parts keep a straight wall up to half - rz; one slice at its end carries it.
       const ls = kind === 'inflate' ? [half - rz, ...levels(half - rz, rz, steps)] : levels(0, half, steps);
+      const cut = kind === 'inflate' ? insetCuts(g, surface.fillet) : revolveCuts(g, surface);
       const addLevel = (level: number, box?: CellBox) => {
-        const loops = levelLoops(g, level, levelField, box);
+        const loops = cut(level, box);
         if (!loops.length) return false;
-        const sample = loops.flat().filter((_, k) => k % 3 === 0);
-        const inset = Math.min(...sample.map(([x, y]) => edgeDistance(polys, x, y)));
+        // Every third point of the loops, counted across them.
+        let inset = Infinity, k = 0;
+        for (const loop of loops) for (const p of loop) if (k++ % 3 === 0) inset = Math.min(inset, index.distance(p[0], p[1]));
         const slice = { axis: 'z' as const, d: loopsToPath(loops), loops, evenOdd: true, box: loopBox(loops), inset };
         zSlices.push({ ...slice, at: level }, { ...slice, at: -level });
         return true;
@@ -589,11 +615,10 @@ export function buildVolume(def: AvatarDefinition, volume = 1, body: BodyAnalysi
 
       const width = b.maxX - b.minX;
       const every = Math.max(1, Math.round(Math.max(1.1, width / MAX_X_SLICES) / g.step));
-      const edgeHeight = (x: number, y: number) => heightOf(x, y, 0);
       // One plane per `every` grid columns, standing for the whole slab around it.
       const before = Math.floor((every - 1) / 2);
       for (let i = 1; i < g.nx - 1; i += every) {
-        const loops = columnLoops(g, Math.max(0, i - before), Math.min(g.nx - 1, i - before + every - 1), edgeHeight);
+        const loops = columnLoops(g, Math.max(0, i - before), Math.min(g.nx - 1, i - before + every - 1), surface);
         if (loops.length) xSlices.push({ axis: 'x', at: g.x0 + i * g.step, d: loopsToPath(loops), loops, evenOdd: true, box: loopBox(loops), inset: 0 });
       }
     }
@@ -616,7 +641,7 @@ export function buildVolume(def: AvatarDefinition, volume = 1, body: BodyAnalysi
     if (z > bestZ) { bestZ = z; eyePart = i; }
   });
   const host = parts[eyePart];
-  // Flat eye planes sit at the highest surface under the eye and its gaze travel, so the body never cuts them.
+  // Limit the socket to its host even when a taller part overlaps the face.
   const w = (EYE_W * eyeScale) / 2 + GAZE_X * eyeScale, hh = (EYE_H * eyeScale) / 2 + GAZE_Y * eyeScale;
   const eyeZ = centers.map(([x, y]) => {
     let top = 0;
@@ -624,18 +649,15 @@ export function buildVolume(def: AvatarDefinition, volume = 1, body: BodyAnalysi
     return top;
   }) as [number, number];
 
-  const normal = (x: number, y: number): Vec3 => {
-    if (!host) return [0, 0, 1];
-    const e = 0.75;
-    const gx = (host.height(x + e, y) - host.height(x - e, y)) / (2 * e);
-    const gy = (host.height(x, y + e) - host.height(x, y - e)) / (2 * e);
-    const n = Math.hypot(gx, gy, 1);
-    return [-gx / n, -gy / n, 1 / n];
-  };
-  const half = (EYE_W * eyeScale) / 2;
-  const eyeNormals = centers.map(([x, y]) => [normal(x - half, y), normal(x, y), normal(x + half, y)]) as [Vec3[], Vec3[]];
+  const eyePlanes = centers.map(([x, y]) => {
+    if (!host) return { x, y, z: 0, dzdx: 0, dzdy: 0 };
+    const e = .75;
+    const dzdx = (host.height(x + e, y) - host.height(x - e, y)) / (2 * e);
+    const dzdy = (host.height(x, y + e) - host.height(x, y - e)) / (2 * e);
+    return { x, y, z: host.height(x, y), dzdx, dzdy };
+  }) as [EyePlane, EyePlane];
 
-  return { parts, bounds: body.bounds, eyePart, eyeZ, eyeScale, eyeNormals };
+  return { parts, bounds: body.bounds, eyePart, eyeZ, eyeScale, eyePlanes };
 }
 
 /** Largest eye scale up to EYE_BOOST × the definition's whose drawn eyes keep EYE_BOOST_PAD from the outline. */

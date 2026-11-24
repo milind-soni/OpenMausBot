@@ -430,6 +430,44 @@ describe("the accessor for server-side callers", () => {
       provideGithubSignIn(null);
     }
   });
+
+  it("says from disk alone whether an audience has a sign-in, without running gh", async () => {
+    const { githubSignedIn, provideGithubSignIn } = await import("./token.ts");
+    expect(githubSignedIn("owner")).toBe(false);
+    const team = setup({ team: true });
+    expect(team.signIn.signedIn(MEMBER)).toBe(false);
+    const child = await showCode(team, MEMBER);
+    child.approve();
+    await settle();
+    const calls = team.calls.length;
+    provideGithubSignIn(team.signIn);
+    try {
+      expect(githubSignedIn(MEMBER)).toBe(true);
+      expect(githubSignedIn(OTHER)).toBe(false);
+      expect(githubSignedIn("owner")).toBe(false);
+      expect(githubSignedIn()).toBe(false);
+      expect(team.calls.length).toBe(calls);
+    } finally {
+      provideGithubSignIn(null);
+    }
+    const own = setup();
+    expect(own.signIn.signedIn()).toBe(false);
+    own.vault.saved.set("owner", { token: TOKEN, login: "octo" });
+    expect(own.signIn.signedIn()).toBe(true);
+    own.vault.saved.clear();
+    // A gh on PATH is not a sign-in: only one whose hosts file lists a github.com account.
+    const ghConfig = join(dataDir, "personal-gh");
+    mkdirSync(ghConfig);
+    vi.stubEnv("GH_CONFIG_DIR", ghConfig);
+    own.set.personal = "/usr/local/bin/gh";
+    expect(own.signIn.signedIn("owner")).toBe(false);
+    writeFileSync(join(ghConfig, "hosts.yml"), "github.com:\n    git_protocol: https\n    users:\n        octo:\n    user: octo\n");
+    expect(own.signIn.signedIn("owner")).toBe(true);
+    expect(own.signIn.signedIn(MEMBER)).toBe(false);
+    own.set.personal = null;
+    expect(own.signIn.signedIn("owner")).toBe(false);
+    vi.unstubAllEnvs();
+  });
 });
 
 describe("only Start downloads, and overlapping asks share one answer", () => {

@@ -365,6 +365,32 @@ describe("the model picker in Simple mode", () => {
     expect(atDefault).toContain('data-simple-effort-auto="true" class="px-2 pb-1 text-[12px] leading-4 text-ink-tertiary">Recommended. Effort is picked per message.</p>');
   });
 
+  it("offers ultra and its tooltip hint only on models whose effortLevels include ultra", () => {
+    const codexEngine: InstanceInfo = {
+      ...fixture.instances[0]!,
+      instanceId: "codex",
+      driverKind: "codex",
+      displayName: "Codex",
+      capabilities: { effortLevels: ["low", "medium", "high", "xhigh", "max", "ultra"] },
+      models: {
+        default: "gpt-5.4",
+        options: [
+          { id: "gpt-5.4", label: "GPT-5.4", effortLevels: ["low", "medium", "high", "xhigh", "max", "ultra"] },
+          { id: "gpt-5.3", label: "GPT-5.3", effortLevels: ["low", "medium", "high", "xhigh", "max"] },
+        ],
+      },
+    };
+    fixture.instances = [codexEngine];
+    const withUltra = open(bot("ultra", "codex", "gpt-5.4"));
+    expect(thinking(withUltra).levels).toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
+    const ultraBand = region(menu(withUltra.html), "data-simple-effort-band");
+    expect(ultraBand).toMatch(/aria-pressed="true"[^>]*>Ultra<\/button>/);
+    expect(ultraBand).toContain(">Maximum thinking with automatic task delegation. Slowest, for the toughest jobs.</p>");
+    fixture.values = [];
+    const withoutUltra = open(bot("high", "codex", "gpt-5.3"));
+    expect(thinking(withoutUltra).levels).toEqual(["low", "medium", "high", "xhigh", "max"]);
+  });
+
   it("names the model on the Simple chip, quiet until hovered; thinking and route stay in its tooltip and the menu", () => {
     const chip = render(bot("high")).nodes.find((node) => node.props["data-tour"] === "model")!;
     const markup = renderToStaticMarkup(chip);

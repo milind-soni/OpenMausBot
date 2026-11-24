@@ -1,9 +1,10 @@
 import type { Store, TaskRecord } from "../store.ts";
+import { archivedOnResult } from "./finished-work.ts";
 import { OUTSIDE_STAYS_HERE } from "./outside-lineage.ts";
 
 /** Where coordinate_bots sends to a teammate outside a room, by its `thread`: "standing" is the sender conversation's one
  * work thread with that teammate (undefined until it is opened), "new" opens one (undefined), and any other value is the id
- * of a thread the sender opened on that teammate earlier, or `answering`: the requester of the sender's running assignment
+ * of a thread the sender opened on that teammate earlier (archived only by its own result), or `answering`: the requester of the sender's running assignment
  * when it asked with reply none. Nothing returns from such work on its own, so it takes a one-way notice (`notice`) there,
  * never new work.
  * Throws when it is neither. `also` narrows which threads count. */
@@ -18,14 +19,28 @@ export function workThreadFor(store: Pick<Store, "workThread" | "taskByThread">,
   if (thread === "standing") return store.workThread(botId, input.fromBotId, input.fromThreadId, false, (task) => also(task) && reach(task));
   const task = store.taskByThread(botId, thread);
   if (task && !reach(task)) throw new Error(OUTSIDE_STAYS_HERE);
-  const usable = task !== undefined && task.archivedAt === undefined && also(task);
+  const allowed = task !== undefined && also(task);
+  const usable = allowed && task.archivedAt === undefined;
+  const reusable = usable || (allowed && archivedOnResult(task));
   if (input.any) {
     if (usable && !task.closedBy) return task;
     throw new Error(`"${thread}" is not an open thread of ${input.botName}: use a threadId list_threads shows on them`);
   }
-  if (usable && task.openedBy?.botId === input.fromBotId && !task.openedBy.roomLane) return task;
+  if (reusable && task.openedBy?.botId === input.fromBotId && !task.openedBy.roomLane) return task;
   const handedWork = usable && input.answering?.botId === botId && input.answering.threadId === thread;
   if (handedWork && input.notice) return task;
   if (handedWork) throw new Error(`"${thread}" handed you work: answer it there with reply "none", a one-way notice; it cannot be given new work`);
   throw new Error(`"${thread}" is not a thread you opened on ${input.botName}: use a threadId one of your coordinate_bots receipts gave, or one list_threads shows on them`);
+}
+
+/** The thread a send to a teammate's standing work thread runs in. A thread holding work this turn already handed the
+ * teammate, or work this conversation still waits on (`keeps`), takes it, so it runs after that work. Otherwise, while a
+ * turn runs in the standing thread, the send takes another work thread this conversation opened on the teammate that holds
+ * no work (`idle`), or undefined to open a new one, instead of waiting behind it. A teammate that could not start it anyway
+ * (`full`) keeps the standing thread, where it queues as before. */
+export function besideBusy(store: Pick<Store, "workThread">, standing: TaskRecord, input: { botId: string; fromBotId: string; fromThreadId: string;
+  fits: (task: TaskRecord) => boolean; busy: (threadId: string) => boolean; idle: (threadId: string) => boolean; full: boolean;
+  keeps: (threadId: string) => boolean }): TaskRecord | undefined {
+  const pick = (more: (task: TaskRecord) => boolean) => store.workThread(input.botId, input.fromBotId, input.fromThreadId, false, (task) => input.fits(task) && more(task));
+  return pick((task) => input.keeps(task.threadId)) ?? (input.full || !input.busy(standing.threadId) ? standing : pick((task) => input.idle(task.threadId)));
 }

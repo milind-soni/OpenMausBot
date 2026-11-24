@@ -573,6 +573,18 @@ export class McpOAuthManager {
     if (!meta) throw new McpOAuthError("not-oauth", "This server does not offer an OAuth sign-in. Add its token as a header instead.");
     const registered = this.clients(name, url);
 
+    /** An app with a configured return address always returns there: it is the one address the provider has registered,
+     * and the only one a browser on another computer can reach. The public route completes it, so no listener runs. */
+    if (registered?.redirectUri) {
+      const client: ClientAuth = {
+        id: registered.clientId,
+        ...(registered.clientSecret ? { secret: registered.clientSecret } : {}),
+        method: tokenAuthMethod(meta, registered.clientSecret),
+      };
+      const scopes = registered.scopes?.length ? registered.scopes : meta.scopes;
+      return { ...this.open(name, url, starting, meta, registered.redirectUri, client, null, scopes).status };
+    }
+
     if (!registered && starting.browser.remote && starting.browser.origin) {
       const redirectUri = `${starting.browser.origin}${CALLBACK_PATH}`;
       let client: ClientAuth | null = null;

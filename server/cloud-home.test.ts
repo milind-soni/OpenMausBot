@@ -396,6 +396,8 @@ it("gives the edge only its routing name and the server the contract, never a ga
   // The bot box and image-engines switches reach the server; an unknown name does not.
   expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_BOT_BOX: "0", OMB_IMAGE_ENGINES: "1", OMB_SOMETHING_ELSE: "x" }, "/data").server).toMatchObject({ OMB_BOT_BOX: "0", OMB_IMAGE_ENGINES: "1" });
   expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_SOMETHING_ELSE: "x" }, "/data").server).not.toHaveProperty("OMB_SOMETHING_ELSE");
+  // So does the switch that gives Antigravity accounts Google's native CLI, which a Cloud home could otherwise never turn on.
+  expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_ANTIGRAVITY_NATIVE_CLI: "1" }, "/data").server).toMatchObject({ OMB_ANTIGRAVITY_NATIVE_CLI: "1" });
   expect(JSON.stringify(server)).not.toContain(token);
   expect(secrets).toEqual({ OMB_CLOUD_BOOTSTRAP_SECRET: secret, ...relay });
   for (const value of Object.values(secrets)) {
@@ -488,8 +490,8 @@ it("holds requests at the edge while the server starts only when the Admin asked
 
 it("hands the server the tool cache switch, and moves no cache of the server's own", () => {
   const config = cloudHomeConfiguration(withGateway())!;
-  const server = cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_CACHE_ROOT: "on" }, "/data").server;
-  expect(server).toMatchObject({ OMB_CACHE_ROOT: "on", HOME: "/data", NODE_COMPILE_CACHE: "/data/.openmausbot/cache/node-compile" });
+  const server = cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_CACHE_ROOT: "on", OMB_CACHE_SWEEP: "on", OMB_CACHE_CAP_TOOLS: "4G", OMB_CACHE_CAP_APP: "1G" }, "/data").server;
+  expect(server).toMatchObject({ OMB_CACHE_ROOT: "on", OMB_CACHE_SWEEP: "on", OMB_CACHE_CAP_TOOLS: "4G", OMB_CACHE_CAP_APP: "1G", HOME: "/data", NODE_COMPILE_CACHE: "/data/.openmausbot/cache/node-compile" });
   // Only the bot box adds the tools' variables (bot-box/tool-caches.ts), for each box's own HOME.
   for (const name of ["npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR", "HF_HUB_CACHE", "XDG_CACHE_HOME"]) expect(server).not.toHaveProperty(name);
 });

@@ -100,6 +100,27 @@ describe("waits set by work a bot handed on", () => {
     finish(sourceThread);
   }, 60_000);
 
+  it("closes a thread \"new\" opened but keeps it out of the archive while its wait is armed, so the wait's message is seen", async () => {
+    const sourceThread = (await api("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.id === source.id).threadId;
+    await control(["send", "--bot", source.id, "--text", "Have the peer tell me when the report lands."]);
+    const { receipts } = await api("POST", "/api/internal/coordinate-bots", { botIds: [peer.id], message: "Watch for the fixture report.", thread: "new" }, await token(sourceThread));
+    expect(receipts).toHaveLength(1);
+    const work = await handedWork(sourceThread);
+    const made = await call("POST", "/api/internal/waits", fileWait("report"), await token(work.threadId));
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    const peerTask = async () => (await api("GET", "/api/bots")).bots.find((bot: any) => bot.id === peer.id).tasks.find((task: any) => task.threadId === work.threadId);
+    finish(work.threadId);
+    await expect.poll(async () => (await peerTask()).closedBy?.botId, { timeout: 15_000 }).toBe(source.id);
+    expect(await peerTask()).not.toHaveProperty("archivedAt");
+
+    writeFileSync(join(folder, "report.txt"), "here");
+    await expect.poll(async () => (await api("GET", `/api/threads/${work.threadId}/messages`)).messages.some((m: any) => m.wait?.status === "fired"), { timeout: 30_000 }).toBe(true);
+    expect(storedWaits()).toEqual([]);
+    expect(await peerTask()).toMatchObject({ unread: true });
+    expect(await peerTask()).not.toHaveProperty("archivedAt");
+    finish(sourceThread);
+  }, 60_000);
+
   it("refuses a wait to work a routine handed on", async () => {
     const { routine } = await api("POST", "/api/routines", {
       name: "Handed watch", prompt: "Ask the peer to watch for the report.", botId: source.id,

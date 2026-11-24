@@ -686,3 +686,19 @@ describe("Technical controls", () => {
     expect(fixture.setAdvancedMode).toHaveBeenCalledWith(true);
   });
 });
+
+describe("the real panel carries the lend switch (LendComputerSwitch.dom.test.ts covers what it shows)", () => {
+  it("mounts LendHere under the screen, asking for the app's line only while the bot is set to This computer", async () => {
+    const { LendHere } = await import("./LendComputerSwitch");
+    fixture.localComputer = { available: false, support: "unsupported", enabled: false, status: "unavailable", reasonCode: "remote-server" };
+    fixture.seed = { phase: "local-unavailable", resolved: { botId: "scout", threadId: "thread-scout", computer: "local", cloudBackend: "box" } };
+    const onLocal = render(makeBot({ computer: "local" })).nodes.filter((node) => node.type === LendHere);
+    expect(onLocal).toHaveLength(1);
+    expect(onLocal[0]!.props.appNeeded).toBe(true);
+    fixture.values.length = 0; fixture.own = 0;
+    fixture.seed = { phase: "auto-unavailable", resolved: { botId: "scout", threadId: "thread-scout", computer: undefined, cloudBackend: "box" } };
+    const onAuto = render(makeBot()).nodes.filter((node) => node.type === LendHere);
+    expect(onAuto).toHaveLength(1);
+    expect(onAuto[0]!.props.appNeeded).toBe(false);
+  });
+});

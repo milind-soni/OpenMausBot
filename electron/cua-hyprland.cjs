@@ -123,6 +123,7 @@ module.exports = {
   PLUGIN_REQUIRED_MESSAGE,
   SYSTEM_DRIVER,
   SYSTEM_DRIVER_PACKAGE,
+  desktopNames,
   isHyprlandSession,
   parseCuaPluginStatus,
   probeCuaHyprlandPlugin,

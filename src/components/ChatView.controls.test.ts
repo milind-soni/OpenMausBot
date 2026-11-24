@@ -144,19 +144,22 @@ describe("the header's right side", () => {
 });
 
 describe("the Simple header", () => {
-  it("is one pill: the avatar and name, with a dot for another busy conversation and no title, role or way back", () => {
+  it("is one pill: the avatar and name, with a dot for another busy conversation, the open thread to switch from, and no title, role or way back", () => {
     const busyElsewhere: Bot = { ...bot, title: "Research", mainThreadId: "other", tasks: [...bot.tasks!, { threadId: "other", title: "Other", createdAt: 0, busy: true, activity: "working" }] };
     fixture.advanced = false;
     try {
       const simple = renderToStaticMarkup(createElement(ChatView, { bot: busyElsewhere }));
       const identity = simple.slice(simple.indexOf("data-chathead-identity"), simple.indexOf("data-chathead-controls"));
       const pill = identity.match(/<button[^>]*data-chathead-pill="true"[^>]*>([\s\S]*?)<\/button>/)!;
-      expect(identity.replace(pill[0], "").replace(/<span role="status"[^>]*>[^<]*<\/span>/, "")).not.toMatch(/<(button|a|span)[\s>]/);
+      const threads = identity.match(/<button[^>]*data-chathead-threads="true"[^>]*>([\s\S]*?)<\/button>/)!;
+      const shell = identity.match(/<div[^>]*data-chathead-switch="closed"[^>]*>/)!;
       expect(pill[1]).toContain(">Pepper</span>");
       expect(pill[1]).toContain('data-chathead-elsewhere="true"');
-      expect(pill[0].match(/class="([^"]*)"/)![1]!.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "bg-composer", "ring-[0.5px]", "shadow-(--shadow-float)", "py-[5.5px]", "pl-[5.5px]", "pr-[13.5px]"]));
-      // Away from the bot's main conversation, the pill names the one on screen.
-      expect(pill[1]).toContain("data-chathead-conversation");
+      expect(shell[0].match(/class="([^"]*)"/)![1]!.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "bg-composer", "ring-[0.5px]", "shadow-(--shadow-float)", "p-[5.5px]"]));
+      // A bot with two threads names the one on screen beside it, which opens the others.
+      expect(threads[0]).toContain('aria-expanded="false"');
+      expect(threads[1]).toContain("data-chathead-conversation");
+      expect(identity.replace(pill[0], "").replace(threads[0], "").replace(/<span role="status"[^>]*>[^<]*<\/span>/, "")).not.toMatch(/<(button|a|span)[\s>]/);
       for (const gone of ["data-chathead-role", "data-background-activity", "data-chathead-back", 'data-testid="chat-more"']) {
         expect(simple, gone).not.toContain(gone);
       }

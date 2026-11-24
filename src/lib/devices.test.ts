@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { ServerStatus } from "../../electron/server-status.mjs";
 import type { CompanionState, PhoneDevice } from "./companion-types";
-import { buildDevices, groupByRoute, kindFromLabel, nameKey, privateNetwork, type DeviceSources } from "./devices";
+import { vpsServerId, type BotComputerRow } from "../../shared/bot-computers";
+import { withBots } from "./device-bots";
+import { buildDevices, groupByKind, kindFromLabel, nameKey, privateNetwork, type DeviceSources } from "./devices";
+import { setLocale } from "./i18n";
 import type { PublicPhone } from "./phones";
 
 const NOW = 1_800_000_000_000;
@@ -44,8 +47,10 @@ describe("the device list", () => {
     expect(mini).toMatchObject({ kind: "server", route: "tailscale", status: "attention", note: "update", version: "0.1.170", address: "http://studio-mini.tail1234.ts.net:8799" });
     expect(mini!.actions).toContainEqual({ type: "copy-update", install: "global" });
     expect(vps).toMatchObject({ route: "internet", status: "offline", note: "unreachable" });
-    expect(vps!.actions.map((action) => action.type)).toEqual(["switch", "retry", "pair-again", "copy-address", "remove"]);
+    expect(vps!.actions.map((action) => action.type)).toEqual(["switch", "retry", "copy-address", "remove"]);
     expect(lan).toMatchObject({ route: "local", status: "attention", note: "signed-out" });
+    expect(lan!.actions.map((action) => action.type)).toEqual(["switch", "pair-again", "copy-address", "remove"]);
+    expect(mini!.actions.some((action) => action.type === "pair-again" || action.type === "retry")).toBe(false);
   });
 
   it("leaves out the place on screen and this computer's own environments", () => {
@@ -128,20 +133,69 @@ describe("the device list", () => {
       lent: [{ id: "l1", name: "Ada's MacBook", platform: "darwin", online: true, lent: true, lastSeenAt: NOW }, { id: "l2", name: "Old", platform: "linux", online: false, lent: false, lastSeenAt: 0 }],
       vps: [{ alias: "my-vps" }, { alias: "my-vps", name: "Again" }, { alias: "gpu", name: "GPU box" }],
     });
-    expect(devices.map((device) => device.id)).toEqual(["here", "lent:l1", "vps:my-vps", "vps:gpu"]);
+    expect(devices.map((device) => device.id)).toEqual(["here", "lent:l1", vpsServerId("my-vps"), vpsServerId("gpu")]);
     expect(devices[3]!.name).toBe("GPU box");
     expect(devices[1]).toMatchObject({ route: "cloud", canHostComputer: true, canRunBots: false, status: "online" });
-    expect(devices[2]).toMatchObject({ kind: "server", route: "ssh", status: "unknown", canHostComputer: true });
+    expect(devices[2]).toMatchObject({ kind: "server", route: "ssh", status: "unknown", canHostComputer: true, actions: [] });
+    expect(devices[1]!.live).toBe(true);
   });
 
-  it("groups the map by route in one fixed order, this place apart", () => {
+  it("marks live only what is connected at this moment: a phone on its link, a place this app is connected to", () => {
     const devices = build({
-      places: places([{ id: "home", kind: "remote", name: "My Cloud", origin: "https://a.mausbot.cloud", home: true }, { id: "mini", kind: "remote", name: "mini", origin: "http://mini.tail1.ts.net:8799" }]),
-      companion: { devices: [phone("a", "Phone", { route: "wifi" })], connectedDeviceIds: ["a"] },
+      places: places([{ id: "a", kind: "remote", name: "A", origin: "https://a.example.com" }, { id: "b", kind: "remote", name: "B", origin: "https://b.example.com" }]),
+      statuses: [status("a"), status("b", { behind: true })],
+      companion: { devices: [phone("on", "On"), phone("off", "Off")], connectedDeviceIds: ["on"] },
+      sessions: { current: null, sessions: [{ id: "s", label: "Chrome on Windows", scopes: ["admin"], lastSeenAt: NOW - 60_000 }] },
     });
-    expect(groupByRoute(devices).map((group) => [group.route, group.devices.map((device) => device.id)])).toEqual([
-      ["tailscale", ["place:mini"]], ["local", ["phone:a"]], ["cloud", ["place:home"]],
+    const live = Object.fromEntries(devices.map((device) => [device.id, Boolean(device.live)]));
+    expect(live).toMatchObject({ "place:a": true, "place:b": false, "phone:on": true, "phone:off": false, "session:s": false });
+  });
+
+  it("groups the map by what each device is, in one fixed order, this place apart", () => {
+    const devices = build({
+      places: places([{ id: "home", kind: "remote", name: "My Cloud", origin: "https://a.mausbot.cloud", home: true }, { id: "mini", kind: "remote", name: "Mac mini", origin: "http://mini.tail1.ts.net:8799" }]),
+      companion: { devices: [phone("a", "Phone", { route: "wifi" })], connectedDeviceIds: ["a"] },
+      vps: [{ alias: "gpu" }],
+    });
+    expect(groupByKind(devices).map((group) => [group.group, group.devices.map((device) => device.id)])).toEqual([
+      ["phones", ["phone:a"]], ["computers", ["place:mini"]], ["servers", ["place:home", "vps:gpu"]],
     ]);
+    expect(groupByKind(build({}))).toEqual([]);
+  });
+});
+
+describe("the bots on each device", () => {
+  const row = (botId: string, kind: BotComputerRow["kind"], computerId: string | null, state: BotComputerRow["state"], over: Partial<BotComputerRow> = {}): BotComputerRow =>
+    ({ botId, kind, computerId, name: null, state, stateAt: state === "unknown" ? null : NOW, ...over });
+  const names: Record<string, string> = { b1: "Scout", b2: "Writer", b3: "Builder" };
+  const named = (id: string) => names[id] ?? null;
+  const devices = () => build({ vps: [{ alias: "gpu", name: "GPU box" }] });
+  setLocale("en");
+
+  it("puts each bot on the device it works on, once, and makes a device of each cloud desktop", () => {
+    const out = withBots(devices(), [
+      row("b1", "local", "local", "ready"), row("b1", "local", "local", "ready", { threadId: "t1" }), row("b2", "vm", "vm:b2", "asleep"),
+      row("b3", "vps", "vps:gpu/omb-b3", "ready", { vps: { serverId: vpsServerId("gpu"), alias: "gpu", container: "omb-b3" } }),
+      row("b2", "cloud", "cloud:b2", "asleep"), row("b3", "browser", null, "unknown"), row("b1", "auto", null, "unknown"),
+    ], "computer", named);
+    expect(Object.fromEntries(out.map((device) => [device.id, device.bots ?? []]))).toEqual({ here: ["b1", "b2"], "vps:gpu": ["b3"], "cloud:b2": ["b2"] });
+    expect(out.at(-1)).toMatchObject({ kind: "vm", name: "Writer’s cloud desktop", status: "offline", desktop: "asleep", route: "cloud" });
+  });
+
+  it("shows no state for a cloud desktop nothing knows about, and no device for a computer the server cannot name", () => {
+    const out = withBots(devices(), [row("b1", "cloud", "cloud:team-1", "unknown", { name: "Team desktop" }), row("b2", "cloud", "cloud:b2", "none"), row("b3", "auto", null, "unknown")], "computer", () => null);
+    expect(out.slice(-2).map((device) => [device.name, device.status, device.desktop])).toEqual([["Team desktop", "unknown", undefined], ["Cloud desktop", "unknown", undefined]]);
+  });
+
+  it("follows Auto to the place it settled on, and leaves a bot on this computer out on a Cloud's page", () => {
+    const out = withBots(devices(), [row("b1", "auto", "local", "ready", { autoKind: "local" }), row("b2", "local", "local", "ready")], "cloud", named);
+    expect(out.find((device) => device.here)?.bots).toBeUndefined();
+    expect(withBots(devices(), [row("b1", "auto", "local", "ready", { autoKind: "local" })], "computer", named)[0]!.bots).toEqual(["b1"]);
+  });
+
+  it("draws nothing extra when the list is empty, refused or missing", () => {
+    expect(withBots(devices(), [], "computer", named)).toEqual(devices());
+    expect(withBots(devices(), null, "computer", named)).toEqual(devices());
   });
 });
 

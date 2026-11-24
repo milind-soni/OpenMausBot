@@ -536,7 +536,7 @@
           },
           "text": {
             "type": "string",
-            "description": "Non-blank new text for append, replace, supersede, or prefer: the fact itself, without a date or bullet. Omit for remove and forget; use remove to delete a passage."
+            "description": "Non-blank new text for append, replace, supersede, or prefer: the fact itself, without a date or bullet. Omit for remove and forget; use remove to delete a passage. At most 1000 characters."
           },
           "old_text": {
             "type": "string",

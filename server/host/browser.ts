@@ -43,6 +43,7 @@ import { browserEngineKind, browserPaneWanted, cloudDisplayWanted, type BrowserE
 import { parseSocks5Proxy } from "../browser/egress/policy.ts";
 import { ChromeEngine, chromeTarget, LiveRouter, profileKey, RuntimeRouter } from "../browser/engines.ts";
 import { ceilingLines, createBrowserCeiling, killChrome, startCeilingLoop, statmBytes } from "../browser/memory-ceiling.ts";
+import { BROWSER_CGROUP_ENV, browserCgroupDir, containInGroup, groupOomKills } from "../browser/memory-cgroup.ts";
 import { browserProcessTree } from "../browser-processes.ts";
 import { pssBytes } from "../bot-memory-cap.ts";
 import { boxMemory } from "../box-memory.ts";
@@ -313,8 +314,14 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       return agentBrowserSweep.closeAll();
     },
   };
-  // Linux servers only: there a browser's proportional size can be read, and its memory is the home's.
+  // Linux servers only: there a browser's proportional size can be read, and its memory is the home's. A Cloud home's root
+  // supervisor may also have put the bots' Chrome under a kernel memory limit (browser/memory-cgroup.ts).
+  const browserGroup = process.platform === "linux" ? browserCgroupDir(process.env[BROWSER_CGROUP_ENV]) : null;
   const browserCeiling = process.platform === "linux" && !DESKTOP_MANAGED ? createBrowserCeiling({
+    ...(browserGroup ? {
+      kernelKills: () => groupOomKills(browserGroup),
+      contain: ({ pids, daemon }: { pids: readonly number[]; daemon?: number }) => { containInGroup(browserGroup, pids.filter((pid) => pid !== daemon)); },
+    } : {}),
     lines: ceilingLines(boxMemory().bytes),
     browsers: async () => (await Promise.all(browserOwners().map(async ({ pid, session }) => {
       const spec = usedBrowserSessions.get(session);
