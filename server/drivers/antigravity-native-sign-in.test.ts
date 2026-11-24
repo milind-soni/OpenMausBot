@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import type { PlanFetch } from "../plan-usage.ts";
@@ -37,7 +38,7 @@ describe("the access token of the native CLI's stored sign-in", () => {
 // The app starts the CLI as over SSH (antigravity-acp.ts), so each account's sign-in is its profile's file, on every
 // system: the OS keychain is never asked.
 describe("which stored sign-in's access token is used", () => {
-  const profileFile = `${antigravityProfileDirectory("native")}/antigravity-acp/antigravity-oauth-token`;
+  const profileFile = join(antigravityProfileDirectory("native"), "antigravity-acp", "antigravity-oauth-token");
   const store = (file: string | null) => {
     const readText = vi.fn(async (path: string) => path === profileFile ? file : null);
     const value: NativeSignInStore = { readText };

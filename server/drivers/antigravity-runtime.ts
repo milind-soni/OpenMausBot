@@ -35,6 +35,7 @@ import { liveCliCommands, outsideBoxOptions } from "../procs.ts";
 import { antigravityRuntimesRoot } from "../engine-roots.ts";
 import { extractZipMember, readZipDirectory } from "../zip-archive.ts";
 import { augmentedPath } from "../env-path.ts";
+import { writeFileAtomic } from "../atomic.ts";
 import {
   resolveAntigravityReleaseAsset,
   type AntigravityReleaseAsset,
@@ -258,6 +259,15 @@ export async function antigravityPathRunsNativeCli(cli: string | undefined, env:
   return runtime ? runtime.harnessPath === null : antigravityNativeByDefault();
 }
 
+/** Written when the native CLI is installed on a computer with no pinned runtime: this computer's accounts that name no
+ * runtime run the CLI from then on, even after an account set to the Classic runtime installs that one beside it. A
+ * computer that had the pinned runtime first never gets it, so its accounts keep the pinned runtime until each chooses. */
+const CLI_FIRST_MARKER = "cli-first.json";
+
+async function cliCameFirst(root: string): Promise<boolean> {
+  return access(join(root, CLI_FIRST_MARKER)).then(() => true, () => false);
+}
+
 /** Legacy `agy` commands (saved absolute paths, Windows shims) migrate without editing user config. */
 export async function resolveAntigravityRuntime(
   binaryPath?: string,
@@ -288,7 +298,7 @@ export async function resolveAntigravityRuntime(
     throw new AntigravitySetupError(CLI_NOT_INSTALLED);
   }
   // OMB_ANTIGRAVITY_NATIVE_CLI=1: an account with no runtime of its own runs the CLI once it is installed here.
-  if (installedCli && ANTIGRAVITY_CLI_FIRST) return installedCli;
+  if (installedCli && (ANTIGRAVITY_CLI_FIRST || await cliCameFirst(runtimeRoot(baseDir)))) return installedCli;
   // A computer that has the pinned runtime keeps running it for an account with no runtime of its own.
   const asset = resolveAntigravityReleaseAsset();
   if (asset) {
@@ -357,7 +367,9 @@ async function installNativeCli(options: AntigravityInstallOptions, root: string
       await options.validate?.(active, active.version);
       return active;
     }
+    const pinnedHere = pinned ? (await completedRelease(join(root, "versions", pinned.sha256), pinned)) !== null : false;
     const installed = await installAntigravityCli(release, { root, fetchImpl: options.fetchImpl, validate: options.validate, retry: retryOnWindowsFileLock });
+    if (!active && !pinnedHere && !(await cliCameFirst(root))) writeFileAtomic(join(root, CLI_FIRST_MARKER), "{}\n", { mode: 0o600 });
     await pruneAntigravityCliReleases(root, runningFrom).catch(() => []);
     return installed;
   } catch (error) {
@@ -525,7 +537,7 @@ export async function antigravityCliUpdate(options: {
   const from = active?.version
     ?? (ANTIGRAVITY_CLI_FIRST ? (pinnedHere ? pinned!.version : await antigravityOlderRuntime(options.baseDir, pinned)) : null);
   if (!from) return null;
-  if (active && pinnedHere && !ANTIGRAVITY_CLI_FIRST && !asked) return null;
+  if (active && pinnedHere && !ANTIGRAVITY_CLI_FIRST && !asked && !(await cliCameFirst(root))) return null;
   const now = options.now ?? Date.now();
   if (channelAnswer === undefined || now - channelAnswer.at >= UPDATE_CHECK_INTERVAL_MS || now < channelAnswer.at) {
     const latest = await (options.latest ?? latestAntigravityCliRelease)();

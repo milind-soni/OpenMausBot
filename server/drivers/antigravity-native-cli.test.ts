@@ -97,6 +97,8 @@ describe("installing the native CLI from Google's channel", () => {
     const root = join(antigravityRuntimesRoot(baseDir), `${process.platform}-${process.arch}`);
     expect(await activeAntigravityCli(root)).toEqual(installed);
     expect(readdirSync(join(root, "versions")).filter((name) => name.startsWith(".install-"))).toEqual([]);
+    // The first runtime on this computer: accounts that name none keep the CLI even once the pinned one is installed beside it.
+    expect(existsSync(join(root, "cli-first.json"))).toBe(true);
 
     await expect(resolveAntigravityRuntime("antigravity", { PATH: "" }, baseDir)).resolves.toEqual(installed);
     await expect(resolveAntigravityRuntime("agy", { PATH: "" }, baseDir, { nativeByDefault: true })).resolves.toEqual(installed);

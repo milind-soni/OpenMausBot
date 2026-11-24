@@ -132,6 +132,19 @@ describe.skipIf(!pinned || WINDOWS)("by default, a computer that has the pinned 
 });
 
 describe.skipIf(!pinned || WINDOWS)("a new install", () => {
+  it("keeps an account that names no runtime on the CLI once an account set to the Classic runtime installs it beside it", async () => {
+    const runtime = await import("./antigravity-runtime.ts");
+    const { baseDir } = computer({ cli: true });
+    // What installing the CLI on a computer with no pinned runtime leaves behind (antigravity-native-cli.test.ts).
+    writeFileSync(join(baseDir, "tools", "antigravity-acp", `${process.platform}-${process.arch}`, "cli-first.json"), "{}\n");
+    for (const cli of ["agy", undefined]) {
+      await expect(runtime.resolveAntigravityRuntime(cli, { PATH: "" }, baseDir), String(cli)).resolves.toMatchObject({ version: "1.5.15", harnessPath: null });
+    }
+    await expect(runtime.resolveAntigravityRuntime("agy_acp_server", { PATH: "" }, baseDir)).resolves.toMatchObject({ version: pinned!.version, source: "managed" });
+    const newer = async () => ({ ...(await latestRelease()), version: "1.5.16" });
+    expect(await runtime.antigravityCliUpdate({ baseDir, now: Date.now() + 3e9, latest: newer, configuredClis: ["agy_acp_server"] })).toBe("1.5.15");
+  });
+
   it("takes the CLI from Google's channel for an account that names no runtime, and the pinned runtime for one set to it", async () => {
     const runtime = await import("./antigravity-runtime.ts");
     const fresh = recordingFetch();
