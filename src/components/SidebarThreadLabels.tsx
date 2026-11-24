@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { ChevronRight, Clock3, Loader2, Plus, X } from "lucide-react";
+import { ChevronRight, Clock3, Loader2, Pin, Plus, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { nextRename } from "@/lib/rename";
@@ -7,7 +7,7 @@ import { localizedTaskTitle } from "@/lib/task-title";
 import { setThreadsUnfolded, useThreadsUnfolded } from "@/lib/thread-fold-preferences";
 import type { Action, AppState, Bot } from "@/state/store";
 import { botOpensTo } from "@/state/thread-navigation";
-import { canUnfold, threadLabels, type LabelRow } from "./sidebar-thread-labels";
+import { canUnfold, openThreadPinned, threadLabels, type LabelRow } from "./sidebar-thread-labels";
 import { isWorking } from "./SidebarThreadRow";
 import { showAllConversations } from "./bot-panel/Conversations";
 import { reducedMotion } from "./MenuMotion";
@@ -26,6 +26,7 @@ const STAGGER_STEPS = 3;
 const YIELDS = "group-hover/label:[mask-image:linear-gradient(to_left,transparent_20px,black_36px)] rtl:group-hover/label:[mask-image:linear-gradient(to_right,transparent_20px,black_36px)]";
 
 type FoldBot = Pick<Bot, "id" | "name" | "tasks">;
+type FillBot = FoldBot & Pick<Bot, "threadId" | "switchingTo">;
 
 export const threadLabelsId = (botId: string) => `thread-labels-${botId}`;
 
@@ -46,10 +47,10 @@ export function ThreadFoldChevron({ bot, dispatch }: { bot: FoldBot; dispatch: D
   );
 }
 
-/** Whether one of the bot's unfolded rows carries the selected fill instead of its row: not while its blank New thread
- * chat (`drafting`) is open, which has no row of its own yet. */
-export function useRowUnfolded(bot: FoldBot, drafting = false): boolean {
-  return useThreadsUnfolded(bot.id) && canUnfold(bot) && !drafting;
+/** Whether one of the rows under the bot carries the selected fill instead of its row (it is unfolded, or the open thread
+ * is pinned): not while its blank New thread chat (`drafting`) is open, which has no row of its own yet. */
+export function useFillOnLabel(bot: FillBot, drafting = false): boolean {
+  return ((useThreadsUnfolded(bot.id) && canUnfold(bot)) || openThreadPinned(bot)) && !drafting;
 }
 
 function StatusMark({ row }: { row: LabelRow }) {
@@ -76,17 +77,21 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
   const [focusAt, setFocusAt] = useState<number | null>(null);
   const finishing = useRef(false);
   const tree = useRef<HTMLDivElement>(null);
-  // Folding plays the unfold backwards: the rows that go fade out in place before the list shortens.
+  // Folding plays the unfold backwards: the rows that go fade out in place before the list shortens. So does a row
+  // that leaves because it was unpinned.
   const shown = useRef({ unfolded, rows, more });
   const [leaving, setLeaving] = useState<{ rows: LabelRow[]; gone: ReadonlySet<string>; more: number } | null>(null);
+  const pins = rows.filter((row) => row.pinned).map((row) => row.task.threadId).join("\n");
   useLayoutEffect(() => {
     const was = shown.current;
-    if (!was.unfolded || unfolded || reducedMotion()) { setLeaving(null); return; }
     const kept = new Set(rows.map((row) => row.task.threadId));
-    setLeaving({ rows: was.rows, gone: new Set(was.rows.filter((row) => !kept.has(row.task.threadId)).map((row) => row.task.threadId)), more: was.more });
+    const folding = was.unfolded && !unfolded;
+    const gone = was.rows.filter((row) => !kept.has(row.task.threadId) && (folding || row.pinned));
+    if (!gone.length || reducedMotion()) { setLeaving(null); return; }
+    setLeaving({ rows: was.rows, gone: new Set(gone.map((row) => row.task.threadId)), more: was.more });
     const timer = window.setTimeout(() => setLeaving(null), FOLD_MS);
     return () => window.clearTimeout(timer);
-  }, [unfolded]);
+  }, [unfolded, pins]);
   useLayoutEffect(() => { shown.current = { unfolded, rows, more }; });
   if (!rows.length && !more && !runningMore && !toast && !leaving) return null;
 
@@ -168,9 +173,14 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
                 }}
                 className="-ms-1.5 h-7 min-w-0 flex-1 rounded-md border border-focus bg-transparent px-1.5 text-[13px] text-ink outline-none" />
             ) : <>
-              <span dir="auto" className={cn("min-w-0 flex-1 truncate", hideable(row) && YIELDS)}>{title}</span>
+              <span className={cn("flex min-w-0 flex-1 items-center gap-1.5", hideable(row) && YIELDS)}>
+                <span dir="auto" className="min-w-0 truncate">{title}</span>
+                {row.pinned && <Pin size={10} role="img" aria-label={t("task.pinned")} className="shrink-0 text-ink-tertiary" />}
+              </span>
               {row.task.threadId === bot.mainThreadId && <MainThreadMark />}
-              <span className={cn("flex shrink-0 items-center", hideable(row) && "transition-opacity duration-[120ms] group-hover/label:opacity-0 motion-reduce:transition-none")}><StatusMark row={row} /></span>
+              <span className={cn("flex shrink-0 items-center", hideable(row) && "transition-opacity duration-[120ms] group-hover/label:opacity-0 motion-reduce:transition-none")}>
+                <StatusMark row={row} />
+              </span>
               {hideable(row) && (
                 <button type="button" tabIndex={-1} aria-label={t("sidebar.threads.hide", { title })} title={t("sidebar.threads.hideShort")}
                   onClick={(event) => { event.stopPropagation(); hide(row); }}
