@@ -147,6 +147,15 @@ const text = (value: unknown): string | undefined => (typeof value === "string" 
 const baseName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 const sentence = (words: string) => words.toLowerCase().replace(/_/g, " ").replace(/\s+/g, " ").trim();
 
+function fileChanges(raw: string | undefined): Record<string, unknown> | undefined {
+  if (!raw) return undefined;
+  try {
+    const changes: unknown = JSON.parse(raw);
+    if (Array.isArray(changes) && changes.length && changes.every((change) => isRecord(change) && typeof change.path === "string" && typeof change.diff === "string")) return { changes };
+  } catch {}
+  return undefined;
+}
+
 /** GMAIL_SEND_EMAIL → app gmail, words "send email". */
 function slugParts(slug: string): { app: string; words: string } {
   const tokens = slug.split("_").filter(Boolean);
@@ -312,11 +321,12 @@ function layersIn(message: RunMessage, live: ReadonlySet<string>): RawLayer[] {
     return [{ ...base, id: message.id, kind: "app", app: server.toLowerCase(), tool: tool.name, words: sentence(bare), read: /^(?:get|list|search|read|find|fetch|query)/i.test(bare), replay: "ai", ...(input ? { args: input } : {}) }];
   }
   if (FILE_WRITE.has(bare) || FILE_EDIT.has(bare)) {
+    const edit = FILE_EDIT.has(bare) ? input ?? (bare === "edit" ? fileChanges(tool.output) ?? fileChanges(tool.input) : undefined) : undefined;
     const path = text(input?.file_path) ?? text(input?.path) ?? text(input?.notebook_path);
-    if (!path) return [{ ...base, id: message.id, kind: "ai", tool: bare, words: "edit files", read: false, replay: "ai" }];
+    if (!path) return [{ ...base, id: message.id, kind: "ai", tool: bare, words: "edit files", read: false, replay: "ai", ...(edit ? { args: edit } : {}) }];
     const content = typeof input?.content === "string" ? input.content : undefined;
     const exact = FILE_WRITE.has(bare) && content !== undefined && !clipped;
-    return [{ ...base, id: message.id, kind: exact ? "file" : "ai", tool: bare, words: baseName(path), read: false, replay: exact ? "exact" : "ai", args: exact ? { path, content } : { path } }];
+    return [{ ...base, id: message.id, kind: exact ? "file" : "ai", tool: bare, words: baseName(path), read: false, replay: exact ? "exact" : "ai", args: exact ? { path, content } : edit ?? { path } }];
   }
   const command = text(tool.summary) ?? text(input?.command) ?? (nameIsCommand(tool.name) ? tool.name : undefined);
   if (command && (bare === "Bash" || bare === "shell" || bare === "vm_exec" || /^(?:exec_command|run_shell_command|bash|terminal)$/i.test(bare) || nameIsCommand(tool.name) || text(input?.command))) {
