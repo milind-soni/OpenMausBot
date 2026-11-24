@@ -141,7 +141,8 @@ export function needsAdvanced(target: SettingsTarget, ctx: SettingsContext): boo
 }
 
 /** Where a request for Settings lands here: its page (or Overview when that page can't exist on this place) and the
- * section to scroll to. A page or row only Advanced mode shows comes back with `advanced`: opening it turns Advanced on. */
+ * section to scroll to. A page or row only Advanced mode shows comes back with `advanced`: Simple shows it there,
+ * marked, without turning Advanced mode on. */
 export function resolveSettingsTarget(requested: AppSettingsSection, ctx: SettingsContext): SettingsTarget & { missing?: SettingsPageId; advanced?: true } {
   const target = isSettingsPage(requested) ? { page: requested } : LEGACY_SETTINGS[requested](ctx);
   if (needsAdvanced(target, ctx)) return { ...target, advanced: true };
@@ -196,7 +197,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
     topFor: ["add a mac mini", "add mac mini", "add a computer", "add always-on computer"], synonyms: ["mac mini", "mini", "home server", "spare computer", "move my bots"] },
   { id: "other-computers", page: "phone", anchor: "computers", labelKey: "devices.computers.title", when: hereOnly, topFor: ["tailscale", "other computers", "another computer", "other computer", "my other computer"],
     synonyms: ["computer", "computers", "laptop", "desktop", "mac", "pc", "share", "tailnet", "connect to a server"] },
-  { id: "tailscale", page: "phone", anchor: "reach", labelKey: "devices.moreWays", sectionKey: "phone.reach.title", when: hereOnly, advanced: true, synonyms: ["tailscale", "https", "tailnet"] },
+  { id: "tailscale", page: "phone", anchor: "more-ways", labelKey: "devices.moreWays", sectionKey: "phone.reach.title", when: hereOnly, advanced: true, synonyms: ["tailscale", "https", "tailnet"] },
   { id: "domain", page: "overview", anchor: "address", labelKey: "settings.overview.address", advanced: true, when: (ctx) => !ctx.here && !ctx.client, synonyms: ["domain", "dns", "https", "custom domain"] },
   { id: "sidebar-color", page: "overview", anchor: "sidebar", labelKey: "placeLook.sidebarColor", sectionKey: "settings.overview.sidebar", synonyms: ["color", "colour", "tint", "cloud color"] },
   { id: "sidebar-picture", page: "overview", anchor: "sidebar", labelKey: "placeLook.sidebarPicture", sectionKey: "settings.overview.sidebar", topFor: ["wallpaper", "background", "sidebar image"], synonyms: ["picture", "banner", "image"] },
@@ -262,7 +263,7 @@ export interface SearchHit {
   /** the row exists only on another place on the rail */
   elsewhere: boolean;
   score: number;
-  /** only Advanced mode shows it: choosing it turns Advanced on */
+  /** only Advanced mode lists it: choosing it shows it in Simple, marked */
   advanced?: boolean;
 }
 

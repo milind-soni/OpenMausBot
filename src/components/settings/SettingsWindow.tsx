@@ -73,8 +73,6 @@ export function SettingsWindow() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [anchor, target.page]);
-  // A link, a notice or a search result that asks for what only Advanced mode shows turns Advanced on and lands there.
-  useEffect(() => { if (target.advanced) setAdvancedMode(true); }, [target.advanced]);
   useEffect(() => window.ogb?.onOpenAppSettings?.(() => setQuery("")), []);
   useEffect(markOpened, []);
 
@@ -98,8 +96,14 @@ export function SettingsWindow() {
     if (entry.jump === "shortcuts") { close(); dispatch({ type: "toggleShortcuts", open: true }); return; }
     if (entry.jump === "bot") { close(); return; }
     if (hit.elsewhere) { computer.open?.(); return; }
-    if (hit.advanced || needsAdvanced({ page: entry.page, anchor: entry.anchor }, ctx)) setAdvancedMode(true);
     go(entry.page, entry.anchor);
+  };
+  /** Clearing the search puts away an Advanced setting it showed in Simple. */
+  const search = (next: string) => {
+    setQuery(next);
+    if (next.trim() || ctx.advanced) return;
+    if (!page.when(ctx)) dispatch({ type: "toggleAppSettings", open: true, section: "overview" });
+    else if (anchor && needsAdvanced({ page: target.page, anchor }, ctx)) setAnchor(null);
   };
   /** Turning Advanced off on a page Simple doesn't show lands on the place's Overview; anywhere else it stays put. */
   const setAdvanced = (on: boolean) => {
@@ -182,7 +186,7 @@ export function SettingsWindow() {
             <div className="flex min-h-0 flex-1">
               {(!narrow || showList) && (
                 <SettingsNav ctx={ctx} place={place} pages={pages} current={narrow ? null : target.page} query={query} hits={hits} narrow={narrow}
-                  onQuery={setQuery} onOpen={(next) => go(next)} onHit={openHit} keyHits={keyHits} onKey={openKey} onClose={close} onAdvanced={setAdvanced} />
+                  onQuery={search} onOpen={(next) => go(next)} onHit={openHit} keyHits={keyHits} onKey={openKey} onClose={close} onAdvanced={setAdvanced} />
               )}
               {(!narrow || !showList) && (
                 <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
@@ -190,7 +194,7 @@ export function SettingsWindow() {
                   <div ref={scrollRef} data-settings-scroll data-settings-content=""
                     className={cn("settings-scroll min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]", narrow ? "pb-12" : "pb-12 pl-8 pr-16")}>
                     <div className={cn("flex max-w-[640px] flex-col", narrow && "max-w-none")}>
-                      <SettingsPageHeader page={page} ctx={ctx} place={place} narrow={narrow} missing={missing} />
+                      <SettingsPageHeader page={page} ctx={ctx} place={place} narrow={narrow} missing={missing} peek={!ctx.advanced && !page.when(ctx) && !anchor} />
                       <div key={target.page} data-settings-page-body={target.page} className={cn("flex flex-col gap-6", narrow && "px-4")}>
                         <LicenseExpiryBanner config={config} />
                         {page.owner === "place" && config === null
