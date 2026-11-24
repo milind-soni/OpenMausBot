@@ -1,5 +1,6 @@
 // Live calls' settings in config.json: schema, type and environment overrides, kept out of server/config.ts.
 import { z } from "zod";
+import { parseGeminiLiveModel } from "../shared/live-call.ts";
 
 export const LIVE_KEY_NEEDS_ENDPOINT = "Save the Azure endpoint first: a Live key works only with the endpoint it was saved for.";
 export const LIVE_KEY_NEEDS_CUSTOM_ENDPOINT = "Save the custom endpoint first: a Live key works only with the endpoint it was saved for.";
@@ -21,6 +22,7 @@ export const liveConfigSchema = z.object({
   elevenlabsAgentFor: z.string().max(64).optional(),
   voice: z.string().trim().max(40).regex(/^[a-z]*$/, "a Live voice is a lowercase built-in voice name").optional(),
   geminiVoice: z.string().trim().max(40).regex(/^[A-Za-z]*$/, "a Gemini Live voice is a built-in voice name").optional(),
+  geminiModel: z.string().trim().max(80).transform((name) => name.replace(/^models\//, "")).refine((name) => name === "" || parseGeminiLiveModel(name) !== undefined, "a Gemini Live model is a Gemini model id").optional(),
   readTypedReplies: z.boolean().optional(),
   idleMinutes: z.number().int().min(1).max(60).optional(),
 });
@@ -40,6 +42,7 @@ export interface LiveConfig {
   elevenlabsAgentFor?: string;
   voice?: string;
   geminiVoice?: string;
+  geminiModel?: string;
   readTypedReplies?: boolean;
   idleMinutes?: number;
 }

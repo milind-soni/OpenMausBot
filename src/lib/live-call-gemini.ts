@@ -2,12 +2,15 @@
 // was said to the harness as on a Fish Audio call. The token's setup is locked by the harness (server/live-gemini.ts), so
 // the setup sent here only names the model and the session to resume.
 import type { LiveGeminiSession } from "../../shared/wire";
+import { t } from "./i18n";
 import { browserGeminiAudio, type GeminiAudio } from "./live-call-gemini-audio";
 import { FISH_UPDATE_PREFIX, type FishAgentSession, type FishSessionOptions, type FishSessionStarter } from "./live-call-fish";
 
 const MIC_MIME = "audio/pcm;rate=16000";
 /** Gemini ends each connection after about 10 minutes; the call goes on over a new one, this many times at most. */
 const MAX_RECONNECTS = 12;
+/** How long Gemini may stay in ACTIVITY_START with no ACTIVITY_END or reply before we hint to switch Live models. */
+export const GEMINI_ACTIVITY_STUCK_MS = 8_000;
 /** Gemini can call a tool before it sends what it heard; the call waits this long after the last words heard... */
 const HEARD_QUIET_MS = 400;
 /** ...and this long at most, since a call can come without words, e.g. on the bot's update. */
@@ -31,6 +34,7 @@ export interface GeminiSocket {
 export interface GeminiSessionDeps {
   openSocket(url: string): GeminiSocket;
   audio(): GeminiAudio;
+  activityStuckMs?: number;
 }
 
 const browserDeps: GeminiSessionDeps = {
@@ -49,6 +53,7 @@ type ServerMessage = {
   };
   toolCall?: { functionCalls?: ToolCall[] };
   toolCallCancellation?: { ids?: string[] };
+  voiceActivity?: { voiceActivityType?: string };
   goAway?: unknown;
   sessionResumptionUpdate?: { newHandle?: string; resumable?: boolean };
 };
@@ -105,6 +110,8 @@ class GeminiLiveSession implements FishAgentSession {
   private heldCalls: ToolCall[] = [];
   private heldQuiet: ReturnType<typeof setTimeout> | null = null;
   private heldLimit: ReturnType<typeof setTimeout> | null = null;
+  private activityTimer: ReturnType<typeof setTimeout> | null = null;
+  private activityNoticeShown = false;
   /** Calls Gemini cancelled, e.g. when the person talked over the agent: they do not run, or their answer is not sent. */
   private cancelledCalls = new Set<string>();
 
@@ -139,7 +146,10 @@ class GeminiLiveSession implements FishAgentSession {
   }
 
   async setMicMuted(muted: boolean): Promise<void> {
-    if (muted && !this.muted) this.send({ realtimeInput: { audioStreamEnd: true } });
+    if (muted && !this.muted) {
+      this.clearActivityNotice();
+      this.send({ realtimeInput: { audioStreamEnd: true } });
+    }
     // Audio captured while muted that has not made a whole chunk yet is never sent.
     if (!muted && this.muted) this.audio?.dropMic();
     this.muted = muted;
@@ -152,6 +162,7 @@ class GeminiLiveSession implements FishAgentSession {
 
   private shut(): void {
     this.clearHeldTimers();
+    this.clearActivityTimer();
     const socket = this.socket;
     this.socket = null;
     if (socket) {
@@ -199,6 +210,7 @@ class GeminiLiveSession implements FishAgentSession {
   /** A connection Gemini ended goes on over a new one while the session can be resumed. */
   private lost(resumable: boolean): void {
     if (this.ended) return;
+    this.clearActivityTimer();
     if (resumable && this.handle && this.reconnects < MAX_RECONNECTS) {
       this.reconnects += 1;
       this.resumingAfterGoAway = this.wentAway;
@@ -224,16 +236,21 @@ class GeminiLiveSession implements FishAgentSession {
   }
 
   private onMessage(message: ServerMessage): void {
+    const activity = message.voiceActivity?.voiceActivityType;
+    if (activity === "ACTIVITY_START") this.startActivityTimer();
+    else if (activity === "ACTIVITY_END") this.clearActivityNotice();
     const content = message.serverContent;
     if (content) {
       const heard = content.inputTranscription?.text;
       if (heard) {
+        this.clearActivityNotice();
         this.heard += heard;
         this.options.callbacks.onUserTranscript({ segmentId: `s${this.segment}`, text: this.heard, final: false });
         if (this.heldCalls.length) this.releaseWhenQuiet();
       }
       for (const part of content.modelTurn?.parts ?? []) {
         if (!part.inlineData?.data || !part.inlineData.mimeType?.startsWith("audio/")) continue;
+        this.clearActivityNotice();
         this.finishHeardUnlessHeld();
         this.turnDone = false;
         this.audio?.play(decodeBase64(part.inlineData.data));
@@ -244,6 +261,7 @@ class GeminiLiveSession implements FishAgentSession {
       }
       const said = content.outputTranscription?.text;
       if (said) {
+        this.clearActivityNotice();
         this.finishHeardUnlessHeld();
         this.said += said;
         this.options.callbacks.onAgentResponseDelta({ segmentId: `a${this.segment}`, text: this.said });
@@ -265,7 +283,10 @@ class GeminiLiveSession implements FishAgentSession {
     const cancelled = message.toolCallCancellation?.ids ?? [];
     if (cancelled.length) this.cancelCalls(cancelled);
     const calls = message.toolCall?.functionCalls ?? [];
-    if (calls.length) this.onToolCalls(calls);
+    if (calls.length) {
+      this.clearActivityNotice();
+      this.onToolCalls(calls);
+    }
     if (message.goAway !== undefined) this.wentAway = true;
     const update = message.sessionResumptionUpdate;
     if (update?.resumable && typeof update.newHandle === "string" && update.newHandle) {
@@ -335,6 +356,29 @@ class GeminiLiveSession implements FishAgentSession {
     if (this.heldLimit) clearTimeout(this.heldLimit);
     this.heldQuiet = null;
     this.heldLimit = null;
+  }
+
+  private startActivityTimer(): void {
+    if (this.ended || this.muted || this.activityTimer || this.activityNoticeShown) return;
+    const waitMs = this.deps.activityStuckMs ?? GEMINI_ACTIVITY_STUCK_MS;
+    this.activityTimer = setTimeout(() => {
+      this.activityTimer = null;
+      if (this.ended || this.muted) return;
+      this.activityNoticeShown = true;
+      this.options.callbacks.onNotice?.(t("call.live.geminiNoSpeechEnd"));
+    }, waitMs);
+  }
+
+  private clearActivityTimer(): void {
+    if (this.activityTimer) clearTimeout(this.activityTimer);
+    this.activityTimer = null;
+  }
+
+  private clearActivityNotice(): void {
+    this.clearActivityTimer();
+    if (!this.activityNoticeShown) return;
+    this.activityNoticeShown = false;
+    this.options.callbacks.onNotice?.(null);
   }
 
   private runToolCall(call: ToolCall): void {

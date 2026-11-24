@@ -6708,6 +6708,8 @@
   "call.live.needsGemini": "Chamadas ao vivo pelo Gemini precisam da sua chave de API do Gemini.",
   "call.live.disclosureGemini": "Uma chamada ao vivo envia sua voz para a API do Gemini, do Google, junto com as mensagens recentes da conversa, as respostas do bot e os detalhes de qualquer aprovação que ele pedir. Este app repassa ao bot o que o Gemini ouve. A chave do Gemini fica no seu computador; a chamada recebe apenas um token de curta duração.",
   "call.live.disclosureGeminiCloud": "Uma chamada ao vivo envia sua voz para a API do Gemini, do Google, junto com as mensagens recentes da conversa, as respostas do bot e os detalhes de qualquer aprovação que ele pedir. Este app repassa ao bot o que o Gemini ouve. A chave do Gemini fica no Cloud; a chamada recebe apenas um token de curta duração.",
+  "call.live.geminiModel": "Modelo",
+  "call.live.geminiNoSpeechEnd": "O Gemini detectou início de fala, mas ainda não ouviu o fim dela. Se não houver resposta, tente trocar o modelo do Gemini Live nas configurações da chamada.",
   "call.live.provider.elevenlabs": "ElevenLabs Agents",
   "call.live.elevenLabsHint": "As chamadas pelo ElevenLabs funcionam no app para computador e no navegador, para o dono deste computador. Elas usam a chave de API do ElevenLabs que as vozes do ElevenLabs usam e criam um agente para chamadas nessa conta.",
   "call.live.elevenLabsKey": "Chave do ElevenLabs",

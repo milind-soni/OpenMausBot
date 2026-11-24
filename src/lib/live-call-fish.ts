@@ -33,6 +33,7 @@ export interface FishSessionOptions<S extends RelaySession = LiveFishSessionToke
     onModeChange(mode: string): void;
     onUserTranscript(event: { segmentId: string; text: string; final: boolean }): void;
     onAgentResponseDelta(event: { segmentId: string; text: string }): void;
+    onNotice?(text: string | null): void;
     onError(error: { code?: string }): void;
   };
 }
@@ -56,6 +57,8 @@ export interface FishCallHooks {
   heard(text: string): void;
   /** What the agent is saying, for the caption. */
   said(text: string): void;
+  /** Live call notice shown while the call is active, or null to clear it. */
+  notice?(text: string | null): void;
   /** The provider ended the session. */
   ended(reason: string): void;
   now(): number;
@@ -104,6 +107,7 @@ export class FishCall<S extends RelaySession = LiveFishSessionToken> {
         onModeChange: (mode) => this.onMode(mode),
         onUserTranscript: (event) => this.onTranscript(event),
         onAgentResponseDelta: (event) => this.hooks.said(event.text),
+        onNotice: (text) => this.hooks.notice?.(text),
         onError: (error) => this.relay({ type: "error", code: /^[\w.-]{1,40}$/.test(error.code ?? "") ? error.code! : "error" }),
       },
     });

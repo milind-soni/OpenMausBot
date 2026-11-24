@@ -308,6 +308,9 @@ async function startFishCall(target: { botId: string; threadId: string }, mine: 
     said: (text) => {
       if (mine === generation) set({ caption: text.slice(-CAPTION_CHARS), heard: "" });
     },
+    notice: (text) => {
+      if (mine === generation && isLiveCallRunning(state.phase)) set({ notice: text });
+    },
     ended: () => {
       if (mine !== generation) return;
       // Closing the call drops its queued `ended` report, so the server hears of it here.

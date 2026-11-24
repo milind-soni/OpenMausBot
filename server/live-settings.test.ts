@@ -18,9 +18,13 @@ describe("live settings", () => {
     expect(JSON.stringify(settings)).not.toContain("sk-test");
   });
 
-  it("reports a saved Gemini voice beside the GPT-Live one, and nothing when it is cleared", () => {
-    expect(liveSettingsFor({ live: { voice: "cedar", geminiVoice: "Kore" } } as AppConfig)).toMatchObject({ voice: "cedar", geminiVoice: "Kore" });
-    expect(liveSettingsFor({ live: { geminiVoice: "" } } as AppConfig)).not.toHaveProperty("geminiVoice");
+  it("reports a saved Gemini voice and model beside the GPT-Live one, and nothing when cleared", () => {
+    expect(liveSettingsFor({ live: { voice: "cedar", geminiVoice: "Kore", geminiModel: "gemini-3.1-flash-live-preview" } } as AppConfig))
+      .toMatchObject({ voice: "cedar", geminiVoice: "Kore", geminiModel: "gemini-3.1-flash-live-preview" });
+    expect(liveSettingsFor({ live: { geminiVoice: "", geminiModel: "" } } as AppConfig)).not.toHaveProperty("geminiVoice");
+    expect(liveSettingsFor({ live: { geminiModel: "" } } as AppConfig)).not.toHaveProperty("geminiModel");
+    expect(liveCallEndpoint({ live: { provider: "gemini", geminiModel: "gemini-3.1-flash-live-preview" } } as AppConfig, {})?.model)
+      .toBe("gemini-3.1-flash-live-preview");
   });
 });
 

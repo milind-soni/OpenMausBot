@@ -51,15 +51,16 @@ class FakeAudio implements GeminiAudio {
   close() { this.closed = true; }
 }
 
-function harness({ denied = false } = {}) {
+function harness({ denied = false, activityStuckMs }: { denied?: boolean; activityStuckMs?: number } = {}) {
   const sockets: FakeSocket[] = [];
   const audios: FakeAudio[] = [];
   const start = geminiSessionStarter({
     openSocket: (url) => { const socket = new FakeSocket(url); sockets.push(socket); return socket; },
     audio: () => { const audio = new FakeAudio(denied); audios.push(audio); return audio; },
+    ...(activityStuckMs !== undefined ? { activityStuckMs } : {}),
   });
   const callbacks = {
-    onConnect: vi.fn(), onDisconnect: vi.fn(), onModeChange: vi.fn(), onUserTranscript: vi.fn(), onAgentResponseDelta: vi.fn(), onError: vi.fn(),
+    onConnect: vi.fn(), onDisconnect: vi.fn(), onModeChange: vi.fn(), onUserTranscript: vi.fn(), onAgentResponseDelta: vi.fn(), onNotice: vi.fn(), onError: vi.fn(),
   };
   const delegate = vi.fn(async (_params: Record<string, unknown>, _context: { callId: string }) => "On it.");
   const options: FishSessionOptions<LiveGeminiSession> = { sessionToken: SESSION, clientTools: { [FISH_DELEGATE_TOOL]: delegate }, clientToolTimeoutMs: 12_000, callbacks };
@@ -398,6 +399,30 @@ describe("a Gemini Live session", () => {
     session.sendUserMessage("late");
     expect(t.socket().sent.at(-1)).not.toHaveProperty("clientContent");
     expect(t.callbacks.onDisconnect).not.toHaveBeenCalled();
+  });
+
+  it("shows a notice when ACTIVITY_START is not followed by ACTIVITY_END, and clears it once heard", async () => {
+    vi.useFakeTimers();
+    try {
+      const t = harness({ activityStuckMs: 5_000 });
+      await t.connect();
+      t.socket().receive({ voiceActivity: { voiceActivityType: "ACTIVITY_START" } });
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(t.callbacks.onNotice).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(t.callbacks.onNotice).toHaveBeenCalledWith(expect.stringContaining("Gemini Live model"));
+      t.socket().receive({ voiceActivity: { voiceActivityType: "ACTIVITY_END" } });
+      expect(t.callbacks.onNotice).toHaveBeenLastCalledWith(null);
+
+      t.callbacks.onNotice.mockClear();
+      t.socket().receive({ voiceActivity: { voiceActivityType: "ACTIVITY_START" } });
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(t.callbacks.onNotice).toHaveBeenCalledTimes(1);
+      t.socket().receive({ serverContent: { inputTranscription: { text: "hello" } } });
+      expect(t.callbacks.onNotice).toHaveBeenLastCalledWith(null);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

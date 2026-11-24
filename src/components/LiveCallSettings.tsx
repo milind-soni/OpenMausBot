@@ -1,6 +1,6 @@
 import { useCallback, useId, useState } from "react";
 
-import { GEMINI_LIVE_VOICE_OPTIONS, geminiLiveVoice, LIVE_VOICE_OPTIONS } from "../../shared/live-call";
+import { GEMINI_LIVE_MODEL_OPTIONS, GEMINI_LIVE_VOICE_OPTIONS, geminiLiveModel, geminiLiveVoice, LIVE_VOICE_OPTIONS } from "../../shared/live-call";
 import { t } from "@/lib/i18n";
 import { liveDisclosure, liveKeyCopy, liveKeyFormKey } from "@/lib/call-mode";
 import { api, useStore, type Bot, type ConfigStatus } from "@/state/store";
@@ -38,8 +38,10 @@ export function LiveCallSettings({ bot, onClose }: { bot?: Pick<Bot, "id" | "nam
   const voiceOptions = gemini ? GEMINI_LIVE_VOICE_OPTIONS : LIVE_VOICE_OPTIONS;
   const voice = gemini ? geminiLiveVoice(live.geminiVoice) : live.voice || "marin";
   const known = voiceOptions.some((option) => option.id === voice);
+  const geminiModel = geminiLiveModel(live.geminiModel);
+  const knownGeminiModel = GEMINI_LIVE_MODEL_OPTIONS.some((option) => option.id === geminiModel);
 
-  const save = async (patch: Partial<Pick<LiveSettings, "voice" | "geminiVoice" | "readTypedReplies" | "idleMinutes">>) => {
+  const save = async (patch: Partial<Pick<LiveSettings, "voice" | "geminiVoice" | "geminiModel" | "readTypedReplies" | "idleMinutes">>) => {
     setSaving(true);
     setError(null);
     try {
@@ -99,6 +101,20 @@ export function LiveCallSettings({ bot, onClose }: { bot?: Pick<Bot, "id" | "nam
         </Select>
       </label>
       <div className="-mt-2 text-[12px] text-ink-tertiary">{t("call.live.voiceNext")}</div>
+      {gemini && (
+        <label className="flex items-center justify-between gap-2">
+          <span className="text-ink-secondary">{t("call.live.geminiModel")}</span>
+          <Select
+            size="sm"
+            value={geminiModel}
+            disabled={saving}
+            onChange={(event) => void save({ geminiModel: event.target.value })}
+          >
+            {!knownGeminiModel && <option value={geminiModel}>{geminiModel}</option>}
+            {GEMINI_LIVE_MODEL_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+          </Select>
+        </label>
+      )}
       </>}
       <label className="flex items-center justify-between gap-2">
         <span className="text-ink-secondary">{t("call.live.readTyped")}</span>

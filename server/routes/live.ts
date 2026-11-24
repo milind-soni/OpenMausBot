@@ -2,7 +2,7 @@
 import type { IncomingMessage } from "node:http";
 import { z } from "zod";
 import type { LiveFishRelayCommand, LiveFishRelayEvent, LiveProvider, LiveSettings } from "../../shared/wire.ts";
-import { GEMINI_LIVE_VOICE_OPTIONS } from "../../shared/live-call.ts";
+import { GEMINI_LIVE_VOICE_OPTIONS, parseGeminiLiveModel } from "../../shared/live-call.ts";
 import { azureLiveDeployment, azureOpenAiRoot, customLiveApiBase, customLiveModel, LiveSessionError, MAX_SDP_BYTES } from "../live-call.ts";
 import { LiveCallBusyError, type LiveCallController } from "../live-call-controller.ts";
 import { RELAY_POLL_MS } from "../live-fish.ts";
@@ -14,7 +14,7 @@ export interface LiveRouteDeps {
   deviceRevoked?: (device: string) => void;
   resolveTarget(botId: string, threadId: string | undefined): { botId: string; botName: string; threadId: string } | null;
   settings(): LiveSettings;
-  saveSettings(patch: { provider?: LiveProvider; azureEndpoint?: string; azureDeployment?: string; customEndpoint?: string; customModel?: string; voice?: string; geminiVoice?: string; readTypedReplies?: boolean; idleMinutes?: number }): Promise<LiveSettings>;
+  saveSettings(patch: { provider?: LiveProvider; azureEndpoint?: string; azureDeployment?: string; customEndpoint?: string; customModel?: string; voice?: string; geminiVoice?: string; geminiModel?: string; readTypedReplies?: boolean; idleMinutes?: number }): Promise<LiveSettings>;
   /** A running relayed (Fish Audio, Gemini or ElevenLabs) call's relay, only for the token its start answered with. */
   fishRelay(sessionId: string, token: string): { receive(events: LiveFishRelayEvent[], from?: number): void; poll(waitMs: number): Promise<{ commands: LiveFishRelayCommand[]; closed: boolean }> } | null;
 }
@@ -56,6 +56,8 @@ const settingsBody = z.object({
   voice: z.string().trim().max(40).regex(/^[a-z]*$/).optional(),
   // "" goes back to the default voice.
   geminiVoice: z.string().trim().refine((name) => name === "" || GEMINI_LIVE_VOICE_OPTIONS.some((option) => option.id === name)).optional(),
+  // "" goes back to the default model.
+  geminiModel: z.string().trim().max(80).transform((name) => name.replace(/^models\//, "")).refine((name) => name === "" || parseGeminiLiveModel(name) !== undefined).optional(),
   readTypedReplies: z.boolean().optional(),
   idleMinutes: z.number().int().min(1).max(60).optional(),
 }).strict();
