@@ -3757,6 +3757,7 @@
   "servers.localHint": "Bots et conversations locaux",
   "servers.switch": "Basculer",
   "settings.advancedMode.title": "Mode avancé",
+  "settings.advancedSetting": "Réglage avancé",
   "settings.deviceNotifications.show": "M'avertir quand un bot a fini",
   "settings.deviceNotifications.title": "Notifications sur cet appareil",
   "settings.domain.label": "Votre domaine",
