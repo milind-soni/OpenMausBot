@@ -4,6 +4,8 @@ export interface BotLibrary {
   pages: BotLibraryPage[];
   apps: BotLibraryApp[];
   files: BotLibraryFileMessage[];
+  /** File paths the person removed from this Library, as the panel names them; the panel leaves them out. */
+  removed?: string[];
 }
 
 export interface BotLibraryPage { threadId: string; messageId: string; at: number; title: string; url: string }
@@ -21,3 +23,10 @@ export interface BotLibraryFileMessage {
 
 /** The most of each group the server sends; the panel shows the newest few and expands in place. */
 export const BOT_LIBRARY_MAX = 200;
+
+/** POST /api/bots/:id/library/remove: the files to take out of the Library. A copy the chat stored for one of them is
+ * deleted when only this bot's conversations show it; a file in a folder stays on disk. */
+export interface BotLibraryRemove { paths: string[] }
+
+/** The most paths one remove names. */
+export const BOT_LIBRARY_REMOVE_MAX = 1000;

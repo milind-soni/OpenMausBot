@@ -87,6 +87,11 @@ export function allLibraryItems(bot: Bot, local: LibraryItems, remote: BotLibrar
   };
 }
 
+export function withoutFiles(items: LibraryItems, removed: ReadonlySet<string>): LibraryItems {
+  if (!removed.size) return items;
+  return { ...items, shared: items.shared.filter((item) => !removed.has(item.file.path)), unshared: items.unshared.filter((path) => !removed.has(path)) };
+}
+
 /** The quiet line naming the conversation an item came from, none while the bot has only one: its title, or with threads
  * hidden (Simple mode) "Main thread" for the one the bot opens to. */
 export function threadLabel(bot: Pick<Bot, "threadId" | "mainThreadId" | "tasks">, threadId: string, threadsShown: boolean): string | undefined {

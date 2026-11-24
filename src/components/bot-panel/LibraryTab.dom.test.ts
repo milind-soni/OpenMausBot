@@ -40,6 +40,7 @@ const makeBot = (over: Partial<Bot> = {}): Bot => ({
 
 let library: BotLibrary;
 const requests: string[] = [];
+const removals: string[][] = [];
 let host: HTMLDivElement;
 let root: Root;
 
@@ -59,9 +60,14 @@ beforeEach(() => {
     apps: [{ threadId: "t2", messageId: "a2", at: 80, title: "Quote calculator" }, { threadId: "t1", messageId: "m2", at: 60, title: "App m2" }],
     files: [{ threadId: "t3", messageId: "f3", at: 5, attachments: [{ path: "/work/report.pdf", kind: "file", name: "report.pdf" }], links: ["/work/notes.md"] }],
   };
-  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+  removals.length = 0;
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(input, "http://x");
     requests.push(url.pathname);
+    if (url.pathname === "/api/bots/scout/library/remove") {
+      removals.push(JSON.parse(String(init?.body)).paths);
+      return new Response(JSON.stringify({ removed: removals.flat() }), { status: 200, headers: { "content-type": "application/json" } });
+    }
     const body = url.pathname === "/api/bots/scout/library" ? library : { error: "not here" };
     return new Response(JSON.stringify(body), { status: url.pathname === "/api/bots/scout/library" ? 200 : 404, headers: { "content-type": "application/json" } });
   }));
@@ -129,4 +135,42 @@ it("shows the newest few of a long group, then Show all opens the rest in place"
   expect(rows("app")).toHaveLength(30);
   expect(host.querySelector('[data-library-more="apps"]')).toBeNull();
   expect(host.querySelector('[data-library-more="pages"]')).toBeNull();
+});
+
+const fileNames = () => host.querySelector('[data-panel-card="files"]')?.textContent ?? "";
+const toast = () => document.querySelector<HTMLElement>("[data-access-toast]");
+
+it("removes a file at once, puts it back on Undo, and tells the server only once the Undo is gone", async () => {
+  library.removed = ["/work/notes.md"];
+  await render(makeBot());
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    expect(fileNames()).toContain("report.pdf");
+    expect(fileNames()).not.toContain("notes.md");
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-library-remove="report.pdf"]')!.click());
+    expect(host.querySelector('[data-panel-card="files"]')).toBeNull();
+    expect(toast()!.textContent).toContain("Removed report.pdf");
+    await act(async () => toast()!.querySelector("button")!.click());
+    expect(fileNames()).toContain("report.pdf");
+    expect(toast()).toBeNull();
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    expect(removals).toEqual([]);
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-library-remove="report.pdf"]')!.click());
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    expect(removals).toEqual([["/work/report.pdf"]]);
+    expect(toast()).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("Remove all takes every file out, and closing the panel before the Undo ends still removes them", async () => {
+  await render(makeBot());
+  await act(async () => host.querySelector<HTMLButtonElement>("[data-library-remove-all]")!.click());
+  expect(host.querySelector('[data-panel-card="files"]')).toBeNull();
+  expect(toast()!.textContent).toContain("Removed 2 files");
+  expect(removals).toEqual([]);
+  act(() => root.unmount());
+  root = createRoot(host);
+  expect(removals).toEqual([["/work/report.pdf", "/work/notes.md"]]);
 });
