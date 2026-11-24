@@ -87,8 +87,8 @@ class QuietEventSource {
 Object.assign(window, { EventSource: QuietEventSource });
 try { localStorage.setItem("omb-advanced-mode", "0"); } catch { /* blocked storage */ }
 
-const [{ StoreProvider, useStore }, { PluginsPanel }, { MemberApps }, { ConnectorCard }, { githubSignIn }, { applySkin, readSkin, SKIN_IDS }, { loadLocale }] = await Promise.all([
-  import("@/state/store"), import("@/components/PluginsPanel"), import("@/components/MemberApps"), import("@/components/ConnectorCard"),
+const [{ StoreProvider }, { useStoreDispatch, useStoreSelector }, { PluginsPanel }, { MemberApps }, { ConnectorCard }, { githubSignIn }, { applySkin, readSkin, SKIN_IDS }, { loadLocale }] = await Promise.all([
+  import("@/state/store"), import("@/state/store-select"), import("@/components/PluginsPanel"), import("@/components/MemberApps"), import("@/components/ConnectorCard"),
   import("@/lib/github-sign-in"), import("@/lib/skins"), import("@/lib/i18n"),
 ]);
 
@@ -103,10 +103,12 @@ async function walkToRefusal() {
 }
 
 function AppsView() {
-  const { state: app, dispatch } = useStore();
-  useEffect(() => { if (app.config) dispatch({ type: "togglePlugins", open: true, surface: "apps" }); }, [Boolean(app.config)]);
+  const configured = useStoreSelector((state) => Boolean(state.config));
+  const open = useStoreSelector((state) => state.pluginsOpen);
+  const dispatch = useStoreDispatch();
+  useEffect(() => { if (configured) dispatch({ type: "togglePlugins", open: true, surface: "apps" }); }, [configured]);
   useEffect(() => {
-    if (!app.pluginsOpen) return;
+    if (!open) return;
     const search = params.get("q");
     const field = document.querySelector<HTMLInputElement>("[data-tour='apps-panel'] input");
     if (search && field) {
@@ -114,8 +116,8 @@ function AppsView() {
       field.dispatchEvent(new Event("input", { bubbles: true }));
     }
     void walkToRefusal();
-  }, [app.pluginsOpen]);
-  if (!app.pluginsOpen) return <div className="h-screen bg-app" />;
+  }, [open]);
+  if (!open) return <div className="h-screen bg-app" />;
   return <div className="h-screen bg-app">{view === "member" ? <MemberApps /> : <PluginsPanel />}</div>;
 }
 
