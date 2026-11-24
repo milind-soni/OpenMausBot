@@ -58,8 +58,8 @@ export function acpCompactSession(deps: AcpCompactDeps) {
     let end!: (ending: Ending) => void;
     const ended = new Promise<Ending>((resolve) => { end = resolve; });
     let stopRequested = false;
-    let interrupt!: (why: "stopped" | "gone" | "timeout") => void;
-    const interrupted = new Promise<"stopped" | "gone" | "timeout">((resolve) => { interrupt = resolve; });
+    let onInterrupt: ((why: "stopped" | "gone" | "timeout") => void) | null = null;
+    const interrupt = (why: "stopped" | "gone" | "timeout") => onInterrupt?.(why);
     const stop = () => { stopRequested = true; interrupt("stopped"); end({ kind: "stopped" }); };
     let finished!: () => void;
     const settled = new Promise<void>((resolve) => { finished = resolve; });
@@ -119,7 +119,8 @@ export function acpCompactSession(deps: AcpCompactDeps) {
       if (ending.kind !== "answered") return fail("stopped");
       const { result } = ending;
       const usage = promptTokenUsage(result);
-      const reported = await Promise.race([Promise.resolve(check?.(result)).catch(() => undefined), interrupted]);
+      const interruptedAfter = new Promise<"stopped" | "gone" | "timeout">((resolve) => { onInterrupt = resolve; });
+      const reported = await Promise.race([Promise.resolve(check?.(result)).catch(() => undefined), interruptedAfter]);
       if (reported === "stopped") return fail("stopped");
       if (reported === "gone" || reported === "timeout") {
         keep = false;

@@ -84,10 +84,7 @@ export interface TaskRecord extends Omit<WireTask, TaskWireDerivedKeys> {
   lastInstanceId?: string;
   handedMessages?: Record<string, HandedState>;
   appliedCompactionId?: string;
-  contextFloor?: number;
-  /** Where the engine last compacted a session in place, for an engine that does not compact by itself: while the next turn
-   * carries on `session` on `instanceId`, the fold measures only the history after `throughId`, the last message it had. */
-  engineCompacted?: { instanceId: string; session: string; throughId: string };
+  contextFloor?: number; engineCompacted?: { instanceId: string; session: string; throughId: string };
   lastContextModel?: string;
   /** Absent (legacy) may be a person's choice: only an "auto" pin yields to a Works on change. */
   surfaceSource?: "user" | "auto";
