@@ -6,7 +6,7 @@ import { DATA_TOOLS } from "./data/tools.ts";
 import bridgedAgents from "./drivers/agents-catalog-goldens/bridged.tools-list.json" with { type: "json" };
 import fullAgents from "./drivers/agents-catalog-goldens/full.tools-list.json" with { type: "json" };
 import { createPageSchema, wideSchema } from "./testing/oversized-tool-schema.ts";
-import { fitToolSchema, schemaBytes, toolSchemaProfile, toolSchemaProfileFor, type ToolSchemaProfile } from "./tool-schema-profile.ts";
+import { fitToolListForBudget, fitToolSchema, schemaBytes, toolSchemaProfile, toolSchemaProfileFor, type ToolSchemaProfile } from "./tool-schema-profile.ts";
 
 type Json = Record<string, unknown>;
 const MOONSHOT = toolSchemaProfile("moonshot")!;
@@ -151,7 +151,7 @@ describe("which turns carry a schema profile", () => {
   });
 
   it("is no other engine or endpoint, so their tool lists are unchanged", () => {
-    for (const engine of ["claudeAgent", "codex", "geminiAgent", "grokAgent", "opencodeGo", "qwenAgent", "cursorAgent", "hermesAgent"]) {
+    for (const engine of ["claudeAgent", "codex", "grokAgent", "opencodeGo", "qwenAgent", "cursorAgent", "hermesAgent"]) {
       expect(toolSchemaProfileFor({ engine, model: "kimi-k2.6" })).toBeUndefined();
     }
     expect(toolSchemaProfileFor({ url: "https://api.groq.com/openai/v1", model: "moonshotai/kimi-k2-instruct-0905" })).toBeUndefined();
@@ -159,6 +159,47 @@ describe("which turns carry a schema profile", () => {
     expect(toolSchemaProfileFor({ url: "https://moonshot.ai.example.com/v1" })).toBeUndefined();
     expect(toolSchemaProfileFor({ url: "not a url" })).toBeUndefined();
     expect(toolSchemaProfile("__proto__")).toBeUndefined();
+  });
+});
+
+describe("fitting a tool list to Gemini's list budget", () => {
+  const GEMINI = toolSchemaProfile("gemini")!;
+  const bytes = (list: unknown) => Buffer.byteLength(JSON.stringify(list));
+  const names = (list: Array<{ name: string }>) => list.map((tool) => tool.name);
+
+  it("the Antigravity and Gemini CLI engines carry the profile", () => {
+    expect(toolSchemaProfileFor({ engine: "antigravityAgent" })).toBe(GEMINI);
+    expect(toolSchemaProfileFor({ engine: "geminiAgent" })).toBe(GEMINI);
+    expect(toolSchemaProfileFor({ engine: "claudeAgent" })).toBeUndefined();
+  });
+
+  it("a list under the budget goes out untouched", () => {
+    const tools = [{ name: "small", inputSchema: { type: "object", properties: { id: { type: "string" } } } }];
+    expect(fitToolListForBudget(tools, GEMINI)).toEqual(tools);
+    expect(fitToolListForBudget(tools, undefined)).toEqual(tools);
+    expect(fitToolListForBudget(tools, { ...GEMINI, maxListBytes: undefined })).toEqual(tools);
+  });
+
+  it("the full agents list fits with every tool's name kept", () => {
+    const tools = fullAgents.tools as Array<{ name: string; description: string; inputSchema: Json }>;
+    expect(bytes(tools)).toBeGreaterThan(GEMINI.maxListBytes!);
+    const fitted = fitToolListForBudget(tools, GEMINI);
+    expect(bytes(fitted)).toBeLessThanOrEqual(GEMINI.maxListBytes!);
+    expect(names(fitted)).toEqual(names(tools));
+  });
+
+  it("each tool keeps its required fields and the trimming loses the deep words first", () => {
+    const required = ["id"];
+    const tools = [
+      { name: "wide", required: [], inputSchema: wideSchema(200) as Json },
+      { name: "page", required, inputSchema: createPageSchema() as Json },
+    ];
+    const fitted = fitToolListForBudget(tools, { ...GEMINI, maxListBytes: bytes(tools) / 2 });
+    expect(bytes(fitted)).toBeLessThanOrEqual(bytes(tools) / 2);
+    const page = fitted.find((tool) => tool.name === "page")!;
+    expect(page.required).toEqual(required);
+    expect(Object.keys((page.inputSchema as Json).properties ?? {})).toEqual(Object.keys((tools[1].inputSchema as Json).properties ?? {}));
+    expect(bytes(fitted)).toBeLessThan(bytes(tools));
   });
 });
 
