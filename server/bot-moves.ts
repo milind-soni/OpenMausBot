@@ -12,7 +12,15 @@
 // (move-back.ts keeps what was done, to be told). A bot is never live in two places and nothing of it is deleted.
 //
 // A hold that asks to lapse (`lapse`) lets the bot go on by itself unless it is held again within HOLD_LAPSE_MS: the
-// computer that runs a move may sleep half-way, and the bot then goes on working where it is.
+// computer that runs a move may sleep half-way, and the bot then goes on working where it is. Only My Cloud's own hold of
+// a bot leaving it lapses: My Cloud is the side that switches first on the way to a computer, so before its switch the bot
+// is live there and nowhere else. A computer's hold, and a returning hold anywhere, never lapses: by the time it would,
+// the other side may already have switched, and letting go then would make two live copies, or none.
+//
+// The invariant, at every point of any order of holds, copies, switches, arrivals, lapses, crashes and retries the two
+// sides can see: the bot is never live in two places. It is live in none only while a move holds it: paused at its place
+// until the move goes on or (My Cloud's hold) lapses, or between the two switch steps, from where the move only goes
+// forward. Between moves it is live in exactly one, and a try always finishes (bot-moves.test.ts, "the invariant").
 import type { BotMovedTo } from "../shared/wire.ts";
 import type { AppTriggerManager } from "./app-triggers.ts";
 import type { Arrivals, ArrivedFacts, MovedAutomation, StaysOnCloud } from "./move-back.ts";
@@ -30,8 +38,6 @@ export const COMPUTER_TEAM_PREFIX = "computer-";
 export const personalTeam = (id: string) => id === MY_CLOUD_TEAM || (id.startsWith(COMPUTER_TEAM_PREFIX) && id.length > COMPUTER_TEAM_PREFIX.length);
 /** How long a hold that asked to lapse holds without being asked again. */
 export const HOLD_LAPSE_MS = 30 * 60_000;
-/** A first arrival is held as one only while it is this new: the move made it moments before. */
-export const ARRIVAL_WINDOW_MS = 10 * 60_000;
 
 export interface BotMovesDeps {
   store: { bot(id: string): BotRecord | null | undefined; patchBot(id: string, patch: Partial<BotRecord>): BotRecord | null;
@@ -66,13 +72,17 @@ type Held = BotMovedTo & {
   lapseAt?: number;
   /** The bot is coming back here: hidden, no turns, compared by the move. */
   back?: true;
-  /** A first arrival this move made here: stopped, it is the line of where it lives. */
+  /** A first arrival, made here already held (arrivalMark): stopped, it is the line of where it lives. */
   arrival?: true;
   /** What this place had of it before it came back: the MCP servers it used here (null: every one). */
   had?: { mcp: string[] | null };
   /** The archived switch the move sent while it came back, set once it arrived. */
   archived?: boolean;
 };
+/** A first arrival's hold, set as the move makes the bot here (POST /api/bots `arriving`): hidden and held from its first
+ * write, with nothing here before it. */
+export function arrivalMark(team: Team, at: number): Held { return { team, state: "moving", at, back: true, arrival: true, had: { mcp: [] } }; }
+
 type HoldAnswer = { movedTo: Held } | { busy: string } | { refused: string; here?: true };
 
 /** Why this bot takes no turn here, or null. */
@@ -126,35 +136,38 @@ export function createBotMoves(deps: BotMovesDeps) {
   };
 
   /** The bot comes back here: its line is held as returning; a bot live here with this id is not taken over. */
-  function holdReturning(bot: BotRecord, held: Held | undefined, team: Team, lapse: boolean, arrival: boolean): HoldAnswer {
-    if (held?.back) {
-      if (held.team.id !== team.id) return { refused: botMoveRefusal(bot)! };
-      const { lapseAt: _lapse, ...kept } = held;
-      const next: Held = { ...kept, ...lapsing(lapse) };
-      set(bot.id, next);
-      return { movedTo: next };
-    }
+  function holdReturning(bot: BotRecord, held: Held | undefined, team: Team): HoldAnswer {
+    if (held?.back) return held.team.id === team.id ? { movedTo: held } : { refused: botMoveRefusal(bot)! };
     if (held?.state === "moved") {
       if (held.team.id !== team.id) return { refused: botMoveRefusal(bot)! };
       const { lapseAt: _lapse, ...kept } = held;
-      const next: Held = { ...kept, state: "moving", at: now(), back: true, had: held.had ?? { mcp: bot.mcpServers ? [...bot.mcpServers] : null }, ...lapsing(lapse) };
+      const next: Held = { ...kept, state: "moving", at: now(), back: true, had: held.had ?? { mcp: bot.mcpServers ? [...bot.mcpServers] : null } };
       set(bot.id, next, { hidden: true });
       return { movedTo: next };
     }
     if (held) return { refused: botMoveRefusal(bot)! };
-    // Security: only a bot the move made here moments ago is taken as its arrival; any other bot with this id is the
-    // person's own, which the move never hides.
-    const fresh = arrival && Number.isFinite(bot.createdAt) && now() - bot.createdAt >= 0 && now() - bot.createdAt <= ARRIVAL_WINDOW_MS;
-    if (!fresh) return { refused: `${bot.name} is already here.`, here: true };
-    const next: Held = { team, state: "moving", at: now(), back: true, arrival: true, had: { mcp: [] }, ...lapsing(lapse) };
-    set(bot.id, next, { hidden: true });
-    cancelWaits(bot.id);
-    return { movedTo: next };
+    // A bot live here with this id is the person's own: the move never hides it. A first arrival is made already held
+    // (arrivalMark, by POST /api/bots over the move's own caller), so it is never live here first.
+    return { refused: `${bot.name} is already here.`, here: true };
   }
 
   /** The automations of this bot, of one kind, by id and name. */
   const named = (list: ReadonlyArray<{ id: string; name: string; botId: string }> | undefined, botId: string, keys: Set<string>, kind: string): MovedAutomation[] =>
     (list ?? []).filter((entry) => entry.botId === botId && keys.has(`${kind}:${entry.id}`)).map((entry) => ({ id: entry.id, name: entry.name }));
+
+  /** The command MCP servers the bot would use here that it did not use here before (`had`; none known: none new). */
+  function newCommandServers(bot: BotRecord, had: Held["had"]): string[] {
+    if (!deps.mcp || !had) return [];
+    const here = deps.mcp(bot.id);
+    const uses = (list: readonly string[] | null) => (list === null ? here.command : here.command.filter((name) => list.includes(name)));
+    const before = new Set(uses(had.mcp));
+    return uses(bot.mcpServers ?? null).filter((name) => !before.has(name));
+  }
+  const switchOffServers = (bot: BotRecord, off: readonly string[]) => {
+    if (!off.length) return;
+    const gone = new Set(off);
+    deps.store.patchBot(bot.id, { mcpServers: (bot.mcpServers ?? deps.mcp?.(bot.id).all ?? []).filter((name) => !gone.has(name)) });
+  };
 
   /** What arriving does here, decided once and kept before any of it is done. */
   function arrivalFacts(bot: BotRecord, held: Held, on: readonly string[]): ArrivedFacts {
@@ -162,13 +175,7 @@ export function createBotMoves(deps: BotMovesDeps) {
     const routines = named(deps.routines()?.listRoutines(), bot.id, keys, "routine");
     const webhooks = named(deps.webhooks()?.list(), bot.id, keys, "webhook");
     const appEvents = named(deps.appEvents()?.list(), bot.id, keys, "app-event");
-    let mcpServers: string[] = [];
-    if (deps.computer && deps.mcp) {
-      const here = deps.mcp(bot.id);
-      const uses = (list: readonly string[] | null) => (list === null ? here.command : here.command.filter((name) => list.includes(name)));
-      const before = new Set(uses(held.had?.mcp ?? null));
-      mcpServers = uses(bot.mcpServers ?? null).filter((name) => !before.has(name));
-    }
+    const mcpServers = deps.computer ? newCommandServers(bot, held.had) : [];
     const computer = deps.computer === true;
     return { v: 1, from: held.team, hold: held.at, at: now(), place: computer ? "computer" : "cloud",
       on: { routines, webhooks: computer ? [] : webhooks, appEvents: computer ? [] : appEvents },
@@ -179,14 +186,19 @@ export function createBotMoves(deps: BotMovesDeps) {
     /** The bot stops here for the move: no turns, its automations off and its waits cancelled. Busy while it answers; a
      * bot already moved stays moved. Holding it again keeps what the first hold switched off, and renews a lapsing hold.
      * `back`: it is coming back here instead (holdReturning). */
-    async hold(botId: string, team: Team, { lapse = false, back = false, arrival = false }: { lapse?: boolean; back?: boolean; arrival?: boolean } = {}): Promise<HoldAnswer> {
+    //
+    // For the engine that runs a move (slice B): holding again after a lapse is not a renewal but a new hold, with a new
+    // `at`, and the bot may have worked in between; whenever the `at` it gets back changes, the move copies again before
+    // it switches. `lapse` is honoured only on My Cloud's hold of a bot leaving it (see the top of this file).
+    async hold(botId: string, team: Team, { lapse = false, back = false }: { lapse?: boolean; back?: boolean } = {}): Promise<HoldAnswer> {
       const bot = deps.store.bot(botId);
       if (!bot) return { refused: "This bot is no longer here." };
       if (bot.defaultBot) return { refused: `${bot.name} stays here: everyone on a team gets their own.` };
       // Past its time, a hold is let go of first: holding again is a new hold, with a new `at`.
       if (lapsed(movedOf(bot)) && ready(movedOf(bot)!.held ?? [])) await moves.release(botId);
       const held = movedOf(deps.store.bot(botId) ?? bot);
-      if (back) return holdReturning(deps.store.bot(botId) ?? bot, held, team, lapse, arrival);
+      if (back) return holdReturning(deps.store.bot(botId) ?? bot, held, team);
+      lapse &&= !deps.computer;
       if (held?.back) return { refused: botMoveRefusal(bot)! };
       if (held?.state === "moved") return held.team.id === team.id ? { movedTo: held } : { refused: botMoveRefusal(bot)! };
       if (held && held.team.id !== team.id) return { refused: botMoveRefusal(bot)! };
@@ -249,10 +261,7 @@ export function createBotMoves(deps: BotMovesDeps) {
       // Kept before anything is done: a server stopped half-way does the rest, the same way, when asked again.
       const facts = kept && kept.from.id === team.id && kept.hold === held.at ? kept : arrivalFacts(bot, held, on);
       if (facts !== kept) deps.arrivals?.put(botId, facts);
-      if (facts.offHere.mcpServers.length) {
-        const off = new Set(facts.offHere.mcpServers);
-        deps.store.patchBot(botId, { mcpServers: (bot.mcpServers ?? deps.mcp?.(botId).all ?? []).filter((name) => !off.has(name)) });
-      }
+      switchOffServers(bot, facts.offHere.mcpServers);
       for (const routine of facts.on.routines) await switchTo(`routine:${routine.id}`, true);
       for (const hook of facts.on.webhooks) await switchTo(`webhook:${hook.id}`, true);
       for (const trigger of facts.on.appEvents) await switchTo(`app-event:${trigger.id}`, true);
@@ -265,6 +274,9 @@ export function createBotMoves(deps: BotMovesDeps) {
       const held = movedOf(bot);
       if (!bot || !held) return { released: true };
       if (!personalTeam(held.team.id)) return { refused: botMoveRefusal(bot)! };
+      // A try to bring it back that stopped left the newer side's fields on its line: command servers it did not use here
+      // before stay off.
+      if (deps.computer) switchOffServers(bot, newCommandServers(bot, held.had));
       set(botId, undefined, { hidden: false });
       return { released: true };
     },

@@ -12,7 +12,7 @@ const team = z.object({ id: z.string().regex(/^[\w-]{1,128}$/u), name: z.string(
 // New states, not new fields on old ones: an older server answers 400 rather than holding the bot the old way.
 const bodySchema = z.discriminatedUnion("state", [
   z.object({ v: z.literal(1), state: z.literal("moving"), team, lapse: z.boolean().optional() }),
-  z.object({ v: z.literal(1), state: z.literal("returning"), team, lapse: z.boolean().optional(), arrival: z.boolean().optional() }),
+  z.object({ v: z.literal(1), state: z.literal("returning"), team }),
   z.object({ v: z.literal(1), state: z.literal("moved"), team }),
   z.object({ v: z.literal(1), state: z.literal("arrived"), team, on: z.array(z.string().regex(/^(?:routine|call|webhook|app-event):[\w-]{1,128}$/u)).max(2_000) }),
   z.object({ v: z.literal(1), state: z.literal("back"), team }),
@@ -49,7 +49,7 @@ export function createBotMoveRoutes({ moves, enabled }: { moves: BotMoves | null
       const moved = moves.moved(bot, body.team);
       return "refused" in moved ? json(res, 409, { error: moved.refused, ...notHeld() }) : json(res, 200, { v: 1, ...moved });
     }
-    const answer = await moves.hold(bot, body.team, { lapse: body.lapse === true, back: body.state === "returning", arrival: body.state === "returning" && body.arrival === true });
+    const answer = await moves.hold(bot, body.team, body.state === "returning" ? { back: true } : { lapse: body.lapse === true });
     if ("busy" in answer) return json(res, 409, { error: `${answer.busy} is answering. The move goes on once it is done.`, busy: answer.busy });
     if ("refused" in answer) return json(res, 409, { error: answer.refused, ...(answer.here ? { here: true } : {}) });
     return json(res, 200, { v: 1, movedTo: answer.movedTo });

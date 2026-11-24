@@ -171,7 +171,9 @@ it("goes to My Cloud a second time: its line there comes back to life instead of
   await expect.poll(async () => !(await botOn(fx.local, rover.id) as Bot & { busy?: boolean })?.busy, { timeout: 60_000, interval: 100 }).toBe(true);
   expect(await move(fx.onCloud, rover.id, { state: "returning", team: LAPTOP })).toMatchObject({ status: 200, body: { movedTo: { back: true } } });
   expect(parseSendSummary((await fx.onCloud("GET", "/api/cloud-send?move=1")).body)?.items.find((item) => item.key === `bot:${rover.id}`)).toMatchObject({ returning: true });
+  // This computer's hold never lapses: My Cloud takes the bot first on this way, so letting go here later would make two.
   const held = await move(fx.local, rover.id, { state: "moving", team: MY_CLOUD, lapse: true });
+  expect(held.body.movedTo, "a lapse asked for here is not taken").not.toHaveProperty("lapseAt");
   expect(held.status, JSON.stringify(held.body)).toBe(200);
   const on = held.body.movedTo.held as string[];
   const arrived = await move(fx.onCloud, rover.id, { state: "arrived", team: LAPTOP, on });
@@ -187,15 +189,22 @@ it("a bot born on My Cloud arrives here held from its first write; a stopped fir
   const mine = (await fx.local("POST", "/api/bots", { name: "Mine", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot as Bot;
   expect(await move(fx.local, mine.id, { state: "returning", team: MY_CLOUD }), "a live bot of the same id here").toMatchObject({ status: 409, body: { here: true } });
   expect(live(await botOn(fx.local, mine.id))).toBe(true);
-  const made = await fx.local("POST", "/api/bots", { id: nova.id, threadId: nova.threadId, name: "Nova", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } });
+  const creation = { id: nova.id, threadId: nova.threadId, name: "Nova", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, arriving: { team: MY_CLOUD } };
+  const page = await fetch(`${fx.desktopBase}/api/bots`, { method: "POST", body: JSON.stringify(creation), headers: { "content-type": "application/json",
+    "x-openmausbot-desktop-owner": fx.ownerCapability, origin: fx.desktopBase, "sec-fetch-site": "same-origin", "sec-fetch-dest": "empty" } });
+  expect(page.status, "only the move's own caller makes an arriving bot").toBe(403);
+  expect(await botOn(fx.local, nova.id)).toBeUndefined();
+  // Made already held: never live here, not even if the app quits before the move holds it.
+  const made = await fx.local("POST", "/api/bots", creation);
   expect(made.status, JSON.stringify(made.body)).toBe(201);
-  const arriving = await move(fx.local, nova.id, { state: "returning", team: MY_CLOUD, arrival: true });
-  expect(arriving.status, JSON.stringify(arriving.body)).toBe(200);
   expect(await botOn(fx.local, nova.id)).toMatchObject({ hidden: true, movedTo: { back: true, arrival: true } });
+  await liveOnlyOn(nova.id, "cloud");
+  await fx.relaunch({ kill: true });
+  expect(await move(fx.local, nova.id, { state: "returning", team: MY_CLOUD }), "a later try takes it").toMatchObject({ status: 200, body: { movedTo: { arrival: true } } });
   await liveOnlyOn(nova.id, "cloud");
   expect((await fx.local("DELETE", `/api/bot-moves/${nova.id}`)).status).toBe(200);
   expect(await botOn(fx.local, nova.id), "kept, as the line of where it lives").toMatchObject({ hidden: true, movedTo: { state: "moved", team: MY_CLOUD } });
   await liveOnlyOn(nova.id, "cloud");
   expect(await move(fx.local, nova.id, { state: "returning", team: MY_CLOUD }), "the next try takes that line").toMatchObject({ status: 200, body: { movedTo: { back: true } } });
   expect((await fx.local("DELETE", `/api/bot-moves/${nova.id}`)).status).toBe(200);
-}, hostTimeout(60_000));
+}, hostTimeout(120_000));
