@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { HeadlessIo } from "./output.ts";
 import { runHeadless } from "./main.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 type Rec = Record<string, any>;
 const URL_ENV = { OPENMAUSBOT_URL: "http://127.0.0.1:19999" };
@@ -118,10 +119,10 @@ describe("run", () => {
   });
 
   it("refuses a server that cannot report a job before sending anything (exit 5)", async () => {
-    const h = harness([], { jobRead: () => { throw Object.assign(new Error("OpenMausBot API error (404): not found"), { status: 404 }); } });
+    const h = harness([], { jobRead: () => { throw Object.assign(new Error(`${APP_NAME} API error (404): not found`), { status: 404 }); } });
     const { code, result } = await h.run(["run", "--bot", "lead", "Go", "--json"]);
     expect(code).toBe(5);
-    expect(result).toMatchObject({ ok: false, exitCode: 5, error: "this OpenMausBot server cannot report a conversation's job" });
+    expect(result).toMatchObject({ ok: false, exitCode: 5, error: `this ${APP_NAME} server cannot report a conversation's job` });
     expect(h.calls.map((call) => call.name)).toEqual(["create_task"]);
   });
 });
@@ -218,7 +219,7 @@ describe("wait", () => {
 
   it("keeps waiting on the same job when the server drops for a moment, and gives up on a refusal", async () => {
     const dropped = Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
-    const proxy = Object.assign(new Error("OpenMausBot API error (502): Bad Gateway"), { status: 502 });
+    const proxy = Object.assign(new Error(`${APP_NAME} API error (502): Bad Gateway`), { status: 502 });
     const h = harness([waited("timed-out", "timed-out", job("running", "v1")), waited("settled", "completed", job("completed", "v2"))], { drops: [dropped] });
     const first = h.run(["wait", "--thread", "t1", "--since", "1000", "--json"]);
     const { code, progress } = await first;
@@ -226,7 +227,7 @@ describe("wait", () => {
     expect(progress.filter((event: Rec) => event.event === "reconnecting")).toEqual([{ event: "reconnecting", inMs: 1_000, threadId: "t1" }]);
     expect(h.calls.filter((call) => call.name === "wait_for_conversation").map((call) => call.args.since_ms)).toEqual([1_000, 1_000, 1_000]);
     expect((await harness([waited("settled", "completed", job("completed", "v1"))], { drops: [proxy] }).run(["wait", "--thread", "t1", "--json"])).code).toBe(0);
-    const refused = Object.assign(new Error("OpenMausBot API error (401): {\"error\":\"unauthorized\"}"), { status: 401 });
+    const refused = Object.assign(new Error(`${APP_NAME} API error (401): {"error":"unauthorized"}`), { status: 401 });
     const gone = harness([waited("settled", "completed", job("completed", "v1"))], { drops: [refused] });
     expect((await gone.run(["wait", "--thread", "t1", "--json"])).code).toBe(4);
     expect(gone.calls.filter((call) => call.name === "wait_for_conversation")).toHaveLength(1);

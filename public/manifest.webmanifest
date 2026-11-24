@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "OpenMausBot",
-  "short_name": "OpenMausBot",
+  "name": "AnAnt",
+  "short_name": "AnAnt",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

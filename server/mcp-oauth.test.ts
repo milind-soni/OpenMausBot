@@ -9,6 +9,7 @@ import type { McpOAuthClientConfig } from "./mcp-registry.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
 import { startFakeOAuth, type FakeOAuth, type FakeOAuthOptions } from "./testing/fake-oauth-server.ts";
 import { withFreeSignInPort } from "./testing/ports.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 let dir: string;
 let oauth: FakeOAuth;
@@ -117,19 +118,19 @@ describe("McpOAuthManager sign-in", () => {
   it("shows the server's own reason when it refuses to register the app", async () => {
     await setup({ registerRefusal: { status: 429, body: { error: "too_many_requests", error_description: "Too many client registrations from this address. Please try again in an hour." }, headers: { "retry-after": "3600" } } });
     const error = await manager.start("docs", mcp.url).catch((cause: unknown) => cause);
-    expect((error as Error).message).toBe("This server would not register OpenMausBot for sign-in (HTTP 429): Too many client registrations from this address. Please try again in an hour. It asked to wait: Retry-After 3600 seconds. Try again later.");
+    expect((error as Error).message).toBe(`This server would not register ${APP_NAME} for sign-in (HTTP 429): Too many client registrations from this address. Please try again in an hour. It asked to wait: Retry-After 3600 seconds. Try again later.`);
   });
 
   it("keeps the plain refusal when the server gives no reason", async () => {
     await setup({ registerRefusal: { status: 500, body: {} } });
     const error = await manager.start("docs", mcp.url).catch((cause: unknown) => cause);
-    expect((error as Error).message).toBe("This server would not register OpenMausBot for sign-in. Try again later.");
+    expect((error as Error).message).toBe(`This server would not register ${APP_NAME} for sign-in. Try again later.`);
   });
 
   it("still reports the refusal when the body is JSON null", async () => {
     await setup({ registerRefusal: { status: 429, body: null, headers: { "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" } } });
     const error = await manager.start("docs", mcp.url).catch((cause: unknown) => cause);
-    expect((error as Error).message).toBe("This server would not register OpenMausBot for sign-in (HTTP 429). It asked to wait: Retry-After Wed, 21 Oct 2026 07:28:00 GMT. Try again later.");
+    expect((error as Error).message).toBe(`This server would not register ${APP_NAME} for sign-in (HTTP 429). It asked to wait: Retry-After Wed, 21 Oct 2026 07:28:00 GMT. Try again later.`);
   });
 
   it("refuses a server that does not use OAuth", async () => {
@@ -731,7 +732,7 @@ describe("McpOAuthManager with a failing onSettled", () => {
     const started = await manager.start("docs", mcp.url);
     const page = await approve(started);
     expect(page.status).toBe(200);
-    expect(await page.text()).toBe("Signed in. You can close this tab and return to OpenMausBot.");
+    expect(await page.text()).toBe(`Signed in. You can close this tab and return to ${APP_NAME}.`);
     expect(manager.authState("docs", mcp.url)).toBe("signed-in");
     await manager.start("docs", mcp.url);
     await expect.poll(() => heard).toEqual(["succeeded", "expired"]);
@@ -763,7 +764,7 @@ describe("McpOAuthManager sign-in from a browser on another computer", () => {
     const callback = await returnAddress(started);
     expect(callback.origin + callback.pathname).toBe("https://cloud.example/mcp-oauth/callback");
     const page = await manager.publicCallback("cloud.example", callback.search);
-    expect(page).toEqual({ status: 200, text: "Signed in. You can close this tab and return to OpenMausBot." });
+    expect(page).toEqual({ status: 200, text: `Signed in. You can close this tab and return to ${APP_NAME}.` });
     expect(manager.status("docs", started.flowId, "alice")?.phase).toBe("succeeded");
     expect(oauth.isValid(`Bearer ${await manager.accessToken("docs", mcp.url)}`)).toBe(true);
 
@@ -780,7 +781,7 @@ describe("McpOAuthManager sign-in from a browser on another computer", () => {
     const forged = new URLSearchParams(callback.search);
     forged.set("state", "forged");
     for (const [host, search] of [["cloud.example", `?${forged}`], ["attacker.example", callback.search], [undefined, callback.search], ["cloud.example", ""]] as const) {
-      expect(await manager.publicCallback(host, search)).toEqual({ status: 400, text: "Invalid sign-in callback. Return to OpenMausBot and try again." });
+      expect(await manager.publicCallback(host, search)).toEqual({ status: 400, text: `Invalid sign-in callback. Return to ${APP_NAME} and try again.` });
     }
     expect(manager.status("docs", started.flowId, "alice")?.phase).toBe("waiting");
     expect(oauth.counts.token).toBe(0);

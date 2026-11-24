@@ -1,3 +1,4 @@
+import { PRODUCT_NAME } from "./product-name.ts";
 // A bot on the person's own Cloud that needs their computer (its apps and screen, its files, or its terminal) when it
 // isn't available asks once with a card: what it wants and why, why it isn't available, and the one-tap fix. The English
 // mirrors src/locales/en.json `computerAsk.*` exactly (a test holds them together): the server has no i18n.
@@ -83,7 +84,7 @@ export const COMPUTER_ASK_WORDS = {
 export type ComputerAskKey = keyof typeof COMPUTER_ASK_WORDS;
 
 /** The product's name as the person reads it, as the app fills `{app}`. */
-export const COMPUTER_ASK_APP = "MausBot";
+export const COMPUTER_ASK_APP = PRODUCT_NAME;
 
 export function computerAskText(key: ComputerAskKey, params: Record<string, string>): string {
   return COMPUTER_ASK_WORDS[key].replace(/\{(\w+)\}/g, (whole, name: string) => (name === "app" ? params.app ?? COMPUTER_ASK_APP : params[name] ?? whole));

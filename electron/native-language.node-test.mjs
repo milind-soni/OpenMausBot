@@ -10,6 +10,8 @@ import { createActivityWindow } from "./lending-activity-window.mjs";
 import { createLendingIndicator } from "./lending-indicator.mjs";
 import { createSystemTray } from "./system-tray.mjs";
 import product from "../product.json" with { type: "json" };
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 const APP = product.name;
 
 const require = createRequire(import.meta.url);
@@ -103,5 +105,5 @@ test("a new language redraws main's menu, both trays, the window title and the b
   assert.deepEqual(calls, [["menu", "Servidor"], ["title", `${APP} — Hospedado: Office (office.example.test)`], ["badge", "Nenhuma conversa não lida"]]);
   assert.deepEqual(said(trays[0]), [`Abrir o ${APP}`, `Sair do ${APP}`]);
   assert.deepEqual(said(trays[1]), ["My Cloud com acesso a este PC", "Pausar", "Permitir que os Clouds executem comandos neste PC", "Ver atividade"]);
-  assert.equal(trays[1].tip, "OpenMausBot: My Cloud com acesso a este PC");
+  assert.equal(trays[1].tip, `${APP_NAME}: My Cloud com acesso a este PC`);
 });

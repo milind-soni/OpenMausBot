@@ -15,6 +15,7 @@ import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 import { markLeftBehind } from "./testing/cloud-left-behind.ts";
 import { freePortBlock } from "./testing/ports.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const HOST = "omb-t-0123456789ab.fly.dev";
@@ -42,7 +43,7 @@ async function api(method: string, path: string, options: { body?: unknown; toke
 }
 
 async function adminPairing(): Promise<string> {
-  const body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 });
+  const body = JSON.stringify({ label: `${APP_NAME} app (Cloud)`, ttlSeconds: 300 });
   const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
   const response = await fetch(`${base}/api/cloud/pairing`, { method: "POST", headers: {
     host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", "content-type": "application/json",
@@ -524,7 +525,7 @@ it("My Cloud remembers a lent computer across its restart, says it is offline by
   expect(away.say, "on the person's own Cloud the bot asks with a card instead of explaining the fix").toContain("If the request needs it, call ask_for_computer");
   const refused = await call("shared_computer", { computer_id: id, action: "list_files", folder_id: randomUUID(), path: "." });
   expect(refused.isError).toBe(true);
-  expect(JSON.stringify(refused)).toContain(`is offline: OpenMausBot on that ${device} is closed, or the ${device} is asleep or off.`);
+  expect(JSON.stringify(refused)).toContain(`is offline: ${APP_NAME} on that ${device} is closed, or the ${device} is asleep or off.`);
   for (const text of [away.say, JSON.stringify(refused)]) if (device !== "Mac") expect(text).not.toMatch(/\bMac\b/u);
 
   // Lent again from the same computer, then paused there: no longer lent, not merely offline.
@@ -535,7 +536,7 @@ it("My Cloud remembers a lent computer across its restart, says it is offline by
   await expect.poll(async () => (await api("GET", "/api/shared-computers", { token: owner })).body.known, { timeout: 5000 })
     .toEqual([expect.objectContaining({ online: false, lent: false, scopes: { folders: 0, terminal: false, screen: true, internet: false, chrome: false } })]);
   call = await ask();
-  expect(JSON.parse((await call("list_shared_computers")).content[0].text).say).toMatch(new RegExp(`^Their ${device} .+ no longer shares itself with the Cloud: OpenMausBot on it is paused`, "u"));
+  expect(JSON.parse((await call("list_shared_computers")).content[0].text).say).toMatch(new RegExp(`^Their ${device} .+ no longer shares itself with the Cloud: ${APP_NAME} on it is paused`, "u"));
   connector.close();
   connector = undefined;
   rmSync(join(home, "desktop-profile"), { recursive: true, force: true });

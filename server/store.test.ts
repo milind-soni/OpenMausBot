@@ -27,6 +27,7 @@ import { TeamComputers } from "./team-computers.ts";
 import { allowsTool } from "../shared/tool-scope.ts";
 import { approvalModeFor } from "../shared/approval-mode.ts";
 import { readRegistry, writeRegistry } from "./testing/registry.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
 
@@ -1720,19 +1721,19 @@ describe("Store", () => {
     expect(reloaded.bots[0]?.chiefOfStaff).toBe(true);
   });
 
-  it("seedIfEmpty makes the new install's Chief its MausBot in chrome, introduced, and no bot after it takes chrome or silver in turn", () => {
+  it(`seedIfEmpty makes the new install's Chief its ${PRODUCT_NAME} in chrome, introduced, and no bot after it takes chrome or silver in turn`, () => {
     const store = new Store(selection);
     store.seedIfEmpty();
     const chief = store.bots[0]!;
-    expect(chief).toMatchObject({ name: "MausBot", color: "chrome", chiefOfStaff: true, defaultBot: {} });
+    expect(chief).toMatchObject({ name: `${PRODUCT_NAME}`, color: "chrome", chiefOfStaff: true, defaultBot: {} });
     expect(store.messagesFor(chief.threadId).map((message) => [message.kind, message.helperIntro, message.card?.options.length])).toEqual([["options", true, 4]]);
-    expect(store.messagesFor(chief.threadId)[0]!.text).toContain("Hey! I'm MausBot. I'm new here. I'm here to be your Chief of Staff.");
+    expect(store.messagesFor(chief.threadId)[0]!.text).toContain(`Hey! I'm ${PRODUCT_NAME}. I'm new here. I'm here to be your Chief of Staff.`);
     const later = Array.from({ length: 25 }, () => store.createBot());
     expect(later.map((bot) => bot.color)).not.toContain("silver");
     expect(later.map((bot) => bot.color)).not.toContain("chrome");
     expect(later[0]?.color).toBe("blue");
-    expect(later.map((bot) => bot.name)).not.toContain("MausBot");
-    expect(new Store(selection).bot(chief.id)).toMatchObject({ name: "MausBot", color: "chrome", defaultBot: {} });
+    expect(later.map((bot) => bot.name)).not.toContain(`${PRODUCT_NAME}`);
+    expect(new Store(selection).bot(chief.id)).toMatchObject({ name: `${PRODUCT_NAME}`, color: "chrome", defaultBot: {} });
   });
 
   it("seedIfEmpty leaves an existing workspace without a Chief as it is", () => {
@@ -2759,7 +2760,7 @@ describe("soul", () => {
   it("on a Team Cloud, gives a member's Chief's apps only to the bot it makes for that member", () => {
     const store = new Store(selection);
     const ada = "ada@acme.test";
-    const chief = store.createBot({ name: "Ada's MausBot", section: "Sales", createdBy: ada, visibility: { people: [ada] } });
+    const chief = store.createBot({ name: `Ada's ${PRODUCT_NAME}`, section: "Sales", createdBy: ada, visibility: { people: [ada] } });
     store.patchBot(chief.id, { chiefOfStaff: true, connectorTools: { gmail: { tools: "*" }, slack: { tools: ["SLACK_SEND_MESSAGE"] } },
       connectorScopes: { apps: { gmail: "write", slack: "read" } } });
     const helper = createdBy(store, chief, "ada-helper");

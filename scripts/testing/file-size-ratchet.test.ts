@@ -49,7 +49,7 @@ const LINES: Record<string, number> = {
   "electron/computer-sharing.mjs": 1002,
   "server/browser-runtime.ts": 1001,
   "server/message-db.ts": 1001,
-  "electron/data-dir-lease.node-test.mjs": 846, // the data-folder lease's own tests: many platform cases (Windows probes in data-dir-lease-windows.node-test.mjs)
+  "electron/data-dir-lease.node-test.mjs": 848, // the data-folder lease's own tests: many platform cases (Windows probes in data-dir-lease-windows.node-test.mjs)
 };
 
 function sourceFiles(): string[] {

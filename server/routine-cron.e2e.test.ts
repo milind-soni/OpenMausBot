@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { nextCronRuns } from "../shared/routine-schedule.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 it("takes cron through the real routine tools, applying the bot's own routine at once, preserving its zone and rejecting invalid API input", async () => {
   const fixture = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
@@ -59,7 +60,7 @@ it("takes cron through the real routine tools, applying the bot's own routine at
     const current = async () => (await api("GET", "/api/routines")).routines.find((routine: any) => routine.id === routineId);
     expect(await current()).toMatchObject({ schedule, enabled: true, runOn: "maus", overlap: "queue", runOnStartup: true });
     expect(create.subtitle).toContain("Queue one scheduled run");
-    expect(create.subtitle).toContain("On startup: Also runs once each time OpenMausBot starts");
+    expect(create.subtitle).toContain(`On startup: Also runs once each time ${APP_NAME} starts`);
     expect((await current()).nextRunAt).toBe(nextCronRuns(schedule, create.routineRequest.createdAt, 1)[0]);
 
     const cardCount = (await messages()).filter(message => message.card?.routineRequest).length;

@@ -30,6 +30,7 @@ vi.mock("../SettingsPrimitives", async (importOriginal) => {
 
 import { SettingsModal } from "../SettingsModal";
 import { profileMenuItems } from "../SidebarProfileMenu";
+import { PRODUCT_NAME } from "../../../shared/product.ts";
 
 const COMPANION = { state: () => new Promise(() => {}) };
 const desktopHere = (extra: Record<string, unknown> = {}) => ({ ogb: { platform: "darwin", companion: COMPANION, environments: { state: () => new Promise(() => {}) }, ...extra } });
@@ -72,9 +73,9 @@ describe("the Settings window", () => {
   it("says which place a place page changes, and that account and app pages stay the same, without “place” for a person with one place", () => {
     expect(render("phone")).toContain("This computer");
     const account = render("account");
-    expect(account).toContain("Your MausBot account");
+    expect(account).toContain(`Your ${PRODUCT_NAME} account`);
     expect(account).not.toContain("Same on every place");
-    expect(render("appearance")).toContain("MausBot on this device");
+    expect(render("appearance")).toContain(`${PRODUCT_NAME} on this device`);
   });
 
   const SIMPLE_NAV = ["overview", "phone", "ai", "vault", "usage", "transfer", "account", "plan", "app", "appearance"];

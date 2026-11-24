@@ -10,6 +10,7 @@ import type { ComputerAskCard } from "../../shared/computer-ask";
 import { ApprovalCard } from "./ApprovalCard";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
 import { RELEASES_URL } from "@/lib/app-links";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 afterEach(() => setLocale("en"));
 
@@ -74,9 +75,9 @@ describe("a bot's ask to turn on what it needs from the person's computer", () =
 
   it("when the app there is the fix, links to it instead of a Turn on that can't work", () => {
     const markup = panel(ask({ reason: "closed" }));
-    expect(markup).toContain("MausBot isn&#x27;t open on your PC. Open it there and Scout carries on.");
+    expect(markup).toContain(`${PRODUCT_NAME} isn&#x27;t open on your PC. Open it there and Scout carries on.`);
     expect(markup).toContain(`href="${RELEASES_URL}/latest"`);
-    expect(markup).toContain(">Get MausBot</a>");
+    expect(markup).toContain(`>Get ${PRODUCT_NAME}</a>`);
     expect(markup).not.toContain(">Turn on</button>");
   });
 

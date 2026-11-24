@@ -16,6 +16,8 @@ import { actingBot, createLendingIndicator, indicatorText } from "./lending-indi
 import { createLendingTarget } from "./lending-target.mjs";
 import { WORDS } from "./lending-words.mjs";
 import nativeText from "./native-text.cjs";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 const HOME = "https://omb-u-fixture.fly.dev", OTHER = "https://omb-c-client-a.fly.dev", TEAM = "https://omb-t-acme.fly.dev";
 const myCloud = { id: "my-cloud", name: "My Cloud", origin: HOME, home: true };
@@ -481,7 +483,7 @@ test("through the home folder, keys, passwords, sign-ins and git secrets stay pr
 test("a Cloud's bot needing apps and screen on a Mac that lacks only macOS's permissions asks macOS for them, and says how to allow them", async t => {
   const homes = { [HOME]: cloudHome() };
   const asked = [];
-  const missing = { mode: "unavailable", reason: "Error: Accessibility and Screen Recording required; grant access in System Settings and restart OpenMausBot" };
+  const missing = { mode: "unavailable", reason: `Error: Accessibility and Screen Recording required; grant access in System Settings and restart ${APP_NAME}` };
   const mac = await computer(t, { homes, places: [myCloud], screen: () => true, cuaConnection: async () => missing, askForScreen: connection => asked.push(connection) });
   mac.sharing.start();
   await until(() => homes[HOME].connects.length === 1, "lending to start");
@@ -489,7 +491,7 @@ test("a Cloud's bot needing apps and screen on a Mac that lacks only macOS's per
   homes[HOME].push({ action: "computer_tools" });
   await until(() => homes[HOME].results.length === 1, "the answer");
   assert.deepEqual(asked, [missing]);
-  assert.match(homes[HOME].results[0].content[0].text, /allow Accessibility and Screen Recording for OpenMausBot in System Settings/);
+  assert.match(homes[HOME].results[0].content[0].text, new RegExp(String.raw`allow Accessibility and Screen Recording for ${APP_NAME} in System Settings`));
 });
 
 test("the move's project folders are lent to My Cloud with editing on top; while paused the move is told to try later", async t => {
@@ -561,7 +563,7 @@ test("the menu names each bot using this Mac with its colour dot; See activity i
   bot.click();
   assert.deepEqual(clicked, ["activity"]);
   assert.equal(trays[0].title, "IT Support and Client A are using this Mac");
-  assert.equal(trays[0].tip, "OpenMausBot: IT Support on My Cloud is using this Mac. Client A is using this Mac");
+  assert.equal(trays[0].tip, `${APP_NAME}: IT Support on My Cloud is using this Mac. Client A is using this Mac`);
   indicator.update({ clouds: ["My Cloud"], using: ["My Cloud"], bots: [{ name: "Helper", color: null, cloud: "My Cloud" }] });
   assert.deepEqual([labels()[0], trays[0].menu[0].icon], ["Helper on My Cloud is using this Mac", undefined], "no dot for a colour this app doesn't know");
   indicator.update({ clouds: ["My Cloud"], using: ["My Cloud"], bots: [{ name: "Helper", color: "red", cloud: "My Cloud" }], paused: true });
@@ -589,7 +591,7 @@ test("the menu-bar item: which Clouds are using this Mac, Pause or Resume, the t
   assert.equal(trays.length, 1);
   assert.deepEqual(labels(), ["Client A is using this Mac", "-", "Pause", "Let Clouds run commands on this Mac", "See activity"]);
   assert.equal(trays[0].title, "Client A is using this Mac");
-  assert.equal(trays[0].tip, "OpenMausBot: Client A is using this Mac");
+  assert.equal(trays[0].tip, `${APP_NAME}: Client A is using this Mac`);
   trays[0].menu.find(item => item.label === "Pause").click();
   trays[0].menu.find(item => item.label === "See activity").click();
   indicator.update({ clouds: ["My Cloud"], using: [], paused: true });

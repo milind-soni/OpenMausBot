@@ -10,6 +10,7 @@ import { WHATS_NEW_NOTICE } from "@/lib/notices";
 import { EMPTY_ONBOARDING, MET_CHIEF_HINT, WELCOME_VERSION } from "@/lib/onboarding";
 import { saveWelcomeDraft } from "@/lib/welcome-draft";
 import type { InstanceInfo } from "@/state/store";
+import { PRODUCT_NAME } from "../../../shared/product.ts";
 
 const f = vi.hoisted(() => ({ state: {} as Record<string, unknown>, dispatch: vi.fn(), api: vi.fn(), landed: vi.fn(), onDone: vi.fn(),
   checks: [] as string[] }));
@@ -39,7 +40,7 @@ const freeOpenCode: InstanceInfo = {
 const notInstalledOpenCode = { ...freeOpenCode, snapshot: { state: "unavailable" }, aiTest: undefined,
   install: { docsUrl: "https://example.test", server: { standalone: { version: "1", downloadBytes: 1 } } } } as InstanceInfo;
 const signIn = (): InstanceInfo => ({ ...claude(false), snapshot: { state: "available", authenticated: false }, authentication: { method: "paste-code" } } as InstanceInfo);
-const maus = { id: "maus", threadId: "t", name: "MausBot", title: "", description: "", notifications: true, color: "chrome", unread: false,
+const maus = { id: "maus", threadId: "t", name: `${PRODUCT_NAME}`, title: "", description: "", notifications: true, color: "chrome", unread: false,
   modelSelection: { instanceId: "claude", model: "m" }, messages: [], defaultBot: {}, chiefOfStaff: true };
 
 let host: HTMLDivElement, root: Root;
@@ -102,7 +103,7 @@ afterEach(async () => {
 describe("a new install's first run", () => {
   it("is two screens with an AI already working: Next, then Create, and it lands in the Chief's chat", async () => {
     await show();
-    expect(host.querySelector("h1")?.textContent).toBe("Meet MausBot");
+    expect(host.querySelector("h1")?.textContent).toBe(`Meet ${PRODUCT_NAME}`);
     expect(host.querySelector("[data-demo-composer]")?.textContent, "reduced motion shows the whole sentence").toContain("Hand off any task to your team of bots");
     for (const gone of ["Step 1", "Back", "Skip", "Your name", "Connect an AI", "Set up later"]) expect(text()).not.toContain(gone);
     expect(button("Next")!.disabled).toBe(false);
@@ -150,7 +151,7 @@ describe("the Chief step", () => {
     expect(chiefStep).toBe(false);
   };
 
-  it("is skipped once MausBot has met the person", async () => {
+  it(`is skipped once ${PRODUCT_NAME} has met the person`, async () => {
     f.state = { ...f.state, bots: [{ ...maus, welcomed: true }] };
     await finishesAtNext();
   });
@@ -160,7 +161,7 @@ describe("the Chief step", () => {
     await finishesAtNext();
   });
 
-  it("is skipped where there is no MausBot", async () => {
+  it(`is skipped where there is no ${PRODUCT_NAME}`, async () => {
     f.state = { ...f.state, bots: [] };
     await finishesAtNext();
   });
@@ -185,7 +186,7 @@ describe("with no AI working yet", () => {
   it("keeps the screen's shape: the pill signs in, and the line under it offers other ways or later", async () => {
     f.state = { ...f.state, instances: [signIn()] };
     await show();
-    expect(host.querySelector("h1")?.textContent).toBe("Meet MausBot");
+    expect(host.querySelector("h1")?.textContent).toBe(`Meet ${PRODUCT_NAME}`);
     expect(button("Next")).toBeUndefined();
     expect(button("Sign in with Claude")).toBeDefined();
     expect(button("Other ways to connect")).toBeDefined();
@@ -263,7 +264,7 @@ describe("with no AI working yet", () => {
     expect(dialog.querySelector('[data-engine-setup="claude"]')).not.toBeNull();
     await act(async () => { dialog.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
     expect(host.querySelector("[data-connect-ai]")).toBeNull();
-    expect(text(), "Escape closed the dialog only").toContain("Meet MausBot");
+    expect(text(), "Escape closed the dialog only").toContain(`Meet ${PRODUCT_NAME}`);
   });
 
   it("says why an AI didn't answer its test, under the pill and in the dialog with Check again", async () => {
@@ -304,7 +305,7 @@ describe("with no AI working yet", () => {
     await show();
     await key("Enter");
     expect(host.querySelector("[data-connect-ai]"), "Enter pressed Connect Claude").not.toBeNull();
-    expect(text()).toContain("Meet MausBot");
+    expect(text()).toContain(`Meet ${PRODUCT_NAME}`);
     await act(async () => { host.querySelector("[data-connect-ai]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
     await key("Escape");
     await tick(100);
@@ -315,7 +316,7 @@ describe("with no AI working yet", () => {
 describe("other first runs", () => {
   it("gives a hosted place's admin the first screen only, then the chat", async () => {
     await show({ hosted: true });
-    expect(text()).toContain("This is your team's shared MausBot");
+    expect(text()).toContain(`This is your team's shared ${PRODUCT_NAME}`);
     await press("Next");
     expect(text()).not.toContain("Introducing your Chief of Staff");
     expect(f.onDone).toHaveBeenCalledExactlyOnceWith(null);

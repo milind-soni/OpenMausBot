@@ -18,6 +18,7 @@ import { PHONE_JOB_TIMEOUT_MS, PHONE_SEND_TIMEOUT_MS, PhoneJobs, type PhoneJobDe
 import { PhoneRegistry, type PhoneRegistration } from "./registry.ts";
 import { phoneRpc, type PhoneRpcDeps, type PhoneToolsList } from "./rpc.ts";
 import type { PhoneToolResult } from "./tools.ts";
+import { APP_NAME, PRODUCT_NAME } from "../../shared/product.ts";
 
 const OWNER = "owner";
 const IPHONE = "companion:iphone";
@@ -33,7 +34,7 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) { await flushDecisionLog(dir); await removeTempDir(dir); }
 });
 
-const bot = (fields: Partial<BotRecord>) => ({ id: "chief", name: "MausBot", color: "teal", ...fields }) as BotRecord;
+const bot = (fields: Partial<BotRecord>) => ({ id: "chief", name: `${PRODUCT_NAME}`, color: "teal", ...fields }) as BotRecord;
 const chief = bot({ chiefOfStaff: true });
 const registration = (name: string, capabilities: PhoneRegistration["capabilities"], platform: "ios" | "android" = "ios"): PhoneRegistration =>
   ({ installId: `install-${name.replace(/\W+/g, "-")}`, name, platform, appVersion: "1.6.0", timeZone: "Asia/Kolkata", capabilities });
@@ -113,7 +114,7 @@ describe("phone MCP host", () => {
     expect(h.host.toolListing()?.phone.map((tool) => tool.name)).toEqual([...PHONE_TOOL_NAMES]);
     const rows = await h.rows();
     expect(rows.filter((row) => row.decision === "auto-approved").map((row) => row.tool)).toEqual(names);
-    expect(rows[0]).toMatchObject({ threadId: TURN.threadId, botId: "chief", botName: "MausBot", source: "connector-scope", rule: "scope:phone:calendar" });
+    expect(rows[0]).toMatchObject({ threadId: TURN.threadId, botId: "chief", botName: `${PRODUCT_NAME}`, source: "connector-scope", rule: "scope:phone:calendar" });
   });
 
   it("a read runs on the phone and the result names the phone", async () => {
@@ -130,7 +131,7 @@ describe("phone MCP host", () => {
     expect(text(result)).toContain("Omkar's iPhone");
     expect(text(result)).toContain("events");
     expect(result.structuredContent).toEqual({ phone: { name: "Omkar's iPhone", platform: "ios" }, events: [] });
-    expect(request.mock.calls[0]![3]).toMatchObject({ timeoutMs: PHONE_JOB_TIMEOUT_MS, offlineText: "Omkar's iPhone is offline. Open the MausBot app on it." });
+    expect(request.mock.calls[0]![3]).toMatchObject({ timeoutMs: PHONE_JOB_TIMEOUT_MS, offlineText: `Omkar's iPhone is offline. Open the ${PRODUCT_NAME} app on it.` });
     expect(h.registry.get(IPHONE)!.lastUsedAt).toBe(h.clock.now);
     expect(h.messages).toEqual([]);
     expect(h.checks()).toBe(2);
@@ -164,7 +165,7 @@ describe("phone MCP host", () => {
     await again;
     expect(h.messages[1]!.message).toEqual({
       role: "bot", kind: "activity", tool: { name: "mcp__device__PHONE_DELETE_EVENT", ok: true, summary: "Delete event on Omkar's iPhone", summaryCode: "chat.notice.phone.write.PHONE_DELETE_EVENT", summaryParams: { phone: "Omkar's iPhone" } },
-      from: { botId: "chief", name: "MausBot", color: "teal" },
+      from: { botId: "chief", name: `${PRODUCT_NAME}`, color: "teal" },
     });
     // A write the phone refused records no row and reaches the bot with the phone's reason.
     const failed = h.handle(call("PHONE_UPDATE_EVENT", { id: "evt-1", title: "Dentist (moved)" }));
@@ -180,7 +181,7 @@ describe("phone MCP host", () => {
     ]);
   });
 
-  it("a send goes straight to the phone: no card of OpenMausBot's own, the person taps Send there", async () => {
+  it(`a send goes straight to the phone: no card of ${APP_NAME}'s own, the person taps Send there`, async () => {
     expect(PHONE_TOOL_NAMES.filter((name) => isOutboundTool(name))).toEqual(["PHONE_RESPOND_TO_INVITE", "PHONE_SEND_MESSAGE", "PHONE_SEND_WHATSAPP"]);
     const h = harness();
     h.registry.register(IPHONE, OWNER, registration("Omkar's iPhone", { calendar: "full", messages: "send" }));
@@ -221,7 +222,7 @@ describe("phone MCP host", () => {
     const request = vi.spyOn(h.jobs, "request");
     const result = await h.handle(call("PHONE_SEND_MESSAGE", { to: "Mom", text: "On my way" })) as PhoneToolResult;
     expect(result).toMatchObject({ isError: true, structuredContent: { code: "refused" } });
-    expect(text(result)).toBe("OpenMausBot did not run this: Phone Messages is read-only for Scout, and Send message would write to it. Ask the user before trying again.");
+    expect(text(result)).toBe(`${APP_NAME} did not run this: Phone Messages is read-only for Scout, and Send message would write to it. Ask the user before trying again.`);
     expect(request).not.toHaveBeenCalled();
     expect(h.messages).toEqual([]);
     expect((await h.rows()).map((row) => [row.decision, row.rule])).toEqual([["auto-denied", "scope:phone:messages:write"]]);
@@ -264,7 +265,7 @@ describe("phone MCP host", () => {
     // Neither allows Messages: refused before any job.
     const message = await h.handle(call("PHONE_SEND_MESSAGE", { to: "Mom", text: "On my way" })) as PhoneToolResult;
     expect(message.isError).toBe(true);
-    expect(text(message)).toBe("MausBot can't use Messages on this phone: it is not allowed in the MausBot app on the phone.");
+    expect(text(message)).toBe(`${PRODUCT_NAME} can't use Messages on this phone: it is not allowed in the ${PRODUCT_NAME} app on the phone.`);
     // A named phone without the app is refused too, though another phone allows it.
     const rsvp = await h.handle(call("PHONE_RESPOND_TO_INVITE", { id: "inv-1", response: "decline", phone: "work pixel" })) as PhoneToolResult;
     expect(rsvp).toMatchObject({ isError: true, structuredContent: { code: "denied" } });
@@ -356,7 +357,7 @@ describe("phone MCP host", () => {
     await vi.advanceTimersByTimeAsync(15_000);
     const result = await pending as PhoneToolResult;
     expect(result).toMatchObject({ isError: true, structuredContent: { code: "offline" } });
-    expect(text(result)).toBe("Omkar's iPhone is offline. Open the MausBot app on it.");
+    expect(text(result)).toBe(`Omkar's iPhone is offline. Open the ${PRODUCT_NAME} app on it.`);
     expect(h.jobs.busy(IPHONE)).toBe(false);
     expect(h.registry.get(IPHONE)!.lastUsedAt).toBeNull();
   });

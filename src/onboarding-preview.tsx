@@ -8,6 +8,7 @@ import { Select } from "@/components/Select";
 import { EMPTY_ONBOARDING, type BeatId } from "@/lib/onboarding";
 import { SKINS, type SkinId } from "@/lib/skins";
 import { StoreProvider } from "@/state/store";
+import { DEFAULT_BOT_NAME } from "@/lib/default-bot";
 import "./styles.css";
 
 /** ?screen=chief&ai=0&bots=3&skin=daylight&reduced=1 opens any state directly; ?w=1338&h=870 sizes the stage. */
@@ -38,7 +39,7 @@ function fixture(url: string, ai: boolean, bots: number): unknown {
   const path = new URL(url, location.href).pathname;
   if (path === "/api/bots") {
     return { bots: [
-      bot("maus", "MausBot", "chrome", { defaultBot: {}, chiefOfStaff: true }),
+      bot("maus", DEFAULT_BOT_NAME, "chrome", { defaultBot: {}, chiefOfStaff: true }),
       ...Array.from({ length: bots }, (_, i) => bot(`bot-${i}`, NAMES[i % NAMES.length]!, COLORS[i % COLORS.length]!, { title: i % 3 === 0 ? "Finds and summarises" : "" })),
     ], groups: [], sections: [] };
   }

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createHostScreenLease, screenCheckFailedText } from "./host-screen-lease.mjs";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 const answer = (status, body) => async () => new Response(body === undefined ? "" : JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const lease = fetch => createHostScreenLease({ fetch, url: () => "http://127.0.0.1:1/api/desktop/shared-computer-control", timeoutMs: 200 });
@@ -28,10 +30,10 @@ test("a screen check that fails says so, and never that a person is using the co
   for (const [fetch, detail] of cases) {
     const said = await refusal(fetch);
     assert.match(said, detail);
-    assert.match(said, /^OpenMausBot on this computer could not check whether its screen is free \(.*\), so this call was not performed\. This is not a person using the computer\./);
+    assert.match(said, new RegExp(String.raw`^${APP_NAME} on this computer could not check whether its screen is free \(.*\), so this call was not performed\. This is not a person using the computer\.`));
     assert.doesNotMatch(said, /held by a person|in use locally/);
   }
-  assert.match(screenCheckFailedText("x"), /quit and reopen OpenMausBot/);
+  assert.match(screenCheckFailedText("x"), new RegExp(String.raw`quit and reopen ${APP_NAME}`));
 });
 
 test("an acquired lease renews with acquire and releases, sending the desktop's own capability", async () => {

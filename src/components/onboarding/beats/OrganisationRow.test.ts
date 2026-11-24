@@ -24,6 +24,7 @@ vi.mock("react", async (original) => ({
   },
 }));
 import { OrganisationRow } from "./OrganisationRow";
+import { PRODUCT_NAME } from "../../../../shared/product.ts";
 
 // These tests run a build that offers an organization portal; this fork's own product.json offers none.
 vi.mock("../../../../shared/services", async (original) => {
@@ -120,7 +121,7 @@ describe("organisation sign-in row in the welcome flow", () => {
     expect(render().html).toBe("");
     await mount();
     const html = render().html;
-    expect(html).toContain("Using MausBot at work?");
+    expect(html).toContain(`Using ${PRODUCT_NAME} at work?`);
     expect(html).toContain("Sign in with your organization.");
     expect(html).toContain("Other Admin address");
     expect(bridge.begin).not.toHaveBeenCalled();
@@ -139,7 +140,7 @@ describe("organisation sign-in row in the welcome flow", () => {
     let html = render().html;
     expect(html).toContain("Finish in your browser");
     expect(html).toContain("ABCDE-FGHIJ");
-    expect(html).not.toContain("Using MausBot at work?");
+    expect(html).not.toContain(`Using ${PRODUCT_NAME} at work?`);
     expect(onConnected).not.toHaveBeenCalled();
 
     push(connected);
@@ -158,7 +159,7 @@ describe("organisation sign-in row in the welcome flow", () => {
     button("Cancel sign-in")!.props.onClick!();
     await flush();
     expect(bridge.cancelEnrollment).toHaveBeenCalledOnce();
-    expect(render().html).toContain("Using MausBot at work?");
+    expect(render().html).toContain(`Using ${PRODUCT_NAME} at work?`);
   });
 
   it("sends another Admin address to Settings instead of asking here", async () => {

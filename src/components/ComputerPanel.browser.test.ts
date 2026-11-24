@@ -23,6 +23,7 @@ vi.mock("@/state/store", async (importOriginal) => ({
   }),
 }));
 import { ComputerPanel } from "./ComputerPanel";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 afterAll(() => vi.unstubAllGlobals());
 const bot = { id: "browser-fixture", name: "Browser fixture", modelSelection: { instanceId: "fixture" } } as Bot;
@@ -90,7 +91,7 @@ describe("Computer panel Works on", () => {
   it("lists neither on My Cloud, and says why", () => {
     const markup = computerTab({ cloudHome: true });
     expect(places(markup)).toEqual(["Auto", "Cloud desktop", "Browser", "Off"]);
-    expect(markup).toContain("Choose where this bot works. It can also use your computer whenever MausBot is open on it.");
+    expect(markup).toContain(`Choose where this bot works. It can also use your computer whenever ${PRODUCT_NAME} is open on it.`);
   });
 });
 

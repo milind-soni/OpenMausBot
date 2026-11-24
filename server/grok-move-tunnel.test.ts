@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { GROK_EXPORT_FORMAT, GROK_EXPORT_MAX_CHARS } from "../shared/grok-import.ts";
 import { createGrokMove, grokMoveCloudflared, type GrokMove } from "./grok-move-tunnel.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 const ADDRESS = "https://quiet-test-words.trycloudflare.com";
 const moves: GrokMove[] = [];
@@ -55,7 +56,7 @@ describe("the Grok Bot link", () => {
     const sent = await post(made.connectorUrl!, send("Tango"));
     expect(sent.status).toBe(200);
     expect(sent.headers.get("content-type")).toBe("application/json");
-    expect(await sent.json()).toMatchObject({ result: { content: [{ text: expect.stringContaining("Arrived in MausBot. Tango") }] } });
+    expect(await sent.json()).toMatchObject({ result: { content: [{ text: expect.stringContaining(`Arrived in ${PRODUCT_NAME}. Tango`) }] } });
     expect((await post(made.connectorUrl!, { jsonrpc: "2.0", method: "notifications/initialized" })).status).toBe(202);
     const looked = move.look(0);
     expect(looked).toMatchObject({ connectorUrl: made.connectorUrl, arrived: [{ seq: 1 }] });

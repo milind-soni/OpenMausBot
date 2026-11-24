@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 import { TalkServerError } from "./talk-server.mjs";
 import { TALK_TEXT, TALK_TIMING, createTalkSession } from "./talk-session.mjs";
+import productJson from "../product.json" with { type: "json" };
+const { name: PRODUCT_NAME } = productJson;
 
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const pick = (object, keys) => Object.fromEntries(keys.map(key => [key, object[key]]));
@@ -48,15 +50,15 @@ const holdAsk = updates => {
 test("the box's words and timings are fixed", () => {
   assert.deepEqual(TALK_TIMING, { replyHideMs: 12_000, noticeHideMs: 4_000, stillWorkingMs: 120_000, hoverRecheckMs: 500, maxListenMs: 60_000 });
   assert.deepEqual(TALK_TEXT, {
-    busy: "Voice is in use in MausBot",
-    serverDown: "Open MausBot to talk",
-    starting: "MausBot is still starting. Try again in a moment.",
-    noMausbot: "Set up MausBot first, then try again.",
-    moved: "MausBot lives on My Cloud now — talk to it there",
+    busy: `Voice is in use in ${PRODUCT_NAME}`,
+    serverDown: `Open ${PRODUCT_NAME} to talk`,
+    starting: `${PRODUCT_NAME} is still starting. Try again in a moment.`,
+    noMausbot: `Set up ${PRODUCT_NAME} first, then try again.`,
+    moved: `${PRODUCT_NAME} lives on My Cloud now — talk to it there`,
     permission: "Talking needs Microphone + Speech Recognition access — System Settings → Privacy & Security.",
     dictationOff: "Turn on Dictation in System Settings → Keyboard, then try again.",
     unavailable: "Talking couldn't start. Try again.",
-    failed: "MausBot couldn't take that · Open chat",
+    failed: `${PRODUCT_NAME} couldn't take that · Open chat`,
   });
   assert.ok(Object.isFrozen(TALK_TIMING));
   assert.ok(Object.isFrozen(TALK_TEXT));
@@ -135,7 +137,7 @@ test("voice in use refuses without listening", () => {
   const h = harness({ busy: true }); h.session.press();
   assert.deepEqual(h.starts, []);
   assert.equal(h.prepares, 0);
-  assert.deepEqual(h.views, [{ state: "error", text: "Voice is in use in MausBot", textCode: "native.talk.voiceBusy" }]);
+  assert.deepEqual(h.views, [{ state: "error", text: `Voice is in use in ${PRODUCT_NAME}`, textCode: "native.talk.voiceBusy" }]);
   mock.timers.tick(3_999); assert.equal(h.closed, 0);
   mock.timers.tick(1); assert.equal(h.closed, 1);
 });
@@ -179,12 +181,12 @@ test("permission and setup problems say what to fix, in the composer's words: on
   }
 });
 
-test("a server that can't take asks says why and stops listening: down, still starting, no MausBot, or moved to My Cloud", async () => {
+test(`a server that can't take asks says why and stops listening: down, still starting, no ${PRODUCT_NAME}, or moved to My Cloud`, async () => {
   const notices = [
-    ["server-down", "Open MausBot to talk", "native.talk.openMausBot"],
+    ["server-down", `Open ${PRODUCT_NAME} to talk`, "native.talk.openMausBot"],
     ["starting", TALK_TEXT.starting, "native.talk.starting"],
     ["no-mausbot", TALK_TEXT.noMausbot, "native.talk.setUpFirst"],
-    ["moved", "MausBot lives on My Cloud now — talk to it there", "native.talk.movedToCloud"],
+    ["moved", `${PRODUCT_NAME} lives on My Cloud now — talk to it there`, "native.talk.movedToCloud"],
   ];
   for (const [code, text, textCode] of notices) {
     const h = harness({ prepare: async () => { throw new TalkServerError(code); } });
@@ -199,7 +201,7 @@ test("a server that can't take asks says why and stops listening: down, still st
   }
 });
 
-test("a server that goes away as the words are sent says Open MausBot to talk", async () => {
+test(`a server that goes away as the words are sent says Open ${PRODUCT_NAME} to talk`, async () => {
   let fail;
   const late = harness({ prepare: () => new Promise((_, reject) => { fail = reject; }) });
   late.session.press(); say(late, "hello"); release(late); await flush();
@@ -317,7 +319,7 @@ test("replaced while listening closes the box and nothing is sent", async () => 
   assert.equal(h.starts.length, 2);
 });
 
-test("clicking the box opens the chat; before the chat is known it only brings MausBot forward", async () => {
+test(`clicking the box opens the chat; before the chat is known it only brings ${PRODUCT_NAME} forward`, async () => {
   const idle = harness(); idle.session.open();
   assert.deepEqual(idle.opened, []); assert.equal(idle.closed, 0);
 

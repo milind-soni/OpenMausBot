@@ -8,6 +8,7 @@ import { buildTurnContext, replaysNatively } from "../turn-context.ts";
 import { instanceConfigs } from "../config.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 import { flushNativeLogs } from "./native.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 describe("OpenAICompatDriver", () => {
   const savedUrl = process.env.OPENAI_COMPAT_URL;
@@ -868,7 +869,7 @@ describe("OpenAICompatDriver", () => {
     ]);
     expect(messages.at(-1)).toEqual({
       role: "user",
-      content: "Context from OpenMausBot updated since this conversation started; it replaces any earlier copy:\n\nMemory: likes quiet hours.\n\nhello",
+      content: `Context from ${APP_NAME} updated since this conversation started; it replaces any earlier copy:\n\nMemory: likes quiet hours.\n\nhello`,
     });
 
     await inst.adapter.sendTurn({
@@ -885,7 +886,7 @@ describe("OpenAICompatDriver", () => {
   });
 
   describe("replays what each earlier user message actually carried", () => {
-    const NOTE = "Context from OpenMausBot updated since this conversation started; it replaces any earlier copy:\n\n";
+    const NOTE = `Context from ${APP_NAME} updated since this conversation started; it replaces any earlier copy:\n\n`;
     // index.ts stamps the turn text (clock, recall) but stores only what the person typed.
     const clock = (minute: string) => `Current time when this message was sent: Friday, 2026-10-09 18:${minute} UTC (UTC+00:00).\n\n`;
 
@@ -969,7 +970,7 @@ describe("OpenAICompatDriver", () => {
       expect(third.slice(0, second.length)).toEqual(second);
       expect(third.at(-1)).toEqual({
         role: "user",
-        content: "The OpenMausBot context notes from earlier in this conversation have been cleared; the standing instructions still apply.\n\nagain",
+        content: `The ${APP_NAME} context notes from earlier in this conversation have been cleared; the standing instructions still apply.\n\nagain`,
       });
       await done();
     });

@@ -13,6 +13,7 @@ import type { PublicSession } from "../sessions.ts";
 import type { Message, StoreChange } from "../store.ts";
 import { createDevsReports, DEVS_REPORTS_FILE, fixedLine, LONGEST_WAIT_MS, NO_ANSWER_MS, RETRY_MS, sentLine, STATUS_EVERY_MS, STATUS_FIRST_MS, TRACKED_MS,
   type DevsReportsDeps } from "./devs-reports.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -164,7 +165,7 @@ describe("a message that tags @devs", () => {
     expect(fx.reports.note("rover-main", false)).toBe("");
     fx.busy.delete("rover-main");
     await fx.settle();
-    expect(fx.sent[1]!.description).toContain("the bot's engine cannot use OpenMausBot's tools");
+    expect(fx.sent[1]!.description).toContain(`the bot's engine cannot use ${APP_NAME}'s tools`);
     expect(fx.sent[1]!.diagnostics).toContain("Engine: Codex (codex), model gpt-5.5, effort high");
 
     fx.person("scout-main", "@devs it failed");
@@ -348,7 +349,7 @@ describe("what the person is told, in their language", () => {
     fx.person("scout-main", "@devs o botão travou");
     fx.advance(NO_ANSWER_MS);
     await fx.settle();
-    expect(fx.notices("scout-main")).toEqual(["notice: Enviado à equipe do MausBot (relatório report-1). Milind e Omkar recebem por e-mail e vão responder para ada@example.com."]);
+    expect(fx.notices("scout-main")).toEqual([`notice: Enviado à equipe do MausBot (relatório report-1). Milind e Omkar recebem por e-mail e vão responder para ada@example.com.`]);
     expect(fx.store.activePath("scout-main").at(-1)?.tool?.nameCode).toBeUndefined();
     fx.stop();
   });
@@ -362,7 +363,7 @@ describe("what the person is told, in their language", () => {
     fx.busy.add("scout-main");
     fx.reports.note("scout-main", true);
     const answer = await fx.call("scout", "scout-main", { went_wrong: "Bilder laden nicht" });
-    const line = "An das MausBot-Team gesendet (Bericht report-1). Milind und Omkar bekommen ihn per E-Mail und antworten dir an ada@example.com.";
+    const line = `An das MausBot-Team gesendet (Bericht report-1). Milind und Omkar bekommen ihn per E-Mail und antworten dir an ada@example.com.`;
     expect(answer.body.text).toBe(`Sent. Tell the person this line in your reply, word for word: "${line}"`);
     fx.bot("scout-main", "Ich schaue mir das an.", { turnId: "t1", turnSucceeded: true });
     fx.busy.delete("scout-main");
@@ -377,7 +378,7 @@ describe("what the person is told, in their language", () => {
     fx.busy.add("scout-main");
     fx.reports.note("scout-main", true);
     const answer = await fx.call("scout", "scout-main", { went_wrong: "offline" });
-    const waiting = "Noch nicht gesendet: der Server des MausBot-Teams war nicht erreichbar. Der Bericht ist gespeichert und wird so bald wie möglich von selbst gesendet, du musst ihn also nicht noch einmal senden.";
+    const waiting = `Noch nicht gesendet: der Server des MausBot-Teams war nicht erreichbar. Der Bericht ist gespeichert und wird so bald wie möglich von selbst gesendet, du musst ihn also nicht noch einmal senden.`;
     expect(answer.body.text).toBe(`Not sent. Tell the person this line in your reply, word for word: "${waiting}"`);
     fx.bot("scout-main", waiting, { turnId: "t1", turnSucceeded: true });
     fx.busy.delete("scout-main");
@@ -385,7 +386,7 @@ describe("what the person is told, in their language", () => {
     expect(fx.notices("scout-main")).toEqual([]);
     fx.advance(RETRY_MS[0]);
     await fx.settle();
-    expect(fx.notices("scout-main")).toEqual(["notice: An das MausBot-Team gesendet (Bericht report-2), nachdem ein früherer Versuch nicht geklappt hat. Milind und Omkar bekommen ihn per E-Mail."]);
+    expect(fx.notices("scout-main")).toEqual([`notice: An das MausBot-Team gesendet (Bericht report-2), nachdem ein früherer Versuch nicht geklappt hat. Milind und Omkar bekommen ihn per E-Mail.`]);
     fx.stop();
   });
 });
@@ -396,7 +397,7 @@ describe("a report that cannot go yet", () => {
     fx.person("scout-main", "@devs offline");
     fx.advance(NO_ANSWER_MS);
     await fx.settle();
-    expect(fx.notices("scout-main")).toEqual(["notice: Not sent yet: the MausBot team's server could not be reached. The report is saved and goes on its own as soon as it can, so there is no need to send it again."]);
+    expect(fx.notices("scout-main")).toEqual([`notice: Not sent yet: the MausBot team's server could not be reached. The report is saved and goes on its own as soon as it can, so there is no need to send it again.`]);
     const saved = JSON.parse(readFileSync(join(fx.dataDir, DEVS_REPORTS_FILE), "utf8"));
     expect(saved.outbox).toHaveLength(1);
     expect(saved.outbox[0].payload.description).toContain("offline");
@@ -411,7 +412,7 @@ describe("a report that cannot go yet", () => {
     await fx.settle();
     expect(fx.sent).toHaveLength(3);
     expect(fx.sent[2]).toEqual(fx.sent[0]);
-    expect(fx.notices("scout-main").at(-1)).toBe("notice: Sent to the MausBot team (report report-3) after an earlier try did not go through. Milind and Omkar get it by email.");
+    expect(fx.notices("scout-main").at(-1)).toBe(`notice: Sent to the MausBot team (report report-3) after an earlier try did not go through. Milind and Omkar get it by email.`);
     expect(JSON.parse(readFileSync(join(fx.dataDir, DEVS_REPORTS_FILE), "utf8")).outbox).toEqual([]);
     fx.stop();
   });
@@ -421,7 +422,7 @@ describe("a report that cannot go yet", () => {
     fx.person("scout-main", "@devs refused");
     fx.advance(NO_ANSWER_MS);
     await fx.settle();
-    expect(fx.notices("scout-main")).toEqual(["notice: The MausBot team's server refused this bug report, so nothing was sent: description must be 1 to 10,000 characters of text."]);
+    expect(fx.notices("scout-main")).toEqual([`notice: The MausBot team's server refused this bug report, so nothing was sent: description must be 1 to 10,000 characters of text.`]);
     fx.advance(RETRY_MS.at(-1)! * 2);
     await fx.settle();
     expect(fx.sent).toHaveLength(1);
@@ -436,7 +437,7 @@ describe("a report that cannot go yet", () => {
     const second = fixture({ dataDir: first.dataDir });
     await second.settle();
     expect(second.sent).toHaveLength(1);
-    expect(second.sent[0]!.description).toContain("OpenMausBot restarted before a bot wrote one");
+    expect(second.sent[0]!.description).toContain(`${APP_NAME} restarted before a bot wrote one`);
     second.stop();
     writeFileSync(join(first.dataDir, DEVS_REPORTS_FILE), "not json");
     const third = fixture({ dataDir: first.dataDir });

@@ -19,6 +19,7 @@ import { createPageSchema } from "./testing/oversized-tool-schema.ts";
 import { whopLikeCatalog } from "./testing/whop-like-catalog.ts";
 import { schemaBytes, TOOL_SCHEMA_PROFILE_ENV } from "./tool-schema-profile.ts";
 import { TOOL_LIMIT_ENV } from "./tool-count-limit.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const TOKEN = "disposable-remote-fixture-token";
 type Frame = { id?: string | number; method?: string; params?: Record<string, unknown> };
@@ -365,7 +366,7 @@ describe("remote MCP tool directory", () => {
     const [small, page] = (await request("tools/list")).result.tools;
     expect(small).toEqual(tools[0]);
     expect(schemaBytes(page.inputSchema)).toBeLessThanOrEqual(12_000);
-    expect(page.description).toContain("OpenMausBot shortened this tool's parameters to fit Kimi's size limit");
+    expect(page.description).toContain(`${APP_NAME} shortened this tool's parameters to fit Kimi's size limit`);
     const closed = once(child!, "close"); child!.kill(); await closed;
 
     start(mcpStdioServer(spec(fake.url))!);
@@ -505,7 +506,7 @@ describe("remote MCP tool directory", () => {
     expect(described.result.content[0].text.length).toBeGreaterThan(600);
     expect(JSON.parse(described.result.content[0].text).inputSchema).toEqual(padded.find((tool) => tool.name === "payments_list")!.inputSchema);
     const ran = (await call(CALL_TOOL, { name: "payments_list", arguments: { company_id: "biz_1" } })).result.content[0].text;
-    expect(ran).toContain("⚠️ TRUNCATED by OpenMausBot:");
+    expect(ran).toContain(`⚠️ TRUNCATED by ${APP_NAME}:`);
     expect(fake.calls).toEqual([{ name: "payments_list", arguments: { company_id: "biz_1" } }]);
   });
 

@@ -15,6 +15,7 @@ import { pagesHomeSignature } from "./pages/access.ts";
 import { createShareHost, readFolderFromDisk } from "./share.ts";
 import type { Routine } from "./routines.ts";
 import type { BotRecord } from "./store.ts";
+import { APP_NAME, PRODUCT_NAME } from "../shared/product.ts";
 
 const KEY = "sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const skillText = "---\nname: triage\ndescription: Sort the inbox.\n---\n\n# Triage\n\nNewest first.\n";
@@ -77,14 +78,14 @@ describe("making a template", () => {
     const department = share.export({ scope: "department", section: "Ops", bots: [bot()] }, [routine]);
     expect(department.card.tagline).toBe("");
     const departmentDetails = share.get(department.card.id).details;
-    expect(departmentDetails.summary).toMatch(/^Shared from MausBot\. Its bots, skills, group chats and routines arrive/);
+    expect(departmentDetails.summary).toMatch(new RegExp(String.raw`^Shared from ${PRODUCT_NAME}\. Its bots, skills, group chats and routines arrive`));
     expect(departmentDetails.brief).toContain("49 per seat");
     const quiet = host({ bots: [bot({ title: undefined, description: undefined })] });
     const lone = quiet.share.export({ scope: "bot", bot: bot({ title: undefined, description: undefined }) }, []);
     expect(lone.card.tagline).toBe("");
     const loneSummary = quiet.share.get(lone.card.id).details.summary ?? "";
-    expect(loneSummary).toMatch(/^Shared from MausBot\. The bot arrives as a new copy/);
-    expect(loneSummary).not.toMatch(/group chats|OpenMausBot/);
+    expect(loneSummary).toMatch(new RegExp(String.raw`^Shared from ${PRODUCT_NAME}\. The bot arrives as a new copy`));
+    expect(loneSummary.slice(`Shared from ${PRODUCT_NAME}.`.length)).not.toMatch(new RegExp(String.raw`group chats|${APP_NAME}`));
     const titled = share.export({ scope: "bot", bot: bot() }, []);
     expect(titled.card.tagline).toBe("Inbox helper");
     expect(share.get(titled.card.id).details.summary).toBe("Keeps the inbox tidy.");

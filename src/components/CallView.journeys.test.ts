@@ -9,6 +9,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppState, Bot, Group } from "@/state/store";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 type Desktop = { capabilities: DesktopCapabilities; ready: boolean };
 const fixture = vi.hoisted(() => ({ desktop: null as Desktop | null }));
@@ -301,7 +302,7 @@ describe("calling a bot off the Mac", () => {
     expect(globalThis.navigator.mediaDevices).toBeUndefined();
     chat(SERVER);
     press(callButton());
-    await vi.waitFor(() => expect(text()).toContain("Live calls need a microphone, and this window can't use one. Open MausBot at a secure https address to make the call."));
+    await vi.waitFor(() => expect(text()).toContain(`Live calls need a microphone, and this window can't use one. Open ${PRODUCT_NAME} at a secure https address to make the call.`));
     expect(text()).not.toContain("WebRTC");
     expect(text()).not.toContain(KEY_NEEDED);
     expect(requests.filter((request) => request.method !== "GET")).toEqual([]);

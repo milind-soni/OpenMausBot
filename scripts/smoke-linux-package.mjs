@@ -13,6 +13,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { linuxDisablesGpu } from "../electron/linux-gpu.mjs";
+import productJson from "../product.json" with { type: "json" };
+
+const { appName: APP_NAME } = productJson;
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const wayland = process.env.OMB_SMOKE_WAYLAND === "1";
@@ -46,7 +49,7 @@ writeFileSync(
   path.join(home, ".openmausbot", "config.json"),
   JSON.stringify({ instances: { ghost: { driver: "not-a-real-driver", displayName: "Ghost" } } }),
 );
-for (const appName of ["openmausbot", "OpenMausBot"]) {
+for (const appName of ["openmausbot", `${APP_NAME}`]) {
   const userData = path.join(xdgConfig, appName);
   mkdirSync(userData, { recursive: true, mode: 0o700 });
   chmodSync(userData, 0o700);
@@ -336,7 +339,7 @@ try {
   if (sessionBlocked) {
     await waitForExit();
     if (existsSync(marker)) throw new Error("release safety block still invoked a CUA executable");
-    const activeUserData = ["openmausbot", "OpenMausBot"]
+    const activeUserData = ["openmausbot", `${APP_NAME}`]
       .map((name) => path.join(xdgConfig, name))
       .find((directory) => existsSync(path.join(directory, "cua-connection.json")));
     if (!activeUserData) throw new Error("release safety smoke could not locate the CUA descriptor");
@@ -383,7 +386,7 @@ try {
     if (existsSync(marker)) {
       throw new Error(`packaged app invoked the ambient driver:\n${readFileSync(marker, "utf8")}`);
     }
-    const userData = ["openmausbot", "OpenMausBot"]
+    const userData = ["openmausbot", `${APP_NAME}`]
       .map((name) => path.join(xdgConfig, name))
       .find((directory) => existsSync(path.join(directory, "cua-connection.json")));
     if (!userData) throw new Error("bundled smoke could not locate the CUA descriptor");
@@ -479,7 +482,7 @@ try {
       await delay(50);
     }
     if (staleHealth?.ok) throw new Error("embedded harness survived hard Electron death");
-    const userData = ["openmausbot", "OpenMausBot"]
+    const userData = ["openmausbot", `${APP_NAME}`]
       .map((name) => path.join(xdgConfig, name))
       .find((directory) => existsSync(path.join(directory, "cua-connection.json")));
     if (!userData) throw new Error("hard-death smoke could not locate the CUA descriptor");

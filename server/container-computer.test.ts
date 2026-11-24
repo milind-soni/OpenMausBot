@@ -40,6 +40,7 @@ import {
 } from "./container-computer.ts";
 import { DESKTOP_FLAGS_LABEL, DESKTOP_FLAGS_VERSION, dockerSecurityIsHardened, podmanSecurityIsHardened } from "./container-isolation.ts";
 import { PIDS_LIMIT } from "./container-limits.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 function runner(responses: Record<string, string | Error>) {
   const calls: string[] = [];
@@ -606,7 +607,7 @@ describe("containerComputerStatus", () => {
 
     expect(status.managed).toBe(false);
     expect(status.ready).toBe(false);
-    expect(status.problem).toContain("not created by OpenMausBot");
+    expect(status.problem).toContain(`not created by ${APP_NAME}`);
   });
 
   it("prefers a running runtime over an earlier installed but stopped one", async () => {
@@ -1060,7 +1061,7 @@ describe("Cua integration", () => {
 });
 
 describe("containerComputerAction", () => {
-  it("never removes an exact-name container without OpenMausBot ownership labels", async () => {
+  it(`never removes an exact-name container without ${APP_NAME} ownership labels`, async () => {
     const fake = runner({
       "/usr/bin/which docker": "docker\n",
       "/usr/bin/which podman": new Error("missing"),
@@ -1072,12 +1073,12 @@ describe("containerComputerAction", () => {
     });
 
     await expect(containerComputerAction("remove", fake.run, "linux")).rejects.toThrow(
-      /not created by OpenMausBot.*remove it manually/i,
+      new RegExp(String.raw`not created by ${APP_NAME}.*remove it manually`, "i"),
     );
     expect(fake.calls).not.toContain(`docker rm -f ${CONTAINER}`);
   });
 
-  it("removes a verified OpenMausBot container even when its version labels are stale", async () => {
+  it(`removes a verified ${APP_NAME} container even when its version labels are stale`, async () => {
     const fake = runner({
       "/usr/bin/which docker": "docker\n",
       "/usr/bin/which podman": new Error("missing"),

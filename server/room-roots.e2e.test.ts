@@ -13,16 +13,17 @@ import { freePortBlock } from "./testing/ports.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 import { ownTurnText } from "./testing/room-handoff-agent.ts";
 import { withAnswer } from "./testing/your-computer.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const RERUN_NOTE = "OpenMausBot restarted while your previous turn here was running";
+const RERUN_NOTE = `${APP_NAME} restarted while your previous turn here was running`;
 const RERUN_CHIP = "Resuming after a restart";
-const SECRET_PROVIDED = "OpenMausBot credential update: the user securely provided";
+const SECRET_PROVIDED = `${APP_NAME} credential update: the user securely provided`;
 const SEAT_FREE = "the computer this conversation waited for is free again";
-const INTERRUPTED_OUTWARD = "Interrupted by an OpenMausBot restart after it already";
+const INTERRUPTED_OUTWARD = `Interrupted by an ${APP_NAME} restart after it already`;
 const SETTLED = "Your downstream room requests have settled.";
 const GOAL_RUN_ENDED = "The goal run this step belonged to ended with the restart.";
-const INTERRUPTED_LINE = "turn interrupted — OpenMausBot restarted";
+const INTERRUPTED_LINE = `turn interrupted — ${APP_NAME} restarted`;
 
 const jsonl = (path: string): any[] => existsSync(path)
   ? readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];

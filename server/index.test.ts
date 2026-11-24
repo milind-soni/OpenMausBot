@@ -1716,7 +1716,7 @@ describe("harness HTTP API", () => {
       req.end();
     });
     expect(brand.status).toBe(200);
-    expect(Reflect.get(Object(Reflect.get(Object(brand.body), "brand")), "name")).toBe("OpenMausBot");
+    expect(Reflect.get(Object(Reflect.get(Object(brand.body), "brand")), "name")).toBe(`${APP_NAME}`);
     expect(await statusWithHeaders({ origin: "https://example.com" })).toBe(403);
     expect(await statusWithHeaders({ host: `127.0.0.2:${PORT}` })).toBe(200);
     expect(await statusWithHeaders({ host: `[::1]:${PORT}` })).toBe(200);
@@ -1780,7 +1780,7 @@ describe("harness HTTP API", () => {
     expect(root.status).toBe(200);
     expect(root.headers.get("content-type")).toBe("text/html");
     expect(root.headers.get("cache-control")).toBe("no-cache");
-    expect(await root.text()).toContain("Packaged OpenMausBot");
+    expect(await root.text()).toContain(`Packaged ${APP_NAME}`);
 
     const index = await fetch(`${BASE}/index.html`);
     expect(index.headers.get("cache-control")).toBe("no-cache");
@@ -1803,7 +1803,7 @@ describe("harness HTTP API", () => {
     expect(spa.status).toBe(200);
     expect(spa.headers.get("content-type")).toBe("text/html");
     expect(spa.headers.get("cache-control")).toBe("no-cache");
-    expect(await spa.text()).toContain("Packaged OpenMausBot");
+    expect(await spa.text()).toContain(`Packaged ${APP_NAME}`);
 
     const missingChunk = await fetch(`${BASE}/assets/missing-abc123.js`);
     expect(missingChunk.status).toBe(200);
@@ -6129,7 +6129,7 @@ describe("harness HTTP API", () => {
         tagline: "Find and explain the signal.",
         summary: "A complete two-bot signal workflow.",
         category: "Research",
-        author: { name: "OpenMausBot" },
+        author: { name: `${APP_NAME}` },
         license: "MIT",
         outcomes: ["Produce a concise signal brief."],
         setupMinutes: 4,
@@ -11054,7 +11054,7 @@ describe("harness HTTP API", () => {
 
       const removed = await api("POST", `/api/bots/${bot.id}/local-computer/remove`, {});
       expect(removed.status).toBe(409);
-      expect(removed.body.error).toMatch(/not created by OpenMausBot.*remove it manually/i);
+      expect(removed.body.error).toMatch(new RegExp(String.raw`not created by ${APP_NAME}.*remove it manually`, "i"));
       expect(readFileSync(fakeDockerLog, "utf8").split("\n")).not.toContain(
         `rm -f ${status.body.container_name}`,
       );
@@ -14190,12 +14190,8 @@ describe("bot memory API", () => {
     try {
       const before = await api("GET", `/api/bots/${bot.id}/system-prompt`);
       expect(before.status).toBe(200);
-      expect(before.body.sections[0]).toEqual({
-        id: "persona",
-        label: "Identity",
-        text: `You are Kiwi, a personal bot in ${APP_NAME}. Role: Tracker. About: Files bugs.`,
-        bytes: 78,
-      });
+      const persona = `You are Kiwi, a personal bot in ${APP_NAME}. Role: Tracker. About: Files bugs.`;
+      expect(before.body.sections[0]).toEqual({ id: "persona", label: "Identity", text: persona, bytes: Buffer.byteLength(persona) });
       expect(before.body.sections.map((s: { id: string }) => s.id)).not.toContain("soul");
       // A new bot has no memory yet: the preview shows how memory works, and the notes section once there is something in it.
       expect(before.body.sections.map((s: { id: string }) => s.id)).toContain("memory-rules");

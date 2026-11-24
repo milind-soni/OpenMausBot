@@ -23,6 +23,7 @@ import {
   thisComputerSwitch,
   whereWorksControl,
 } from "./surface.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 describe("browserIsThePlace", () => {
   it("is true only where the conversation works on the built-in browser", () => {
@@ -270,7 +271,7 @@ describe("surfacePrompt", () => {
     expect(beside).toContain("This computer is the person's own: their screen, their apps and the browsers they are signed in to.");
     expect(beside).toContain("use, in this order: a connected app that does it, your built-in browser, a cloud computer if select_computer offers one.");
     expect(beside).toContain("Use their own browser or screen only when the task needs their own signed-in session and nothing else works.");
-    expect(beside).toContain("OpenMausBot asks them once whether you may, at every approval level except Full access");
+    expect(beside).toContain(`${APP_NAME} asks them once whether you may, at every approval level except Full access`);
     expect(beside).toContain("never mention DevTools, CDP, debugging ports, profiles, grants, binding, attaching, endpoints or drivers");
     const alone = surfacePrompt({ computer: "local", browser: false });
     expect(alone).not.toMatch(/web pages included/);
@@ -305,7 +306,7 @@ describe("surfacePrompt", () => {
     expect(text).toContain("verify its result before claiming success");
     expect(text).toContain("Announcing an action is not performing it");
     expect(text).toContain("never act on a different computer or describe a host window as a VM");
-    expect(text).toContain("use OpenMausBot's mounted browser/computer tools first");
+    expect(text).toContain(`use ${APP_NAME}'s mounted browser/computer tools first`);
     expect(text).toContain("Do not substitute the provider's own desktop");
   });
 

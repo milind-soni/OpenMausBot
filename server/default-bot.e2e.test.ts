@@ -7,6 +7,7 @@ import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 import { childEnv } from "./testing/omb-env.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 type McpServer = { command: string; args: string[]; env: Record<string, string> };
 type Answer = { id: number; result?: { content?: Array<{ text: string }>; isError?: boolean }; error?: { code: number; message: string } };
@@ -30,7 +31,7 @@ async function callTool(server: McpServer, name: string, args: unknown): Promise
   }
 }
 
-it("makes MausBot a new install's first bot, never deleted, hidden by its switch, with a Chief's tools after the Chief moves on", async () => {
+it(`makes ${PRODUCT_NAME} a new install's first bot, never deleted, hidden by its switch, with a Chief's tools after the Chief moves on`, async () => {
   const fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_MODE: "hang" });
   const api = async (method: string, path: string, body?: unknown) => {
     const response = await fetch(`${fixture.info.url}${path}`, { method, headers: { "content-type": "application/json" },
@@ -77,7 +78,7 @@ it("makes MausBot a new install's first bot, never deleted, hidden by its switch
     rmSync(fixture.fixtureDumpPath, { force: true });
     const agents = launched.mcpConfig.mcpServers.agents!;
     expect(agents.env.OMB_CHIEF_OF_STAFF).toBe("1");
-    expect(launched.systemPrompt).toContain("You are also this person's MausBot");
+    expect(launched.systemPrompt).toContain(`You are also this person's ${PRODUCT_NAME}`);
     expect(launched.systemPrompt).toContain("but you are not the Chief");
     const created = await callTool(agents, "create_bot", { name: "Scout", role: "Researcher", instructions: "Find what the person asks for." });
     expect(created.error).toBeUndefined();
@@ -92,7 +93,7 @@ it("makes MausBot a new install's first bot, never deleted, hidden by its switch
   }
 }, 120_000);
 
-it("lets MausBot read the unread notifications and mark finished work read, not once sign-in members share the workspace, and gives no other bot the tools", async () => {
+it(`lets ${PRODUCT_NAME} read the unread notifications and mark finished work read, not once sign-in members share the workspace, and gives no other bot the tools`, async () => {
   const fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_MODE: "hang" });
   const api = async (path: string) => (await (await fetch(`${fixture.info.url}${path}`, { signal: AbortSignal.timeout(10_000) })).json()) as any;
   const control = (args: string[]) => runControlOmb([...args, "--url", fixture.info.url]) as Promise<any>;

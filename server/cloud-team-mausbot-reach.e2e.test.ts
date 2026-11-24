@@ -13,6 +13,7 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
 import { personKey } from "./person-key.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 const ADA = { email: "ada@acme.test", role: "admin" as const };
 const MIRA = { email: "mira@acme.test", role: "member" as const };
@@ -95,7 +96,7 @@ beforeAll(async () => {
   await share(archive, { everyone: "view", people: {} });
   await share(payroll, { everyone: "none", people: { [BEN.email]: "chat" } });
   mausbot = (await botsOf(mira)).find((bot) => bot.defaultBot?.person === MIRA.email)!;
-  expect(mausbot, "every member has their own MausBot").toBeDefined();
+  expect(mausbot, `every member has their own ${PRODUCT_NAME}`).toBeDefined();
   const chat = await team.as(mira, "POST", `/api/bots/${mausbot.id}/tasks`, { title: "Mine" });
   expect(chat.status, JSON.stringify(chat.body)).toBe(201);
   mine = chat.body.task.threadId as string;
@@ -160,7 +161,7 @@ it("hands work to Sales privately: the result comes back to Mira whole, and Ben 
   await expect.poll(settled, { timeout: 30_000 }).toBe(true);
 
   const work = turn("S-WORK");
-  expect(sent(work)).toMatch(/\[From @MausBot \(bot\) · assignment \S+ for Mira · on their behalf at your level\]/);
+  expect(sent(work)).toMatch(new RegExp(String.raw`\[From @${PRODUCT_NAME} \(bot\) · assignment \S+ for Mira · on their behalf at your level\]`));
   expect(sent(turn("M-RESUMED")), "her result comes back whole: this is her own chat").toContain("Q3 was 120k");
   const seen = (await botsOf(mira)).find((bot) => bot.id === sales.id)!.tasks!.find((task) => task.threadId === work.threadId)!;
   expect(seen, "Sales' chat with Mira is listed for her").toBeDefined();
@@ -232,7 +233,7 @@ it("never into a room, nor into Sales' shared chat", async () => {
   expect(JSON.stringify(await lines(ada, sales.threadId))).not.toContain("pull the numbers for Mira");
 }, hostTimeout(120_000));
 
-it("works from her MausBot's main chat too, which is hers alone", async () => {
+it(`works from her ${PRODUCT_NAME}'s main chat too, which is hers alone`, async () => {
   const main = (await botsOf(mira)).find((bot) => bot.id === mausbot.id)!.mainThreadId;
   expect(main).toBeTruthy();
   await say("FROM-MY-MAIN-CHAT", main);

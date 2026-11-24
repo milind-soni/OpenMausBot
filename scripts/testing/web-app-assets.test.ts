@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Window } from "happy-dom";
 import { describe, expect, it } from "vitest";
+import { APP_NAME } from "../../shared/product.ts";
 
 const root = new URL("../../", import.meta.url);
 const html = readFileSync(new URL("index.html", root), "utf8");
@@ -13,7 +14,7 @@ describe("phone web app installation assets", () => {
     const href = head.querySelector('link[rel="manifest"]')?.getAttribute("href");
     expect(href).toBeDefined();
     const manifest = JSON.parse(readFileSync(fileURLToPath(new URL(`public${href}`, root)), "utf8"));
-    expect(manifest.name).toBe("OpenMausBot");
+    expect(manifest.name).toBe(`${APP_NAME}`);
     expect(manifest.display).toBe("standalone");
     const origin = "https://workspace.example.test";
     const start = new URL(manifest.start_url, origin);

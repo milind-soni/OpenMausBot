@@ -16,6 +16,7 @@ import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { startBrokerFake, type BrokerFake } from "./testing/broker-fake.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { APP_NAME } from "../shared/product.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const HOST = "omb-t-0f1e2d3c4b5a.fly.dev";
@@ -130,7 +131,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
     person = broker.userFor(installation);
-    const pairing = await signed("/api/cloud/pairing", "POST", JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 }));
+    const pairing = await signed("/api/cloud/pairing", "POST", JSON.stringify({ label: `${APP_NAME} app (Cloud)`, ttlSeconds: 300 }));
     token = (await api("POST", "/api/auth/pair", { code: pairing.code })).token;
     const bots = (await api("GET", "/api/bots")).bots as any[];
     const found = bots.find((bot) => bot.defaultBot && !bot.defaultBot.person);
@@ -148,7 +149,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     const rows = await messages();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ role: "bot", kind: "text" });
-    expect(rows[0].text).toBe("Hi Sam! I'm MausBot, your Chief of Staff. I live on the Cloud, so I keep working while your computer is off. What do you want off your plate?");
+    expect(rows[0].text).toBe(`Hi Sam! I'm ${PRODUCT_NAME}, your Chief of Staff. I live on the Cloud, so I keep working while your computer is off. What do you want off your plate?`);
     expect(rows[0].helperIntro).toBeUndefined();
     expect((await api("GET", "/api/config")).onboarding.hintsSeen).toContain("cloud-welcome-done");
     expect((await api("GET", "/api/bots")).bots.find((bot: any) => bot.id === chief.id).welcomed).toBe(true);
@@ -194,7 +195,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     expect(rows.some((row) => row.role === "user" && String(row.text).includes(`${APP_NAME} first look`)), "the first look's prompt is never the person's message").toBe(false);
     expect(rows.find((row) => row.id === gmail.id).connector).toMatchObject({ status: "connected", resumed: true });
     const dump = JSON.parse(readFileSync(dumpFile(), "utf8"));
-    expect(JSON.stringify(dump.prompt)).toContain("OpenMausBot first look: Sam just connected Gmail.");
+    expect(JSON.stringify(dump.prompt)).toContain(`${APP_NAME} first look: Sam just connected Gmail.`);
     const month = new Date().toISOString().slice(0, 7);
     const decisions = existsSync(join(dataDir, "decisions")) ? readdirSync(join(dataDir, "decisions")).filter((name) => name.startsWith(month)).map((name) => readFileSync(join(dataDir, "decisions", name), "utf8")).join("") : "";
     expect(decisions).toContain(`"tool":"${SEND}"`);

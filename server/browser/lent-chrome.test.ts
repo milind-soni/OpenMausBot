@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { LinkOpened } from "../../electron/device-link-protocol.mjs";
 import type { ChromeRoute } from "../device-links.ts";
 import { LentChromeDoors, lentChromeGuidance, type LentChromeDeps } from "./lent-chrome.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 const servers: Server[] = [];
 const sockets: Socket[] = [];
@@ -207,10 +208,10 @@ describe("LentChromeDoors", () => {
   it("guidance names the computer and what to do", () => {
     const text = lentChromeGuidance("offline", { name: "Omkar's MacBook", device: "Mac", online: false });
     expect(text).toContain("Omkar's MacBook");
-    expect(text).toContain("open OpenMausBot on that Mac");
+    expect(text).toContain(`open ${APP_NAME} on that Mac`);
     expect(lentChromeGuidance("no-chrome", null)).toContain("chrome://inspect/#remote-debugging");
     const notLent = lentChromeGuidance("not-lent", null);
-    expect(notLent, "the app lends its Chrome by itself, and an older one needs updating").toContain("open OpenMausBot on their Mac or PC, which lends its Chrome by itself (updating OpenMausBot there if it is an older version)");
+    expect(notLent, "the app lends its Chrome by itself, and an older one needs updating").toContain(`open ${APP_NAME} on their Mac or PC, which lends its Chrome by itself (updating ${APP_NAME} there if it is an older version)`);
     expect(notLent, "no switch to send the person to").not.toMatch(/turn on|Settings → MausBot Cloud/u);
     expect(notLent, "or the way back to the built-in browser").toContain("switch this profile to Built-in under Settings → Desktops & browser");
   });

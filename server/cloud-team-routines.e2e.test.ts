@@ -12,6 +12,7 @@ import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } 
 import { CLOUD_NOBODY_KEY } from "./cloud-sharing.ts";
 import { personKey } from "./person-key.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 const OWNER = { email: "olive@acme.test", role: "owner" as const };
 const ADMIN = { email: "ari@acme.test", role: "admin" as const };
@@ -224,7 +225,7 @@ it("a member's routine for the shared chat lands where everyone reads it, run by
     expect((await team.as(token, "GET", `/api/threads/${ran.threadId}/messages`)).status).toBe(404);
   }
   // A teammate's own MausBot takes no routine from anyone else, and one Bob sets up for his is his alone.
-  const bobsMausBot = (await botsOf(bob)).find((bot) => bot.name === "MausBot")!;
+  const bobsMausBot = (await botsOf(bob)).find((bot) => bot.name === `${PRODUCT_NAME}`)!;
   expect((await team.as(owner, "POST", "/api/routines", { name: "Peek", prompt: "x", botId: bobsMausBot.id, schedule: LATER })).status).toBe(404);
   const own = await team.as(bob, "POST", "/api/routines", { name: "Bee check", prompt: "Check the bees", botId: bobsMausBot.id, schedule: LATER });
   expect(own.status, JSON.stringify(own.body)).toBe(201);

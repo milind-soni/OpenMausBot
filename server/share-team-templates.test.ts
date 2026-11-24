@@ -15,6 +15,7 @@ import { createShareHost } from "./share.ts";
 import type { BotRecord } from "./store.ts";
 import { createTeamTemplates, teamTemplatesFolder } from "./team-templates.ts";
 import { fakeGithubRepo } from "./testing/fake-composio-github.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 const SKILL = "---\nname: report\ndescription: Weekly report.\n---\n\n# Report\n\nRun scripts/report.py.\n";
 const SCRIPT = "import os\nprint(os.environ.get('WEEK', 'this week'))\n";
@@ -171,7 +172,7 @@ describe("GitHub through the connection", () => {
     const published = await request(ADMIN, "POST", `/api/share/${card.id}/publish-repo`, { repo: "acme/playbooks", folder: "templates" });
     expect(published.status, JSON.stringify(published.body)).toBe(200);
     expect(published.body).toMatchObject({ kind: "pull_request", url: "https://github.com/acme/playbooks/pull/1", branch: expect.stringMatching(/^mausbot-reporter-[a-f0-9]{6}$/) });
-    expect(repo.pulls).toEqual([{ head: published.body.branch, base: "main", title: "Add the Reporter template from MausBot" }]);
+    expect(repo.pulls).toEqual([{ head: published.body.branch, base: "main", title: `Add the Reporter template from ${PRODUCT_NAME}` }]);
     const branch = repo.branches.get(published.body.branch)!;
     expect([...branch.keys()].sort()).toEqual(["templates/reporter/bot.md", "templates/reporter/skills/report/SKILL.md", "templates/reporter/skills/report/scripts/report.py"]);
     expect(repo.branches.get("main")!.size).toBe(0);

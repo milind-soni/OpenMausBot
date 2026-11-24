@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { appHostContext, appMaxHeight, appStyleVariables } from "./app-host-context";
+import { PRODUCT_NAME } from "../../../shared/product.ts";
 
 const tokens: Record<string, string> = {
   "--color-composer": "#ffffff", "--color-ink": "#0f1a13", "--color-ink-secondary": "#4d5a52", "--color-ink-tertiary": "#4f5c54",
@@ -42,7 +43,7 @@ describe("the host context", () => {
     const context = appHostContext({ width: 612.4, maxHeight: 700 });
     expect(context).toMatchObject({
       displayMode: "inline", availableDisplayModes: ["inline"], containerDimensions: { width: 612, maxHeight: 700 },
-      platform: "web", userAgent: expect.stringMatching(/^MausBot\//),
+      platform: "web", userAgent: expect.stringMatching(new RegExp(String.raw`^${PRODUCT_NAME}\/`)),
     });
     vi.stubGlobal("window", { innerHeight: 2_000, ogb: {} });
     expect(appMaxHeight()).toBe(720);

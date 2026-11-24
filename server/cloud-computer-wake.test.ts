@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "./config.ts";
 import type { BotRecord } from "./store.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 type Box = { id: string; name: string; state: string; hydrated?: boolean };
 
@@ -203,7 +204,7 @@ const ranEcho = () => requests.filter((request) => request.command?.includes("ec
 /** Left as it is: a passing failure that says MausBot keeps trying, never "do not retry". */
 function keptAsItIs(error: Error | null) {
   expect(error).toBeInstanceOf(Error);
-  expect(error!.message).toMatch(/MausBot keeps trying in the background; trying again later is fine/);
+  expect(error!.message).toMatch(new RegExp(String.raw`${PRODUCT_NAME} keeps trying in the background; trying again later is fine`));
   expect(error!.message).not.toMatch(/Do not retry|replac/i);
   expect(claims.transientClaimFailure(error)).toBe(true);
 }
@@ -250,7 +251,7 @@ describe("a woken cloud computer that is slow to answer", () => {
       claims.startAutoVmClaim(table, "thread-1", "g1");
       await slot.begin;
       expect(slot.failed).toBeFalsy();
-      if (!slot.claimed) expect(slot.retryReason).toMatch(/MausBot keeps trying in the background/);
+      if (!slot.claimed) expect(slot.retryReason).toMatch(new RegExp(String.raw`${PRODUCT_NAME} keeps trying in the background`));
     }
     expect(slot.claimed).toBe(true);
     expect(slot.attempts).toBeGreaterThan(3);
@@ -338,7 +339,7 @@ describe("a woken cloud computer that never answers", () => {
     const { bot, box, originalName } = await madeThenSilent();
     noRoom = true;
     const error = await failure(bot);
-    expect(error!.message).toMatch(/plan has no room for a new computer beside it, so MausBot kept it, stopped and with its files/);
+    expect(error!.message).toMatch(new RegExp(String.raw`plan has no room for a new computer beside it, so ${PRODUCT_NAME} kept it, stopped and with its files`));
     expect(claims.transientClaimFailure(error)).toBe(true);
     expect(box.name).toBe(originalName);
     expect(renames(box.id).map((request) => request.name)).toEqual([expect.stringMatching(SET_ASIDE_NAME), originalName]);

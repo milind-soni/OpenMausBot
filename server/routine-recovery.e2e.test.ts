@@ -11,6 +11,7 @@ import { waitForExit } from "./testing/cleanup.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 import { openSse, type SseRecorder } from "./testing/sse.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const STALLED = "No activity for 20 minutes — the routine was stopped";
 const SIGN_IN = "This bot's AI is signed out. Sign in again in Settings → AI.";
@@ -174,7 +175,7 @@ it("picks a run that a restart cut off up again once on the next start, and neve
   await expect.poll(async () => (await s.run(id))?.retried, { timeout: hostTimeout(20_000) }).toBe("restarted");
   await expect.poll(async () => (await s.run(id))?.status, { timeout: hostTimeout(60_000) }).toBe("completed");
   expect(await s.runs()).toMatchObject([{ id, threadId, retried: "restarted", status: "completed" }]);
-  expect(JSON.stringify(JSON.parse(readFileSync(s.dump, "utf8")).prompt)).toContain("this run's first start was cut off when OpenMausBot restarted");
+  expect(JSON.stringify(JSON.parse(readFileSync(s.dump, "utf8")).prompt)).toContain(`this run's first start was cut off when ${APP_NAME} restarted`);
   await new Promise((resolve) => setTimeout(resolve, 3_000));
   const sent = await s.prompts(threadId);
   expect(sent.filter((text) => text.includes(ROUTINE_HEADER))).toHaveLength(1);

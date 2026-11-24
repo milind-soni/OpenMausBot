@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UpdatesConsentState } from "../../electron/updates-consent.mjs";
 import { setLocale } from "@/lib/i18n";
 import { UpdatesConsentRow } from "./UpdatesConsent";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const base: UpdatesConsentState = { available: true, due: false, status: null, signedIn: false, email: null, version: "2026-10-23" };
 let current: UpdatesConsentState;
@@ -63,7 +64,7 @@ describe("Settings → General: Product updates by email", () => {
   it("reflects the account's answer, and turning it off withdraws; on again is one tap when signed in", async () => {
     current = { ...base, signedIn: true, status: "opted_in", email: "person@example.test" };
     await show();
-    expect(host.textContent).toContain("Get MausBot updates");
+    expect(host.textContent).toContain(`Get ${PRODUCT_NAME} updates`);
     expect(host.textContent).toContain("Sent to person@example.test.");
     expect(toggle()!.getAttribute("aria-checked")).toBe("true");
     await click(toggle()!);
@@ -82,7 +83,7 @@ describe("Settings → General: Product updates by email", () => {
     expect(toggle()!.getAttribute("aria-checked")).toBe("false");
     await click(toggle()!);
     expect(dialog()).not.toBeNull();
-    expect(dialog()!.textContent).toContain("Get MausBot updates?");
+    expect(dialog()!.textContent).toContain(`Get ${PRODUCT_NAME} updates?`);
     expect(document.querySelector<HTMLInputElement>('input[type="email"]')!.value).toBe("");
     expect(document.querySelector('input[type="checkbox"]')).toBeNull();
     await click(button("No thanks"));

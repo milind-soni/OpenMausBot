@@ -8,6 +8,7 @@ import { expect, it } from "vitest";
 
 import { launchVerificationServer } from "../scripts/control-omb.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const FAKE_MCP = fileURLToPath(new URL("./testing/fake-mcp-server.ts", import.meta.url));
 
@@ -61,7 +62,7 @@ it("restart keeps the key and replaces the warm process, and so does turning the
     await setup.done();
     // Saving the key answered the card the setup turn asked with, so that turn goes on once more. It runs now, while nothing
     // else is sent: later it would take the thread or the warm process from a turn this test checks.
-    await expect.poll(() => { try { return JSON.stringify(dump().prompt).includes("OpenMausBot secret update"); } catch { return false; } }, { timeout: 30_000 }).toBe(true);
+    await expect.poll(() => { try { return JSON.stringify(dump().prompt).includes(`${APP_NAME} secret update`); } catch { return false; } }, { timeout: 30_000 }).toBe(true);
     await setup.done();
 
     const launched = await turn();

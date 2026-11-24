@@ -14,6 +14,7 @@ import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { startFakeOpenAiLive, type FakeOpenAiLive } from "./testing/fake-openai-live.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { openSse } from "./testing/sse.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLAUDE = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
@@ -155,7 +156,7 @@ posixOnly("Live call e2e", () => {
       expect(JSON.stringify(started.body)).not.toContain(LIVE_KEY);
       expect(call).toMatchObject({ botId: bot.id, threadId: bot.threadId, client: "desktop" });
       expect(session.body).toMatchObject({ session: { client: { data_channel: { allowed_client_events: ["session.close"] } } } });
-      expect((session.body.session as { instructions: string }).instructions).toContain("runs in OpenMausBot on the user's own computer.");
+      expect((session.body.session as { instructions: string }).instructions).toContain(`runs in ${APP_NAME} on the user's own computer.`);
       await live.waitForAttach(session.id);
       await sse.until((frame) => frame.kind === "live.call" && frame.call?.callId === call.callId && frame.call?.status === "live");
 
@@ -642,7 +643,7 @@ posixOnly("Live call on the person's Cloud", () => {
       },
     }));
     mkdirSync(join(home, "web"));
-    writeFileSync(join(home, "web", "index.html"), "<!doctype html><title>OpenMausBot</title>");
+    writeFileSync(join(home, "web", "index.html"), `<!doctype html><title>${APP_NAME}</title>`);
     const port = await freePortBlock([0, 1]);
     base = `http://127.0.0.1:${port}`;
     // Only loopback answers: the fake GPT-Live. The Admin and OpenAI are offline.
@@ -675,7 +676,7 @@ posixOnly("Live call on the person's Cloud", () => {
       if (Date.now() > deadline) throw new Error(`the Cloud home never came up. output:\n${output}`);
       await new Promise((r) => setTimeout(r, 150));
     }
-    const pairing = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 });
+    const pairing = JSON.stringify({ label: `${APP_NAME} app (Cloud)`, ttlSeconds: 300 });
     const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
     const granted = await request("POST", "/api/cloud/pairing", JSON.parse(pairing), {
       "x-omb-cloud-timestamp": timestamp, "x-omb-cloud-nonce": nonce,

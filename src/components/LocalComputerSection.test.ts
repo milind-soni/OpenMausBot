@@ -32,6 +32,7 @@ import {
 } from "./LocalComputerSection";
 import { computerInventoryRequest } from "@/lib/computer-requests";
 import { VpsComputersCard } from "./VpsComputersCard";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const cloudVm: LocalVmInventoryInstance = {
   botId: "cloud-bot",
@@ -231,7 +232,7 @@ describe("Local VM inventory UI", () => {
     }));
 
     expect(markup).toContain("Not managed");
-    expect(markup).toContain("not managed by MausBot");
+    expect(markup).toContain(`not managed by ${PRODUCT_NAME}`);
     expect(markup).toContain("remove it directly in Docker or Podman");
     expect(markup).not.toContain(">Delete</button>");
     expect(markup).not.toContain("Container labels do not match");
@@ -515,7 +516,7 @@ describe("VPS computer inventory UI", () => {
     expect(disconnected.match(/No VPS is set up yet/g)).toHaveLength(1);
     expect(disconnected).not.toContain("aria-busy");
     expect(renderCard({ unavailableReason: "SSH host cannot be reached" })).toContain("SSH host cannot be reached");
-    expect(renderCard()).toContain("No MausBot desktops found on your VPS");
+    expect(renderCard()).toContain(`No ${PRODUCT_NAME} desktops found on your VPS`);
   });
 
   it("tags computers on more than one server and keeps reachable rows beside the warning", () => {

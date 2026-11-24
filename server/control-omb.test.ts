@@ -14,6 +14,7 @@ import {
 } from "../scripts/control-omb.ts";
 import { installedChrome, UI_MUTATING } from "../scripts/testing/control-omb-ui.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 describe("control-omb command mapping", () => {
   it("treats unhealthy doctor and non-settled waits as command failures", () => {
@@ -115,7 +116,7 @@ describe("control-omb command mapping", () => {
     });
   });
 
-  it("rejects an available engine when the endpoint is not OpenMausBot", async () => {
+  it(`rejects an available engine when the endpoint is not ${APP_NAME}`, async () => {
     const callTool = vi.fn(async (name: string) => name === "get_system_health"
       ? { status: "connected", app: "another-app" }
       : { instances: [{ instanceId: "ready", snapshot: { state: "available" } }] });
@@ -132,7 +133,7 @@ describe("control-omb command mapping", () => {
       callTool: vi.fn() as any,
       env: {},
     })).rejects.toMatchObject({
-      message: "mutating commands require an explicit OpenMausBot instance",
+      message: `mutating commands require an explicit ${APP_NAME} instance`,
     });
   });
 
@@ -184,7 +185,7 @@ describe("control-omb command mapping", () => {
       callTool: vi.fn() as any,
       env: {},
     })).rejects.toMatchObject({
-      message: "mutating commands require an explicit OpenMausBot instance",
+      message: `mutating commands require an explicit ${APP_NAME} instance`,
     });
   });
 
@@ -230,7 +231,7 @@ describe("control-omb command mapping", () => {
     });
     await expect(runControlOmb(["set-model", "--bot", "bot-1", "--instance", "claude", "--model", "model-b"], {
       callTool: callTool as any, env: {},
-    })).rejects.toThrow("explicit OpenMausBot instance");
+    })).rejects.toThrow(`explicit ${APP_NAME} instance`);
   });
 });
 

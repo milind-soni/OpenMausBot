@@ -4,6 +4,7 @@ import { loginPlace } from "../shared/logins.ts";
 import { fillLogin, type EmailCodeAnswer, type EmailCodeAsk, type FillCandidate, type FillLoginDeps, type FillLoginInput } from "./login-fill.ts";
 import { waitForEmailCode, type CodeMailbox, type CodeMiss } from "./email-code.ts";
 import { FakeLoginPage } from "./testing/fake-login-page.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const NOW = 1_700_000_000_000;
 const CODE = "483920";
@@ -132,7 +133,7 @@ describe("an emailed code inside fill_login", () => {
     expect(asks[0]).toMatchObject({ site: "acme.test", via: "email", boxes: 1, askedAt: null });
     expect(JSON.stringify(outcome)).not.toContain(CODE);
     expect(JSON.stringify(current.engineCalls)).not.toContain(CODE);
-    expect(outcome.text).toContain("OpenMausBot read the code from the person's connected email");
+    expect(outcome.text).toContain(`${APP_NAME} read the code from the person's connected email`);
   });
 
   it("spreads a code across one-character boxes and asks only for codes that fit", async () => {

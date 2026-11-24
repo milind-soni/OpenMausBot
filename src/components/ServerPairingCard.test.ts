@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { codeUntil, lastSeen } from "../lib/pairing-time";
 import { canPairDevices, pairingBlockedReason, phoneSecretNote, sameWifiOnlyLink, ServerPairingCard, shownDevices } from "./ServerPairingCard";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 describe("pairing devices from a hosted server's settings", () => {
   it("is offered to the owner on the box and to admin sessions, never to chat-only sessions", () => {
@@ -86,7 +87,7 @@ describe("pairing devices from a hosted server's settings", () => {
     const cloud = renderToStaticMarkup(createElement(ServerPairingCard, { initialSession: admin, cloudHome: true, placeName: "My Cloud" }));
     expect(cloud).toContain(">Pair a phone<");
     expect(cloud).not.toContain("Chat and approvals only");
-    expect(cloud, "one untitled row says what to do; the code and \"scan this code\" are only in the dialog").toContain("Install MausBot on your phone from the App Store or Google Play, then pair it here.");
+    expect(cloud, "one untitled row says what to do; the code and \"scan this code\" are only in the dialog").toContain(`Install ${PRODUCT_NAME} on your phone from the App Store or Google Play, then pair it here.`);
     expect(cloud).not.toContain("is always on");
     const elsewhere = renderToStaticMarkup(createElement(ServerPairingCard, { initialSession: admin }));
     expect(elsewhere).toContain("Chat and approvals only");

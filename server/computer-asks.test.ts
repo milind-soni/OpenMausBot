@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ComputerAsks, type DesktopState, type OnlineComputer } from "./computer-asks.ts";
 import type { LentPlatform } from "./lent-computers.ts";
 import type { Message } from "./store.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 const bot = { id: "scout", name: "Scout", color: "blue" } as unknown as Parameters<ComputerAsks["ask"]>[0]["bot"];
 const PC = { name: "HOME-PC", platform: "win32" } as const;
@@ -124,7 +125,7 @@ describe("a bot on the person's own Cloud asks to turn on what it needs from the
     const call = f.asks.ask({ threadId: "t1", bot, need: "screen", why: "Open Excel" }, 30_000);
     await vi.advanceTimersByTimeAsync(20_000);
     expect(f.card()).toMatchObject({ options: ["Not now"], computerAsk: { reason: "closed", device: "PC" } });
-    expect(f.card().subtitle).toContain("MausBot isn't open on your PC. Open it there and Scout carries on.");
+    expect(f.card().subtitle).toContain(`${PRODUCT_NAME} isn't open on your PC. Open it there and Scout carries on.`);
     await f.present(desktop({ paused: true }));
     expect(f.card()).toMatchObject({ options: ["Turn on", "Not now"], computerAsk: { reason: "paused" } });
     f.state.online = [lends()];

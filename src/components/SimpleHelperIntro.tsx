@@ -17,6 +17,7 @@ import { IntroChips } from "./HelperSetup";
 import { usePrefersReducedMotion } from "./mascot-clock";
 import { preloadConnectedApps } from "@/lib/connected-apps";
 import { cloudOffered } from "@/lib/brand";
+import { DEFAULT_BOT_NAME } from "@/lib/default-bot";
 
 /** How long after the part before each part arrives, when a first run has just landed here: the three lines, the typing
  * row, the follow-up and its chips. With no AI there is no typing row, and the follow-up comes `noAi` after the last line. */
@@ -123,7 +124,7 @@ export function SimpleHelperIntro({ botId, threadId, message, answered, followup
   const bot = state.bots.find((candidate) => candidate.id === botId);
   const team = bot?.defaultBot?.person ? state.config?.team?.name : undefined;
   const person = greetingName(state.config?.profile?.name) || undefined;
-  const lines = introLines({ name: bot?.name ?? "MausBot", chief: Boolean(bot?.chiefOfStaff), person, team });
+  const lines = introLines({ name: bot?.name ?? DEFAULT_BOT_NAME, chief: Boolean(bot?.chiefOfStaff), person, team });
   const look = useLookAround(!answered);
   const ai = thinksWith(bot, state.instances);
   const connects = whoConnectsAi(useTeamPeople());

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { CONNECTING_DELAY_MS, MIN_VISIBLE_MS, PhoneRow, phoneSubtitle, relayStatusLine, sortPhones, steadyAt } from "./PairedPhones";
 import type { CompanionState, PhoneDevice, PhoneSetupController } from "./PhoneSetupFlow";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const NOW = Date.now();
 const phone = (extra: Partial<PhoneDevice> = {}): PhoneDevice => ({ id: "phone-1", name: "Ada", createdAt: NOW, lastSeenAt: NOW - 3 * 86_400_000, cloudDesktopAccess: true, ...extra });
@@ -42,11 +43,11 @@ describe("paired phones", () => {
     const rowFor = (device: PhoneDevice, controller: PhoneSetupController, onPairAgain?: () => void) =>
       createElement(PhoneRow, { device, connected: false, state: state(), c: controller, onRemoved: () => {}, onPairAgain });
     const markup = renderToStaticMarkup(rowFor(phone(), retired, () => {}));
-    expect(markup).toContain("This phone has an older MausBot app. Update the app, then open it once on the same Wi-Fi as this computer. If that doesn&#x27;t reconnect it, pair it again here.");
+    expect(markup).toContain(`This phone has an older ${PRODUCT_NAME} app. Update the app, then open it once on the same Wi-Fi as this computer. If that doesn&#x27;t reconnect it, pair it again here.`);
     expect(markup).toMatch(/<button type="button"[^>]*>Pair again<\/button>/);
     expect(renderToStaticMarkup(rowFor(phone(), retired)), "no way to pair from here: no button").not.toContain("Pair again");
-    expect(renderToStaticMarkup(rowFor(phone({ e2eAt: NOW }), retired, () => {})), "a phone on the encrypted connection").not.toContain("older MausBot app");
-    expect(renderToStaticMarkup(rowFor(phone(), c, () => {})), "the link not ended").not.toContain("older MausBot app");
+    expect(renderToStaticMarkup(rowFor(phone({ e2eAt: NOW }), retired, () => {})), "a phone on the encrypted connection").not.toContain(`older ${PRODUCT_NAME} app`);
+    expect(renderToStaticMarkup(rowFor(phone(), c, () => {})), "the link not ended").not.toContain(`older ${PRODUCT_NAME} app`);
   });
 
   it("lists connected phones first, then the most recently seen", () => {

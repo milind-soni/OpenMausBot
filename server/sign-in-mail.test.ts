@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createEmailSignIn } from "./account-signin.ts";
 import { createSignInMail, SIGNIN_CODE_RESEND_MS, SIGNIN_CODE_TRIES, SIGNIN_CODE_TTL_MS, smtpOptions, type MailMessage } from "./sign-in-mail.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 const URL_ = "smtps://signin%40example.test:p%40ss@smtp.example.test:465";
 
@@ -26,7 +27,7 @@ describe("sign-in codes through the server's own mail server", () => {
     const box = mailbox();
     const mail = createSignInMail({ url: URL_, transport: box.transport });
     expect(await mail.send("her@example.test")).toBe("sent");
-    expect(box.sent[0]).toMatchObject({ from: "signin@example.test", to: "her@example.test", subject: "Your MausBot sign-in code" });
+    expect(box.sent[0]).toMatchObject({ from: "signin@example.test", to: "her@example.test", subject: `Your ${PRODUCT_NAME} sign-in code` });
     const code = box.code();
     expect(code).toMatch(/^\d{8}$/);
     expect(mail.check("other@example.test", code)).toBe("wrong");
@@ -38,7 +39,7 @@ describe("sign-in codes through the server's own mail server", () => {
   it("names the server the code signs in to in the subject", async () => {
     const box = mailbox();
     await createSignInMail({ url: URL_, transport: box.transport }).send("her@example.test", "maus.example.com");
-    expect(box.sent[0]).toMatchObject({ subject: "Your MausBot sign-in code for maus.example.com" });
+    expect(box.sent[0]).toMatchObject({ subject: `Your ${PRODUCT_NAME} sign-in code for maus.example.com` });
     expect(box.sent[0]?.text).toContain("to sign in to maus.example.com is");
   });
 

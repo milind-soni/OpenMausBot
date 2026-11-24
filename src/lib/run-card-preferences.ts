@@ -16,9 +16,9 @@ function storage(): Storage | undefined {
 export function showRunCard(): boolean {
   if (sessionChoice !== undefined) return sessionChoice;
   try {
-    return storage()?.getItem(RUN_CARD_KEY) !== "0";
+    return storage()?.getItem(RUN_CARD_KEY) === "1";
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -56,5 +56,5 @@ export function setShowRunCard(enabled: boolean): void {
 }
 
 export function useShowRunCard(): boolean {
-  return useSyncExternalStore(subscribe, showRunCard, () => true);
+  return useSyncExternalStore(subscribe, showRunCard, () => false);
 }

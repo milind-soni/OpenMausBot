@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { accentInk, applyBrand, bootstrapBrand, brand, brandVars, DEFAULT_BRAND, iconType, luminance, PRODUCT_NAME, productName } from "./brand";
+import { APP_NAME } from "../../shared/product.ts";
 
 describe("brand", () => {
   it("derives readable ink for light and dark accents", () => {
@@ -39,10 +40,10 @@ describe("brand", () => {
     expect(brand()).toEqual(DEFAULT_BRAND);
   });
 
-  it("names the product MausBot, or a white-label brand file by its own name", () => {
+  it(`names the product ${PRODUCT_NAME}, or a white-label brand file by its own name`, () => {
     applyBrand({ brand: DEFAULT_BRAND, source: "default", file: "" });
-    expect(productName()).toBe("MausBot");
-    expect(brand().name).toBe("OpenMausBot");
+    expect(productName()).toBe(`${PRODUCT_NAME}`);
+    expect(brand().name).toBe(`${APP_NAME}`);
     applyBrand({ brand: { name: "Acme Bots" }, source: "file", file: "/data/brand.json" });
     expect(productName()).toBe("Acme Bots");
     applyBrand({ brand: DEFAULT_BRAND, source: "default", file: "" });

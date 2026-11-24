@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { BotEditorStore, initialState, type InstanceInfo, type useStore } from "@/state/store";
 import { EngineSetup } from "./EngineSetup";
 import { RefreshEngines } from "./EngineLibrary";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement;
@@ -87,6 +88,6 @@ it("says plainly when the engine now runs the copy the app installed", async () 
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ instances: [ready], usingAppCopy: true }))));
   mount(createElement(EngineSetup, { instance: opencode }));
   await act(async () => button("Install OpenCode here").click());
-  expect(host.textContent).toContain("Another copy of OpenCode on this computer doesn't start, so OpenCode now uses the copy MausBot installed.");
+  expect(host.textContent).toContain(`Another copy of OpenCode on this computer doesn't start, so OpenCode now uses the copy ${PRODUCT_NAME} installed.`);
   expect(host.textContent).toContain("Installation verified");
 });

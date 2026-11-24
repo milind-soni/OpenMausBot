@@ -6,6 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Action, AppState, Bot, InstanceInfo } from "@/state/store";
 import { viewerClosedRelease } from "./computer-takeover";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const fixture = vi.hoisted(() => ({
   held: false,
@@ -393,7 +394,7 @@ describe("taking control of a Local VM", () => {
     await settle();
     expect(releases()).toHaveLength(1);
     expect(liveDesktop()).toBeNull();
-    expect(document.body.textContent).toContain("MausBot couldn't open the live desktop. Try again.");
+    expect(document.body.textContent).toContain(`${PRODUCT_NAME} couldn't open the live desktop. Try again.`);
   });
 });
 

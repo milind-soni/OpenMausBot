@@ -4,6 +4,7 @@ import {
   checkSentinelInstall, launchdPlist, sentinelCommand, sentinelLaunchdPlist, sentinelServicePlan, sentinelSystemdService, sentinelSystemdTimer,
   sentinelUnitCommand, serviceCommand, servicePlan, shippedSentinelCli, systemdUnit, unstableInstallWarning, type ServiceSpec,
 } from "./service-unit.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const spec: ServiceSpec = {
   node: "/usr/bin/node",
@@ -19,12 +20,12 @@ const spec: ServiceSpec = {
 describe("service units", () => {
   it("runs the same serve command, with strip-types only for a checkout", () => {
     expect(serviceCommand(spec)).toEqual(["/usr/bin/node", "/usr/lib/node_modules/openmausbot/cli.js", "serve", ...spec.serveArgs]);
-    expect(serviceCommand({ ...spec, script: "/srv/OpenMausBot/server/openmausbot.ts" })[1]).toBe("--experimental-strip-types");
+    expect(serviceCommand({ ...spec, script: `/srv/${APP_NAME}/server/openmausbot.ts` })[1]).toBe("--experimental-strip-types");
   });
 
   it("renders a systemd unit that restarts, runs as the user, and grants low ports only for --domain", () => {
     const unit = systemdUnit(spec);
-    expect(unit).toContain("Description=OpenMausBot (agentada)");
+    expect(unit).toContain(`Description=${APP_NAME} (agentada)`);
     expect(unit).toContain("User=maus");
     expect(unit).toContain("Environment=OMB_DATA_DIR=/home/maus/.openmausbot");
     expect(unit).toContain("ExecStart=/usr/bin/node /usr/lib/node_modules/openmausbot/cli.js serve --port 8799 --data-dir /home/maus/.openmausbot --domain maus.example.com --no-pair");
@@ -63,7 +64,7 @@ describe("service units", () => {
     const out = "/Users/maus/Library/Application Support/openmausbot-sentinel";
     const sentinel = { node: "/usr/bin/node", script: "/usr/lib/node_modules/openmausbot/cli.js", dataDir: "/Users/maus/.openmausbot", home: "/Users/maus", out };
     expect(sentinelCommand(sentinel)).toEqual(["/usr/bin/node", "/usr/lib/node_modules/openmausbot/cli.js", "sentinel", "--once", "--data-dir", "/Users/maus/.openmausbot", "--out", out]);
-    expect(sentinelCommand({ ...sentinel, script: "/srv/OpenMausBot/server/openmausbot.ts" })[1]).toBe("--experimental-strip-types");
+    expect(sentinelCommand({ ...sentinel, script: `/srv/${APP_NAME}/server/openmausbot.ts` })[1]).toBe("--experimental-strip-types");
     const plist = sentinelLaunchdPlist(sentinel);
     expect(plist).toContain("<string>com.openmausbot.sentinel</string>");
     expect(plist).toContain("<key>StartInterval</key>\n\t<integer>120</integer>");
@@ -95,18 +96,18 @@ describe("service units", () => {
   });
 
   it("finds the CLI the installed desktop app ships, and runs it as Node", () => {
-    const app = "/Applications/OpenMausBot.app/Contents";
-    const present = new Set([`${app}/MacOS/OpenMausBot`, `${app}/Resources/server/openmausbot.js`]);
-    expect(shippedSentinelCli("darwin", "/Users/maus", (path) => present.has(path))).toEqual({ node: `${app}/MacOS/OpenMausBot`, script: `${app}/Resources/server/openmausbot.js` });
-    const user = "/Users/maus/Applications/OpenMausBot.app/Contents";
+    const app = `/Applications/${APP_NAME}.app/Contents`;
+    const present = new Set([`${app}/MacOS/${APP_NAME}`, `${app}/Resources/server/openmausbot.js`]);
+    expect(shippedSentinelCli("darwin", "/Users/maus", (path) => present.has(path))).toEqual({ node: `${app}/MacOS/${APP_NAME}`, script: `${app}/Resources/server/openmausbot.js` });
+    const user = `/Users/maus/Applications/${APP_NAME}.app/Contents`;
     expect(shippedSentinelCli("darwin", "/Users/maus", (path) => path.startsWith(user))?.script).toBe(`${user}/Resources/server/openmausbot.js`);
-    expect(shippedSentinelCli("linux", "/home/maus", (path) => path.startsWith("/opt/OpenMausBot/"))).toEqual({ node: "/opt/OpenMausBot/openmausbot", script: "/opt/OpenMausBot/resources/server/openmausbot.js" });
+    expect(shippedSentinelCli("linux", "/home/maus", (path) => path.startsWith(`/opt/${APP_NAME}/`))).toEqual({ node: `/opt/${APP_NAME}/openmausbot`, script: `/opt/${APP_NAME}/resources/server/openmausbot.js` });
     // an app with its script missing, or one released before Sentinel, is no CLI for it
-    expect(shippedSentinelCli("darwin", "/Users/maus", (path) => path.endsWith("MacOS/OpenMausBot"))).toBeNull();
+    expect(shippedSentinelCli("darwin", "/Users/maus", (path) => path.endsWith(`MacOS/${APP_NAME}`))).toBeNull();
     expect(shippedSentinelCli("darwin", "/Users/maus", (path) => present.has(path), () => false)).toBeNull();
     expect(shippedSentinelCli("win32", "C:\\Users\\maus", () => true)).toBeNull();
 
-    const spec = { node: `${app}/MacOS/OpenMausBot`, script: `${app}/Resources/server/openmausbot.js`, dataDir: "/Users/maus/.openmausbot", home: "/Users/maus", out: "/tmp/s", electronRunAsNode: true };
+    const spec = { node: `${app}/MacOS/${APP_NAME}`, script: `${app}/Resources/server/openmausbot.js`, dataDir: "/Users/maus/.openmausbot", home: "/Users/maus", out: "/tmp/s", electronRunAsNode: true };
     expect(sentinelLaunchdPlist(spec)).toContain("<key>ELECTRON_RUN_AS_NODE</key>\n\t\t<string>1</string>");
     expect(sentinelSystemdService(spec)).toContain("Environment=ELECTRON_RUN_AS_NODE=1");
     expect(sentinelLaunchdPlist({ ...spec, electronRunAsNode: false })).not.toContain("ELECTRON_RUN_AS_NODE");

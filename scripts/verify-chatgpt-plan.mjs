@@ -7,6 +7,9 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+import productJson from "../product.json" with { type: "json" };
+
+const { appName: APP_NAME } = productJson;
 
 const root = mkdtempSync(join(tmpdir(), "omb-chatgpt-plan-"));
 process.env.OMB_DATA_DIR = join(root, "omb");
@@ -56,7 +59,7 @@ async function start() {
     }
     else if (message.method === "turn/completed") completions?.(message.params);
   });
-  await rpc("initialize", { clientInfo: { name: "openmausbot", title: "OpenMausBot", version: "fixture" } });
+  await rpc("initialize", { clientInfo: { name: "openmausbot", title: `${APP_NAME}`, version: "fixture" } });
   child.stdin.write(JSON.stringify({ method: "initialized" }) + "\n");
 }
 function rpc(method, params) {

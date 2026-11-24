@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { UpdaterState } from "@/lib/updater";
 import { UpdateBanner } from "./UpdateBanner";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 let push: (state: UpdaterState) => void = () => {};
 const seen = vi.fn(async () => {});
@@ -52,7 +53,7 @@ describe("the line after the app updated itself", () => {
 
     focused = true;
     await act(async () => window.dispatchEvent(new Event("focus")));
-    expect(line()).toBe("MausBot updated itself to 0.1.130.");
+    expect(line()).toBe(`${PRODUCT_NAME} updated itself to 0.1.130.`);
     expect(seen).not.toHaveBeenCalled();
 
     await act(async () => vi.advanceTimersByTime(5_000));
@@ -66,6 +67,6 @@ describe("the line after the app updated itself", () => {
     await act(async () => root.render(createElement(UpdateBanner)));
     await act(async () => push({ status: "downloaded", version: "0.1.131", updated: "0.1.130", installsByItself: true }));
     expect(line()).toBeNull();
-    expect(host.textContent).toContain("MausBot 0.1.131 is ready");
+    expect(host.textContent).toContain(`${PRODUCT_NAME} 0.1.131 is ready`);
   });
 });

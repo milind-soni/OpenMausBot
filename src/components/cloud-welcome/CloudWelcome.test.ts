@@ -36,6 +36,7 @@ vi.mock("@/components/TeamLibraryPanel", async () => {
 import { CloudWelcome, sentHere } from "./CloudWelcome";
 import { CLOUD_SETUP_MOVE_SKIPPED, CLOUD_WELCOME_DONE, CLOUD_WELCOME_SHOWN as SHOWN, welcomeStepHint } from "@/lib/cloud-setup";
 import { resetCloudWelcome, useCloudWelcome } from "@/lib/cloud-welcome";
+import { PRODUCT_NAME } from "../../../shared/product.ts";
 
 const CLOUD = { name: "Studio Cloud", origin: "https://omb-u-1a2b3c4d5e6f.fly.dev" };
 const quiet: CloudSendNotice = { ready: true, bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: 0, signature: "", dismissed: false, running: false, last: null, whole: null };
@@ -101,11 +102,11 @@ afterEach(() => {
 });
 
 describe("CloudWelcome on a Team Cloud", () => {
-  const OWN = { id: "mine", threadId: "tm", name: "MausBot", defaultBot: { person: "nuno@acme.test" } };
+  const OWN = { id: "mine", threadId: "tm", name: `${PRODUCT_NAME}`, defaultBot: { person: "nuno@acme.test" } };
   const FIRST = { id: "b2", threadId: "t2", name: "Poppy", chiefOfStaff: true };
   beforeEach(() => { fixture.state.config.team = { id: "team-acme", name: "Acme" }; fixture.state.bots = [OWN, FIRST]; });
 
-  it("an empty team isn't told its bots are already here: the Owner's own MausBot and the first bot are no work", async () => {
+  it(`an empty team isn't told its bots are already here: the Owner's own ${PRODUCT_NAME} and the first bot are no work`, async () => {
     render();
     await vi.waitFor(() => expect(host.querySelector('[data-bring-choice="fresh"]')).not.toBeNull());
     expect(text()).not.toContain("Your bots are already here");
@@ -142,7 +143,7 @@ describe("CloudWelcome", () => {
     render();
     await vi.waitFor(() => expect(text()).toContain("What should Studio Cloud start with?"));
     expect(text()).toContain("Welcome to Studio Cloud");
-    expect(text()).toContain("Bots on your computer come here by themselves from the MausBot app.");
+    expect(text()).toContain(`Bots on your computer come here by themselves from the ${PRODUCT_NAME} app.`);
     expect(host.querySelector('[data-bring-choice="fresh"]')).not.toBeNull();
     expect(host.querySelector("[data-bring-desktop]"), "this is the desktop app already").toBeNull();
     expect(host.querySelector("[data-bring-update]")).toBeNull();
@@ -159,7 +160,7 @@ describe("CloudWelcome", () => {
     fixture.state.bots = [fixture.state.bots[0]];
     window.ogb = { ...window.ogb!, cloudMove: {} } as unknown as typeof window.ogb;
     render();
-    await vi.waitFor(() => expect(host.querySelector("[data-bring-update]")?.textContent).toBe("Update MausBot to bring your bots here by itself."));
+    await vi.waitFor(() => expect(host.querySelector("[data-bring-update]")?.textContent).toBe(`Update ${PRODUCT_NAME} to bring your bots here by itself.`));
     expect([...host.querySelectorAll("button")].some((node) => node.textContent?.startsWith("Copy"))).toBe(false);
   });
 
@@ -353,7 +354,7 @@ describe("CloudWelcome", () => {
     render();
     await vi.waitFor(() => expect(text()).toContain("Welcome to Studio Cloud"));
     const folders = host.querySelector('[data-welcome-files="folders"]')!;
-    expect(folders.textContent).toContain("Bots on Studio Cloud use the files on this computer by themselves while it's awake and MausBot is open. There's nothing to set up.");
+    expect(folders.textContent).toContain(`Bots on Studio Cloud use the files on this computer by themselves while it's awake and ${PRODUCT_NAME} is open. There's nothing to set up.`);
     expect(folders.querySelector("button")).toBeNull();
   });
 

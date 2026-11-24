@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TalkShortcutState } from "../../electron/talk-shortcut.mjs";
 import { setLocale } from "@/lib/i18n";
 import { TalkShortcutRow, talkShortcutKeywords } from "./TalkShortcutRow";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const KEYS: TalkShortcutState["keys"] = [
   { id: "ctrl-opt-space", label: "⌃⌥Space" },
@@ -19,7 +20,7 @@ let root: Root;
 
 const settle = async () => { for (let i = 0; i < 3; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
 const show = async () => { await act(async () => { root.render(createElement(TalkShortcutRow)); }); await settle(); };
-const toggle = () => host.querySelector<HTMLButtonElement>('button[aria-label="Talk to MausBot from any app"]')!;
+const toggle = () => host.querySelector<HTMLButtonElement>(`button[aria-label="Talk to ${PRODUCT_NAME} from any app"]`)!;
 const click = async (element: HTMLElement) => { await act(async () => { element.click(); }); await settle(); };
 
 beforeEach(() => {
@@ -57,7 +58,7 @@ describe("TalkShortcutRow", () => {
 
   it("shows the switch on with the key in its subtitle, and turns it off", async () => {
     await show();
-    expect(host.textContent).toContain("Talk to MausBot from any app");
+    expect(host.textContent).toContain(`Talk to ${PRODUCT_NAME} from any app`);
     expect(host.textContent).toContain("Hold ⌃⌥Space, speak, let go");
     await click(toggle());
     expect(bridge.set).toHaveBeenCalledWith({ enabled: false });

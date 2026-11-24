@@ -1,7 +1,7 @@
 {
-  "name": "MausBot",
-  "appName": "OpenMausBot",
-  "appId": "com.openmausbot.app",
+  "name": "AnAnt",
+  "appName": "AnAnt",
+  "appId": "com.anant.app",
   "updates": {
     "owner": "tanlull",
     "repo": "OpenMausBot"

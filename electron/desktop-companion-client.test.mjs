@@ -20,6 +20,8 @@ import {
   withDesktopCompanionAccess,
   withoutDesktopCompanionAccess,
 } from "./desktop-companion-client.mjs";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 const token = `omb_${"a".repeat(43)}`;
 // The one opaque label the control plane puts in front of a managed domain.
@@ -226,7 +228,7 @@ describe("desktop companion pairing", () => {
         requestId: "request-https-03",
         fetchImpl,
       }),
-    ).rejects.toThrow("OpenMausBot HTTPS companion address");
+    ).rejects.toThrow(`${APP_NAME} HTTPS companion address`);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 

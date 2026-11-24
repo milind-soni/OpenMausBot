@@ -11,6 +11,7 @@ import { removeTempDir } from "../testing/cleanup.ts";
 import { writeTokenFile } from "./connect.ts";
 import type { HeadlessIo } from "./output.ts";
 import { runHeadless } from "./main.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "omb-connect-"));
 let server: Server;
@@ -97,7 +98,7 @@ describe("connect", () => {
     expect(requests.at(-1)).toMatchObject({ path: "/api/auth/pair", body: { code: "ABCD-EFGH-JKLM" } });
     const lan = capture();
     expect(await runHeadless(["connect", "http://omb-test-no-such-host:1", "--code", "ABCD-EFGH-JKLM", "--out", join(dir, "token-lan")], { io: lan.io, env: {} })).toBe(5);
-    expect(lan.err[0]).toContain("no MausBot server answers at http://omb-test-no-such-host:1");
+    expect(lan.err[0]).toContain(`no ${PRODUCT_NAME} server answers at http://omb-test-no-such-host:1`);
     const open = capture();
     expect(await runHeadless(["connect", "http://203.0.113.9:8799", "--code", "ABCD-EFGH-JKLM", "--out", join(dir, "token-open")], { io: open.io, env: {} })).toBe(2);
     expect(open.err.join("\n")).toContain("put HTTPS in front");

@@ -17,6 +17,7 @@ import {
 import { OrgLibraryTab } from "@/components/TeamLibraryPanelOrg";
 import { TemplateDetailsBody } from "@/components/TemplateCard";
 import { parsePackageDocument } from "../../shared/package-format";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const fixture = (name: string) => JSON.parse(readFileSync(join(import.meta.dirname, "..", "..", "shared", "package-fixtures", name), "utf8"));
 const text = (markup: string) => markup.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ");
@@ -81,7 +82,7 @@ describe("the shelf card", () => {
       busy: null, notice: "", error: "", onAdd, onDetails: vi.fn(),
     }));
     const shown = text(markup);
-    for (const line of ["Packages Customer Co shares with you", "Sales desk", "Recommended by Acme Partners", "From Acme Partners", "Added", "Update MausBot to add this"]) {
+    for (const line of ["Packages Customer Co shares with you", "Sales desk", "Recommended by Acme Partners", "From Acme Partners", "Added", `Update ${PRODUCT_NAME} to add this`]) {
       expect(shown).toContain(line);
     }
     expect(markup).toContain('aria-label="Add Sales desk"');

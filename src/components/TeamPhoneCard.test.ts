@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setLocale } from "@/lib/i18n";
 import { PHONE_ARRIVAL_POLL_MS, TeamPhoneCard, type TeamPhone } from "./TeamPhoneCard";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const fixture = vi.hoisted(() => ({ api: vi.fn(), phones: [] as TeamPhone[], current: "s-desktop" as string | null }));
 vi.mock("@/state/store", () => ({ api: fixture.api }));
@@ -77,7 +78,7 @@ describe("Open on your phone, on a Team Cloud: the phones it opened", () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     flushSync(() => host.querySelector<HTMLButtonElement>("[data-phone-pairing-action]")!.click());
     await vi.waitFor(() => expect(host.querySelector("[data-team-phone-code]")).not.toBeNull());
-    expect(host.querySelector("[data-team-phone-code]")!.textContent).toContain("Scan it from inside the MausBot app, not the camera.");
+    expect(host.querySelector("[data-team-phone-code]")!.textContent).toContain(`Scan it from inside the ${PRODUCT_NAME} app, not the camera.`);
     expect(host.querySelector("[data-team-phone-code]")!.textContent).not.toMatch(/phone's camera|in the browser/);
     fixture.phones = [phone("ph-ada", "Ada's iPhone", "ada@acme.test")];
     await vi.advanceTimersByTimeAsync(PHONE_ARRIVAL_POLL_MS);

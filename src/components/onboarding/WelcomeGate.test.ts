@@ -28,6 +28,7 @@ vi.mock("@/components/Avatar", () => ({ MausAvatar: () => null }));
 import { SharedWorkspaceHint } from "./SharedWorkspaceHint";
 import { useWelcomeViewer, WelcomeGate } from "./WelcomeGate";
 import { WelcomeFlow } from "./WelcomeFlow";
+import { PRODUCT_NAME } from "../../../shared/product.ts";
 
 type Node = ReactElement<Record<string, unknown> & { onClick?: () => void; onClose?: () => void; onDone?: (botId: string | null) => void; children?: ReactNode }>;
 function render(component: () => ReactNode) {
@@ -142,7 +143,7 @@ describe("who gets the welcome flow", () => {
   it("gives a hosted member a note instead, and nothing that writes the workspace config", async () => {
     const { tree, html } = gate({ hosted: true, canSave: false });
     expect(tree?.type).toBe(SharedWorkspaceHint);
-    expect(html).toContain("Your team&#x27;s shared MausBot");
+    expect(html).toContain(`Your team&#x27;s shared ${PRODUCT_NAME}`);
     expect(html).not.toContain("role=\"dialog\"");
     fixture.values = [];
     const hint = render(() => SharedWorkspaceHint({ replay: false, onClose: vi.fn() }));
@@ -159,10 +160,10 @@ describe("who gets the welcome flow", () => {
     fixture.values = [];
     expect(render(() => SharedWorkspaceHint({ replay: false, onClose: vi.fn() })).html).toBe("");
     fixture.values = [];
-    expect(render(() => SharedWorkspaceHint({ replay: true, onClose: vi.fn() })).html).toContain("shared MausBot");
+    expect(render(() => SharedWorkspaceHint({ replay: true, onClose: vi.fn() })).html).toContain(`shared ${PRODUCT_NAME}`);
     vi.stubGlobal("localStorage", { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } });
     fixture.values = [];
-    expect(render(() => SharedWorkspaceHint({ replay: false, onClose: vi.fn() })).html).toContain("shared MausBot");
+    expect(render(() => SharedWorkspaceHint({ replay: false, onClose: vi.fn() })).html).toContain(`shared ${PRODUCT_NAME}`);
   });
 
   it("never opens the flow for a hosted member, even when the admin has not finished it", () => {

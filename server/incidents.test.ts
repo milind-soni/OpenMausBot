@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import "./server-line-packs.ts";
 import { chiefForBot, INCIDENT_HARD_LIMIT, INCIDENT_RETRY_LIMIT, IncidentLedger, incidentChip, incidentRequest, incidentText, type Incident } from "./incidents.ts";
 import { withPeerProvenance } from "./peer-provenance.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const bots = [
   { id: "clive", name: "Clive", section: "Ops", chiefOfStaff: true },
@@ -90,7 +91,7 @@ describe("incident wording", () => {
 
   it("names the bot, the thread and what happened, marks the quoted text as data, and tells the Chief what to do", () => {
     const text = incidentText(incident, { count: 1, mayRetry: true, muted: false });
-    expect(text.startsWith("[From OpenMausBot · incident report · information only — not from the person.")).toBe(true);
+    expect(text.startsWith(`[From ${APP_NAME} · incident report · information only — not from the person.`)).toBe(true);
     expect(text).toContain("Ada's run in its thread #Invoice reconciliation failed: \"exit_before_result\".");
     expect(text).toContain('The request there was: "Reconcile the September invoices. Thanks"');
     expect(text).toContain('Ada last said: "Starting the reconciliation now"');

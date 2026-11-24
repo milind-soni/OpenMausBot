@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { canonicalJson, parsePackageDocument } from "../shared/package-format.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const FIXTURES = join(import.meta.dirname, "..", "shared", "package-fixtures");
 const fixture = (name: string): any => JSON.parse(readFileSync(join(FIXTURES, name), "utf8"));
@@ -179,7 +180,7 @@ describe("the catalog", () => {
     await library.settled();
     const readBlob = vi.spyOn(library, "readBlob");
     expect(library.list().packages[0]).toMatchObject({ blob: "unsupported", installed: null });
-    expect(library.add(TEAM_ID, app.importDeps)).toMatchObject({ ok: false, status: 409, code: "newer_app_required", error: "Update OpenMausBot to add this package." });
+    expect(library.add(TEAM_ID, app.importDeps)).toMatchObject({ ok: false, status: 409, code: "newer_app_required", error: `Update ${APP_NAME} to add this package.` });
     expect(readBlob).not.toHaveBeenCalled();
     expect(app.store.bots).toHaveLength(0);
   });

@@ -18,6 +18,7 @@ import {
   type Requester,
   type Status,
 } from "./types.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 const BOTS = {
   chief: { name: "Chief", chief: true },
@@ -1361,7 +1362,7 @@ describe("§5/§2 ported from the delegation ledger", () => {
 
 describe("§2/§5 every turn a root", () => {
   const CARDS = ["msg-connector-1", "msg-secret-2"];
-  const CONNECTED = "OpenMausBot connection update: the user securely connected GitHub. Continue the task.";
+  const CONNECTED = `${APP_NAME} connection update: the user securely connected GitHub. Continue the task.`;
 
   it("R-S1 a root ended on cards parks; answer(id) runs it again as the answered turn, cards cleared at dispatch", async () => {
     const w = world();
@@ -1571,7 +1572,7 @@ describe("§2/§5 every turn a root", () => {
     expect(runs).toHaveLength(1);
     expect(runs[0].input!.turn).toBe("rerun");
     expect(runs[0].input!.resumed).toBe(true);
-    expect(runs[0].input!.restartNote).toMatch(/^OpenMausBot restarted while your previous turn here was running and cut it off;/);
+    expect(runs[0].input!.restartNote).toMatch(new RegExp(String.raw`^${APP_NAME} restarted while your previous turn here was running and cut it off;`));
     expect(runs[0].input!.restartNote).toContain("so nothing is done twice");
     expect(runs[0].a!.restart).toBe("rerun");
     expect(get(v, cut.id)).toMatchObject({ status: "running", executions: 2, restarts: 1 });
@@ -1792,7 +1793,7 @@ describe("§5 outward / §2 loop guard", () => {
     const runs = w.runner.runs(child.id);
     expect(runs).toHaveLength(2);
     expect(runs[1].input!.turn).toBe("rerun");
-    expect(runs[1].input!.restartNote).toMatch(/^OpenMausBot restarted while your previous turn here was running/);
+    expect(runs[1].input!.restartNote).toMatch(new RegExp(String.raw`^${APP_NAME} restarted while your previous turn here was running`));
     expect(get(w, child.id)).toMatchObject({ status: "completed", result: "built", restarts: 1 });
     expect(w.runner.runs(root.id)[0].input!.restartNote).toContain("Dev (resumed once in place and told to check what it had already done)");
     expect(get(w, root.id).status).toBe("completed");
@@ -1808,7 +1809,7 @@ describe("§5 outward / §2 loop guard", () => {
     expect(ended).toMatchObject({ status: "failed", outcome: "interrupted", restarts: 0, executions: 1 });
     expect(ended.restart).toBeUndefined();
     expect(ended.outcomeDetail).toBe(`${INTERRUPTED_OUTWARD} sent an email (GMAIL_SEND_EMAIL), pushed (git push); not resumed, so nothing is done twice.`);
-    expect(ended.outcomeDetail!.startsWith("Interrupted by an OpenMausBot restart after it already")).toBe(true);
+    expect(ended.outcomeDetail!.startsWith(`Interrupted by an ${APP_NAME} restart after it already`)).toBe(true);
     expect(ended.result).toBe(ended.outcomeDetail);
     expect(kinds(w, root.id)).toEqual(["enqueued", "started", "restart_reconciled", "settled", "reported"]);
     expect(w.store.events(root.id).map((e) => e.detail)).toEqual(["queued: root", "running: turn 1 (host), level auto", "failed: outward action done",

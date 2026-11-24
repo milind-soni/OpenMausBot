@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { withDefault } from "./runtime/questions.ts";
 import { queuedBehindPersonText, settledWaitingChip, turnWaitedOnPerson, UnansweredApprovals } from "./waiting-on-person.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 describe("the waiting-on-you chip once its card settles", () => {
   it.each([
@@ -60,7 +61,7 @@ describe("approvals nobody answered", () => {
     const notes = new UnansweredApprovals();
     notes.record("t1", "turn-1", "Bash", "npm test");
     expect(notes.annotate("t1", "turn-1", "Tests are unverified.", true)).toBe(
-      "[OpenMausBot: nobody answered the approval for “Bash: npm test” in time, so it did not run. Do not report it as done; it needs the person's approval.]\n\nTests are unverified.",
+      `[${APP_NAME}: nobody answered the approval for “Bash: npm test” in time, so it did not run. Do not report it as done; it needs the person's approval.]\n\nTests are unverified.`,
     );
   });
 
@@ -70,7 +71,7 @@ describe("approvals nobody answered", () => {
     notes.record("t1", "turn-1", "Bash", "npm test");
     notes.record("t1", "turn-1", "audit_write", "audit_write {\"name\":\"receipt\"}");
     expect(notes.annotate("t1", "turn-1", "One or more tool operations failed or were denied", false)).toBe(
-      "One or more tool operations failed or were denied\n\n[OpenMausBot: nobody answered the approvals for “Bash: npm test”, “audit_write {\"name\":\"receipt\"}” in time, so they did not run. Do not report them as done; they need the person's approval.]",
+      `One or more tool operations failed or were denied\n\n[${APP_NAME}: nobody answered the approvals for “Bash: npm test”, “audit_write {"name":"receipt"}” in time, so they did not run. Do not report them as done; they need the person's approval.]`,
     );
   });
 
@@ -97,7 +98,7 @@ describe("approvals nobody answered", () => {
     expect(notes.annotate("t1", "turn-1", "done", true)).toContain("approvals for “audit_write {\"name\":\"receipt\"}”, “Bash: npm test”");
     notes.answered("t1", "turn-1", "audit_write", "audit_write {\"name\":\"receipt\"}");
     expect(notes.annotate("t1", "turn-1", "done", true)).toBe(
-      "[OpenMausBot: nobody answered the approval for “Bash: npm test” in time, so it did not run. Do not report it as done; it needs the person's approval.]\n\ndone",
+      `[${APP_NAME}: nobody answered the approval for “Bash: npm test” in time, so it did not run. Do not report it as done; it needs the person's approval.]\n\ndone`,
     );
     notes.answered("t1", "turn-1", "Bash", "npm test");
     expect(notes.annotate("t1", "turn-1", "done", true)).toBe("done");

@@ -3,6 +3,9 @@ import { chmodSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import productJson from "../product.json" with { type: "json" };
+
+const { appName: APP_NAME } = productJson;
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const prefixName = "omb-linux-smoke-runtime-";
@@ -33,7 +36,7 @@ const executables = [
   path.join(root, "release", appImage),
 ];
 if (process.env.OMB_SMOKE_INSTALLED_DEB === "1") {
-  executables.push("/opt/OpenMausBot/openmausbot");
+  executables.push(`/opt/${APP_NAME}/openmausbot`);
 }
 
 for (const executable of executables) {

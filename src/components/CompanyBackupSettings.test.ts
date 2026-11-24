@@ -22,6 +22,7 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
 }));
 vi.mock("@/state/store", () => ({ api: vi.fn() }));
 import { CompanyBackupSettings, ConnectedCompanyBackupSettings, SavedCompanyBackupSchedule } from "./CompanyBackupSettings";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 type BackupBridge = NonNullable<NonNullable<Window["ogb"]>["companyBackups"]>;
 type Node = ReactElement<{
@@ -248,7 +249,7 @@ describe("optional Company cloud backup settings", () => {
   it("shows restart instructions and no backup actions when a restore is already staged", async () => {
     vi.mocked(bridge.state).mockResolvedValueOnce({ busy: false, pendingRestore: true });
     await ready();
-    expect(render().html).toContain("Fully quit MausBot");
+    expect(render().html).toContain(`Fully quit ${PRODUCT_NAME}`);
     for (const label of ["Back up this installation", "Restore this backup", "Delete cloud backup", "Refresh cloud backups"]) {
       expect(button(label)).toBeUndefined();
     }
@@ -265,10 +266,10 @@ describe("optional Company cloud backup settings", () => {
     await ready();
     if (lateState) {
       expect(render().html).toContain("Cloud backups could not be loaded");
-      expect(render().html).not.toContain("Fully quit MausBot");
+      expect(render().html).not.toContain(`Fully quit ${PRODUCT_NAME}`);
       resolveState({ busy: false, pendingRestore: true }); await flush();
     }
-    expect(render().html).toContain("Fully quit MausBot");
+    expect(render().html).toContain(`Fully quit ${PRODUCT_NAME}`);
     for (const label of ["Back up this installation", "Restore this backup", "Delete cloud backup", "Refresh cloud backups"]) {
       expect(button(label)).toBeUndefined();
     }
@@ -469,7 +470,7 @@ describe("optional Company cloud backup settings", () => {
     const replace = button("Replace installation"); replace.props.onClick!(); replace.props.onClick!(); await flush();
     expect(bridge.restore).toHaveBeenCalledOnce();
     expect(storage.get(WORKSPACE_RESTORE_MARKER)).toBe(STAGE_ID);
-    expect(render().html).toContain("Fully quit MausBot");
+    expect(render().html).toContain(`Fully quit ${PRODUCT_NAME}`);
     expect(window.location.reload).not.toHaveBeenCalled();
     expect([...storage.values()]).not.toContain(PASSWORD);
   });

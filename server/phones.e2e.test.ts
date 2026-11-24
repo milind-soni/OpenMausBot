@@ -17,6 +17,7 @@ import { PHONE_INTERNAL_MCP_PATH } from "./phones/rpc.ts";
 import { READ_AND_DRAFT_REFUSAL } from "./read-and-draft.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 import { openSse, type SseRecorder } from "./testing/sse.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const key = "isolated-phone-capability";
 const PHONE_NAME = "Omkar's iPhone";
@@ -163,7 +164,7 @@ it("a bot without a grant sees no phone tools", async () => {
   // The owner's own turn, refused for the grant alone.
   const refused = (await rpc(token, "tools/call", { name: "PHONE_LIST_EVENTS", arguments: { from: "2026-10-23T00:00:00+05:30", to: "2026-10-24T00:00:00+05:30" } })).body.result;
   expect(refused.isError).toBe(true);
-  expect(refused.content[0].text).toBe("OpenMausBot did not run this: Scout has not been given access to Phone Calendar. Ask the user to allow it under the bot's Access settings, and do not retry.");
+  expect(refused.content[0].text).toBe(`${APP_NAME} did not run this: Scout has not been given access to Phone Calendar. Ask the user to allow it under the bot's Access settings, and do not retry.`);
 }, 60_000);
 
 it("any bot left on the default hears where the person is talking from: the paired phone's send, or the computer", async () => {
@@ -322,7 +323,7 @@ it("a conversation an outside event's run reported into loses the phone", async 
   expect(untouched.mcpConfig.mcpServers).toHaveProperty(PHONE_MCP_SERVER);
 }, 90_000);
 
-it("a send reaches the phone with no card of OpenMausBot's own in the chat: the person taps Send on the phone", async () => {
+it(`a send reaches the phone with no card of ${APP_NAME}'s own in the chat: the person taps Send on the phone`, async () => {
   await settle();
   const allowed = await phone("PUT", "/api/phones/self", { ...registration("install-0001", PHONE_NAME), capabilities: { calendar: "full", messages: "send" } });
   expect(allowed.status).toBe(200);

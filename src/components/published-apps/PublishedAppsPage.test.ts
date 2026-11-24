@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PublishedApp } from "../../../shared/published-apps";
+import { PRODUCT_NAME } from "../../../shared/product.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -225,7 +226,7 @@ describe("apps on the hosting the Cloud plan includes", () => {
   it("says plainly where each app is hosted", async () => {
     apps = [INCLUDED, SITE, PAGE];
     await show();
-    expect([INCLUDED, SITE, PAGE].map((app) => card(app.id).querySelector("[data-app-source]")?.textContent)).toEqual(["Included hosting", "Your Netlify", "MausBot page"]);
+    expect([INCLUDED, SITE, PAGE].map((app) => card(app.id).querySelector("[data-app-source]")?.textContent)).toEqual(["Included hosting", "Your Netlify", `${PRODUCT_NAME} page`]);
     expect(card(INCLUDED.id).getAttribute("data-source")).toBe("included");
     expect(card(INCLUDED.id).querySelector("[data-app-access]")?.textContent).toBe("Public");
   });
@@ -244,7 +245,7 @@ describe("apps on the hosting the Cloud plan includes", () => {
     expect(host.querySelector(`[data-published-app="${INCLUDED.id}"]`)).toBeNull();
   });
 
-  it("shows an app MausBot took down as taken down, with nothing to open, preview or copy", async () => {
+  it(`shows an app ${PRODUCT_NAME} took down as taken down, with nothing to open, preview or copy`, async () => {
     apps = [TAKEN_DOWN, NOT_LIVE, FOLDERLESS];
     await show();
     expect(card(TAKEN_DOWN.id).querySelector("[data-app-status]")?.textContent).toBe("Taken down");

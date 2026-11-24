@@ -4,6 +4,8 @@ import test from "node:test";
 import { cloudMachine, cloudSetupProgress, cloudState, homeLook, listedColors, MAX_CLOUDS, olderRelease, otherOwnClouds, ownCloudPlaces, parseCloudList, parseCloudRenewal, parseOrganizations, releaseVersion, withoutOldCloudHome, signedInServers, swatchColor } from "./cloud-list.mjs";
 import environments from "./environments.cjs";
 import { createHomePlaces } from "./home-places.mjs";
+import productJson from "../product.json" with { type: "json" };
+const { name: PRODUCT_NAME, appName: APP_NAME } = productJson;
 
 const HOME = "https://omb-u-1a2b3c4d5e6f.fly.dev", CLIENT_A = "https://omb-c-a.fly.dev", CLIENT_B = "https://omb-c-b.fly.dev", TEAM = "https://omb-t-acme.fly.dev";
 const cloud = (over = {}) => ({ id: "c-a", name: "Client A", color: "green", role: "owner", tier: "pro", runsOn: "cloud", status: "ready", origin: CLIENT_A,
@@ -65,13 +67,13 @@ test("a server or computer of the person's own that signed in with their account
     teamId: null, primary: false, managed: false, lastSeenAt: 1_761_000_000_000, version: "0.1.118" }], "only reachable on its own network; fields this app doesn't know are ignored");
   assert.equal(parseCloudList([{ ...mini, status: "ready", origin: "https://mini.example.ts.net" }])[0].origin, "https://mini.example.ts.net");
   for (const bad of [{ managed: "false" }, { managed: 0 }, { managed: null }, { managed: false, runsOn: "cloud" }]) {
-    assert.deepEqual(parseCloudList([cloud(bad)]), [], `${JSON.stringify(bad)}: whether MausBot vouches for it is never guessed`);
+    assert.deepEqual(parseCloudList([cloud(bad)]), [], `${JSON.stringify(bad)}: whether ${PRODUCT_NAME} vouches for it is never guessed`);
   }
   const [loose] = parseCloudList([{ ...mini, lastSeenAt: "yesterday", version: "<b>1</b>" }]);
   assert.deepEqual([loose.lastSeenAt, loose.version], [undefined, undefined], "a malformed last-seen time or version is left out");
   assert.deepEqual(parseCloudList([{ ...mini, lastSeenAt: null, version: null }])[0], parseCloudList([{ ...mini, lastSeenAt: undefined, version: undefined }])[0]);
   assert.equal(parseCloudList([cloud({ managed: true })])[0].managed, true);
-  assert.equal(parseCloudList([cloud({ status: "offline", origin: null })]).length, 0, "a Cloud MausBot runs still needs its address");
+  assert.equal(parseCloudList([cloud({ status: "offline", origin: null })]).length, 0, `a Cloud ${PRODUCT_NAME} runs still needs its address`);
   const list = parseCloudList([primary, mini, { ...mini, id: "s-vps", name: "VPS", status: "ready", origin: "https://vps.example.com", primary: true }]);
   assert.deepEqual(list.map(entry => entry.primary), [true, false, false], "never My Cloud");
   assert.deepEqual([otherOwnClouds(list), ownCloudPlaces(list)], [[], []], "nor another Cloud of theirs: nothing pairs with it by id or lends to it");
@@ -144,7 +146,7 @@ test("the switcher lists another own Cloud like a team's: no Forget, the window 
   assert.deepEqual(menu.map(item => item.id), ["workspace-home", "workspace-a"]);
   const before = environments.workspaceMenuTemplate(state, { onSwitch() {}, onConnect() {}, onForget() {} });
   assert.equal(before.some(item => item.id === "workspace-forget"), false);
-  assert.equal(environments.workspaceWindowTitle(state, null, HOME), "OpenMausBot — Client A");
+  assert.equal(environments.workspaceWindowTitle(state, null, HOME), `${APP_NAME} — Client A`);
 });
 
 test("home places: the session's other Clouds become saved places, one remembered is opened next time, and one the session drops is forgotten", () => {

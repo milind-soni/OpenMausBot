@@ -6,16 +6,18 @@ import path from "node:path";
 import test from "node:test";
 
 import { autostartEntry, createOpenAtLogin, installOpenAtLogin } from "./open-at-login.mjs";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 /** Electron's login item API on macOS and Windows: one item per name, as Windows keeps one Run entry per name. */
 function fakeApp({ openAtLogin = false, isPackaged = true } = {}) {
-  const items = new Map(openAtLogin ? [["OpenMausBot", { args: [] }]] : []);
+  const items = new Map(openAtLogin ? [[`${APP_NAME}`, { args: [] }]] : []);
   return {
     isPackaged, items, wasOpenedAtLogin: false,
     getLoginItemSettings() {
       return { openAtLogin: items.size > 0, wasOpenedAtLogin: this.wasOpenedAtLogin, launchItems: [...items].map(([name, item]) => ({ name, args: item.args, enabled: true })) };
     },
-    setLoginItemSettings({ openAtLogin: on, args = [], name = "OpenMausBot" }) { if (on) items.set(name, { args }); else items.delete(name); },
+    setLoginItemSettings({ openAtLogin: on, args = [], name = `${APP_NAME}` }) { if (on) items.set(name, { args }); else items.delete(name); },
   };
 }
 
@@ -53,11 +55,11 @@ test("macOS: choosing it while lending added one makes it the person's, so it op
 test("Windows: the person's item has a name of its own, apart from lending's hidden one", async t => {
   const dir = await temp(t);
   const app = fakeApp();
-  const login = createOpenAtLogin({ app, file: path.join(dir, "win.json"), platform: "win32", home: dir, argv: ["OpenMausBot.exe"] });
+  const login = createOpenAtLogin({ app, file: path.join(dir, "win.json"), platform: "win32", home: dir, argv: [`${APP_NAME}.exe`] });
   login.follow(true);
   login.choose(true);
   assert.equal(login.chosen(), true);
-  assert.deepEqual(app.items.get("OpenMausBot at login"), { args: [] }, "no hidden flag");
+  assert.deepEqual(app.items.get(`${APP_NAME} at login`), { args: [] }, "no hidden flag");
   login.follow(false);
   assert.equal(login.chosen(), true, "lending stopping leaves it");
   login.choose(false);
@@ -68,14 +70,14 @@ test("Windows: the person's item has a name of its own, apart from lending's hid
  * only for that default entry with exactly the asked `args`, and `launchItems` listing every entry for this executable. */
 function windowsApp(entries = []) {
   const items = new Map(entries.map(({ name, args = [], enabled = true }) => [name, { args, enabled }]));
-  const DEFAULT = "electron.app.OpenMausBot";
+  const DEFAULT = `electron.app.${APP_NAME}`;
   return {
     isPackaged: true, items,
     getLoginItemSettings({ args = [] } = {}) {
       const own = items.get(DEFAULT);
       return {
         openAtLogin: Boolean(own) && JSON.stringify(own.args) === JSON.stringify(args),
-        launchItems: [...items].map(([name, item]) => ({ name, path: "C:\\OpenMausBot\\OpenMausBot.exe", args: item.args, scope: "user", enabled: item.enabled })),
+        launchItems: [...items].map(([name, item]) => ({ name, path: `C:\\${APP_NAME}\\${APP_NAME}.exe`, args: item.args, scope: "user", enabled: item.enabled })),
       };
     },
     setLoginItemSettings({ openAtLogin: on, args = [], name = DEFAULT }) { if (on) items.set(name, { args, enabled: true }); else items.delete(name); },
@@ -84,35 +86,35 @@ function windowsApp(entries = []) {
 
 test("Windows: Settings shows on while Windows already starts the app, even from lending's hidden entry", async t => {
   const dir = await temp(t);
-  const app = windowsApp([{ name: "electron.app.OpenMausBot", args: ["--omb-hidden"] }]);
-  const login = createOpenAtLogin({ app, file: path.join(dir, "win.json"), platform: "win32", home: dir, argv: ["OpenMausBot.exe"] });
+  const app = windowsApp([{ name: `electron.app.${APP_NAME}`, args: ["--omb-hidden"] }]);
+  const login = createOpenAtLogin({ app, file: path.join(dir, "win.json"), platform: "win32", home: dir, argv: [`${APP_NAME}.exe`] });
   const handlers = new Map();
   installOpenAtLogin({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, guard: (_channel, handler) => handler, loginItem: login, changed: () => {} });
   assert.deepEqual(await handlers.get("open-at-login:state")({}), { available: true, on: true });
-  app.items.get("electron.app.OpenMausBot").enabled = false;
+  app.items.get(`electron.app.${APP_NAME}`).enabled = false;
   assert.equal(login.chosen(), false, "an entry turned off in Task Manager starts nothing");
 });
 
 test("Windows: turning it off removes every entry that starts the app, and lending adds none until it is on again", async t => {
   const dir = await temp(t);
-  const app = windowsApp([{ name: "electron.app.OpenMausBot", args: ["--omb-hidden"] }, { name: "OpenMausBot at login" }]);
-  const login = createOpenAtLogin({ app, file: path.join(dir, "win.json"), platform: "win32", home: dir, argv: ["OpenMausBot.exe"] });
+  const app = windowsApp([{ name: `electron.app.${APP_NAME}`, args: ["--omb-hidden"] }, { name: `${APP_NAME} at login` }]);
+  const login = createOpenAtLogin({ app, file: path.join(dir, "win.json"), platform: "win32", home: dir, argv: [`${APP_NAME}.exe`] });
   login.choose(false);
   assert.deepEqual([...app.items.keys()], []);
   login.follow(true);
   assert.equal(login.chosen(), false, "lending keeps to the person's choice");
   login.choose(true);
   login.follow(true);
-  assert.deepEqual([...app.items].sort(), [["OpenMausBot at login", { args: [], enabled: true }], ["electron.app.OpenMausBot", { args: ["--omb-hidden"], enabled: true }]]);
+  assert.deepEqual([...app.items].sort(), [[`${APP_NAME} at login`, { args: [], enabled: true }], [`electron.app.${APP_NAME}`, { args: ["--omb-hidden"], enabled: true }]]);
 });
 
 test("Linux: the person's autostart entry has no hidden flag and no lending mark, and lending never removes it", async t => {
   const dir = await temp(t);
   const config = path.join(dir, "config");
   const entry = path.join(config, "autostart", "openmausbot.desktop");
-  const login = createOpenAtLogin({ app: fakeApp(), file: path.join(dir, "linux.json"), platform: "linux", home: dir, env: { XDG_CONFIG_HOME: config, APPIMAGE: "/home/me/OpenMausBot.AppImage" } });
+  const login = createOpenAtLogin({ app: fakeApp(), file: path.join(dir, "linux.json"), platform: "linux", home: dir, env: { XDG_CONFIG_HOME: config, APPIMAGE: `/home/me/${APP_NAME}.AppImage` } });
   login.choose(true);
-  assert.equal(await readFile(entry, "utf8"), autostartEntry("/home/me/OpenMausBot.AppImage", { lending: false }));
+  assert.equal(await readFile(entry, "utf8"), autostartEntry(`/home/me/${APP_NAME}.AppImage`, { lending: false }));
   assert.doesNotMatch(await readFile(entry, "utf8"), /--omb-hidden|X-OpenMausBot-Lending/);
   assert.equal(login.chosen(), true);
   login.follow(false);

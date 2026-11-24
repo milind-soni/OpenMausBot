@@ -3,6 +3,8 @@ import test from "node:test";
 
 import { deferred, downloadInto, elevatedHarness, errorStates, found, harness, settle, SUM } from "./updater-test-fixture.mjs";
 import { installDetail } from "./update-words.mjs";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 test("elevated-install wording survives terminal handoff and its staged card", async () => {
   const { h } = elevatedHarness(async () => ({ ok: false, reason: "refused", ...installDetail("native.update.noAdmin") }));
@@ -520,7 +522,7 @@ test("the hand-off install opens the staged package instead of quitting", async 
   h.coordinator.install();
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(received, [["/tmp/OpenMausBot-2.0.0-amd64.deb"]]);
+  assert.deepEqual(received, [[`/tmp/${APP_NAME}-2.0.0-amd64.deb`]]);
   assert.equal(h.getState().status, "handed-off");
   assert.ok(h.states.some((entry) => entry.status === "installing"));
   assert.equal(h.getState().command, "sudo apt-get install -y '/tmp/x.deb'");
@@ -560,7 +562,7 @@ test("without a hand-off the install still quits and installs", async () => {
     called += 1;
   };
 
-  await downloadInto(h, ["/tmp/OpenMausBot-2.0.0.AppImage"]);
+  await downloadInto(h, [`/tmp/${APP_NAME}-2.0.0.AppImage`]);
   h.coordinator.install();
 
   assert.equal(called, 1);
@@ -594,7 +596,7 @@ test("a staged update survives hourly checks that find nothing newer, and a manu
   };
   h.updater.downloadUpdate = async () => {
     h.updater.emit("update-downloaded", { version: "2.1.0" });
-    return ["/tmp/OpenMausBot-2.1.0-amd64.deb"];
+    return [`/tmp/${APP_NAME}-2.1.0-amd64.deb`];
   };
   await h.coordinator.check(true);
   await settle();
@@ -669,7 +671,7 @@ test("failed download and hand-off actions survive automatic checks but remain r
     assert.deepEqual(h.getState(), failed);
     h.updater.downloadUpdate = async () => {
       h.updater.emit("update-downloaded", { version: "2.0.0" });
-      return ["/tmp/OpenMausBot-2.0.0-amd64.deb"];
+      return [`/tmp/${APP_NAME}-2.0.0-amd64.deb`];
     };
     await h.coordinator.check(true);
     await settle();
@@ -711,7 +713,7 @@ test("elevated install: one click installs the staged package and reopens", asyn
   assert.match(h.getState().message, /password/i);
   await settle();
 
-  assert.deepEqual(calls.elevated, [{ files: ["/tmp/OpenMausBot-2.0.0-amd64.deb"], info: { sha512: SUM } }]);
+  assert.deepEqual(calls.elevated, [{ files: [`/tmp/${APP_NAME}-2.0.0-amd64.deb`], info: { sha512: SUM } }]);
   assert.equal(calls.relaunch, 1);
   assert.deepEqual(calls.handOff, [], "no terminal when the install worked");
   // the card stays busy while the app reopens: no second click, no stray state
@@ -771,7 +773,7 @@ for (const reason of ["refused", "unavailable", "failed", "unverifiable"]) {
     assert.equal(h.getState().status, "handed-off");
     assert.equal(h.getState().command, "sudo apt-get install -y '/tmp/x.deb'");
     assert.equal(h.getState().message, `because ${reason}.`);
-    assert.deepEqual(calls.handOff, [["/tmp/OpenMausBot-2.0.0-amd64.deb"]]);
+    assert.deepEqual(calls.handOff, [[`/tmp/${APP_NAME}-2.0.0-amd64.deb`]]);
     assert.equal(calls.relaunch, 0);
   });
 }

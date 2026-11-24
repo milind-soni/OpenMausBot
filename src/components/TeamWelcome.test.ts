@@ -17,6 +17,7 @@ import { TeamWelcome } from "./TeamWelcome";
 import { teamPrivateChatsLineDue } from "./TeamPrivateChatsLine";
 import { finishTeamWelcome, markTeamWelcomeShown, parseTeamWelcome, resetTeamWelcome, invitedToTeam, teamWelcomeDue, teamWelcomeView, WELCOME_USE_MS } from "@/lib/team-welcome";
 import { teamQuiet } from "./MausBotWelcome";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const ACME = { id: "team-acme", name: "Acme" };
 const people = [
@@ -26,7 +27,7 @@ const people = [
 ];
 const bot = (id: string, name: string, extra: Record<string, unknown> = {}) => ({ id, name, title: "", description: "", tasks: [], threadId: `${id}-main`, mainThreadId: `${id}-main`, avatarCrop: "mascot", ...extra });
 const bots = [
-  bot("mine", "MausBot", { defaultBot: { person: "sam@acme.test" } }),
+  bot("mine", `${PRODUCT_NAME}`, { defaultBot: { person: "sam@acme.test" } }),
   bot("payroll", "Payroll", { description: "Runs payroll every month.\nAsk it anything about pay.", yourAccess: "view" }),
   bot("support", "Support", { title: "Answers customers" }),
   bot("old", "Old", { hidden: true }),
@@ -77,7 +78,7 @@ describe("a new member's first screen in a team", () => {
     render(null);
     expect(container.querySelector("[data-team-welcome-invited]")?.textContent).toBe("You’re in Acme now.");
     expect(container.querySelector("[data-team-welcome-person]")).toBeNull();
-    expect(container.textContent).toContain("No bots are shared with you in Acme yet. Your own MausBot is in the sidebar.");
+    expect(container.textContent).toContain(`No bots are shared with you in Acme yet. Your own ${PRODUCT_NAME} is in the sidebar.`);
     expect([...container.querySelectorAll("button")].map((button) => button.textContent)).toEqual(["Look around"]);
   });
 });
@@ -144,7 +145,7 @@ describe("its manners", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("MausBot's own card never reaches a team's member, and its admins never over their welcome or a run", () => {
+  it(`${PRODUCT_NAME}'s own card never reaches a team's member, and its admins never over their welcome or a run`, () => {
     const owner = { hosted: false, canSave: true, cloudHome: true, teamRole: "owner" }, admin = { ...owner, teamRole: "admin" }, member = { ...owner, canSave: false, teamRole: "member" };
     const idle = { config: { team: ACME }, bots: [{ busy: false }] }, seen = { invitedBy: null, welcomedAt: 1, hints: [] };
     expect(teamQuiet(idle, member, seen), "a member, even after their welcome").toBe(true);

@@ -14,9 +14,10 @@ import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.
 import { failedTurnCause } from "../shared/failed-turn.ts";
 import { lastNonReceipt } from "../src/lib/receipts.ts";
 import { openSse } from "./testing/sse.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const CALLS = 12;
-const NOTE = "[OpenMausBot: this exact call has failed the same way 5 times in a row: “Bash: git status”. Change approach, or stop and report what is blocking.]";
+const NOTE = `[${APP_NAME}: this exact call has failed the same way 5 times in a row: “Bash: git status”. Change approach, or stop and report what is blocking.]`;
 const STOPPED = "the same call failed the same way 10 times in a row: “Bash: git status” — the turn was stopped";
 /** What the command prints, every time. Never in anything the harness writes. */
 const OUTPUT = "fatal: not a git repository (or any of the parent directories): .git";

@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const MARCO = { email: "marco@acme.test", role: "owner" as const };
 const SETTLED = "Your downstream room requests have settled.";
@@ -261,7 +262,7 @@ describe("Ask for approval: a question waits for the person, and an answer count
     const question = "Nur den Abschlusstext oder auch den Einladungstext?";
     script(fuchs.id, handOn("AF3", dachs, "AF3-BRIEF: Setz den Fix um."), done("AF3"));
     script(dachs.id,
-      { key: "AF3-B2", match: ["AF3-BRIEF", "OpenMausBot restarted"], reply: "AF3-B2: Beides angepasst, wie im Auftrag." },
+      { key: "AF3-B2", match: ["AF3-BRIEF", `${APP_NAME} restarted`], reply: "AF3-B2: Beides angepasst, wie im Auftrag." },
       { key: "AF3-B", match: ["AF3-BRIEF"], timeoutMs: 120_000, steps: [{ server: "ogb", tool: "ask_user", arguments: { question, choices: ["Nur den Abschlusstext", "Beides"] } }], reply: "AF3-B: nie erreicht." });
     await say(fuchs, inbox, "AF3-JOB: Lass Dachs den Fix umsetzen.");
     const work = await (async () => { await until(async () => Boolean(await workThread())); return (await workThread())!; })();

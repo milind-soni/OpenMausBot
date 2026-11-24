@@ -17,6 +17,9 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import productJson from "../product.json" with { type: "json" };
+
+const { appName: APP_NAME } = productJson;
 
 const require = createRequire(import.meta.url);
 const { app } = require("electron");
@@ -57,12 +60,12 @@ async function main() {
   mkdirSync(applications);
 
   // The bug shape: a version in the filename, and a launcher pinned to it.
-  const launched = path.join(installDir, "OpenMausBot-0.0.1-x86_64.AppImage");
+  const launched = path.join(installDir, `${APP_NAME}-0.0.1-x86_64.AppImage`);
   copyFileSync(packaged, launched);
   const desktopEntry = path.join(applications, "com.openmausbot.app.desktop");
   writeFileSync(
     desktopEntry,
-    `[Desktop Entry]\nName=OpenMausBot\nExec=${launched} %U\nType=Application\n`,
+    `[Desktop Entry]\nName=${APP_NAME}\nExec=${launched} %U\nType=Application\n`,
   );
 
   // Isolate every path the updater writes to.

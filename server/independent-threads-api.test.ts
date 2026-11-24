@@ -11,6 +11,7 @@ import { launchVerificationServer, runControlOmb, type VerificationServer } from
 import { handleToolCall, request } from "../scripts/mcp-server.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
 import { memoryDate } from "./workspace.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 describe("independent bot tasks through the isolated control surface", () => {
   let session: VerificationServer;
@@ -293,7 +294,7 @@ describe("independent bot tasks through the isolated control surface", () => {
     // whole, so the engine never reads the gate half-written
     writeFileSync(`${modelFile(models[1], "gate")}.tmp`, ending);
     renameSync(`${modelFile(models[1], "gate")}.tmp`, modelFile(models[1], "gate"));
-    const note = "[OpenMausBot: nobody answered the approval for “Bash: npm run release-check” in time, so it did not run.";
+    const note = `[${APP_NAME}: nobody answered the approval for “Bash: npm run release-check” in time, so it did not run.`;
     const runMessages = async () => (await api("GET", `/api/threads/${await runThread()}/messages?limit=100`)).body.messages as any[];
     const reported = async () => (await runMessages()).find((message: any) => message.roomRequest?.id === requestId && message.roomRequest.phase === "result")?.tool;
     if (ending === "finish") {

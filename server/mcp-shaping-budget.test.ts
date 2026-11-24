@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ResultStore, answerQuery } from "./mcp-shape.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const wideResult = () => Object.fromEntries(Array.from({ length: 80 }, (_, index) => [
   `field_${index}_${"x".repeat(100)}`,
@@ -15,7 +16,7 @@ describe("held-result metadata obeys the query budget", () => {
     const answer = answerQuery(store, { result: handle, query: "@" }, budget);
     expect(answer.isError).toBeUndefined();
     expect(answer.content[0]!.text.length).toBeLessThanOrEqual(budget);
-    expect(answer.content[0]!.text).toContain("TRUNCATED by OpenMausBot");
+    expect(answer.content[0]!.text).toContain(`TRUNCATED by ${APP_NAME}`);
     expect(answer.content[0]!.text).toContain(`"${handle}"`);
     expect(answer.content[0]!.text).toContain("Narrow the query");
     expect(store.get(handle)!.value).toBe(value);

@@ -27,6 +27,8 @@ import {
   MANAGED_COMPANION_RELEASE_AT_FIELD,
   MANAGED_COMPANION_TOKEN_FIELD,
 } from "./managed-companion-tunnel.mjs";
+import productJson from "../product.json" with { type: "json" };
+const { name: PRODUCT_NAME } = productJson;
 
 const UUID = "11111111-1111-4111-8111-111111111111";
 const INSTALLATION_ID = "22222222-2222-4222-8222-222222222222";
@@ -1523,7 +1525,7 @@ describe("Companion account on demand", () => {
 
   it("tells a desktop below the minimum version to update", async () => {
     const message = friendlyCompanionAccountError(new ControlPlaneError("update_required", 426));
-    expect(message).toBe("This version of MausBot can no longer make secure links. Update MausBot, then try again. Local Wi-Fi and Tailscale pairing still work.");
+    expect(message).toBe(`This version of ${PRODUCT_NAME} can no longer make secure links. Update ${PRODUCT_NAME}, then try again. Local Wi-Fi and Tailscale pairing still work.`);
   });
 
   it("signs a relay-capable computer in without a tunnel when no phone needs one", async () => {

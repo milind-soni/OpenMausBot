@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { APP_NAME } from "../shared/product.ts";
 
 type ProviderBoat = Record<string, unknown> & { id: string; name: string; state: string };
 type RequestRecord = { method: string; path: string; search: string; headers: IncomingMessage["headers"] };
@@ -286,7 +287,7 @@ describe("OpenMaus-managed Boat inventory", () => {
     const inventory = await boat.listManagedBoats(cfg, [{ botId, name: "Conflict", inUse: false }]);
 
     expect(inventory).toMatchObject({ available: false, instances: [] });
-    expect(inventory.problem).toMatch(/no longer has its OpenMausBot owner name/i);
+    expect(inventory.problem).toMatch(new RegExp(String.raw`no longer has its ${APP_NAME} owner name`, "i"));
     expect(journal.boatCreateRecoverySnapshot()).toContainEqual({ botId, boxId, resolved: true });
     expect(requests.map(({ method, path }) => `${method} ${path}`)).toEqual([
       "GET /api/v1/sandboxes",
@@ -590,7 +591,7 @@ describe("OpenMaus-managed Boat inventory", () => {
     deleteRemovesBoat = false;
 
     await expect(boat.deleteManagedBoat(cfg, owners, boxId, managedName)).rejects.toThrow(
-      `boat.dev accepted the deletion of cloud computer ${boxId}, but says it is blocked without a reason OpenMausBot knows. boat.dev keeps retrying on its own; if ${boxId} is still listed in boat.dev later, delete it there.`,
+      `boat.dev accepted the deletion of cloud computer ${boxId}, but says it is blocked without a reason ${APP_NAME} knows. boat.dev keeps retrying on its own; if ${boxId} is still listed in boat.dev later, delete it there.`,
     );
     expect(deleteJournal.boatDeletionSnapshot()).toEqual([expect.objectContaining({ boxId, phase: "blocked" })]);
     expect(journal.boatCreateRecoverySnapshot()).toContainEqual({ botId, boxId, resolved: true });

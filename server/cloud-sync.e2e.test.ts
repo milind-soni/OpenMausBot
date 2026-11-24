@@ -11,6 +11,7 @@ import { createCloudFilesService } from "../electron/cloud-sync.mjs";
 import { cloudPairingSignature } from "./cloud-home.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
+import { APP_NAME, PRODUCT_NAME } from "../shared/product.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const HOST = "omb-t-0123456789ab.fly.dev";
@@ -44,7 +45,7 @@ async function api(method: string, path: string, options: { body?: unknown; remo
 }
 
 async function ownerPairing(): Promise<string> {
-  const body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 });
+  const body = JSON.stringify({ label: `${APP_NAME} app (Cloud)`, ttlSeconds: 300 });
   const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
   const granted = await api("POST", "/api/cloud/pairing", { remote: true, headers: {
     "content-type": "application/json", "x-omb-cloud-timestamp": timestamp, "x-omb-cloud-nonce": nonce,
@@ -72,7 +73,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     },
   }));
   mkdirSync(join(home, "web"));
-  writeFileSync(join(home, "web", "index.html"), "<!doctype html><title>OpenMausBot</title>");
+  writeFileSync(join(home, "web", "index.html"), `<!doctype html><title>${APP_NAME}</title>`);
   const port = await freePortBlock([0, 1]);
   base = `http://127.0.0.1:${port}`;
   const offlinePrelude = `data:text/javascript,${encodeURIComponent('globalThis.fetch = async () => new Response("offline fixture", { status: 503 });')}`;
@@ -164,7 +165,7 @@ it("shares a PC folder as a read-only copy: changes go to My Cloud, a bot's edit
   }
 }, 60_000);
 
-it("a bot's turn wakes the desktop, and its new work comes down to Documents/MausBot/<bot>/<conversation>", async () => {
+it(`a bot's turn wakes the desktop, and its new work comes down to Documents/${PRODUCT_NAME}/<bot>/<conversation>`, async () => {
   const pcHome = realpathSync(mkdtempSync(join(tmpdir(), "omb-files-pc-")));
   const created = await api("POST", "/api/bots", { body: { name: "Report Owl", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } } });
   const bot = created.body.bot as { id: string; threadId: string };
@@ -183,7 +184,7 @@ it("a bot's turn wakes the desktop, and its new work comes down to Documents/Mau
     expect((await api("POST", `/api/bots/${bot.id}/messages`, { body: { text: "write the report" } })).status).toBe(202);
     expect((await woken).folderIds).toContain(`bot-${bot.id}-${bot.threadId}`);
     await service.pass();
-    const owl = join(pcHome, "Documents", "MausBot", "Report Owl");
+    const owl = join(pcHome, "Documents", `${PRODUCT_NAME}`, "Report Owl");
     const [conversation] = readdirSync(owl);
     expect(readFileSync(join(owl, conversation!, "report.md"), "utf8")).toBe("# Q3");
   } finally {

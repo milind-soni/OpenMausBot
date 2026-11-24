@@ -6,6 +6,7 @@ import type { LocaleKey } from "@/locales";
 import { useStore, type Message } from "@/state/store";
 import { HelperSetup } from "./HelperSetup";
 import { SimpleHelperIntro } from "./SimpleHelperIntro";
+import { DEFAULT_BOT_NAME } from "@/lib/default-bot";
 
 export const HELPER_ASK_KEYS: readonly LocaleKey[] = [
   "helperIntro.ask.overview", "helperIntro.ask.inbox", "helperIntro.ask.routine", "helperIntro.ask.howto",
@@ -31,7 +32,7 @@ export function HelperIntro(props: IntroProps) {
 function AdvancedHelperIntro({ botId, threadId, message, answered }: IntroProps) {
   const { state, dispatch } = useStore();
   const bot = state.bots.find((candidate) => candidate.id === botId);
-  const name = bot?.name ?? "MausBot";
+  const name = bot?.name ?? DEFAULT_BOT_NAME;
   const team = bot?.defaultBot?.person ? state.config?.team?.name : undefined;
   const ask = (key: LocaleKey) => dispatch({ type: "answerCard", botId, threadId, messageId: message.id, answer: t(key) });
   return (

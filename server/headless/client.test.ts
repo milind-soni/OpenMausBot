@@ -8,6 +8,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { HeadlessError } from "./args.ts";
 import { explain, namedServer, openClient, readToken } from "./client.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "omb-client-"));
 afterAll(() => removeTempDir(dir));
@@ -45,7 +46,7 @@ describe("the server and the credential", () => {
 
   it("refuses control-omb's changes on a server it merely found", async () => {
     await expect(openClient({}, { env: {}, requireExplicitForMutations: true }, true))
-      .rejects.toMatchObject({ message: "mutating commands require an explicit OpenMausBot instance", exitCode: 2 });
+      .rejects.toMatchObject({ message: `mutating commands require an explicit ${APP_NAME} instance`, exitCode: 2 });
   });
 });
 
@@ -58,18 +59,18 @@ describe("explain", () => {
     const signedIn = { identity: { kind: "saved" as const, name: "local", label: "x", scopes: ["admin", "client"], expiresAt: 0 } };
     expect(await explain(status(403, "admin scope required"), undefined, signedIn)).toMatchObject({ exitCode: 5, message: "not allowed: admin scope required" });
     expect(await explain(status(403, "admin scope required"), undefined, { botShell: true })).toMatchObject({ exitCode: 5, hint: expect.stringContaining("your own terminal") });
-    expect(await explain(status(403, "OpenMausBot refused this request because the installed desktop app requires a paired session token.")))
+    expect(await explain(status(403, `${APP_NAME} refused this request because the installed desktop app requires a paired session token.`)))
       .toMatchObject({ exitCode: 4, message: "not allowed: a change from a program on this computer needs you signed in", hint: expect.stringContaining("openmausbot login") });
     expect(await explain(status(403, "admin scope required"), undefined, { identity: { kind: "saved", name: "local", label: "x", scopes: ["client"], expiresAt: 0 } }))
       .toMatchObject({ hint: expect.stringContaining("chat only") });
     expect(await explain(status(409, "stop this bot's turn first"))).toMatchObject({ exitCode: 6, message: "stop this bot's turn first" });
-    expect(await explain(status(409, 'OpenMausBot API error (409): {"error":"stop this bot\'s turn first","code":"thread_busy"}')))
+    expect(await explain(status(409, `${APP_NAME} API error (409): {"error":"stop this bot's turn first","code":"thread_busy"}`)))
       .toMatchObject({ exitCode: 6, message: "stop this bot's turn first" });
-    expect(await explain(status(403, 'OpenMausBot API error (403): {"error":"admin scope required"}'))).toMatchObject({ message: "not allowed: admin scope required" });
-    expect(await explain(status(502, "OpenMausBot API error (502): <html>Bad gateway</html>"))).toMatchObject({ message: "OpenMausBot API error (502): <html>Bad gateway</html>" });
-    expect(await explain(status(404, 'OpenMausBot API error (404): {"error":"no such bot"}'))).toMatchObject({ exitCode: 7, message: "no such bot" });
-    expect(await explain(status(404, "OpenMausBot API error (404): not found"))).toMatchObject({ exitCode: 1 });
-    expect(await explain(new TypeError("fetch failed"), "http://127.0.0.1:1")).toMatchObject({ exitCode: 5, message: "cannot reach OpenMausBot at http://127.0.0.1:1" });
+    expect(await explain(status(403, `${APP_NAME} API error (403): {"error":"admin scope required"}`))).toMatchObject({ message: "not allowed: admin scope required" });
+    expect(await explain(status(502, `${APP_NAME} API error (502): <html>Bad gateway</html>`))).toMatchObject({ message: `${APP_NAME} API error (502): <html>Bad gateway</html>` });
+    expect(await explain(status(404, `${APP_NAME} API error (404): {"error":"no such bot"}`))).toMatchObject({ exitCode: 7, message: "no such bot" });
+    expect(await explain(status(404, `${APP_NAME} API error (404): not found`))).toMatchObject({ exitCode: 1 });
+    expect(await explain(new TypeError("fetch failed"), "http://127.0.0.1:1")).toMatchObject({ exitCode: 5, message: `cannot reach ${APP_NAME} at http://127.0.0.1:1` });
     expect(await explain(Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" }))).toMatchObject({ exitCode: 5 });
     const kept = new HeadlessError("as it was", 4, "hint");
     expect(await explain(kept)).toBe(kept);

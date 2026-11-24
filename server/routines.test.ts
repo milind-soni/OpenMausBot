@@ -20,6 +20,7 @@ import {
 import { createUsageCapGate } from "./host/usage-cap-gate.ts";
 import { resetUsageTotalsForTests } from "./usage-caps.ts";
 import { appendUsage, flushUsageLedger } from "./usage-ledger.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const dirs: string[] = [];
 /** Runs that were made to start: a `missed` row that only counts skipped occurrences is left out. */
@@ -1619,7 +1620,7 @@ describe("RoutineManager", () => {
     // A second restart while that second start runs fails it.
     const again = new RoutineManager(h.options);
     expect(again.listRuns()).toMatchObject([
-      { routineId: routine.id, status: "failed", retried: "restarted", threadId: "thread-1", error: "OpenMausBot restarted while this routine was running" },
+      { routineId: routine.id, status: "failed", retried: "restarted", threadId: "thread-1", error: `${APP_NAME} restarted while this routine was running` },
     ]);
     expect(failureWasPersistedBeforeCallback).toBe(true);
     expect(cut).toHaveLength(2);
@@ -1629,7 +1630,7 @@ describe("RoutineManager", () => {
         routineName: "Morning brief",
         status: "failed",
         threadId: "thread-1",
-        error: "OpenMausBot restarted while this routine was running",
+        error: `${APP_NAME} restarted while this routine was running`,
       },
     ]);
     expect(new RoutineManager(h.options).listRuns()).toHaveLength(1);
@@ -4078,7 +4079,7 @@ describe("routine paths that cannot exist where the routine runs", () => {
     h.manager.update(routine.id, { prompt: routine.prompt });
     h.manager.runNow(routine.id);
     await h.manager.tick();
-    expect(h.started[0]!.prompt).toContain("[OpenMausBot: this run is on a Linux computer, where C:\\Users\\Ada\\Reports\\weekly.xlsx cannot exist.");
+    expect(h.started[0]!.prompt).toContain(`[${APP_NAME}: this run is on a Linux computer, where C:\\Users\\Ada\\Reports\\weekly.xlsx cannot exist.`);
     expect(JSON.parse(readFileSync(h.options.file!, "utf8")).routines[0]).not.toHaveProperty("warning");
   });
 });

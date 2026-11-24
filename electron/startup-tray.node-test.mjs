@@ -6,6 +6,8 @@ import nativeText from "./native-text.cjs";
 import { createStartupScreen, startupScreenHtml } from "./startup-screen.mjs";
 import { createSystemTray } from "./system-tray.mjs";
 import product from "../product.json" with { type: "json" };
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 const APP = product.name;
 
 const iconPath = fileURLToPath(new URL("./resources/app-icon.png", import.meta.url));
@@ -155,7 +157,7 @@ test("the tray's menu and the startup screen speak the app's language, and the t
   text.set("pt-br");
   tray.relabel();
   assert.deepEqual(trayInstance.menu.map(item => item.label), [`Abrir o ${APP}`, undefined, `Sair do ${APP}`]);
-  assert.equal(trayInstance.tooltip, "OpenMausBot");
+  assert.equal(trayInstance.tooltip, `${APP_NAME}`);
   const html = startupScreenHtml(iconPath, { t: text.t, lang: text.intlTag() });
   assert.match(html, /<html lang="pt-BR">/);
   assert.match(html, /<button aria-label="Fechar"/);

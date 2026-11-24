@@ -24,6 +24,9 @@ import {
   CLOUDFLARED_VERSION,
   executableTarget,
 } from "./prepare-cloudflared.mjs";
+import productJson from "../product.json" with { type: "json" };
+
+const { appName: APP_NAME } = productJson;
 
 const require = createRequire(import.meta.url);
 const { validateDriverCandidate } = require("../electron/cua-linux.cjs");
@@ -437,7 +440,7 @@ for (const expected of [
 
 // The DEB and RPM install the same tree under /opt; check what each extracted.
 function verifySystemPackage(extracted, label, packageType) {
-  const appRoot = path.join(extracted, "opt", "OpenMausBot");
+  const appRoot = path.join(extracted, "opt", `${APP_NAME}`);
   requireDirectoryMode(appRoot, 0o755);
   const packageResources = path.join(appRoot, "resources");
   // Routes the in-app updater to the package-manager hand-off.
@@ -473,8 +476,8 @@ function verifySystemPackage(extracted, label, packageType) {
   requireFile(scalableIcon);
   const desktop = readFileSync(desktopFile, "utf8");
   for (const expected of [
-    "Name=OpenMausBot",
-    "Exec=/opt/OpenMausBot/openmausbot %U",
+    `Name=${APP_NAME}`,
+    `Exec=/opt/${APP_NAME}/openmausbot %U`,
     "Icon=openmausbot",
     "StartupWMClass=com.openmausbot.app",
     "Categories=Utility;",

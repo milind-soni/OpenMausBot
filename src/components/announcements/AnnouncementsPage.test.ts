@@ -7,6 +7,7 @@ import { setLocale } from "@/lib/i18n";
 import { TEAMS_NOTICE } from "@/lib/notices";
 import type { AnnouncementCard } from "../../../shared/announcements";
 import type { Announcements } from "./use-announcements";
+import { PRODUCT_NAME } from "../../../shared/product.ts";
 
 const f = vi.hoisted(() => ({ found: null as unknown as Announcements, dispatch: vi.fn(), state: { config: {} as Record<string, unknown> }, remembered: vi.fn() }));
 vi.mock("./use-announcements", () => ({ useAnnouncements: () => f.found }));
@@ -22,7 +23,7 @@ const { track } = await import("@/lib/analytics");
 const NOW = Date.parse("2026-11-18T10:00:00Z");
 const browser: HistoryFacts = { branded: false, organization: false, cloudSale: false, cloudCards: false, remote: false, team: false, canSave: true, sponsors: true, modelgo: true };
 const desktop: HistoryFacts = { ...browser, cloudSale: true, cloudCards: true };
-const card: AnnouncementCard = { id: "phone-app-2026-11", kind: "product", title: { en: "MausBot on your phone", "pt-br": "MausBot no seu celular" }, body: "Chat with your bots anywhere.",
+const card: AnnouncementCard = { id: "phone-app-2026-11", kind: "product", title: { en: `${PRODUCT_NAME} on your phone`, "pt-br": `${PRODUCT_NAME} no seu celular` }, body: "Chat with your bots anywhere.",
   primary: { label: "Open", action: { open: "my_cloud" } }, starts: "2026-11-20T00:00:00Z", ends: "2027-01-01T00:00:00Z" } as AnnouncementCard;
 const markRead = vi.fn();
 const found = (facts: HistoryFacts, extra: Partial<Announcements> = {}): Announcements => ({
@@ -56,7 +57,7 @@ describe("Announcements", () => {
     const teams = rows()[1]!;
     expect(teams.querySelector("time")?.getAttribute("datetime")).toBe("2026-11-17T00:00:00.000Z");
     expect(teams.textContent).toContain("Nov 17, 2026");
-    expect(teams.textContent).toContain("MausBot is better with your team");
+    expect(teams.textContent).toContain(`${PRODUCT_NAME} is better with your team`);
     expect(teams.textContent).toContain("Show again");
     const hunt = rows().find(row => row.dataset.announcementItem === "product-hunt-launch-2026-10")!;
     expect(hunt.querySelector("[data-announcement-ended]")?.textContent).toBe("Ended");
@@ -123,7 +124,7 @@ describe("Announcements", () => {
     setLocale("pt-br");
     f.found = found(browser);
     await open();
-    expect(rows()[0]!.textContent).toContain("MausBot no seu celular");
+    expect(rows()[0]!.textContent).toContain(`${PRODUCT_NAME} no seu celular`);
     expect(document.querySelector("h1")?.textContent).toBe("Anúncios");
   });
 });

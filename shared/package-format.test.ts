@@ -25,11 +25,13 @@ import {
   upgradeV1,
   type PackageDocument,
 } from "./package-format.ts";
+import { APP_NAME } from "./product.ts";
 
 const FIXTURES = join(import.meta.dirname, "package-fixtures");
 const fixtureText = (name: string) => readFileSync(join(FIXTURES, name), "utf8");
 const fixture = (name: string): any => (name.endsWith(".md") ? fixtureText(name) : JSON.parse(fixtureText(name)));
-const manifest = JSON.parse(fixtureText("manifest.json")) as {
+const RECORDED_APP_NAME = "OpenMausBot";
+const manifest = JSON.parse(fixtureText("manifest.json").replaceAll(RECORDED_APP_NAME, APP_NAME)) as {
   fixtures: Record<string, {
     sha256?: string; keys?: string[]; summary?: unknown; secretFindings?: string[];
     downgrade?: { dropped?: string[]; error?: string }; error?: { code: string; message: string };

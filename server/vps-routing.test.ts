@@ -20,6 +20,7 @@ import { CONTROL_BUSY, CONTROL_REFUSAL_PLAIN, controlRefusal, createControlClien
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import type { RoutineSchedule } from "../shared/routines.ts";
 import { workerPort } from "./testing/worker-port.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
@@ -760,7 +761,7 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
       const thread = await replies();
       expect(thread.filter((message) => String(message.tool?.name ?? "").startsWith("error:"))).toEqual([]);
       const echo = thread.find((message) => message.text?.startsWith("echo: ")).text as string;
-      expect(echo).toContain("This bot's VPS computer is unavailable this turn (The OpenMausBot VPS container is stopped)");
+      expect(echo).toContain(`This bot's VPS computer is unavailable this turn (The ${APP_NAME} VPS container is stopped)`);
       expect(echo).toContain("Open Computer and enable Start VPS automatically");
     } finally {
       writeFileSync(template, original);

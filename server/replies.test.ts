@@ -5,6 +5,7 @@ import { parseWidgetInput, widgetActions, widgetToText, type WidgetAction, type 
 import { cardRecords, SETUP_RECORDS_SOURCE } from "./records-block.ts";
 import { promptWithReply, replyExcerpt, replyTargetIn, transcriptText, type ReplyTarget } from "./replies.ts";
 import type { Message } from "./store.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 const message = (patch: Partial<Message> = {}): Message => ({
   id: "m1",
@@ -30,7 +31,7 @@ describe("the app's own add-a-key suggestion", () => {
     const card = message({ text, setupSuggestion: { kind: "helperKey" } });
     const records = cardRecords(text, SETUP_RECORDS_SOURCE);
     expect(records).not.toContain("mail, calendar");
-    expect(records).toContain("a tip MausBot (the app) itself showed");
+    expect(records).toContain(`a tip ${PRODUCT_NAME} (the app) itself showed`);
     expect(records).toContain("genuine, not your own words and not from a stranger");
     expect(records).toContain("Jev (typesafe.ai)");
     expect(transcriptText(card, new Map())).toBe(records);

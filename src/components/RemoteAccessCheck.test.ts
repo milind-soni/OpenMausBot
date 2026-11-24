@@ -16,6 +16,7 @@ import { setLocale } from "@/lib/i18n";
 import type { CompanionState } from "@/lib/companion-types";
 import type { CompanionAccountState } from "../types/ogb";
 import { PairingFailureCheck, RemoteAccessCheckRow } from "./RemoteAccessCheck";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const state: CompanionState = {
   enabled: true,
@@ -50,7 +51,7 @@ const button = (label: string) => [...host.querySelectorAll("button")].find((nod
 describe("the connection check", () => {
   it("in Settings, shows the headline closed, and the steps and Copy diagnostics open", async () => {
     flushSync(() => root.render(createElement(RemoteAccessCheckRow, { account, state })));
-    expect(host.querySelector("[data-remote-access-headline]")?.textContent).toBe("MausBot Relay didn't answer.");
+    expect(host.querySelector("[data-remote-access-headline]")?.textContent).toBe(`${PRODUCT_NAME} Relay didn't answer.`);
     expect(host.querySelector("[data-remote-access-check]")).toBeNull();
     flushSync(() => button("Connection check")!.click());
     const steps = [...host.querySelectorAll("[data-step]")].map((node) => `${node.getAttribute("data-step")}=${node.getAttribute("data-result")}`);
@@ -68,7 +69,7 @@ describe("the connection check", () => {
     flushSync(() => root.render(createElement(PairingFailureCheck, { account: { available: false, status: "signed-out" }, state, setupTimedOut: false })));
     expect(host.querySelector("[data-remote-access-headline]")).toBeNull();
     expect(host.querySelector('[data-step="account"]')?.getAttribute("data-result")).toBe("failed");
-    expect(host.textContent).toContain("This computer can't reach MausBot right now.");
+    expect(host.textContent).toContain(`This computer can't reach ${PRODUCT_NAME} right now.`);
     expect(button("Copy diagnostics")).not.toBeNull();
   });
 });

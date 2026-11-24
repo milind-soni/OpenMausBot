@@ -11,6 +11,8 @@ import environments from "./environments.cjs";
 import localOrigin from "./local-origin.cjs";
 import { HOME_SCREEN_PATH, homeOf, installHomeWindowIpc, LOOK_MS, OPEN_MS, placeOf, QUIET_MS, routeOf, SPLASH_TEXT, splashText, TEAM_RENEW_EARLY_MS, TEAM_RENEW_MS, TEAM_RENEW_RETRY_MS, UPDATING_MS } from "./home-window.mjs";
 import { ACCOUNT, ACME, CLIENT, CLIENT_A, CLOUD, connected, done, LOCAL, TEAM, world } from "./fixtures/home-window-world.mjs";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 /** Everything already queued runs before this comes back: what the fake clock's callbacks left to flush. */
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -755,7 +757,7 @@ test("a team on screen signs in again before its hour ends, without moving the p
   assert.deepEqual(w.teamPairs, ["team-acme"], "not before its time");
   await w.later(1);
   assert.deepEqual(w.teamPairs, ["team-acme", "team-acme"]);
-  assert.deepEqual(w.redeemed, [["team", { code: "TTTT-EEEE-AAAA", cookie: true, label: "OpenMausBot app" }]]);
+  assert.deepEqual(w.redeemed, [["team", { code: "TTTT-EEEE-AAAA", cookie: true, label: `${APP_NAME} app` }]]);
   assert.equal(w.went.length, went, "the page never moved");
   assert.equal(w.pairs, 0, "never My Cloud's pairing");
   await w.later(TEAM_RENEW_MS);

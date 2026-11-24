@@ -20,6 +20,7 @@ import { resolveRequestAuth } from "./request-auth.ts";
 import { SessionRegistry } from "./sessions.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { portableWorkspaceConfig, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
+import { APP_NAME, PRODUCT_NAME } from "../shared/product.ts";
 
 const directories: string[] = [];
 afterEach(async () => { for (const directory of directories.splice(0)) await removeTempDir(directory); });
@@ -126,7 +127,7 @@ it("offers the built-in browser and cloud computers, never this computer or a Lo
 
 it("refuses the places it never offers with what is true there, not a setup step", () => {
   const local = cloudHomePlaceRefusal("local")!, vm = cloudHomePlaceRefusal("vm")!;
-  expect(local).toBe("This computer isn't a place in the Cloud. Set Works on to Auto, Cloud desktop or Browser; your own computer is reached while OpenMausBot is open on it.");
+  expect(local).toBe(`This computer isn't a place in the Cloud. Set Works on to Auto, Cloud desktop or Browser; your own computer is reached while ${APP_NAME} is open on it.`);
   expect(vm).toBe("Cloud bots can't use a private desktop. Set Works on to Auto, Cloud desktop or Browser.");
   for (const text of [local, vm]) {
     expect(text).not.toMatch(/configure|Computer panel|install|set (?:it|one) up/i);
@@ -142,7 +143,7 @@ function fixture() {
   const sessions = new SessionRegistry({ file: join(root, "sessions.json"), now: () => now });
   const pairing = createCloudPairing({ secret, sessions, now: () => now });
   let counter = 0;
-  const sign = (body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 }), options: { key?: string; at?: number; nonce?: string } = {}) => {
+  const sign = (body = JSON.stringify({ label: `${APP_NAME} app (Cloud)`, ttlSeconds: 300 }), options: { key?: string; at?: number; nonce?: string } = {}) => {
     const timestamp = String(Math.floor((options.at ?? now) / 1000)), nonce = options.nonce ?? `nonce-${String(++counter).padStart(12, "0")}`;
     return { timestamp, nonce, signature: `v1=${cloudPairingSignature(options.key ?? secret, timestamp, nonce, body)}`, body: Buffer.from(body) };
   };
@@ -160,7 +161,7 @@ it("opens one ordinary pairing window for a correctly signed request", () => {
   expect(granted.body.credential).toMatch(/^omb_pair_[A-Za-z0-9_-]{43}$/);
   expect(granted.body.expiresAt).toBe(f.now() + 300_000);
   const paired = f.exchange(granted.body.code as string);
-  expect(paired).toMatchObject({ ok: true, session: { label: "OpenMausBot app (Cloud)", scopes: ["admin", "client"] } });
+  expect(paired).toMatchObject({ ok: true, session: { label: `${APP_NAME} app (Cloud)`, scopes: ["admin", "client"] } });
 });
 
 it("matches the Admin's signature byte for byte", () => {
@@ -182,7 +183,7 @@ it("refuses a wrong key, a tampered request or a malformed signature, and counts
   const good = f.sign();
   const variants = [
     f.sign(undefined, { key: "W".repeat(43) }),
-    { ...good, body: Buffer.from(JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 600 })) },
+    { ...good, body: Buffer.from(JSON.stringify({ label: `${APP_NAME} app (Cloud)`, ttlSeconds: 600 })) },
     { ...good, nonce: "nonce-tampered-000" },
     { ...good, timestamp: String(Number(good.timestamp) + 1) },
     { ...good, signature: good.signature.slice(3) },
@@ -235,7 +236,7 @@ it("keeps every window single use and short lived, capping what the Admin asks f
   expect(f.exchange(long.body.code as string).ok).toBe(false);
   const plain = f.mint(f.sign("{}"));
   expect(plain.body.expiresAt).toBe(f.now() + 300_000);
-  expect(f.exchange(plain.body.code as string)).toMatchObject({ ok: true, session: { label: "MausBot Cloud" } });
+  expect(f.exchange(plain.body.code as string)).toMatchObject({ ok: true, session: { label: `MausBot Cloud` } });
 });
 
 it("opens a browser sign-in only a browser redeems, by credential alone, for at most two minutes", () => {
@@ -327,7 +328,7 @@ it("a new home on a kept volume clears the data-directory lease the previous mac
   expect(() => prepareCloudHomeData(home, dataDir, "home-other", lock)).toThrow(/another Cloud machine/);
   expect(readFileSync(lease, "utf8")).toContain("d8d9e0f1a2b3c4");
   // A volume another live home holds: refused before the volume is even checked.
-  const held = () => { throw new Error("Another MausBot home is already running on this volume. No data was changed."); };
+  const held = () => { throw new Error(`Another ${PRODUCT_NAME} home is already running on this volume. No data was changed.`); };
   expect(() => prepareCloudHomeData(home, dataDir, "home-7f3k2", held)).toThrow(/already running on this volume/);
   expect(readFileSync(lease, "utf8")).toContain("d8d9e0f1a2b3c4");
   expect(prepareCloudHomeData(home, dataDir, "home-7f3k2", lock)).toEqual({ volume: "existing", cleared: [{ path: lease, host: "d8d9e0f1a2b3c4", pid: 613 }] });
@@ -342,7 +343,7 @@ it("holds its volume for as long as it lives, and says plainly why it will not s
   const home = directory();
   const calls: number[] = [];
   const answer = (status: number | null, extra: { error?: Error; stderr?: string } = {}) => (fd: number) => { calls.push(fd); return { status, ...extra }; };
-  expect(() => holdVolume(home, answer(75))).toThrow("Another MausBot home is already running on this volume. No data was changed.");
+  expect(() => holdVolume(home, answer(75))).toThrow(`Another ${PRODUCT_NAME} home is already running on this volume. No data was changed.`);
   expect(() => holdVolume(home, answer(null, { error: new Error("spawnSync /usr/bin/flock ENOENT") }))).toThrow(/could not lock its volume \(spawnSync \/usr\/bin\/flock ENOENT\)/);
   expect(() => holdVolume(home, answer(1, { stderr: "flock: 3: Bad file descriptor\n" }))).toThrow(/could not lock its volume \(flock: 3: Bad file descriptor\)/);
   holdVolume(home, answer(0));
@@ -361,7 +362,7 @@ it.skipIf(!existsSync("/usr/bin/flock"))("a second home on a volume a live home 
       holder.stdout.on("data", (chunk: Buffer) => { if (chunk.toString().includes("held")) resolve(); });
       holder.once("exit", (code) => reject(new Error(`the holder exited ${code}`)));
     });
-    expect(() => holdVolume(home)).toThrow("Another MausBot home is already running on this volume. No data was changed.");
+    expect(() => holdVolume(home)).toThrow(`Another ${PRODUCT_NAME} home is already running on this volume. No data was changed.`);
   } finally {
     holder.kill("SIGKILL");
   }
@@ -785,7 +786,7 @@ it("a Team Cloud's pairing binds the Admin's member claim to the session it open
   const pairing = createCloudPairing({ secret, sessions, team: { id: "team-1", name: "Acme" }, now: () => now });
   let counter = 0;
   const mint = (claims: Record<string, unknown>) => {
-    const body = JSON.stringify({ label: "OpenMausBot app (Team Cloud)", ttlSeconds: 300, ...claims });
+    const body = JSON.stringify({ label: `${APP_NAME} app (Team Cloud)`, ttlSeconds: 300, ...claims });
     const timestamp = String(Math.floor(now / 1000)), nonce = `nonce-${String(++counter).padStart(12, "0")}`;
     return pairing.handle({ timestamp, nonce, signature: `v1=${cloudPairingSignature(secret, timestamp, nonce, body)}`, body: Buffer.from(body), source: "203.0.113.9" });
   };
@@ -824,7 +825,7 @@ it("a Team Cloud pairing at a new role ends that person's sessions, phones and w
   const pairing = createCloudPairing({ secret, sessions, team: { id: "team-1", name: "Acme" }, now: () => now });
   let counter = 0;
   const mint = (email: string, role: string) => {
-    const body = JSON.stringify({ label: "OpenMausBot app (Team Cloud)", ttlSeconds: 300, member: { email, role } });
+    const body = JSON.stringify({ label: `${APP_NAME} app (Team Cloud)`, ttlSeconds: 300, member: { email, role } });
     const timestamp = String(Math.floor(now / 1000)), nonce = `nonce-${String(++counter).padStart(12, "0")}`;
     return pairing.handle({ timestamp, nonce, signature: `v1=${cloudPairingSignature(secret, timestamp, nonce, body)}`, body: Buffer.from(body), source: "203.0.113.9" });
   };

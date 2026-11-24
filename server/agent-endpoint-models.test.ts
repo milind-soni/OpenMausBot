@@ -1,6 +1,7 @@
 import { expect, it, vi } from "vitest";
 import type { InstanceConfig } from "./contracts.ts";
 import { discoverAgentEndpointModels, officialModels } from "./agent-endpoint-models.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 function endpoint(codex: boolean, url = "https://gateway.example/v1"): InstanceConfig {
   return codex
@@ -32,7 +33,7 @@ it.each([
   expect(entry.config).toMatchObject({ endpoint: { models: ["old"] } });
 });
 it.each([
-  ["http://localhost:8317/v1", "localhost refers to OpenMausBot's server or container"],
+  ["http://localhost:8317/v1", `localhost refers to ${APP_NAME}'s server or container`],
   ["https://gateway.example/v1", "could not reach the gateway"],
 ])("explains network failures for %s without exposing raw exceptions", async (url, detail) => {
   const failure = await discoverAgentEndpointModels(endpoint(true, url), vi.fn<typeof fetch>().mockRejectedValue(new Error("fixture-secret"))).catch(error => error);

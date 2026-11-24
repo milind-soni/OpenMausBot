@@ -12,6 +12,9 @@ import { execFile, execFileSync, spawn } from "node:child_process";
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import productJson from "../product.json" with { type: "json" };
+
+const { appName: APP_NAME } = productJson;
 
 const { values: options } = parseArgs({
   options: { installer: { type: "string" }, out: { type: "string" }, wait: { type: "string", default: "120" } },
@@ -21,7 +24,7 @@ if (process.platform !== "win32" || process.env.GITHUB_ACTIONS !== "true") {
   process.exit(2);
 }
 if (!options.installer || !existsSync(options.installer) || !options.out) {
-  console.error("usage: node scripts/defender-check-win.mjs --installer <OpenMausBot-<version>-setup.exe> --out <folder> [--wait 120]");
+  console.error(`usage: node scripts/defender-check-win.mjs --installer <${APP_NAME}-<version>-setup.exe> --out <folder> [--wait 120]`);
   process.exit(2);
 }
 
@@ -31,7 +34,7 @@ mkdirSync(SCRIPTS, { recursive: true });
 const WAIT_SECONDS = Math.max(10, Number(options.wait) || 120);
 const DEVTOOLS_PORT = 9339;
 const STARTED = new Date();
-const APP = "OpenMausBot.exe";
+const APP = `${APP_NAME}.exe`;
 const DRIVER = "cua-driver-background.exe";
 const DEFENDER_EVENTS = [1006, 1007, 1008, 1015, 1116, 1117];
 const MPCMDRUN = path.join(process.env.ProgramFiles ?? "C:\\Program Files", "Windows Defender", "MpCmdRun.exe");
@@ -287,7 +290,7 @@ if (-not $exited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyCon
 
 const installedFiles = (folder) => ps(String.raw`
 $root = ${quote(folder)}
-$names = @('OpenMausBot.exe', 'resources\cua-driver-background.exe', 'resources\cua-driver.exe')
+$names = @('${APP_NAME}.exe', 'resources\cua-driver-background.exe', 'resources\cua-driver.exe')
 $sdk = Join-Path $root 'resources\cua-sdk'
 if (Test-Path -LiteralPath $sdk) {
   $names += @(Get-ChildItem -LiteralPath $sdk -Recurse -File | Where-Object { $_.Extension -in '.exe', '.node', '.dll' } | ForEach-Object { $_.FullName.Substring($root.Length + 1) })
@@ -424,7 +427,7 @@ async function pressStart() {
 }
 
 function appLog() {
-  const folder = path.join(process.env.APPDATA ?? "", "OpenMausBot", "logs");
+  const folder = path.join(process.env.APPDATA ?? "", `${APP_NAME}`, "logs");
   const file = path.join(folder, "server.log");
   if (!existsSync(file)) return { file, present: false, lines: [] };
   for (const name of readdirSync(folder)) {
@@ -515,9 +518,9 @@ function judge(r) {
   const ourEvents = (r.findings?.events ?? []).filter((event) => OURS.test(`${event.path} ${event.process}`));
   const ourDetections = (r.findings?.detections ?? []).filter((detection) => detection.resources.some((resource) => OURS.test(resource)));
   for (const event of ourEvents) {
-    problems.push(`Windows Security flagged ${event.path || "an OpenMausBot file"}: ${event.threat || `event ${event.id}`}${event.action ? ` (${event.action})` : ""}`);
+    problems.push(`Windows Security flagged ${event.path || `an ${APP_NAME} file`}: ${event.threat || `event ${event.id}`}${event.action ? ` (${event.action})` : ""}`);
   }
-  if (!ourEvents.length && ourDetections.length) problems.push(`Windows Security recorded ${ourDetections.length} detection(s) in OpenMausBot's files`);
+  if (!ourEvents.length && ourDetections.length) problems.push(`Windows Security recorded ${ourDetections.length} detection(s) in ${APP_NAME}'s files`);
   if (r.download?.error) problems.push(`the installer couldn't be saved to Downloads: ${r.download.error}`);
   else if (r.download && !r.download.stillThere) problems.push("the installer was gone 15 s after it was saved to Downloads");
   if (r.installerScan?.ran && !r.installerScan.clean) problems.push(`Defender's scan of the installer found ${r.installerScan.threats.join(", ") || "a threat"}`);
@@ -555,9 +558,9 @@ function render(r, verdict) {
   const before = r.asFound ?? {};
   const after = r.protection ?? {};
 
-  add("## Windows Security and the OpenMausBot installer");
+  add(`## Windows Security and the ${APP_NAME} installer`);
   add();
-  add(`OpenMausBot ${r.version}, commit \`${String(r.commit).slice(0, 12)}\`, on ${r.machine?.os ?? "Windows"} ${r.machine?.version ?? ""} (GitHub's ${r.machine?.image || "windows-latest"}).`);
+  add(`${APP_NAME} ${r.version}, commit \`${String(r.commit).slice(0, 12)}\`, on ${r.machine?.os ?? "Windows"} ${r.machine?.version ?? ""} (GitHub's ${r.machine?.image || "windows-latest"}).`);
   add();
   if (verdict.problems.length) {
     add("**Verdict: something went wrong for a person installing the app.**");
@@ -670,7 +673,7 @@ function render(r, verdict) {
     }
     add(`- Defender Operational events ${DEFENDER_EVENTS.join(", ")}: ${findings.events.length ? "" : "none."}`);
     for (const event of findings.events) {
-      add(`  - ${event.time}, event ${event.id}: ${event.threat || "(no name)"}${event.path ? ` in ${event.path}` : ""}${event.source ? `, by ${event.source}` : ""}${event.action ? `, action ${event.action}` : ""}${OURS.test(`${event.path} ${event.process}`) ? "" : " (not OpenMausBot's)"}.`);
+      add(`  - ${event.time}, event ${event.id}: ${event.threat || "(no name)"}${event.path ? ` in ${event.path}` : ""}${event.source ? `, by ${event.source}` : ""}${event.action ? `, action ${event.action}` : ""}${OURS.test(`${event.path} ${event.process}`) ? "" : ` (not ${APP_NAME}'s)`}.`);
     }
   }
   add();

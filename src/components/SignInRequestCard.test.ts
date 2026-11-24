@@ -31,6 +31,7 @@ vi.mock("@/lib/logins", () => ({
 import { LoginForm } from "./LoginForm";
 import { SignInBanner, SignInRequestCard } from "./SignInRequestCard";
 import { VaultChoices } from "./VaultChoices";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const card = (signIn: Record<string, unknown> = {}): Message => ({
   id: "card-1",
@@ -76,7 +77,7 @@ describe("SignInRequestCard while it waits", () => {
     expect(html).toContain("— Pepper");
     expect(html).toContain("Pepper’s built-in browser");
     for (const label of ["Open", "Done", "Cancel"]) expect(html).toContain(label);
-    expect(html).toContain("MausBot never sees it.");
+    expect(html).toContain(`${PRODUCT_NAME} never sees it.`);
     expect(html).not.toContain("<input");
   });
 
@@ -90,7 +91,7 @@ describe("SignInRequestCard while it waits", () => {
 
   it("says the host computer, not this one, where this computer is somewhere else", () => {
     here.value = false;
-    expect(view({ place: "local" })).toContain("the computer MausBot runs on");
+    expect(view({ place: "local" })).toContain(`the computer ${PRODUCT_NAME} runs on`);
   });
 
   it("Open goes to the place the bot works", () => {

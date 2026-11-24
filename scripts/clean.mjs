@@ -1,4 +1,7 @@
 import { rm } from "node:fs/promises";
+import productJson from "../product.json" with { type: "json" };
+
+const { appName: APP_NAME } = productJson;
 
 const generatedPaths = [
   "dist",
@@ -7,7 +10,7 @@ const generatedPaths = [
   "dist-server",
   "release",
   "electron/resources/speech-helper",
-  "electron/resources/OpenMausBot Speech.app",
+  `electron/resources/${APP_NAME} Speech.app`,
 ];
 
 await Promise.all(

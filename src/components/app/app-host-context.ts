@@ -4,6 +4,7 @@ import { appVersion } from "@/lib/app-links";
 import { readColorScheme, type ColorScheme } from "@/lib/color-scheme";
 import { activeLocale } from "@/lib/i18n";
 import type { AppHostContext } from "../../../shared/app-frame/bridge";
+import { APP_NAME } from "../../../shared/product";
 
 const VARIABLES: ReadonlyArray<readonly [string, string]> = [
   ["--color-background-primary", "var(--color-composer)"],
@@ -123,6 +124,6 @@ export function appHostContext(args: { width: number; maxHeight: number }): AppH
     ...(timeZone ? { timeZone } : {}),
     platform: appPlatform(),
     deviceCapabilities: { touch: matches("(pointer: coarse)") || (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0), hover: matches("(hover: hover)") },
-    userAgent: `MausBot/${appVersion()}`,
+    userAgent: `${APP_NAME}/${appVersion()}`,
   };
 }

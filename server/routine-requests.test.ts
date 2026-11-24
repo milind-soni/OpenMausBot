@@ -20,6 +20,7 @@ import type { JsonValue } from "./schema.ts";
 import "./server-line-packs.ts";
 import { setConversationLanguage } from "./server-lines.ts";
 import { directApply, type DirectApplyCheck } from "./direct-apply.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 class MemoryStore implements RoutineRequestStore {
   readonly threads = new Map<string, RoutineRequestMessage[]>();
@@ -459,7 +460,7 @@ describe("RoutineRequestService", () => {
     expect(plain.detail).not.toContain("On startup:");
 
     const proposed = await service.propose({ botId: "bot-a", threadId: "thread-a", proposal: createProposal({ runOnStartup: true }) });
-    expect(proposed.detail).toContain("On startup: Also runs once each time OpenMausBot starts");
+    expect(proposed.detail).toContain(`On startup: Also runs once each time ${APP_NAME} starts`);
     expect(store.messagesFor("thread-a")[0]!.card!.routineRequest?.operation).toMatchObject({ action: "create", routine: { runOnStartup: true } });
     expect(service.resolve({ botId: "bot-a", threadId: "thread-a", requestId: proposed.requestId, behavior: "allow" }).state).toBe("applied");
     const routine = routines.listRoutines().find((candidate) => candidate.name === "Morning brief")!;

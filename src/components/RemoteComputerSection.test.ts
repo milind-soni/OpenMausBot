@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
 import { isServerPairingLink, RemoteComputerSection } from "./RemoteComputerSection";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -77,7 +78,7 @@ describe("remote connection Settings", () => {
     expect(html).toContain("Companion address");
     expect(html).toContain("Six-digit companion code");
     expect(html).toContain('placeholder="000000"');
-    expect(html).toContain("managed MausBot HTTPS address");
+    expect(html).toContain(`managed ${PRODUCT_NAME} HTTPS address`);
     expect(html).toContain("Tailscale name ending in .ts.net");
     expect(html).not.toContain("<select");
     expect(html).not.toContain("Server pairing link");

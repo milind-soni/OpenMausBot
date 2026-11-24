@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runPair, type CliOptions } from "./cli.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
+import { APP_NAME, PRODUCT_NAME } from "../shared/product.ts";
 
 const mocks = vi.hoisted(() => ({
   readCliStartup: vi.fn(),
@@ -145,7 +146,7 @@ describe("openmausbot pair", () => {
     const failure = await runPair(options).then(() => null, (error: unknown) => error);
     expect(failure).toBeInstanceOf(Error);
     const message = (failure as Error).message;
-    expect(message).toContain("The OpenMausBot desktop app runs this server");
+    expect(message).toContain(`The ${APP_NAME} desktop app runs this server`);
     expect(message).toContain("Settings → Phone & devices");
     // A terminal `serve` would not get the keys the app keeps in its own credential store, so it is not offered.
     expect(message).not.toContain("openmausbot serve");
@@ -155,7 +156,7 @@ describe("openmausbot pair", () => {
   it("says how to start a server when none runs", async () => {
     fetchMock.mockImplementation(async () => { throw new Error("offline"); });
     expect(await runPair(options)).toBe(1);
-    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("No MausBot server is running here. Start it: openmausbot serve"));
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining(`No ${PRODUCT_NAME} server is running here. Start it: openmausbot serve`));
   });
 });
 
@@ -178,7 +179,7 @@ describe("the phone-app link `openmausbot pair --phone android` scans", () => {
     expect(await runPair({ ...options, phone: "android", publicUrl: explicitOrigin })).toBe(0);
     expect(printed()).not.toContain("openmausbot://");
     expect(printed()).not.toContain(credential);
-    expect(printed()).toContain("scan this with the MausBot app");
+    expect(printed()).toContain(`scan this with the ${PRODUCT_NAME} app`);
   });
 
   it("keeps a proxy path in the web link", async () => {

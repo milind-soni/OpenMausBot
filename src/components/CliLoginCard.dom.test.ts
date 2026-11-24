@@ -8,6 +8,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
 import { CLI_LOGIN_LAYER, CliLoginPrompt } from "./CliLoginCard";
 import { Layer } from "./Layer";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 afterEach(() => { document.body.innerHTML = ""; vi.unstubAllGlobals(); });
@@ -23,7 +24,7 @@ it("shows the terminal's code and what it would get, and Allow answers that one 
   await act(async () => { root.render(createElement(CliLoginPrompt)); });
   await act(async () => { await Promise.resolve(); });
   const card = document.querySelector<HTMLElement>("[data-notice='cli-login']")!;
-  expect(card.textContent).toContain("A terminal wants to control MausBot");
+  expect(card.textContent).toContain(`A terminal wants to control ${PRODUCT_NAME}`);
   expect(card.querySelector("[data-cli-login-code]")!.textContent).toBe("KQ7M-X2PD");
   expect(card.textContent).toContain("Full control · openmausbot CLI on studio");
   const allow = [...card.querySelectorAll("button")].find((button) => button.textContent === "Allow")!;

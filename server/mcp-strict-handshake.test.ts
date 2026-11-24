@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mcpStdioServer, type StdioServer } from "./mcp-gate-config.ts";
 import { RemoteMcpClient } from "./mcp-http.ts";
 import { startFakeHttpMcp, unrecognizedField, STRICT_INITIALIZE_SCHEMAS, type FakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 /** codex-cli 0.160.1 (also 0.144.4, 0.149.0) mounting a URL server natively */
 const CODEX = { protocolVersion: "2025-06-18", capabilities: { elicitation: { form: {}, url: {} } }, clientInfo: { name: "codex-mcp-client", title: "Codex", version: "0.160.1" } };
@@ -96,11 +97,11 @@ describe("strict initialize fixture", () => {
   it("accepts OMB's own client, which sends the minimal handshake", async () => {
     fake = await startFakeHttpMcp({ strictInitialize: "http-400", tools: TOOLS });
     const client = new RemoteMcpClient({ type: "http", url: fake.url, headers: {} });
-    await client.initialize("OpenMausBot", AbortSignal.timeout(5_000));
+    await client.initialize(`${APP_NAME}`, AbortSignal.timeout(5_000));
     const listed = await client.request("tools/list", {}, AbortSignal.timeout(5_000)) as { tools: Array<{ name: string }> };
     expect(listed.tools.map((tool) => tool.name)).toEqual(["report", "campaigns"]);
     await client.close();
-    expect(fake.initializes).toEqual([{ protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "OpenMausBot", version: "1" } }]);
+    expect(fake.initializes).toEqual([{ protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: `${APP_NAME}`, version: "1" } }]);
   });
 
   it.each([
@@ -120,7 +121,7 @@ describe("strict initialize fixture", () => {
     expect((await ask(1, "initialize", handshake)).result.serverInfo.name).toBe("fake-http-mcp");
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
     expect((await ask(2, "tools/list")).result.tools.map((tool: { name: string }) => tool.name)).toEqual(["report", "campaigns"]);
-    expect(fake.initializes).toEqual([{ protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "OpenMausBot tool proxy", version: "1" } }]);
+    expect(fake.initializes).toEqual([{ protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: `${APP_NAME} tool proxy`, version: "1" } }]);
   });
 
   it.each([
@@ -131,7 +132,7 @@ describe("strict initialize fixture", () => {
     const ask = startProxy(mcpStdioServer({ type: "http", url: fake.url, headers })!);
     const message = (await ask(1, "initialize", CODEX)).error?.message;
     expect(message).toBe("This MCP server refused its credentials (HTTP 401). If it uses a sign-in, send the message again: "
-      + "OpenMausBot refreshes sign-ins when a message starts. If it still fails, open Plugins → MCP servers and sign in to it again, "
+      + `${APP_NAME} refreshes sign-ins when a message starts. If it still fails, open Plugins → MCP servers and sign in to it again, `
       + "or check its header values.");
     expect(message).not.toContain(fake.url);
     // not Codex's own sign-in: codexSignInRefused reads "please sign in again"

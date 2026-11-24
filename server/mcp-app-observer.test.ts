@@ -18,6 +18,7 @@ import { gateServer, mcpStdioServer, type StdioServer } from "./mcp-gate-config.
 import { RemoteMcpClient } from "./mcp-http.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { startFakeHttpMcp, type FakeHttpMcp, type FakeHttpMcpTool } from "./testing/fake-http-mcp-server.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const FAKE_APP = fileURLToPath(new URL("./testing/fake-stdio-app-server.ts", import.meta.url));
 const TOKEN = "omb-comms-token-fixture";
@@ -216,7 +217,7 @@ describe("the observer in a process", () => {
     expect(JSON.parse(proxy.env!.OMB_REMOTE_MCP_APPS!)).toEqual(mountFor("draw"));
     const { ask } = start(proxy);
     await ask(1, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "gemini", version: "1" } });
-    expect(fake.initializes).toEqual([{ protocolVersion: "2025-06-18", capabilities: { extensions: { [APP_EXTENSION_KEY]: { mimeTypes: [APP_MIME] } } }, clientInfo: { name: "OpenMausBot tool proxy", version: "1" } }]);
+    expect(fake.initializes).toEqual([{ protocolVersion: "2025-06-18", capabilities: { extensions: { [APP_EXTENSION_KEY]: { mimeTypes: [APP_MIME] } } }, clientInfo: { name: `${APP_NAME} tool proxy`, version: "1" } }]);
     expect((await ask(2, "tools/list")).result.tools.map((tool: { name: string }) => tool.name)).toEqual(["create_view", "list_notes"]);
     expect((await ask(3, "tools/call", { name: "save_checkpoint", arguments: {} })).error).toEqual({ code: -32602, message: APP_ONLY_REFUSAL });
     expect((await ask(4, "tools/call", { name: "create_view", arguments: { elements: "[]" } })).result.structuredContent).toEqual({ elements: 2 });
@@ -236,7 +237,7 @@ describe("the observer in a process", () => {
     const { ask } = start(mcpStdioServer({ type: "http", url: fake.url, headers: {} }, { apps: mountFor("strict") })!);
     expect((await ask(1, "initialize", {})).result.serverInfo.name).toBe("fake-http-mcp");
     expect((await ask(2, "tools/list")).result.tools).toHaveLength(2);
-    const plain = { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "OpenMausBot tool proxy", version: "1" } };
+    const plain = { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: `${APP_NAME} tool proxy`, version: "1" } };
     expect(fake.initializes).toEqual([{ ...plain, capabilities: { extensions: { [APP_EXTENSION_KEY]: { mimeTypes: [APP_MIME] } } } }, plain]);
   }, 30_000);
 
@@ -244,7 +245,7 @@ describe("the observer in a process", () => {
     fake = await startFakeHttpMcp({ tools: HTTP_TOOLS });
     const plain = start(mcpStdioServer({ type: "http", url: fake.url, headers: {} })!);
     await plain.ask(1, "initialize", {});
-    expect(fake.initializes).toEqual([{ protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "OpenMausBot tool proxy", version: "1" } }]);
+    expect(fake.initializes).toEqual([{ protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: `${APP_NAME} tool proxy`, version: "1" } }]);
     expect((await plain.ask(2, "tools/list")).result.tools.map((tool: { name: string }) => tool.name)).toEqual(["create_view", "list_notes"]);
     const closed = once(child!, "close"); child!.kill(); await closed;
     const searched = start(mcpStdioServer({ type: "http", url: fake.url, headers: {} }, { directory: { name: "draw" } })!);
@@ -317,11 +318,11 @@ describe("OMB's own client and the UI extension", () => {
       const fake = await startFakeHttpMcp({ strictInitialize, tools: HTTP_TOOLS });
       try {
         const client = new RemoteMcpClient({ type: "http", url: fake.url, headers: {} });
-        await client.initialize("OpenMausBot", AbortSignal.timeout(5_000), { extensions: { [APP_EXTENSION_KEY]: { mimeTypes: [APP_MIME] } } });
+        await client.initialize(`${APP_NAME}`, AbortSignal.timeout(5_000), { extensions: { [APP_EXTENSION_KEY]: { mimeTypes: [APP_MIME] } } });
         expect(client.extensions).toBe("refused");
         expect((await client.request("tools/list", {}, AbortSignal.timeout(5_000)) as { tools: unknown[] }).tools).toHaveLength(3);
         expect(fake.initializes).toHaveLength(2);
-        expect(fake.initializes[1]).toEqual({ protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "OpenMausBot", version: "1" } });
+        expect(fake.initializes[1]).toEqual({ protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: `${APP_NAME}`, version: "1" } });
         await client.close();
       } finally {
         await fake.close();
@@ -330,7 +331,7 @@ describe("OMB's own client and the UI extension", () => {
     const lenient = await startFakeHttpMcp({ tools: HTTP_TOOLS });
     try {
       const client = new RemoteMcpClient({ type: "http", url: lenient.url, headers: {} });
-      await client.initialize("OpenMausBot", AbortSignal.timeout(5_000), { extensions: { [APP_EXTENSION_KEY]: { mimeTypes: [APP_MIME] } } });
+      await client.initialize(`${APP_NAME}`, AbortSignal.timeout(5_000), { extensions: { [APP_EXTENSION_KEY]: { mimeTypes: [APP_MIME] } } });
       expect(client.extensions).toBe("ok");
       expect(lenient.initializes).toHaveLength(1);
       await client.close();

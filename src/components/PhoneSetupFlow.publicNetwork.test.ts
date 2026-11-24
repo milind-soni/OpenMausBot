@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { PhoneSetupFlowView, type CompanionState, type PhoneSetupController } from "./PhoneSetupFlow";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 // Windows Firewall drops a phone's connection on a network Windows calls Public, and Windows 11 calls a newly joined
 // Wi-Fi Public.
@@ -88,8 +89,8 @@ describe("the pairing code", () => {
     for (const over of [{}, { state: e2e }]) {
       const html = render(over);
       expect(qrCodes(html)).toBe(1);
-      expect(html).toContain("Install MausBot on your phone from the App Store or Google Play, then scan this code in the app.");
-      expect(html).toContain("Scan it from inside the MausBot app, not the camera.");
+      expect(html).toContain(`Install ${PRODUCT_NAME} on your phone from the App Store or Google Play, then scan this code in the app.`);
+      expect(html).toContain(`Scan it from inside the ${PRODUCT_NAME} app, not the camera.`);
     }
   });
 

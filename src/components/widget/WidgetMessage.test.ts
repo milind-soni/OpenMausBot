@@ -12,6 +12,7 @@ import { t } from "@/lib/i18n";
 import { SAMPLE_DOCS_URL, SAMPLE_IMAGE_URL, WIDGET_SAMPLES } from "../../../shared/widget-samples";
 import { parseWidgetInput, widgetActions, type WidgetPayload, type WidgetRoot } from "../../../shared/widget";
 import { WidgetMessage } from "./WidgetMessage";
+import { PRODUCT_NAME } from "../../../shared/product.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -192,7 +193,7 @@ describe("drawing a widget", () => {
     act(() => find<HTMLButtonElement>(`button[title="${t("attach.externalHidden")}"]`)!.click());
     const image = find<HTMLImageElement>("img")!;
     expect(image.getAttribute("src")).toBe(SAMPLE_IMAGE_URL);
-    expect(image.getAttribute("alt")).toBe("MausBot");
+    expect(image.getAttribute("alt")).toBe(`${PRODUCT_NAME}`);
     expect(image.getAttribute("loading")).toBe("lazy");
     expect(image.getAttribute("referrerpolicy")).toBe("no-referrer");
     expect(Number.parseFloat(image.style.aspectRatio)).toBeCloseTo(16 / 9);

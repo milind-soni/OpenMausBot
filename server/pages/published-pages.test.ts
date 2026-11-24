@@ -11,6 +11,7 @@ import { PublishedPagesStore } from "./store.ts";
 import { createPublishedPages } from "./service.ts";
 import { createPagesInternalRoutes, createPublishedPageRoutes, type AppPages } from "../routes/published-pages.ts";
 import { PASS } from "../routes/table.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const SITE = { "index.html": "<!doctype html><h1>Bake sale</h1>", "style.css": "h1{color:red}" };
 let dir: string;
@@ -53,11 +54,11 @@ function setup(options: { home?: boolean; quota?: number; selfHosted?: boolean; 
 }
 
 describe("publishing a page", () => {
-  it("asks the person to sign in to MausBot when this app has no account, and publishes nothing", async () => {
+  it(`asks the person to sign in to ${PRODUCT_NAME} when this app has no account, and publishes nothing`, async () => {
     const f = setup();
     writeSite(join(f.work, "site"));
     const outcome = await f.publish({ path: "site" });
-    expect(outcome).toEqual({ status: 403, text: "Publishing a page needs a MausBot account. Sign in to MausBot in the app's Settings, then ask again." });
+    expect(outcome).toEqual({ status: 403, text: `Publishing a page needs a MausBot account. Sign in to ${PRODUCT_NAME} in the app's Settings, then ask again.` });
     expect(f.service.minted).toEqual([]);
     expect(f.cards).toEqual([]);
   });
@@ -80,7 +81,7 @@ describe("publishing a page", () => {
     expect(f.service.minted).toEqual([]);
     expect(f.cards).toEqual([]);
     applyIncludedPagesMessage({ type: "openmausbot:included-pages", access: null });
-    expect((await f.publish({ path: "site" })).text).toMatch(/^Publishing a page needs a MausBot account/u);
+    expect((await f.publish({ path: "site" })).text).toMatch(new RegExp(String.raw`^Publishing a page needs a MausBot account`, "u"));
   });
 
   it("publishes a folder to a new link with a card showing the link and the usage, and remembers it", async () => {
@@ -93,7 +94,7 @@ describe("publishing a page", () => {
     const url = `https://${page}.mausbot.page/`;
     expect(outcome.text).toContain(`Published “Bake sale” at ${url}`);
     expect(outcome.text).toContain("This account now has 1 of 5 pages.");
-    expect(outcome.text.split("\n").at(-1)).toBe("Free pages carry a small “Made with MausBot” badge.");
+    expect(outcome.text.split("\n").at(-1)).toBe(`Free pages carry a small “Made with ${PRODUCT_NAME}” badge.`);
     expect(f.cards).toEqual([{ threadId: "thread-1", id: "m1", text: `Published “Bake sale”: ${url} (1 of 5 pages)`,
       card: { state: "live", title: "Bake sale", pageId: page, url, usage: { pages: 1, limit: 5 } } }]);
     expect(Object.fromEntries(f.service.pages.get(page!)!.files)).toEqual(SITE);
@@ -176,8 +177,8 @@ describe("publishing a page", () => {
     await f.publish({ path: "one" });
     const refused = await f.publish({ path: "two", title: "Second" });
     expect(refused.status).toBe(402);
-    expect(refused.text).toBe("You’ve used your 1 free pages. MausBot Cloud gives you more, and pages without the badge. Tell the person this in your reply.");
-    expect(f.cards.at(-1)).toMatchObject({ text: "You’ve used your 1 free pages. MausBot Cloud gives you more, and pages without the badge.",
+    expect(refused.text).toBe(`You’ve used your 1 free pages. MausBot Cloud gives you more, and pages without the badge. Tell the person this in your reply.`);
+    expect(f.cards.at(-1)).toMatchObject({ text: `You’ve used your 1 free pages. MausBot Cloud gives you more, and pages without the badge.`,
       card: { state: "limit", title: "Second", upgrade: true, plan: "free", usage: { pages: 1, limit: 1 } } });
   });
 

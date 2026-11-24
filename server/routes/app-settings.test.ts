@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { RequestAuth } from "../request-auth.ts";
 import { createWindowPrefs } from "./app-settings.ts";
 import { callRoute } from "./call-route.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const owner: RequestAuth = { kind: "loopback", scopes: ["admin", "client"] };
 const phone: RequestAuth = { kind: "loopback", scopes: ["client"] };
@@ -27,7 +28,7 @@ describe("window preferences on the server", () => {
     await callRoute(prefs.routes, { method: "PUT", path: "/api/window-prefs", body: { values: { "appearance.skin": "daylight" } }, auth: owner });
     expect(prefs.write("appearance.skin", "midnight")).toBeNull();
     open = false;
-    expect(prefs.write("appearance.skin", "dusk")).toBe("Open MausBot on this computer first; this setting lives in the app window.");
+    expect(prefs.write("appearance.skin", "dusk")).toBe(`Open ${PRODUCT_NAME} on this computer first; this setting lives in the app window.`);
     expect(prefs.read("appearance.skin")).toBe("midnight");
     open = true;
     expect(prefs.write("appearance.skin", "dusk")).toBeNull();
@@ -37,7 +38,7 @@ describe("window preferences on the server", () => {
   it("refuses a preference the window never reported, such as a desktop-only one from a browser", () => {
     const frames: Record<string, unknown>[] = [];
     const prefs = createWindowPrefs({ broadcast: (frame) => frames.push(frame), ownerOrAdmin: () => true, windowOpen: () => true });
-    expect(prefs.write("remote.relay", true)).toMatch(/^The open MausBot window can't change this here\./);
+    expect(prefs.write("remote.relay", true)).toMatch(new RegExp(String.raw`^The open ${PRODUCT_NAME} window can't change this here\.`));
     expect(frames).toEqual([]);
   });
 });

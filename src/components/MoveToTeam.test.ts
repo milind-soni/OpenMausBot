@@ -15,6 +15,7 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
 vi.mock("react-dom", async original => ({ ...await original<typeof import("react-dom")>(), createPortal: (node: ReactNode) => node }));
 import { CloudSendStrip } from "./CloudSendStrip";
 import { MovedBotRows, TeamMoveLine, useMoveToTeam } from "./MoveToTeam";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 type Node = ReactElement<{ children?: ReactNode; onClick?: () => void; disabled?: boolean }>;
 const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
@@ -109,7 +110,7 @@ it("the bot menu has one Move to item per team, none without a team or for a bot
   const confirm = html(menu);
   for (const said of ["Move Scout to Acme?", "Only you and Acme's admins can use Scout until you share it.",
     "Goes with Scout: instructions, skills, files, routines, and your chats with Scout", "Your chats stay private there: only you can see them.",
-    "Stays on My Cloud: what Scout remembers, your connections, and MausBot", "There's no way back: you can't move it back to My Cloud.", "Move to Acme"]) expect(confirm).toContain(said);
+    `Stays on My Cloud: what Scout remembers, your connections, and ${PRODUCT_NAME}`, "There's no way back: you can't move it back to My Cloud.", "Move to Acme"]) expect(confirm).toContain(said);
   expect(page.moveToTeam, "nothing moves until the confirm").not.toHaveBeenCalled();
 });
 

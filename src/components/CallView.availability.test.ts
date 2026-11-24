@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { callCapabilityHelp } from "@/lib/call-capability";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 function capabilities(
   dictation: DesktopCapabilities["dictation"],
@@ -70,7 +71,7 @@ describe("call capability guidance", () => {
     }, "other"), false, null);
     expect(help).toEqual({
       label: "Calls where you take turns need the desktop app",
-      reason: "They listen from this computer, so they need MausBot on a Mac, Windows or Linux computer.",
+      reason: `They listen from this computer, so they need ${PRODUCT_NAME} on a Mac, Windows or Linux computer.`,
     });
   });
 
@@ -101,7 +102,7 @@ describe("call capability guidance", () => {
       onDevice: true,
     }), false, null)).toEqual({
       label: "Calls aren't available right now",
-      reason: "The speech service is unavailable in this app build. Restart or update MausBot.",
+      reason: `The speech service is unavailable in this app build. Restart or update ${PRODUCT_NAME}.`,
     });
   });
 });

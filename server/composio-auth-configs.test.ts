@@ -13,6 +13,7 @@ import {
   setManagedBrokerAccess,
 } from "./composio.ts";
 import { forgetProjectAuthConfigs } from "./composio-project.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 // Composio's own wording for a toolkit it has no managed sign-in for (Xero, Buffer) when the Session names no auth config.
 const NO_MANAGED_AUTH = (toolkit: string) =>
@@ -382,7 +383,7 @@ describe("custom auth configs made in the Composio dashboard", () => {
     const failed = await callTool(cfg, "BUFFER_LIST_POSTS");
     expect(failed.result.content[0]!.text).toContain(NO_MANAGED_AUTH("buffer"));
     expect(failed.result.content[1]!.text).toBe(
-      "OpenMausBot note: buffer has no Composio-managed sign-in. buffer connects with the person's own Composio auth config "
+      `${APP_NAME} note: buffer has no Composio-managed sign-in. buffer connects with the person's own Composio auth config `
       + 'ac_buffer_new. Call COMPOSIO_MANAGE_CONNECTIONS with toolkits ["buffer"] to show the person a card that connects '
       + "it, then end the turn. Do not retry this call before that.",
     );
@@ -412,17 +413,17 @@ describe("custom auth configs made in the Composio dashboard", () => {
 
     await expect(authorizeService(cfg, "xero")).rejects.toMatchObject({
       status: 409,
-      message: "OpenMausBot could not turn on Tool Router for your xero auth config ac_xero_scoped, which Composio needs before "
+      message: `${APP_NAME} could not turn on Tool Router for your xero auth config ac_xero_scoped, which Composio needs before `
         + "it uses it. Check that your Composio project key may edit auth configs. Composio said: This API key may not edit auth configs",
     });
     const reply = await callTool(cfg, "XERO_LIST_INVOICES");
-    expect(reply.result.content[1]!.text).toMatch(/^OpenMausBot note: OpenMausBot could not turn on Tool Router for your xero auth config/);
+    expect(reply.result.content[1]!.text).toMatch(new RegExp(String.raw`^${APP_NAME} note: ${APP_NAME} could not turn on Tool Router for your xero auth config`));
   });
 });
 
-describe("OpenMausBot's managed connected apps", () => {
+describe(`${APP_NAME}'s managed connected apps`, () => {
   const managed = {} as AppConfig;
-  const plainLine = "xero needs your own OAuth app. Add your Composio project key in Settings → AI → Other services; OpenMausBot then "
+  const plainLine = `xero needs your own OAuth app. Add your Composio project key in Settings → AI → Other services; ${APP_NAME} then `
     + "uses your xero auth config from that project. Connect again.";
 
   it("answers a toolkit that needs the person's own OAuth app with one plain line instead of Composio's error", async () => {
@@ -436,8 +437,8 @@ describe("OpenMausBot's managed connected apps", () => {
     expect(calls.slice(before)).toEqual([]);
 
     const reply = await callTool(managed, "XERO_LIST_INVOICES");
-    expect(reply.result.content[1]!.text).toContain("OpenMausBot's built-in connected apps cannot use. Tell the person: add their own Composio project key in Settings → AI → Other services");
-    expect(reply.result.content[1]!.text).toContain("OpenMausBot then picks that auth config up on its own");
+    expect(reply.result.content[1]!.text).toContain(`${APP_NAME}'s built-in connected apps cannot use. Tell the person: add their own Composio project key in Settings → AI → Other services`);
+    expect(reply.result.content[1]!.text).toContain(`${APP_NAME} then picks that auth config up on its own`);
     expect(calls.slice(before).some((call) => call.path.startsWith("/api/"))).toBe(false);
   });
 });

@@ -7,6 +7,9 @@ import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { runControlOmb } from "./control-omb.ts";
 import { TOUR_STEPS } from "../src/lib/guided-tour.ts";
+import productJson from "../product.json" with { type: "json" };
+
+const { name: PRODUCT_NAME } = productJson;
 
 const handle = process.argv[2];
 if (!handle) throw new Error("Usage: node --experimental-strip-types scripts/verify-onboarding-ui.ts /path/to/fixture/ui.json");
@@ -65,7 +68,7 @@ await evaluate("fetch('/api/config', {method:'PUT', headers:{'Content-Type':'app
 await evaluate("fetch('/api/bots').then(r => r.json()).then(data => Promise.all(data.bots.filter(bot => bot.defaultBot).map(bot => fetch('/api/bots/' + bot.id, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({welcomed:false})}).then(r => r.ok)))).then(oks => oks.length > 0 && oks.every(Boolean))");
 // A new install opens in Simple mode; this page's own writes after the clear would otherwise read as an earlier run.
 await evaluate("localStorage.clear(); sessionStorage.clear(); localStorage.setItem('omb-advanced-mode', '0'); setTimeout(() => { location.search = '?onboarding=1'; }, 0); true");
-await textVisible("Meet OpenMausBot");
+await textVisible(`Meet ${PRODUCT_NAME}`);
 await evaluate("document.documentElement.dataset.reducedMotion = 'true'; true");
 await screenshot("welcome");
 // Two screens, no form: the first asks nothing and shows no steps, Back or Skip.
@@ -96,7 +99,7 @@ await poll(() => evaluate("document.querySelectorAll('[data-welcome]').length"),
 // The welcome lands in the chat with the Chief (the server's first bot): its first messages, no AI asked.
 const first = await evaluate("fetch('/api/bots').then(r => r.json()).then(data => data.bots.find(bot => bot.chiefOfStaff && !bot.hidden))");
 assert.ok(first?.name, "the Chief");
-assert.equal(first.welcomed, true, "MausBot is introduced, so its old first-launch card never comes");
+assert.equal(first.welcomed, true, `${PRODUCT_NAME} is introduced, so its old first-launch card never comes`);
 const composer = `Message ${first.name}`;
 await textVisible(composer);
 await textVisible(`Hey! I'm ${first.name}. I'm new here.`);
@@ -117,7 +120,7 @@ assert.equal(starter.modelSelection.model, selected.models.default);
 // and this time it is saved.
 // MausBot has met the person by now, so the Chief step is not shown again: Next lands in the Chief's chat.
 await evaluate("localStorage.removeItem('omb-email-gate'); setTimeout(() => location.reload(), 0); true");
-await textVisible("Meet OpenMausBot");
+await textVisible(`Meet ${PRODUCT_NAME}`);
 await click("Next");
 await poll(() => evaluate("document.querySelectorAll('[data-welcome]').length"), 0, "Next lands in the chat");
 await textVisible(composer);
@@ -169,7 +172,7 @@ console.log("PASS Settings replay and Skip queued behind slow Next");
 
 await openSettings();
 await click("Replay welcome tour");
-await textVisible("Meet OpenMausBot");
+await textVisible(`Meet ${PRODUCT_NAME}`);
 await holdConfigWrite();
 await click("Next");
 await poll(() => evaluate("document.querySelectorAll('[data-welcome]').length"), 0, "slow completion cannot trap welcome");

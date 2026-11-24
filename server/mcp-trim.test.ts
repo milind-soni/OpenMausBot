@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { DEFAULT_RESULT_BUDGET, trimResultText } from "./mcp-trim.ts";
+import { APP_NAME } from "../shared/product.ts";
 
-const BANNER = "⚠️ TRUNCATED by OpenMausBot:";
+const BANNER = `⚠️ TRUNCATED by ${APP_NAME}:`;
 /** What was kept, between the banner at the start and the one at the end. */
 const keptBody = (text: string) => text.slice(text.indexOf("\n\n") + 2, text.lastIndexOf(`\n\n${BANNER}`));
 
@@ -158,7 +159,7 @@ describe("trimResultText with a held result", () => {
     const out = trimResultText({ text, spillPath: "/data/tool-results/7.json", toolName: "search_products", held: { handle: "r3", shape: "object{nextOffset, products}; products: 200 items{id, name, price, rating, description, images}" } });
     expect(out.trimmed).toBe(true);
     expect(out.text.length).toBeLessThan(DEFAULT_RESULT_BUDGET);
-    expect(out.text.startsWith("⚠️ SHAPED by OpenMausBot:")).toBe(true);
+    expect(out.text.startsWith(`⚠️ SHAPED by ${APP_NAME}:`)).toBe(true);
     expect(out.text).toContain('query_result {"result":"r3","query":');
     expect(out.text).toContain("200 items{id, name, price");
     expect(out.text).not.toContain("/data/tool-results");

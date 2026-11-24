@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { DEFAULT_BRAND, describeBrand, loadBrand, productName } from "./brand.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 const dirs: string[] = [];
 const enabled = (feature: string) => feature === "branding";
@@ -26,7 +27,7 @@ describe("brand.json", () => {
     const file = join(tmpdir(), "omb-brand-missing", "brand.json");
     expect(loadBrand({ file, isEnabled: enabled })).toEqual({ brand: DEFAULT_BRAND, source: "default", file });
     expect(describeBrand(loadBrand({ file, isEnabled: enabled }))).toBe("brand: default");
-    expect(productName(loadBrand({ file, isEnabled: enabled }))).toBe("MausBot");
+    expect(productName(loadBrand({ file, isEnabled: enabled }))).toBe(`${PRODUCT_NAME}`);
   });
 
   it("applies a valid file with the branding feature on", () => {

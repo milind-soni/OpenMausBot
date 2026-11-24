@@ -10,6 +10,7 @@ import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const POLL = { name: "Bash", input: { command: "gh run view 42; sleep 30" }, hold: true };
 const QUESTION = "Is the PR up yet?";
@@ -59,7 +60,7 @@ it("stops a turn that keeps the person's message unread in a long tool call, and
     const content = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).prompt?.message?.content;
     const prompt = typeof content === "string" ? content : (content as Array<{ text?: string }>).map((block) => block.text ?? "").join("\n");
     expect(prompt).toContain(QUESTION);
-    expect(prompt).toContain('[OpenMausBot: your step "Bash: gh run view 42; sleep 30" had run for');
+    expect(prompt).toContain(`[${APP_NAME}: your step "Bash: gh run view 42; sleep 30" had run for`);
   } finally {
     globalThis.fetch = realFetch;
     await fixture.close();

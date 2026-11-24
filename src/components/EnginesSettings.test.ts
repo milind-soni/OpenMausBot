@@ -5,6 +5,7 @@ import type { Bot, InstanceInfo } from "@/state/store";
 import { EnginesSettings } from "./EnginesSettings";
 import { accountActions } from "./EngineAccounts";
 import { AntigravityFreeSpace, formatDiskSize } from "./AntigravityFreeSpace";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const fixture = vi.hoisted(() => ({ instances: [] as InstanceInfo[], bots: [] as Bot[], config: undefined as Record<string, unknown> | undefined }));
 vi.mock("@/state/store", async (importOriginal) => ({
@@ -310,7 +311,7 @@ describe("Settings → Engines → setup cards", () => {
 
     vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
     const remote = renderToStaticMarkup(createElement(EnginesSettings));
-    expect(remote).toContain("open Settings → AI on the computer running MausBot");
+    expect(remote).toContain(`open Settings → AI on the computer running ${PRODUCT_NAME}`);
     expect(remote).not.toContain("data-key-row");
 
     vi.stubGlobal("window", {});

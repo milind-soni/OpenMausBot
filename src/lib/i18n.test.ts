@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { applyBrand, DEFAULT_BRAND } from "./brand";
 import { activePackComplete, documentLanguage, intlLocale, resolveLocale, setLocale, t, tFromServer } from "./i18n";
 import { en, localeChoices, locales } from "@/locales";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 afterEach(() => {
   setLocale("en");
@@ -37,7 +38,7 @@ describe("t", () => {
   });
 
   it("fills {app} with the product's name, a white-label brand's own name, or the name a caller passes", () => {
-    expect(t("routines.runsOn.localHint")).toBe("Starts while MausBot is open here.");
+    expect(t("routines.runsOn.localHint")).toBe(`Starts while ${PRODUCT_NAME} is open here.`);
     expect(t("routines.runsOn.localHint", { app: "Acme" })).toBe("Starts while Acme is open here.");
     applyBrand({ brand: { name: "Acme Bots" }, source: "file", file: "/brand.json" });
     try {

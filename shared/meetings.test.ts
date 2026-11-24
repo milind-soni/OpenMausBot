@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { consentLine, findMeetingLink, parseMeetingLink, ZOOM_NOT_SUPPORTED } from "./meetings.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 describe("meeting links", () => {
   it("knows Google Meet, Microsoft Teams and Jitsi links", () => {
@@ -25,7 +26,7 @@ describe("meeting links", () => {
   });
 
   it("names the bot and the person it takes notes for", () => {
-    expect(consentLine("Ada", "Milind")).toBe("Hi, I'm Ada (notes) from MausBot, taking notes for Milind. Ask me with @notes. Type \"@notes stop\" and I'll leave.");
+    expect(consentLine("Ada", "Milind")).toBe(`Hi, I'm Ada (notes) from ${PRODUCT_NAME}, taking notes for Milind. Ask me with @notes. Type "@notes stop" and I'll leave.`);
     expect(consentLine("Ada", undefined)).toContain("taking notes for the person who invited me");
   });
 });

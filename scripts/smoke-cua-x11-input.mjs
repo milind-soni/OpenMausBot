@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import productJson from "../product.json" with { type: "json" };
+
+const { appName: APP_NAME } = productJson;
 
 const execFileAsync = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -55,7 +58,7 @@ windowManager.once("error", (error) => {
   }
 }
 
-const title = `OpenMausBot CUA input safety ${process.pid}`;
+const title = `${APP_NAME} CUA input safety ${process.pid}`;
 const xev = spawn(
   "xev",
   ["-name", title, "-geometry", "320x180+40+40"],

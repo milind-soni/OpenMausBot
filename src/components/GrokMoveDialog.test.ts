@@ -14,6 +14,7 @@ import { GROK_BOT_MARK_PATH } from "./GrokBotMark";
 import { GrokMoveDialog } from "./GrokMoveDialog";
 import { GrokImportSection } from "./ImportSettings";
 import { SettingsLook } from "./SettingsPrimitives";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const MEMORY = "The door sticks in the rain";
 const WHEN = "Weekdays around 9:00 AM Asia/Calcutta (may run up to 15 min early or 15 min late)";
@@ -227,8 +228,8 @@ describe("Move from Grok Bot", () => {
     await act(async () => button("Get the link")!.click());
     await tick();
     expect(host.querySelector<HTMLInputElement>('input[aria-label="Link for Grok Bot"]')!.value).toBe(link);
-    expect(shown()).toContain("open Connect apps, choose Add a custom connector at the bottom, name it MausBot, paste this as the Server URL, then choose Add plugin");
-    await act(async () => button("Add the MausBot bot in Grok Bot")!.click());
+    expect(shown()).toContain(`open Connect apps, choose Add a custom connector at the bottom, name it ${PRODUCT_NAME}, paste this as the Server URL, then choose Add plugin`);
+    await act(async () => button(`Add the ${PRODUCT_NAME} bot in Grok Bot`)!.click());
     expect(openExternal).toHaveBeenCalledWith("https://x.ai/bot/3i4Tvjckmdk05UwntFeNo");
     expect(host.querySelector("[data-grok-move-arrived]")).toBeNull();
 
@@ -236,7 +237,7 @@ describe("Move from Grok Bot", () => {
     await act(async () => { vi.advanceTimersByTime(3_000); });
     await tick();
     expect(shown()).toContain("Arrived from Grok Bot: Job Search");
-    expect(shown()).toContain("The link works for an hour, while MausBot stays open.");
+    expect(shown()).toContain(`The link works for an hour, while ${PRODUCT_NAME} stays open.`);
     await act(async () => { vi.advanceTimersByTime(3_000); });
     await tick();
     expect(calls.at(-1)).toBe("GET /api/setup-import/grok/connector?after=1");

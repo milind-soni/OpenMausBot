@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { DATA_DIR } from "../config.ts";
 import { codexDeveloperInstructions, syncCodexInstructions } from "./codex-instructions.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 const receiptPath = (key: string, nativeThreadId: string) =>
   join(DATA_DIR, "codex-instructions", `${createHash("sha256").update(JSON.stringify([key, nativeThreadId])).digest("hex")}.sha256`);
@@ -12,7 +13,7 @@ describe("Codex effective developer instructions", () => {
   it("preserves native rules after bot rules, including when bot rules are removed", () => {
     const config = { developer_instructions: "Native rules." };
     expect(codexDeveloperInstructions(config, "Bot rules.")).toBe("Bot rules.\n\nNative rules.");
-    expect(codexDeveloperInstructions(config, "")).toBe("No OpenMausBot bot-specific instructions remain.\n\nNative rules.");
+    expect(codexDeveloperInstructions(config, "")).toBe(`No ${APP_NAME} bot-specific instructions remain.\n\nNative rules.`);
     expect(codexDeveloperInstructions({}, "Bot rules.")).toBe("Bot rules.");
     expect(codexDeveloperInstructions({ developer_instructions: null }, "")).toBe("");
   });
@@ -37,7 +38,7 @@ describe("Codex instruction receipts", () => {
     await syncCodexInstructions(key, "native", "", "", true, request);
     await syncCodexInstructions(key, "native", "", "", true, request);
     expect(request).toHaveBeenCalledTimes(2);
-    expect(request.mock.calls[1][1].items[0].content[0].text).toContain("No OpenMausBot bot-specific instructions remain.");
+    expect(request.mock.calls[1][1].items[0].content[0].text).toContain(`No ${APP_NAME} bot-specific instructions remain.`);
   });
 
   it("adopts an existing native session once without replaying user history", async () => {
@@ -61,7 +62,7 @@ describe("Codex instruction receipts", () => {
     expect(accepted).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps native sessions independent even for one OpenMausBot task", async () => {
+  it(`keeps native sessions independent even for one ${APP_NAME} task`, async () => {
     const key = randomUUID();
     const request = vi.fn().mockResolvedValue({});
     await syncCodexInstructions(key, "first", "rules", "", false, request);

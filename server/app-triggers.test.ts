@@ -10,6 +10,7 @@ import { brokerClient } from "./app-trigger-broker.ts";
 import { AppTriggerManager, type AppTriggerManagerOptions } from "./app-triggers.ts";
 import { RoutineManager } from "./routines.ts";
 import { startBrokerFake, type BrokerFake } from "./testing/broker-fake.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 let dir = "";
 let broker: BrokerFake;
@@ -267,7 +268,7 @@ describe("AppTriggerManager", () => {
     const triggers = manager();
     const create = (event: string) => triggers.create({ botId: "bot-1", name: "New mail", prompt: "Summarize it.", app: "gmail", event });
     await expect(create("GMAIL_OWN_ENDPOINT")).rejects.toThrow("GMAIL_OWN_ENDPOINT can't be used yet: this event needs webhook setup on our side first. Pick another event this app offers.");
-    await expect(create("GMAIL_NOT_A_THING")).rejects.toThrow("GMAIL_NOT_A_THING is not an event OpenMausBot can watch.");
+    await expect(create("GMAIL_NOT_A_THING")).rejects.toThrow(`GMAIL_NOT_A_THING is not an event ${APP_NAME} can watch.`);
     expect(triggers.list()).toEqual([]);
   });
 

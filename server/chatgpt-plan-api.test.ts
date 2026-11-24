@@ -10,6 +10,7 @@ import { verificationServerEnvironment } from "../scripts/control-omb.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { excludedWorkspaceAuthPath } from "./workspace-backup-policy.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const FAKE_CODEX = join(ROOT, "server/testing/fake-codex-app-server.ts");
@@ -156,7 +157,7 @@ describe("ChatGPT plan accounts over isolated HTTP", () => {
     ] as const) {
       const refused = await api("POST", "/api/instances/chatgpt/auth/start", {}, { ...owner, [header]: value });
       expect(refused.status).toBe(403);
-      expect(refused.body.error).toContain("computer running OpenMausBot");
+      expect(refused.body.error).toContain(`computer running ${APP_NAME}`);
       expect(refused.body).not.toHaveProperty("auth");
     }
   });

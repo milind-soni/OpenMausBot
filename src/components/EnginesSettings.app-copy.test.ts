@@ -4,9 +4,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { BotEditorStore, initialState, type InstanceInfo, type useStore } from "@/state/store";
 import { EnginesSettings } from "./EnginesSettings";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-const NOTICE = "Another copy of OpenCode on this computer doesn't start, so OpenCode now uses the copy MausBot installed.";
+const NOTICE = `Another copy of OpenCode on this computer doesn't start, so OpenCode now uses the copy ${PRODUCT_NAME} installed.`;
 const install: InstanceInfo["install"] = {
   platform: "linux", command: { linux: "npm install -g opencode-ai" }, needsNode: true,
   server: { standalone: { version: "1.19.4", downloadBytes: 64_291_659 } },

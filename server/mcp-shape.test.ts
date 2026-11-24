@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { QUERY_TOOL, QUERY_TOOL_NAME, ResultStore, answerQuery, describeShape } from "./mcp-shape.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const product = (i: number) => ({ id: `p${i}`, name: `Protein Bar ${i}`, price: 199 + i, blurb: "x".repeat(300) });
 
@@ -55,7 +56,7 @@ describe("answerQuery", () => {
   it("cuts an answer that is itself too big, so the whole result never comes back", () => {
     const answer = answerQuery(store, { result: handle, query: "@" }, 2_000);
     expect(answer.content[0]!.text.length).toBeLessThan(2_400);
-    expect(answer.content[0]!.text).toContain("TRUNCATED by OpenMausBot");
+    expect(answer.content[0]!.text).toContain(`TRUNCATED by ${APP_NAME}`);
     expect(answer.content[0]!.text).toContain(`"${handle}"`);
   });
 

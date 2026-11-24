@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppState, Bot } from "@/state/store";
 import type { Routine, RoutineRun } from "@/lib/routines";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 // Hook-by-call-order harness: the page's own state survives between captures, so a click then a fresh capture shows
 // what renders next. Effects never run.
@@ -306,7 +307,7 @@ describe("routine editor", () => {
   it("shows a saved startup choice when the simple editor opens", () => {
     const html = editor({ ...routine, runOnStartup: true });
     expect(html).toContain('aria-expanded="true"');
-    expect(html).toMatch(/<input type="checkbox" aria-label="Also run when MausBot starts"[^>]*checked[^>]*>/);
+    expect(html).toMatch(new RegExp(String.raw`<input type="checkbox" aria-label="Also run when ${PRODUCT_NAME} starts"[^>]*checked[^>]*>`));
   });
 
   it("offers Remember the last run for a repeating routine, off unless the routine has it", () => {

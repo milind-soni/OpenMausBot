@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { installCloudFiles } from "./cloud-sync-main.mjs";
+import productJson from "../product.json" with { type: "json" };
+const { name: PRODUCT_NAME } = productJson;
 
 test("Files keeps its settings in the folder main names (the staging Admin's own), else cloud-sync", async (t) => {
   const { existsSync } = await import("node:fs");
@@ -58,7 +60,7 @@ test("Files channels answer this computer's own window only, and share only a fo
   assert.equal(await handlers.get("files:pick")({}), null);
   await assert.rejects(handlers.get("files:check")({}, "not a list"));
   await handlers.get("files:open")({}, { outputs: true });
-  assert.deepEqual(opened, [join(dir, "documents", "MausBot")]);
+  assert.deepEqual(opened, [join(dir, "documents", `${PRODUCT_NAME}`)]);
   // before-quit runs twice when quitting: closing again must not throw.
   installed.close();
   assert.doesNotThrow(() => installed.close());
@@ -75,7 +77,7 @@ test("Files starts when the Documents folder can't be found, and keeps bot outpu
     cloudAccount: () => ({ openDashboard: async () => {} }), localDataDir: join(dir, "home", ".openmausbot"),
   });
   t.after(() => { installed.close(); rmSync(dir, { recursive: true, force: true }); });
-  const outputs = join(dir, "home", "Documents", "MausBot");
+  const outputs = join(dir, "home", "Documents", `${PRODUCT_NAME}`);
   assert.equal((await handlers.get("files:state")({})).outputs.dir, outputs);
   await handlers.get("files:open")({}, { outputs: true });
   assert.deepEqual(opened, [outputs]);

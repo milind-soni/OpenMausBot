@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { EngineSetup, EngineUpdateNotice, installCommandFor, needsCli, needsSignIn } from "./EngineSetup";
 import { engineStatus } from "./ModelPickerFull";
 import { StoreProvider, type InstanceInfo } from "@/state/store";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -226,7 +227,7 @@ describe("install from Settings on the server", () => {
     // A remote client's Settings has no keys, so it names the computer instead of offering the button.
     vi.stubGlobal("window", { ogb: { platform: "linux", remoteClient: { active: true } } });
     const remote = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: appCopy({ state: "available", authenticated: false, version: "1.19.4" }) })));
-    expect(remote).toContain("on the computer running MausBot");
+    expect(remote).toContain(`on the computer running ${PRODUCT_NAME}`);
     expect(remote).not.toContain("Open AI › Other services");
     // Missing or broken, the app's copy is installed again from here.
     expect(render(appCopy({ state: "unavailable", reason: "`opencode` version check failed." }))).toContain("Install OpenCode here");
@@ -260,7 +261,7 @@ describe("server device-code sign-in", () => {
     };
     const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: engine })));
     expect(markup).toContain("Continue with ChatGPT");
-    expect(markup).toContain("separate from MausBot Cloud and from paying with an API key");
+    expect(markup).toContain(`separate from MausBot Cloud and from paying with an API key`);
     expect(markup).not.toContain("codex login");
     expect(markup).not.toContain("Device-code login");
   });
@@ -342,7 +343,7 @@ describe("API-key engine setup", () => {
 
   it("has no button on a remote client, whose settings hide the keys", () => {
     const html = render(keyEngine("openai-compat", { state: "unavailable" }), { platform: "darwin", remoteClient: { active: true } });
-    expect(html).toContain("on the computer running MausBot");
+    expect(html).toContain(`on the computer running ${PRODUCT_NAME}`);
     expect(html).not.toContain("Open AI › Other services");
   });
 

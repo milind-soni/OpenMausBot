@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { PackageDocument } from "../shared/package-format.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 const FIXTURES = join(import.meta.dirname, "..", "shared", "package-fixtures");
 const fixture = (name: string): any => JSON.parse(readFileSync(join(FIXTURES, name), "utf8"));
@@ -111,13 +112,13 @@ describe("importing a whole team", () => {
     expect(app.events.filter((kind) => kind === "bot")).toHaveLength(3);
   });
 
-  it("brings a new install's chrome MausBot back in chrome from its own export", async () => {
+  it(`brings a new install's chrome ${PRODUCT_NAME} back in chrome from its own export`, async () => {
     const app = await installation();
     app.store.seedIfEmpty();
     const { createBotPackageExport } = await import("./package-export.ts");
     const exported = createBotPackageExport({ name: "Mine", groups: [], routines: [], bots: app.store.bots });
     const document: PackageDocument = app.parsePackageDocument(JSON.parse(JSON.stringify(exported)));
-    expect(document.package.agents.map((agent) => [agent.name, agent.appearance?.color])).toEqual([["MausBot", "chrome"]]);
+    expect(document.package.agents.map((agent) => [agent.name, agent.appearance?.color])).toEqual([[`${PRODUCT_NAME}`, "chrome"]]);
     const result = app.importer.importPackageDocument(document, { trust: "file", mode: "add" }, app.deps);
     if (result.alreadyAdded) throw new Error("unexpected");
     expect(result.bots.map((bot) => app.store.bot(bot.id)?.color)).toEqual(["chrome"]);

@@ -10,6 +10,9 @@ import { existsSync, writeSync } from "node:fs";
 import path from "node:path";
 
 import { packageInstallCommand } from "../electron/package-install-command.mjs";
+import productJson from "../product.json" with { type: "json" };
+
+const { appName: APP_NAME } = productJson;
 
 const IMAGE = process.env.OMB_DEB_SMOKE_IMAGE || "ubuntu:24.04";
 const RUNTIME = process.env.OMB_DEB_SMOKE_RUNTIME || "docker";
@@ -25,7 +28,7 @@ if (!deb.endsWith(".deb") || !existsSync(deb)) fail("pass the path to a .deb");
 
 // Inside the container the package sits at a path with a space and an
 // apostrophe, so the quoting the app emits is exercised, not assumed.
-const staged = "/root/pending dir/o'brien/OpenMausBot.deb";
+const staged = `/root/pending dir/o'brien/${APP_NAME}.deb`;
 const command = packageInstallCommand("deb", staged);
 console.log(`[smoke-deb-command] command under test:\n    ${command}\n`);
 
@@ -84,7 +87,7 @@ const installed = inContainer(
     prepare,
     command,
     'dpkg-query -W -f="INSTALLED=\\${Version} \\${db:Status-Abbrev}\\n" openmausbot',
-    'test -x /opt/OpenMausBot/openmausbot && echo "EXECUTABLE=yes"',
+    `test -x /opt/${APP_NAME}/openmausbot && echo "EXECUTABLE=yes"`,
   ].join("\n"),
 );
 

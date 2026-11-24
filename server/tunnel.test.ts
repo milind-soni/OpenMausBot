@@ -28,6 +28,7 @@ import {
   type ManagedTunnelAccess,
   type RunningTunnel,
 } from "./tunnel.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 const posix = process.platform !== "win32";
 
@@ -191,7 +192,7 @@ describe("login and logout against the control plane", () => {
 
     const status = fakeIo([]);
     await runStatus(options(dir, { command: "status" }), status.io);
-    expect(status.out.join("\n")).toContain(`MausBot web address: ${stub.endpointUrl}`);
+    expect(status.out.join("\n")).toContain(`${PRODUCT_NAME} web address: ${stub.endpointUrl}`);
 
     const bye = fakeIo([]);
     expect(await runLogout(options(dir, { command: "logout" }), bye.io)).toBe(0);

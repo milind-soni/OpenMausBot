@@ -37,6 +37,7 @@ import {
 } from "./system-prompt.ts";
 import { loginPlace } from "../shared/logins.ts";
 import { REPLY_HABITS_PROMPT } from "./reply-habits.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 describe("the stable half", () => {
   it("leaves out a conversation's folder, so a new thread can read the bot's cached prompt", () => {
@@ -212,7 +213,7 @@ describe("computerPrompt", () => {
   it("distinguishes background window control from foreground desktop input", () => {
     const prompt = computerPrompt("local");
     expect(prompt).toContain("background delivery");
-    expect(prompt).toContain("do not bring OpenMausBot");
+    expect(prompt).toContain(`do not bring ${APP_NAME}`);
     expect(prompt).toContain("dedicated browser tools");
     expect(prompt).toContain("keeping the user's intended browser profile/account");
     expect(prompt).toContain("Do not silently retry a background refusal");
@@ -285,7 +286,7 @@ describe("computerPrompt", () => {
   });
 
   it("prefers a saved login through fill_login, which submits the form, before asking the person", () => {
-    expect(SIGN_IN_PROMPT).toContain("When you have a saved login for the site, open its login page in your browser and call fill_login: OpenMausBot types the password and any one-time code itself and submits the form");
+    expect(SIGN_IN_PROMPT).toContain(`When you have a saved login for the site, open its login page in your browser and call fill_login: ${APP_NAME} types the password and any one-time code itself and submits the form`);
     expect(SIGN_IN_PROMPT.indexOf("fill_login")).toBeLessThan(SIGN_IN_PROMPT.indexOf("call request_sign_in"));
   });
 
@@ -303,7 +304,7 @@ describe("computerPrompt", () => {
   it("names the Vault's secrets a bot may use, once each, so it asks for them by name", () => {
     expect(savedSecretsPrompt([])).toBe("");
     expect(savedSecretsPrompt([{ name: "Stripe key", refOnly: true }, { name: "stripe-key" }, { name: "Notion\n token" }, { name: "Acme", refOnly: true }]))
-      .toBe(' Secrets in the Vault you may use: "stripe-key", "Notion token", "Acme" (ref only). To use one, call request_credential with its name as the label: OpenMausBot hands it over at once with no card, and you never see the value.');
+      .toBe(` Secrets in the Vault you may use: "stripe-key", "Notion token", "Acme" (ref only). To use one, call request_credential with its name as the label: ${APP_NAME} hands it over at once with no card, and you never see the value.`);
     const many = Array.from({ length: 45 }, (_, index) => ({ name: `key ${index}` }));
     expect(savedSecretsPrompt(many)).toContain('"key 39" and 5 more.');
     expect(savedSecretsPrompt([{ name: "x".repeat(200) }])).toContain(`"${"x".repeat(80)}"`);
@@ -425,7 +426,7 @@ describe("cloudHomePrompt", () => {
   it("says the bot runs in the cloud, offers what works there, and never asks for a place that cannot exist", () => {
     for (const tools of [true, false]) {
       const text = cloudHomePrompt(tools);
-      expect(text).toMatch(/^ You run on the user's My Cloud, their always-on OpenMausBot in the cloud, not on their own computer\./);
+      expect(text).toMatch(new RegExp(String.raw`^ You run on the user's My Cloud, their always-on ${APP_NAME} in the cloud, not on their own computer\.`));
       expect(text.startsWith(` You run on ${CLOUD_HOME_PLACE}.`)).toBe(true);
       expect(text).toContain("Offer what works here: the built-in browser and their cloud computer, a desktop in the cloud. Call it their cloud computer, as the app does.");
       expect(text).not.toMatch(/\bOMB\b|\bBoat\b|\bbox\b/);
@@ -436,7 +437,7 @@ describe("cloudHomePrompt", () => {
 
   it("points to a lent computer only when the turn has the shared-computer tools", () => {
     expect(cloudHomePrompt(true)).toContain("check list_shared_computers: a computer they share with the Cloud is reachable through shared_computer");
-    expect(cloudHomePrompt(true)).toContain("otherwise ask them to open OpenMausBot on that computer, signed in to MausBot Cloud: it shares that computer with you by itself");
+    expect(cloudHomePrompt(true)).toContain(`otherwise ask them to open ${APP_NAME} on that computer, signed in to MausBot Cloud: it shares that computer with you by itself`);
     expect(cloudHomePrompt(true)).not.toContain("use-my-computer");
     expect(cloudHomePrompt(true)).not.toContain("Settings →");
     expect(cloudHomePrompt(true)).toContain("use its say field when it has one");
@@ -456,12 +457,12 @@ describe("cloudHomePrompt", () => {
   it("names the person's computer by its platform, never a Mac unless it is one, and the product by its name", () => {
     const pc = cloudHomePrompt(true, [], [{ name: "ASH-PC", platform: "win32" }]);
     expect(pc).toContain("If they ask for something on their PC (ASH-PC), check list_shared_computers");
-    expect(pc).toContain("otherwise ask them to open OpenMausBot on that PC, signed in to MausBot Cloud: it shares that PC with you by itself. It is a PC: call it that, never a Mac unless it is one.");
+    expect(pc).toContain(`otherwise ask them to open ${APP_NAME} on that PC, signed in to MausBot Cloud: it shares that PC with you by itself. It is a PC: call it that, never a Mac unless it is one.`);
     const mac = cloudHomePrompt(false, [], [{ name: "Ash’s MacBook", platform: "darwin" }, { name: "ASH-PC", platform: "win32" }]);
     expect(mac).toContain("You cannot see or use their Mac (Ash’s MacBook), its screen or its files from here.");
     for (const text of [pc, mac, cloudHomePrompt(true), cloudHomePrompt(true, [], [{ name: "box", platform: "linux" }])]) {
       expect(text).not.toMatch(/this Mac|OMB Cloud|OpenMausBot Cloud|Mac or PC/u);
-      if (text.includes("Settings →")) expect(text).toContain("Settings → MausBot Cloud");
+      if (text.includes("Settings →")) expect(text).toContain(`Settings → MausBot Cloud`);
     }
     expect(cloudHomePrompt(true, [], [{ name: "box", platform: "linux" }])).toContain("Call it their computer: never assume it is a Mac.");
     expect(cloudHomePrompt(true, [], [{ name: "evil\u202eNAME\nnext", platform: "win32" }])).not.toMatch(/[\u202e\n]/u);

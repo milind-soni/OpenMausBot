@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { runServiceCommand, serviceServeArgs } from "./service-cli.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 describe("openmausbot service", () => {
   let dir: string;
@@ -87,7 +88,7 @@ describe("openmausbot service", () => {
 
     // Windows gets a schtasks line, with the platform's own folder as --out
     expect(runServiceCommand({ ...base, sentinelOut: undefined, platform: "win32", dataDir: "C:\\Users\\maus\\.openmausbot", home: "C:\\Users\\maus", env: {} }, io)).toBe(1);
-    expect(err.join("\n")).toContain('schtasks /Create /SC MINUTE /MO 2 /TN "OpenMausBot Sentinel" /TR "\\"/usr/bin/node\\" \\"/usr/lib/node_modules/openmausbot/cli.js\\" \\"sentinel\\"');
+    expect(err.join("\n")).toContain(`schtasks /Create /SC MINUTE /MO 2 /TN "${APP_NAME} Sentinel" /TR "\\"/usr/bin/node\\" \\"/usr/lib/node_modules/openmausbot/cli.js\\" \\"sentinel\\"`);
     expect(err.join("\n")).toContain("\\\"--out\\\" \\\"C:\\Users\\maus\\AppData\\Local\\openmausbot-sentinel\\\"");
   });
 
@@ -109,11 +110,11 @@ describe("openmausbot service", () => {
 
   it("--sentinel prefers the installed app's own CLI over a checkout, which an update or Node upgrade would strand", () => {
     const sentinelOut = join(dir, "sentinel-state");
-    const app = "/Applications/OpenMausBot.app/Contents";
-    const checkout = { action: "install" as const, dataDir: join(dir, "data"), port: 8799, sentinel: true, sentinelOut, script: "/src/OpenMausBot/server/openmausbot.ts", node: "/home/maus/.nvm/versions/node/v24.0.0/bin/node", platform: "darwin" as const, home: "/Users/maus" };
+    const app = `/Applications/${APP_NAME}.app/Contents`;
+    const checkout = { action: "install" as const, dataDir: join(dir, "data"), port: 8799, sentinel: true, sentinelOut, script: `/src/${APP_NAME}/server/openmausbot.ts`, node: "/home/maus/.nvm/versions/node/v24.0.0/bin/node", platform: "darwin" as const, home: "/Users/maus" };
     expect(runServiceCommand({ ...checkout, exists: (path) => path.startsWith(app), hasSentinel: () => true }, io)).toBe(0);
     const plist = readFileSync(join(sentinelOut, "com.openmausbot.sentinel.plist"), "utf8");
-    expect(plist).toContain(`<string>${app}/MacOS/OpenMausBot</string>`);
+    expect(plist).toContain(`<string>${app}/MacOS/${APP_NAME}</string>`);
     expect(plist).toContain(`<string>${app}/Resources/server/openmausbot.js</string>`);
     expect(plist).toContain("<key>ELECTRON_RUN_AS_NODE</key>");
     expect(plist).not.toContain("openmausbot.ts");

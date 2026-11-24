@@ -14,6 +14,7 @@ import {
   validateBaseUrl,
   validateToolArguments,
 } from "../scripts/mcp-server.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const ORIGINAL_FETCH = globalThis.fetch;
 
@@ -314,16 +315,16 @@ describe("MCP tool execution", () => {
 
     await expect(handleToolCall("update_bot_profile", {
       bot_id: "bot-1", name: "Mira",
-    }, fetcher)).rejects.toThrow("OpenMausBot did not return the updated bot");
+    }, fetcher)).rejects.toThrow(`${APP_NAME} did not return the updated bot`);
     await expect(handleToolCall("update_channel", {
       channel_id: "channel-1", name: "Launch",
-    }, fetcher)).rejects.toThrow("OpenMausBot did not return the updated channel");
+    }, fetcher)).rejects.toThrow(`${APP_NAME} did not return the updated channel`);
     await expect(handleToolCall("create_task", {
       target_type: "bot", target_id: "bot-1", title: "Fresh",
-    }, fetcher)).rejects.toThrow("OpenMausBot did not return the created task");
+    }, fetcher)).rejects.toThrow(`${APP_NAME} did not return the created task`);
     await expect(handleToolCall("rename_task", {
       target_type: "bot", target_id: "bot-1", task_id: "task-1", title: "Renamed",
-    }, fetcher)).rejects.toThrow("OpenMausBot did not return the renamed task");
+    }, fetcher)).rejects.toThrow(`${APP_NAME} did not return the renamed task`);
   });
 
   it("searches with encoded, bounded parameters", async () => {
@@ -659,12 +660,12 @@ describe("waiting on a conversation's job", () => {
   it("names an older server that cannot report a job, and a conversation that is gone as gone", async () => {
     const answering = (body: string) => vi.fn(async (path: string) => {
       if (path === "/api/bots?messages=0") return bot();
-      throw new OpenMausBotApiError(404, `OpenMausBot API error (404): ${body}`);
+      throw new OpenMausBotApiError(404, `${APP_NAME} API error (404): ${body}`);
     });
     await expect(handleToolCall("wait_for_conversation", { target_type: "bot", target_id: "bot-1" }, answering("not found")))
       .rejects.toThrow("cannot report a conversation's job");
     await expect(handleToolCall("wait_for_conversation", { target_type: "bot", target_id: "bot-1" }, answering('{"error":"no such conversation"}')))
-      .rejects.toThrow('OpenMausBot API error (404): {"error":"no such conversation"}');
+      .rejects.toThrow(`${APP_NAME} API error (404): {"error":"no such conversation"}`);
   });
 
   it("sends with the caller's send id, returns the receipt, and refuses a malformed id before sending", async () => {

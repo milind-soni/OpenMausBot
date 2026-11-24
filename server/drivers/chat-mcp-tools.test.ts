@@ -17,6 +17,7 @@ import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
 import { wideSchema } from "../testing/oversized-tool-schema.ts";
 import { schemaBytes, toolSchemaProfile } from "../tool-schema-profile.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 const killProbe = vi.hoisted(() => ({ override: false, stopped: false, budgets: [] as number[] }));
 const spawned = vi.hoisted(() => [] as Array<{ owner?: string; opts: { env?: NodeJS.ProcessEnv; box?: unknown } }>);
@@ -256,7 +257,7 @@ describe("Chat MCP session", () => {
       sessions.push(session);
       const [definition] = session.definitions;
       expect(schemaBytes(definition!.function.parameters)).toBeLessThanOrEqual(12_000);
-      expect(definition!.function.description).toContain("OpenMausBot shortened this tool's parameters to fit Kimi's size limit");
+      expect(definition!.function.description).toContain(`${APP_NAME} shortened this tool's parameters to fit Kimi's size limit`);
       expect(warn).toHaveBeenCalledWith(expect.stringMatching(/^chat-mcp: audit: kept only the top-level fields of tool "write"'s parameters/));
       expect(() => session.validate("audit_write", { field_000: { label: 5 } })).toThrow("input schema");
       expect(() => session.validate("audit_write", { field_000: { label: "five" } })).not.toThrow();
@@ -854,7 +855,7 @@ describe("Chat MCP shutdown verdict", () => {
 const grantFor = (server: string, tool: string) => expect.stringMatching(new RegExp(`^\\["${server}","[0-9a-f]{64}","${tool}"\\]$`));
 
 describe("Chat MCP approvals by server", () => {
-  it("asks nothing for OpenMausBot's agents server, and grants no session-wide allow on the person's computer", async () => {
+  it(`asks nothing for ${APP_NAME}'s agents server, and grants no session-wide allow on the person's computer`, async () => {
     const agents = fixture(); const audit = fixture(); const computer = fixture();
     const session = await mountChatTools({
       agents: agents.server, custom: { audit: audit.server },

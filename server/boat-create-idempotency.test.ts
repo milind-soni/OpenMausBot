@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { APP_NAME } from "../shared/product.ts";
 
 type Scenario = "lost-response" | "restart-after-5xx" | "in-progress" | "recovered-box";
 
@@ -513,7 +514,7 @@ describe("Boat create idempotency", () => {
         elapsed?: number;
       };
       await expectCleanWorkerExit(worker, "vanishing-lock worker");
-      expect(result.error).toMatch(/locked by another OpenMausBot process/i);
+      expect(result.error).toMatch(new RegExp(String.raw`locked by another ${APP_NAME} process`, "i"));
       expect(result.elapsed).toBeGreaterThanOrEqual(1_500);
       expect(result.elapsed).toBeLessThan(5_000);
     } finally {
@@ -576,7 +577,7 @@ describe("Boat create idempotency", () => {
         elapsed?: number;
       };
       await expectCleanWorkerExit(worker, "replaced-lock worker");
-      expect(result.error).toMatch(/locked by another OpenMausBot process/i);
+      expect(result.error).toMatch(new RegExp(String.raw`locked by another ${APP_NAME} process`, "i"));
       expect(result.elapsed).toBeGreaterThanOrEqual(1_500);
       expect(result.elapsed).toBeLessThan(5_000);
     } finally {
@@ -633,8 +634,8 @@ describe("Boat create idempotency", () => {
         expectCleanWorkerExit(second, "second live-reaper contender"),
       ]);
 
-      expect(firstResult.error).toMatch(/locked by another OpenMausBot process/i);
-      expect(secondResult.error).toMatch(/locked by another OpenMausBot process/i);
+      expect(firstResult.error).toMatch(new RegExp(String.raw`locked by another ${APP_NAME} process`, "i"));
+      expect(secondResult.error).toMatch(new RegExp(String.raw`locked by another ${APP_NAME} process`, "i"));
       expect(readFileSync(lockPath, "utf8")).toBe(lockContents);
       expect(readFileSync(`${lockPath}.reap-${lockToken}`, "utf8")).toBe(reaperContents);
       expect(() => readFileSync(join(dataDir, "box-create-requests.json"), "utf8")).toThrow();

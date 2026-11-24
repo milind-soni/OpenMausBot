@@ -27,6 +27,7 @@ import {
   splitPiModel,
   updatePiModelCatalog,
 } from "./pi.ts";
+import { APP_NAME, PRODUCT_NAME } from "../../shared/product.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-pi-cli.ts");
 const MODELS_LINE =
@@ -587,7 +588,7 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(second.message).toBe("second");
     const third = await send("third", "Memory: moved to Toronto.", first.cursor);
     expect(third.message)
-      .toBe("Context from OpenMausBot updated since this conversation started; it replaces any earlier copy:\n\nMemory: moved to Toronto.\n\nthird");
+      .toBe(`Context from ${APP_NAME} updated since this conversation started; it replaces any earlier copy:\n\nMemory: moved to Toronto.\n\nthird`);
   });
 
   it("re-establishes the full prompt after pi compaction summarizes the session", async () => {
@@ -1230,7 +1231,7 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(done).toMatchObject({ ok: true, stopReason: "cancelled" });
   });
 
-  it("writes models.json and set_model for a host::model inject pick, in MausBot's own Pi folder", async () => {
+  it(`writes models.json and set_model for a host::model inject pick, in ${PRODUCT_NAME}'s own Pi folder`, async () => {
     const home = mkdtempSync(join(tmpdir(), "omb-pi-turn-inject-"));
     const dump = join(home, "dump.jsonl");
     // The person's own Pi setup: what a bot's turn must not load, and the login and providers it needs.

@@ -3209,10 +3209,10 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       questions: [{ question: "Which source should I use?", options: [{ label: "Directly in OpenMausBot" }, { label: "The official server in Executor" }] }],
     });
     expect(recorder.events.find((e) => e.type === "item.completed" && e.itemType === "assistant_text")).toMatchObject({
-      text: "Which source should I use?\n- Directly in OpenMausBot\n- The official server in Executor",
+      text: `Which source should I use?\n- Directly in OpenMausBot\n- The official server in Executor`,
     });
 
-    const answer = "The user answered your questions.\n\nQ: Which source should I use?\nA: Directly in OpenMausBot";
+    const answer = `The user answered your questions.\n\nQ: Which source should I use?\nA: Directly in OpenMausBot`;
     await expect(instance.adapter.respondToRequest("t-async-question", opened.requestId!, { behavior: "answer", message: answer })).resolves.toBe("answered");
     expect(await recorder.until((e) => e.type === "request.resolved")).toMatchObject({ requestId: opened.requestId, behavior: "answer", source: "user" });
     expect(JSON.parse(readFileSync(dump, "utf8")).calls.find((c: any) => c.method === "turn/steer")?.params?.input).toEqual([{ type: "text", text: answer }]);
@@ -4243,7 +4243,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       await expect(instance.snapshot()).resolves.toMatchObject({ authenticated: true });
     });
 
-    it("says a ChatGPT account's Codex usage limit is OpenAI's, not MausBot's, and leaves a custom provider's words alone", async () => {
+    it(`says a ChatGPT account's Codex usage limit is OpenAI's, not ${PRODUCT_NAME}'s, and leaves a custom provider's words alone`, async () => {
       await create({ mode: "usage-limit" });
       const { done, errors } = await runTurn("t-limit");
       expect(errors).toHaveLength(1);
@@ -4261,7 +4261,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     const plus = "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 5:23 PM.";
     const said = codexUserError(plus, "own");
     expect(said).toContain("ChatGPT");
-    expect(said).toContain("not your MausBot plan");
+    expect(said).toContain(`not your ${PRODUCT_NAME} plan`);
     expect(said).toMatch(/It resets at 5:23 PM \([^)]+\)\./);
     expect(said).not.toContain("Pro");
     expect(codexUserError("You've hit your usage limit for gpt-6.1-sol. Switch to another model now, or try again at Oct 17th, 2026 5:23 PM.", "own"))

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { routineDateTime, routineRunLabel, routineRunTone, routineRunsOn } from "./routine-display";
 import { setLocale } from "./i18n";
 import type { RoutineRun } from "./routines";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 describe("where a routine runs", () => {
   it("on the Cloud, every routine runs on schedule even when the person's computer is off", () => {
@@ -21,12 +22,12 @@ describe("where a routine runs", () => {
     expect(routineRunsOn({ roomGoal: false, computer: "vm", cloudHome: true }).label).toBe("The Cloud");
   });
 
-  it("on a desktop, a routine starts while MausBot is open there", () => {
+  it(`on a desktop, a routine starts while ${PRODUCT_NAME} is open there`, () => {
     expect(routineRunsOn({ roomGoal: false, cloudHome: false })).toEqual({
-      label: "This computer", hint: "Starts while MausBot is open here.",
+      label: "This computer", hint: `Starts while ${PRODUCT_NAME} is open here.`,
     });
     expect(routineRunsOn({ roomGoal: false, runOn: "cloud", cloudHome: false })).toEqual({
-      label: "Cloud desktop", hint: "Runs the whole job on the bot's cloud desktop while MausBot is open.",
+      label: "Cloud desktop", hint: `Runs the whole job on the bot's cloud desktop while ${PRODUCT_NAME} is open.`,
     });
     expect(routineRunsOn({ roomGoal: false, computer: "vm", cloudHome: false }).label).toBe("The bot's private desktop");
     expect(routineRunsOn({ roomGoal: true, cloudHome: false }).label).toBe("This computer, with the whole group");

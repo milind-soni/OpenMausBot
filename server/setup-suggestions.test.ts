@@ -10,6 +10,7 @@ import type { BotRecord, Message } from "./store.ts";
 import { cancelSetupRequest } from "./setup-request.ts";
 import type { SideJobText } from "./side-jobs.ts";
 import { Store } from "./store.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 // Recorded with the real Claude CLI: the prompt each scenario was sent, and the 32 replies with the options shown.
 const evaluation = JSON.parse(readFileSync(new URL("./testing/fixtures/setup-suggestions-eval.json", import.meta.url), "utf8")) as {
@@ -18,13 +19,14 @@ const evaluation = JSON.parse(readFileSync(new URL("./testing/fixtures/setup-sug
   prompts: Record<string, string>;
   replies: Array<{ scenario: string; text: string; shown: string[] | null }>;
 };
+const RECORDED_APP_NAME = "OpenMausBot";
 
 describe("the prompt", () => {
   it("is the one the recorded run used, for every scenario", () => {
     for (const { id, ctx } of evaluation.scenarios) {
       const prompt = setupSuggestionPrompt({ name: ctx.name ?? undefined, title: ctx.title, department: ctx.department, apps: ctx.apps ?? [],
         aboutMe: ctx.about || undefined, otherJobs: ctx.jobs ?? [], language: ctx.language, canBrowse: ctx.canBrowse ?? true });
-      expect(prompt, id).toBe(evaluation.prompts[id]);
+      expect(prompt, id).toBe(evaluation.prompts[id]!.replaceAll(RECORDED_APP_NAME, APP_NAME));
     }
   });
 

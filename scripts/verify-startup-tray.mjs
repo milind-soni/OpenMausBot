@@ -8,6 +8,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
+import productJson from "../product.json" with { type: "json" };
+
+const { appName: APP_NAME } = productJson;
 
 const flag = "--omb-startup-fixture";
 if (!process.versions.electron) {
@@ -61,7 +64,7 @@ if (!process.versions.electron) {
     await delay(150);
     mkdirSync(output, { recursive: true });
     writeFileSync(join(output, "startup-screen.png"), (await active.webContents.capturePage()).toPNG());
-    assert.equal(await active.webContents.executeJavaScript("document.querySelector('h1').textContent"), "OpenMausBot");
+    assert.equal(await active.webContents.executeJavaScript("document.querySelector('h1').textContent"), `${APP_NAME}`);
     assert.equal(await active.webContents.executeJavaScript("typeof process"), "undefined");
     // Exercise the actual renderer close button.
     await active.webContents.executeJavaScript("document.querySelector('button').click()");

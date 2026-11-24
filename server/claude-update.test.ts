@@ -9,6 +9,7 @@ import { CLAUDE_CODE_PACKAGE, isAppInstalledClaude, updateClaudeCli, type AppCop
 import { ClaudeDriver } from "./drivers/claude.ts";
 import { npmPackageOf } from "./engine-install.ts";
 import { registerPathDir, resetPathCacheForTests } from "./env-path.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 type Callback = (error: Error | null, stdout: string, stderr?: string) => void;
 
@@ -51,7 +52,7 @@ describe("updateClaudeCli", () => {
     };
 
     await expect(updateClaudeCli("claude", {}, execute, noAppCopy)).rejects.toThrow(
-      "Claude finished updating, but OpenMausBot could not verify",
+      `Claude finished updating, but ${APP_NAME} could not verify`,
     );
   });
 

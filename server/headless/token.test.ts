@@ -11,6 +11,7 @@ import { pairingRequest, SessionRegistry } from "../sessions.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import type { HeadlessIo } from "./output.ts";
 import { runHeadless } from "./main.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "omb-token-"));
 let server: Server;
@@ -107,7 +108,7 @@ describe("token", () => {
     const file = join(dir, "old-token");
     const made = await run(["token", "create", "CI", "--out", file]);
     expect(made.code).toBe(5);
-    expect(made.err[0]).toBe("error: this OpenMausBot server cannot make access tokens");
+    expect(made.err[0]).toBe(`error: this ${APP_NAME} server cannot make access tokens`);
     expect(registry.list()).toEqual([]);
     expect(() => readFileSync(file)).toThrow();
   });

@@ -14,6 +14,8 @@ import {
   inMacSyncedFolder,
   macMountIsLocal,
 } from "./data-dir-lease.mjs";
+import productJson from "../product.json" with { type: "json" };
+const { appName: APP_NAME } = productJson;
 
 const MODULE_URL = new URL("./data-dir-lease.mjs", import.meta.url).href;
 const LEASE_NAME = "openmausbot-server.lease";
@@ -124,7 +126,7 @@ test("an invalid child capability fails closed without acquisition or secret log
     assert.equal(result.code, 0);
     assert.equal(result.stderr, "");
     assert.deepEqual(JSON.parse(result.stdout), {
-      error: "The OpenMausBot desktop lease delegation is invalid; refusing to start to protect its state.",
+      error: `The ${APP_NAME} desktop lease delegation is invalid; refusing to start to protect its state.`,
       consumed: true,
     });
     assert.equal(result.stdout.includes(invalidCapability), false);

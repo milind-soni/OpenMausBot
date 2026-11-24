@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TemplateCard, TemplateDetails } from "../../shared/share-card";
 import type { Message } from "@/state/store";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const dispatch = vi.fn();
 const api = vi.fn(async (_path: string, _init?: RequestInit): Promise<unknown> => ({ ok: true }));
@@ -78,7 +79,7 @@ describe("a template's chat card", () => {
     const signIn = shown({ ...draft, fallback: "sign_in" });
     expect(signIn).toContain("Save folder…");
     expect(signIn).toContain("Upload on GitHub");
-    expect(signIn).toContain("Sign in to MausBot to publish");
+    expect(signIn).toContain(`Sign in to ${PRODUCT_NAME} to publish`);
     expect(signIn).not.toMatch(/\bPublish\b/);
     expect(shown({ ...draft, fallback: "unavailable" })).toContain("Publishing isn't available here");
   });

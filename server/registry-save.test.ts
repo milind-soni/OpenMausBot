@@ -5,6 +5,7 @@ import { RegistrySaveError } from "./registry-save.ts";
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import { Store, type BotRecord } from "./store.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
 const locked = () => Object.assign(new Error("EPERM: operation not permitted, rename 'bots.json.tmp' -> 'bots.json'"), { code: "EPERM" });
@@ -37,7 +38,7 @@ describe("bots.json save failures", () => {
     failNextSave(store);
 
     expect(() => store.switchTask(bot.id, first.threadId))
-      .toThrow("Couldn't save the thread switch: another program is holding OpenMausBot's bots.json, or its folder is read-only.");
+      .toThrow(`Couldn't save the thread switch: another program is holding ${APP_NAME}'s bots.json, or its folder is read-only.`);
     expect(bot).toMatchObject({ threadId: second.threadId, resumeCursors: { claude: "session-two" } });
     expect(bot.pinnedMessageId).toBeUndefined();
     expect(changes).not.toHaveBeenCalled();
@@ -127,7 +128,7 @@ describe("bots.json save failures", () => {
     failNextSave(store);
 
     expect(() => store.setResumeCursor(bot.id, "claude", "session-three"))
-      .toThrow("Couldn't save the conversation's engine session: another program is holding OpenMausBot's bots.json, or its folder is read-only.");
+      .toThrow(`Couldn't save the conversation's engine session: another program is holding ${APP_NAME}'s bots.json, or its folder is read-only.`);
     expect(second.resumeCursors.claude).toBe("session-three");
     failNextSave(store);
     expect(() => store.setHandedMessages(bot.id, second.threadId, "claude", { session: "session-three", ids: [] }))
@@ -147,7 +148,7 @@ describe("bots.json save failures", () => {
   it("names the unsaved action and keeps the raw error as its cause", () => {
     const fullDisk = new RegistrySaveError("the thread's usage", "bots.json", Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" }));
 
-    expect(fullDisk.message).toBe("Couldn't save the thread's usage: OpenMausBot couldn't write bots.json.");
+    expect(fullDisk.message).toBe(`Couldn't save the thread's usage: ${APP_NAME} couldn't write bots.json.`);
     expect(fullDisk.cause).toMatchObject({ code: "ENOSPC" });
   });
 });
@@ -179,7 +180,7 @@ describe("groups.json save failures", () => {
     failNextGroupSave(store);
 
     expect(() => store.switchGroupTask(room.id, first.threadId))
-      .toThrow("Couldn't save the thread switch: another program is holding OpenMausBot's groups.json, or its folder is read-only.");
+      .toThrow(`Couldn't save the thread switch: another program is holding ${APP_NAME}'s groups.json, or its folder is read-only.`);
     expect(room.threadId).toBe(second.threadId);
     expect(room.pinnedMessageId).toBeUndefined();
     expect(room.pinnedCwd).toBeUndefined();
@@ -252,7 +253,7 @@ describe("groups.json save failures", () => {
     failNextGroupSave(store);
 
     expect(() => store.patchGroup(room.id, { name: "Renamed", bulletin: "Ship it", pinnedMessageId: "pin-two", unread: true }))
-      .toThrow("Couldn't save the room's settings: another program is holding OpenMausBot's groups.json, or its folder is read-only.");
+      .toThrow(`Couldn't save the room's settings: another program is holding ${APP_NAME}'s groups.json, or its folder is read-only.`);
     expect(room).toEqual(unchanged);
     expect(second.pinnedMessageId).toBeUndefined();
     expect(changes).not.toHaveBeenCalled();

@@ -5,6 +5,7 @@ import {
   liveMedia, onLiveStreamConnected, onServerCall, resetLiveMedia, setLiveMuted, startLiveCall, subscribeLiveMedia, takeLiveCallAction,
 } from "./live-call-media";
 import { ApiError } from "@/state/store";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 class FakeTrack { enabled = true; stopped = false; stop() { this.stopped = true; } }
 class FakeChannel {
@@ -447,7 +448,7 @@ describe("live call media", () => {
     await startLiveCall({ botId: "b1", threadId: "t1" });
     expect(liveMedia()).toMatchObject({
       phase: "failed",
-      notice: "Live calls need a microphone, and this window can't use one. Open MausBot at a secure https address to make the call.",
+      notice: `Live calls need a microphone, and this window can't use one. Open ${PRODUCT_NAME} at a secure https address to make the call.`,
       action: null,
     });
     expect(currentCall()).toBeNull();
@@ -766,7 +767,7 @@ describe("a blocked microphone", () => {
       pageMicrophone,
     });
     await startLiveCall({ botId: "b1", threadId: "t1" });
-    expect(liveMedia()).toMatchObject({ phase: "failed", notice: "Live calls need a microphone, and this window can't use one. Open MausBot at a secure https address to make the call.", action: null });
+    expect(liveMedia()).toMatchObject({ phase: "failed", notice: `Live calls need a microphone, and this window can't use one. Open ${PRODUCT_NAME} at a secure https address to make the call.`, action: null });
     expect(liveMedia().notice).not.toMatch(/browser/i);
     expect(pageMicrophone).not.toHaveBeenCalled();
   });

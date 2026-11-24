@@ -10,6 +10,7 @@ import { transcriptText } from "../replies.ts";
 import type { BotRecord, Message } from "../store.ts";
 import { SETTINGS_CARDS } from "./cards.ts";
 import { createAppSettings, WRITE_BUDGET } from "./host.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const ADDRESS = "macmini.tail1234.ts.net";
 const SECRETS = [ADDRESS, "http://", "https://", "/pair#code=", "ABCD-EFGH-IJKL", "omb_pair_"];
@@ -62,7 +63,7 @@ describe("app_settings show_card", () => {
     expect(answer.status).toBe(200);
     expect(messages).toEqual([{ id: "m1", threadId: "t-kiwi", role: "bot", kind: "text", text: SETTINGS_CARDS["other-computers"].text, settingsCard: { id: "other-computers" } }]);
     expect(answer.body).toEqual({ text: expect.stringMatching(/^Card shown: Your other computers\. Your other computers is on now\. Only the user can change it; you cannot, and you never see what the card shows\./) });
-    expect(String(answer.body.text)).toContain("if the card shows a switch, turn it on there; otherwise open MausBot on that computer, Settings → Phone & devices");
+    expect(String(answer.body.text)).toContain(`if the card shows a switch, turn it on there; otherwise open ${PRODUCT_NAME} on that computer, Settings → Phone & devices`);
     expect(String(answer.body.text)).toContain("Connect to a server");
   });
 
@@ -78,13 +79,13 @@ describe("app_settings show_card", () => {
     const answer = await show("ai-sign-in");
     expect(messages).toEqual([{ id: "m1", threadId: "t-kiwi", role: "bot", kind: "text", text: SETTINGS_CARDS["ai-sign-in"].text, settingsCard: { id: "ai-sign-in" } }]);
     expect(answer.body.text).toBe("Card shown: AI sign-in. Only the user can change it; you cannot, and you never see what the card shows. " + SETTINGS_CARDS["ai-sign-in"].guide);
-    expect(String((await fixture({ group: true }).show("ai-sign-in")).body.text)).toContain("open Settings → AI → Providers in MausBot");
+    expect(String((await fixture({ group: true }).show("ai-sign-in")).body.text)).toContain(`open Settings → AI → Providers in ${PRODUCT_NAME}`);
   });
 
   it("in a room, where no control is drawn, posts nothing and tells the bot where the person finds it", async () => {
     const { show, messages } = fixture({ group: true, on: true });
     const answer = await show("other-computers");
-    expect(answer).toEqual({ status: 200, body: { text: "No card shown: a settings control is not drawn in a room. Tell the user in one line to open Settings → Phone & devices → Your other computers in MausBot on the computer itself, or to ask you in your own chat, where you can show it." } });
+    expect(answer).toEqual({ status: 200, body: { text: `No card shown: a settings control is not drawn in a room. Tell the user in one line to open Settings → Phone & devices → Your other computers in ${PRODUCT_NAME} on the computer itself, or to ask you in your own chat, where you can show it.` } });
     expect(messages).toEqual([]);
   });
 
@@ -102,7 +103,7 @@ describe("app_settings show_card", () => {
   it("replays to the engine as the app's own card, with the fixed text only", () => {
     const row = { id: "m1", role: "bot", kind: "text", text: SETTINGS_CARDS["other-computers"].text, settingsCard: { id: "other-computers" } } as Message;
     const replayed = transcriptText(row, new Map());
-    expect(replayed).toMatch(/^\[Records from a settings control MausBot \(the app\) showed to the person in this chat because you asked for it; the person works it themselves, and nothing it shows is sent to you/);
+    expect(replayed).toMatch(new RegExp(String.raw`^\[Records from a settings control ${PRODUCT_NAME} \(the app\) showed to the person in this chat because you asked for it; the person works it themselves, and nothing it shows is sent to you`));
     expect(replayed).toContain(SETTINGS_CARDS["other-computers"].text);
   });
 
@@ -110,7 +111,7 @@ describe("app_settings show_card", () => {
     for (const options of [{ here: false }, { cards: false as const }]) {
       const { show, messages } = fixture(options);
       const answer = await show("other-computers");
-      expect(answer).toEqual({ status: 200, body: { text: "No card shown: Your other computers is set in the MausBot desktop app on the computer itself, in Settings → Phone & devices. Tell the user that in one line." } });
+      expect(answer).toEqual({ status: 200, body: { text: `No card shown: Your other computers is set in the ${PRODUCT_NAME} desktop app on the computer itself, in Settings → Phone & devices. Tell the user that in one line.` } });
       expect(messages).toEqual([]);
     }
   });

@@ -20,6 +20,7 @@ import { LENT_BROWSER_NO_ENDPOINT, LENT_SCREEN_BROWSING } from "./lent-screen-gu
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 import { freePortBlock } from "./testing/ports.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const HOST = "omb-t-0123456789ab.fly.dev";
@@ -58,7 +59,7 @@ async function api(method: string, path: string, options: { body?: unknown; toke
 }
 
 async function adminPairing(): Promise<string> {
-  const body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 });
+  const body = JSON.stringify({ label: `${APP_NAME} app (Cloud)`, ttlSeconds: 300 });
   const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
   const response = await fetch(`${base}/api/cloud/pairing`, { method: "POST", headers: {
     ...edge, "content-type": "application/json",
@@ -260,7 +261,7 @@ it("a screen the PC's own server cannot check says so in one sentence, never tha
   const refused = await screenCall("get_desktop_state");
   leaseUrl = right;
   expect(refused.isError).toBe(true);
-  expect(said(refused)).toMatch(/^OpenMausBot on this computer could not check whether its screen is free \(its server answered 404.*\), so this call was not performed\. This is not a person using the computer\./);
+  expect(said(refused)).toMatch(new RegExp(String.raw`^${APP_NAME} on this computer could not check whether its screen is free \(its server answered 404.*\), so this call was not performed\. This is not a person using the computer\.`));
   expect((await screenCall("get_desktop_state")).isError).toBeFalsy();
 }, hostTimeout(30_000));
 
@@ -291,9 +292,9 @@ it("a locked screen says to unlock it, and works once unlocked", async () => {
 it("a quarantined driver says how to restore it; restored, the next action works without a restart", async () => {
   screen.set("exit");
   const stopped = await screenCall("get_desktop_state");
-  expect(said(stopped)).toMatch(/^Computer control stopped on this computer because its helper exited and OpenMausBot is restarting it by itself, so try the action once more\b.*Protection history/);
+  expect(said(stopped)).toMatch(new RegExp(String.raw`^Computer control stopped on this computer because its helper exited and ${APP_NAME} is restarting it by itself, so try the action once more\b.*Protection history`));
   const working = driver;
-  driver = { mcpCommand: join(home, "Program Files", "OpenMausBot", "resources", "cua-driver.exe"), mcpArgs: ["mcp"], mcpEnv: {} };
+  driver = { mcpCommand: join(home, "Program Files", `${APP_NAME}`, "resources", "cua-driver.exe"), mcpArgs: ["mcp"], mcpEnv: {} };
   const missing = await screenCall("get_desktop_state");
   expect(said(missing)).toBe(helperMissing());
   expect(said(missing)).not.toContain(home);

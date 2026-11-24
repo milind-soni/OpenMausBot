@@ -4,6 +4,7 @@ import type { BurstCardData } from "../../shared/burst.ts";
 import { burstLimits, BURST_PLAN_LIMITS, type BurstLimits } from "./limits.ts";
 import { BURST_PART_MAX_RESTARTS, childOpening, createBurstManager, cutOffTooOften, mergePrompt, type BurstManagerDeps, type BurstTurnOutcome } from "./manager.ts";
 import { openBurstStore, type BurstChild, type BurstRecord, type BurstStore } from "./store.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 type Started = { burst: BurstRecord; child: BurstChild & { threadId: string }; text: string; done: (outcome: BurstTurnOutcome) => void };
 
@@ -363,7 +364,7 @@ describe("after a restart", () => {
     console.log(`part starts over 10 restarts of a crash loop: ${started.length}, merge starts: ${merges.length}`);
     expect(started).toHaveLength(2 + 2 * BURST_PART_MAX_RESTARTS);
     expect(store.childrenIn(burstId, "failed").map((child) => child.error)).toEqual([cutOffTooOften(BURST_PART_MAX_RESTARTS), cutOffTooOften(BURST_PART_MAX_RESTARTS)]);
-    expect(cutOffTooOften(2)).toBe("Not started again: OpenMausBot restarted while this part ran 3 times.");
+    expect(cutOffTooOften(2)).toBe(`Not started again: ${APP_NAME} restarted while this part ran 3 times.`);
     // The merge turn is cut off by the restarts that follow it as well: the parts are posted as they came instead.
     expect(merges).toHaveLength(1 + BURST_PART_MAX_RESTARTS);
     expect(store.get(burstId)!.phase).toBe("done");

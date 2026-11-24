@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
 import type { Message } from "@/state/store";
 import type { CompanionState } from "./PhoneSetupFlow";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 const f = vi.hoisted(() => ({ here: true, state: null as object | null, act: null as unknown }));
 vi.mock("@/lib/companion-bridge", () => ({ pageIsThisComputer: () => f.here }));
@@ -29,7 +30,7 @@ vi.mock("./PhoneSetupFlow", () => ({
 const { RichMessageRow, richRowKind } = await import("./RichMessageRow");
 const { PhoneDevicesSection } = await import("./PhoneDevicesSection");
 
-const TEXT = "Your other computers: this is turned on in MausBot on the computer itself, in Settings → Phone & devices.";
+const TEXT = `Your other computers: this is turned on in ${PRODUCT_NAME} on the computer itself, in Settings → Phone & devices.`;
 const message = { id: "m1", role: "bot", kind: "text", text: TEXT, settingsCard: { id: "other-computers" } } as unknown as Message;
 const off = { on: false, since: null };
 const state = (tailscale: object = off, extra: Partial<CompanionState> = {}) => ({ enabled: false, keepAwake: false, port: 8810, devices: [], pairing: null, notices: [], routes: { wifi: off, relay: off, https: off, tailscale }, ...extra });
@@ -91,7 +92,7 @@ describe("a settings card in chat", () => {
   it("on a Cloud's page, a browser or another computer's window, says where it is set and draws no switch", async () => {
     f.here = false;
     const chat = await show();
-    expect(chat.querySelector("[data-settings-card-elsewhere]")!.textContent).toBe("This is set on the computer itself: open MausBot there, then Settings → Phone & devices → Your other computers.");
+    expect(chat.querySelector("[data-settings-card-elsewhere]")!.textContent).toBe(`This is set on the computer itself: open ${PRODUCT_NAME} there, then Settings → Phone & devices → Your other computers.`);
     expect(chat.querySelector('[role="switch"]')).toBeNull();
     expect(chat.querySelector("button")).toBeNull();
     expect(rowOf(chat)).toBeNull();

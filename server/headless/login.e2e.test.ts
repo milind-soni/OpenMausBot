@@ -9,6 +9,7 @@ import { removeTempDir } from "../testing/cleanup.ts";
 import { runHeadless, type HeadlessOptions } from "./main.ts";
 import type { HeadlessIo } from "./output.ts";
 import type { SecurityRunner } from "./saved-servers.ts";
+import { PRODUCT_NAME } from "../../shared/product.ts";
 
 /** macOS `security` as a map: no real keychain is touched. */
 function fakeKeychain(): SecurityRunner {
@@ -82,7 +83,7 @@ describe("openmausbot login, then status, bots, stop and threads against the des
     await approving;
     expect(login.code).toBe(0);
     expect(login.err).toContain(shown);
-    expect(login.err).toContain("MausBot is asking you to allow this terminal");
+    expect(login.err).toContain(`${PRODUCT_NAME} is asking you to allow this terminal`);
     const signedIn = JSON.parse(login.out);
     expect(signedIn).toMatchObject({ ok: true, storedIn: "keychain", session: { scopes: ["admin", "client"] } });
     expect(login.out).not.toMatch(/omb_sess_/);

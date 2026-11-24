@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { launchVerificationServer, type VerificationServer } from "../scripts/control-omb.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 describe("paired thread targets through an isolated HTTP fixture", () => {
   let fixture: VerificationServer;
@@ -69,7 +70,7 @@ describe("paired thread targets through an isolated HTTP fixture", () => {
     for (const [method, suffix, body] of actions) {
       const result = await paired(method, `/api/bots/${bot.id}${suffix}`, body);
       expect(result.status, `${method} ${suffix}`).toBe(409);
-      expect(result.body.error).toMatch(/Update the OpenMausBot app on this device.*choose a thread/);
+      expect(result.body.error).toMatch(new RegExp(String.raw`Update the ${APP_NAME} app on this device.*choose a thread`));
     }
     const legacyPhone = await api("POST", `/api/bots/${bot.id}/read`, undefined, { "x-openmausbot-companion": "1", "x-openmausbot-companion-device": "fixture-phone" });
     expect(legacyPhone.status).toBe(409);

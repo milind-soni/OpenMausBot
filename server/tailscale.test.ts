@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { classifyTailscaleStderr, clearLeftoverTailscaleServe, explainTailscaleFailure, parseTailscaleStatus, tailnetListenFallback, tailscaleMarker, tailscaleServe, type TailscaleStatus } from "./tailscale.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 describe("tailscale helpers", () => {
   it("reads the MagicDNS name, addresses and state from status --json", () => {
@@ -88,7 +89,7 @@ describe("serve --tailscale", () => {
     }
   });
 
-  it("checks first: HTTPS certificates on, and no other MausBot server already on this name; a serve that exits says why", async () => {
+  it(`checks first: HTTPS certificates on, and no other ${PRODUCT_NAME} server already on this name; a serve that exits says why`, async () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-ts-"));
     try {
       const fake = fakeServe(null);
@@ -98,7 +99,7 @@ describe("serve --tailscale", () => {
       const refused = fakeServe(1, "Access denied: serve config denied");
       expect(await tailscaleServe(status, 8799, { dataDir: dir, settleMs: 500, spawnImpl: refused.spawnImpl })).toEqual({ failure: "needs-operator" });
       expect(existsSync(tailscaleMarker(dir))).toBe(false);
-      expect(explainTailscaleFailure("other-server")).toContain("different MausBot server");
+      expect(explainTailscaleFailure("other-server")).toContain(`different ${PRODUCT_NAME} server`);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

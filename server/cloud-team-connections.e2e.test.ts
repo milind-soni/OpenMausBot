@@ -15,6 +15,7 @@ import { startFakeHttpMcp, type FakeHttpMcp } from "./testing/fake-http-mcp-serv
 import { startFakeOAuth, type FakeOAuth } from "./testing/fake-oauth-server.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 import { readRegistry } from "./testing/registry.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const TOKEN = `ops_fake-team-${randomBytes(8).toString("hex")}`;
 const OWNER = { email: "olive@acme.test", role: "owner" as const };
@@ -359,7 +360,7 @@ it("signs Cleo in to a notes server of her own, and only her chat gets her token
       res.setEncoding("utf8").on("data", (chunk: string) => { text += chunk; }).on("end", () => resolve(`${res.statusCode} ${text}`));
     }).on("error", reject);
   });
-  expect(page).toBe("200 Signed in. You can close this tab and return to OpenMausBot.");
+  expect(page).toBe(`200 Signed in. You can close this tab and return to ${APP_NAME}.`);
   expect((await team.as(cleo, "GET", "/api/team/my-connections")).body.mcp).toEqual(expect.arrayContaining([expect.objectContaining({ name: "notes", connected: true, how: "sign-in" })]));
   const cleos = await turn(cleo, cleoThread, "Read my notes.");
   const token = /Bearer ([\w.-]+)/.exec(JSON.stringify((cleos.mcpConfig.mcpServers as Record<string, unknown>).notes))?.[1];

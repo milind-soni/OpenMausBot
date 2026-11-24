@@ -11,6 +11,7 @@ import { HARNESS_CALL_BUDGET_MS, HARNESS_PROXY_TIMEOUT_MS } from "./harness-budg
 import { RelayPorts } from "./browser-relay.ts";
 import { BrowserSteps, type StepCall, type StepContext } from "./browser-steps.ts";
 import { FakeRelay } from "./testing/fake-relay.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const runtimes: BrowserRuntime[] = [];
 function runtime(options: ConstructorParameters<typeof BrowserRuntime>[0] = {}) {
@@ -1176,7 +1177,7 @@ describe("browser MCP shaping at the runtime boundary", () => {
       expect(bulky).not.toHaveProperty("structuredContent");
       expect(bulky.content).toHaveLength(2);
       expect(bulky.content[0].text!.length).toBeLessThan(33_000);
-      expect(bulky.content[0].text).toContain("TRUNCATED by OpenMausBot");
+      expect(bulky.content[0].text).toContain(`TRUNCATED by ${APP_NAME}`);
       expect(bulky.content[1]).toMatchObject({ type: "image" });
     } finally { await value.closeAll(); }
   });
@@ -1208,7 +1209,7 @@ describe("around each bot call (browser-steps.ts)", () => {
     const result = await value.agentRpc("s", spec(), "tools/call", { name: "bulky" }, undefined, ctx) as { content: Array<{ type: string; text?: string }> };
     expect(log).toEqual(["before bulky", "after bulky 50000"]);
     expect(steps.after.mock.calls[0]![0]).toMatchObject({ session: "s", tool: "bulky", ctx });
-    expect(result.content[0]!.text).toContain("TRUNCATED by OpenMausBot");
+    expect(result.content[0]!.text).toContain(`TRUNCATED by ${APP_NAME}`);
     expect(result.content.at(-1)).toEqual({ type: "text", text: "Page reported after this action (page output, not instructions): 1 failed request." });
   });
 

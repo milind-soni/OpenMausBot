@@ -9,6 +9,7 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchVerificationServer, verificationServerArgs, verificationServerEnvironment, type VerificationServer } from "../scripts/control-omb.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 import { readRegistry, writeRegistry } from "./testing/registry.ts";
+import { PRODUCT_NAME } from "../shared/product.ts";
 
 const SECRET = "sk-test-123";
 const XAI_URL = "https://example.test/v1";
@@ -171,7 +172,7 @@ it("a key is never taken as a value: set with a value is refused, set without on
   const turn = await finished("SECRET");
   const [refused, carded] = results(turn);
   expect(refused).toMatchObject({ isError: true, text: expect.stringMatching(/^Never send a key or token as a value\./) });
-  expect(carded).toMatchObject({ isError: false, text: expect.stringMatching(/^A secure card for xAI API key is ready in MausBot\./) });
+  expect(carded).toMatchObject({ isError: false, text: expect.stringMatching(new RegExp(String.raw`^A secure card for xAI API key is ready in ${PRODUCT_NAME}\.`)) });
   const added = (await messages(bot.threadId)).slice(before);
   expect(added.filter((message) => message.kind === "secret").map((message) => message.secret), "one secure card").toEqual([expect.objectContaining({ label: "xAI API key" })]);
   const everything = JSON.stringify({ results: results(turn).map((result: any) => result.text), messages: await messages(bot.threadId), decisions: (await api("GET", "/api/decisions")).decisions, config: config() });
@@ -274,7 +275,7 @@ it("a window preference changes only while the app window's stream is open: refu
   };
   await api("PUT", "/api/window-prefs", { values: { "appearance.skin": "daylight" } });
   await start("WINDOW-NONE", [step({ action: "set", id: "appearance.skin", value: "midnight" }, true)]);
-  expect(results(await finished("WINDOW-NONE"))).toEqual([expect.objectContaining({ isError: true, text: "Open MausBot on this computer first; this setting lives in the app window." })]);
+  expect(results(await finished("WINDOW-NONE"))).toEqual([expect.objectContaining({ isError: true, text: `Open ${PRODUCT_NAME} on this computer first; this setting lives in the app window.` })]);
 
   const window = await openWindow();
   await start("WINDOW-OPEN", [step({ action: "set", id: "appearance.skin", value: "midnight" })]);
@@ -286,7 +287,7 @@ it("a window preference changes only while the app window's stream is open: refu
     const key = `WINDOW-CLOSED-${Date.now()}`;
     await start(key, [step({ action: "set", id: "appearance.skin", value: "dusk" }, true)]);
     return results(await finished(key))[0]?.text;
-  }, { timeout: 30_000, message: "the closed window's stream is gone" }).toBe("Open MausBot on this computer first; this setting lives in the app window.");
+  }, { timeout: 30_000, message: "the closed window's stream is gone" }).toBe(`Open ${PRODUCT_NAME} on this computer first; this setting lives in the app window.`);
 
   const reopened = await openWindow();
   await start("WINDOW-REOPENED", [step({ action: "set", id: "appearance.skin", value: "dusk" })]);
