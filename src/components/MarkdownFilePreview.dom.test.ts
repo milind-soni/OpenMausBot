@@ -36,6 +36,7 @@ describe("Markdown file preview errors and encodings", () => {
     await open(async () => new Response(source));
     expect(host.querySelector("pre")?.textContent).toBe(source);
     expect(host.querySelector('[aria-pressed="true"]')).toBeTruthy();
+    expect((host.querySelector('[aria-pressed="true"]') as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("still opens UTF-8 files as UTF-8", async () => {
