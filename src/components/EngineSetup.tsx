@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Check, Copy, Download, ExternalLink, KeyRound, Loader2, LogIn, TerminalSquare, X } from "lucide-react";
 import { api, ApiError, type InstanceInfo, useStore } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -285,7 +285,12 @@ function installsAntigravityCli(instance: InstanceInfo): boolean {
   return instance.driverKind === "antigravityAgent" && !/^agy_acp_server$/iu.test(instance.cli?.trim() ?? "");
 }
 
-function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; signInOnly: boolean }) {
+/** A Google sign-in for one Antigravity account, also when its last check could not tell whether it is signed in. */
+export function AntigravitySignIn({ instance }: { instance: InstanceInfo }) {
+  return instance.install?.managed ? <ManagedEngineSetup instance={instance} signInOnly autoStart /> : <EngineSetup instance={instance} unframed />;
+}
+
+function ManagedEngineSetup({ instance, signInOnly, autoStart = false }: { instance: InstanceInfo; signInOnly: boolean; autoStart?: boolean }) {
   const { state, refreshInstances, refreshModels } = useStore();
   const signInStarted = useSignInStarted(instance.instanceId);
   const [busy, setBusy] = useState<"install" | "signin" | "complete" | "check" | null>(null);
@@ -373,6 +378,13 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
     await refreshInstances();
     await refreshModels(instance.instanceId);
   });
+
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (!autoStart || !signInOnly || autoStarted.current) return;
+    autoStarted.current = true;
+    void signIn();
+  }, [autoStart, signInOnly, signIn]);
 
   if (!signInOnly) {
     // The server installs it on its own too (the engine updater): the card says so and waits for it.

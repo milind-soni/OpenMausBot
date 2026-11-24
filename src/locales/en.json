@@ -4848,6 +4848,7 @@
   "engines.account.powershell": "Use PowerShell for this command.",
   "accounts.claude": "Claude",
   "accounts.chatgpt": "ChatGPT",
+  "accounts.antigravity": "Google Gemini (Antigravity)",
   "accounts.count": "{count} accounts · {signedIn} signed in",
   "accounts.signedIn": "Signed in",
   "accounts.notSignedIn": "Not signed in",
