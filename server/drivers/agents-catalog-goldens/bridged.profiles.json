@@ -733,6 +733,54 @@
       "use_tool"
     ]
   },
+  "skills+shared+voice+x+team+board": {
+    "bytes": 19047,
+    "sha256": "b952fee38047b56ab210b8accb5197a3e3f47a67afd3b0bcc78f1eb8b5d46292",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "publish_page",
+      "post_to_room",
+      "post_to_thread",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "send_voice_note",
+      "message_person",
+      "share",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "default+room+board": {
+    "bytes": 16855,
+    "sha256": "1da389a5178734674ca47b44d4c97f9c4e4660fea18840345b9831777865c103",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "attach_file",
+      "publish_page",
+      "post_to_room",
+      "post_to_thread",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "message_person",
+      "share",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
   "default+tools-off": {
     "bytes": 16444,
     "sha256": "1b468d3464d21ab53160b2c7c06f3d9a2f9c2202c7715f3bec41a11ac8e2a15b",
