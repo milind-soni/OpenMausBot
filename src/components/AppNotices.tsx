@@ -34,6 +34,7 @@ import { engineReady } from "./EngineLibrary";
 import { ModelgoOfferCard, type ModelgoCardAction } from "./ModelgoOffer";
 import { CLOUD_NOTICE_CARD, cloudNoticeStep, CloudNoticeCard } from "./CloudNotice";
 import { CloudTrialIntroCard } from "./CloudTrialIntro";
+import { hasBotsHere } from "@/lib/move-changes";
 import { useMoveQuiet } from "./CloudSendStrip";
 import { CloudTrialNoticeCard, useCloudPlanSnapshot } from "./CloudTrialNotice";
 import { GrokMovePopup, reportGrokMovePopup, type GrokMovePopupAction } from "./GrokMovePopup";
@@ -357,7 +358,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   }
   if (notice === CLOUD_INTRO && offer) {
     const done = (action: string) => { track("cloud_card_action", { action }); close(); save(CLOUD_INTRO); };
-    return <CloudTrialIntroCard offer={offer}
+    return <CloudTrialIntroCard offer={offer} botsHere={hasBotsHere({ bots: state.bots, cloudHome: state.config?.cloudHome === true, desktop: Boolean(window.ogb), remote: window.ogb?.remoteClient?.active === true })}
       onStart={() => { done("start"); dispatch({ type: "openCloudAdd", source: "app_card" }); }}
       onHowTo={() => { done("howto"); dispatch({ type: "cloudHowTo", open: true }); }}
       onSignIn={view?.kind === "signed-out" ? () => { track("cloud_card_action", { action: "signin" }); close(); dispatch({ type: "openCloudAdd", source: "app_card", signIn: true }); } : undefined}

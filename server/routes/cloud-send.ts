@@ -19,6 +19,7 @@ import { cloudSendManifest } from "../cloud-send-manifest.ts";
 import { moveMemoryRoute, type MoveMemoryDeps } from "../cloud-send-memory.ts";
 import { cloudSendSummary, partHash, type CloudSendSources } from "../cloud-send.ts";
 import { cloudSendChatsRoute, type CloudSendChatsDeps } from "../cloud-send-chats.ts";
+import { moveFacts, type MoveChangesDeps } from "../move-changes.ts";
 import { loginFingerprints, VERIFY_NONCE } from "../cloud-send-verify.ts";
 import type { AppConfig } from "../config.ts";
 import { TEAM_READER, type VaultStore } from "../vault-store.ts";
@@ -54,6 +55,8 @@ export interface CloudSendRouteDeps extends Pick<CloudSendSources, "appVersion" 
   refusal?: ServerErrorBody;
   /** The one bot a request's sign-in moves into this team, which every read here is kept to; null for any other. */
   scope?(auth: RequestAuth): string | null;
+  /** What moving some of this computer's bots to My Cloud changes for them (GET /api/cloud-send/changes). */
+  changes?: MoveChangesDeps;
 }
 
 export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
@@ -117,6 +120,15 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
       if (!asked.success) return json(res, 400, { error: "send { nonce }: at least 32 random bytes, base64url" });
       res.setHeader("cache-control", "no-store");
       return json(res, 200, { v: 1, vault: 1, secrets: { ...loginFingerprints(asked.data.nonce, deps.logins), ...deps.connectionFingerprints(asked.data.nonce) } });
+    }
+    if (path === "/api/cloud-send/changes") {
+      if (!deps.changes || home || scoped) return json(res, 404, { error: "not found" });
+      if (method !== "GET") return json(res, 405, { error: "method not allowed" });
+      const ids = (url.searchParams.get("bots") ?? "").split(",").filter((id) => /^[\w-]{1,128}$/u.test(id)).slice(0, 500);
+      const facts = ids.length ? moveFacts(deps.changes, ids) : null;
+      if (!facts) return json(res, 404, { error: "Choose which bots move." });
+      res.setHeader("cache-control", "no-store");
+      return json(res, 200, { v: 1, facts });
     }
     if (path !== "/api/cloud-send") return PASS;
     if (method !== "GET") return json(res, 405, { error: "method not allowed" });
