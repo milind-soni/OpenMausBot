@@ -2,7 +2,7 @@ import { RuntimeNoticeError, runtimeErrorText } from "./runtime-notice-error.ts"
 import { createHash } from "node:crypto";
 import type { DriverCreateInput, ModelCatalog, ProviderInstance, ProviderSnapshot, RuntimeEvent, RuntimeEventListener, SendTurnInput, TextGenerationOptions } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
-import { CustomHeaderError, customHeaderSecrets, resolveCustomHeaders, type OpenAICompatCustomHeadersConfig, type RuntimeHeaderContext } from "./openai-compat-headers.ts";
+import { CustomHeaderError, customHeaderSecrets, maskCustomSecrets, resolveCustomHeaders, scrubErrorSecrets, type OpenAICompatCustomHeadersConfig, type RuntimeHeaderContext } from "./openai-compat-headers.ts";
 import { ASK_USER_TOOL, ASK_USER_TOOL_DEFINITION, askQuestionSummary, parseAskQuestions, questionChoices } from "../../shared/ask-question.ts";
 import { allowsTool, parseToolScope } from "../../shared/tool-scope.ts";
 import { redactSecretsInText } from "../redact.ts";
@@ -284,7 +284,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const customHeaders = options.customHeaders ? resolveCustomHeaders(options.customHeaders, headerContext ?? { threadId, providerInstanceId: input.instanceId }) : undefined;
       const response = await send(`${options.apiUrl}/${route === "responses" ? "responses" : "chat/completions"}`, {
         method: "POST",
-        ...(messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === "image_url")) ? { redirect: "error" as const } : {}),
+        ...((Object.keys(customHeaders ?? {}).length || messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === "image_url"))) ? { redirect: "error" as const } : {}),
         headers: { ...customHeaders, authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
         body: payload,
         signal: activeSignal,
@@ -530,11 +530,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         }
       }
     }
-    const safeText = (text: string) => {
-      let safe = text;
-      for (const secret of secrets) if (secret) safe = safe.split(secret).join("[redacted]");
-      return redactSecretsInText(safe);
-    };
+    const safeText = (text: string) => redactSecretsInText(maskCustomSecrets(text, secrets));
     const preview = (value: unknown) => toolDetailPreview(JSON.parse(JSON.stringify(value, (_key, part) =>
       typeof part === "string" ? safeText(part) : part)));
     const native = (dir: "out" | "in", msg: unknown) => appendNative(turn.threadId, {
@@ -982,9 +978,14 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const model = named ?? options.generateModel?.() ?? options.models().default;
       signal?.throwIfAborted();
       checkModel?.(model);
-      const { text, reasoning, toolCalls } = await complete([{ role: "user", content: prompt }], model, false, signal, undefined, [], onUsage, undefined, undefined, { providerInstanceId: input.instanceId });
-      if (toolCalls.length) throw new ChatProtocolError("provider returned tool calls to a text-only helper");
-      return text.trim() ? text : reasoning;
+      const headerSecrets = customHeaderSecrets(options.customHeaders, { providerInstanceId: input.instanceId });
+      try {
+        const { text, reasoning, toolCalls } = await complete([{ role: "user", content: prompt }], model, false, signal, undefined, [], onUsage, undefined, undefined, { providerInstanceId: input.instanceId });
+        if (toolCalls.length) throw new ChatProtocolError("provider returned tool calls to a text-only helper");
+        return maskCustomSecrets(text.trim() ? text : reasoning, headerSecrets);
+      } catch (error) {
+        throw scrubErrorSecrets(error, headerSecrets);
+      }
     },
     dispose: async () => {
       const turns = [...active.values()];

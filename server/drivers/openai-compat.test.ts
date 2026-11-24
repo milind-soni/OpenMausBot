@@ -1336,13 +1336,13 @@ describe("how long a turn waits for a reply", () => {
 
 describe("opt-in custom OpenAI-compatible request headers", () => {
   it("preserves standard headers when disabled and injects per-thread/bot/turn/provider headers consistently across threads, compaction, retries, non-streaming, and secret scrubbing", async () => {
-    const seenRequests: Array<{ url: string; headers: Record<string, string>; body: Record<string, unknown> }> = [];
+    const seenRequests: Array<{ url: string; redirect?: RequestInit["redirect"]; headers: Record<string, string>; body: Record<string, unknown> }> = [];
     let chatAttempt = 0;
     vi.stubGlobal("fetch", vi.fn(async (url: string | URL, init?: RequestInit) => {
       const target = String(url);
       if (target.endsWith("/models")) return Response.json({ data: [] });
       const rawHeaders = Object.fromEntries(new Headers(init?.headers).entries());
-      seenRequests.push({ url: target, headers: rawHeaders, body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown> });
+      seenRequests.push({ url: target, redirect: init?.redirect, headers: rawHeaders, body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown> });
       chatAttempt++;
       if (chatAttempt === 4) {
         return new Response("", { status: 200, headers: { "content-type": "text/event-stream" } });
@@ -1370,6 +1370,7 @@ describe("opt-in custom OpenAI-compatible request headers", () => {
       await offInst.adapter.sendTurn({ threadId: "t-off", botId: "b1", text: "hi" });
       await recOff.until((e) => e.type === "turn.completed");
       expect(seenRequests[0]!.headers["x-maus-thread-id"]).toBeUndefined();
+      expect(seenRequests[0]!.redirect).toBeUndefined();
       recOff.stop();
       await offInst.dispose();
 
@@ -1405,6 +1406,7 @@ describe("opt-in custom OpenAI-compatible request headers", () => {
       expect(chatReqs[0]!.headers["x-maus-bot-id"]).toBe("bot-one");
       expect(chatReqs[0]!.headers["x-provider-id"]).toBe("gw-on");
       expect(chatReqs[0]!.headers["x-gateway-token"]).toBe("gw-secret-token-xyz");
+      expect(chatReqs[0]!.redirect).toBe("error");
       expect(chatReqs[1]!.headers["x-maus-thread-id"]).toBe("thread-beta");
       // chatAttempt === 4 was truncated, so retried once on attempt 5 for thread-alpha: same turnId!
       expect(chatReqs[2]!.headers["x-maus-thread-id"]).toBe("thread-alpha");
@@ -1439,9 +1441,41 @@ describe("opt-in custom OpenAI-compatible request headers", () => {
       const nonStreamReq = seenRequests.at(-1)!;
       expect(nonStreamReq.headers["x-gateway-client"]).toBe("maus");
       expect(nonStreamReq.headers["x-maus-thread-id"]).toBeUndefined();
+      expect(nonStreamReq.redirect).toBe("error");
       await optInst.dispose();
       recOn.stop();
       await onInst.dispose();
+  });
+
+  it("masks secret custom header values in generateText replies, reasoning, and propagated errors", async () => {
+    let mode: "text" | "reasoning" | "error" | "clean" = "text";
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL) => {
+      if (String(url).endsWith("/models")) return Response.json({ data: [] });
+      if (mode === "error") return new Response(JSON.stringify({ error: { message: "bad token gw-secret-helper-999" } }), { status: 500, headers: { "content-type": "application/json" } });
+      if (mode === "reasoning") return Response.json({ choices: [{ message: { content: null, reasoning_content: "think gw-secret-helper-999 done" }, finish_reason: "stop" }] });
+      if (mode === "clean") return Response.json({ choices: [{ message: { content: "plain clean output" }, finish_reason: "stop" }] });
+      return Response.json({ choices: [{ message: { content: "echo gw-secret-helper-999 ok" }, finish_reason: "stop" }] });
+    }));
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "gw-helper", displayName: "Helper", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({
+        url: "https://gw.example/v1", model: "m1",
+        customHeaders: {
+          enabled: true,
+          headers: [{ name: "X-Gateway-Token", value: "gw-secret-helper-999", secret: true }],
+        },
+      }),
+      environment: { OPENAI_COMPAT_API_KEY: "test-api-key-123456" },
+    });
+    mode = "text";
+    await expect(inst.generateText!("say hi")).resolves.toBe("echo [redacted] ok");
+    mode = "reasoning";
+    await expect(inst.generateText!("say hi")).resolves.toBe("think [redacted] done");
+    mode = "clean";
+    await expect(inst.generateText!("say hi")).resolves.toBe("plain clean output");
+    mode = "error";
+    await expect(inst.generateText!("say hi")).rejects.toThrow(/bad token \[redacted\]/);
+    await inst.dispose();
   });
 });
 

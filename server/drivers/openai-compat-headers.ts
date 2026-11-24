@@ -171,11 +171,12 @@ export function decodeCustomHeaders(raw: unknown): OpenAICompatCustomHeadersConf
 
 export function mergeCustomHeadersPatch(
   patch: unknown,
-  previous?: OpenAICompatCustomHeadersConfig,
+  previous?: unknown,
 ): OpenAICompatCustomHeadersConfig {
   if (!isPlainRecord(patch)) throw new CustomHeaderValidationError("customHeaders must be an object.");
   if (typeof patch.enabled !== "boolean") throw new CustomHeaderValidationError("customHeaders.enabled must be a boolean.");
-  const prevByName = new Map((previous?.headers ?? []).map((entry) => [entry.name.toLowerCase(), entry]));
+  const priorHeaders = previous === undefined ? [] : decodeCustomHeaders(previous).headers;
+  const prevByName = new Map(priorHeaders.map((entry) => [entry.name.toLowerCase(), entry]));
   const rawEntries = normalizeEntries(patch.headers);
   const resolved = rawEntries.map((entry) => {
     const name = validateHeaderName(entry.name);
@@ -281,6 +282,37 @@ export function customHeaderSecrets(
     }
   }
   return [...out];
+}
+
+export function maskCustomSecrets(text: string, secrets: readonly string[]): string {
+  let masked = text;
+  for (const secret of secrets) if (secret) masked = masked.split(secret).join("[redacted]");
+  return masked;
+}
+
+export function scrubErrorSecrets(error: unknown, secrets: readonly string[]): unknown {
+  if (secrets.length === 0) return error;
+  if (typeof error === "string") return maskCustomSecrets(error, secrets);
+  if (!(error instanceof Error)) return error;
+  const masked = maskCustomSecrets(error.message, secrets);
+  if (masked === error.message) return error;
+  try {
+    error.message = masked;
+    return error;
+  } catch {
+    return new Error(masked, { cause: error });
+  }
+}
+
+export function stripSensitiveCustomHeaders(raw: unknown): OpenAICompatCustomHeadersConfig | undefined {
+  let decoded: OpenAICompatCustomHeadersConfig;
+  try {
+    decoded = decodeCustomHeaders(raw);
+  } catch {
+    return undefined;
+  }
+  const kept = decoded.headers.filter((rule) => !isSensitiveHeader(rule));
+  return kept.length ? { enabled: decoded.enabled, headers: kept } : undefined;
 }
 
 export function applyOpenAiCompatHeaderDefaults(

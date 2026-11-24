@@ -432,6 +432,22 @@ describe("a server's reply wait", () => {
     await call("PATCH", "/api/instances/openai-compat-1", { customHeaders: null });
     expect(persisted.at(-1)!["openai-compat-1"]!.config).toEqual({ url: "https://gw.example/v1", key: "k" });
 
+    (cfg.instances["openai-compat-1"] as { config: Record<string, unknown> }).config = {
+      url: "https://gw.example/v1", key: "k",
+      customHeaders: { enabled: true, headers: { "X-Gateway-Token": "gw-map-secret-999" } },
+    };
+    await call("PATCH", "/api/instances/openai-compat-1", {
+      customHeaders: { enabled: true, headers: [{ name: "X-Gateway-Token", keepExisting: true, secret: true }] },
+    });
+    expect(persisted.at(-1)!["openai-compat-1"]!.config).toMatchObject({
+      customHeaders: { enabled: true, headers: [{ name: "X-Gateway-Token", value: "gw-map-secret-999", required: true, secret: true }] },
+    });
+    (cfg.instances["openai-compat-1"] as { config: Record<string, unknown> }).config = {
+      url: "https://gw.example/v1", key: "k", customHeaders: { enabled: "bad", headers: 42 },
+    };
+    expect(await status("openai-compat-1", { customHeaders: { enabled: true, headers: [] } })).toBe(400);
+    await call("PATCH", "/api/instances/openai-compat-1", { customHeaders: null });
+
     const nonOwner = await serve(
       { cfg: cfg as unknown as AppConfig, persistProviderInstance: async () => {} },
       { kind: "loopback", scopes: ["admin"], trust: "service" },

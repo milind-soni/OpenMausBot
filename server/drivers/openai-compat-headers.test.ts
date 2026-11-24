@@ -5,8 +5,11 @@ import {
   CustomHeaderValidationError,
   customHeaderSecrets,
   decodeCustomHeaders,
+  maskCustomSecrets,
   mergeCustomHeadersPatch,
   resolveCustomHeaders,
+  scrubErrorSecrets,
+  stripSensitiveCustomHeaders,
   summarizeCustomHeaders,
 } from "./openai-compat-headers.ts";
 
@@ -142,5 +145,24 @@ describe("OpenAI-compatible custom headers config & resolution", () => {
     });
     expect(customHeaderSecrets(dynamicSecrets, { threadId: "thread-99" })).toEqual(["tok-thread-99"]);
     expect(customHeaderSecrets(dynamicSecrets, { threadId: "1" })).toEqual([]);
+
+    expect(mergeCustomHeadersPatch(
+      { enabled: true, headers: [{ name: "X-Gateway-Token", keepExisting: true, secret: true }] },
+      { enabled: true, headers: { "X-Gateway-Token": "gw-tok-map-123456" } },
+    )).toEqual({
+      enabled: true,
+      headers: [{ name: "X-Gateway-Token", value: "gw-tok-map-123456", required: true, secret: true }],
+    });
+    expect(() => mergeCustomHeadersPatch({ enabled: true, headers: [] }, { enabled: "bad", headers: 123 })).toThrow(CustomHeaderValidationError);
+
+    expect(stripSensitiveCustomHeaders(config)).toEqual({
+      enabled: true,
+      headers: [{ name: "X-Maus-Thread-ID", value: "{threadId}", required: true, secret: false }],
+    });
+    expect(stripSensitiveCustomHeaders(dynamicSecrets)).toBeUndefined();
+    expect(maskCustomSecrets("err tok-thread-99", ["tok-thread-99"])).toBe("err [redacted]");
+    const err = new Error("http 500: tok-thread-99");
+    expect(scrubErrorSecrets(err, ["tok-thread-99"])).toBe(err);
+    expect(err.message).toBe("http 500: [redacted]");
   });
 });

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { InstanceConfig, InstanceConfigMap } from "./contracts.ts";
-import { customHeadersPatchSchema, decodeCustomHeaders, summarizeCustomHeaders } from "./drivers/openai-compat-headers.ts";
+import { customHeadersPatchSchema, decodeCustomHeaders, stripSensitiveCustomHeaders, summarizeCustomHeaders } from "./drivers/openai-compat-headers.ts";
 import { isOllamaServer, OLLAMA_PLACEHOLDER_KEY, probeOllama } from "./drivers/ollama.ts";
 
 export { summarizeCustomHeaders };
@@ -79,7 +79,8 @@ export function changeEndpointAddress(
   if (change.apiKey !== undefined && /^https?:\/\//i.test(change.apiKey)) {
     return { status: 400, error: "That API key looks like a URL. Paste the secret key itself, not a web address." };
   }
-  if (change.apiKey === undefined && config.key !== OLLAMA_PLACEHOLDER_KEY && (!saved || new URL(url).origin !== new URL(saved).origin)) {
+  const originChanged = !saved || new URL(url).origin !== new URL(saved).origin;
+  if (change.apiKey === undefined && config.key !== OLLAMA_PLACEHOLDER_KEY && originChanged) {
     return { status: 400, error: "Enter the API key again: a saved key is only sent to the server it was entered for." };
   }
   if (config.catalog && url !== saved) {
@@ -87,7 +88,9 @@ export function changeEndpointAddress(
     const duplicate = localServerAlreadyAdded(others, url);
     if (duplicate) return { status: 409, error: duplicate };
   }
-  entry.config = { ...config, url, ...(change.apiKey !== undefined ? { key: change.apiKey } : {}) };
+  const { customHeaders: priorHeaders, ...restConfig } = config;
+  const nextHeaders = originChanged && priorHeaders !== undefined ? stripSensitiveCustomHeaders(priorHeaders) : priorHeaders;
+  entry.config = { ...restConfig, url, ...(change.apiKey !== undefined ? { key: change.apiKey } : {}), ...(nextHeaders !== undefined ? { customHeaders: nextHeaders } : {}) };
   return { addressChanged: url !== saved };
 }
 
