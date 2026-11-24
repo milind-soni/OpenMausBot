@@ -12,9 +12,25 @@ import { reducedMotion } from "./MenuMotion";
 import { openTabId, type ThreadTab } from "./thread-tabs";
 
 const RESIZE_MS = 240;
+const LIST_FADE = 40;
+const CLEAR_OF_CONTROLS = 24;
+const WIDEST = 720;
 const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 const PART = "flex h-full min-w-0 items-center rounded-full outline-none transition-colors duration-[120ms] hover:bg-ink/[0.06] active:bg-ink/[0.08] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
 const CHIP = "flex h-7 max-w-42 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] leading-[18px] outline-none transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
+
+/** The widest the open pill may be while staying centred in the header and clear of the controls on either side. */
+function centredRoom(pill: HTMLElement): number {
+  const row = pill.closest("[data-chathead-row]");
+  const centre = row ? row.getBoundingClientRect().left + row.getBoundingClientRect().width / 2 : 0;
+  let half = row ? row.getBoundingClientRect().width / 2 : WIDEST / 2;
+  for (const side of row?.querySelectorAll<HTMLElement>("[data-chathead-controls]") ?? []) {
+    const box = side.getBoundingClientRect();
+    if (box.width === 0) continue;
+    half = Math.min(half, box.left >= centre ? box.left - centre : centre - box.right);
+  }
+  return Math.max(0, Math.min(WIDEST, 2 * (half - CLEAR_OF_CONTROLS)));
+}
 
 export const tabTitle = (tab: ThreadTab): string => (tab.draft ? t("task.newShort") : !tab.title || tab.title === "New thread" ? t("task.untitledChat") : localizedTaskTitle(tab.title));
 
@@ -51,6 +67,7 @@ export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle
 }) {
   const dispatch = useStoreDispatch();
   const [open, setOpen] = useState(false);
+  const [room, setRoom] = useState(WIDEST);
   const box = useGlidingWidth(open);
   const list = useRef<HTMLDivElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
@@ -66,8 +83,10 @@ export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle
   useEffect(() => {
     if (!open) return;
     const away = (event: PointerEvent) => { if (!box.current?.contains(event.target as Node)) setOpen(false); };
+    const resize = () => { if (box.current) setRoom(centredRoom(box.current)); };
     document.addEventListener("pointerdown", away);
-    return () => document.removeEventListener("pointerdown", away);
+    window.addEventListener("resize", resize);
+    return () => { document.removeEventListener("pointerdown", away); window.removeEventListener("resize", resize); };
   }, [open]);
   useLayoutEffect(() => {
     if (!open || !list.current) return;
@@ -77,7 +96,7 @@ export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle
     chip?.focus({ preventScroll: true });
     const settle = window.setTimeout(() => {
       chip?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-      setFade(edgeFade(row));
+      setFade(edgeFade(row, LIST_FADE));
     }, reducedMotion() ? 0 : RESIZE_MS);
     return () => window.clearTimeout(settle);
   }, [open]);
@@ -101,7 +120,7 @@ export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle
 
   return (
     <div ref={box} data-chathead-switch={open ? "open" : "closed"} onKeyDown={open ? onKey : undefined}
-      className={cn("flex h-[39px] min-w-0 max-w-full items-center overflow-hidden rounded-full p-[5.5px] text-ink", ELEVATED_FLOAT, open && "max-w-[min(720px,100cqw_-_34rem)]")}>
+      className={cn("flex h-[39px] min-w-0 items-center overflow-hidden rounded-full p-[5.5px] text-ink", ELEVATED_FLOAT, !open && "max-w-full")} style={open ? { maxWidth: room } : undefined}>
       {open ? (
         <div key="open" className="flex min-w-0 animate-fade-in items-center gap-1 motion-reduce:animate-none">
           <button type="button" data-chathead-pill data-tour="bot-pill" onClick={onToggle} title={t("chat.openBotPanel")} aria-label={label}
@@ -109,7 +128,7 @@ export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle
             {head}
           </button>
           <div ref={list} role="listbox" aria-label={t("task.namedList", { name: bot.name })} aria-orientation="horizontal"
-            onScroll={(event) => setFade(edgeFade(event.currentTarget))} style={{ maskImage: fade, WebkitMaskImage: fade }}
+            onScroll={(event) => setFade(edgeFade(event.currentTarget, LIST_FADE))} style={{ maskImage: fade, WebkitMaskImage: fade }}
             className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {tabs.map((tab) => {
               const selected = tab.threadId === active;
@@ -140,7 +159,7 @@ export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle
             {head}
           </button>
           <button ref={toggle} type="button" data-chathead-threads aria-haspopup="listbox" aria-expanded={false}
-            aria-label={t("task.namedList", { name: bot.name })} onClick={() => setOpen(true)}
+            aria-label={t("task.namedList", { name: bot.name })} onClick={() => { if (box.current) setRoom(centredRoom(box.current)); setOpen(true); }}
             className={cn(PART, "gap-1.5 pe-2.5 ps-1.5 text-[14px] font-medium leading-5 text-ink-secondary hover:text-ink")}>
             <span aria-hidden="true" className="text-ink-tertiary">·</span>
             <span data-chathead-conversation dir="auto" className="min-w-0 max-w-[180px] truncate">{current ? tabTitle(current) : ""}</span>
