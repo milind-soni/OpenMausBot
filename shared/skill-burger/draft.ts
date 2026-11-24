@@ -332,7 +332,7 @@ class Drafter {
         example: redactSecretsInText(heredoc[3]!).slice(0, EXAMPLE_MAX),
       });
     } else if (layer.kind === "shell") {
-      const cwd = typeof layer.args.cwd === "string" && !new RegExp(CONVERSATION_FOLDER.source).test(layer.args.cwd) ? layer.args.cwd : undefined;
+      const cwd = typeof layer.args.cwd === "string" ? layer.args.cwd.replace(CONVERSATION_FOLDER, ".") : undefined;
       this.steps.push({ id, kind: "shell", label: label.replace(CONVERSATION_FOLDER, "."), run: this.shell(command.replace(CONVERSATION_FOLDER, ".")), ...(cwd ? { cwd } : {}) });
     } else if (layer.kind === "file") {
       const content = String(layer.args.content ?? "");
