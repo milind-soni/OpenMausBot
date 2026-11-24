@@ -681,10 +681,10 @@ export function ModelPicker({
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
           {threadId && simpleUpdatesBotDefault && (
             <div className="shrink-0 border-b-[0.5px] border-ink/10 px-3.5 py-2">
-              <div role="group" aria-label={t("model.scope.label")} className="flex gap-1">
+              <div role="group" aria-label={t("model.scope.label")} className="flex flex-col gap-1">
                 {(["thread", "bot"] as const).map((value) => (
                   <button key={value} type="button" aria-pressed={scope === value} onClick={() => setScope(value)}
-                    className={cn("h-6 rounded-full px-2.5 text-[12px] leading-4",
+                    className={cn("w-full rounded-lg px-2.5 py-1.5 text-left text-[12px] leading-snug",
                       scope === value ? "bg-ink/[0.08] font-medium text-ink" : "text-ink-secondary hover:bg-ink/[0.06] hover:text-ink")}>
                     {value === "bot" ? t("model.scope.bot") : t("model.scope.thread")}
                   </button>
