@@ -34,6 +34,34 @@ describe("file writes in a saved workflow", () => {
     expect(draft!.workflow.steps.map((step) => step.kind === "shell" && step.run)).toEqual(commands);
   });
 
+  it.each(["report.csv", '"quarter report.csv"', "'quarter report.csv'"])("folds only the adjacent full rewrites of %s", (path) => {
+    const layers = burgerLayers([ask, shell("printf draft > " + path), shell("printf revised > " + path), shell("printf finished > " + path)]);
+    expect(layers).toHaveLength(1);
+    expect(layers[0]).toMatchObject({ args: { command: "printf finished > " + path }, tries: 2 });
+  });
+
+  it.each([
+    "printf first >> report.csv",
+    "printf first > report.csv > other.csv",
+    'printf first > "$OUT"',
+    "printf $(touch marker) > report.csv",
+    "printf first > report.csv; touch marker",
+    "touch marker 2> report.csv",
+    "printf first # > report.csv",
+  ])("keeps a command that is not a simple full rewrite: %s", (command) => {
+    const commands = [command, "printf second > report.csv"];
+    const layers = burgerLayers([ask, ...commands.map((one) => shell(one))]);
+    expect(layers.map((layer) => layer.args?.command)).toEqual(commands);
+  });
+
+  it.each([
+    [String.raw`printf first > "a\\b.csv"`, String.raw`printf second > 'a\\b.csv'`],
+    ["printf first > ~/report.csv", "printf second > '~/report.csv'"],
+  ])("keeps differently interpreted quoted targets: %s and %s", (first, second) => {
+    const layers = burgerLayers([ask, shell(first), shell(second)]);
+    expect(layers.map((layer) => layer.args?.command)).toEqual([first, second]);
+  });
+
   it("keeps relative output paths in different working directories", () => {
     const draft = draftWorkflow([
       ask,
@@ -80,13 +108,6 @@ describe("file writes in a saved workflow", () => {
     expect(draft!.workflow.steps.map((step) => step.kind === "shell" && step.run)).toEqual(commands);
   });
 
-  it("keeps a command's other effects when a later command overwrites its redirected output", () => {
-    const commands = ["cp source.txt artifact.txt > build.log", "printf done > build.log"];
-    const draft = draftWorkflow([ask, ...commands.map((command) => shell(command))]);
-    expect(draft).not.toBeNull();
-    expect(draft!.workflow.steps.map((step) => step.kind === "shell" && step.run)).toEqual(commands);
-  });
-
   it("keeps an output written on different computers", () => {
     const command = "python make_report.py > report.csv";
     const layers = burgerLayers([
@@ -112,7 +133,7 @@ describe("file writes in a saved workflow", () => {
     expect(redirectTarget(commands[1]!)).toBe("report.csv");
   });
 
-  it("folds adjacent complete file-tool rewrites and keeps successful shell commands", () => {
+  it("folds adjacent complete file-tool and single-redirect rewrites", () => {
     const layers = burgerLayers([
       ask,
       write("/reports/summary.md", "Draft"),
@@ -123,8 +144,7 @@ describe("file writes in a saved workflow", () => {
     ]);
     expect(layers.map((layer) => [layer.args, layer.tries])).toEqual([
       [{ path: "/reports/summary.md", content: "Finished" }, 2],
-      [{ command: "printf draft > report.csv", cwd: "/reports" }, undefined],
-      [{ command: "printf finished > report.csv", cwd: "/reports" }, undefined],
+      [{ command: "printf finished > report.csv", cwd: "/reports" }, 1],
     ]);
   });
 });

@@ -384,9 +384,28 @@ function joinDesktop(layers: BurgerLayer[]): BurgerLayer[] {
   return out;
 }
 
+function overwriteTarget(command: string): string | null {
+  let quote: string | null = null;
+  for (let i = 0; i < command.length; i += 1) {
+    const char = command[i]!;
+    if (char === "\\" && quote !== "'") { i += 1; continue; }
+    if ((char === "'" || char === '"') && (quote === null || quote === char)) { quote = quote ? null : char; continue; }
+    if (quote !== "'" && (char === "$" || char === "`")) return null;
+    if (quote) continue;
+    if (/[#;|&<()\r\n]/.test(char)) return null;
+    if (char !== ">") continue;
+    if (/[0-9>]/.test(command[i - 1] ?? "") || command[i + 1] === ">") return null;
+    const target = /^(?:'([^'\\]+)'|"([^"\\$`]+)"|([^\s"'\\$`;|&<>()*?[\]{}!~]+))\s*$/.exec(command.slice(i + 1).trim());
+    const path = target?.[1] ?? target?.[2] ?? target?.[3];
+    return path && !path.startsWith("/dev/") ? path : null;
+  }
+  return null;
+}
+
 function writesTo(layer: BurgerLayer): string | null {
-  return layer.kind === "file" && typeof layer.args?.path === "string"
-    ? JSON.stringify([layer.where, layer.args?.cwd ?? null, layer.args.path]) : null;
+  const path = layer.kind === "file" && typeof layer.args?.path === "string" ? layer.args.path
+    : layer.kind === "shell" && typeof layer.args?.command === "string" ? overwriteTarget(layer.args.command) : null;
+  return path ? JSON.stringify([layer.where, layer.args?.cwd ?? null, path]) : null;
 }
 
 /** A read the run made that leaves no layer: a page looked at, a file or listing read. */

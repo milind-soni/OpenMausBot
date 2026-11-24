@@ -71,12 +71,19 @@ describe("where a Skill Burger's steps run", () => {
       expected: { "first.csv": "second", "report.csv": "first", "backup.csv": "first" },
     },
     {
-      name: "a command's artifact after its redirected log is overwritten",
-      commands: [
-        "printf payload > source.txt", "cp source.txt artifact.txt > build.log",
-        "printf done > build.log", "cp artifact.txt packaged.txt",
-      ],
-      expected: { "artifact.txt": "payload", "packaged.txt": "payload", "build.log": "done" },
+      name: "the final adjacent overwrite attempt",
+      commands: ["printf draft > report.csv", "printf corrected > report.csv", "cp report.csv final.csv"],
+      expected: { "report.csv": "corrected", "final.csv": "corrected" },
+    },
+    {
+      name: "a file before a command with a commented-out redirect",
+      commands: ["printf payload > report.csv", "printf done # > report.csv"],
+      expected: { "report.csv": "payload" },
+    },
+    {
+      name: "distinct filenames after shell quote interpretation",
+      commands: [String.raw`printf first > "a\\b.csv"`, String.raw`printf second > 'a\\b.csv'`],
+      expected: { [String.raw`a\b.csv`]: "first", [String.raw`a\\b.csv`]: "second" },
     },
   ])("replays $name", async ({ commands, expected }) => {
     const cwd = folder();
