@@ -404,7 +404,7 @@ export async function resumeRun(state: RunState, response: string, deps: RunDeps
       const replies = Object.values(delegation.replies);
       results[step.id] = {
         state: "done",
-        output: { replies: Object.fromEntries(replies.map((reply) => [reply.name, reply.text])), text: repliesText(delegation.replies), rounds: delegation.round, ...(unmet.length ? { unmet } : {}) },
+        output: { replies: Object.fromEntries(Object.entries(delegation.replies).map(([part, reply]) => [part, reply.text])), text: repliesText(delegation.replies), rounds: delegation.round, ...(unmet.length ? { unmet } : {}) },
         detail: { rounds: delegation.round, replies: replies.map((reply) => ({ name: reply.name, ok: reply.ok, text: reply.text.slice(0, 600) })) },
       };
       deps.events.ended(state.id, state.name, step, results[step.id]!);
