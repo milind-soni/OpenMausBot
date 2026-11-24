@@ -25,7 +25,7 @@
 //                           keyring then
 //   FAKE_AGY_COMMANDS       the slash commands advertised, comma separated (default goal,compact,plan,learn)
 //   FAKE_AGY_USAGE          1: an ordinary prompt reports `usage_update` and its usage, as 1.5.14 does
-//   FAKE_AGY_COMPACT        how `/compact` is answered: reply (as an ordinary message) | bare (`end_turn` alone) |
+//   FAKE_AGY_COMPACT        how `/compact` is answered: reply (as an ordinary message, 777 output tokens) | bare (`end_turn` alone) |
 //                           usage-only (no `usage_update`) | usage-after (the `usage_update` follows the answer) | error |
 //                           exit | hang (answers `cancelled` on session/cancel) | hang-ignore-cancel
 import { createHash } from "node:crypto";
@@ -190,7 +190,8 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
       break;
     case "session/prompt": {
       const sessionId = message.params?.sessionId;
-      if (first?.trim() === "/compact" && process.env.FAKE_AGY_COMPACT !== "reply") {
+      const answersCompact = first?.trim() === "/compact";
+      if (answersCompact && process.env.FAKE_AGY_COMPACT !== "reply") {
         const how = process.env.FAKE_AGY_COMPACT ?? "";
         if (how === "exit") process.exit(4);
         if (how === "error") return failure(message.id, -32603, "compaction failed");
@@ -213,7 +214,7 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
       }
       used += 1_000;
       update(sessionId, { sessionUpdate: "usage_update", used, size: WINDOW });
-      result(message.id, { stopReason: "end_turn", usage: usage(used - 20, 20) });
+      result(message.id, { stopReason: "end_turn", usage: answersCompact ? usage(used - 777, 777) : usage(used - 20, 20) });
       break;
     }
     default:

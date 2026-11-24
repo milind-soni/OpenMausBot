@@ -91,7 +91,7 @@ describe.skipIf(WINDOWS)("Compact now on the native Antigravity CLI", () => {
   it("counts a /compact the CLI answered as a message as no compaction, books what it reported and closes the session", async () => {
     const t = await thread("as-message", { FAKE_AGY_COMPACT: "reply" });
     await t.send();
-    expect(await t.compact()).toMatchObject({ ok: false, reason: "the agent answered /compact as a message", usage: { output: 20 }, sessionChanged: true });
+    expect(await t.compact()).toMatchObject({ ok: false, reason: "the agent answered /compact as a message", usage: { output: 777 }, sessionChanged: true });
     expect(await t.compact()).toMatchObject({ ok: false, reason: "no live session holds this conversation" });
   }, 120_000);
 
