@@ -7,7 +7,6 @@ const OFFICIAL = [
   "https://platform.claude.com/",
   "https://docs.x.ai/",
   "https://ai.google.dev/",
-  "https://cloud.google.com/",
   "https://cursor.com/",
   "https://platform.minimax.io/",
   "https://openrouter.ai/",

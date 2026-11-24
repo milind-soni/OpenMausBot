@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-20T07:30:00Z",
+  "updatedAt": "2026-11-24T09:00:00Z",
   "engines": {
     "claude": {
       "default": "claude-sonnet-5",
@@ -371,14 +371,14 @@
       "cachedInputPerMillion": 0.15,
       "outputPerMillion": 15,
       "asOf": "2026-11-20",
-      "source": "https://cloud.google.com/vertex-ai/generative-ai/pricing"
+      "source": "https://ai.google.dev/gemini-api/docs/pricing"
     },
     "gemini-4-argon": {
       "inputPerMillion": 2,
       "cachedInputPerMillion": 0.1,
       "outputPerMillion": 10,
       "asOf": "2026-11-20",
-      "source": "https://cloud.google.com/vertex-ai/generative-ai/pricing",
+      "source": "https://ai.google.dev/gemini-api/docs/pricing",
       "changes": [
         {
           "from": "2026-12-01",
@@ -393,7 +393,7 @@
       "cachedInputPerMillion": 0.1,
       "outputPerMillion": 10,
       "asOf": "2026-11-20",
-      "source": "https://cloud.google.com/vertex-ai/generative-ai/pricing",
+      "source": "https://ai.google.dev/gemini-api/docs/pricing",
       "changes": [
         {
           "from": "2026-12-01",
@@ -408,7 +408,7 @@
       "cachedInputPerMillion": 0.075,
       "outputPerMillion": 7.5,
       "asOf": "2026-11-20",
-      "source": "https://cloud.google.com/vertex-ai/generative-ai/pricing"
+      "source": "https://ai.google.dev/gemini-api/docs/pricing"
     },
     "gemini-3.8-flash": {
       "inputPerMillion": 0.75,
