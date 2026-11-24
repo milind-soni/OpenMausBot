@@ -14,12 +14,9 @@ export interface UsageState {
   usagePeak: number | null;
   usageLast: number | null;
   usageCompacted: boolean;
-  /** This turn's own collapse watch, for an engine that compacts its session without telling (the native Antigravity CLI
-   *  does at a turn's start): the peak and window of the readings this turn received since its prompt was sent. */
+  /** The native Antigravity CLI 1.5.15 compacts its session at a turn's start without telling; this turn's readings after its prompt show it. */
   turnPeak: number | null;
   turnSize: number | null;
-  /** The turn's readings stopped being comparable — one arrived in another window, or the session changed model — so
-   *  this turn never judges a collapse. */
   turnBlind: boolean;
   collapsedInTurn: boolean;
 }
@@ -49,8 +46,13 @@ function readUsage(update: any, turn: UsageState): SessionReport {
   };
 }
 
-/** A reading this turn can judge by: the first one arms the watch with its window, a later one in that window collapses
- * below the ratio of the turn's peak, and one in any other window ends the watch rather than compare across models. */
+export function blindTurn(turn: UsageState): void {
+  turn.turnBlind = true;
+  turn.collapsedInTurn = false;
+  turn.turnSize = null;
+  turn.turnPeak = null;
+}
+
 function watchTurnCollapse(turn: UsageState, used: number, size: number): void {
   if (turn.turnBlind) return;
   if (turn.turnSize === null) {
@@ -58,12 +60,7 @@ function watchTurnCollapse(turn: UsageState, used: number, size: number): void {
     turn.turnPeak = used;
     return;
   }
-  if (turn.turnSize !== size) {
-    turn.turnBlind = true;
-    turn.turnSize = null;
-    turn.turnPeak = null;
-    return;
-  }
+  if (turn.turnSize !== size) return blindTurn(turn);
   if (turn.turnPeak !== null && used < turn.turnPeak * ACP_COMPACTION_COLLAPSE_RATIO) turn.collapsedInTurn = true;
   if (turn.turnPeak === null || used > turn.turnPeak) turn.turnPeak = used;
 }

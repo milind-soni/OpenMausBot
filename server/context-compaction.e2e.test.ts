@@ -676,3 +676,12 @@ it.skipIf(process.platform === "win32")("keeps the session the native CLI auto-c
   expect(f.task().engineCompacted).toMatchObject({ instanceId: "antigravity", session });
   expect(f.sessionSetups()).toEqual(["session/new"]);
 }, { FAKE_AGY_AUTO_COMPACT: "1", FAKE_AGY_AUTO_COMPACT_AT: "13000" }), 120_000);
+
+it.skipIf(process.platform === "win32")("keeps the auto-compacted session when the reply opens with an internal block and only settles with its text", () => antigravityFixture(async f => {
+  const session = await antigravityLongThenSixth(f);
+  const fifth = (await f.messages()).find((m: { role: string; text?: string }) => m.role === "user" && m.text?.startsWith("FIFTH"));
+  expect(await f.engineRows()).toHaveLength(1);
+  expect(await f.folds()).toHaveLength(0);
+  expect(f.cursor()).toBe(session);
+  expect(f.task().engineCompacted).toMatchObject({ instanceId: "antigravity", session, throughId: fifth.id });
+}, { FAKE_AGY_AUTO_COMPACT: "1", FAKE_AGY_AUTO_COMPACT_AT: "13000", FAKE_AGY_FLOW: "system-first" }), 120_000);

@@ -205,7 +205,7 @@ interface PendingHandoff extends Handoff {
 function actedOn(event: RuntimeEvent): boolean {
   if (event.synthetic) return false;
   return event.type === "content.delta" || event.type === "item.started" || event.type === "item.updated" ||
-    event.type === "item.completed" || event.type === "request.opened";
+    event.type === "item.completed" || event.type === "request.opened" || event.type === "context.compacted";
 }
 
 /** A handoff is recorded once the provider is seen acting on it; a turn that fails before records nothing. */

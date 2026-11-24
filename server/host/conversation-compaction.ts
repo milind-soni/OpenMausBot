@@ -43,31 +43,6 @@ interface CompactionInstance {
   adapter: { capabilities: { contextReading?: "meter"; nativeCompaction?: boolean }; compactSession?: unknown };
 }
 
-export interface EngineCompactionNoticeDeps {
-  store: Pick<Store, "taskByThread" | "patchTask" | "activePath">;
-  directContext(bot: BotRecord, threadId: string, messages: Message[]): ContextMessage[];
-  instance(instanceId: string): CompactionInstance | null | undefined;
-}
-
-/** An engine's report that it compacted the session the settled turn just ran on (the native Antigravity CLI does this
- * silently at a turn's start). Every engine's chat gets its notice. Only an engine OpenMausBot cannot fold for itself
- * (`compactSession`, no `nativeCompaction`) also gets the boundary its fold measures from: through the message its
- * compacted session had received, so the next fold counts only what came after it. */
-export function noteEngineCompaction(deps: EngineCompactionNoticeDeps, bot: BotRecord | undefined, threadId: string, reportedInstanceId: string | undefined, notice: () => void): void {
-  notice();
-  if (!bot) return;
-  const task = deps.store.taskByThread(bot.id, threadId);
-  const instanceId = reportedInstanceId ?? task?.lastInstanceId;
-  const instance = instanceId === undefined ? undefined : deps.instance(instanceId);
-  if (!task || instanceId === undefined || !instance?.adapter.compactSession || instance.adapter.capabilities.nativeCompaction === true) return;
-  const session = task.resumeCursors[instanceId];
-  const handed = task.handedMessages?.[instanceId];
-  if (typeof session !== "string" || !handed?.through) return;
-  const order = deps.directContext(bot, threadId, sinceFreshStart(deps.store.activePath(threadId))).map((entry) => entry.id);
-  if (!handedStateUsable(handed, session, order)) return;
-  deps.store.patchTask(bot.id, threadId, { engineCompacted: { instanceId, session, throughId: handed.through } });
-}
-
 export interface CompactConversationInput {
   bot: BotRecord; threadId: string; generation: string; instance: CompactionInstance; model: string;
   excludedIds: ReadonlySet<string>; manual: boolean; idle?: AbortSignal;
@@ -88,6 +63,8 @@ export interface ConversationCompactionDeps {
   engineCompact(target: { botId: string; threadId: string; instanceId: string }, signal: AbortSignal, check: EngineCompactCheck): Promise<EngineCompactOutcome>;
   /** Whether the conversation's next turn carries on `session`, by the decision that turn makes before it dispatches. */
   resumesSession(input: CompactConversationInput, session: string): boolean;
+  /** The engine instance behind an id, while it is still configured. */
+  instance(instanceId: string): CompactionInstance | null | undefined;
   /** The engine instance and model the conversation's next turn would run on now. */
   currentSelection(botId: string, threadId: string): { instanceId: string; model: string | null } | undefined;
   generateText(botId: string, instance: CompactionInstance): ((prompt: string, options?: { signal?: AbortSignal }) => Promise<string>) | undefined;
@@ -116,7 +93,18 @@ export function createConversationCompaction(deps: ConversationCompactionDeps) {
     return { instanceId, session, throughId: handed.through };
   };
 
-  return async function compactConversation(input: CompactConversationInput): Promise<void> {
+  const noteEngineCompaction = (bot: BotRecord | undefined, threadId: string, reportedInstanceId: string | undefined, notice: () => void): void => {
+    notice();
+    if (!bot) return;
+    const instanceId = reportedInstanceId ?? store.taskByThread(bot.id, threadId)?.lastInstanceId;
+    const instance = instanceId === undefined ? undefined : deps.instance(instanceId);
+    if (instanceId === undefined || !instance?.adapter.compactSession || instance.adapter.capabilities.nativeCompaction === true) return;
+    const context = deps.directContext(bot, threadId, sinceFreshStart(store.activePath(threadId)));
+    const through = receivedThrough(bot.id, threadId, instanceId, context);
+    if (through) store.patchTask(bot.id, threadId, { engineCompacted: through });
+  };
+
+  return Object.assign(async function compactConversation(input: CompactConversationInput): Promise<void> {
     const { bot, threadId, generation, instance, model, excludedIds, manual, idle } = input;
     const task = store.taskByThread(bot.id, threadId);
     const settings = deps.context();
@@ -188,5 +176,5 @@ export function createConversationCompaction(deps: ConversationCompactionDeps) {
       if (shown) deps.summarizing?.(threadId, false);
       if (deps.controllers.get(threadId)?.generation === generation) deps.controllers.delete(threadId);
     }
-  };
+  }, { noteEngineCompaction });
 }

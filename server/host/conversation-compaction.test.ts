@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { compactBudget } from "../context-budget.ts";
 import type { BotRecord, Message } from "../store.ts";
-import { claudeCompactionDisabled, createConversationCompaction, foldBackstop, foldDue, noteEngineCompaction, type ConversationCompactionDeps, type EngineCompactionNoticeDeps } from "./conversation-compaction.ts";
+import { claudeCompactionDisabled, createConversationCompaction, foldBackstop, foldDue, type ConversationCompactionDeps } from "./conversation-compaction.ts";
 
 describe("foldBackstop", () => {
   it("sits above where each engine compacts by itself and below its limit", () => {
@@ -98,7 +98,7 @@ describe("compactConversation", () => {
         return options.engineCompact === "stale" ? "stale" : options.engineCompact ? "done" : "skipped";
       },
       resumesSession: () => options.resumes ?? true,
-      currentSelection: () => ({ instanceId: "engine", model: "model" }),
+      instance: () => undefined, currentSelection: () => ({ instanceId: "engine", model: "model" }),
       generateText: options.generateText ?? (() => undefined),
       claimIsCurrent: options.claimIsCurrent ?? (() => true),
       controllers: new Map(),
@@ -245,7 +245,7 @@ describe("noteEngineCompaction", () => {
       resumeCursors: { engine: options.cursor ?? "s1" },
       handedMessages: options.handed ? { engine: { session: options.handed.session, through: options.handed.through, ids: [] } } : undefined,
     };
-    const deps: EngineCompactionNoticeDeps = {
+    const deps: Pick<ConversationCompactionDeps, "store" | "directContext" | "instance"> = {
       store: {
         taskByThread: () => task as never,
         activePath: () => messages,
@@ -261,7 +261,7 @@ describe("noteEngineCompaction", () => {
         return { instanceId: id, driverKind: "engine", adapter };
       },
     };
-    const note = (direct = true, reported?: string) => noteEngineCompaction(deps, direct ? bot : undefined, thread, reported, () => notices.push({}));
+    const note = (direct = true, reported?: string) => createConversationCompaction(deps as never).noteEngineCompaction(direct ? bot : undefined, thread, reported, () => notices.push({}));
     return { note, patches, notices };
   }
 
@@ -343,7 +343,7 @@ describe("compactConversation on an engine that compacts in place only when aske
       engineCompactionOn: () => true,
       engineCompact: async (_target, _signal, check) => { boundaries.push(check.boundary?.()); return "done"; },
       resumesSession: () => options.resumes ?? true,
-      currentSelection: () => ({ instanceId: "engine", model: "model" }),
+      instance: () => undefined, currentSelection: () => ({ instanceId: "engine", model: "model" }),
       generateText: () => undefined,
       claimIsCurrent: () => true,
       controllers: new Map(),

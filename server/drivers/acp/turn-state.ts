@@ -139,8 +139,6 @@ export function trackThoughtAfterTool(state: AcpTurn["state"]): void {
   if (state.toolsSinceShown) state.thoughtSinceTool = true;
 }
 
-/** The turn's buffered words, cleaned of internal harness text and taken out of its state, with the reply marked
- * landed; null when nothing visible remains. The caller publishes the text it returns. */
 export function takeAssistantText(state: AcpTurn["state"]): string | null {
   const raw = state.text;
   state.text = "";
@@ -154,8 +152,6 @@ export interface AcpTurnEnd {
   ok: boolean;
   stopReason: string | null;
   error?: Omit<ErrorReplyFailure, "stopReason">;
-  /** The turn's last words, taken from its state and left unpublished: the caller publishes them, after whatever the
-   * turn's end itself has to say first. */
   finalText: string | null;
 }
 

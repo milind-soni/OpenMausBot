@@ -32,7 +32,15 @@ as having compacted only when the prompt ends `end_turn` with usage and a
 that falls back to the fold, its usage booked. After a compaction the fold, as
 long as the next turn carries on that session, measures only the history after
 the last message the session had received, so a conversation that had just
-passed the fold point is not folded on its next message. The pinned runtime
+passed the fold point is not folded on its next message. The CLI (1.5.15) also
+compacts a session by itself at a turn's start when it nears the model's limit,
+and tells no one: the turn's own `usage_update` readings after its prompt fall
+below 60% of the turn's first one within the same window. A turn that settles
+as a success after such a fall, with no model change and no reading from
+another window during it, adds the same chat note the other engines get, ahead
+of its reply, and writes the same boundary as Compact now does, so the fold
+does not replace a session the CLI already shortened. A turn that ends in an
+error, a Stop or an empty reply says nothing. The pinned runtime
 (`agy_acp_server`) and every other ACP agent fold.
 
 OpenMausBot's own fold (below) is what compacts in every other case:
@@ -56,6 +64,7 @@ OpenMausBot's own fold (below) is what compacts in every other case:
 ```sh
 pnpm exec vitest run server/host/conversation-compaction.test.ts server/context-compaction.e2e.test.ts \
   server/drivers/antigravity-compact.test.ts server/drivers/acp/session-compact.test.ts
+pnpm exec vitest run server/drivers/antigravity-auto-compact.test.ts server/drivers/acp/session-reports.test.ts
 ```
 
 ## OpenMausBot's fold

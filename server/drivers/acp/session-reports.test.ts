@@ -83,6 +83,15 @@ describe("readSessionReport: the turn's own collapse watch", () => {
     expect(state.collapsedInTurn).toBe(false);
   });
 
+  it("forgets a collapse already seen once a reading arrives in another window", () => {
+    const state = turn();
+    readSessionReport(usage({ used: 64_872, size: 131_072 }), undefined, state, live());
+    readSessionReport(usage({ used: 11_190, size: 131_072 }), undefined, state, live());
+    expect(state.collapsedInTurn).toBe(true);
+    readSessionReport(usage({ used: 12_000, size: 262_144 }), undefined, state, live());
+    expect(state).toMatchObject({ turnBlind: true, collapsedInTurn: false });
+  });
+
   it("needs the drop below the share, not merely any dip", () => {
     const state = turn();
     readSessionReport(usage({ used: 100_000, size: 131_072 }), undefined, state, live());

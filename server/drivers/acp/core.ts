@@ -26,7 +26,7 @@ import { acpCapabilities } from "./capabilities.ts"; import { readAcpMediaLinks 
 import { acpNativeLogMessage } from "./tool-log.ts";
 import { formatQuietLimit, lastSeenPhrase, LIMIT_WORDS, promptIdleTimeoutMs, type LogSignal } from "./quiet-status.ts"; import { startAcpQuietWatch } from "./quiet-watch.ts"; import { AppliedConfig } from "./applied-config.ts"; import { modelRefused, roomForReadBeside, startupRefresh } from "./startup-refresh.ts"; import { stderrFailureOf, watchStderrFailure, type StderrFailure } from "./harness-failure.ts"; import { timed, turnStartClock, type TurnStartClock } from "../../perf/turn-starts.ts";
 import { acpMissingSession, retryTransient } from "./rpc-error.ts";
-import { readSessionReport } from "./session-reports.ts";
+import { blindTurn, readSessionReport } from "./session-reports.ts";
 import { promptTokenUsage } from "./prompt-usage.ts";
 import { advertisedCommands, turnAnswers, turnSteering, type AcpSteerSupport } from "./steer.ts";
 import { pickSessionModel, SessionModelControls, type AcpModelSelection } from "./session-model-controls.ts"; import { currentModeUpdateId, readSessionModes, withSessionMode, type AcpSessionModes } from "./session-modes.ts";
@@ -509,7 +509,6 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         session.current = null; session.settledAt = Date.now();
         active.delete(threadId); if (current.state.stopped) endBackground(threadId, session);
         const end = endTurn(current, ok, stopReason, support.displayName);
-        // A turn the agent compacted its own session under says so ahead of its last words, and only when it settled as a success.
         if (end.ok && end.stopReason === null && session.compactCommand && current.state.collapsedInTurn) emit({ ...base(threadId, current.turnId), type: "context.compacted" });
         if (end.finalText !== null) emit({ ...base(threadId, current.turnId), type: "item.completed", itemType: "assistant_text", text: end.finalText });
         if (end.error) emit({ ...base(threadId, current.turnId), type: "runtime.error", ...end.error });
@@ -1007,7 +1006,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           state: () => session.sessionConfigResult, store: (result) => { session.sessionConfigResult = result; },
           report: (model, variants) => emit({ ...base(threadId, turnId), type: "session.model-variants", model, variants }),
         });
-        const receiveModelVariants = (result: any, replace = false) => { if (replace) session.appliedConfig.clear(); modelControls.receive(result, replace); };
+        const receiveModelVariants = (result: any, replace = false) => { if (replace) session.appliedConfig.clear(); const before = modelControls.modelOf(session.sessionConfigResult); modelControls.receive(result, replace); if (state.promptSent && modelControls.modelOf(session.sessionConfigResult) !== before) blindTurn(state); };
         const requestedVariantOption = () => modelControls.variant(variant);
 
         const flushAssistantText = () => {
@@ -1215,8 +1214,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 current.turn = cliTurn;
                 const modelBefore = selectedModel;
                 selectedModel = await modelControls.select((m, p, t, r) => (session.appliedConfig.clear(), request(m, p, t, r)), sessionId, INIT_TIMEOUT);
-                // the model a session switched to reports its own usage and window: this turn's readings no longer compare
-                if (modelControls.modelOf(session.sessionConfigResult) !== modelBefore) state.turnBlind = true;
+                if (modelControls.modelOf(session.sessionConfigResult) !== modelBefore) blindTurn(state);
               }
 
               if (support.configureSession) {
