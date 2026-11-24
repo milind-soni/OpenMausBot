@@ -1,4 +1,5 @@
 import { botShowsUnread } from "@/lib/bot-unread";
+import { shownChatIsUnread } from "@/lib/shown-chat-unread";
 import type { Action, AppState, BotAnnouncement, Group } from "./store";
 import { serverFetch } from "@/lib/relay-server";
 import { roomFeedShows } from "@/lib/room-feed";
@@ -17,6 +18,12 @@ const markedUnread = new Map<string, number | undefined>();
 /** Conversations the server holds unread that the person opened again here, read once their mark is next announced. */
 const reopened = new Set<string>();
 const OPENS_A_CONVERSATION: ReadonlySet<Action["type"]> = new Set(["select", "openDataResult", "switchTask", "newTask", "send"]);
+const OPENS_A_ROOM_THREAD: ReadonlySet<Action["type"]> = new Set(["switchGroupTask", "newGroupTask", "sendGroup"]);
+/** Whether the page's first snapshot came in, or the person opened or wrote in a conversation here before it did. */
+let restoreSettled = false;
+/** The unread conversation this page put back on screen by itself when it loaded. Nobody chose to look at it, so it
+ * stays unread until the person opens a conversation here. */
+let restoredUnread: string | undefined;
 
 function shownBotThread(state: AppState): string | undefined {
   if (state.activeView !== "chat" || (state.newChat && state.newChat.botId === state.selectedId)) return undefined;
@@ -36,6 +43,10 @@ function openedBotThread(action: Action, state: AppState): string | undefined {
  * this one included, write in one, or act from anywhere else in the app. The server's own mark ends only for the
  * conversation they open or write in. */
 export function holdMarkedUnread(action: Action, state: AppState): void {
+  if (OPENS_A_CONVERSATION.has(action.type) || OPENS_A_ROOM_THREAD.has(action.type)) {
+    restoreSettled = true;
+    restoredUnread = undefined;
+  }
   const shown = shownBotThread(state), leaves = OPENS_A_CONVERSATION.has(action.type) || !shown;
   if (leaves || !markedUnread.has(shown)) markedUnread.clear();
   const opened = OPENS_A_CONVERSATION.has(action.type) ? openedBotThread(action, state) : undefined;
@@ -46,11 +57,27 @@ export function holdMarkedUnread(action: Action, state: AppState): void {
   reopened.delete(shown);
 }
 
+function shownThread(state: AppState): string | undefined {
+  const room = state.activeView === "chat" ? state.groups.find((candidate) => candidate.id === state.selectedId) : undefined;
+  return room ? room.threadId : shownBotThread(state);
+}
+
+/** Call when a snapshot is in, before any frame on top of it; only the page's first counts: the conversation it shows by
+ * itself. */
+export function holdRestoredUnread(state: AppState): void {
+  if (restoreSettled) return;
+  restoreSettled = true;
+  const shown = shownThread(state);
+  restoredUnread = shown && shownChatIsUnread(state) ? shown : undefined;
+}
+
 const serverHolds = (task: { threadId: string; heldUnread?: string } | undefined) =>
   task?.heldUnread !== undefined && !reopened.has(task.threadId);
 
-/** Whether the shown conversation is still held unread: marked by the person, and nothing newer has arrived in it. */
+/** Whether the shown conversation is still held unread: put back on screen by a page load and not opened since, or marked
+ * by the person and nothing newer has arrived in it. */
 export function shownChatHeldUnread(state: AppState): boolean {
+  if (restoredUnread !== undefined && shownThread(state) === restoredUnread) return true;
   const shown = shownBotThread(state);
   if (!shown) return false;
   const task = state.bots.find((candidate) => candidate.id === state.selectedId)?.tasks?.find((candidate) => candidate.threadId === shown);
@@ -67,7 +94,7 @@ const chatShows = (state: AppState, id: string) => id === state.selectedId && st
 function visibleThreadIds(state: AppState, kind: "bot" | "group", ownerId: string, shown?: string): string[] {
   const panel = state.forkPanel;
   return [...new Set([shown, panel?.kind === kind && panel.ownerId === ownerId ? panel.threadId : undefined])]
-    .filter((threadId): threadId is string => Boolean(threadId));
+    .filter((threadId): threadId is string => Boolean(threadId) && threadId !== restoredUnread);
 }
 
 export function markVisibleBotThreadsRead(state: AppState, bot: BotAnnouncement, focused: boolean, post: SendRead = sendRead): void {

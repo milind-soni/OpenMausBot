@@ -19,7 +19,7 @@ import { isNotificationFeedAction, reduceNotificationFeed, type NotificationFeed
 import { bumpThreadUpdatedAt, mergeTaskStamps, rewindThreadUpdatedAt } from "./thread-stamps";
 import { botOpensTo, closeTrayUnlessShown, closeUnpinnedTray, openBot, openThread, visibleNotificationThread, withRememberedTrayPin } from "./thread-navigation";
 import { patchGroupTask } from "./thread-edits"; import { unreadBeyondFrame, wholeBotFrame } from "./bot-thread-frame";
-import type { EngineInstall } from "./engine-install";
+import type { EngineInstall } from "./engine-install"; import { holdRestoredUnread } from "./read-visible";
 import { optimisticMessageId, optimisticUserMessage, sendArrived, sendReconciled } from "./optimistic-send";
 import { patchedGroups, roomAnswers, snapshotPatch } from "./room-frames";
 import { savedStateAction, type SavedOwner, type SavedSnapshot } from "./saved-state";
@@ -2994,7 +2994,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           loaded = await loadAll();
         } while (alive && rehydrateRequested);
         if (!alive || !loaded) return false;
-        hydrated = true;
+        holdRestoredUnread(store.getState()); hydrated = true;
         for (const frame of pendingFrames.splice(0)) store.enqueueFrame(frame);
         store.flushFrames();
         return true;
