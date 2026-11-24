@@ -101,6 +101,19 @@ describe.skipIf(process.platform === "win32")("the image's start-up script keeps
     expect(readdirSync(workspace).some((name) => name.startsWith("unmerged-local-"))).toBe(true);
   });
 
+  it("reads a profile's dangling lock link as copied, so a complete profile is not moved aside", () => {
+    const dir = scratch();
+    const home = join(dir, "home");
+    const workspace = join(dir, "workspace");
+    mkdirSync(join(home, ".config", "google-chrome", "Default"), { recursive: true });
+    writeFileSync(join(home, ".config", "google-chrome", "Default", "Cookies"), "cookies");
+    symlinkSync("old-host-4242", join(home, ".config", "google-chrome", "SingletonLock"));
+    runPrepare(prepareScript(dir, workspace), home);
+    expect(readFileSync(join(workspace, ".browser-profiles", "google-chrome", "Default", "Cookies"), "utf8")).toBe("cookies");
+    expect(lstatSync(join(home, ".config", "google-chrome")).isSymbolicLink()).toBe(true);
+    expect(readdirSync(workspace).filter((name) => name.startsWith("unmerged-"))).toEqual([]);
+  });
+
   it("keeps a home path that is a regular file instead of deleting it silently", () => {
     const dir = scratch();
     const home = join(dir, "home");

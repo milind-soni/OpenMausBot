@@ -16,9 +16,11 @@ export function workspacePreparationDockerfile(workspace: string): string {
       '  target="$2"' \\
       '  if [ -e "$source" ] && [ ! -L "$source" ]; then' \\
       '    if [ -d "$source" ]; then' \\
-      '      cp -an "$source/." "$target/"' \\
+      '      cp -an "$source/." "$target/" || true' \\
       '      missing=$(cd "$source" && find . -mindepth 1 -print | while IFS= read -r item; do' \\
-      '        if [ -f "$item" ]; then' \\
+      '        if [ -L "$item" ]; then' \\
+      '          [ "$(readlink "$item")" = "$(readlink "$target/$item" || true)" ] || echo "$item"' \\
+      '        elif [ -f "$item" ]; then' \\
       '          cmp -s "$item" "$target/$item" || echo "$item"' \\
       '        elif [ ! -e "$target/$item" ]; then' \\
       '          echo "$item"' \\
