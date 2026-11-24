@@ -322,6 +322,12 @@ const acpModels = (process.env.FAKE_ACP_SESSION_MODELS ?? "")
   });
 const sessionModels = () =>
   acpModels.length ? { currentModelId: acpModels[0].modelId, availableModels: acpModels } : null;
+const sessionModesList = (process.env.FAKE_ACP_SESSION_MODES ?? "").split(",").filter(Boolean);
+let currentSessionMode: string | null = sessionModesList[0] ?? null;
+const sessionModesPayload = () =>
+  sessionModesList.length
+    ? { currentModeId: currentSessionMode ?? sessionModesList[0], availableModes: sessionModesList.map((id) => ({ id, name: id })) }
+    : null;
 
 const argv = process.argv.slice(2);
 const dumpEnv = Object.fromEntries(
@@ -1091,6 +1097,7 @@ function handle(msg: any) {
       }
       const opts = configOptions();
       const mdls = sessionModels();
+      const sm = sessionModesPayload();
       sessionsOpened += 1;
       const firstSession = process.env.FAKE_ACP_SESSION_ID ?? "fake-acp-session";
       liveSession = sessionsOpened === 1 ? firstSession : `${firstSession}-${sessionsOpened}`;
@@ -1099,6 +1106,7 @@ function handle(msg: any) {
         sessionId: liveSession,
         ...(opts ? { configOptions: opts } : {}),
         ...(mdls ? { models: mdls } : {}),
+        ...(sm ? { modes: sm } : {}),
       }, "session/new", liveSession);
       if (mode === "hermes-steer") advertiseHermesCommands(liveSession);
       break;
@@ -1175,7 +1183,8 @@ function handle(msg: any) {
         }
       }
       if (process.env.FAKE_ACP_LOAD_UNANSWERED === "1") break;
-      resultAndConfigUpdates(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}) }, "session/load", msg.params.sessionId);
+      const sm = sessionModesPayload();
+      resultAndConfigUpdates(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}), ...(sm ? { modes: sm } : {}) }, "session/load", msg.params.sessionId);
       if (mode === "hermes-steer") advertiseHermesCommands(msg.params.sessionId);
       break;
     }
@@ -1193,8 +1202,9 @@ function handle(msg: any) {
       }
       const opts = configOptions();
       const mdls = sessionModels();
+      const sm = sessionModesPayload();
       liveSession = typeof msg.params?.sessionId === "string" ? msg.params.sessionId : liveSession;
-      result(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}) });
+      result(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}), ...(sm ? { modes: sm } : {}) });
       break;
     }
     // droid sets model/autonomy here, not via argv. Recorded beside FAKE_ACP_DUMP; last writer wins.
@@ -1219,6 +1229,13 @@ function handle(msg: any) {
           error: { code: -32602, message: `Invalid params: sessionId and ${settingId} must be strings` },
         });
         break;
+      }
+      if (msg.method === "session/set_mode" && sessionModesList.length) {
+        if (!sessionModesList.includes(msg.params.modeId)) {
+          out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: `Invalid params: unknown modeId "${msg.params.modeId}"` } });
+          break;
+        }
+        currentSessionMode = msg.params.modeId;
       }
       configCalls.push({ method: msg.method, params: msg.params });
       if (process.env.FAKE_ACP_DUMP) {

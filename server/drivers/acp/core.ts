@@ -30,7 +30,7 @@ import { acpMissingSession } from "./rpc-error.ts";
 import { readSessionReport } from "./session-reports.ts";
 import { promptTokenUsage } from "./prompt-usage.ts";
 import { advertisedCommands, turnAnswers, turnSteering, type AcpSteerSupport } from "./steer.ts";
-import { pickSessionModel, SessionModelControls, type AcpModelSelection } from "./session-model-controls.ts";
+import { pickSessionModel, SessionModelControls, type AcpModelSelection } from "./session-model-controls.ts"; import { readSessionModes, type AcpSessionModes } from "./session-modes.ts";
 import { notThisCli, versionFromProbe } from "./version-probe.ts"; import { engineHomes } from "../../engine-homes/engine-homes.ts"; import { apiKeyAccount } from "./api-key-account.ts";
 
 export function skipSubscriptionAuthForLocalInject(model: string | undefined): boolean {
@@ -265,7 +265,7 @@ export interface AcpSupport extends AcpDriverHooks {
      * their argv slugs (Cursor answers `default[]` for the CLI's `auto`). */
     sessionModels: Array<{ modelId?: string; name?: string }>;
     /** Last model acknowledged by session/new/load/set_model, preserved for pooled turns. */
-    currentModelId?: string;
+    currentModelId?: string; sessionModes?: AcpSessionModes;
     /** The session's effort, and where a live change to it is recorded. */ currentEffort?: EffortLevel; effortApplied?(effort: EffortLevel | undefined): void;
     /** What this live session last confirmed per config option; absent for a one-shot session. */ applied?: AppliedConfig;
     /** session/new's or session/load's `configOptions`, verbatim. */
@@ -1224,6 +1224,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                     if (method === "session/set_model" && params && typeof params === "object" && "modelId" in params && typeof params.modelId === "string") {
                       session.sessionConfigResult = { ...session.sessionConfigResult, models: { ...session.sessionConfigResult?.models, currentModelId: params.modelId } };
                     }
+                    if (method === "session/set_mode" && params && typeof params === "object" && "modeId" in params && typeof params.modeId === "string") {
+                      session.sessionConfigResult = { ...session.sessionConfigResult, modes: { ...session.sessionConfigResult?.modes, currentModeId: params.modeId } };
+                    }
                     if (method === "session/set_config_option" && Array.isArray(result?.configOptions)) session.sessionConfigResult = { ...session.sessionConfigResult, configOptions: result.configOptions };
                     return result;
                   },
@@ -1231,13 +1234,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   env: spawnEnv,
                   config: turnConfig,
                   turn: cliTurn,
-                  sessionModels: Array.isArray(session.sessionConfigResult?.models?.availableModels)
-                    ? session.sessionConfigResult.models.availableModels
-                    : [],
+                  sessionModels: Array.isArray(session.sessionConfigResult?.models?.availableModels) ? session.sessionConfigResult.models.availableModels : [],
                   currentModelId: session.sessionConfigResult?.models?.currentModelId, currentEffort: session.effort, effortApplied: (effort) => { session.effort = effort; }, applied: session.appliedConfig,
-                  configOptions: Array.isArray(session.sessionConfigResult?.configOptions)
-                    ? session.sessionConfigResult.configOptions
-                    : [],
+                  configOptions: Array.isArray(session.sessionConfigResult?.configOptions) ? session.sessionConfigResult.configOptions : [],
+                  sessionModes: readSessionModes(session.sessionConfigResult) ?? undefined,
                   notice: (message) => {
                     if (session.fallbackNotice === message) return;
                     session.fallbackNotice = message;

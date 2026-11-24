@@ -1,17 +1,22 @@
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { fileURLToPath } from "node:url";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ensureDirs } from "../../config.ts";
+import type { ProviderInstance } from "../../contracts.ts";
 import { resetPathCache } from "../../env-path.ts";
 
 import { removeTempDir } from "../../testing/cleanup.ts";
+import { recordEvents, type EventRecorder } from "../../testing/events.ts";
 import {
   HERMES_ACP_MODELS_TIMEOUT_ENV,
   HERMES_ACP_MODELS_DEFAULT_TIMEOUT_MS,
   HERMES_CONFIG_MODEL_ID,
   HERMES_OPENMAUS_SCREENSHOT_COMPAT,
   HERMES_OPENMAUS_SCREENSHOT_COMPAT_MODEL,
+  HermesAgentDriver,
   bindHermesScreenshotCompat,
   fetchHermesAcpModels,
   hermesAcpModelId,
@@ -465,5 +470,149 @@ describe("resolveHermesModels when Hermes has no model to list", () => {
       default: HERMES_CONFIG_MODEL_ID,
       options: [{ id: HERMES_CONFIG_MODEL_ID, label: "anthropic/claude-opus-4.6 (Hermes config)", custom: true }],
     });
+  });
+});
+
+const FAKE_ACP_CLI = join(dirname(fileURLToPath(import.meta.url)), "../../testing/fake-acp-cli.ts");
+const HERMES_SESSION_MODES = "default,accept_edits,dont_ask";
+
+describe("Hermes advertised ACP edit modes", () => {
+  let scratch: string;
+  let instance: ProviderInstance | undefined;
+  let recorder: EventRecorder | undefined;
+
+  beforeEach(() => {
+    ensureDirs();
+    scratch = mkdtempSync(join(tmpdir(), "omb-hermes-modes-"));
+  });
+
+  afterEach(async () => {
+    recorder?.stop();
+    await instance?.dispose();
+    instance = undefined;
+    recorder = undefined;
+    await removeTempDir(scratch);
+  });
+
+  async function create(environment: Record<string, string> = {}) {
+    const hermesHome = join(scratch, ".hermes");
+    mkdirSync(hermesHome, { recursive: true });
+    instance = await HermesAgentDriver.create({
+      instanceId: `hermes-modes-${Math.random().toString(36).slice(2)}`,
+      displayName: "Hermes",
+      enabled: true,
+      environment: {
+        HOME: scratch,
+        USERPROFILE: scratch,
+        HERMES_HOME: hermesHome,
+        OPENMAUSBOT_PROBE_LOCAL_INJECT: "0",
+        FAKE_ACP_DUMP: join(scratch, "launch.json"),
+        ...environment,
+      },
+      config: { cli: FAKE_ACP_CLI, fullAuto: false },
+    });
+    recorder = recordEvents(instance.adapter);
+    return { instance, recorder };
+  }
+
+  const dumpFile = () => join(scratch, "launch.json");
+  const configCalls = () =>
+    existsSync(`${dumpFile()}.config.json`)
+      ? (JSON.parse(readFileSync(`${dumpFile()}.config.json`, "utf8")) as Array<{ method: string; params: any }>)
+      : [];
+  const modeCalls = () => configCalls().filter((call) => call.method === "session/set_mode").map((call) => call.params.modeId);
+
+  it("maps approval modes onto advertised Hermes session modes across pooled turns without respawning", async () => {
+    const launches = join(scratch, "launches");
+    const { instance, recorder } = await create({
+      FAKE_ACP_SESSION_MODES: HERMES_SESSION_MODES,
+      FAKE_ACP_LAUNCH_COUNT_FILE: launches,
+    });
+    const runTurn = async (approvalMode: "edits" | "ask" | "auto" | "full") => {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId: "t-hermes-modes",
+        text: `turn-${approvalMode}`,
+        cwd: scratch,
+        approvalMode,
+      });
+      const done = await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      expect(done).toMatchObject({ ok: true });
+    };
+
+    await runTurn("edits");
+    expect(modeCalls()).toEqual(["accept_edits"]);
+    // Same level on the pooled session already matches currentModeId, so no redundant RPC.
+    await runTurn("edits");
+    expect(modeCalls()).toEqual(["accept_edits"]);
+
+    await runTurn("ask");
+    expect(modeCalls()).toEqual(["accept_edits", "default"]);
+
+    await runTurn("full");
+    expect(modeCalls()).toEqual(["accept_edits", "default", "dont_ask"]);
+
+    // Engines without a native auto reviewer stay in ask/default rather than escalating.
+    await runTurn("auto");
+    expect(modeCalls()).toEqual(["accept_edits", "default", "dont_ask", "default"]);
+
+    expect(Number(readFileSync(launches, "utf8"))).toBe(1);
+  });
+
+  it("applies the target mode when resuming a session via session/load", async () => {
+    const { instance, recorder } = await create({ FAKE_ACP_SESSION_MODES: HERMES_SESSION_MODES });
+    const { turnId } = await instance.adapter.sendTurn({
+      threadId: "t-hermes-resume",
+      text: "resume with edits",
+      cwd: scratch,
+      approvalMode: "edits",
+      resumeCursor: "fake-acp-session",
+    });
+    const done = await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+    expect(done).toMatchObject({ ok: true });
+    expect(configCalls()).toContainEqual({
+      method: "session/set_mode",
+      params: { sessionId: "fake-acp-session", modeId: "accept_edits" },
+    });
+  });
+
+  it("leaves behavior unchanged when Hermes advertises no session modes", async () => {
+    const { instance, recorder } = await create();
+    const { turnId } = await instance.adapter.sendTurn({
+      threadId: "t-hermes-legacy",
+      text: "legacy session",
+      cwd: scratch,
+      approvalMode: "edits",
+    });
+    const done = await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+    expect(done).toMatchObject({ ok: true });
+    expect(modeCalls()).toEqual([]);
+  });
+
+  it("fails closed and retires the session when session/set_mode is rejected", async () => {
+    const launches = join(scratch, "launches-fail");
+    const { instance, recorder } = await create({
+      FAKE_ACP_SESSION_MODES: HERMES_SESSION_MODES,
+      FAKE_ACP_MODE: "no-session-config",
+      FAKE_ACP_LAUNCH_COUNT_FILE: launches,
+    });
+    const first = await instance.adapter.sendTurn({
+      threadId: "t-hermes-mode-fail",
+      text: "first",
+      cwd: scratch,
+      approvalMode: "edits",
+    });
+    const done1 = await recorder.until((event) => event.type === "turn.completed" && event.turnId === first.turnId);
+    expect(done1).toMatchObject({ ok: false, stopReason: "rpc_error" });
+    expect(recorder.events.some((event) => event.type === "runtime.error" && event.message.includes("session/set_mode"))).toBe(true);
+
+    // Next turn must spawn a fresh process because approvalUnconfirmed retired the session.
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-hermes-mode-fail",
+      text: "second",
+      cwd: scratch,
+      approvalMode: "edits",
+    });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === second.turnId);
+    expect(Number(readFileSync(launches, "utf8"))).toBe(2);
   });
 });
