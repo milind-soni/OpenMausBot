@@ -44,6 +44,13 @@ export function usePhoneBack(enabled: boolean, steps: number, back: () => void):
     const onPop = (event: PopStateEvent) => {
       if (ownPops.current > 0) {
         ownPops.current -= 1;
+        // A step opened again while the app's own step back was on its way may have been added above the entry it left;
+        // count from the entry the page landed on so the effect adds back what is missing.
+        const landed = entryOf(event.state);
+        if (ownPops.current === 0 && landed !== undefined && landed < added.current) {
+          added.current = landed;
+          redraw();
+        }
         return;
       }
       if (added.current === 0) return;

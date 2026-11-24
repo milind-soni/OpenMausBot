@@ -172,3 +172,22 @@ it("leaves the entry its own step back lands on marked for the step opened again
   await pressBack();
   expect(back).toHaveBeenCalledTimes(1);
 });
+
+it("adds the reopened step's entry again when its own step back lands below it", async () => {
+  const settle: Array<() => void> = [];
+  vi.mocked(window.history.go).mockImplementation((delta = 0) => {
+    // The browser picks where the traversal lands when it starts, before the reopened step's entry is added.
+    const target = Math.max(0, above + delta);
+    settle.push(() => {
+      above = target;
+      window.dispatchEvent(new PopStateEvent("popstate", { state: entries[above] ?? null }));
+    });
+  });
+  await show(true, 1);
+  await show(true, 0);
+  await show(true, 1);
+  await act(async () => { for (const step of settle.splice(0)) step(); });
+  expect(entries[above], "the page is on the open step's entry again").toEqual({ ombPhoneBack: 1 });
+  await pressBack();
+  expect(back, "back closes the open step instead of leaving the app").toHaveBeenCalledTimes(1);
+});
