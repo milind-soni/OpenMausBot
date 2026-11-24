@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { saveChatFollowup } from "./message-db.ts";
+import { closeMessageDb, saveChatFollowup } from "./message-db.ts";
 import { killCliTree } from "./procs.ts";
 import {
   cancelSteeredMessage,
@@ -20,6 +20,7 @@ import {
   queuedSteerSnapshot,
   queuedSteeredMessage,
   queueSteeredMessage,
+  requeueSettledSteer,
   restoreHeldSteeredQueue,
   restoreSteeredMessages,
   settleHeldSteeredQueue,
@@ -123,6 +124,37 @@ describe("steer-queue module", () => {
     queueSteeredMessage(botId, "thread-own", "waiting on its own turn");
     expect(queuedThreadPosition(botId, "thread-own")).toBeNull();
     expect(queuedThreadPosition("other-bot", "thread-slot")).toBeNull();
+  });
+
+  it("keeps a steer the agent turned down late ahead of what was queued meanwhile, across a restart", () => {
+    const bot = fakeBot("bot-late-order", "thread-late-order", true);
+    const a = queueSteeredMessage(bot.id, bot.threadId, "A");
+    queueSteeredMessage(bot.id, bot.threadId, "B");
+    const held = holdSteeredQueue(bot.id, bot.threadId, a.id)!;
+    settleHeldSteeredQueue(held);
+    const c = queueSteeredMessage(bot.id, bot.threadId, "C");
+    requeueSettledSteer(held, ["row-a", "row-b"]);
+    const order = () => {
+      const queue = holdSteeredQueue(bot.id, bot.threadId, c.id)!;
+      restoreHeldSteeredQueue(queue);
+      return queue.items.map((item) => [item.messageId, item.text, item.rowId]);
+    };
+    const expected = [[held.items[0]!.messageId, "A", "row-a"], [held.items[1]!.messageId, "B", "row-b"], [c.id, "C", undefined]];
+    expect(order()).toEqual(expected);
+    closeMessageDb();
+    restoreSteeredMessages();
+    expect(order()).toEqual(expected);
+  });
+
+  it("keeps a message put back at the head ahead of what was queued before it, across a restart", () => {
+    const bot = fakeBot("bot-first-order", "thread-first-order", true);
+    const later = queueSteeredMessage(bot.id, bot.threadId, "queued later", { queuedAt: 2 });
+    queueSteeredMessage(bot.id, bot.threadId, "put back", { first: true, queuedAt: 1 });
+    closeMessageDb();
+    restoreSteeredMessages();
+    const queue = holdSteeredQueue(bot.id, bot.threadId, later.id)!;
+    restoreHeldSteeredQueue(queue);
+    expect(queue.items.map((item) => item.text)).toEqual(["put back", "queued later"]);
   });
 
   it("preserves self-opened request provenance through persistence and a capacity wait", () => {

@@ -1,7 +1,7 @@
 // Mid-turn sends wait here off the transcript (else they become the active leaf mid-turn) and survive Stop: stop-then-steer is the feature.
 
 import { newId } from "./contracts.ts";
-import { chatFollowups, saveChatFollowup, settleChatFollowups } from "./message-db.ts";
+import { chatFollowups, prepared, saveChatFollowup, settleChatFollowups } from "./message-db.ts";
 import { drainCoalesceHead } from "./admission.ts";
 import { spokenLineFields } from "./live-call-record.ts";
 import { workOriginSchema, type WorkOrigin } from "./peer-provenance.ts";
@@ -51,6 +51,13 @@ interface QueueEntry {
 export type SteerQueueHead = Pick<QueueEntry["items"][number], "trigger" | "sender" | "peerAsk" | "origin" | "mentions">;
 
 const queues = new Map<string, QueueEntry>();
+
+/** Restore reads a thread's followups back by rowid: this moves them behind every other row, in its queue's order. */
+function persistOrder(threadId: string): void {
+  const { top } = prepared("SELECT coalesce(max(rowid), 0) AS top FROM chat_followups").get() as { top: number };
+  prepared("UPDATE chat_followups SET rowid = ?2 + 1 + (SELECT key FROM json_each(?1) WHERE value = chat_followups.id) WHERE id IN (SELECT value FROM json_each(?1))")
+    .run(JSON.stringify(queues.get(threadId)?.items.map((item) => item.messageId) ?? []), top);
+}
 
 export interface HeldSteerQueue {
   botId: string;
@@ -145,6 +152,7 @@ export function queueSteeredMessage(
   if (ahead < 0) entry.items.push(item);
   else entry.items.splice(ahead, 0, item);
   queues.set(threadId, entry);
+  if (ahead >= 0) persistOrder(threadId);
   changed();
   return { id };
 }
@@ -326,6 +334,7 @@ export function requeueSettledSteer(held: HeldSteerQueue, rowIds: readonly strin
   const items = held.items.map((item, index) => ({ ...item, rowId: rowIds[index] }));
   for (const item of items) saveChatFollowup({ id: item.messageId, kind: "bot", ownerId: held.botId, threadId: held.threadId, payload: item });
   restoreHeldSteeredQueue({ ...held, items });
+  persistOrder(held.threadId);
 }
 
 export function _queuedCount(threadId: string): number {
