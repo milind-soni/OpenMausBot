@@ -102,7 +102,7 @@ function readEntries(file: string): Map<string, Entry> {
  * is unchanged, else run, and kept when it succeeds with some output. The callback gets exactly what a run would give.
  */
 export function createCliProbeCache(options: { file: string | null; appVersion: string; run?: ExecCli; platform?: NodeJS.Platform }) {
-  const run = options.run ?? execCli;
+  const run: ExecCli = (...args) => (options.run ?? execCli)(...args); // read at each call: tests replace execCli
   const platform = options.platform ?? process.platform;
   let entries: Map<string, Entry> | null = null;
   const loaded = () => (entries ??= options.file ? readEntries(options.file) : new Map());
