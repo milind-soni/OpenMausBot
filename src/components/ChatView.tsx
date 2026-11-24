@@ -1,3 +1,4 @@
+import { chatHeaderContainer } from "./chat-header-layout";
 import { memo, use, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
@@ -927,14 +928,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
       <GlassScrollFrame className="flex-1 [--glass-tint:var(--color-app)]">
       {/* z-[25]: above the room set-up card (z-20), below the CallOverlay (z-30). */}
       <GlassBar edge="top" fade={!remoteClient} data-chathead-float={simpleHead ? "" : undefined} className="z-[25]">
-      <div
-        {...headerDragProps} data-look="chat-header"
-        className={cn(
-          // A container query never matches the container itself, so the row that wraps is the child below.
-          "@container/chathead",
-          paneTitle ? "ps-3 pe-11 py-2" : simpleHead ? "px-5 pt-2.5 pb-2.5 max-md:pl-14 max-md:pr-3" : "px-5 py-3 pl-11 md:pl-5 max-md:pl-14 max-md:pr-3",
-        )}
-      >
+      <div {...headerDragProps} data-look="chat-header" className={chatHeaderContainer(Boolean(paneTitle), simpleHead)}>
         <div data-chathead-row className={cn("flex items-center justify-between", compactHeader ? "gap-2" : "@max-[30rem]/chathead:flex-wrap @max-[30rem]/chathead:gap-y-1 @min-[30rem]/chathead:grid @min-[30rem]/chathead:grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(max-content,1fr)]")}>{advanced && !inForkPanel && <ChatActivityControls key={bot.threadId} activity={activity} compact={Boolean(paneTitle)} botId={bot.id} style={headerNoDragStyle} />}
         <div data-chathead-identity className={cn("flex min-w-0 items-center gap-2", compactHeader ? "flex-1" : "@max-[30rem]/chathead:basis-full @min-[30rem]/chathead:col-start-2 @min-[30rem]/chathead:justify-self-center", simpleHead && phone && "justify-center")} style={headerNoDragStyle}>
           {simpleHead || paneTitle ? (
