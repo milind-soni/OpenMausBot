@@ -36,19 +36,19 @@ const message = (id: string, minutes: number, fields: Partial<Message>): Message
 
 interface Fixture { id: string; name: string; color: string; home: "computer" | "cloud"; title?: string; line: string; minutes: number; chief?: boolean; unread?: boolean; working?: boolean; mascotBody?: string }
 const FIXTURES: Fixture[] = [
-  { id: "mausbot", name: "MausBot", color: "green", home: "computer", line: "Morning. Three things need you today.", minutes: 48, chief: true },
-  { id: "git-tasks", name: "Git Tasks", color: "orange", home: "computer", line: "Pushed the fix to the release branch.", minutes: 30 },
-  { id: "ledger", name: "Ledger", color: "blue", home: "computer", line: "The March invoices are filed in your Drive.", minutes: 12 },
-  { id: "tech", name: "Technical Assistant", color: "purple", home: "cloud", line: "The deploy check passed on the second try.", minutes: 40, unread: true },
-  { id: "scout", name: "Scout", color: "teal", home: "cloud", line: "Five new issues since yesterday.", minutes: 22 },
-  { id: "atlas", name: "Atlas", color: "pink", home: "cloud", line: "Booked: the 9:40 train to Leeds on Friday.", minutes: 5 },
+  { id: "mausbot", name: "MausBot", color: "green", home: "computer", title: "Today's plan", line: "Morning. Three things need you today.", minutes: 48, chief: true },
+  { id: "git-tasks", name: "Git Tasks", color: "orange", home: "computer", title: "Release fix", line: "Pushed the fix to the release branch.", minutes: 30 },
+  { id: "ledger", name: "Ledger", color: "blue", home: "computer", title: "March invoices", line: "The March invoices are filed in your Drive.", minutes: 12 },
+  { id: "tech", name: "Technical Assistant", color: "purple", home: "cloud", title: "Deploy check", line: "Deploy check", minutes: 40, unread: true },
+  { id: "scout", name: "Scout", color: "teal", home: "cloud", title: "Open issues", line: "Open issues", minutes: 22 },
+  { id: "atlas", name: "Atlas", color: "pink", home: "cloud", title: "Leeds trip", line: "Leeds trip", minutes: 5 },
 ];
 
 function botOf(fixture: Fixture, overrides: Partial<Bot> = {}, text = fixture.line): Bot {
   const thread = `${fixture.id}-main`;
   const working = Boolean(overrides.busy);
   return {
-    title: fixture.title ?? "", description: "", notifications: true, unread: fixture.unread === true, modelSelection: { instanceId: "claude", model: "claude-opus-5-5" },
+     title: "", description: "", notifications: true, unread: fixture.unread === true, modelSelection: { instanceId: "claude", model: "claude-opus-5-5" },
     id: fixture.id, name: fixture.name, color: fixture.color, threadId: thread, mainThreadId: thread, busy: false, activity: working ? "working" : "idle",
     chiefOfStaff: fixture.chief === true,
     tasks: [{ threadId: thread, title: fixture.name, createdAt: AT, ...(fixture.unread ? { unread: true } : {}), ...(working ? { busy: true, activity: "working" } : {}) }],
@@ -63,7 +63,9 @@ function scene(): { bots: Bot[]; where: Map<string, BotWhere> } {
   const bots: Bot[] = [];
   for (const fixture of FIXTURES) {
     const home = fixture.home === "cloud" ? cloud : computer;
-    let bot = botOf(fixture);
+    // A bot of the place not on screen shows only its conversation's title: no message text crosses between places.
+    const other = fromCloud ? fixture.home === "computer" : fixture.home === "cloud";
+    let bot = botOf(fixture, {}, other ? fixture.title ?? "" : fixture.line);
     const place: BotWhere = { home };
     if (view === "working" && fixture.id === "scout") { bot = botOf(fixture, { busy: true }, "Reading the open issues…"); place.working = true; }
     if (view === "handoff" && fixture.id === "tech") { bot = botOf(fixture, { busy: true }, "Git Tasks is pushing the branch on this computer…"); place.working = true; place.workingAt = computer; }
@@ -77,7 +79,7 @@ function scene(): { bots: Bot[]; where: Map<string, BotWhere> } {
 
 /** Today's other place, as main hands it to the page: rows under a group of their own. */
 function rowOf(fixture: Fixture): PlaceBotRow {
-  return { home: "cloud", id: fixture.id, threadId: `${fixture.id}-main`, name: fixture.name, color: fixture.color, ...(fixture.unread ? { unread: true as const } : {}) };
+  return { home: "cloud", id: fixture.id, threadId: `${fixture.id}-main`, name: fixture.name, color: fixture.color, ...(fixture.title ? { title: fixture.title } : {}), ...(fixture.unread ? { unread: true as const } : {}) };
 }
 
 const { bots: all, where } = scene();
