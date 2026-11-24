@@ -217,7 +217,6 @@ function AccountRow({ group, instance, several, signingIn, onSignIn, onSignInDon
     : state === "signedOut" ? t("accounts.notSignedIn")
     : state === "unknown" ? t("accounts.unknown")
     : instance.snapshot.reason ?? t("onboarding.engines.needsSetup");
-  // An Antigravity account runs on its own runtime, so one of them can need installing while the others work.
   const setsUp = group === "antigravity" && state === "unavailable";
   const signedIn = state === "signedIn";
   useEffect(() => {
@@ -261,10 +260,7 @@ function AccountRow({ group, instance, several, signingIn, onSignIn, onSignInDon
               )}
             </>
             : group === "antigravity"
-            ? <div data-account-sign-in={instance.instanceId}>
-              <AntigravitySignIn instance={instance} />
-              <button type="button" onClick={onSignInDone} className="mt-2 rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-control">{t("common.cancel")}</button>
-            </div>
+            ? <div data-account-sign-in={instance.instanceId}><AntigravitySignIn instance={instance} onDone={onSignInDone} /></div>
             : <>
               {several && instance.authentication?.method === "device-code" && <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("accounts.chatgptDeviceHint")}</p>}
               <DeviceSignIn instanceId={instance.instanceId} provider="codex" browserPkce={instance.authentication?.method === "browser-pkce"} autoStart onDone={onSignInDone} />
@@ -354,7 +350,6 @@ export function AddAccount({ label, endpoint, extra, folder: offerFolder = false
 /** One card for a provider's accounts: who is signed in, one button for whoever is not, and one way to add another. */
 export function AccountsCard({ group, accounts, advanced, bare = false }: { group: AccountGroup; accounts: InstanceInfo[]; advanced?: ReactNode; bare?: boolean }) {
   const [signingIn, setSigningIn] = useState<readonly string[]>([]);
-  // A Google sign-in waits for its own redirect, so another account's must not end it; the other providers show one.
   const startSignIn = (instanceId: string) => setSigningIn((current) => group === "antigravity" ? [...current.filter((id) => id !== instanceId), instanceId] : [instanceId]);
   const endSignIn = (instanceId: string) => setSigningIn((current) => current.includes(instanceId) ? current.filter((id) => id !== instanceId) : current);
   const primary = accounts[0]!;

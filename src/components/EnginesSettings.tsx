@@ -197,11 +197,7 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
 }
 
 /** The executable behind an engine: its path, Claude's self-update, and a reset to the default. */
-function EngineAdvanced({ instance, account }: {
-  instance: InstanceInfo;
-  /** Whose CLI path this is, when one card lists several accounts. */
-  account?: string;
-}) {
+function EngineAdvanced({ instance, accountName }: { instance: InstanceInfo; accountName?: string }) {
   const { refreshInstances } = useStoreActions();
   const showInstances = useShowInstances();
   const [open, setOpen] = useState(false);
@@ -262,7 +258,7 @@ function EngineAdvanced({ instance, account }: {
 
   return (
       <details className="mt-4 border-t border-hairline/40 pt-3">
-        <summary className="cursor-pointer rounded-md py-1 text-[12px] font-medium text-ink-secondary outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">{account ? `${t("engines.library.advanced")} · ${account}` : t("engines.library.advanced")}</summary>
+        <summary className="cursor-pointer rounded-md py-1 text-[12px] font-medium text-ink-secondary outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">{accountName ? `${t("engines.library.advanced")} · ${accountName}` : t("engines.library.advanced")}</summary>
         <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("engines.footer")}</p>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-[13px]">
           {instance.cli ? (
@@ -535,10 +531,9 @@ function SimpleEngines({ rows, isReady, renderEngine, more, accountsOnly = false
   );
 }
 
-/** Each Antigravity account keeps its own CLI path, so each keeps its own way to fix it. */
 function accountsAdvanced(group: AccountGroup, accounts: InstanceInfo[]): ReactNode {
   if (group === "antigravity") return accounts.map((account) => (
-    <EngineAdvanced key={account.instanceId} instance={account} account={accounts.length > 1 ? engineDisplayName(account) : undefined} />
+    <EngineAdvanced key={account.instanceId} instance={account} accountName={accounts.length > 1 ? engineDisplayName(account) : undefined} />
   ));
   return <>{group === "claude" ? <><ClaudeEndpoints /><ClaudeBedrockEndpoints /></> : <CodexEndpoints />}<EngineAdvanced instance={accounts[0]!} /></>;
 }

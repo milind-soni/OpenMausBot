@@ -10,6 +10,8 @@ import { setLocale } from "@/lib/i18n";
 const fixture = vi.hoisted(() => ({
   state: { instances: [] as InstanceInfo[], bots: [] as Bot[], config: {} as Record<string, unknown> },
   calls: [] as Array<{ path: string; method: string; body: unknown }>,
+  startGate: null as Promise<void> | null,
+  opened: [] as string[],
 }));
 vi.mock("@/state/store", async (original) => ({
   ...await original<typeof import("@/state/store")>(),
@@ -24,6 +26,7 @@ vi.mock("@/state/store", async (original) => ({
       const added = google("antigravity-work", "Work", { authenticated: false });
       return { instanceId: added.instanceId, instances: [...fixture.state.instances, added] };
     }
+    if (path.endsWith("/auth/start") && fixture.startGate) await fixture.startGate;
     if (path.endsWith("/auth/start")) return { auth: { phase: "waiting", flowId: `flow-${path.split("/")[3]}`, authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth?state=fixture" } };
     if (path.includes("/auth/status")) return { auth: { phase: "waiting" } };
     return {};
@@ -49,10 +52,12 @@ const other = (instanceId: string, displayName: string): InstanceInfo => ({
 let container: HTMLDivElement, root: Root;
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  vi.stubGlobal("open", () => null);
+  vi.stubGlobal("open", (url: string) => { fixture.opened.push(url); return null; });
   setLocale("en");
   fixture.state = { instances: [google("antigravity", "Google Gemini (Antigravity)", { account: { email: "me@example.test" } })], bots: [], config: {} };
   fixture.calls = [];
+  fixture.startGate = null;
+  fixture.opened = [];
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
@@ -123,6 +128,42 @@ describe("Google Gemini (Antigravity) accounts share one card", () => {
     expect(startCalls()).toEqual(["/api/instances/antigravity/auth/start", "/api/instances/antigravity-work/auth/start"]);
     expect(row("antigravity").querySelector("[data-account-sign-in]")?.textContent).toContain("Open Google sign-in again");
     expect(row("antigravity-work").querySelector("[data-account-sign-in]")?.textContent).toContain("Open Google sign-in again");
+  });
+
+  it("cancels the account's Google sign-in on the server and closes its panel", async () => {
+    fixture.state.instances = [google("antigravity", "Personal", { authenticated: false })];
+    await render();
+    await click(buttons(row("antigravity"), "Sign in")[0]);
+    await click(buttons(row("antigravity"), "Cancel")[0]);
+    expect(fixture.calls.at(-1)).toEqual({ path: "/api/instances/antigravity/auth/cancel", method: "POST", body: { flowId: "flow-antigravity" } });
+    expect(row("antigravity").querySelector("[data-account-sign-in]")).toBeNull();
+    expect(buttons(row("antigravity"), "Sign in")).toHaveLength(1);
+  });
+
+  it("opens no Google page for a sign-in cancelled before it started, and ends that flow", async () => {
+    fixture.state.instances = [google("antigravity", "Personal", { authenticated: false })];
+    let start!: () => void;
+    fixture.startGate = new Promise((resolve) => { start = resolve; });
+    await render();
+    await click(buttons(row("antigravity"), "Sign in")[0]);
+    await click(buttons(row("antigravity"), "Cancel")[0]);
+    await act(async () => { start(); await fixture.startGate; });
+    expect(fixture.opened).toEqual([]);
+    expect(fixture.calls.at(-1)).toEqual({ path: "/api/instances/antigravity/auth/cancel", method: "POST", body: { flowId: "flow-antigravity" } });
+  });
+
+  it("closes the panel once the pasted redirect signs the account in, before its status is read again", async () => {
+    fixture.state.instances = [google("antigravity", "Personal", { authenticated: false })];
+    await render();
+    await click(buttons(row("antigravity"), "Sign in")[0]);
+    const input = row("antigravity").querySelector<HTMLInputElement>("[data-redirect-paste] input")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "http://127.0.0.1:1/?state=fixture&code=x");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await click(buttons(row("antigravity"), "Send redirect")[0]);
+    expect(fixture.calls.at(-1)).toMatchObject({ path: "/api/instances/antigravity/auth/complete", method: "POST" });
+    expect(row("antigravity").querySelector("[data-account-sign-in]")).toBeNull();
   });
 
   it("signs in an account whose status could not be read, rather than offering an install", async () => {

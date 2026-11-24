@@ -285,12 +285,17 @@ function installsAntigravityCli(instance: InstanceInfo): boolean {
   return instance.driverKind === "antigravityAgent" && !/^agy_acp_server$/iu.test(instance.cli?.trim() ?? "");
 }
 
-/** A Google sign-in for one Antigravity account, also when its last check could not tell whether it is signed in. */
-export function AntigravitySignIn({ instance }: { instance: InstanceInfo }) {
-  return instance.install?.managed ? <ManagedEngineSetup instance={instance} signInOnly autoStart /> : <EngineSetup instance={instance} unframed />;
+export function AntigravitySignIn({ instance, onDone }: { instance: InstanceInfo; onDone: () => void }) {
+  return instance.install?.managed ? <ManagedEngineSetup instance={instance} signInOnly autoStart onDone={onDone} /> : <EngineSetup instance={instance} unframed />;
 }
 
-function ManagedEngineSetup({ instance, signInOnly, autoStart = false }: { instance: InstanceInfo; signInOnly: boolean; autoStart?: boolean }) {
+function ManagedEngineSetup({ instance, signInOnly, autoStart = false, onDone }: {
+  instance: InstanceInfo;
+  signInOnly: boolean;
+  autoStart?: boolean;
+  /** Signed in or cancelled; given, the panel offers Cancel. */
+  onDone?: () => void;
+}) {
   const { state, refreshInstances, refreshModels } = useStore();
   const signInStarted = useSignInStarted(instance.instanceId);
   const [busy, setBusy] = useState<"install" | "signin" | "complete" | "check" | null>(null);
@@ -298,6 +303,8 @@ function ManagedEngineSetup({ instance, signInOnly, autoStart = false }: { insta
   const [flow, setFlow] = useState<{ flowId: string; authorizationUrl: string; pastedCode: boolean } | null>(null);
   const [callbackUrl, setCallbackUrl] = useState("");
   const managed = instance.install!.managed!;
+  const done = useRef(onDone);
+  useEffect(() => { done.current = onDone; }, [onDone]);
 
   const flowId = flow?.flowId;
   useEffect(() => {
@@ -316,6 +323,7 @@ function ManagedEngineSetup({ instance, signInOnly, autoStart = false }: { insta
         await refreshInstances();
         await refreshModels(instance.instanceId);
         ended(null);
+        if (live) done.current?.();
       } catch (cause) {
         // 404: this sign-in is gone on the server (finished through the pasted redirect, or its session ended).
         if (cause instanceof ApiError && cause.status === 404) {
@@ -349,13 +357,26 @@ function ManagedEngineSetup({ instance, signInOnly, autoStart = false }: { insta
     else window.open(link, "_blank", "noopener,noreferrer");
   };
 
+  const cancelled = useRef(false);
+  const cancelFlow = (id: string) => api(`/api/instances/${encodeURIComponent(instance.instanceId)}/auth/cancel`, { method: "POST", body: JSON.stringify({ flowId: id }) }).catch(() => {});
+  const cancel = async () => {
+    cancelled.current = true;
+    if (flow) await cancelFlow(flow.flowId);
+    onDone?.();
+  };
+
   const signIn = () => run("signin", async () => {
     if (flow) return openLink(flow.authorizationUrl);
     signInStarted();
     const { auth } = await api(`/api/instances/${encodeURIComponent(instance.instanceId)}/auth/start`, { method: "POST" });
+    if (cancelled.current) {
+      if (auth.flowId) await cancelFlow(auth.flowId);
+      return;
+    }
     if (auth.phase === "succeeded") {
       await refreshInstances();
       await refreshModels(instance.instanceId);
+      onDone?.();
       return;
     }
     if (!auth.flowId || !auth.authorizationUrl) throw new Error(t("engineSetup.googleNoLink"));
@@ -372,6 +393,7 @@ function ManagedEngineSetup({ instance, signInOnly, autoStart = false }: { insta
     setCallbackUrl("");
     await refreshInstances();
     await refreshModels(instance.instanceId);
+    onDone?.();
   });
 
   const check = () => run("check", async () => {
@@ -478,6 +500,7 @@ function ManagedEngineSetup({ instance, signInOnly, autoStart = false }: { insta
         </>
       )}
       {error && <p className="text-[12px] text-danger">{error}</p>}
+      {onDone && <button type="button" onClick={() => void cancel()} className="rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-control">{t("common.cancel")}</button>}
     </div>
   );
 }
