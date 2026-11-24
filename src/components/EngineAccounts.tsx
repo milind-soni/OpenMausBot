@@ -208,6 +208,9 @@ function AccountRow({ group, instance, several, signingIn, onSignIn, onSignInDon
   onSignInDone: () => void;
 }) {
   const [renaming, setRenaming] = useState(false);
+  const signInButton = useRef<HTMLButtonElement>(null);
+  const signInPanel = useRef<HTMLDivElement>(null);
+  const wasSigningIn = useRef(signingIn);
   const state = accountState(instance);
   const account = instance.snapshot.account;
   // This server cannot run the provider's sign-in (a remote browser for a local-only flow): say why, offer nothing.
@@ -222,6 +225,14 @@ function AccountRow({ group, instance, several, signingIn, onSignIn, onSignInDon
   useEffect(() => {
     if (group === "antigravity" && signingIn && signedIn) onSignInDone();
   }, [group, signingIn, signedIn, onSignInDone]);
+  useEffect(() => {
+    const opened = signingIn && !wasSigningIn.current, closed = !signingIn && wasSigningIn.current;
+    wasSigningIn.current = signingIn;
+    if (closed) signInButton.current?.focus();
+    if (!opened) return;
+    const frame = requestAnimationFrame(() => signInPanel.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [signingIn]);
 
   return (
     <li data-account={instance.instanceId} data-account-state={state} className="px-3 py-2.5">
@@ -237,7 +248,7 @@ function AccountRow({ group, instance, several, signingIn, onSignIn, onSignInDon
               <div className="truncate text-[12px] text-ink-secondary" title={detail}>{detail}</div>
             </div>
             {state !== "signedIn" && state !== "unavailable" && !blocked && !signingIn && (
-              <button type="button" onClick={onSignIn} className={cn("shrink-0 rounded-lg px-3 py-1.5 text-[12px] font-semibold",
+              <button ref={signInButton} type="button" onClick={onSignIn} className={cn("shrink-0 rounded-lg px-3 py-1.5 text-[12px] font-semibold",
                 state === "signedOut" ? "bg-accent text-white hover:brightness-110" : "bg-control text-ink hover:bg-raised-hover")}>
                 {t("accounts.signIn")}
               </button>
@@ -248,7 +259,7 @@ function AccountRow({ group, instance, several, signingIn, onSignIn, onSignInDon
       </div>
       {setsUp && <div data-account-setup={instance.instanceId} className="pl-9"><EngineSetup instance={instance} unframed /></div>}
       {signingIn && !setsUp && (
-        <div className="pl-9">
+        <div ref={signInPanel} className="pl-9">
           {group === "claude"
             ? <>
               <ClaudeSignIn instanceId={instance.instanceId} autoStart onDone={onSignInDone} />

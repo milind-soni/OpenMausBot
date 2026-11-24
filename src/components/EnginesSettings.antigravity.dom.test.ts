@@ -175,6 +175,16 @@ describe("Google Gemini (Antigravity) accounts share one card", () => {
     expect(row("antigravity").querySelector("[data-account-sign-in]")).toBeNull();
   });
 
+  it("moves focus into the sign-in it opens, and back to Sign in when it is cancelled", async () => {
+    fixture.state.instances = [google("antigravity", "Personal", { authenticated: false })];
+    await render();
+    await click(buttons(row("antigravity"), "Sign in")[0]);
+    await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
+    expect(row("antigravity").querySelector("[data-account-sign-in]")?.contains(document.activeElement)).toBe(true);
+    await click(buttons(row("antigravity"), "Cancel")[0]);
+    expect(document.activeElement).toBe(buttons(row("antigravity"), "Sign in")[0]);
+  });
+
   it("keeps the sign-in open and says why when the server could not cancel it", async () => {
     fixture.state.instances = [google("antigravity", "Personal", { authenticated: false })];
     fixture.cancelFails = true;
