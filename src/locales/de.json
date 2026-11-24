@@ -4380,6 +4380,8 @@
   "room.thread.panel": "Thread",
   "room.thread.close": "Thread schließen",
   "room.thread.resize": "Thread-Breite ändern",
+  "settings.features.teamBoard": "Board",
+  "settings.features.teamBoardLine": "Verfolge Arbeit in Gruppenchats als Einträge mit Status, Labels und dem, worauf jeder wartet",
   "settings.features.error": "Das konnte nicht gespeichert werden. Prüfe deine Verbindung und versuche es erneut.",
   "skillBurger.pill.cooking": "Wird gekocht… {count}",
   "skillBurger.pill.add": "Hinzufügen",
