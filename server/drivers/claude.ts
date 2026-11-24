@@ -61,7 +61,7 @@ import type { KeepWarmContract } from "./claude-keepwarm.ts"; import { claudeFor
 import { BACKGROUND_CALL_TIMEOUT_MS, backgroundCallArgs, spawnBackgroundCall } from "./claude-background.ts"; import { withEndpointFolder } from "./claude-endpoint-folder.ts";
 import { permissionLaunchCwd, shellRequest } from "./permission-command.ts"; import { readToolPaths } from "../own-file-reads.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
-import { extractMcpImages } from "../mcp-tool-images.ts"; import { claudeToolDraft } from "./tool-progress.ts"; import { redactSecretsInText } from "../../shared/redact.ts"; import { foldTranscriptImages, transcriptImagesOver } from "./claude-transcript-images.ts";
+import { extractMcpImages } from "../mcp-tool-images.ts"; import { claudeToolDraft } from "./tool-progress.ts"; import { redactSecretsInText } from "../../shared/redact.ts"; import { foldTranscriptImages, imageFoldTarget, transcriptImagesOver } from "./claude-transcript-images.ts";
 import {
   ASK_USER_QUESTION_TOOL,
   ASK_USER_TOOL,
@@ -1160,7 +1160,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // A process started ahead is taken once it has started up and has listed again the tools the harness serves only during a turn.
       const ahead = sessions.get(threadId);
       if (!spare && ahead?.spare && !ahead.closing && ahead.argsKey === argsKey && !(ahead.tools?.ready && await ahead.tools.relist(Object.keys(mcpServers)))) closeSession(threadId, "never used");
-      const live = sessions.get(threadId), transcript = { configDir: env.CLAUDE_CONFIG_DIR?.trim() || resolveClaudeConfigDir(undefined, env), cwd }, imagesOver = !turn.sessionReset && !!sessionId && live?.sessionId === sessionId && !live.turn && transcriptImagesOver({ ...transcript, sessionId }, turn.images?.length ?? 0);
+      const live = sessions.get(threadId), transcript = imageFoldTarget(config, env, cwd), imagesOver = !!transcript && !turn.sessionReset && !!sessionId && live?.sessionId === sessionId && !live.turn && transcriptImagesOver({ ...transcript, sessionId }, turn.images?.length ?? 0);
       if (!turn.sessionReset && !imagesOver && live && !live.turn && !live.closing && live.child.exitCode === null && live.argsKey === argsKey && (!sessionId || sessionId === live.sessionId)) {
         stopIdleClose(`${instanceId}\0${threadId}`, live.idleTimer); // busy again: no longer idle
         if (live.spare) { live.spare = false; live.take?.(turnId); appendNative(threadId, { dir: "out", source: "claude.session", msg: { took: "prestarted" } }); }
@@ -1277,7 +1277,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (authSettingsPath) {
           writeFileSync(authSettingsPath, JSON.stringify(settings), { mode: 0o600 });
         }
-        if (sessionId) { foldTranscriptImages({ ...transcript, sessionId, incoming: turn.images?.length ?? 0 }); args.push("--resume", sessionId); } // a resumed thread resends every past image: older ones become a note, leaving room for this turn's own
+        if (sessionId) { if (transcript) foldTranscriptImages({ ...transcript, sessionId, incoming: turn.images?.length ?? 0 }); args.push("--resume", sessionId); } // on a custom endpoint a resumed thread resends every past image: older ones become a note, leaving room for this turn's own
         else args.push("--session-id", newSessionId!);
       } catch (error) {
         cleanupUnownedLaunch();

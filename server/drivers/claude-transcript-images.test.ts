@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { test } from "vitest";
 
-import { CLAUDE_IMAGE_KEEP, CLAUDE_IMAGE_LIMIT, foldTranscriptImages, imagesToKeep, transcriptImagesOver, transcriptPath } from "./claude-transcript-images.ts";
+import { CLAUDE_IMAGE_KEEP, CLAUDE_IMAGE_LIMIT, FOLD_BACKUP_SUFFIX, foldTranscriptImages, imageFoldTarget, imagesToKeep, transcriptImagesOver, transcriptPath } from "./claude-transcript-images.ts";
 
 const image = (n: number) => ({ type: "image", source: { type: "base64", media_type: "image/png", data: `img${n}` } });
 const userRow = (blocks: unknown[], n: number) => JSON.stringify({ type: "user", message: { role: "user", content: blocks }, uuid: `u${n}` });
@@ -138,7 +138,61 @@ test("the transcript is found where Claude Code writes it: a linked working dire
 test("a transcript that cannot be read keeps the warm process and costs the turn nothing", () => {
   const options = setup([]);
   const unreadable = { configDir: options.configDir, cwd: options.cwd, sessionId: "dir" };
-  mkdirSync(transcriptPath(options.configDir, options.cwd, "dir"));     // stat works, read does not
+  mkdirSync(transcriptPath(options.configDir, options.cwd, "dir"));     // something there, but not a file
   assert.equal(transcriptImagesOver(unreadable, 25), false);
-  assert.equal(foldTranscriptImages(unreadable).skipped, "unreadable");
+  assert.equal(foldTranscriptImages(unreadable).skipped, "missing");
+});
+
+test("only a custom Anthropic-compatible endpoint is folded: never first-party Anthropic, Bedrock, company access or a Claude account", () => {
+  const endpoint = { endpointModels: ["deepseek-chat"], configDir: "/data/providers/claude-1" };
+  const env = { ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic", CLAUDE_CONFIG_DIR: "/data/providers/claude-1" };
+  assert.deepEqual(imageFoldTarget(endpoint, env, "/work"), { configDir: "/data/providers/claude-1", cwd: "/work" });
+  // an endpoint entry pointed at Anthropic itself, in any spelling
+  for (const url of ["https://api.anthropic.com", "https://API.Anthropic.com/", "https://api.anthropic.com./v1", "https://anthropic.com"]) {
+    assert.equal(imageFoldTarget(endpoint, { ...env, ANTHROPIC_BASE_URL: url }, "/work"), undefined, url);
+  }
+  assert.equal(imageFoldTarget(endpoint, { ...env, ANTHROPIC_BASE_URL: undefined }, "/work"), undefined);
+  assert.equal(imageFoldTarget(endpoint, { ...env, ANTHROPIC_BASE_URL: "not a url" }, "/work"), undefined);
+  assert.equal(imageFoldTarget({ ...endpoint, bedrock: true }, env, "/work"), undefined);
+  assert.equal(imageFoldTarget({ ...endpoint, managed: true }, env, "/work"), undefined);
+  // a Claude account with its own folder, or the default Claude, even with a base URL in its environment
+  assert.equal(imageFoldTarget({ configDir: "/data/providers/claude-1" }, env, "/work"), undefined);
+  assert.equal(imageFoldTarget({}, env, "/work"), undefined);
+  assert.equal(imageFoldTarget(endpoint, { ...env, CLAUDE_CONFIG_DIR: undefined }, "/work"), undefined);
+});
+
+test("a fold keeps the transcript as it was beside it, rewrites only the rows that lost an image, and leaves no temp file", () => {
+  // the CLI's own spacing and key order, which a rewrite of every row would lose
+  const plain = (n: number) => `{"type":"assistant", "message":{"content":[{"type":"text","text":"answer ${n}"}]}}`;
+  const rows = Array.from({ length: 21 }, (_, i) => [userRow([image(i)], i), plain(i)]).flat();
+  const { file, ...options } = setup(rows);
+  const before = readFileSync(file, "utf8");
+  assert.equal(foldTranscriptImages(options).folded, 21 - CLAUDE_IMAGE_KEEP);
+  assert.equal(readFileSync(`${file}${FOLD_BACKUP_SUFFIX}`, "utf8"), before);
+  assert.ok(!`${file}${FOLD_BACKUP_SUFFIX}`.endsWith(".jsonl"));
+  const after = readFileSync(file, "utf8").split("\n"), was = before.split("\n");
+  assert.equal(after.length, was.length);
+  const differ = after.flatMap((line, index) => (line === was[index] ? [] : [index]));
+  // only the first five user rows (even lines) changed; every assistant row is byte for byte the same
+  assert.deepEqual(differ, [0, 2, 4, 6, 8]);
+  assert.deepEqual(readdirSync(dirname(file)).sort(), [`${options.sessionId}.jsonl`, `${options.sessionId}.jsonl${FOLD_BACKUP_SUFFIX}`].sort());
+  assert.equal(statSync(file).mode, statSync(`${file}${FOLD_BACKUP_SUFFIX}`).mode);
+});
+
+test("counts only the images a request sends: the copy the CLI keeps beside a tool result is neither counted nor changed", () => {
+  const mirrored = (n: number) => JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: `t${n}`, content: [image(n)] }] }, toolUseResult: [image(n)] });
+  const at = setup(Array.from({ length: CLAUDE_IMAGE_LIMIT }, (_, i) => mirrored(i)));
+  assert.equal(transcriptImagesOver(at), false);
+  const over = setup(Array.from({ length: CLAUDE_IMAGE_LIMIT + 1 }, (_, i) => mirrored(i)));
+  assert.equal(foldTranscriptImages(over).folded, CLAUDE_IMAGE_LIMIT + 1 - CLAUDE_IMAGE_KEEP);
+  const first = JSON.parse(readFileSync(over.file, "utf8").split("\n")[0]!);
+  assert.match(first.message.content[0].content[0].text, /Earlier image/);
+  assert.equal(first.toolUseResult[0].type, "image");
+});
+
+test("a session id that is not one is never looked up", () => {
+  const { configDir, cwd } = setup(Array.from({ length: 25 }, (_, i) => userRow([image(i)], i)));
+  assert.equal(foldTranscriptImages({ configDir, cwd, sessionId: "../s1" }).skipped, "missing");
+  assert.equal(transcriptImagesOver({ configDir, cwd, sessionId: "../s1" }, 25), false);
+  assert.ok(!existsSync(join(configDir, "projects", `s1.jsonl${FOLD_BACKUP_SUFFIX}`)));
 });

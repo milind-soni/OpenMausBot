@@ -1,14 +1,21 @@
-// Anthropic-compatible endpoints take at most 20 images per request. Claude Code sends the whole conversation on every
-// turn, so a long thread that keeps adding screenshots (a patent page per turn) crosses that line and every later turn,
-// text-only or not, is refused with HTTP 400 "Total number of images exceeds the maximum allowed of 20" (seen
+// Some Anthropic-compatible endpoints take at most 20 images per request. Claude Code sends the whole conversation on
+// every turn, so a long thread that keeps adding screenshots (a patent page per turn) crosses that line and every later
+// turn, text-only or not, is refused with HTTP 400 "Total number of images exceeds the maximum allowed of 20" (seen
 // 2026-11-13 on a patent-extraction thread: 81k tokens, page images from earlier turns).
 //
-// Before a resumed turn, keep the newest images that fit beside the turn's own and turn the older ones into a one-line
-// note in the transcript Claude Code reads. A warm process holds the conversation in memory and never rereads that file,
-// so once its next request would go over the limit it is not reused: the turn starts a process that resumes the folded
+// Only for a custom Anthropic-compatible endpoint (imageFoldTarget): first-party Anthropic takes far more images per
+// request, so its threads keep every image and its warm processes are reused as before. For such an endpoint, before a
+// resumed turn, keep the newest images that fit beside the turn's own and turn the older ones into a one-line note in
+// the transcript Claude Code reads. A warm process holds the conversation in memory and never rereads that file, so
+// once its next request would go over the limit it is not reused: the turn starts a process that resumes the folded
 // transcript instead (transcriptImagesOver). The engine's own JSONL is the only place both sides share; nothing else
 // about the conversation changes, and a folded image is still described by the text around it.
-import { readFileSync, realpathSync, renameSync, statSync, writeFileSync, type Stats } from "node:fs";
+//
+// The rewrite is careful: the file as it was is first copied beside it (`<session>.jsonl.before-image-fold`, which the
+// CLI never reads as a session), only the rows that held a folded image are written anew, the new file is synced and
+// renamed over the old one, and nothing is replaced when the transcript changed while it was being read.
+import { randomUUID } from "node:crypto";
+import { closeSync, fsyncSync, openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync, type Stats } from "node:fs";
 import { dirname, join } from "node:path";
 
 /** What one request may carry (the endpoints' own limit). */
@@ -17,20 +24,46 @@ export const CLAUDE_IMAGE_LIMIT = 20;
 export const CLAUDE_IMAGE_KEEP = 16;
 /** Claude Code's cap on a project folder's name; a longer one is cut and given a hash of the full path. */
 const PROJECT_DIR_MAX = 200;
+/** The copy of a transcript as it was before its latest fold. */
+export const FOLD_BACKUP_SUFFIX = ".before-image-fold";
 
 const counted = new Map<string, { stamp: string; total: number }>();
 
 export interface FoldResult {
   total: number;
   folded: number;
-  /** Why nothing was read, when nothing was. */
-  skipped?: "missing" | "unreadable";
+  /** Why nothing was read or replaced, when nothing was. */
+  skipped?: "missing" | "unreadable" | "changed";
 }
 
 interface TranscriptOptions {
   configDir: string;
   cwd: string;
   sessionId: string;
+}
+
+/** Whether a base URL points at a host other than Anthropic's own. */
+function customHost(url: string | undefined): boolean {
+  if (!url?.trim()) return false;
+  try {
+    const host = new URL(url.trim()).hostname.toLowerCase().replace(/\.$/u, "");
+    return host !== "anthropic.com" && !host.endsWith(".anthropic.com");
+  } catch {
+    return false;
+  }
+}
+
+/** Where to fold images, or undefined to leave the thread alone: only a custom endpoint instance (Settings > Custom
+ * endpoint: not Bedrock, not company model access, not a Claude account) pointed at a host that isn't Anthropic's,
+ * whose transcripts live in that endpoint's own config folder. */
+export function imageFoldTarget(
+  config: { endpointModels?: unknown; bedrock?: boolean; managed?: boolean; configDir?: string },
+  env: { ANTHROPIC_BASE_URL?: string; CLAUDE_CONFIG_DIR?: string },
+  cwd: string,
+): { configDir: string; cwd: string } | undefined {
+  if (!Array.isArray(config.endpointModels) || config.bedrock === true || config.managed === true || !config.configDir) return undefined;
+  const configDir = env.CLAUDE_CONFIG_DIR?.trim();
+  return configDir && customHost(env.ANTHROPIC_BASE_URL) ? { configDir, cwd } : undefined;
 }
 
 /** Where Claude Code keeps one session's transcript, as its own code names it: the resolved working directory with
@@ -56,9 +89,11 @@ const folderHash = (path: string) => {
 
 /** The transcript for one session: the folder the CLI names after the resolved working directory. */
 function findTranscript(options: TranscriptOptions): { file: string; stat: Stats } | undefined {
+  if (!/^[A-Za-z0-9-]+$/u.test(options.sessionId)) return undefined;
   const file = transcriptPath(options.configDir, options.cwd, options.sessionId);
   try {
-    return { file, stat: statSync(file) };
+    const stat = statSync(file);
+    return stat.isFile() ? { file, stat } : undefined;
   } catch { /* no transcript under the resolved name, or the name as given when the directory is gone */ }
   return undefined;
 }
@@ -97,6 +132,7 @@ export function transcriptImagesOver(options: TranscriptOptions, incoming = 0): 
 
 type ImageSlot = { container: unknown[]; index: number };
 
+/** The image blocks a row sends: only its `message.content`, never the copies the CLI keeps beside it for itself. */
 function imageSlots(row: unknown): ImageSlot[] {
   const slots: ImageSlot[] = [];
   const walk = (value: unknown, depth: number) => {
@@ -110,7 +146,8 @@ function imageSlots(row: unknown): ImageSlot[] {
     }
     for (const entry of Object.values(value as Record<string, unknown>)) walk(entry, depth + 1);
   };
-  walk(row, 0);
+  const content = (row as { message?: { content?: unknown } } | null)?.message?.content;
+  if (Array.isArray(content)) walk(content, 0);
   return slots;
 }
 
@@ -122,14 +159,30 @@ interface FoldOptions extends TranscriptOptions {
 }
 
 /** Keep the newest images of one transcript that fit beside the turn's own, replacing older ones with a text note.
- * Atomic: a new file is written beside it and renamed over. Returns what it found; never throws: an unreadable
- * transcript must not cost the turn. */
+ * Returns what it found; never throws: an unreadable transcript must not cost the turn, and a failed rewrite leaves the
+ * transcript as it was. */
 export function foldTranscriptImages(options: FoldOptions): FoldResult {
   try {
     return fold(options);
   } catch {
     return { total: 0, folded: 0, skipped: "unreadable" };
   }
+}
+
+/** Writes `text` to a new file beside `file`, synced to disk, and returns its path. */
+function writeBeside(file: string, text: string, mode: number): string {
+  const temp = join(dirname(file), `.${randomUUID()}.image-fold.tmp`);
+  const fd = openSync(temp, "wx", mode & 0o777);
+  try {
+    writeFileSync(fd, text);
+    fsyncSync(fd);
+  } catch (error) {
+    closeSync(fd);
+    try { unlinkSync(temp); } catch { /* already gone */ }
+    throw error;
+  }
+  closeSync(fd);
+  return temp;
 }
 
 function fold(options: FoldOptions): FoldResult {
@@ -140,24 +193,39 @@ function fold(options: FoldOptions): FoldResult {
   const total = imagesIn(file, stat);
   if (total <= keep) return { total, folded: 0 };
 
-  const parsed: Array<{ line: string; row?: unknown }> = readFileSync(file, "utf8").split("\n").map((line) => {
-    if (!line.includes('"image"')) return { line };
+  const original = readFileSync(file, "utf8");
+  const parsed: Array<{ line: string; row?: unknown; slots: ImageSlot[] }> = original.split("\n").map((line) => {
+    if (!line.includes('"image"')) return { line, slots: [] };
     try {
-      return { line, row: JSON.parse(line) as unknown };
+      const row = JSON.parse(line) as unknown;
+      return { line, row, slots: imageSlots(row) };
     } catch {
-      return { line };      // a half-written last line, or a format this code does not know: left as it was
+      return { line, slots: [] };      // a half-written last line, or a format this code does not know: left as it was
     }
   });
-  const slots: ImageSlot[] = [];
-  for (const entry of parsed) if (entry.row !== undefined) slots.push(...imageSlots(entry.row));
+  const slots = parsed.flatMap((entry) => entry.slots);
   const folded = Math.max(0, slots.length - keep);
   if (!folded) return { total: slots.length, folded: 0 };
+  const changed = new Set(slots.slice(0, folded));
   slots.slice(0, folded).forEach((slot, index) => { slot.container[slot.index] = note(index + 1, keep); });
+  // Only a row that lost an image is written anew; every other line stays byte for byte as the CLI wrote it.
+  const out = parsed.map((entry) => (entry.slots.some((slot) => changed.has(slot)) ? JSON.stringify(entry.row) : entry.line)).join("\n");
 
-  const out = parsed.map((entry) => (entry.row === undefined ? entry.line : JSON.stringify(entry.row))).join("\n");
-  const temp = join(dirname(file), `.${options.sessionId}.images.tmp`);
-  writeFileSync(temp, out, { mode: stat.mode });
-  renameSync(temp, file);
+  const temp = writeBeside(file, out, stat.mode);
+  try {
+    const backup = writeBeside(file, original, stat.mode);
+    renameSync(backup, `${file}${FOLD_BACKUP_SUFFIX}`);
+    // The CLI may have written while this ran: then nothing is replaced, and the next resume looks again.
+    const now = statSync(file);
+    if (now.size !== Buffer.byteLength(original) || stampOf(now) !== stampOf(stat)) {
+      unlinkSync(temp);
+      return { total: slots.length, folded: 0, skipped: "changed" };
+    }
+    renameSync(temp, file);
+  } catch (error) {
+    try { unlinkSync(temp); } catch { /* renamed, or already gone */ }
+    throw error;
+  }
   counted.set(file, { stamp: stampOf(statSync(file)), total: slots.length - folded });
   return { total: slots.length, folded };
 }
