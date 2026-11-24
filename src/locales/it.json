@@ -5351,6 +5351,7 @@
   "computer.problem.localMac": "I bot non possono ancora usare questo Mac. Controlla che {app} sia consentito in Registrazione schermo e Accessibilità, in Impostazioni di Sistema → Privacy e sicurezza, poi riavvialo.",
   "computer.problem.localMacTooOld": "Bots non può usare questo Mac: il controllo desktop locale ha bisogno di macOS 15 Sequoia o più tardi. Aggiornare macOS per usarlo.",
   "computer.problem.localRemoteServer": "I bot sul tuo server non possono usare questo computer. Torna a Questo computer per usarlo.",
+  "computer.problem.localMacTooOld": "Bots non può usare questo Mac: il controllo desktop locale ha bisogno di macOS 13 Ventura o più tardi. Aggiornare macOS per usarlo.",
   "computer.problem.oldImage": "Il desktop privato non è aggiornato; sostituiscilo",
   "computer.problem.unmanaged": "Il container esistente non è stato creato da {app}; ricrealo",
   "computer.problem.publicViewer": "Il visore del desktop privato è aperto alla rete; sostituiscilo",

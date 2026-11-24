@@ -7173,7 +7173,6 @@
   "computer.problem.localNotReady": "ボットはまだこのコンピューターを使えません。{app} を再起動して、もう一度お試しください。",
   "computer.problem.localNeedsApp": "ボットにこのコンピューターを使わせることができるのは、ここにある {app} アプリだけです。使うには、ここでアプリを開いてください。",
   "computer.problem.localMac": "ボットはまだこの Mac を使えません。「システム設定 → プライバシーとセキュリティ」の「画面収録」と「アクセシビリティ」で {app} が許可されているか確認してから、再起動してください。",
-  "computer.problem.localRemoteServer": "自分のサーバー上のボットは、このコンピューターを使えません。使うには「このコンピューター」に切り替えてください。",
   "ask.header.asks": "{name}からの質問",
   "ask.settled.chose": "選んだ回答：",
   "ask.settled.answered": "あなたの回答：",

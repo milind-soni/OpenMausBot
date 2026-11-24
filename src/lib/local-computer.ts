@@ -39,7 +39,7 @@ export function localComputerDisabledReason({
 }): string | null {
   if (!providerSupportsLocal) return t("computer.problem.localAiCannot");
   if (capabilities.localComputer.available) return null;
-  if (pageOnRemoteServer(capabilities)) return t("computer.problem.localRemoteServer");
+  if (pageOnRemoteServer(capabilities)) return t("computer.problem.lendRemoteServer");
   if (capabilities.host.platform === "linux") {
     if (capabilities.localComputer.reasonCode === "linux-wayland-seat-safety-blocked") return t("computer.problem.localWaylandBlocked");
     if (capabilities.localComputer.reasonCode === "wayland-compositor-unsupported") return t("computer.problem.localWaylandDesktop");

@@ -63,7 +63,7 @@ describe("local computer UI eligibility", () => {
         localComputer: { available: false, reasonCode: "remote-server" },
       } as DesktopCapabilities;
       expect(localComputerSelectable({ capabilities, providerSupportsLocal: true })).toBe(false);
-      expect(localComputerDisabledReason({ capabilities, providerSupportsLocal: true })).toBe(en["computer.problem.localRemoteServer"]);
+      expect(localComputerDisabledReason({ capabilities, providerSupportsLocal: true })).toBe(en["computer.problem.lendRemoteServer"]);
     }
   });
 
