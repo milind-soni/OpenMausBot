@@ -3,20 +3,42 @@
 // place becomes a Bot-shaped value the sidebar places and draws like any other. Its id is its place's key and its own id
 // (`cloud:scout`), so two bots with one id in two places never meet, and nothing that writes to this place's server is
 // ever handed one: what such a row sends is either "open it", which main does where the bot lives, or dropped.
+//
+// Everything here is keyed by a place, not by "My Cloud": today the places are this computer and My Cloud, and a
+// person's own always-on machine (a server of their own, or a computer at home) is meant to join the same list later
+// as one more place, with its own key, kind, name and state.
 import type { Dispatch } from "react";
 import { BOT_BODY_IDS, type BotBodyId } from "../../shared/bot-body";
 import { MASCOT_FACE_COLORS, mascotBodyColorSchema, mascotMaterialSchema, type MascotFaceColor } from "../../shared/bot-avatar";
 import type { Action, Bot } from "@/state/store";
 import { t } from "./i18n";
 import { MAUS_COLOR_NAMES, type MausColor } from "./mascot";
-import { openOtherPlaceBot, placedKey, usePlacesTogetherPart, type BotHome, type PlaceBotRow, type PlacesTogetherState } from "./places-together";
+import { openOtherPlaceBot, usePlacesTogetherPart, type BotHome, type PlaceBotRow, type PlacesTogetherState } from "./places-together";
 
-/** How the other place is doing, as main last said. Asleep and waking are normal for a Cloud, never an error. */
+/** How a place is doing, as main last said. Asleep and waking are normal for a Cloud, never an error. */
 export type PlaceHealth = NonNullable<PlacesTogetherState["other"]>["state"];
+
+/** What kind of machine a place is: its icon, and its words where it has words of its own. */
+export type PlaceKind = "this-computer" | "my-cloud" | "own-server" | "home-computer";
+
+/** A place in the one list: its stable key (the namespace of its bots' ids, never an address), its kind and its name. */
+export interface Place {
+  key: string;
+  kind: PlaceKind;
+  label: string;
+}
+
+/** The two places main lists today, as places. */
+export function placeOfHome(home: BotHome): Place {
+  return home === "cloud" ? { key: "cloud", kind: "my-cloud", label: t("cloudSetup.myCloud") } : { key: "computer", kind: "this-computer", label: t("place.local") };
+}
+
+/** A bot's key in a list that holds several places: ids are unique only within one. */
+export const placeKeyed = (place: Pick<Place, "key">, id: string): string => `${place.key}:${id}`;
 
 /** Where a row of the other place comes from: its place, its own id there, and how that place is doing. */
 export interface PlacedFrom {
-  home: BotHome;
+  place: Place;
   id: string;
   health: PlaceHealth;
 }
@@ -31,9 +53,9 @@ const known = <T extends string>(list: readonly string[], value: string | undefi
 
 /** A row of the other place as a bot of this list. It carries only what the row does: a name, a look, a state and a
  * time; never a message, an engine or a setting of the other place. */
-export function placedBot(row: PlaceBotRow, health: PlaceHealth): PlacedBot {
+export function placedBot(row: PlaceBotRow, health: PlaceHealth, place: Place = placeOfHome(row.home)): PlacedBot {
   return {
-    id: placedKey(row.home, row.id), threadId: placedKey(row.home, row.threadId),
+    id: placeKeyed(place, row.id), threadId: placeKeyed(place, row.threadId),
     name: row.name, title: row.title ?? "", description: "", notifications: false,
     color: known<MausColor>(MAUS_COLOR_NAMES, row.color) ?? "green",
     mascotBody: known<BotBodyId>(BOT_BODY_IDS, row.mascotBody),
@@ -45,7 +67,7 @@ export function placedBot(row: PlaceBotRow, health: PlaceHealth): PlacedBot {
     // No engine of this place: no model badge, and nothing here runs it.
     modelSelection: { instanceId: "", model: "" },
     messages: [],
-    placedFrom: { home: row.home, id: row.id, health },
+    placedFrom: { place, id: row.id, health },
     ...(row.lastAt !== undefined ? { lastAt: row.lastAt } : {}),
   };
 }
@@ -68,7 +90,7 @@ function placedList(state: PlacesTogetherState | null): readonly PlacedBot[] {
   const other = state?.on ? state.other : null;
   const kept = new Map<string, { row: PlaceBotRow; health: PlaceHealth; bot: PlacedBot }>();
   const next = (other?.bots ?? []).map((row) => {
-    const key = placedKey(row.home, row.id), had = adapted.get(key);
+    const key = placeKeyed(placeOfHome(row.home), row.id), had = adapted.get(key);
     const entry = had && had.health === other!.state && sameRow(had.row, row) ? had : { row, health: other!.state, bot: placedBot(row, other!.state) };
     kept.set(key, entry);
     return entry.bot;
@@ -132,10 +154,12 @@ export function placedLine(bot: PlacedBot, advanced: boolean): string {
   return advanced ? "" : bot.title;
 }
 
-export type PlaceIcon = "computer" | "cloud" | "cloud-asleep" | "cloud-waking" | "cloud-off" | "computer-off";
+export type PlaceIcon = "computer" | "cloud" | "server" | "cloud-asleep" | "cloud-waking" | "cloud-off" | "computer-off" | "server-off";
 
 export interface PlaceMark {
-  home: BotHome;
+  /** The place's key: which place the row's bot lives in. */
+  place: string;
+  kind: PlaceKind;
   icon: PlaceIcon;
   /** The tooltip, and what a screen reader says, shown or not. */
   label: string;
@@ -144,16 +168,24 @@ export interface PlaceMark {
   shows: "always" | "hover";
 }
 
+const DEVICE: Record<PlaceKind, { icon: PlaceIcon; off: PlaceIcon }> = {
+  "this-computer": { icon: "computer", off: "computer-off" }, "home-computer": { icon: "computer", off: "computer-off" },
+  "my-cloud": { icon: "cloud", off: "cloud-off" }, "own-server": { icon: "server", off: "server-off" },
+};
+
 /** The device mark for one row. Pure: the row draws it, and the tests read it. A place that is asleep or can't be
- * reached says so on its rows in quiet words, never as an error. */
-export function placeMark(home: BotHome, health: PlaceHealth, working: boolean, name: string): PlaceMark {
-  if (home === "cloud" && health === "asleep") return { home, icon: "cloud-asleep", label: t("together.mark.asleep", { name }), shows: "always" };
-  if (home === "cloud" && health === "waking") return { home, icon: "cloud-waking", label: t("together.state.waking"), shows: "always" };
-  if (health === "offline") return home === "cloud"
-    ? { home, icon: "cloud-off", label: t("together.mark.offlineCloud", { name }), shows: "always" }
-    : { home, icon: "computer-off", label: t("together.state.offlineComputer"), shows: "always" };
-  if (working) return { home, icon: home, label: t(home === "cloud" ? "together.mark.workingCloud" : "together.mark.workingComputer"), shows: "always" };
-  return { home, icon: home, label: t(home === "cloud" ? "together.onCloud" : "together.onComputer"), shows: "hover" };
+ * reached says so on its rows in quiet words, never as an error. This computer and My Cloud have words of their own;
+ * any other place of the person's is named by its own name. */
+export function placeMark(place: Place, health: PlaceHealth, working: boolean, name: string): PlaceMark {
+  const { kind } = place, device = DEVICE[kind];
+  const mark = (icon: PlaceIcon, label: string, shows: PlaceMark["shows"]): PlaceMark => ({ place: place.key, kind, icon, label, shows });
+  if (kind === "my-cloud" && health === "asleep") return mark("cloud-asleep", t("together.mark.asleep", { name }), "always");
+  if (kind === "my-cloud" && health === "waking") return mark("cloud-waking", t("together.state.waking"), "always");
+  if (health === "offline") return mark(device.off, kind === "my-cloud" ? t("together.mark.offlineCloud", { name })
+    : kind === "this-computer" ? t("together.state.offlineComputer") : t("together.mark.offline", { place: place.label, name }), "always");
+  if (working) return mark(device.icon, kind === "my-cloud" ? t("together.mark.workingCloud") : kind === "this-computer" ? t("together.mark.workingComputer")
+    : t("together.mark.workingOn", { place: place.label }), "always");
+  return mark(device.icon, kind === "my-cloud" ? t("together.onCloud") : kind === "this-computer" ? t("together.onComputer") : t("together.mark.on", { place: place.label }), "hover");
 }
 
 /** This page's place while the one list is on; null while it is off, in a browser, and on any other place's page. */
@@ -164,7 +196,7 @@ const hereOf = (state: PlacesTogetherState | null): BotHome | null => (state?.on
 export function rowPlaceMark(bot: Bot, working: boolean, here: BotHome | null | undefined): PlaceMark | null {
   if (!here) return null;
   const from = isPlacedBot(bot) ? bot.placedFrom : null;
-  return from ? placeMark(from.home, from.health, working, bot.name) : placeMark(here, "ready", working, bot.name);
+  return from ? placeMark(from.place, from.health, working, bot.name) : placeMark(placeOfHome(here), "ready", working, bot.name);
 }
 
 /** This page's place while the one list is on, for the rows' marks; null while it is off. */

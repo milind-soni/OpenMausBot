@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
 import { setLocale } from "./i18n";
-import { isPlacedBot, otherPlaceDispatch, ownRows, placedBot, placedLine, placeMark, resetPlaceRowsForTest, withOtherPlace } from "./place-rows";
+import { isPlacedBot, otherPlaceDispatch, ownRows, placedBot, placedLine, placeMark, placeOfHome, resetPlaceRowsForTest, withOtherPlace, type Place } from "./place-rows";
 import type { PlaceBotRow } from "./places-together";
 import { partitionSidebarBots, sidebarBotRows } from "./sidebar-layout";
 
@@ -27,7 +27,7 @@ describe("a row of the other place as a bot of the one list", () => {
   it("carries a name, a look, a state and a time, and nothing of the other place's engine or settings", () => {
     const bot = placedBot(row("cloud", "nova", { name: "Nova", title: "Research", color: "pink", mascotBody: "classic", unread: true, working: true, chief: true, lastAt: 42 }), "asleep");
     expect(bot).toMatchObject({ name: "Nova", title: "Research", color: "pink", unread: true, busy: true, activity: "working", lastAt: 42, messages: [] });
-    expect(bot.placedFrom).toEqual({ home: "cloud", id: "nova", health: "asleep" });
+    expect(bot.placedFrom).toEqual({ place: { key: "cloud", kind: "my-cloud", label: "My Cloud" }, id: "nova", health: "asleep" });
     expect(bot.modelSelection).toEqual({ instanceId: "", model: "" });
     // The Chief stays where it started: the other place's is an ordinary row here.
     expect(bot.chiefOfStaff).toBeUndefined();
@@ -39,6 +39,17 @@ describe("a row of the other place as a bot of the one list", () => {
     const bot = placedBot(row("cloud", "nova", { title: "Research" }), "ready");
     expect(placedLine(bot, false)).toBe("Research");
     expect(placedLine(bot, true)).toBe("");
+  });
+
+  it("is keyed by a place, not by My Cloud: a third place of the person's own joins with its own key, kind and name", () => {
+    const studio: Place = { key: "env-7f3a", kind: "home-computer", label: "Studio Mac" };
+    const rack: Place = { key: "env-91bc", kind: "own-server", label: "Basement server" };
+    expect(placedBot(row("computer", "render"), "ready", studio).id).toBe("env-7f3a:render");
+    expect(placedBot(row("computer", "render"), "ready", rack).id).toBe("env-91bc:render");
+    expect(placeMark(studio, "ready", false, "Render")).toMatchObject({ place: "env-7f3a", kind: "home-computer", icon: "computer", label: "On Studio Mac", shows: "hover" });
+    expect(placeMark(rack, "ready", true, "Render")).toMatchObject({ icon: "server", label: "Working on Basement server now", shows: "always" });
+    expect(placeMark(rack, "offline", false, "Render")).toMatchObject({ icon: "server-off", label: "Basement server can't be reached right now. Render carries on when it's back.", shows: "always" });
+    expect(placeMark(studio, "offline", false, "Render").icon).toBe("computer-off");
   });
 });
 
@@ -105,27 +116,27 @@ describe("what a row of the other place does", () => {
 
 describe("the device mark", () => {
   it("names where the bot lives, on hover and keyboard focus only, while there is nothing more to say", () => {
-    expect(placeMark("computer", "ready", false, "Git")).toEqual({ home: "computer", icon: "computer", label: "On this computer", shows: "hover" });
-    expect(placeMark("cloud", "ready", false, "Scout")).toEqual({ home: "cloud", icon: "cloud", label: "On My Cloud", shows: "hover" });
-    expect(placeMark("cloud", "loading", false, "Scout").shows).toBe("hover");
+    expect(placeMark(placeOfHome("computer"), "ready", false, "Git")).toEqual({ place: "computer", kind: "this-computer", icon: "computer", label: "On this computer", shows: "hover" });
+    expect(placeMark(placeOfHome("cloud"), "ready", false, "Scout")).toEqual({ place: "cloud", kind: "my-cloud", icon: "cloud", label: "On My Cloud", shows: "hover" });
+    expect(placeMark(placeOfHome("cloud"), "loading", false, "Scout").shows).toBe("hover");
   });
 
   it("stays while the bot works, and says where", () => {
-    expect(placeMark("cloud", "ready", true, "Scout")).toEqual({ home: "cloud", icon: "cloud", label: "Working on My Cloud now", shows: "always" });
-    expect(placeMark("computer", "ready", true, "Git")).toEqual({ home: "computer", icon: "computer", label: "Working on this computer now", shows: "always" });
+    expect(placeMark(placeOfHome("cloud"), "ready", true, "Scout")).toEqual({ place: "cloud", kind: "my-cloud", icon: "cloud", label: "Working on My Cloud now", shows: "always" });
+    expect(placeMark(placeOfHome("computer"), "ready", true, "Git")).toEqual({ place: "computer", kind: "this-computer", icon: "computer", label: "Working on this computer now", shows: "always" });
   });
 
   it("stays while My Cloud sleeps, wakes or can't be reached, in quiet words, never as an error", () => {
-    expect(placeMark("cloud", "asleep", false, "Atlas")).toEqual({ home: "cloud", icon: "cloud-asleep", label: "My Cloud is asleep. Opening Atlas wakes it.", shows: "always" });
-    expect(placeMark("cloud", "asleep", true, "Atlas").icon).toBe("cloud-asleep");
-    expect(placeMark("cloud", "waking", false, "Atlas")).toEqual({ home: "cloud", icon: "cloud-waking", label: "My Cloud is waking up…", shows: "always" });
-    expect(placeMark("cloud", "offline", false, "Scout")).toEqual({ home: "cloud", icon: "cloud-off", label: "My Cloud can't be reached right now. Scout carries on when it's back.", shows: "always" });
-    expect(placeMark("computer", "offline", false, "Git")).toEqual({ home: "computer", icon: "computer-off", label: "This computer's bots can't be read right now.", shows: "always" });
+    expect(placeMark(placeOfHome("cloud"), "asleep", false, "Atlas")).toEqual({ place: "cloud", kind: "my-cloud", icon: "cloud-asleep", label: "My Cloud is asleep. Opening Atlas wakes it.", shows: "always" });
+    expect(placeMark(placeOfHome("cloud"), "asleep", true, "Atlas").icon).toBe("cloud-asleep");
+    expect(placeMark(placeOfHome("cloud"), "waking", false, "Atlas")).toEqual({ place: "cloud", kind: "my-cloud", icon: "cloud-waking", label: "My Cloud is waking up…", shows: "always" });
+    expect(placeMark(placeOfHome("cloud"), "offline", false, "Scout")).toEqual({ place: "cloud", kind: "my-cloud", icon: "cloud-off", label: "My Cloud can't be reached right now. Scout carries on when it's back.", shows: "always" });
+    expect(placeMark(placeOfHome("computer"), "offline", false, "Git")).toEqual({ place: "computer", kind: "this-computer", icon: "computer-off", label: "This computer's bots can't be read right now.", shows: "always" });
   });
 
   it("speaks the person's language", () => {
     setLocale("pt-br");
-    expect(placeMark("cloud", "ready", false, "Scout").label).toBe("No My Cloud");
-    expect(placeMark("cloud", "asleep", false, "Atlas").label).toBe("O My Cloud está em repouso. Abrir Atlas o ativa.");
+    expect(placeMark(placeOfHome("cloud"), "ready", false, "Scout").label).toBe("No My Cloud");
+    expect(placeMark(placeOfHome("cloud"), "asleep", false, "Atlas").label).toBe("O My Cloud está em repouso. Abrir Atlas o ativa.");
   });
 });
