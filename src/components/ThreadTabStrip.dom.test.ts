@@ -3,11 +3,13 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Action, Bot, Task } from "@/state/store";
+import { newChatThreadId } from "@/state/new-chat";
 
 const feature = vi.hoisted(() => ({ on: true }));
 const dispatch = vi.hoisted(() => vi.fn());
+const store = vi.hoisted(() => ({ state: { bots: [] as unknown[], newChat: null } }));
 vi.mock("@/lib/use-feature", () => ({ useFeature: (name: string) => name === "threadTabs" && feature.on }));
-vi.mock("@/state/store-select", () => ({ useStoreDispatch: () => dispatch, useStoreSelector: () => false }));
+vi.mock("@/state/store-select", () => ({ useStoreDispatch: () => dispatch, useStoreSelector: (select: (state: unknown) => unknown) => select(store.state) }));
 
 import { ThreadTabStrip } from "./ThreadTabStrip";
 
@@ -68,6 +70,14 @@ describe("thread tab strip", () => {
     act(() => closeOf("Invoice for Acme").click());
     expect(sent().map((action) => action.type)).toEqual(["switchTask", "updateTask"]);
     expect(sent()[0]).toMatchObject({ botId: "kiwi", threadId: "trip" });
+  });
+
+  it("closes the blank New thread tab by going back to the thread open before it, archiving nothing", () => {
+    store.state = { bots: [{ id: "kiwi", threadId: "launch" }], newChat: null };
+    render(kiwi(FIVE, newChatThreadId("kiwi")));
+    expect(tab("New thread").getAttribute("aria-selected")).toBe("true");
+    act(() => closeOf("New thread").click());
+    expect(sent()).toEqual([{ type: "switchTask", botId: "kiwi", threadId: "launch" }]);
   });
 
   it("archives on a middle click", () => {

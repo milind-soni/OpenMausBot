@@ -57,6 +57,7 @@ function Strip({ bot, tabs }: { bot: Bot; tabs: ThreadTab[] }) {
   const [toast, setToast] = useUndoToast();
   const [fade, setFade] = useState<string | undefined>();
   const canWrite = bot.yourAccess !== "view";
+  const behindDraft = useStoreSelector((state) => state.bots.find((each) => each.id === bot.id)?.threadId);
 
   const measure = useCallback(() => {
     const element = scroller.current;
@@ -80,11 +81,14 @@ function Strip({ bot, tabs }: { bot: Bot; tabs: ThreadTab[] }) {
   };
   const close = (tab: ThreadTab) => {
     if (!tab.closable) return;
+    if (tab.draft) {
+      if (behindDraft) dispatch({ type: "switchTask", botId: bot.id, threadId: behindDraft });
+      return;
+    }
     if (tab.threadId === active) {
       const next = neighbourOf(tabs, tab.threadId);
       if (next) dispatch({ type: "switchTask", botId: bot.id, threadId: next });
     }
-    if (tab.draft) return;
     dispatch({ type: "updateTask", botId: bot.id, threadId: tab.threadId, patch: { archivedAt: Date.now() } });
     setToast({ text: t("sidebar.threads.hidden"), undo: () => dispatch({ type: "updateTask", botId: bot.id, threadId: tab.threadId, patch: { archivedAt: null } }) });
   };
