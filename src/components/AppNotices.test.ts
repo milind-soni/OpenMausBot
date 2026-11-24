@@ -520,6 +520,17 @@ describe("Boat's credit offer", () => {
     await endedForGood();
   });
 
+  it("shows Boat's address for manual opening and keeps the offer available if the browser fails", async () => {
+    fresh(); await launch();
+    vi.mocked(window.ogb!.openExternal!).mockRejectedValueOnce(new Error("no browser"));
+    press("Get Boat"); await flush();
+    const after = render();
+    expect(after).toMatch(/role="alert"[^>]*>[^<]*<span[^>]*>https:\/\/boat\.dev<\/span>/);
+    expect(storage.get(BOAT_OFFER_NOTICE)).toBeUndefined();
+    press("Get Boat"); await flush();
+    await endedForGood();
+  });
+
   it("the claim opens an email to Boat's billing address with Boat's subject and body for the person to send, and ends it for good; nothing is sent for them", async () => {
     fresh(); await launch();
     vi.mocked(api).mockClear();

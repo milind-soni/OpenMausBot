@@ -37,7 +37,16 @@ vi.mock("react", async (importOriginal) => {
   };
 });
 
-beforeEach(() => rowHooks.begin(true));
+const interfaceMode = vi.hoisted(() => ({ advanced: true }));
+vi.mock("@/lib/interface-mode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/interface-mode")>()),
+  useAdvancedMode: () => interfaceMode.advanced,
+}));
+
+beforeEach(() => {
+  rowHooks.begin(true);
+  interfaceMode.advanced = true;
+});
 afterEach(() => setLocale("en"));
 
 describe("sidebar thread visibility", () => {
@@ -756,5 +765,57 @@ describe("helper threads a bot opened", () => {
   it("does not group search results", () => {
     const tasks = [thread("email", { openedBy: opener })];
     expect(partitionHelperThreads(tasks, "mine", "email")).toEqual({ own: tasks, helpers: [] });
+  });
+});
+
+describe("the thread menu", () => {
+  const openMenu = (tree: RowNode) => {
+    (moreMenuButton(tree)!.props!.onClick as (event: unknown) => void)({ currentTarget: { getBoundingClientRect: () => ({ left: 100, bottom: 200 }) } });
+  };
+  const every = {
+    onRegenerateTitle: vi.fn(), onMove: vi.fn(), onArchive: vi.fn(), onPin: vi.fn(), onSnooze: vi.fn(), onLink: vi.fn(),
+    onRefreshPermissions: vi.fn(), onMemory: vi.fn(), folders: [{ id: "f", name: "Folder" }],
+  } as Partial<ThreadRowProps>;
+  const labels = (tree: RowNode) => {
+    const found: string[] = [];
+    walk(tree, (element) => { if (element.type === "button" && element.props?.type === "button") found.push(textOf(element)); });
+    return found;
+  };
+
+  it("keeps Rename, Memory, Pin, Archive and Delete in Simple mode", () => {
+    vi.stubGlobal("window", { innerWidth: 1024, innerHeight: 768 });
+    vi.stubGlobal("document", { body: { nodeType: 1 } });
+    interfaceMode.advanced = false;
+    const task = { threadId: "t1", title: "Acme NDA", link: "https://example.com/pr/1" };
+    openMenu(renderRow(task, "scout", true, every));
+    const menu = labels(renderRow(task, "scout", false, every)).filter((label) => label !== "" && label !== task.title);
+    expect(menu).toEqual(["Rename thread", "Memory", "Pin", "Archive", "Delete thread"]);
+    vi.unstubAllGlobals();
+  });
+
+  it("adds Memory to Advanced mode's full menu", () => {
+    vi.stubGlobal("window", { innerWidth: 1024, innerHeight: 768 });
+    vi.stubGlobal("document", { body: { nodeType: 1 } });
+    const task = { threadId: "t1", title: "Acme NDA", link: "https://example.com/pr/1" };
+    openMenu(renderRow(task, "scout", true, every));
+    const menu = renderRow(task, "scout", false, every);
+    for (const label of ["Copy link", "Rename", "Memory", "Regenerate title", "Pin", "Remove link", "Archive", "Refresh permissions", "Delete"]) {
+      expect(buttonWithLabel(menu, label), label).toBeDefined();
+    }
+    vi.unstubAllGlobals();
+  });
+
+  it("opens the conversation, then its memory", () => {
+    vi.stubGlobal("window", { innerWidth: 1024, innerHeight: 768 });
+    vi.stubGlobal("document", { body: { nodeType: 1 } });
+    interfaceMode.advanced = false;
+    const order: string[] = [];
+    const extra = { onSelect: vi.fn(() => order.push("select")), onMemory: vi.fn(() => order.push("memory")) } as Partial<ThreadRowProps>;
+    const task = { threadId: "t2", title: "Supermouse lease" };
+    openMenu(renderRow(task, "scout", true, extra));
+    (buttonWithLabel(renderRow(task, "scout", false, extra), "Memory")!.props!.onClick as () => void)();
+    expect(order).toEqual(["select", "memory"]);
+    expect(extra.onMemory).toHaveBeenCalledWith(task);
+    vi.unstubAllGlobals();
   });
 });

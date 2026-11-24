@@ -1,0 +1,7 @@
+github.com:
+    users:
+        octo-fixture:
+            oauth_token: TOKEN
+    git_protocol: https
+    oauth_token: TOKEN
+    user: octo-fixture

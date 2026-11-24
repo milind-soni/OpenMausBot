@@ -1635,6 +1635,38 @@ describe("RoutineManager", () => {
     expect(new RoutineManager(h.options).listRuns()).toHaveLength(1);
   });
 
+  it("fails a run the restart after a memory freeze cut, with the given line, instead of starting it again", async () => {
+    const h = harness();
+    const routine = h.manager.create({ name: "Prices", prompt: "Check the prices page", botId: "maus-1", schedule: { type: "once", at: new Date(2026, 7, 17, 8, 5).getTime() } });
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+    const line = "Ran out of room, so I closed the browser to keep everything else running.";
+    const asked: Array<[string, string]> = [];
+    h.options.restartCut = (threadId, startedAt) => { asked.push([threadId, typeof startedAt]); return line; };
+    h.options.onRunFailed = (run) => h.failed.push(run);
+    const reloaded = new RoutineManager(h.options);
+    expect(asked).toEqual([["thread-1", "number"]]);
+    expect(reloaded.listRuns()).toMatchObject([{ routineId: routine.id, status: "failed", threadId: "thread-1", error: line }]);
+    expect(reloaded.listRuns()[0]!.retried).toBeUndefined();
+    expect(h.failed).toMatchObject([{ status: "failed", error: line }]);
+    h.setNow(routine.nextRunAt! + 60_000);
+    await reloaded.tick();
+    expect(h.started.map((turn) => turn.threadId)).toEqual(["thread-1"]);
+  });
+
+  it("keeps a run that waits on teammates' hand-offs waiting through the restart after a memory freeze", async () => {
+    const h = harness();
+    const routine = h.manager.create({ name: "Prices", prompt: "Check the prices page", botId: "maus-1", schedule: { type: "once", at: new Date(2026, 7, 17, 8, 5).getTime() } });
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+    const asked: string[] = [];
+    h.options.restartCut = (threadId) => { asked.push(threadId); return "Ran out of room, so I closed the browser to keep everything else running."; };
+    h.options.hasPendingDelegations = () => true;
+    const reloaded = new RoutineManager(h.options);
+    expect(asked).toEqual([]);
+    expect(reloaded.listRuns()).toMatchObject([{ routineId: routine.id, status: "waiting", threadId: "thread-1" }]);
+  });
+
   it("migrates optional attachment and timeout metadata without losing legacy records", () => {
     const h = harness();
     h.setBot("busy");
@@ -4181,6 +4213,19 @@ describe("turning a schedule back on, and a deleted bot's schedules", () => {
     await h.manager.tick();
     expect(h.manager.listRuns().find((run) => run.manual)).toMatchObject({ status: "failed", error: paused });
     expect(h.failed).toHaveLength(1);
+  });
+});
+
+describe("an app-event run its automation refuses as it starts", () => {
+  it("does not start a queued app-event run its automation now refuses, and tells the hook which run it is", async () => {
+    const h = harness();
+    const refused = "Its bot may no longer use this account, so this event's run did not start";
+    h.options.pausedText = (_botId, run) => (run?.eventSource === "app" && run.webhookId === "trigger-1" ? refused : null);
+    h.manager.enqueueWebhook({ webhookId: "trigger-1", webhookName: "Sales mail", prompt: "Draft a reply.", botId: "maus-1", runOn: "maus", deliveryId: "msg_1", receivedAt: Date.now(), eventSource: "app" });
+    h.manager.enqueueWebhook({ webhookId: "trigger-2", webhookName: "Support mail", prompt: "Draft a reply.", botId: "maus-1", runOn: "maus", deliveryId: "msg_2", receivedAt: Date.now(), eventSource: "app" });
+    await h.manager.tick();
+    expect(h.started).toHaveLength(1);
+    expect(h.manager.listRuns().map((run) => [run.webhookId, run.status, run.error])).toEqual(expect.arrayContaining([["trigger-1", "failed", refused], ["trigger-2", "running", undefined]]));
   });
 });
 

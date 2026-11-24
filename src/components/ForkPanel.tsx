@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import { useLayoutEffect, useRef } from "react";
 import { currentTaskBot, useStore } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { ChatView } from "./ChatView";
@@ -7,6 +8,15 @@ import { GroupView } from "./GroupView";
 export function ForkPanel() {
   const { state, dispatch } = useStore();
   const panel = state.forkPanel;
+  const asideRef = useRef<HTMLElement>(null);
+  const focusedLoad = useRef<string | undefined>(undefined);
+  useLayoutEffect(() => {
+    const aside = asideRef.current;
+    if (!panel?.focusComposer || !aside) return;
+    if (focusedLoad.current === panel.loadId && document.activeElement !== aside) return;
+    focusedLoad.current = panel.loadId;
+    (aside.querySelector<HTMLTextAreaElement>('[data-tour="composer"] textarea:not([disabled])') ?? aside).focus();
+  }, [panel?.focusComposer, panel?.loadId, panel?.loading]);
   if (!panel) return null;
   const bot = panel.kind === "bot" ? state.bots.find((candidate) => candidate.id === panel.ownerId) : undefined;
   const group = panel.kind === "group" ? state.groups.find((candidate) => candidate.id === panel.ownerId) : undefined;
@@ -19,7 +29,7 @@ export function ForkPanel() {
     turnStartedAt: null, pinnedCwd: groupTask.pinnedCwd, pinnedMessageId: groupTask.pinnedMessageId } : null;
 
   return (
-    <aside aria-label={t("chat.forkPanel")} className="relative flex h-full w-[min(48vw,640px)] min-w-[360px] flex-col border-l border-hairline bg-app">
+    <aside ref={asideRef} tabIndex={panel.focusComposer ? -1 : undefined} aria-label={t("chat.forkPanel")} className="relative flex h-full w-[min(48vw,640px)] min-w-[360px] flex-col border-l border-hairline bg-app">
       <div className="flex items-center justify-between border-b border-hairline px-4 py-2 text-sm font-medium text-ink">
         <span className="truncate">{task?.title ?? t("chat.forkPanel")}</span>
         <button type="button" aria-label={t("chat.closeForkPanel")} className="rounded p-1 text-ink-secondary hover:bg-raised hover:text-ink"
@@ -30,7 +40,7 @@ export function ForkPanel() {
           : panel.loadFailed ? <div className="flex items-center gap-3 p-4 text-sm text-ink-secondary">
             <span>{t("chat.forkUnavailable")}</span>
             <button type="button" className="rounded px-2 py-1 text-ink hover:bg-raised"
-              onClick={() => dispatch({ type: "openForkPanel", kind: panel.kind, ownerId: panel.ownerId, threadId: panel.threadId })}>
+              onClick={() => dispatch({ type: "openForkPanel", kind: panel.kind, ownerId: panel.ownerId, threadId: panel.threadId, focusComposer: panel.focusComposer })}>
               {t("chat.retry")}
             </button>
           </div>

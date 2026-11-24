@@ -115,7 +115,7 @@ const DEBT: Record<string, number> = {
   "src/components/ProIntroduction.tsx": 2,
   "src/components/ProfileSettings.tsx": 3,
   "src/components/Select.tsx": 9,
-  "src/components/ServerList.tsx": 4,
+  "src/components/ServerList.tsx": 2,
   "src/components/SettingsPrimitives.tsx": 3,
   "src/components/SidebarPopoverMenu.tsx": 1,
   "src/components/SidebarProfileMenu.tsx": 2,

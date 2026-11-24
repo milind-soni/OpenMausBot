@@ -21,6 +21,8 @@ export const USER_ERROR = {
   "serverError.model.accountUpdating": "this provider account is being updated — try again shortly",
   "serverError.chat.busyEdit": "the thread is working — stop it before editing",
   "serverError.chat.busyVersion": "the thread is working — stop it before switching versions",
+  "serverError.forkBusy": "Wait for this conversation to finish before forking it.",
+  "serverError.forkNoText": "This conversation has no text message to fork from yet.",
   "serverError.chat.busyFresh": "the thread is working — stop it before starting fresh",
   "serverError.chat.questionGone": "this question is no longer available",
   "serverError.chat.askerGone": "the bot that asked this question is no longer available",
@@ -229,6 +231,8 @@ export const USER_ERROR = {
   "serverError.voice.fishTranscribeConnection": "Couldn't reach Fish Audio to hear you — check your connection.",
   "serverError.voice.elevenLabsTranscribeConnection": "Couldn't reach ElevenLabs to hear you — check your connection.",
   "serverError.file.tooLarge": "This file is {size}, over the {limit} limit for opening files from chat. The file itself is still saved as {name}.",
+  "serverError.vps.tooManyCores": "{server} has {cores} CPU cores in all. Choose {cores} or fewer.",
+  "serverError.vps.tooMuchMemory": "{server} has about {memory} GB of memory. Choose {memory} GB or less.",
 } as const;
 
 export type UserErrorKey = keyof typeof USER_ERROR;

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import nativeText from "./native-text.cjs";
 import { createStartupScreen, startupScreenHtml } from "./startup-screen.mjs";
+import { createLendingIndicator } from "./lending-indicator.mjs";
 import { createSystemTray } from "./system-tray.mjs";
 
 const iconPath = fileURLToPath(new URL("./resources/app-icon.png", import.meta.url));
@@ -240,4 +241,44 @@ test("the startup screen says how the workspace came up, once", async t => {
   hidden.splash.attach(hidden.win);
   hidden.win.webContents.emit("did-finish-load"); await flush();
   assert.equal(ways.at(-1), "hidden");
+});
+
+test("on Linux the lending indicator borrows the one tray icon and hands Open and Quit back", () => {
+  const made = [], opened = [];
+  class Tray extends EventEmitter {
+    constructor() { super(); made.push(this); }
+    setToolTip(value) { this.tooltip = value; }
+    setTitle(value) { this.title = value; }
+    setContextMenu(value) { this.menu = value; }
+    isDestroyed() { return this.destroyed ?? false; }
+    destroy() { this.destroyed = true; }
+  }
+  const fakes = { Menu: { buildFromTemplate: value => value }, nativeImage: { createFromPath: () => ({ resize: () => ({}) }) }, iconPath };
+  const win = new Window();
+  const tray = createSystemTray({ ...fakes, Tray, getWindow: () => win, onQuit: () => {} });
+  const labels = () => made[0].menu.filter(item => item.label).map(item => item.label);
+  const openQuit = labels();
+  const lending = createLendingIndicator({ ...fakes, Tray: tray.Borrowed,
+    onPause: () => {}, onResume: () => {}, onActivity: () => {}, device: "PC" });
+  win.on("show", () => opened.push("show"));
+
+  lending.update({ clouds: ["My Cloud"], using: [], paused: false });
+  assert.equal(made.length, 1, "no second tray icon");
+  assert.match(made[0].tooltip, /^OpenMausBot: My Cloud/);
+  assert.ok(labels().includes("Pause"));
+  tray.relabel();
+  assert.ok(labels().includes("Pause"), "a language change does not put Open and Quit over the lending menu");
+  made[0].emit("click");
+  assert.deepEqual(opened, ["show"], "a click still opens the window");
+
+  lending.update({ clouds: [], using: [], paused: false });
+  assert.equal(made[0].isDestroyed(), false);
+  assert.equal(made[0].tooltip, "OpenMausBot");
+  assert.deepEqual(labels(), openQuit);
+
+  lending.update({ clouds: ["My Cloud"], using: [], paused: false });
+  assert.equal(made.length, 1);
+  assert.ok(labels().includes("Pause"), "lending again borrows the icon again");
+  lending.destroy(); tray.destroy();
+  assert.equal(made[0].isDestroyed(), true);
 });

@@ -41,7 +41,7 @@ import { createActivityWindow } from "./lending-activity-window.mjs";
 import { missingPermissions } from "./lent-screen-failures.mjs";
 import { createScreenControl } from "./screen-control.mjs"; import { createAskPrompt } from "./ask-prompt.mjs";
 let startupScreen = null;
-let desktopTray = null;
+let desktopTray = null, linuxTray = null; // Linux: an Open/Quit icon the window never hides into, since not every desktop shows it.
 import { collisionFreeDownloadPath, defaultSaveName, openFolder, openHtmlCopy, openLogsFolder, revealDownloadWhenDone, revealInFolder, withSavableFile } from "./save-file.mjs";
 import { desktopViewerPermissionAllowed } from "./desktop-viewer-permissions.mjs";
 import { appPermissionHandlers, externalLinkUrl } from "./app-permissions.mjs";
@@ -449,12 +449,12 @@ const DESKTOP_CRASH_LOG_MAX_BYTES = 512 * 1024;
 let logStream = null;
 let desktopShutdownStarted = false;
 import { companionAdvertisedHostedUrl, companionEnabledAtRest, companionOriginTarget, companionPairing, companionPairingRenew, companionDeviceRoutes, companionStartsAtLaunch, companionCloudDesktopAccess, companionRouteOn, dismissCompanionNotice, rememberCompanionRoute, setCompanionMigrationFacts,
-  companionBrowserControlAccess, companionRevoke, companionRunning, companionSettings, companionState, rememberCompanionKeepAwake, setCompanionHostedUrl, setCompanionLifecycleListener, startCompanion, stopCompanion } from "./companion.mjs";
+  companionBrowserControlAccess, companionRevoke, companionRunning, companionSettings, companionState, rememberCompanionKeepAwake, setCompanionHostedUrl, setCompanionLifecycleListener, setCompanionProviderKeySaver, startCompanion, stopCompanion } from "./companion.mjs";
 import { createDesktopCompanionE2E, deviceCounts } from "./companion-e2e-desktop.mjs"; import { startCheckedManagedConnection } from "./managed-companion-start.mjs";
 import { autoStartCompanion } from "./companion-autostart.mjs";
 import { createPhoneLinkRoutes } from "./phone-link-routes.mjs"; import { reachableForKeepAwake } from "./keep-awake.mjs";
 import { createRoutineWakeHold, rememberRoutineWake, routineWakeSettings } from "./routine-wake.mjs";
-import { CREDENTIAL_PATCH, credentialSaveError } from "./credential-patch.mjs";
+import { CREDENTIAL_PATCH, credentialSaveError, serveCredentialSaves } from "./credential-patch.mjs";
 
 /** Second wall after preload's reduced bridge: computer-controlling IPC answers only the local server's UI.
  * Declared before any handler registration (temporal dead zone). */
@@ -1480,9 +1480,9 @@ const lendingActivity = createActivityWindow({ BrowserWindow, icon: APP_ICON, ba
 let lendingTray = null;
 function lendingIndicator() {
   lendingTray ??= createLendingIndicator({
-    Tray, Menu, nativeImage, Notification, iconPath: APP_ICON, t: nativeT, onPause: () => sharingController().pause(), onActivity: () => lendingActivity.show(),
+    Tray: linuxTray?.Borrowed ?? Tray, Menu, nativeImage, Notification, iconPath: APP_ICON, t: nativeT, onPause: () => sharingController().pause(), onActivity: () => lendingActivity.show(),
     onResume: () => void sharingController().resume()?.catch(error => slog(`lending resume: ${error?.message ?? error}`)), onStartScreen: () => void screenControl.start(),
-    onTerminal: on => void lendingDialogs.lendTerminal(on, () => sharingController().lendTerminal(on)).catch(error => slog(`lending terminal: ${error?.message ?? error}`)), onQuit: process.platform === "win32" ? () => app.quit() : null,
+    onTerminal: on => void lendingDialogs.lendTerminal(on, () => sharingController().lendTerminal(on)).catch(error => slog(`lending terminal: ${error?.message ?? error}`)), onQuit: process.platform === "win32" || linuxTray ? () => app.quit() : null,
   });
   return lendingTray;
 }
@@ -1528,7 +1528,7 @@ function persistEnvironments(next) {
   try { railChanged(); } catch {}
 }
 
-function applyNativeLanguage() { relabelDesktop({ menu: refreshApplicationMenu, trays: [desktopTray, lendingTray], window: mainWindow, title: mainWindowTitle, badge: applyUnreadBadge }); }
+function applyNativeLanguage() { relabelDesktop({ menu: refreshApplicationMenu, trays: [desktopTray, linuxTray, lendingTray], window: mainWindow, title: mainWindowTitle, badge: applyUnreadBadge }); }
 
 async function workspaceMenuAction(action) {
   try { await action(); } catch (error) {
@@ -2623,7 +2623,7 @@ installPlaceLook({ ipcMain, guard: workspaceOnly, place: () => savedPlace(enviro
 const lendingDialogs = createLendingDialogs({ dialog, window: () => mainWindow, validate: validateSharedFolders, isHome: isHomeFolder, t: nativeT });
 // Settings → Servers' computer access, and the popup after pairing a server of the person's own (server-lending.mjs).
 const serverLending = installServerLending({ ipcMain, guard: localWorkspaceOnly, sharing: sharingController, dialogs: lendingDialogs, validate: validateSharedFolders, dialog, window: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null),
-  saved: savedWorkspace, candidate: lendableServer, flag: refreshSharedComputersAllowed, environments: () => environmentsState.environments, active: () => activeEnvironment(environmentsState), openSettings: openWorkspaceSettings, t: nativeT, log: slog });
+  saved: savedWorkspace, candidate: lendableServer, flag: refreshSharedComputersAllowed, environments: () => environmentsState.environments, active: () => activeEnvironment(environmentsState), openSettings: openWorkspaceSettings, t: nativeT, log: slog, screen: screenControl.now, allowScreen: screenControl.start, local: event => cloudPageAsking(event) === "local", page: event => { const env = activeEnvironment(environmentsState); return env?.origin && env.kind !== "local" && activePageOrigin(event) === env.origin ? env : null; } });
 
 const cloudSync = installCloudFiles({ t: nativeT,
   app, ipcMain, dialog, shell, powerMonitor, localWorkspaceOnly, localDataDir: desktopDataDir(),
@@ -2745,7 +2745,7 @@ async function saveWorkspaceCredential(name, value, options) {
 }
 
 installCredentialStoreIpc({ ipcMain, localOnly, dialog, windowFor: (sender) => BrowserWindow.fromWebContents(sender), t: nativeT, appName: () => app.name, unreadable: () => credentialStoreUnavailable, quitting: () => desktopShutdownStarted, moveAside: () => fs.renameSync(CREDENTIALS_FILE, `${CREDENTIALS_FILE}.unreadable-${Date.now()}`), log: slog, relaunch: relaunchAfterDesktopRemoteChange });
-ipcMain.handle("credential:set", localOnly("credential:set", (_event, name, value, options) => saveWorkspaceCredential(name, value, options)));
+serveCredentialSaves({ ipcMain, localOnly, setPhoneSaver: setCompanionProviderKeySaver, save: saveWorkspaceCredential });
 
 ipcMain.handle("approvals:set-trusted-mode", localOnly("approvals:set-trusted-mode", (_event, botId, mode, options) => {
   // A separately launched dev server is outside this trust path: never degrade this grant to loopback HTTP.
@@ -2791,13 +2791,13 @@ app.whenReady().then(async () => { launchRecord.mark("ready");
     clearCache: () => session.defaultSession.clearCache(),
     log: slog,
   });
-  if (process.platform === "win32") {
+  if (process.platform === "win32" || process.platform === "linux") {
     try {
-      desktopTray = createSystemTray({
-        Tray, Menu, nativeImage, iconPath: APP_ICON, t: nativeT,
+      const tray = createSystemTray({ Tray, Menu, nativeImage, iconPath: APP_ICON, t: nativeT,
         getWindow: () => startupScreen?.window ?? mainWindow ?? (openWindowForLink?.(), mainWindow),
         onQuit: () => app.quit(),
       });
+      if (process.platform === "win32") desktopTray = tray; else linuxTray = tray;
     } catch (error) {
       slog(`system tray unavailable: ${error?.message ?? error}`);
     }
@@ -3120,5 +3120,5 @@ function releaseDesktopDataDirLease() {
 
 // before-quit is too early (this app defers it); will-quit is Electron's last boundary, and the process hook covers app.exit().
 app.on("will-quit", releaseDesktopDataDirLease);
-app.on("will-quit", () => { desktopTray?.destroy(); void tailnetShare.stop(); });
+app.on("will-quit", () => { desktopTray?.destroy(); linuxTray?.destroy(); void tailnetShare.stop(); });
 process.once("exit", releaseDesktopDataDirLease);

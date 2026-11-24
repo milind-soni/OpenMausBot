@@ -39,6 +39,44 @@ looks like a credential — API keys, tokens, `password: …` lines, private key
 blocks — is replaced with `«redacted N chars»` before it reaches disk. A bot
 that helpfully "remembers" a key it read from a `.env` does not get to keep it.
 
+## A conversation's own notes
+
+A bot you use for many separate matters, such as one assistant for many clients with one conversation per client,
+keeps each matter's facts in that conversation:
+
+```
+memory/
+└── threads/
+    └── <conversation id>.md   the notes of one conversation, loaded only there
+```
+
+- **Which conversations have them.** Every 1:1 conversation of a bot except its main one: the conversation set with
+  **Set as main thread** while it is open, else the bot's oldest. A bot with one conversation, its main conversation,
+  routine runs (each starts a fresh conversation, so notes there would never be read again), rooms and every
+  conversation on a Team Cloud keep saving to `MEMORY.md` exactly as before.
+- **The bot picks the scope, never the person.** In such a conversation `memory_update` saves to its notes by default:
+  the client, the parties, terms, deadlines, what was decided. `scope: "everywhere"` saves to `MEMORY.md`: facts about
+  the person and how they work, or anything they ask to have remembered everywhere or for all clients. Changing or
+  removing a passage that is only in `MEMORY.md` changes it there. **Forget** reaches the conversation's notes too.
+  A bot that keeps memory with its own file tools is given the file's path instead.
+- **What loads.** The conversation's notes go in the changing half of its prompt, beside `MEMORY.md`: the first 100
+  lines or 12 KB, expired entries hidden. That half is sent again after a compaction, so the notes survive one. The
+  bot's main conversation's prompt is unchanged. `MEMORY.md` and the topic index still load everywhere.
+- **What never happens by itself.** The notes are not listed with the topics, not indexed for automatic recall or
+  `session_search`, not journaled and never moved to the archive. Memory upkeep does not read those conversations:
+  neither capture nor the dream copies a matter into `MEMORY.md`, topics or About me. Another conversation reads them
+  only when the person asks ("use the clause we agreed for Supermouse"), with `session_search` `scope: "threads"`,
+  and only among the same bot's own conversations.
+- **Lifecycle.** Archiving a conversation keeps its notes; deleting it deletes them. **Duplicate**, team backups,
+  shared team packages and templates carry no conversation's notes; nor does a move to My Cloud.
+- **Seeing and editing them.** **What it remembers** in the bot panel's Library shows the open conversation's notes
+  under **This thread**, above **Everywhere** (`MEMORY.md`), each as plain text saved as you type. A conversation's
+  ⋯ menu has **Memory**, which opens it there. In Advanced mode the Memory section shows **This thread** at the top.
+  A reply that saved to the conversation's notes has a quiet *Saved to this thread* line under it.
+
+Other conversations can still come up: automatic recall searches the bot's earlier conversations, and the recent-work
+brief names the newest thing said in each. Those are about the conversations, not their notes, and are unchanged.
+
 ## What loads, and the budget
 
 At the start of every turn the **first 200 lines or 24 KB of `MEMORY.md`,
@@ -440,6 +478,7 @@ free form, or one you rewrite by hand, works the same.
 | `GET` | `/api/bots/:id/memory/journal?limit=` | Recent changes, newest first. |
 | `POST` | `/api/bots/:id/memory/journal/:entryId/revert` | Puts the file back to that row's earlier text. |
 | `POST` | `/api/bots/:id/memory/open` | `{ target: "obsidian" \| "folder" }` — opens the folder on this computer; loopback only. |
+| `GET`, `PUT`, `DELETE` | `/api/bots/:id/memory/thread/:threadId` | One conversation's notes, with `scoped`: whether its saves go there. `PUT` takes `{ text, expectedHash? }`; `409` as above. Not journaled. |
 | `GET` | `/api/bots/:id/memory/upkeep` | Whether upkeep is on, whether the engine can run the model steps, and the last tidy-up and capture. |
 | `POST` | `/api/bots/:id/memory/tidy` | Runs the tidy-up now (`409` when upkeep is switched off) and returns its report. |
 | `GET` | `/api/profile/learned` | Facts bots added to About me on their own, newest first. |

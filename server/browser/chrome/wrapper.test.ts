@@ -126,6 +126,8 @@ describe("the display, language and time zone the launcher gives Chrome", () => 
   it("reads the primary display on each desktop, and declares 1920x1080 where there is none", async () => {
     expect(await primaryScreen("darwin", {}, answer("1512x982\n"))).toEqual({ width: 1512, height: 982 });
     expect(await primaryScreen("win32", {}, answer("1536x864\r\n"))).toEqual({ width: 1536, height: 864 });
+    // A scaled display (150%) reports fractional DIPs; reading only the tail digits turned 1706.66… into 66667.
+    expect(await primaryScreen("win32", {}, answer("1706.66666666667x1066.66666666667"))).toEqual({ width: 1707, height: 1067 });
     const xrandr = "Screen 0: minimum 8 x 8, current 4480 x 1440\nHDMI-1 connected 2560x1440+1920+0 (normal) 597mm x 336mm\neDP-1 connected primary 1920x1080+0+0 (normal) 344mm x 194mm\n";
     expect(await primaryScreen("linux", { DISPLAY: ":0" }, answer(xrandr))).toEqual({ width: 1920, height: 1080 });
     expect(await primaryScreen("linux", {}, answer(xrandr))).toEqual({ width: 1920, height: 1080 });

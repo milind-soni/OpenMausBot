@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { CONTROL_WAITED } from "./control-client.ts";
+import { CONTROL_WAITED, CONTROL_WAITED_HELD } from "./control-client.ts";
 import { CLOUD_COMPUTER_DEAD_WAITING, CLOUD_COMPUTER_NEEDS_PERSON, CLOUD_COMPUTER_REPLACED_BY_PERSON, cloudComputerSetAsideNotice } from "../shared/cloud-computer-recovery.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
@@ -358,7 +358,7 @@ describe("a cloud computer starts only when the bot uses it", () => {
     const next = await startTurn(bot.id, "Look again");
     expect(resumes()).toBe(0);
     const waited = await computerCall(next, "tools/call", { name: "screenshot", arguments: {} });
-    expect(waited.body.result).toEqual({ isError: true, content: [{ type: "text", text: CONTROL_WAITED }] });
+    expect(waited.body.result).toEqual({ isError: true, content: [{ type: "text", text: CONTROL_WAITED_HELD }] });
     expect(resumes()).toBe(1);
     const woken = await computerCall(next, "tools/call", { name: "screenshot", arguments: {} });
     expect(woken.body.result.isError, JSON.stringify(woken.body)).toBeFalsy();
@@ -372,7 +372,7 @@ describe("a cloud computer starts only when the bot uses it", () => {
 
   const callThroughWait = async (sent: any) => {
     let result = await computerCall(sent, "tools/call", { name: "screenshot", arguments: {} });
-    for (let tries = 0; result.body.result.content?.[0]?.text === CONTROL_WAITED && tries < 3; tries++) {
+    for (let tries = 0; [CONTROL_WAITED, CONTROL_WAITED_HELD].includes(result.body.result.content?.[0]?.text) && tries < 3; tries++) {
       result = await computerCall(sent, "tools/call", { name: "screenshot", arguments: {} });
     }
     return result;

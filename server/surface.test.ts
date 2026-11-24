@@ -461,6 +461,24 @@ describe("surfacePrompt", () => {
     expect(surfacePrompt({ computer: "vm", browser: false }, { canSelect: true, lentToServer: [], thisComputer }))
       .toBe(surfacePrompt({ computer: "vm", browser: false }, { canSelect: true, thisComputer }));
   });
+
+  // On a VPS with a lent PC and no place chosen, "select_computer is the way to connect them" sent a bot asked for
+  // desktop apps to a Local VM that was never set up, and This computer (the VPS) was offered for the person's files.
+  it("with a lent computer and no place set, says to use it for desktop apps, and offers This computer only where the app runs", () => {
+    const lent = [{ name: "OFFICE-PC", platform: "win32" as const }];
+    const vps = { bot: "Ada", platform: "linux" as const, desktopApp: false };
+    const none = surfacePrompt({ computer: null, browser: true }, { canSelect: true, lentToServer: lent, thisComputer: vps, worksOnAuto: true });
+    expect(none).toContain("No other computer is set for this conversation: for desktop apps, use their PC (OFFICE-PC) through shared_computer, and don't select a Local VM or another place for it unless they ask.");
+    expect(none).not.toContain("switch it to This computer");
+    expect(surfacePrompt({ computer: null, browser: true }, { canSelect: true, lentToServer: lent, thisComputer: { ...vps, desktopApp: true }, worksOnAuto: true })).toContain("switch it to This computer");
+    // Works on Off (which refuses the lent screen) or a place the person chose that isn't running: not told to use the PC.
+    expect(surfacePrompt({ computer: null, browser: true }, { canSelect: false, lentToServer: lent, worksOnAuto: false })).not.toContain("No other computer is set");
+    // A place chosen or pinned: the person picked it, so only the existing lines speak.
+    expect(surfacePrompt({ computer: "vm", browser: false }, { canSelect: true, lentToServer: lent, worksOnAuto: true })).not.toContain("No other computer is set");
+    expect(surfacePrompt({ computer: null, browser: true }, { pinned: "browser", lentToServer: lent, worksOnAuto: true })).not.toContain("No other computer is set");
+    // Nothing lent: unchanged.
+    expect(surfacePrompt({ computer: null, browser: true }, { canSelect: true, lentToServer: [], worksOnAuto: true })).not.toContain("No other computer is set");
+  });
 });
 
 describe("surface parsing", () => {
@@ -659,5 +677,29 @@ describe("a vm_exec command that names this computer's own paths", () => {
     expect(failedOnHostPath("ls /Users/ana/Desktop", { exitCode: 124, timedOut: true }, "darwin")).toBe(false);
     expect(failedOnHostPath("ls /nope", failed, "darwin")).toBe(false);
     expect(failedOnHostPath("ls /Users/ana/Desktop", failed, "linux")).toBe(false);
+  });
+});
+
+describe("a thread's own computer", () => {
+  const turn = (worksOn: "cloud" | "vm" | "local" | "browser" | "off" | undefined, task?: { surface?: "cloud" | "vm" | "local" | "browser"; surfaceSource?: "user" | "auto" }) =>
+    resolveSurface({ destination: worksOn, pinnedSurface: chosenPin(task), browserOn: true });
+
+  it("runs on the thread's choice over the bot's, and on the bot's once cleared", () => {
+    expect(turn("cloud", { surface: "vm", surfaceSource: "user" })).toMatchObject({ computer: "vm", pinned: "vm" });
+    expect(turn("vm", { surface: "local", surfaceSource: "user" })).toMatchObject({ computer: "local", pinned: "local" });
+    expect(turn(undefined, { surface: "cloud", surfaceSource: "user" })).toMatchObject({ computer: "cloud", pinned: "cloud" });
+    expect(turn("cloud", {})).toMatchObject({ computer: "cloud", pinned: null });
+    expect(turn(undefined, {})).toMatchObject({ computer: undefined, pinned: null });
+  });
+
+  it("takes an Auto pin for no choice of the person's, and lets the bot's Off beat any choice", () => {
+    expect(turn("vm", { surface: "local", surfaceSource: "auto" })).toMatchObject({ computer: "vm", pinned: null });
+    expect(turn("off", { surface: "vm", surfaceSource: "user" })).toMatchObject({ computer: "off", browser: false, pinned: null });
+  });
+
+  it("does not swap in another place when the thread's choice can't be had", () => {
+    const plan = resolveSurface({ destination: "local", pinnedSurface: "browser", browserOn: false });
+    expect(plan).toMatchObject({ computer: "off", browser: false, pinned: "browser" });
+    expect(plan.note).toMatch(/No computer is mounted instead/);
   });
 });

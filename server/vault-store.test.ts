@@ -448,3 +448,30 @@ describe("the held-secret scrubber", () => {
     expect(redactSecretsInText("My password is fake-hunter2, enjoy.")).toBe("My password is fake-hunter2, enjoy.");
   });
 });
+
+describe("a pasted GitHub token", () => {
+  // Assembled here: it only has to look like one.
+  const token = ["github", "pat", "11FIXTURE0", "z".repeat(40)].join("_");
+  const member = `p_${"a".repeat(22)}`;
+
+  it("is kept sealed per sign-in, masked like every saved secret, never listed and never a bot's", () => {
+    const store = new VaultStore({ dataDir: dir });
+    store.setGithubToken("owner", { token, login: "octo-fixture" });
+    store.setGithubToken(member, { token: `${token}m`, login: "member-login" });
+    expect(readFileSync(join(dir, LOGINS_FILE), "utf8")).not.toContain(token);
+    const again = new VaultStore({ dataDir: dir });
+    expect(again.githubToken("owner")).toEqual({ token, login: "octo-fixture" });
+    expect(again.githubToken(member)?.login).toBe("member-login");
+    expect(again.secretValues()).toEqual(expect.arrayContaining([token, `${token}m`]));
+    expect(again.listSecrets(TEAM_READER)).toEqual([]);
+    expect(again.listSecrets({ person: member, team: false })).toEqual([]);
+    expect(again.secretNamesFor("bot-a", TEAM_READER)).toEqual([]);
+    expect(new HeldSecrets(again).scrub(`clone with ${token} please`)).not.toContain(token);
+
+    again.forgetPerson(member);
+    expect(again.githubToken(member)).toBeNull();
+    expect(again.githubToken("owner")?.token).toBe(token);
+    again.setGithubToken("owner", null);
+    expect(new VaultStore({ dataDir: dir }).githubToken("owner")).toBeNull();
+  });
+});

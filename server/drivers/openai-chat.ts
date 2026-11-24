@@ -21,7 +21,7 @@ import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent,
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
 import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
 import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, replayableToolCalls, toolArguments, type ChatToolCall } from "./openai-chat-protocol.ts";
-import { completionError, httpErrorDetail, refusedToolCall, refusedToolCallFailure, rejectsReasoningReplay, rejectsToolsParameter, RejectedToolCallError, sseData, StreamTruncatedError, UnsupportedChatToolsError, UnsupportedReasoningReplayError, type ProviderBody } from "./openai-chat-refusals.ts";
+import { ChatHttpError, completionError, httpErrorDetail, refusedToolCall, refusedToolCallFailure, rejectsReasoningReplay, rejectsToolsParameter, RejectedToolCallError, sseData, StreamTruncatedError, UnsupportedChatToolsError, UnsupportedReasoningReplayError, type ProviderBody } from "./openai-chat-refusals.ts";
 import { ChatRepeatGuard } from "./chat-repeat-guard.ts";
 import { TextCallHoldback, textToolCalls } from "./chat-text-tool-calls.ts";
 import { createModelRoutes, isOpenAIAddress, ModelRouteRefused, noRouteLeft, readResponsesStream, responsesRequest, routeRefusal, selectedReasoningEffort, type ModelRoute, type ResponseItem } from "./openai-responses.ts";
@@ -307,7 +307,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         if (messages.some((entry) => entry.reasoning_content !== undefined) && rejectsReasoningReplay(status, body)) {
           return new UnsupportedReasoningReplayError(message);
         }
-        return new Error(message);
+        return new ChatHttpError(status, message);
       };
       if (!response.ok) throw failure(response.status, await response.text().catch(() => ""));
       noteKeyAccepted(options.apiUrl, options.apiKey);
@@ -929,7 +929,6 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     })();
     return { turnId };
   };
-
   return {
     instanceId: input.instanceId,
     driverKind: options.driverKind,
@@ -983,8 +982,10 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         return () => listeners.delete(listener);
       },
     },
-    generateText: async (prompt, { signal, onUsage, model: named } = {}) => {
+    generateText: async (prompt, { signal, onUsage, model: named, checkModel } = {}) => {
       const model = named ?? options.generateModel?.() ?? options.models().default;
+      signal?.throwIfAborted();
+      checkModel?.(model);
       const { text, reasoning, toolCalls } = await complete([{ role: "user", content: prompt }], model, false, signal, undefined, [], onUsage);
       if (toolCalls.length) throw new ChatProtocolError("provider returned tool calls to a text-only helper");
       return text.trim() ? text : reasoning;
