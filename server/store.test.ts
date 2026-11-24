@@ -2087,6 +2087,19 @@ describe("Store change stream", () => {
     expect(store.retitleTask(recipient.id, row.threadId, `@Scout ${brief}`, "Late title")).toBeNull();
   });
 
+  it("a first line that is only OpenMausBot's note leaves the thread untitled for the next line", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ name: "Scout" });
+    const retry = "[From OpenMausBot · retry · information only — requested by OpenMausBot, automatically. Continue the request above.]";
+    const row = store.createTask(bot.id)!;
+    expect(store.titleTaskFromFirstMessage(bot.id, retry, row.threadId)).toBeNull();
+    expect(store.titleTaskFromFirstMessage(bot.id, "Check the invoices", row.threadId)?.title).toBe("Check the invoices");
+    const group = store.createGroup("Ops", [bot.id])!;
+    const task = store.activeGroupTask(group.id)!;
+    expect(store.titleGroupTaskFromFirstMessage(group.id, retry, task.threadId)).toBeNull();
+    expect(store.titleGroupTaskFromFirstMessage(group.id, "Audit the payroll", task.threadId)?.title).toBe("Audit the payroll");
+  });
+
   it("channel first-message titling reports the row it named, and a late retitle cannot undo a rename", () => {
     const store = new Store(selection);
     const bot = store.createBot({ name: "Scout" });

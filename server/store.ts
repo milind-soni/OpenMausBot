@@ -1003,11 +1003,11 @@ export class Store {
   }
 
   titleGroupTaskFromFirstMessage(groupId: string, text: string, threadId?: string): GroupTaskRecord | null {
-    const group = this.group(groupId);
+    const group = this.group(groupId), title = titleFromMessage(text);
     const task = threadId ? this.groupTaskByThread(groupId, threadId) : this.activeGroupTask(groupId);
-    if (!group || !task || task.titleFromFirstMessage || task.title !== UNTITLED_TASK) return null;
+    if (!group || !task || task.titleFromFirstMessage || task.title !== UNTITLED_TASK || title === UNTITLED_TASK) return null;
     this.commitGroupChange(group, "the thread's title", () => {
-      task.title = titleFromMessage(text);
+      task.title = title;
       task.titleFromFirstMessage = true;
     });
     this.emit({ type: "group", groupId });
@@ -2201,11 +2201,11 @@ export class Store {
   }
 
   titleTaskFromFirstMessage(botId: string, text: string, threadId?: string): TaskRecord | null {
-    const bot = this.own(botId);
+    const bot = this.own(botId), title = titleFromMessage(text);
     const task = threadId ? this.taskByThread(botId, threadId) : this.activeTask(botId);
-    if (!bot || !task || task.titleFromFirstMessage || (task.title !== UNTITLED_TASK && task.title !== UNTITLED_THREAD)) return null;
+    if (!bot || !task || task.titleFromFirstMessage || (task.title !== UNTITLED_TASK && task.title !== UNTITLED_THREAD) || title === UNTITLED_TASK) return null;
     this.commitBotChange(bot, "the thread's title", () => {
-      task.title = titleFromMessage(text);
+      task.title = title;
       task.titleFromFirstMessage = true;
     }, undefined, true);
     this.emit({ type: "bot", botId });
