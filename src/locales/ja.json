@@ -7699,7 +7699,6 @@
   "devicesPage.kind.server": "自分のサーバー",
   "devicesPage.kind.cloud": "Cloud",
   "devicesPage.kind.phone": "スマホ",
-  "devicesPage.kind.vm": "ボットのコンピューター",
   "devicesPage.group.computers": "コンピューター",
   "devicesPage.group.servers": "Cloud と自分のサーバー",
   "devicesPage.group.phones": "スマホ",

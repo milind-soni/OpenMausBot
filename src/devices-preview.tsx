@@ -1,6 +1,6 @@
 // Dev-only gallery of Settings → Devices, served at /devices-preview.html; not in the packaged app. It mounts the real
 // Settings window over a fake desktop bridge and answers every /api request itself, so nothing reaches a server.
-// ?place=computer|cloud&devices=full|none&tailscale=unknown|not-installed|no-cli|signed-out|needs-approval|magicdns|ready|unshared
+// ?place=computer|cloud&devices=full|none|one|ten&bots=full|none|unknown|forbidden&tailscale=unknown|not-installed|no-cli|signed-out|needs-approval|magicdns|ready|unshared
 //  &check=1 (presses the private network's button once loaded) &select=<device id> &add=choose|phone|computer|server
 //  &skin=midnight|daylight&advanced=1
 import { StrictMode } from "react";
@@ -15,7 +15,9 @@ import "./styles.css";
 
 const params = new URLSearchParams(location.search);
 const place = params.get("place") === "cloud" ? "cloud" : "computer";
-const full = params.get("devices") !== "none";
+const shown = params.get("devices") ?? "full";
+const full = shown === "full" || shown === "ten";
+const ten = shown === "ten";
 const tailscale = params.get("tailscale") ?? (full ? "ready" : "unknown");
 const skin = params.get("skin") ?? "midnight";
 applySkinChoice(SKIN_IDS.includes(skin as SkinId) ? (skin as SkinId) : "midnight");
@@ -31,8 +33,12 @@ let companion: CompanionState = {
   devices: full ? [
     { id: "iphone", name: "Ada’s iPhone 16", createdAt: now - 9e8, lastSeenAt: now - MIN, cloudDesktopAccess: false, e2eAt: now - 5e8, routes: "any", route: "wifi" },
     { id: "pixel", name: "Pixel 9", createdAt: now - 9e8, lastSeenAt: now - 26 * 60 * MIN, cloudDesktopAccess: false, e2eAt: now - 5e8, routes: "any", route: null },
-  ] : [],
-  connectedDeviceIds: full ? ["iphone"] : [],
+    ...(ten ? [
+      { id: "ipad", name: "Ada’s iPad Pro", createdAt: now - 9e8, lastSeenAt: now - MIN, cloudDesktopAccess: false, e2eAt: now - 5e8, routes: "any" as const, route: "tailscale" as const },
+      { id: "kid", name: "Theo’s Galaxy A54 with a very long name", createdAt: now - 9e8, lastSeenAt: now - 3 * 24 * 60 * MIN, cloudDesktopAccess: false, e2eAt: now - 5e8, routes: "local" as const, route: null },
+    ] : []),
+  ] : shown === "one" ? [{ id: "iphone", name: "Ada’s iPhone 16", createdAt: now - 9e8, lastSeenAt: now - MIN, cloudDesktopAccess: false, e2eAt: now - 5e8, routes: "any", route: "wifi" }] : [],
+  connectedDeviceIds: full ? ["iphone", ...(ten ? ["ipad"] : [])] : shown === "one" ? ["iphone"] : [],
   routes: { wifi: { on: full, since: now - 9e8 }, relay: { on: full, since: now - 9e8 }, tailscale: tailRoute, https: { on: false, since: null } },
   tailnetShare: ready && tailscale !== "unshared" ? { on: true, origin: "http://ada-macbook.tail4c2e.ts.net:8799", https: false, problem: null } : undefined,
 };
@@ -50,6 +56,7 @@ const environments = full ? [
   { id: "home", kind: "remote" as const, name: "Ada’s Cloud", origin: "https://ada.mausbot.cloud", home: true, color: "violet" },
   { id: "mini", kind: "remote" as const, name: "Studio Mac mini", origin: "http://studio-mini.tail4c2e.ts.net:8799" },
   { id: "vps", kind: "remote" as const, name: "Hetzner box", origin: "https://maus.example.com" },
+  ...(ten ? [{ id: "lan", kind: "remote" as const, name: "Office NUC", origin: "http://192.168.1.40:8799" }] : []),
 ] : [{ id: "local", kind: "local" as const, name: "This computer" }];
 const statuses = full ? [
   { id: "mini", state: "connected", since: now - 9e8, version: "0.1.171", behind: true, install: "global" },
@@ -81,7 +88,21 @@ const sessions = full ? [
   { id: "s-air", label: "Ada’s MacBook Air", scopes: ["admin", "client"], createdAt: now - 9e8, lastSeenAt: now - 3 * 60 * MIN, expiresAt: now + 9e8 },
   ...(place === "cloud" ? [{ id: "s-phone", label: "Safari on iPhone", scopes: ["admin", "client"], createdAt: now - 9e8, lastSeenAt: now - MIN, expiresAt: now + 9e8 }] : []),
 ] : [];
+const BOTS = [
+  { id: "b1", name: "Scout", color: "green" }, { id: "b2", name: "Writer", color: "purple" }, { id: "b3", name: "Builder", color: "orange" },
+  { id: "b4", name: "Ledger", color: "blue" }, { id: "b5", name: "Helper", color: "pink" },
+];
+const row = (botId: string, kind: string, computerId: string | null, state: string, extra: object = {}) => ({ botId, kind, computerId, name: null, state, stateAt: state === "unknown" ? null : now - MIN, ...extra });
+const botMode = params.get("bots") ?? "full";
+const botRows = !full || botMode === "none" ? [] : botMode === "unknown" ? [
+  row("b1", "cloud", "cloud:b1", "unknown"), row("b2", "vps", "vps:gpu/omb-b2", "unknown", { vps: { serverId: "vps:gpu", alias: "gpu", container: "omb-b2" } }),
+] : [
+  row("b1", "local", "local", "ready"), row("b2", "local", "local", "ready"), row("b3", "cloud", "cloud:b3", "asleep"),
+  row("b4", "vps", "vps:gpu/omb-b4", "ready", { vps: { serverId: "vps:gpu", alias: "gpu", container: "omb-b4" } }), row("b5", "browser", null, "unknown"),
+  ...(ten ? [row("b5", "cloud", "cloud:b5", "ready")] : []),
+];
 const ANSWERS: Record<string, unknown> = {
+  "/api/computers/bots": { now, rows: botRows },
   "/api/auth/session": { kind: "loopback", trust: "owner" },
   "/api/auth/sessions": { sessions, current: null },
   "/api/phones": { phones: full ? [{ key: "k1", registration: { installId: "i1", name: "Ada’s iPhone 16", platform: "ios", appVersion: "2.4.0", timeZone: "UTC", capabilities: {} }, registeredAt: now - 9e8, seen: now - MIN, lastUsedAt: null, online: true, busy: false }] : [] },
@@ -89,7 +110,7 @@ const ANSWERS: Record<string, unknown> = {
 };
 const config = {
   profile: { name: "Ada", email: "ada@example.com" }, membership: { authority: "local", pairingCodes: true }, managedPolicy: null,
-  vps: { configured: full, sshAlias: "", servers: full ? [{ name: "GPU box", sshAlias: "gpu" }] : [] },
+  vps: { configured: full, sshAlias: "", servers: full ? [{ name: "GPU box", sshAlias: "gpu" }, ...(ten ? [{ name: "Render farm", sshAlias: "farm" }] : [])] : [] },
   ...(place === "cloud" ? { cloudHome: true } : {}),
 };
 ANSWERS["/api/config"] = config;
@@ -98,11 +119,12 @@ globalThis.fetch = async (input: RequestInfo | URL) => {
   if (path === "/api/shared-computers" && place === "cloud" && full) {
     return Response.json({ computers: [], known: [{ id: "l1", name: "Ada’s MacBook Pro", platform: "darwin", online: true, busy: false, lent: true, lastSeenAt: now, lastUsedAt: null, scopes: { folders: 1, terminal: true, screen: true, internet: false, chrome: false } }] });
   }
+  if (path === "/api/computers/bots" && botMode === "forbidden") return Response.json({ error: "forbidden" }, { status: 403 });
   if (path in ANSWERS) return Response.json(ANSWERS[path]);
   return Response.json({ error: "not in the preview" }, { status: 404 });
 };
 
-const state = { ...initialState, config: config as never, appSettingsOpen: true, appSettingsSection: "devices" as const };
+const state = { ...initialState, bots: BOTS as never, config: config as never, appSettingsOpen: true, appSettingsSection: "devices" as const };
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <StoreContext.Provider value={{ state, dispatch: () => {} } as never}>

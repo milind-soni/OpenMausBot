@@ -8240,7 +8240,6 @@
   "devicesPage.kind.server": "你自己的服务器",
   "devicesPage.kind.cloud": "Cloud",
   "devicesPage.kind.phone": "手机",
-  "devicesPage.kind.vm": "机器人的电脑",
   "devicesPage.group.computers": "电脑",
   "devicesPage.group.servers": "Cloud 和你自己的服务器",
   "devicesPage.group.phones": "手机",

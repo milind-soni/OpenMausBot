@@ -6855,7 +6855,6 @@
   "devicesPage.kind.server": "Свой сервер",
   "devicesPage.kind.cloud": "Cloud",
   "devicesPage.kind.phone": "Телефон",
-  "devicesPage.kind.vm": "Компьютер бота",
   "devicesPage.group.computers": "Компьютеры",
   "devicesPage.group.servers": "Cloud и свои серверы",
   "devicesPage.group.phones": "Телефоны",

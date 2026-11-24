@@ -3444,7 +3444,6 @@
   "devicesPage.kind.server": "Votre propre serveur",
   "devicesPage.kind.cloud": "Cloud",
   "devicesPage.kind.phone": "Téléphone",
-  "devicesPage.kind.vm": "Ordinateur du bot",
   "devicesPage.group.computers": "Ordinateurs",
   "devicesPage.group.servers": "Clouds et vos propres serveurs",
   "devicesPage.group.phones": "Téléphones",
