@@ -117,7 +117,7 @@ const needsSignIn = (response) => response?.status === 401 || response?.status =
  * remains is a Cloud that fell asleep in the seconds since the Admin answered; one that only agreed to sleep answers so
  * itself and is left alone. Rows are kept for the Cloud and account they came from, and dropped the moment either changes.
  */
-export function createPlacesTogether({ pref, cloud, powerChecked, computer, local, cloudFetch, napped = () => {}, address = () => null, shown, focused, openPlace, send, changed, now = Date.now,
+export function createPlacesTogether({ pref, cloud, powerChecked, computer, local, cloudFetch, napped = () => {}, address = () => null, shown, focused, openPlace, send, changed, turnedOn = () => {}, now = Date.now,
   setTimer = setInterval, clearTimer = clearInterval, later = setTimeout, cancelLater = clearTimeout }) {
   /** What each place gave last: its rows, when, and how the last read went. */
   const kept = new Map();
@@ -293,10 +293,13 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
       void refresh(otherHome(here));
       return { v: 1, available: true, on: true, here, other: otherOf(here) };
     },
-    /** The switch. Off forgets every list. */
+    /** The switch. Off forgets every list. Turned on from this computer's page, it also lets My Cloud run commands here
+     * (`turnedOn`), so the two places work as one with one switch; the person turns that alone off from the icon's menu. */
     set(asking, value) {
+      const was = isOn();
       on = value === true;
       pref.write({ v: 1, on });
+      if (on && !was && asking === "computer") { try { turnedOn(); } catch {} }
       sameScope();
       tell();
       return this.state(asking);

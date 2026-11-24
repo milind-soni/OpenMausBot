@@ -4185,6 +4185,7 @@
   "remote.tailscale.needsApproval": "Dieser Computer wartet auf die Genehmigung in Ihrem Tailscale-Netzwerk. Genehmigen Sie ihn in der Tailscale-Admin-Konsole und versuchen Sie es dann erneut.",
   "together.switch.title": "Dieser Computer und Meine Cloud zusammen",
   "together.switch.line": "Standardmäßig aus. Die Bots der Cloud und die Bots dieses Computers stehen in einer Liste, und jeder öffnet sich dort, wo er läuft.",
+  "together.switch.commands": "Wenn du es einschaltest, dürfen die Bots von Meine Cloud auch Befehle auf diesem Computer ausführen; das kannst du über das OpenMausBot-Symbol wieder ausschalten.",
   "together.switch.failed": "Das konnte nicht gespeichert werden. Versuch es noch einmal.",
   "server.rooms.linkedAway": "{bot} läuft auf {place}, das gerade aus ist oder schläft. Die Antwort kommt hier, sobald {place} wieder da ist.",
   "server.rooms.linkedGone": "{bot} läuft auf {place}. Die Verbindung zu {place} ist gerade aus; eine Antwort kommt hier erst, wenn sie zurück ist.",

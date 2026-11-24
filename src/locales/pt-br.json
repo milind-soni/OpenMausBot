@@ -11443,6 +11443,7 @@
   "together.state.offlineComputer": "Não é possível ler os bots deste computador agora.",
   "together.switch.title": "Este computador e o My Cloud juntos",
   "together.switch.line": "Desativado por padrão. Os bots do Cloud e os deste computador aparecem em uma só lista, e cada um abre onde está.",
+  "together.switch.commands": "Ao ativar, os bots do My Cloud também podem executar comandos neste computador; você pode desativar isso pelo ícone do OpenMausBot.",
   "together.switch.failed": "Não foi possível salvar. Tente de novo.",
   "together.state.signin": "Abra o My Cloud uma vez para entrar.",
   "sidebar.newBotOn.computer": "Novo bot neste computador",

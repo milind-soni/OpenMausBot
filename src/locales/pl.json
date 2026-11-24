@@ -7212,6 +7212,7 @@
   "remote.tailscale.needsApproval": "Ten komputer czeka na zatwierdzenie w Twojej sieci Tailscale. Zatwierdź go w konsoli administracyjnej Tailscale, a potem spróbuj ponownie.",
   "together.switch.title": "Ten komputer i My Cloud razem",
   "together.switch.line": "Domyślnie wyłączone. Boty z Cloud i boty z tego komputera są na jednej liście, a każdy otwiera się tam, gdzie działa.",
+  "together.switch.commands": "Włączenie pozwala też botom z My Cloud uruchamiać polecenia na tym komputerze; możesz to wyłączyć w ikonie OpenMausBot.",
   "together.switch.failed": "Nie udało się zapisać. Spróbuj ponownie.",
   "imageGen.complexity.label": "Poziom szczegółowości",
   "imageGen.complexity.help": "Jak szczegółowe są obrazy GPT-Image-2.6. Niższy poziom jest prostszy i szybszy.",

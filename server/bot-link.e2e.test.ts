@@ -204,6 +204,11 @@ it("a bot on the computer and a bot on the person's own server hand each other w
     await expect.poll(async () => (await fromAtlas()).map((message) => message.text), { timeout: 40_000 }).toEqual(["Atlas here: 42 orders this week. @Writer please confirm."]);
     await expect.poll(async () => (await computer.messages(launch.activeTaskId)).some((message) => message.kind === "text" && message.from?.botId === writer.id && message.text === "Writer confirms: 42."), { timeout: 40_000 }).toBe(true);
     expect(atlasTurns()).toBe(turnsBefore + 1);
+    // Writer took that turn because of what Atlas, on the server, wrote: on the computer it ran limited, as work from there
+    // does, though the person's own line started the round.
+    const confirmed = computer.providerTurns().filter((turn) => turn.botId === writer.id).at(-1);
+    expect(confirmed).toMatchObject({ permissionMode: "acceptEdits", restricted: true });
+    expect(JSON.stringify(confirmed.prompt)).toContain("Running commands on this computer is off for work from My Cloud");
     const roomWork = (await home.api("GET", "/api/bots")).bots.find((bot: any) => bot.id === atlas.id).tasks.find((task: any) => task.title === "@Launch · work");
     expect(roomWork, "the room's turns run in one thread of their own on the server").toBeTruthy();
     const read = (await home.messages(roomWork.threadId)).map((message) => message.text ?? "").join("\n");

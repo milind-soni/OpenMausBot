@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createCoordinator, type Coordinator, type CoordinatorHost, type HandoffView } from "../coordinator.ts";
 import type { SendTurnInput } from "../contracts.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
-import { createLinkLimits, LINK_ACTION_DENIED, LINK_COMMANDS_MESSAGE, LINK_COMMANDS_OFF, LINK_ENGINE_REFUSAL, linkLevel, linkRouteRefused } from "./far-side.ts";
+import { createLinkLimits, LINK_ACTION_DENIED, LINK_CODEX_NO_FILES, LINK_COMMANDS_MESSAGE, LINK_COMMANDS_OFF, LINK_ENGINE_REFUSAL, LINK_ROUTE_REFUSAL, linkAppWriteRefused, linkHandOnRefusal, linkLevel, linkRouteRefused } from "./far-side.ts";
 import { createBotLink, type BotLink } from "./link.ts";
 import { peerKey, type Frame } from "./protocol.ts";
 
@@ -134,7 +134,7 @@ describe("what a limited turn's engine is given", () => {
       phone: { command: "phone", args: [], env: {} }, device: { command: "device", args: [], env: {} }, data: { command: "data", args: [], env: {} },
       custom: { shell: { command: "sh", args: [], env: {} } }, mcpApps: { shell: { extension: true } }, customResultBudgets: { shell: 0 },
       agents: { command: "agents", args: [], env: {} }, composio: { command: "composio", args: [], env: {} }, email: { command: "email", args: [], env: {} },
-      hooks: { url: "http://127.0.0.1:1", token: "t" },
+      hooks: { url: "http://127.0.0.1:1", token: "t" }, dweb: { url: "http://127.0.0.1:2" },
     },
   });
   const limits = createLinkLimits({ cloud: () => false, node: () => undefined, confinable: () => true });
@@ -157,8 +157,9 @@ describe("what a limited turn's engine is given", () => {
     expect(limited).not.toHaveProperty("botSettingsFile");
     expect(limited).not.toHaveProperty("mcpFromUserConfig");
     expect(limited).not.toHaveProperty("preloadBrowserTools");
-    expect(limited.text).toBe(`do the work\n\n${LINK_COMMANDS_OFF}`);
-    expect(limited.recoveryText).toBe(`earlier\n\ndo the work\n\n${LINK_COMMANDS_OFF}`);
+    const told = driverKind === "codex" ? `${LINK_COMMANDS_OFF} ${LINK_CODEX_NO_FILES}` : LINK_COMMANDS_OFF;
+    expect(limited.text).toBe(`do the work\n\n${told}`);
+    expect(limited.recoveryText).toBe(`earlier\n\ndo the work\n\n${told}`);
     expect(limited.confinedWhy).toBe(LINK_COMMANDS_OFF);
   });
 
@@ -175,15 +176,53 @@ describe("what a limited turn's engine is given", () => {
       const [method, path] = refused.split(" ") as [string, string];
       expect(linkRouteRefused(method, path), refused).toBe(true);
     }
-    for (const kept of ["POST /api/internal/coordinate-bots", "GET /api/internal/assignment-status", "POST /api/internal/memory", "POST /api/internal/connectors/mcp", "POST /api/internal/email/mcp"]) {
+    for (const memory of ["POST /api/internal/memory", "POST /api/internal/memory/log", "POST /api/internal/team-memory"]) {
+      const [method, path] = memory.split(" ") as [string, string];
+      expect(linkRouteRefused(method, path), memory).toBe(true);
+    }
+    for (const kept of ["POST /api/internal/coordinate-bots", "GET /api/internal/assignment-status", "GET /api/internal/session-search", "POST /api/internal/connectors/mcp", "POST /api/internal/email/mcp"]) {
       const [method, path] = kept.split(" ") as [string, string];
       expect(linkRouteRefused(method, path), kept).toBe(false);
     }
   });
 
+  it("reads from connected apps but changes nothing in them, on every engine", () => {
+    expect(linkAppWriteRefused([{ slug: "GMAIL_FETCH_EMAILS" }], ["gmail"])).toBe(false);
+    expect(linkAppWriteRefused([{ slug: "GMAIL_SEND_EMAIL" }], ["gmail"])).toBe(true);
+    expect(linkAppWriteRefused([{ slug: "SLACK_SEND_MESSAGE" }], ["slack"])).toBe(true);
+    expect(linkAppWriteRefused([{ slug: "COMPOSIO_PROXY_EXECUTE" }], ["gmail"])).toBe(true);
+  });
+
+  it("answers no question for the person, no work outside its own, and leaves no words for another conversation's next run", () => {
+    const farSide = (id: string) => id.startsWith("link-");
+    expect(linkHandOnRefusal({ answers: "person-work-1" }, farSide)).toBe(LINK_ROUTE_REFUSAL);
+    expect(linkHandOnRefusal({ answers: "link-h-1" }, farSide)).toBeNull();
+    expect(linkHandOnRefusal({ post: { wake: false } }, farSide)).toBe(LINK_ROUTE_REFUSAL);
+    expect(linkHandOnRefusal({ post: { wake: true } }, farSide)).toBeNull();
+    expect(linkHandOnRefusal({}, farSide)).toBeNull();
+  });
+
+  it("knows a root started by what the far side wrote here, and limits it only while commands are off", () => {
+    const roots = new Map<string, string>();
+    const here = createLinkLimits({ cloud: () => false, node: (id) => (roots.has(id) ? { rootId: roots.get(id)! } : undefined), confinable: () => true });
+    const root = here.farRoot();
+    roots.set("child", root);
+    expect(here.farSide("child")).toBe(true);
+    expect(here.limited("child")).toBe(true);
+    expect(here.commandsOff()).toBe(true);
+    here.receive({ type: LINK_COMMANDS_MESSAGE, on: true });
+    expect(here.commandsOff()).toBe(false);
+    expect(here.limited("child")).toBe(false);
+    expect(here.farSide("child")).toBe(true);
+  });
+
   it("answers its permission requests at the capped level only while that turn runs", () => {
     limits.begin("thread-1", true, "claudeAgent");
     expect(limits.held("thread-1")?.level("full")).toBe("edits");
+    expect(limits.held("thread-1")?.level("full", "Write")).toBe("edits");
+    expect(limits.held("thread-1")?.level("full", "mcp__composio__GMAIL_SEND_EMAIL"), "the app route refuses its writes").toBe("full");
+    expect(limits.held("thread-1")?.level("full", "mcp__email__send_email")).toBe("full");
+    expect(limits.held("thread-1")?.level("edits", "mcp__composio__GMAIL_SEND_EMAIL")).toBe("edits");
     limits.begin("thread-1", false, "claudeAgent");
     expect(limits.held("thread-1")).toBeNull();
     expect(LINK_ACTION_DENIED).toMatch(/off/u);

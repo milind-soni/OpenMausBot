@@ -1007,7 +1007,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         // Without these every turn gets this machine's MCP servers, connectors, skills, hooks and CLAUDE.md (one desktop: 407 tools, ~10k tokens).
         if (!turn.mcpFromUserConfig && claudeCliSupports(turnCliVersion, "--strict-mcp-config")) args.push("--strict-mcp-config");
         if (projectSettingsOnly) args.push("--setting-sources", "project");
-        if (turn.userSkillsDir) args.push("--add-dir", turn.userSkillsDir);
+        if (turn.userSkillsDir && !shellOff(turn)) args.push("--add-dir", turn.userSkillsDir);
       }
       const compactWindow = autoCompactWindow(turnEnvironment, injected.model);
       const passedAutocompact = Boolean(compactWindow) && ownCli && cliHasAutocompact === true; if (compactWindow && passedAutocompact) args.push("--autocompact", compactWindow);
@@ -1098,7 +1098,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       mcpServers.ogb = { command: process.execPath, args: [PERM_PROXY_PATH, socketPath], env: permissionEnv, alwaysLoad: true };
       allowed.push("mcp__ogb", ...gateQueryTools(mcpServers));
       // A guest pre-allows only harness tools; anything else (the browser can open file:) asks.
-      if (turn.guestConfined) allowed.splice(0, allowed.length, ...allowed.filter((name) => name === "mcp__ogb" || name === "mcp__agents"));
+      if (shellOff(turn)) allowed.splice(0, allowed.length, ...allowed.filter((name) => name === "mcp__ogb" || name === "mcp__agents"));
       const env = withEndpointFolder(environment(config.endpointModels ? undefined : turnModel), config, () => retryState.delete(threadId)); if (ownHttp) withLoopbackNoProxy(env); env.PATH = turnEnvironment.PATH; // launch the copy this turn checked, not one a newer PATH finds
       // The MCP config carries credentials and argv is readable via `ps`: a 0600 file, removed at settle.
       let mcpConfigPath: string | null = null;

@@ -10,13 +10,16 @@
 // hand-off, its result and its stop go only to the place they belong to.
 //
 // Security: the link joins only servers the same person signs in to as owner (server/routes/bot-link.ts), and work that
-// crosses it counts as the person's own, as it does between two bots of one place. Work the Cloud hands a computer
-// follows the person's grant to their Clouds on that computer (server/bot-link/far-side.ts): while "Let Clouds run
-// commands on this computer" is off, it runs there with no shell, computer use, reads outside its working folders or
-// writes outside its working folder, and an engine that can't be held to that refuses it. Work a computer hands its Cloud
-// runs in the Cloud's box. Still open: what comes back (results, files) is read by the person's own turns at their
-// level; a limited turn's writes to its working folder and memory are read by later turns there; the grant is read when
-// each turn starts. Turning the link off on the computer ends all of it.
+// crosses it counts as the person's own, as it does between two bots of one place. Work the Cloud hands a computer, and
+// any turn there that what the Cloud wrote started (a far room member's answer that names a bot), follows the person's
+// grant to their Clouds on that computer (server/bot-link/far-side.ts; turning this link on grants it, the OpenMausBot
+// icon takes it back). While "Let Clouds run commands on this computer" is off, such a turn runs in its thread's own
+// scratch folder with no shell, computer use, browser, phones, own MCP servers, Data tools or reads outside that folder;
+// connected apps and Email only read; it writes no memory, schedules nothing, changes no setting, answers nothing for the
+// person and leaves no words in another conversation; an engine that can't be held to that refuses it. Work a computer
+// hands its Cloud runs in the Cloud's box. Still open: what comes back (results, files, a far member's line in a room) is
+// read by the person's own turns at their level, and the grant is read when each turn starts. Turning the link off on
+// the computer ends all of it.
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
