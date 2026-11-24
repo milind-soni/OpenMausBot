@@ -23,6 +23,7 @@ export interface StoredCookie {
   session?: boolean;
   sameSite?: string;
   partitionKey?: unknown;
+  partitionKeyOpaque?: boolean;
 }
 
 interface EncryptedJar {
@@ -44,8 +45,12 @@ function cookieIdentity(cookie: Pick<StoredCookie, "name" | "domain" | "path">):
   return `${cookie.name}\0${cookie.domain}\0${cookie.path || "/"}`;
 }
 
+function isPartitionedCookie(cookie: Pick<StoredCookie, "partitionKey" | "partitionKeyOpaque">): boolean {
+  return cookie.partitionKey != null || cookie.partitionKeyOpaque !== undefined;
+}
+
 function isLivePersistableCookie(cookie: StoredCookie, nowSec: number): boolean {
-  if (!cookie.name || !cookie.domain || cookie.partitionKey != null) return false;
+  if (!cookie.name || !cookie.domain || isPartitionedCookie(cookie)) return false;
   if (cookie.session !== true && typeof cookie.expires === "number" && cookie.expires > 0 && cookie.expires <= nowSec) {
     return false;
   }
@@ -152,7 +157,7 @@ export async function remountCookies(
   const stored = readJar(dataDir, profileKey).filter((cookie) => isLivePersistableCookie(cookie, nowSec));
   if (stored.length === 0) return 0;
   const live = await browser.connection.root.send<{ cookies?: StoredCookie[] }>("Storage.getCookies", {}, { timeoutMs: CDP_TIMEOUT_MS });
-  const present = new Set((live.cookies ?? []).map(cookieIdentity));
+  const present = new Set((live.cookies ?? []).filter((cookie) => !isPartitionedCookie(cookie)).map(cookieIdentity));
   const missing = stored.filter((cookie) => !present.has(cookieIdentity(cookie)));
   if (missing.length === 0) return 0;
   const result = await cdpSink((method, params) => browser.connection.root.send(method, params, { timeoutMs: CDP_TIMEOUT_MS })).write(

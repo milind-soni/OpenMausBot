@@ -540,10 +540,11 @@ export class BrowserService {
         !readsDuringHold(parsed.call) &&
         run.browser.connected &&
         this.#options.backend(profile.key).kind === "local" &&
+        deadline - Date.now() > 500 &&
         Date.now() - (this.#lastCookieSnapshot.get(profile.key) ?? 0) >= 30_000
       ) {
         this.#lastCookieSnapshot.set(profile.key, Date.now());
-        await snapshotCookies(
+        void snapshotCookies(
           run.browser,
           this.#options.dataDir,
           profile.key,

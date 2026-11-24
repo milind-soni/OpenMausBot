@@ -474,26 +474,16 @@ export class BrowserSweep {
     }
     for (const session of owned ?? []) {
       // Read per browser, after the awaits before it: a turn may have started using it.
-      if (this.#held(session)) {
-        if (this.#keepAlive && this.#live(session)) this.#lastKeepAlive.set(session, this.#now());
-        continue;
-      }
       if (this.#live(session)) {
-        if (await this.#closeIdle(session)) {
+        if (this.#held(session) || !(await this.#closeIdle(session))) {
+          await this.#pingKeepAlive(session);
+        } else {
           this.#lastKeepAlive.delete(session);
           console.info(`browser ${session}: closed after it sat unused`);
-        } else if (this.#keepAlive) {
-          const now = this.#now();
-          const last = this.#lastKeepAlive.get(session);
-          if (last === undefined) {
-            this.#lastKeepAlive.set(session, now);
-          } else if (now - last >= this.#keepAliveIntervalMs) {
-            this.#lastKeepAlive.set(session, now);
-            await this.#keepAlive(session);
-          }
         }
         continue;
       }
+      if (this.#held(session)) continue;
       const closed = await closeBrowserSession(binaryPath, browserRuntimeEnv({ AGENT_BROWSER_SESSION: session }));
       if (closed) {
         this.#warned.delete(session);
@@ -502,6 +492,20 @@ export class BrowserSweep {
         this.#warned.add(session);
         console.warn(`browser ${session}: could not close a browser nothing here uses any more; the sweep keeps trying`);
       }
+    }
+  }
+
+  async #pingKeepAlive(session: string): Promise<void> {
+    if (!this.#keepAlive) return;
+    const now = this.#now();
+    const last = this.#lastKeepAlive.get(session);
+    if (last === undefined) {
+      this.#lastKeepAlive.set(session, now);
+      return;
+    }
+    if (now - last >= this.#keepAliveIntervalMs) {
+      this.#lastKeepAlive.set(session, now);
+      await this.#keepAlive(session);
     }
   }
 

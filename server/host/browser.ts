@@ -287,7 +287,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     held: (session) => !turnResources.free(`browser:${session}`),
     closeIdle: (session) => browserRuntime.closeIfIdle(session, idleMs(), usedBrowserSessions.get(session)),
     keepAlive: async (session) => {
-      if (idleMs() > 0) return;
+      if (idleMs() > 0 && turnResources.free(`browser:${session}`)) return;
       const spec = usedBrowserSessions.get(session);
       if (!spec || chromeTarget(session, spec) || attachesToChrome(spec.env)) return;
       await inRunningBrowser(spec.command, browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session }), ["get", "url"]).then(() => undefined, () => undefined);

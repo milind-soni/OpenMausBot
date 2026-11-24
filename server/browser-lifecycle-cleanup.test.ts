@@ -380,14 +380,17 @@ describe("closing this data dir's browsers nothing uses", () => {
     vi.stubEnv("XDG_RUNTIME_DIR", runtimeDir);
     vi.mocked(runningBrowserSessionNames).mockResolvedValueOnce(["bot-keep"]);
     vi.mocked(runningBrowserSessionNames).mockResolvedValueOnce(["bot-keep"]);
+    vi.mocked(runningBrowserSessionNames).mockResolvedValueOnce(["bot-keep"]);
     const keepAlive = vi.fn(async () => {});
+    const closeIdle = vi.fn(async () => false);
     let now = 1_000;
+    let held = false;
     const running = new BrowserSweep({
       engine: () => "/bin/agent-browser",
       owns: (session) => session === "bot-keep",
       live: (session) => session === "bot-keep",
-      held: () => false,
-      closeIdle: async () => false,
+      held: () => held,
+      closeIdle,
       keepAlive,
       keepAliveIntervalMs: 500,
       now: () => now,
@@ -397,6 +400,12 @@ describe("closing this data dir's browsers nothing uses", () => {
     now += 600;
     await running.sweep();
     expect(keepAlive).toHaveBeenCalledExactlyOnceWith("bot-keep");
+
+    held = true;
+    now += 600;
+    await running.sweep();
+    expect(keepAlive).toHaveBeenCalledTimes(2);
+    expect(closeIdle).toHaveBeenCalledTimes(2);
     vi.unstubAllEnvs();
     info.mockRestore();
   });

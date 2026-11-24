@@ -767,10 +767,70 @@ describe("browsers on one computer", () => {
       await erased;
       allowGetCookiesReturn();
       await pendingCall;
+      await sleep(10);
     } finally {
       nowSpy.mockRestore();
     }
     expect(existsSync(join(profileDir(dataDir, "bot:a"), "omb-cookies.enc"))).toBe(false);
     expect(existsSync(profileDir(dataDir, "bot:a"))).toBe(false);
+  });
+
+  it("ignores partitioned cookies during capture and live presence checks, and never delays tool return for periodic snapshots", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-browser-partition-"));
+    folders.push(dataDir);
+    let launch = 0;
+    const backend = new FakeBackend(() => {
+      const chrome = new FakeChrome();
+      if (launch === 1) {
+        chrome.cookies.push({ name: "xs", value: "partitioned-only", domain: ".facebook.com", path: "/", secure: true, partitionKeyOpaque: false });
+      }
+      launch++;
+      return chrome;
+    });
+    const service = new BrowserService({ dataDir, backend: () => backend, maxRunning: 4, idleMs: () => 600_000, takeoverMs: 200, callBudgetMs: 400 });
+    services.push(service);
+    const target = { session: "bot-a", key: "bot:a" };
+    const rpc = (name: string, args: Record<string, unknown> = {}) =>
+      service.agentRpc(target, "tools/call", { name, arguments: args }) as Promise<{ content: Array<{ type: string; text?: string }>; isError?: boolean }>;
+    await rpc("agent_browser_open", { url: "https://facebook.com" });
+    backend.chromes[0]!.cookies.push(
+      { name: "xs", value: "unpartitioned-auth", domain: ".facebook.com", path: "/", secure: true, httpOnly: true, expires: -1 },
+      { name: "part_opaque", value: "drop-me", domain: ".facebook.com", path: "/", secure: true, partitionKeyOpaque: false },
+      { name: "part_obj", value: "drop-me-too", domain: ".facebook.com", path: "/", secure: true, partitionKey: { topLevelSite: "https://site.test" } },
+    );
+    await sleep(25);
+    expect(await service.closeIdle(10)).toEqual(["bot:a"]);
+
+    await rpc("agent_browser_get_url");
+    expect(backend.chromes[1]!.cookies).toContainEqual(expect.objectContaining({ name: "xs", value: "unpartitioned-auth" }));
+    expect(backend.chromes[1]!.cookies.some((cookie) => cookie.name === "part_opaque" || cookie.name === "part_obj")).toBe(false);
+
+    const profile = service.profile(target);
+    const root = profile.run!.browser.connection.root;
+    const origSend = root.send.bind(root);
+    let snapshotDone = Promise.resolve();
+    root.send = (async (method: string, params: Record<string, unknown>, opts?: { timeoutMs?: number }) => {
+      if (method === "Storage.getCookies") {
+        let markDone!: () => void;
+        snapshotDone = new Promise<void>((resolve) => { markDone = resolve; });
+        try {
+          await sleep(500);
+          return await origSend(method, params, opts);
+        } finally {
+          markDone();
+        }
+      }
+      return origSend(method, params, opts);
+    }) as typeof root.send;
+    const baseNow = Date.now();
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(baseNow + 35_000);
+    try {
+      const slowSnapshotResult = await rpc("agent_browser_open", { url: "https://facebook.com/next" });
+      expect(slowSnapshotResult.isError).toBeFalsy();
+      expect(slowSnapshotResult.content.map((part) => part.text ?? "").join("\n")).not.toContain("unknown");
+    } finally {
+      nowSpy.mockRestore();
+      await snapshotDone;
+    }
   });
 });
