@@ -1,5 +1,6 @@
 // Room queue actions that talk to the server, kept out of the store file: cancelling a queued room message
-// and steering the queue head into the running room turn.
+// and steering the queue head into the running room turn. A quiet steer (Enter in a busy room) says nothing
+// when it cannot steer: the message just stays queued.
 import { t } from "../lib/i18n";
 
 import { api } from "./api";
@@ -41,13 +42,13 @@ export function steerGroupQueued(
         for (const queueId of body.queueIds ?? []) {
           send.dispatch({ type: "consumePendingQueued", threadId: body.threadId, queueId });
         }
-      } else if (body?.queued === true) {
+      } else if (body?.queued === true && !action.quiet) {
         send.notice({ type: "notice", notice: body.blockedBy === "images" ? { kind: "steer-images", botName: null, threadId: body.threadId } : { kind: "note", botName: null, text: t("composer.queued.roomSteerHeld"), threadId: body.threadId } });
       }
       action.onSettled?.();
     })
     .catch((error) => {
-      send.showError(error);
+      if (!action.quiet) send.showError(error);
       action.onError?.();
     });
 }

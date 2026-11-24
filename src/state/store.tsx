@@ -674,7 +674,7 @@ export type Action =
   | { type: "cancelQueued"; botId: string; queueId: string; threadId?: string; onCancelled?: () => void }
   | { type: "steerQueued"; botId: string; queueId: string; threadId?: string; onError?: () => void; onSettled?: () => void }
   | { type: "cancelGroupQueued"; groupId: string; threadId: string; queueId: string; onCancelled?: () => void }
-  | { type: "steerGroupQueued"; groupId: string; queueId: string; threadId?: string; onError?: () => void; onSettled?: () => void }
+  | { type: "steerGroupQueued"; groupId: string; queueId: string; threadId?: string; quiet?: boolean; onError?: () => void; onSettled?: () => void }
   | { type: "editMessage"; botId: string; messageId: string; text: string; threadId?: string; sendId?: string }
   | { type: "switchBranch"; botId: string; messageId: string; threadId?: string }
   | { type: "threadActive"; threadId: string; activeLeafId: string }
@@ -2609,16 +2609,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   queueId: body.queueId,
                   text: action.text,
                 });
-                // The chosen "Sending while a bot works" applies in rooms too: hand the fresh queue head
-                // to the running turn. A driver that cannot steer keeps the queue and says so.
-                if (action.followUp === "steer") {
-                  wrapped({
-                    type: "steerGroupQueued",
-                    groupId: action.groupId,
-                    threadId: body.threadId,
-                    queueId: body.queueId,
-                    onSettled: () => {},
-                  });
+                // "Sending while a bot works" applies in rooms too: a fresh queue head is handed to the running
+                // turn, quietly. One that cannot steer (a message ahead of it, the turn just ended) stays queued.
+                const ahead = (stateRef.current.pendingQueued[body.threadId] ?? []).some((entry) => entry.queueId !== body.queueId);
+                if (action.followUp === "steer" && !ahead) {
+                  wrapped({ type: "steerGroupQueued", groupId: action.groupId, threadId: body.threadId, queueId: body.queueId, quiet: true });
                 }
               }
             })
