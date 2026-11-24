@@ -84,6 +84,8 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
     const { req, res, path, method, url, json, readBody } = ctx;
     if (path !== "/api/cloud-send" && !path.startsWith("/api/cloud-send/")) return PASS;
     const home = deps.cloudHome === true || deps.ownHome?.(ctx.auth) === true;
+    // A move into this Cloud starts with its owner's computer asking here: a new Cloud's first hour holds its inbox offer.
+    if (move && home && move.owner(ctx.auth)) leases.touched();
     const scoped = deps.scope?.(ctx.auth) ?? null;
     // Downstream handlers rely on this outer wrapper as the sole gate: team refusal rejects callers unless
     // scoped to a specific bot move session.

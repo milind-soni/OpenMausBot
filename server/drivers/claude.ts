@@ -691,7 +691,7 @@ function diagnosticClaudeUserMessage(message: ClaudeUserMessage): ClaudeUserMess
 
 export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
   driverKind: DRIVER_KIND,
-  metadata: { displayName: "Claude", supportsMultipleInstances: true },
+  metadata: { displayName: "Claude", supportsMultipleInstances: true, signInAccount: "Claude" },
   install: {
     command: {
       darwin: "npm install -g @anthropic-ai/claude-code",

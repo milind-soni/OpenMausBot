@@ -17,7 +17,7 @@ function host(options: { floored?: Set<string>; owner?: boolean } = {}) {
   const store = new Store(claude);
   const own = createOwnThreads({
     store, registry: { instances: () => [], cliTarget: (id) => ({ driverKind: drivers[id]! }) }, node: () => undefined,
-    current: () => undefined, proposalRefusal: () => null, givesWay: () => null, modelName: (one) => one.model,
+    current: () => undefined, proposalRefusal: () => null, givesWay: () => null, modelName: (one) => one.model, hint: () => ({ why: "", connect: "" }),
     // sourceApprovalMode: a guest's or a fenced turn (`floored`) and a Bot API thread run at Ask, whatever the thread says.
     sourceLevel: (botId, threadId) => options.floored?.has(threadId) || store.taskByThread(botId, threadId)?.botApi
       ? "ask" : approvalModeFor(store.projectBotForTask(botId, threadId)!),
