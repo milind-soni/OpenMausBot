@@ -234,7 +234,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "together", page: "plan", anchor: "together", labelKey: "together.switch.title", sectionKey: "settings.page.plan", synonyms: ["together", "one list", "both places", "cloud bots", "sidebar"] },
   { id: "this-week", page: "plan", anchor: "this-week", labelKey: "settings.plan.thisWeek", sectionKey: "settings.page.plan", synonyms: ["usage", "weekly", "limits", "cloud desktop hours", "voice replies"] },
   { id: "updates", page: "app", anchor: "updates", labelKey: "settings.updates.title", when: desk, synonyms: ["update", "version", "check for updates", "release"] },
-  { id: "your-computers", page: "app", anchor: "your-computers", labelKey: "settings.app.computers", when: desk, synonyms: ["servers", "connect to a server", "environments", "switch"] },
+  { id: "your-computers", page: "app", anchor: "your-computers", labelKey: "settings.app.computers", when: desk, advanced: true, synonyms: ["servers", "connect to a server", "environments", "switch"] },
   { id: "help", page: "app", anchor: "help", labelKey: "sidebar.menu.helpShort", synonyms: ["help center", "feedback", "diagnostics", "logs", "tour", "welcome tour"] },
   { id: "language", page: "general", anchor: "typing", labelKey: "settings.language.title", simple: { page: "app", anchor: "typing" }, synonyms: ["language", "translate"] },
   { id: "send-key", page: "general", anchor: "typing", labelKey: "settings.sendKey.title", synonyms: ["enter", "return", "shift+enter", "new line", "keyboard"] },

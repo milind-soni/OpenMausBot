@@ -76,6 +76,7 @@ export function SettingsWindow() {
   // A link, a notice or a search result that asks for what only Advanced mode shows turns Advanced on and lands there.
   useEffect(() => { if (target.advanced) setAdvancedMode(true); }, [target.advanced]);
   useEffect(() => window.ogb?.onOpenAppSettings?.(() => setQuery("")), []);
+  useEffect(() => window.ogb?.environments?.onOpenSettings?.(() => { setQuery(""); setNarrowPage(true); }), []);
   useEffect(markOpened, []);
 
   const hits = useMemo(() => searchSettings(query, ctx, (entry) => hitLabel({ entry, elsewhere: false, score: 0 }, place, ctx.desktop),
