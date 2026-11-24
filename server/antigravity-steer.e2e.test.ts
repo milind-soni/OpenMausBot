@@ -24,7 +24,7 @@ posixOnly("Antigravity CLI steer through the message route", () => {
   let child: ChildProcess;
   let home: string, tools: string;
   // One Antigravity instance per test, each with its own gates and log.
-  const NAMES = ["agy", "agyLate", "agyLateFull", "agyQueue", "agyQueueFull", "agyRoom", "agyLost"];
+  const NAMES = ["agy", "agyLate", "agyLateFull", "agyQueue", "agyQueueFull", "agyRoom", "agyLost", "agyLostQueue"];
   const cli = (name: string) => ({ finishGate: join(tools, `${name}.finish`), rejectGate: join(tools, `${name}.reject`), rpc: join(tools, `${name}.rpc.jsonl`) });
   let stderr = "";
 
@@ -67,7 +67,7 @@ posixOnly("Antigravity CLI steer through the message route", () => {
         FAKE_ACP_AUTH_METHOD: "oauth-personal", FAKE_ACP_MODELS: "gemini-3.8-flash", FAKE_ACP_MODES: "default,plan",
         FAKE_ACP_AGENT_NAME: "Antigravity ACP Server", FAKE_ACP_VERSION: "1.5.15", FAKE_ACP_AGENT_VERSION: "1.5.15",
         FAKE_ACP_MODE: "antigravity-steer", FAKE_ACP_GATE_FILE: cli(name).finishGate, FAKE_ACP_RPC_APPEND_FILE: cli(name).rpc,
-        ...(name === "agyLost" ? { FAKE_ACP_STEER_FAIL: "lost", FAKE_ACP_STEER_TOOL: "sleep 600" }
+        ...(name.startsWith("agyLost") ? { FAKE_ACP_STEER_FAIL: "lost", FAKE_ACP_STEER_TOOL: "sleep 600" }
           : { FAKE_ACP_STEER_FAIL: "asking-late", FAKE_ACP_STEER_FAIL_GATE: cli(name).rejectGate }),
       },
       config: { cli: executable, fullAuto: true },
@@ -307,5 +307,38 @@ posixOnly("Antigravity CLI steer through the message route", () => {
     expect(typed[1].steered).toBe(true);
     expect(bot.messages.filter((m: any) => m.tool?.nameCode === "chat.notice.steerUnconfirmed")).toHaveLength(1);
     expect(calls("agyLost", "session/prompt")).toBe(2);
+  }, 60_000);
+
+  it("the queue's Steer button: a steer the CLI took in but never confirmed reaches the CLI once and says so once in the thread", async () => {
+    const created = (await api("POST", "/api/bots")).body.bot;
+    expect((await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "agyLostQueue", model: "gemini-3.8-flash" } })).status).toBe(200);
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "Build the report." })).status).toBe(202);
+    await waitFor(async () => (await getBot(created.id)).busy === true && calls("agyLostQueue", "session/prompt") === 1
+      && (await getBot(created.id)).messages.some((m: any) => m.kind === "activity" && JSON.stringify(m.tool ?? {}).includes("sleep 600")), "the long tool call");
+    const first = await api("POST", `/api/bots/${created.id}/messages`, { text: "Use pytest.", followUp: "queue" });
+    const second = await api("POST", `/api/bots/${created.id}/messages`, { text: "Add a README.", followUp: "queue" });
+    expect(first.body).toMatchObject({ ok: true, queued: true });
+    expect(second.body).toMatchObject({ ok: true, queued: true });
+
+    const steered = await api("POST", `/api/bots/${created.id}/queue/${first.body.queueId}/steer`, { threadId: created.threadId });
+    expect(steered.status).toBe(200);
+    expect(steered.body).toMatchObject({ ok: true, steered: true, queueIds: [first.body.queueId, second.body.queueId] });
+    expect(calls("agyLostQueue", "session/prompt.steer")).toBe(1);
+    // Past the person-first wait, so a stop and a second run it would make have started.
+    await new Promise((r) => setTimeout(r, PERSON_FIRST_MS * 3));
+    let bot = await getBot(created.id);
+    expect(bot.busy).toBe(true);
+    expect(calls("agyLostQueue", "session/prompt")).toBe(2);
+    expect(calls("agyLostQueue", "session/cancel")).toBe(0);
+
+    writeFileSync(cli("agyLostQueue").finishGate, "finish");
+    await waitFor(async () => !(await getBot(created.id)).busy, "the turn to end");
+    bot = await getBot(created.id);
+    const typed = bot.messages.filter((m: any) => m.role === "user" && m.kind === "text");
+    expect(typed.map((m: any) => m.text)).toEqual(["Build the report.", "Use pytest.", "Add a README."]);
+    expect(typed.slice(1).every((m: any) => m.steered === true)).toBe(true);
+    expect(bot.messages.filter((m: any) => m.tool?.nameCode === "chat.notice.steerUnconfirmed")).toHaveLength(1);
+    expect(calls("agyLostQueue", "session/prompt")).toBe(2);
+    expect(calls("agyLostQueue", "session/prompt.steer")).toBe(1);
   }, 60_000);
 });

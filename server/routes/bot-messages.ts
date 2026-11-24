@@ -455,6 +455,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         for (const message of messages) handoffs.steered(bot.threadId, steerTarget, instance?.instanceId, message.id);
         const queueIds = held.items.map((item) => item.messageId);
         settleHeldSteeredQueue(held);
+        if (steered === "indeterminate") store.appendMessage(bot.threadId, { role: "bot", kind: "activity", tool: failedNoticeTool("chat.notice.steerUnconfirmed") });
         // After it is recorded, each line loses its mark and waits once more, in order, at the head of the queue; one that
         // could not be written says so in the thread, its row left to send again.
         refusedLate = () => {
