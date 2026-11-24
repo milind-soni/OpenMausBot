@@ -54,6 +54,14 @@ describe("toolDetailPreview", () => {
     expect(toolDetailPreview({ ok: false, error: { message: "denied", password: "tiny" } })).not.toContain("tiny");
     expect(toolDetailPreview({ ok: false, error: JSON.stringify({ message: "denied", password: "tiny" }) })).not.toContain("tiny");
     expect(toolDetailPreview({ ok: false, errorToken: "tiny" })).not.toContain("tiny");
+    expect(toolDetailPreview({ ok: false, error: { message: "denied", api_key: 1234 } })).not.toContain("1234");
+    const row = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`f${i}`, "x"]));
+    const pastBudget = (tail: Record<string, unknown>) => ({ response: Array.from({ length: 6 }, () => row), tail });
+    expect(toolDetailPreview(pastBudget({ error: "connection refused" }))).toContain("connection refused");
+    expect(toolDetailPreview(pastBudget({ errorToken: "tiny" }))).not.toContain("tiny");
+    expect(toolDetailPreview(pastBudget({ token: { error: "tiny" } }))).not.toContain("tiny");
+    expect(toolDetailPreview(pastBudget({ error: { message: "denied", api_key: 1234 } }))).toContain("denied");
+    expect(toolDetailPreview(pastBudget({ error: { message: "denied", api_key: 1234 } }))).not.toContain("1234");
   });
   it("scrubs structured JSON inside native text results without changing ordinary prose", () => {
     const preview = toolDetailPreview([{ type: "text", text: JSON.stringify({ message: "request completed", password: "tiny", headers: { Cookie: "sid=x" }, env: [{ name: "API_KEY", value: "small" }] }) }]);

@@ -8,6 +8,12 @@ export function toolDetailPreview(value: unknown): string | undefined {
   let textBudget = 256_000;
   /** A failed call's error is the cause the model must read; it is kept whole even where the rest is omitted. */
   const ERROR_KEY = /^error/i;
+  const SECRET_KEY = /token|secret|password|passwd|cookie|authorization|api.?key|(^|[_.-])keys?$/i;
+  const secretKeysOut = (item: unknown, depth = 0): unknown => {
+    if (depth > 12 || item === null || typeof item !== "object") return item;
+    if (Array.isArray(item)) return item.map((child) => secretKeysOut(child, depth + 1));
+    return Object.fromEntries(Object.entries(item).map(([key, child]) => [key, SECRET_KEY.test(key) ? "[redacted]" : secretKeysOut(child, depth + 1)]));
+  };
   const ERROR_TEXT_MAX = 500;
   const errorText = (value: unknown): string => {
     let parsed = value;
@@ -18,7 +24,7 @@ export function toolDetailPreview(value: unknown): string | undefined {
     let text: string;
     if (typeof parsed === "string") text = parsed;
     else {
-      try { text = JSON.stringify(redactSecrets(parsed)) ?? ""; }
+      try { text = JSON.stringify(redactSecrets(secretKeysOut(parsed))) ?? ""; }
       catch { return "[error not serializable]"; }
     }
     // Redact before the cut, like commandSummary, so a sliced credential cannot slip through.
@@ -27,10 +33,11 @@ export function toolDetailPreview(value: unknown): string | undefined {
   /** The first /^error/i value anywhere below an omitted object: the cause a failed call must still give up. */
   const findError = (item: Record<string, unknown> | object, depth = 0): unknown => {
     if (depth > 12) return undefined;
-    for (const [key, child] of Object.entries(item).slice(0, 40)) {
+    const entries = Object.entries(item).slice(0, 40).filter(([key]) => !SECRET_KEY.test(key));
+    for (const [key, child] of entries) {
       if (ERROR_KEY.test(key) && isErrorValue(child)) return child;
     }
-    for (const child of Object.values(item).slice(0, 40)) {
+    for (const [, child] of entries) {
       if (child !== null && typeof child === "object" && !Array.isArray(child)) {
         const found = findError(child, depth + 1);
         if (found !== undefined) return found;
@@ -64,7 +71,7 @@ export function toolDetailPreview(value: unknown): string | undefined {
     const entries = Object.entries(item);
     const result: Record<string, unknown> = Object.create(null);
     for (const [key, child] of entries.slice(0, 40)) {
-      result[key] = /token|secret|password|passwd|cookie|authorization|api.?key|(^|[_.-])keys?$/i.test(key)
+      result[key] = SECRET_KEY.test(key)
         ? "[redacted]"
         : ERROR_KEY.test(key) && isErrorValue(child)
         ? errorText(child)
