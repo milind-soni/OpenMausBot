@@ -54,7 +54,7 @@ describe("findMediaPaths", () => {
     }
     expect((await findMediaPaths(`see ${absolute}`, turn)).map((file) => file.path)).toEqual([absolute]);
     writeFileSync(join(scratch, "secret.pdf"), Buffer.alloc(100));
-    expect(await findMediaPaths(`- ${join("inbox", "..", "..", "secret.pdf")}`, turn)).toEqual([]);
+    expect(await findMediaPaths("- inbox/../../secret.pdf", turn)).toEqual([]);
   });
 
   it("ignores text without media", async () => {
