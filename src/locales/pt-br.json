@@ -2861,6 +2861,7 @@
   "composer.dictation.permission": "O ditado precisa de acesso ao Microfone e ao Reconhecimento de Fala. Ative os dois em Ajustes do Sistema → Privacidade e Segurança.",
   "composer.dictation.disabled": "Ligue o Ditado em Ajustes do Sistema → Teclado e tente novamente.",
   "composer.dictation.failed": "Não foi possível iniciar o ditado. Tente novamente.",
+  "composer.dictation.languageMissing": "O Windows não tem um reconhecedor de fala para o seu idioma que o ditado possa usar. Para ditar aqui, adicione uma chave do Fish Audio ou do ElevenLabs em Configurações → IA → Outros serviços, ou use a digitação por voz do Windows (tecla Windows + H).",
   "composer.dictation.unavailable": "O ditado não está disponível nesta versão.",
   "composer.dictation.start": "Iniciar o ditado",
   "composer.dictation.stop": "Parar o ditado",

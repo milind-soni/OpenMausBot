@@ -3073,6 +3073,7 @@
   "composer.dictation.permission": "Dictation needs Microphone and Speech Recognition access. Turn both on in System Settings → Privacy & Security.",
   "composer.dictation.disabled": "Turn on Dictation in System Settings → Keyboard, then try again.",
   "composer.dictation.failed": "Dictation couldn't start. Try again.",
+  "composer.dictation.languageMissing": "Windows has no speech recognizer for your language that dictation can use. To dictate here, add a Fish Audio or ElevenLabs key in Settings → AI → Other services, or use Windows voice typing (Windows key + H).",
   "composer.dictation.unavailable": "Dictation isn't available in this build.",
   "composer.dictation.start": "Start dictation",
   "composer.dictation.stop": "Stop dictation",

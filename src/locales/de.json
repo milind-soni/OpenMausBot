@@ -1160,6 +1160,7 @@
   "composer.error.noImages": "Der gewählte Beantworter unterstützt keine Bildanhänge.",
   "composer.error.clipboardImage": "Das Bild aus der Zwischenablage ließ sich nicht lesen. Häng stattdessen die Bilddatei an.",
   "composer.dictation.macOnly": "Diktieren gibt es vorerst nur unter macOS.",
+  "composer.dictation.languageMissing": "Windows hat für deine Sprache keine Spracherkennung, die das Diktieren nutzen kann. Um hier zu diktieren, füge in Einstellungen → KI → Weitere Dienste einen Fish-Audio- oder ElevenLabs-Schlüssel hinzu oder nutze die Spracheingabe von Windows (Windows-Taste + H).",
   "composer.dictation.unavailable": "Diktieren ist in diesem Build nicht verfügbar.",
   "composer.dictation.start": "Diktieren starten",
   "composer.dictation.stop": "Diktieren stoppen",
