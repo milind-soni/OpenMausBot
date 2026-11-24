@@ -53,7 +53,12 @@ where they belong instead of adding new places.
   Settings. Don't add a second home for the same setting.
 - **No new settings.** No new global settings, toggles or hidden flags. Make
   the behaviour automatic with a good default. An optional field on something
-  the person sets up is fine.
+  the person sets up is fine. One exception: **Settings → Features**, a short
+  list of plain on/off switches for whole features some people don't want
+  (Skill Burger, thread tabs, thread notes, mascot animations). It's there so
+  Simple mode can turn off one feature at a time without switching to
+  Advanced. A switch goes there only when its off state is clean: the feature
+  is hidden whole, and nothing the person made is lost.
 - **No new asks.** No new permission asks, approval cards, confirm dialogs,
   nags or waits that interrupt the person, and no default below Full access.
   A bot gets on with the work; a change that needs undoing gets **Undo**.

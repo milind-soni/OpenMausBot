@@ -55,7 +55,7 @@ describe("the Settings window", () => {
   it("opens with the place, Your account and This app, each headed by an identity row", () => {
     fixture.advanced = true;
     const html = render();
-    expect(navPages(html)).toEqual(["overview", "devices", "phone", "ai", "bots", "desktops", "vault", "usage", "transfer", "data", "account", "app", "general", "appearance"]);
+    expect(navPages(html)).toEqual(["overview", "devices", "phone", "ai", "bots", "desktops", "vault", "usage", "transfer", "data", "account", "app", "general", "appearance", "features"]);
     expect(html).toContain("This computer");
     expect(html).toContain("Your account");
     expect(html).toContain("This app");
@@ -77,7 +77,7 @@ describe("the Settings window", () => {
     expect(render("appearance")).toContain("MausBot on this device");
   });
 
-  const SIMPLE_NAV = ["overview", "devices", "phone", "ai", "vault", "usage", "transfer", "account", "plan", "app", "appearance"];
+  const SIMPLE_NAV = ["overview", "devices", "phone", "ai", "vault", "usage", "transfer", "account", "plan", "app", "appearance", "features"];
   const SIMPLE_PEOPLE: Array<[string, () => void]> = [
     ["a person with only this computer", () => vi.stubGlobal("window", desktopHere({ cloudAccount: { state: () => new Promise(() => {}), onState: () => () => {} } }))],
     ["This computer's rail, with My Cloud", () => vi.stubGlobal("window", desktopHere({ cloudAccount: { state: () => new Promise(() => {}), onState: () => () => {} }, workspaces: { state: () => new Promise(() => {}), places: () => new Promise(() => {}) } }))],
@@ -269,5 +269,38 @@ describe("the outer menu", () => {
     });
     expect(rows.find((item) => item.key === "plan")?.separatorBefore).toBeFalsy();
     expect(rows.find((item) => item.key === "support")?.separatorBefore).toBe(true);
+  });
+});
+
+describe("Settings → Features", () => {
+  const featureSwitches = () => Object.fromEntries(fixture.switches.map((props) => [(props as { "data-feature-switch"?: string })["data-feature-switch"], props.checked]).filter(([name]) => name));
+  beforeEach(() => { vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} }); });
+
+  it("is in Simple mode's list, with Skill Burger on and thread tabs off by default", () => {
+    fixture.config = { features: { skillBurger: true, threadTabs: false } };
+    const html = render("features");
+    expect(navPages(html)).toContain("features");
+    expect(html).toContain("Skill Burger");
+    expect(html).toContain("Save a bot&#x27;s run as steps you can run again");
+    expect(featureSwitches()).toEqual({ skillBurger: true, threadTabs: false, threadNotes: true, mascotMotion: true });
+  });
+
+  it("saves Skill Burger off in the place's config.json", async () => {
+    const { api } = await import("@/state/store");
+    fixture.config = { features: { skillBurger: true, threadTabs: false } };
+    render("features");
+    fixture.switches.find((props) => (props as { "data-feature-switch"?: string })["data-feature-switch"] === "skillBurger")!.onClick!({} as never);
+    expect(api).toHaveBeenCalledWith("/api/config", { method: "PATCH", body: JSON.stringify({ features: { skillBurger: false } }) });
+  });
+
+  it("leaves out the place's switches when its server doesn't know them, and for a team's member", () => {
+    fixture.config = {};
+    render("features");
+    expect(featureSwitches()).toEqual({ threadNotes: true, mascotMotion: true });
+    fixture.switches = [];
+    fixture.config = { cloudHome: true, team: { name: "Acme" }, features: { skillBurger: true, threadTabs: false } };
+    fixture.admin = false;
+    render("features");
+    expect(featureSwitches()).toEqual({ threadNotes: true, mascotMotion: true });
   });
 });

@@ -12,7 +12,7 @@ import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/
 import { avatarMarks, type AvatarKind } from "@/lib/avatar-marks";
 import { CARVED_BODIES, type CarvedBody, type CarvedBodyId } from "../../shared/carved-bodies";
 import type { CursorAvatarHandle } from "./CursorAvatar";
-import { mascotClock, put, usePrefersReducedMotion, type MascotTicket } from "./mascot-clock";
+import { mascotClock, put, useMascotStill, type MascotTicket } from "./mascot-clock";
 import { ACTIVE_STATES, HOVER_BLINK_MS, blinkOpenness, frameFloorMs, nextFrameAt } from "./mascot-motion";
 import { mascotFaceInk, type MascotFaceColor } from "../../shared/bot-avatar";
 
@@ -165,7 +165,7 @@ function CarvedAvatarComponent(
   const body = CARVED_BODIES[bodyId];
   const faceInk = mascotFaceInk(faceColor);
   const uid = useId().replace(/:/g, "");
-  const reduced = usePrefersReducedMotion();
+  const reduced = useMascotStill();
   const live = !reduced && (animated ?? ACTIVE_STATES.has(state));
   const group = useRef<SVGGElement>(null);
   const eyes = [useRef<SVGRectElement>(null), useRef<SVGRectElement>(null)] as const;

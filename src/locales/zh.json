@@ -10329,5 +10329,15 @@
   "skillBurger.run.pathUndone": "已移除路径",
   "skillBurger.run.addPathFailed": "无法完成，请重试。",
   "activity.tool.team.runWorkflow": "运行 Skill Burger",
-  "activity.tool.team.workflowEdit": "更改 Skill Burger"
+  "activity.tool.team.workflowEdit": "更改 Skill Burger",
+  "settings.page.features": "功能",
+  "settings.features.skillBurger": "Skill Burger",
+  "settings.features.skillBurgerLine": "把机器人的一次运行保存为可再次运行的步骤",
+  "settings.features.threadTabs": "对话标签页",
+  "settings.features.threadTabsLine": "在聊天上方以标签页显示机器人的对话",
+  "settings.features.threadNotes": "对话笔记",
+  "settings.features.threadNotesLine": "显示机器人为每个对话记下的内容",
+  "settings.features.mascotMotion": "吉祥物动画",
+  "settings.features.mascotMotionLine": "机器人工作时让它们的吉祥物动起来",
+  "settings.features.error": "无法保存。请检查网络连接后重试。"
 }

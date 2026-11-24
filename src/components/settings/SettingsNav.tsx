@@ -321,13 +321,13 @@ function HitRow({ ctx, place, hit, query, onHit }: { ctx: SettingsContext; place
 
 const PAGE_OWNER: Record<SettingsPageId, SettingsOwner> = {
   overview: "place", devices: "place", phone: "place", ai: "place", bots: "place", desktops: "place", vault: "place", usage: "place", transfer: "place", storage: "place",
-  data: "place", people: "place", installations: "place", account: "account", plan: "account", app: "app", general: "app", appearance: "app",
+  data: "place", people: "place", installations: "place", account: "account", plan: "account", app: "app", general: "app", appearance: "app", features: "app",
 };
 
 const PAGE_KEY: Partial<Record<SettingsPageId, Parameters<typeof t>[0]>> = {
   devices: "settings.page.devices", phone: "settings.section.phoneDevices", ai: "settings.group.ai", bots: "settings.page.bots", desktops: "settings.page.desktops",
   vault: "settings.section.vault", usage: "settings.page.spending", transfer: "settings.page.importExport", storage: "settings.page.storage", data: "settings.page.data", people: "settings.section.people",
-  installations: "settings.section.workspaces", plan: "settings.page.plan", general: "settings.section.general", appearance: "settings.section.appearance",
+  installations: "settings.section.workspaces", plan: "settings.page.plan", general: "settings.section.general", appearance: "settings.section.appearance", features: "settings.page.features",
 };
 
 /** A result's second line: its owner and its page ("This computer › Phone & devices"), or what a jump opens. */

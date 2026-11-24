@@ -40,6 +40,7 @@ import { inputCls } from "./field";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useMinuteTick } from "@/lib/minute-tick";
 import { ThreadMemoryCard } from "../bot-panel/MemoryText";
+import { useFeature } from "@/lib/use-feature";
 import { MemoryModelSetting } from "./MemoryModelSetting";
 import { useMemoryUpkeepStatus } from "./use-memory-upkeep-status";
 
@@ -112,6 +113,7 @@ export function LendingReviewNotice({ changed, stale, busy, onReviewed }: { chan
 
 export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; active?: boolean; onToggle: (enabled: boolean) => void }) {
   const { capabilities } = useDesktopCapabilities();
+  const threadNotes = useFeature("threadNotes");
   const [overview, setOverview] = useState<MemoryOverview | null>(null);
   const [journal, setJournal] = useState<MemoryJournalRow[] | null>(null);
   const [editing, setEditing] = useState<Editing | null>(null);
@@ -324,7 +326,7 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
         )}
       </div>
 
-      <ThreadMemoryCard bot={bot} />
+      {threadNotes && <ThreadMemoryCard bot={bot} />}
 
       {lendingReview && (
         <LendingReviewNotice

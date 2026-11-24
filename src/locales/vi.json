@@ -6099,5 +6099,15 @@
   "skillBurger.run.pathUndone": "Đã xóa nhánh",
   "skillBurger.run.addPathFailed": "Không làm được. Hãy thử lại.",
   "activity.tool.team.runWorkflow": "Chạy Skill Burger",
-  "activity.tool.team.workflowEdit": "Đổi Skill Burger"
+  "activity.tool.team.workflowEdit": "Đổi Skill Burger",
+  "settings.page.features": "Tính năng",
+  "settings.features.skillBurger": "Skill Burger",
+  "settings.features.skillBurgerLine": "Lưu một lần chạy của bot thành các bước bạn có thể chạy lại",
+  "settings.features.threadTabs": "Thẻ luồng",
+  "settings.features.threadTabsLine": "Hiển thị các luồng của bot thành thẻ phía trên khung chat",
+  "settings.features.threadNotes": "Ghi chú của luồng",
+  "settings.features.threadNotesLine": "Hiển thị những gì bot ghi lại cho từng luồng",
+  "settings.features.mascotMotion": "Hoạt ảnh linh vật",
+  "settings.features.mascotMotionLine": "Cho linh vật của bot chuyển động khi bot làm việc",
+  "settings.features.error": "Không thể lưu. Hãy kiểm tra kết nối rồi thử lại."
 }

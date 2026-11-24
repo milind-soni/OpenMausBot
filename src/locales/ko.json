@@ -7828,5 +7828,15 @@
   "skillBurger.run.pathUndone": "경로를 제거했습니다",
   "skillBurger.run.addPathFailed": "하지 못했습니다. 다시 시도하세요.",
   "activity.tool.team.runWorkflow": "Skill Burger 실행",
-  "activity.tool.team.workflowEdit": "Skill Burger 변경"
+  "activity.tool.team.workflowEdit": "Skill Burger 변경",
+  "settings.page.features": "기능",
+  "settings.features.skillBurger": "Skill Burger",
+  "settings.features.skillBurgerLine": "봇의 실행을 다시 실행할 수 있는 단계로 저장해요",
+  "settings.features.threadTabs": "스레드 탭",
+  "settings.features.threadTabsLine": "봇의 스레드를 채팅 위에 탭으로 보여줘요",
+  "settings.features.threadNotes": "스레드 메모",
+  "settings.features.threadNotesLine": "봇이 스레드마다 적어 둔 내용을 보여줘요",
+  "settings.features.mascotMotion": "마스코트 애니메이션",
+  "settings.features.mascotMotionLine": "봇이 일하는 동안 마스코트가 움직이게 해요",
+  "settings.features.error": "저장하지 못했어요. 연결을 확인하고 다시 시도해 주세요."
 }

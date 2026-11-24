@@ -5,7 +5,7 @@ import { mascotFaceInk, type MascotFaceColor } from "../../shared/bot-avatar";
 import { mountAvatar, type AvatarOptions, type MountedAvatar } from "../../packages/phone-protocol/src/open-bot-avatar/dom/index.ts";
 import type { AvatarDefinition, AvatarMood, AvatarState } from "../../packages/phone-protocol/src/open-bot-avatar/types.ts";
 import { DONE_TURN_S } from "../../packages/phone-protocol/src/open-bot-avatar/motion.ts";
-import { usePrefersReducedMotion } from "./mascot-clock";
+import { useMascotStill } from "./mascot-clock";
 import { ACTIVE_STATES } from "./mascot-motion";
 
 export type ObjectLook = { state: AvatarState; mood: AvatarMood };
@@ -65,7 +65,7 @@ export type ObjectAvatarProps = {
 };
 
 function ObjectAvatarComponent({ definition, fill, faceColor, size = 44, state = "idle", trackPointer = true, animated, label, kind }: ObjectAvatarProps) {
-  const reduced = usePrefersReducedMotion();
+  const reduced = useMascotStill();
   const cheering = useFinishCheer(state);
   const live = !reduced && (animated ?? (ACTIVE_STATES.has(state) || cheering));
   const shown = cheering && live ? DONE : objectLook(state);
