@@ -33,6 +33,7 @@ describe.skipIf(!available)(`sign-in masks in a real box (${available ? "bubblew
     put(codex, '{"tokens":{"access_token":"codex-1"}}');
     put(join(home, ".omb-edge", "caddy", "site.key"), "edge-secret");
     mkdirSync(cwd, { recursive: true });
+    mkdirSync(join(dataDir, "workspaces", "bot-a"), { recursive: true });
   });
 
   it("a Codex bot's shell reads and refreshes its own login, and never Claude's or the edge's keys", () => {
@@ -59,6 +60,19 @@ describe.skipIf(!available)(`sign-in masks in a real box (${available ? "bubblew
     expect(readFileSync(codex, "utf8")).toContain("codex-2");
     expect(readFileSync(claude, "utf8")).toContain("claude-secret");
     expect(readdirSync(home).sort()).toEqual(before);
+  }, 60_000);
+
+  it("a bot cannot rename a sign-in's folder away so the next box reads it at another path", () => {
+    const first = runInBox("codex", [
+      `mv "${home}/.claude" "${home}/moved-claude" 2>/dev/null || echo FOLDER-NOT-MOVABLE`,
+      `rm -rf "${home}/.claude" 2>/dev/null; ls "${claude}" >/dev/null 2>&1 && echo STILL-THERE`,
+    ].join("\n"));
+    expect(first).toContain("FOLDER-NOT-MOVABLE");
+    expect(first).toContain("STILL-THERE");
+    const second = runInBox("codex", `cat "${home}/moved-claude/.credentials.json" 2>/dev/null || echo NOT-MOVED; cat "${claude}"; echo " END"`);
+    expect(second).toContain("NOT-MOVED");
+    expect(second).not.toContain("claude-secret");
+    expect(readFileSync(claude, "utf8")).toContain("claude-secret");
   }, 60_000);
 
   it("leaves no empty sign-in file behind for an engine that never signed in here", () => {

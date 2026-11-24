@@ -3,7 +3,7 @@
 // every other engine's and every other account's sign-in file there is masked, and so are the folders only the server
 // reads. Security: a spawn that names no engine keeps none.
 import { realpathSync, statSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { ENGINE_FOLDERS } from "../engine-homes/layout.ts";
 import { under, type SignInMasks } from "./plan.ts";
@@ -28,14 +28,20 @@ const files: SignInFiles = {
 export function signInMasks(input: { home: string; dataDir: string; env: Record<string, string | undefined>; engine?: string | null }, fs: SignInFiles = files): SignInMasks {
   const home = fs.realpath(input.home) ?? resolve(input.home), dataDir = fs.realpath(input.dataDir) ?? resolve(input.dataDir);
   const spawnHome = input.env.HOME && isAbsolute(input.env.HOME) ? input.env.HOME : input.home;
+  const lexical = (path: string) => under(resolve(path), resolve(input.home)) ? join(home, relative(resolve(input.home), resolve(path))) : resolve(path);
   const ownFiles = new Set<string>();
   for (const folder of ENGINE_FOLDERS) {
     if (!input.engine || !folder.drivers.includes(input.engine)) continue;
     const named = folder.env ? input.env[folder.env] : undefined;
     const base = named && isAbsolute(named) ? named : join(spawnHome, folder.home);
     for (const name of folder.shared) {
-      const real = fs.realpath(join(base, name));
-      if (real) ownFiles.add(real);
+      const path = join(base, name), real = fs.realpath(path);
+      // Security: the folders are a bot's to write, so a link is followed only to this same file in HOME (MausBot's own
+      // engine folder linking the person's login), never to another engine's file planted there.
+      const fallback = join(home, folder.home, name);
+      if (real && (real === lexical(path) || real === fallback)) ownFiles.add(real);
+      // The driver's own sign-in check also takes the HOME default where the folder is a shared XDG one.
+      if (folder.env?.startsWith("XDG_") && fs.realpath(fallback) === fallback) ownFiles.add(fallback);
     }
   }
   const inHome = (path: string) => under(path, home) && !under(path, dataDir);
@@ -49,5 +55,11 @@ export function signInMasks(input: { home: string; dataDir: string; env: Record<
     }
   }
   const hidden = SERVER_ONLY_HOME_FOLDERS.map((name) => fs.realpath(join(home, name))).filter((path): path is string => path !== null && inHome(path) && fs.isDirectory(path));
-  return { own, masked, hidden };
+  // Security: every folder between HOME and a sign-in is a mount point too, so a bot cannot rename it away and leave the
+  // file at a path the next box does not mask.
+  const folders = new Set<string>();
+  for (const file of [...own, ...masked]) {
+    for (let folder = dirname(file); folder !== home && under(folder, home); folder = dirname(folder)) folders.add(folder);
+  }
+  return { folders: [...folders].sort((a, b) => a.split(sep).length - b.split(sep).length || a.localeCompare(b)), own, masked, hidden };
 }

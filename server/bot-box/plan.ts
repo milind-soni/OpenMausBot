@@ -103,6 +103,8 @@ export interface BoxRequest {
 
 /** What of the engines' sign-ins in the server's HOME a box keeps (sign-in-masks.ts), for a box that has that HOME. */
 export interface SignInMasks {
+  /** The folders between HOME and those files, parents first, bound over themselves read-write. */
+  folders: readonly string[];
   /** The spawn's own sign-in files, bound over themselves read-write: a refresh then writes in place instead of renaming a
    * new file over the old one, which would lift that file's mask in every other running box. */
   own: readonly string[];
@@ -253,6 +255,8 @@ export function planBox(setup: BoxSetup, request: BoxRequest, signIns?: SignInMa
   // An engine home lives in the data folder, so it goes back after that.
   const ownHome = request.home ? resolve(request.home) : null;
   if (!ownHome) rw(home);
+  // Before the data folder's line, so one of these holding the data folder never shows it.
+  if (!ownHome) for (const folder of signIns?.folders ?? []) if (under(folder, home) && folder !== home) mounts.push({ kind: "bind", source: folder, target: folder, optional: true });
   const dataInsideHome = under(dataDir, home);
   if (!mutate.has("bind-data")) {
     if (dataInsideHome) mounts.push({ kind: "tmpfs", target: dataDir });
@@ -367,7 +371,7 @@ export function planBox(setup: BoxSetup, request: BoxRequest, signIns?: SignInMa
   // Security: last, so no line above puts another engine's or account's sign-in back. Only in the server's HOME.
   if (!ownHome && signIns) {
     const inHome = (path: string) => under(path, home) && !under(path, dataDir);
-    for (const file of signIns.own) if (inHome(file)) mounts.push({ kind: "bind", source: file, target: file });
+    for (const file of signIns.own) if (inHome(file)) mounts.push({ kind: "bind", source: file, target: file, optional: true });
     for (const file of signIns.masked) if (inHome(file)) mounts.push({ kind: "mask", target: file });
     for (const folder of signIns.hidden) if (inHome(folder)) mounts.push({ kind: "tmpfs", target: folder });
   }

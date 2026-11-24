@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -29,6 +29,7 @@ function volume(name: string) {
     gemini: join(home, ".gemini", "oauth_creds.json"),
     opencode: join(home, ".local", "share", "opencode", "auth.json"),
     pi: join(home, ".pi", "agent", "auth.json"),
+    muse: join(home, ".config", "muse", "auth.json"),
   };
   for (const file of Object.values(signIns)) put(file, `{"token":"${file}"}`);
   const edge = join(edgeCertificateStorage(home), "certificates", "site.key");
@@ -88,6 +89,36 @@ describe("a bot box on a My Cloud keeps only its own engine account's sign-in", 
     for (const plan of [cloud.plan({ env: { HOME: home } }), cloud.plan({ env: { HOME: home }, engine: "cursorAgent" })]) {
       for (const file of Object.values(signIns)) expect(visibleInBox(plan, file), file).toBe("none");
     }
+  });
+
+  it("follows a link only to the same engine's file in HOME, never to another engine's sign-in a bot planted", () => {
+    const planted = volume("planted-cloud");
+    rmSync(planted.signIns.pi);
+    symlinkSync(planted.signIns.codex, planted.signIns.pi);
+    const own = join(planted.dataDir, "providers", "codex-own", "h2", "codex");
+    mkdirSync(own, { recursive: true });
+    symlinkSync(planted.signIns.claude, join(own, "auth.json"));
+    const pi = planted.plan({ env: { HOME: planted.home }, engine: "piAgent" });
+    expect(visibleInBox(pi, planted.signIns.codex)).toBe("none");
+    const codex = planted.plan({ env: { HOME: planted.home, CODEX_HOME: own }, engine: "codex" });
+    expect(visibleInBox(codex, planted.signIns.claude)).toBe("none");
+  });
+
+  it("makes every folder between HOME and a sign-in a mount point, before the data folder's line, so none can be renamed away", () => {
+    const plan = cloud.plan({ env: { HOME: home }, engine: "claudeAgent" });
+    const binds = plan.mounts.flatMap((mount, index) => (mount.kind === "bind" && mount.source === mount.target ? [[mount.target, index] as const] : []));
+    const at = new Map(binds);
+    for (const folder of [".claude", ".codex", ".local", ".local/share", ".local/share/opencode", ".config", ".config/muse", ".pi", ".pi/agent"]) expect(at.has(join(home, folder)), folder).toBe(true);
+    expect(at.get(join(home, ".local"))!).toBeLessThan(at.get(join(home, ".local", "share"))!);
+    const dataLine = plan.mounts.findIndex((mount) => mount.kind === "tmpfs" && mount.target === dataDir);
+    expect(at.get(join(home, ".claude"))!).toBeLessThan(dataLine);
+    expect(visibleInBox(plan, join(home, ".local", "share", "other-tool", "state"))).toBe("rw");
+  });
+
+  it("a Muse bot keeps its login in HOME even where the spawn names another config folder, as its sign-in check does", () => {
+    const plan = cloud.plan({ env: { HOME: home, XDG_CONFIG_HOME: join(root, "elsewhere") }, engine: "museCode" });
+    expect(visibleInBox(plan, signIns.muse)).toBe("rw");
+    expect(visibleInBox(plan, signIns.claude)).toBe("none");
   });
 
   it("masks stay last, so a path a driver puts back read-write never shows another engine's sign-in", () => {
