@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type WheelEvent as ReactWheelEvent } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type WheelEvent as ReactWheelEvent } from "react";
 import { Pin, Plus, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { sameDrawnBot } from "@/lib/drawn-bots";
 import { nextRename } from "@/lib/rename";
 import { localizedTaskTitle } from "@/lib/task-title";
 import { useFeature } from "@/lib/use-feature";
@@ -9,7 +10,7 @@ import type { Bot } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { BotAvatar } from "./Avatar";
 import { reducedMotion } from "./MenuMotion";
-import { botShowsTabs, neighbourOf, openTabId, showsTabs, threadTabs, type ThreadTab } from "./thread-tabs";
+import { botShowsTabs, neighbourOf, openTabId, sameTabs, showsTabs, threadTabs, type ThreadTab } from "./thread-tabs";
 import { useSlidingIndicator, useTabMotion } from "./thread-tab-motion";
 import { UndoToast, useUndoToast } from "./UndoToast";
 
@@ -32,9 +33,9 @@ export function useBotHasThreads(botId: string): boolean {
 /** A bot's threads as tabs in the chat header, once Thread tabs is on and the bot has two threads or more. */
 export function HeaderThreadTabs({ bot }: { bot: Bot }) {
   const on = useFeature("threadTabs");
-  const tabs = useMemo(() => threadTabs(bot), [bot.id, bot.threadId, bot.switchingTo, bot.mainThreadId, bot.tasks, bot.busy]);
+  const tabs = threadTabs(bot);
   if (!on || !showsTabs(tabs)) return null;
-  return <Strip bot={bot} tabs={tabs} />;
+  return <Strip bot={bot} tabs={tabs} active={openTabId(bot)} />;
 }
 
 /** The mask that fades a sideways-scrolling row's edges where more of it is hidden, none when it all fits. */
@@ -48,13 +49,17 @@ export function edgeFade(element: HTMLElement, fade = FADE): string | undefined 
   return `linear-gradient(to right, ${left}, ${right})`;
 }
 
-function Strip({ bot, tabs }: { bot: Bot; tabs: ThreadTab[] }) {
+type StripProps = { bot: Bot; tabs: ThreadTab[]; active: string };
+
+const sameStrip = (a: StripProps, b: StripProps) => a.active === b.active && sameTabs(a.tabs, b.tabs)
+  && a.bot.id === b.bot.id && a.bot.yourAccess === b.bot.yourAccess && sameDrawnBot(a.bot, b.bot);
+
+const Strip = memo(function Strip({ bot, tabs, active }: StripProps) {
   const dispatch = useStoreDispatch();
   const panelOpen = useStoreSelector((state) => state.settingsOpen);
   const panelBeside = useStoreSelector((state) => state.settingsOpen || state.computerOpen || state.inspectorOpen);
   const scroller = useRef<HTMLDivElement>(null);
   const { shown, entering } = useTabMotion(tabs, scroller);
-  const active = openTabId(bot);
   const indicator = useSlidingIndicator(scroller, active);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -202,4 +207,4 @@ function Strip({ bot, tabs }: { bot: Bot; tabs: ThreadTab[] }) {
       <UndoToast toast={toast} onDone={() => setToast(null)} />
     </div>
   );
-}
+}, sameStrip);
