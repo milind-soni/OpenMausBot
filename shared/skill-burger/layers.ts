@@ -91,7 +91,7 @@ const COMPUTER_LOOK = /^(?:screenshot|get_screen_size|exec_status|move|wait|zoom
 const FILE_WRITE = new Set(["Write", "write_file", "create_file"]);
 const FILE_EDIT = new Set(["Edit", "MultiEdit", "NotebookEdit", "edit", "apply_patch", "str_replace_based_edit_tool"]);
 const BROWSER_OPEN = /(?:^|_)(?:navigate|open|open_url|goto|tab_new)$/;
-const BROWSER_LOOK = /(?:^|_)(?:snapshot|screenshot|read|get_text|status|tabs|wait|check|console|network|close|evaluate_read)$/;
+const BROWSER_LOOK = /(?:^|_)(?:snapshot|screenshot|read|get_text|status|tab_list|wait|console|network|evaluate_read)$/;
 /** A status row the app writes as an activity: a lowercase word, a colon, then words, never a tool name. */
 const STATUS_ROW = /^[a-z]+: \S/;
 const COORDINATE = /(?:^|__)coordinate_bots$/;
@@ -298,7 +298,7 @@ function layersIn(message: RunMessage, live: ReadonlySet<string>): RawLayer[] {
     return layer ? [layer] : [];
   }
   if (/browser/i.test(server ?? "") || /^(?:agent_)?browser_/.test(bare)) {
-    if (BROWSER_LOOK.test(bare)) return [];
+    if (BROWSER_LOOK.test(bare) || (/(?:^|_)tabs$/.test(bare) && input?.action === "list")) return [];
     const url = text(input?.url);
     if (BROWSER_OPEN.test(bare) && url) {
       let host = url;
