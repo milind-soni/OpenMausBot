@@ -161,10 +161,11 @@ export class BitwardenLogins implements VaultProvider {
   private readonly run: BwRun;
   private readonly now: () => number;
   private readonly forgetAppData: () => void;
-  private session: { key: string; credentials: string } | null = null;
+  private session: { key: string; credentials: string; hasAccount: boolean; account?: string } | null = null;
   /** The client_id the tool is signed in with; null once signed out, or when this process has not signed it in yet. */
   private signedInAs: string | null = null;
-  private unlocking: Promise<string> | null = null;
+  private unlocking: { credentials: string; generation: number; promise: Promise<string> } | null = null;
+  private connecting: number | null = null;
   private account: string | undefined;
   private logins: LoginEntry[] = [];
   private entries = new Map<string, ItemEntry>();
@@ -215,6 +216,7 @@ export class BitwardenLogins implements VaultProvider {
   /** Signs the tool out and forgets its settings folder: the account's cached vault goes with it. */
   async disconnect(): Promise<void> {
     this.generation++;
+    this.connecting = null;
     this.unlocking = null;
     if (this.signedInAs !== null || this.session) await this.run(["logout"]).catch(() => null);
     this.clear();
@@ -224,6 +226,7 @@ export class BitwardenLogins implements VaultProvider {
 
   clear(): void {
     this.generation++;
+    this.connecting = null;
     this.refreshing = null;
     this.unlocking = null;
     this.session = null;
@@ -240,7 +243,9 @@ export class BitwardenLogins implements VaultProvider {
   private async load(candidate?: BitwardenCredentials): Promise<BitwardenStatus> {
     const credentials = candidate ?? this.credentials();
     if (!credentials) { this.clear(); return this.status(); }
-    if (candidate) { this.generation++; this.refreshing = null; this.unlocking = null; }
+    // Keep saved-account polling off the single bw CLI profile while validating a candidate connection.
+    if (!candidate && this.connecting !== null) return this.status();
+    if (candidate) { this.generation++; this.refreshing = null; this.connecting = this.generation; }
     const generation = this.generation;
     const stale = () => {
       if (generation === this.generation) return false;
@@ -289,26 +294,41 @@ export class BitwardenLogins implements VaultProvider {
       if (stale()) return this.status();
       this.logins = logins.sort((a, b) => a.site.localeCompare(b.site) || a.username.localeCompare(b.username));
       this.entries = entries;
+      if (this.session?.credentials === credentialKey(credentials) && this.session.hasAccount) this.account = this.session.account;
       const totalListed = this.logins.length + [...entries.values()].filter(listedAsSecret).length;
       this.emptySummary = totalListed === 0 ? { total: active.length, hiddenPasswords, noWebsite } : undefined;
       this.refreshedAt = this.now();
       this.error = undefined;
       return this.status();
     } catch (error) {
+      if (candidate && this.session?.credentials === credentialKey(candidate)) this.session = null;
       const problem = error instanceof BitwardenProblem ? error : new BitwardenProblem(error instanceof Error ? error.message : UNREADABLE, "unavailable");
       if (candidate) throw problem;
       if (generation === this.generation) this.error = problem;
       return this.status();
+    } finally {
+      if (candidate && this.connecting === generation) this.connecting = null;
     }
   }
 
   /** Signs in with the API key when the tool is signed out (or signed in elsewhere), then unlocks with the master password.
    * `again`: a new connection, so whatever account the tool holds is signed out first. */
   private unlock(credentials: BitwardenCredentials, again = false, generation = this.generation): Promise<string> {
-    if (!again && this.unlocking) return this.unlocking;
-    const running = this.unlockNow(credentials, again, generation).finally(() => { if (this.unlocking === running) this.unlocking = null; });
-    this.unlocking = running;
-    return running;
+    const credsKey = credentialKey(credentials);
+    const current = this.unlocking;
+    if (!again && current && current.credentials === credsKey && current.generation === generation && generation === this.generation) {
+      return current.promise;
+    }
+    const run = async (): Promise<string> => {
+      if (current) await current.promise.catch(() => null);
+      if (generation !== this.generation) throw new BitwardenProblem(UNREADABLE, "unavailable");
+      return this.unlockNow(credentials, again, generation);
+    };
+    const promise = run().finally(() => {
+      if (this.unlocking?.promise === promise) this.unlocking = null;
+    });
+    this.unlocking = { credentials: credsKey, generation, promise };
+    return promise;
   }
 
   private async unlockNow(credentials: BitwardenCredentials, again: boolean, generation: number): Promise<string> {
@@ -348,9 +368,8 @@ export class BitwardenLogins implements VaultProvider {
       hasAccount = true;
       account = afterStatus.userEmail ?? undefined;
     }
-    this.session = { key, credentials: credentialKey(credentials) };
+    this.session = { key, credentials: credentialKey(credentials), hasAccount, account };
     this.signedInAs = credentials.clientId;
-    if (hasAccount) this.account = account;
     return key;
   }
 
@@ -386,6 +405,7 @@ export class BitwardenLogins implements VaultProvider {
   private async item(itemId: string): Promise<BwItem | null> {
     const credentials = this.credentials();
     if (!credentials) return null;
+    if (this.connecting !== null) throw new BitwardenProblem(UNREADABLE, "unavailable");
     const generation = this.generation;
     await this.sync(credentials, false, generation);
     try { return JSON.parse(await this.call(credentials, ["get", "item", itemId], generation)) as BwItem; }

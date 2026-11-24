@@ -222,6 +222,8 @@ describe("Bitwarden through its command line tool", () => {
     expect(listAttempts).toBe(2);
 
     let releaseList!: () => void;
+    let onList!: () => void;
+    const listStarted = new Promise<void>((resolve) => { onList = resolve; });
     const gate = new Promise<void>((resolve) => { releaseList = resolve; });
     let savedConn: typeof CREDENTIALS | null = CREDENTIALS;
     const racing = new BitwardenLogins({
@@ -230,11 +232,12 @@ describe("Bitwarden through its command line tool", () => {
         if (args[0] === "status") return { code: 0, stdout: JSON.stringify({ status: "unlocked", userEmail: "bot@acme.test" }), stderr: "", timedOut: false };
         if (args[0] === "unlock") return { code: 0, stdout: "fake-session", stderr: "", timedOut: false };
         if (args[0] === "sync") return { code: 0, stdout: "Syncing complete.", stderr: "", timedOut: false };
-        if (args[0] === "list") { await gate; return { code: 0, stdout: JSON.stringify(ITEMS), stderr: "", timedOut: false }; }
+        if (args[0] === "list") { onList(); await gate; return { code: 0, stdout: JSON.stringify(ITEMS), stderr: "", timedOut: false }; }
         return { code: 0, stdout: "", stderr: "", timedOut: false };
       },
     });
     const pending = racing.refresh();
+    await listStarted;
     savedConn = null;
     await racing.disconnect();
     releaseList();
@@ -261,6 +264,8 @@ describe("Bitwarden through its command line tool", () => {
     expect(unlockCalls).toBe(2);
 
     let releaseSync!: () => void;
+    let onSync!: () => void;
+    const syncStarted = new Promise<void>((resolve) => { onSync = resolve; });
     const syncGate = new Promise<void>((resolve) => { releaseSync = resolve; });
     const postSyncCalls: string[] = [];
     let syncSaved: typeof CREDENTIALS | null = CREDENTIALS;
@@ -269,12 +274,13 @@ describe("Bitwarden through its command line tool", () => {
       run: async (args) => {
         if (args[0] === "status") return { code: 0, stdout: JSON.stringify({ status: "unlocked", userEmail: "bot@acme.test" }), stderr: "", timedOut: false };
         if (args[0] === "unlock") { postSyncCalls.push("unlock"); return { code: 0, stdout: "fake-session", stderr: "", timedOut: false }; }
-        if (args[0] === "sync") { await syncGate; return { code: 0, stdout: "Syncing complete.", stderr: "", timedOut: false }; }
+        if (args[0] === "sync") { onSync(); await syncGate; return { code: 0, stdout: "Syncing complete.", stderr: "", timedOut: false }; }
         if (args[0] === "list") { postSyncCalls.push("list"); return { code: 0, stdout: JSON.stringify(ITEMS), stderr: "", timedOut: false }; }
         return { code: 0, stdout: "", stderr: "", timedOut: false };
       },
     });
     const pendingSync = syncRacing.refresh();
+    await syncStarted;
     syncSaved = null;
     await syncRacing.disconnect();
     postSyncCalls.length = 0;
@@ -338,5 +344,45 @@ describe("Bitwarden through its command line tool", () => {
     releaseFirst();
     await expect(pendingOld).rejects.toThrow("Bitwarden could not be read");
     expect(replaceVault.status()).toEqual({ connected: true, server: "vault.bitwarden.com", account: "other@acme.test", items: 3 });
+
+    const candidate = { ...CREDENTIALS, clientId: "user.bad-candidate", password: "bad-candidate-password" };
+    let releaseCandUnlock!: () => void;
+    let onCandUnlock!: () => void;
+    const candUnlockStarted = new Promise<void>((resolve) => { onCandUnlock = resolve; });
+    const candUnlockGate = new Promise<void>((resolve) => { releaseCandUnlock = resolve; });
+    let activeCli = "bot";
+    let overlapCalls = 0;
+    const isolated = new BitwardenLogins({
+      credentials: () => CREDENTIALS,
+      run: async (args, env) => {
+        if (args[0] === "logout") { activeCli = "none"; return { code: 0, stdout: "", stderr: "", timedOut: false }; }
+        if (args[0] === "login") { activeCli = env?.BW_CLIENTID === candidate.clientId ? "candidate" : "bot"; return { code: 0, stdout: "", stderr: "", timedOut: false }; }
+        if (args[0] === "status") {
+          const email = activeCli === "candidate" ? "candidate@acme.test" : "bot@acme.test";
+          return { code: 0, stdout: JSON.stringify({ status: activeCli === "none" ? "unauthenticated" : "unlocked", userEmail: email }), stderr: "", timedOut: false };
+        }
+        if (args[0] === "unlock") {
+          if (env?.BW_PASSWORD === candidate.password) { onCandUnlock(); await candUnlockGate; return { code: 0, stdout: "fake-cand-session", stderr: "", timedOut: false }; }
+          return { code: 0, stdout: "fake-bot-session", stderr: "", timedOut: false };
+        }
+        if (args[0] === "sync") return { code: 0, stdout: "Syncing complete.", stderr: "", timedOut: false };
+        if (args[0] === "list") {
+          if (env?.BW_SESSION === "fake-cand-session") return { code: 0, stdout: JSON.stringify({ unexpected: true }), stderr: "", timedOut: false };
+          if (activeCli === "candidate") overlapCalls++;
+          return { code: 0, stdout: JSON.stringify(ITEMS), stderr: "", timedOut: false };
+        }
+        return { code: 0, stdout: "", stderr: "", timedOut: false };
+      },
+    });
+    expect(await isolated.refresh()).toEqual({ connected: true, server: "vault.bitwarden.com", account: "bot@acme.test", items: 3 });
+    const failingCandidate = isolated.refresh(candidate);
+    await candUnlockStarted;
+    expect(await isolated.refresh()).toEqual({ connected: true, server: "vault.bitwarden.com", account: "bot@acme.test", items: 3 });
+    await expect(isolated.read("bitwarden:i1:github.com")).rejects.toThrow("Bitwarden could not be read");
+    expect(overlapCalls).toBe(0);
+    releaseCandUnlock();
+    await expect(failingCandidate).rejects.toThrow("Bitwarden could not be read");
+    expect(isolated.status()).toEqual({ connected: true, server: "vault.bitwarden.com", account: "bot@acme.test", items: 3 });
+    expect(await isolated.refresh()).toEqual({ connected: true, server: "vault.bitwarden.com", account: "bot@acme.test", items: 3 });
   });
 });
