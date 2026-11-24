@@ -11269,6 +11269,8 @@
   "devicesPage.update.runPlain": "{name} runs {app} from a terminal command. To update it, run this in a terminal there:",
   "devicesPage.addFlow.serverRunTerminal": "On that machine, open a terminal and run one of these",
   "devicesPage.add.cloudAlwaysOn": "Always on, even when this computer is off",
+  "devicesPage.action.goToBots": "Go to its bots",
+  "devicesPage.network.short.notShared": "On · your computers can’t connect yet",
   "settings.people.activityIn": "Activity is in Data.",
   "settings.people.members": "Members",
   "settings.place.alwaysOn": "Always on",

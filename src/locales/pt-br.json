@@ -11195,6 +11195,8 @@
   "devicesPage.update.runPlain": "{name} roda o {app} por um comando de terminal. Para atualizar, rode isto em um terminal lá:",
   "devicesPage.addFlow.serverRunTerminal": "Nessa máquina, abra um terminal e rode um destes",
   "devicesPage.add.cloudAlwaysOn": "Sempre ligado, mesmo com este computador desligado",
+  "devicesPage.action.goToBots": "Ir para os bots dele",
+  "devicesPage.network.short.notShared": "Ligada · seus computadores ainda não podem se conectar",
   "settings.people.activityIn": "A atividade fica em Dados.",
   "settings.people.members": "Membros",
   "settings.place.alwaysOn": "Sempre ligado",

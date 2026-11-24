@@ -143,7 +143,7 @@ export function PairCodePanel({ kind, address, onConnected }: { kind: "phone" | 
   }
   return (
     <div className="flex flex-col gap-3" data-pair-panel={kind}>
-      <p className="text-[13px] leading-[18px] text-ink">{t("devicesPage.addFlow.computerPasteLink", { app: productName() })}</p>
+      <p className="text-[13px] leading-[18px] text-ink-secondary">{t("devicesPage.addFlow.computerPasteLink", { app: productName() })}</p>
       {link && (
         <div className="flex flex-col items-start gap-1.5">
           <button type="button" onClick={copy} data-copy-link="" data-pair-link={link.link} className="ui-button ui-button-primary">

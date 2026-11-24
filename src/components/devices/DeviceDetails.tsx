@@ -15,7 +15,7 @@ import { kindLabel, routeLabel } from "./device-words";
 
 export function actionLabel(action: DeviceAction): string {
   switch (action.type) {
-    case "switch": return t("devicesPage.action.switch");
+    case "switch": return t("devicesPage.action.goToBots");
     case "retry": return t("devicesPage.action.reconnect");
     case "pair-again": return t("servers.pairAgain");
     case "copy-address": return t("servers.copyAddress");
@@ -44,16 +44,18 @@ function Detail({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-export function ActionButton({ device, action, onAction }: { device: Device; action: DeviceAction; onAction: (device: Device, action: DeviceAction) => void }) {
+export function ActionButton({ device, action, onAction, main = false }: { device: Device; action: DeviceAction; onAction: (device: Device, action: DeviceAction) => void; main?: boolean }) {
   return (
     <button type="button" data-device-action={action.type} data-danger={action.type === "remove" ? "" : undefined} onClick={() => onAction(device, action)}
-      aria-label={`${actionLabel(action)}: ${device.name}`} className={action.type === "remove" ? "ui-button ms-auto shrink-0 text-danger!" : "ui-button shrink-0"}>{actionLabel(action)}</button>
+      aria-label={`${actionLabel(action)}: ${device.name}`} className={action.type === "remove" ? "ui-button ms-auto shrink-0 text-danger!" : main ? "ui-button ui-button-primary shrink-0" : "ui-button shrink-0"}>{actionLabel(action)}</button>
   );
 }
-/** Harmless actions first, then one Remove, which takes every way the device is joined here. */
+/** What it needs first, then the harmless actions, then one Remove, which takes every way the device is joined here. */
 function orderActions(device: Device): DeviceAction[] {
+  const need = needOf(device);
   const removes = device.actions.filter((action) => action.type === "remove");
-  return [...device.actions.filter((action) => action.type !== "remove"), ...removes.slice(0, 1)];
+  const rest = device.actions.filter((action) => action.type !== "remove" && action !== need);
+  return [...(need ? [need] : []), ...rest, ...removes.slice(0, 1)];
 }
 
 const actionKey = (action: DeviceAction) => `${action.type}:${"source" in action ? action.source.id : ""}`;
@@ -82,7 +84,7 @@ export function DeviceDetails({ device, onAction, onRemoved, now, pairing, onPai
   const need = needOf(device);
   const update = device.actions.find((action) => action.type === "copy-update");
   const pairAgain = device.actions.find((action) => action.type === "pair-again");
-  const actions = orderActions(device).filter((action) => action !== need && action.type !== "copy-update");
+  const actions = orderActions(device).filter((action) => action.type !== "copy-update");
   const vps = vpsOf(device);
   const lend = lendsHere(device);
   const [version] = useState(() => window.ogb?.app?.version ?? "");
@@ -107,7 +109,7 @@ export function DeviceDetails({ device, onAction, onRemoved, now, pairing, onPai
         </div>
       )}
       {device.usesThisComputer && !lend && <p className="text-[13px] leading-[18px] text-ink-secondary">{t("servers.share.on", { name: device.name })}</p>}
-      {lend && <LendComputerSwitch id={lend} className="-mx-3" />}
+      {lend && <LendComputerSwitch id={lend} look="setting" />}
       {/* The editor names its server by its SSH name, which the details above already show. */}
       {vps && <div data-device-ssh-editor="" className="flex flex-col gap-2 [&_[data-vps-server]_span.font-mono]:hidden [&_[data-vps-server]_button:last-of-type]:ms-auto">
         <p className="text-[13px] font-medium leading-[18px] text-ink">{t("devicesPage.detail.sshEditorTitle")}</p>
@@ -121,7 +123,7 @@ export function DeviceDetails({ device, onAction, onRemoved, now, pairing, onPai
             aside={<button type="button" className="ui-button" data-pair-again-cancel="" onClick={() => onPairing(false)}>{t("common.cancel")}</button>} />
         </div>
         : actions.length > 0 && <div data-device-actions="" className="flex flex-wrap items-center gap-2">
-          {actions.map((action) => <ActionButton key={actionKey(action)} device={device} action={action}
+          {actions.map((action) => <ActionButton key={actionKey(action)} device={device} action={action} main={action === need}
             onAction={(chosen, act) => (act.type === "pair-again" ? onPairing(true) : onAction(chosen, act))} />)}
         </div>}
     </div>

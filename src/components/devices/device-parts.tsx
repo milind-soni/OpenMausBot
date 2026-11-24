@@ -13,8 +13,7 @@ export function StatusMark({ status }: { status: Device["status"] }) {
   if (status === "attention") return <CircleAlert size={14} aria-hidden="true" className="shrink-0 text-warning" />;
   if (status === "online") return <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-success" />;
   if (status === "offline") return <span aria-hidden="true" className="size-2 shrink-0 rounded-full border border-ink-tertiary" />;
-  // Nothing checks it live (a Cloud run for the person, a machine bots reach over SSH): a quiet filled dot.
-  return <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-ink-tertiary/50" />;
+  return null;
 }
 
 /** How it connects, after its state; a Cloud leaves it out, and a cloud desktop says what it is instead. */

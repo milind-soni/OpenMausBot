@@ -151,7 +151,8 @@ function placeState(status: ServerStatus | undefined): Pick<Device, "status" | "
 
 function fromPlace(entry: SavedPlace, status: ServerStatus | undefined, lends: boolean): Device {
   const hand = byHand(entry);
-  const state = hand ? placeState(status) : { status: "unknown" as const };
+  // A Cloud this app is connected to right now is online; nothing else about it is checked from here.
+  const state = hand ? placeState(status) : status?.state === "connected" ? { status: "online" as const } : { status: "unknown" as const };
   const route = placeRoute(entry);
   const actions: DeviceAction[] = [{ type: "switch", placeId: entry.id }];
   if (hand && entry.origin) {

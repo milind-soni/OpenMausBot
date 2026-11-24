@@ -158,7 +158,7 @@ export function AddDevicePanel(props: AddDeviceProps) {
   const backRef = useRef(back);
   backRef.current = back;
   useEffect(() => {
-    setSub?.({ title, back: backTo, onBack: () => backRef.current() });
+    setSub?.({ title, short: kind === "server" ? t("devicesPage.add.server") : undefined, back: backTo, onBack: () => backRef.current() });
   }, [setSub, title, backTo]);
   useEffect(() => () => setSub?.(null), [setSub]);
   return (

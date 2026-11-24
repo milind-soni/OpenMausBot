@@ -59,7 +59,7 @@ function DeviceRow({ device, mark, opened, onAction, now }: {
           {bots.length > 0 && <span className="pt-1 @min-[480px]/rows:hidden"><BotsOn bots={bots} /></span>}
         </button>
         {bots.length > 0 && <span className="hidden @min-[480px]/rows:flex"><BotsOn bots={bots} /></span>}
-        {need && (
+        {need && !open && (
           <button type="button" data-row-action={need.type} onClick={() => onAction(device, need)} aria-label={`${actionLabel(need)}: ${device.name}`}
             className="ui-button ui-button-sm relative z-10 shrink-0">{actionLabel(need)}</button>
         )}
@@ -84,8 +84,8 @@ function NetworkRow({ network, line, action, secondary }: { network: PrivateNetw
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="flex flex-wrap items-center gap-x-2 text-[14px] leading-5 text-ink">
             {t("devicesPage.network.title")}
-            <span data-network-state={network.state} className={cn("flex items-center gap-1.5 text-[13px] leading-[18px]", network.state === "ready" || network.state === "unknown" ? "text-ink-secondary" : "text-ink")}>
-              <StatusMark status={NETWORK_MARK[network.state] ?? "attention"} />{networkShort(network)}
+            <span data-network-state={network.state} className={cn("flex items-center gap-1.5 text-[13px] leading-[18px]", (network.state === "ready" && network.shared) || network.state === "unknown" ? "text-ink-secondary" : "text-ink")}>
+              <StatusMark status={network.state === "ready" && !network.shared ? "attention" : NETWORK_MARK[network.state] ?? "attention"} />{networkShort(network)}
             </span>
           </span>
           <span data-network-line={network.state} aria-live="polite" className="text-[13px] leading-[18px] text-ink-secondary">{line}</span>

@@ -69,6 +69,7 @@ const environments: Array<{ id: string; kind: "local" | "remote"; name: string; 
   ...(ten ? [{ id: "lan", kind: "remote" as const, name: "Office NUC", origin: "http://192.168.1.40:8799" }] : []),
 ] : [{ id: "local", kind: "local" as const, name: "This computer" }];
 const statuses = full ? [
+  { id: "home", state: "connected", since: now - 9e8, version: "0.1.180", behind: false, install: null },
   { id: "mini", state: "connected", since: now - 9e8, version: "0.1.171", behind: true, install: "global" },
   { id: "vps", state: "cantReach", since: now - 40 * MIN, version: "0.1.180", behind: false, install: "docker" },
 ] : [];

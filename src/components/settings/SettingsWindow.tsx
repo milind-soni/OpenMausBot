@@ -149,7 +149,7 @@ export function SettingsWindow() {
   // width each side of the centre), the back button keeps only its chevron.
   const compactBack = narrow && typeof window !== "undefined"
     && (sub
-      ? window.innerWidth / 2 - 16 - (30 + sub.back.length * 6.5) < (sub.title.length * 8.5) / 2
+      ? window.innerWidth / 2 - 16 - (30 + sub.back.length * 7) < ((sub.short ?? sub.title).length * 9) / 2
       : window.innerWidth / 2 - 16 - (30 + t("settings.title").length * 7) < (pageLabel(page, place, ctx.desktop).length * 9) / 2);
   const closeButton = (
     <button type="button" onClick={close} aria-label={t("settings.close")} title={`${t("settings.close")} (${shortcutLabel("close-panel")})`}
@@ -179,7 +179,7 @@ export function SettingsWindow() {
                         className={cn("flex h-8 shrink-0 cursor-pointer items-center gap-0.5 rounded-full text-[13px] font-medium leading-5 text-ink-secondary hover:bg-menu-hover hover:text-ink", compactBack ? "w-8 justify-center" : "pl-1 pr-2")}>
                         <ChevronLeft size={16} aria-hidden="true" className="rtl:-scale-x-100" />{!compactBack && (sub?.back ?? t("settings.title"))}
                       </button>
-                      <h2 className={cn("pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 truncate text-center text-[16px] font-semibold leading-[22px] text-ink", compactBack ? "max-w-[calc(100%-96px)]" : "max-w-[calc(100%-224px)]")}>{sub?.title ?? pageLabel(page, place, ctx.desktop)}</h2>
+                      <h2 className={cn("pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 truncate text-center text-[16px] font-semibold leading-[22px] text-ink", compactBack ? "max-w-[calc(100%-96px)]" : "max-w-[calc(100%-224px)]")}>{sub ? sub.short ?? sub.title : pageLabel(page, place, ctx.desktop)}</h2>
                     </>
                   )}
                   {closeButton}

@@ -48,7 +48,7 @@ const NETWORK_SHORT: Record<PrivateNetworkState, LocaleKey> = {
   "needs-permission": "devicesPage.network.short.needsPermission", magicdns: "devicesPage.network.short.magicdns", ready: "devicesPage.network.short.ready",
 };
 /** Two or three words for the map. */
-export const networkShort = (network: PrivateNetwork): string => t(NETWORK_SHORT[network.state]);
+export const networkShort = (network: PrivateNetwork): string => (network.state === "ready" && !network.shared ? t("devicesPage.network.short.notShared") : t(NETWORK_SHORT[network.state]));
 
 /** A computer's name on the private network without the network's own suffix: "ada-macbook", not "ada-macbook.tail4c2e.ts.net". */
 const shortName = (name: string | null) => ((name ?? "").split(".")[0] ?? "").replace(/-/g, "\u2011");

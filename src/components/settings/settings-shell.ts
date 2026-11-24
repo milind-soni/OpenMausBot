@@ -17,6 +17,8 @@ export interface SettingsShell {
 
 export interface SettingsSub {
   title: string;
+  /** A shorter title for the narrow header, where the way back sits beside it. */
+  short?: string;
   /** Where the header's back button goes, in a word or two. */
   back: string;
   onBack: () => void;

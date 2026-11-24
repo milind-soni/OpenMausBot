@@ -29,8 +29,8 @@ const PAIR_COMMAND = "npx openmausbot pair";
 function CommandLine({ command, inline = false }: { command: string; inline?: boolean }) {
   const { state, copy } = useCopyFeedback(command);
   if (inline) {
-    return <span className="flex items-center gap-1">
-      <code className="min-w-0 flex-1 rounded-lg bg-ink/[0.05] px-3 py-2 font-mono text-[12px] leading-4 text-ink">{command}</code>
+    return <span className="flex min-w-0 items-center gap-2 rounded-lg bg-ink/[0.05] py-1 ps-3 pe-1">
+      <code className="min-w-0 flex-1 py-1.5 font-mono text-[12px] leading-4 text-ink">{command}</code>
       <button type="button" onClick={copy} aria-label={t(state === "copied" ? "connect.copied" : "connect.copy")} title={t("connect.copy")} className="ui-icon-button shrink-0">
         {state === "copied" ? <Check size={14} aria-hidden="true" className="text-success" /> : <Copy size={14} aria-hidden="true" />}
       </button>
@@ -131,7 +131,7 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
     <label className="flex flex-col gap-1.5 text-[13px] font-medium text-ink">{t("connect.address")}
       <input data-autofocus={start?.locked ? undefined : true} data-own-server-link value={address} disabled={busy} readOnly={start?.locked === true} onChange={(event) => { if (!start?.locked) typeAddress(event.target.value, (event.nativeEvent as InputEvent).inputType === "insertFromPaste"); }}
         placeholder={t("connect.addressPlaceholder")} autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false} aria-invalid={Boolean(shownProblem) || undefined}
-        className={inline ? cn(SETTINGS_INPUT, "font-normal aria-[invalid=true]:shadow-[inset_0_0_0_1px_var(--color-danger)]") : "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] font-normal text-ink outline-none focus:border-accent/50"} />
+        className={inline ? cn(SETTINGS_INPUT, "font-normal aria-[invalid=true]:shadow-[inset_0_0_0_1px_var(--color-danger)] aria-[invalid=true]:focus-visible:outline-danger") : "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] font-normal text-ink outline-none focus:border-accent/50"} />
     </label>
     {shownProblem && inline && <p ref={problemLine} role="alert" data-connect-problem className="-mt-2 text-[13px] leading-[18px] text-danger">{shownProblem}
     </p>}
@@ -139,7 +139,7 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
     {!connect && !start && !inline && <p data-connect-other-computer className="text-[12px] leading-4 text-ink-secondary">{t("connect.otherComputer", { app: productName() })}</p>}
     {codeOnlyHint && <p data-connect-hint className="text-[13px] text-ink-secondary">{t("connect.addAddress", { example: EXAMPLE_ADDRESS })}</p>}
     {found && <p data-connect-found className={cn("text-[13px] text-ink-secondary", inline && "flex items-center gap-1.5")}>
-      {inline ? <Check size={14} aria-hidden="true" className="shrink-0 text-success" /> : "✓"} {found.version ? t("connect.found", { name: found.label, version: found.version }) : found.label} · {t(TRANSPORT_KEY[found.transport])}
+      {inline ? <Check size={14} aria-hidden="true" className="shrink-0 text-success" /> : "✓"} {found.version ? t("connect.found", { name: found.label, version: found.version }) : found.label}{!inline && <> · {t(TRANSPORT_KEY[found.transport])}</>}
     </p>}
     {showCode && <label className="flex flex-col gap-1.5 text-[13px] font-medium text-ink">{t("connect.code")}
       <input ref={codeField} data-autofocus={start?.locked ? true : undefined} data-own-server-code value={code} disabled={busy} onChange={(event) => { setCode(event.target.value); setFailure(null); }}
