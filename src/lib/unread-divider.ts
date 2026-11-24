@@ -1,9 +1,10 @@
+import { automationNote } from "@/lib/automation-note";
 import { peerLine } from "@/lib/peer-message";
 import type { Message } from "@/state/store";
 
-type Line = Pick<Message, "id" | "role" | "text" | "peerAsk">;
+type Line = Pick<Message, "id" | "role" | "kind" | "text" | "peerAsk" | "automated">;
 
-const fromPerson = (message: Line) => message.role === "user" && !peerLine(message);
+export const fromPerson = (message: Line) => message.role === "user" && !peerLine(message) && !automationNote(message);
 
 export function firstUnreadMessageId(messages: readonly Line[], lastReadMessageId?: string): string | null {
   let seen = -1;

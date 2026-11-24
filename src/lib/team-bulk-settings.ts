@@ -6,7 +6,7 @@ import { approvalModeFor, supportsApprovalMode, type ApprovalMode } from "../../
 import { atLeast, sameAccess, type BotAccess, type BotAccessLevel, type GrantedLevel } from "../../shared/bot-access";
 import { botOwner } from "../../shared/bot-owner";
 import { accessOfBot, withPerson } from "@/components/bot-access/access";
-import type { EffortLevel, ModelSelection } from "../../shared/wire";
+import { offeredEffortLevels, type EffortLevel, type ModelSelection } from "../../shared/wire";
 
 /** Custom is per bot: it can only be granted through the desktop's confirmation for that one bot. */
 export const TEAM_APPROVAL_MODES = ["ask", "edits", "auto", "full"] as const satisfies readonly ApprovalMode[];
@@ -63,8 +63,15 @@ export function teamEffortChoices(bots: readonly Bot[], instances: readonly Inst
   const offered = new Set<EffortLevel>();
   for (const bot of bots) {
     const engine = engineOf(bot, instances);
-    if (engine?.capabilities?.modelVariants) continue;
-    for (const level of engine?.capabilities?.effortLevels ?? []) offered.add(level);
+    if (!engine || engine.capabilities?.modelVariants) continue;
+    const options = engine.models.options ?? [];
+    const levels = options.length
+      ? options.flatMap((option) => offeredEffortLevels(engine, option.id))
+      : (engine.capabilities?.effortLevels ?? []);
+    for (const level of levels) offered.add(level);
+    if (bot.modelSelection?.model) {
+      for (const level of offeredEffortLevels(engine, bot.modelSelection.model)) offered.add(level);
+    }
   }
   return order.filter((level) => offered.has(level));
 }
@@ -103,12 +110,12 @@ export function planTeamChange(bots: readonly Bot[], instances: readonly Instanc
     const next: ModelSelection = { instanceId: current.instanceId, model };
     if (current.variant && model === current.model) next.variant = current.variant;
     if (change.effort === undefined) {
-      if (current.effort) next.effort = current.effort;
+      if (current.effort && offeredEffortLevels(engine, model).includes(current.effort)) next.effort = current.effort;
     } else if (change.effort !== null) {
       if (engine.capabilities?.modelVariants) {
         return { bot, status: "skip", reason: t("teamSettings.skip.variantsOnly", { engine: engineName }) };
       }
-      if (!(engine.capabilities?.effortLevels ?? []).includes(change.effort)) {
+      if (!offeredEffortLevels(engine, model).includes(change.effort)) {
         return { bot, status: "skip", reason: t("teamSettings.skip.effortUnsupported", { engine: engineName }) };
       }
       next.effort = change.effort;

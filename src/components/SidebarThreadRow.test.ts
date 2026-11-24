@@ -721,6 +721,20 @@ describe("Thread link", () => {
     expect(chipClass(render(true))).toContain("mt-2.5");
     expect(chipClass(render(false))).not.toContain("mt-2.5");
   });
+
+  it("hides the chip in Simple mode, in the sidebar and the bot panel", () => {
+    interfaceMode.advanced = false;
+    const now = Date.UTC(2026, 8, 25, 12, 0, 0);
+    for (const panel of [false, true]) {
+      const markup = renderToStaticMarkup(createElement(SidebarThreadRow, {
+        task: { threadId: "t", title: "Fix", updatedAt: now - 3_600_000, link: "https://github.com/o/r/pull/42" },
+        ownerId: "b", current: false, now, panel, preview: "Last line", onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), locale: "en",
+      }));
+      expect(markup).toContain("Fix");
+      expect(markup).not.toContain("#42");
+      expect(markup).not.toContain("<a ");
+    }
+  });
 });
 
 describe("helper threads a bot opened", () => {

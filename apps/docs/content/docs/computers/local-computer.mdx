@@ -10,6 +10,16 @@ Local control is off by default. The Electron main process owns the bundled CUA 
 
 The packaged app can request Accessibility and Screen Recording permission. After granting either permission, restart the control session when prompted so macOS applies the new grant.
 
+## Windows
+
+The Windows app (x64) ships its own computer-control helper, `cua-driver.exe` with `cua-driver-background.exe`. There is no
+permission to grant: once a bot is set to **This computer**, it can use the apps on your screen. If Windows Security or
+Smart App Control blocks the helper, the Screen panel says so; allow it and restart MausBot. Windows on Arm is not
+supported yet.
+
+To let bots on a server of your own (a VPS) use this PC instead, see
+[Let bots on your own server use this computer](/docs/computers/lend-to-your-server).
+
 ## Ubuntu
 
 Ubuntu 24.04 GNOME host control is temporarily disabled while the real-seat input-safety blocker in issue #345 is resolved. Packaged builds retain the pinned runtime for reproducible review, but MausBot does not start it and clears legacy opt-ins. Chat, screen preview, Cloud, and Local VM remain available. Do not start the bundled driver manually as a workaround.

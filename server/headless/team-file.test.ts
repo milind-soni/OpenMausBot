@@ -105,8 +105,8 @@ rooms:
   });
 
   it("reads JSON too, and warns about a bot left on an automatic computer", () => {
-    const team = loadTeamFile(file(JSON.stringify({ version: 1, bots: [{ name: "Solo" }] }), "team.json"));
-    expect(team.bots).toEqual([{ name: "Solo", manages: [], skills: [] }]);
+    const team = loadTeamFile(file(JSON.stringify({ version: 1, bots: [{ name: "Solo", effort: "ultra" }] }), "team.json"));
+    expect(team.bots).toEqual([{ name: "Solo", effort: "ultra", manages: [], skills: [] }]);
     expect(team.warnings).toEqual([expect.stringContaining('bot "Solo" has no computer set')]);
   });
 

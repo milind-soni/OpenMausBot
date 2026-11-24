@@ -199,4 +199,88 @@ describe("a bot browser's memory ceiling", () => {
     expect(killed).toEqual(["11 SIGKILL"]);
     expect(count).toBe(1);
   });
+
+  it("after the kernel kills at the browsers' limit, closes the browser that lost processes, with the turn that held it", async () => {
+    let kills = 0;
+    const contained: string[] = [];
+    const sizes: Record<number, number> = { 10: 30 * MB, 11: 200 * MB, 12: 400 * MB };
+    const forced: string[] = [];
+    const ceiling = createBrowserCeiling({
+      lines: { softBytes: 700 * MB, hardBytes: 1000 * MB },
+      browsers: async () => [{ session: "bot-a", pids: Object.keys(sizes).map(Number), daemon: 10 }, { session: "bot-b", pids: [20, 21], daemon: 20 }],
+      pss: (pid) => sizes[pid] ?? (pid >= 20 ? 100 * MB : null),
+      quiet: () => false, tabs: async () => [], closeTab: async () => false, close: async () => false,
+      forceClose: async (browser, used) => { forced.push(`${browser.session} [${browser.pids.join(",")}] ${Math.round(used / MB)} MB`); return true; },
+      kernelKills: () => kills,
+      contain: (browser) => contained.push(browser.session),
+      log: () => {},
+    });
+    await ceiling.tick();
+    expect(forced).toEqual([]);
+    expect(contained).toEqual(["bot-a", "bot-b"]);
+    // The kernel killed bot-a's largest renderer at the group's limit.
+    delete sizes[12];
+    kills = 1;
+    await ceiling.tick();
+    expect(forced).toEqual(["bot-a [10,11] 630 MB"]);
+    // No new kill: nothing more is closed.
+    await ceiling.tick();
+    expect(forced).toHaveLength(1);
+  });
+
+  function twoBrowsers() {
+    let kills = 0;
+    const a: Record<number, number> = { 10: 30 * MB, 11: 200 * MB, 12: 400 * MB };
+    const b: Record<number, number> = { 20: 30 * MB, 21: 800 * MB, 22: 20 * MB };
+    const forced: string[] = [];
+    const ceiling = createBrowserCeiling({
+      lines: { softBytes: 700 * MB, hardBytes: 1000 * MB },
+      browsers: async () => [{ session: "bot-a", pids: Object.keys(a).map(Number), daemon: 10 }, { session: "bot-b", pids: Object.keys(b).map(Number), daemon: 20 }],
+      pss: (pid) => a[pid] ?? b[pid] ?? null,
+      quiet: () => false, tabs: async () => [], closeTab: async () => false, close: async () => false,
+      forceClose: async (browser) => { forced.push(browser.session); return true; },
+      kernelKills: () => kills,
+      log: () => {},
+    });
+    return { ceiling, a, b, forced, kill: () => { kills += 1; } };
+  }
+
+  it("after a kernel kill, closes the browser whose lost process was the victim, not one that swapped a small renderer", async () => {
+    const run = twoBrowsers();
+    await run.ceiling.tick();
+    // The kernel kills bot-a's 400 MB renderer while bot-b swaps a 20 MB renderer on a normal navigation.
+    delete run.a[12];
+    delete run.b[22]; run.b[23] = 20 * MB;
+    run.kill();
+    await run.ceiling.tick();
+    expect(run.forced).toEqual(["bot-a"]);
+  });
+
+  it("closes nothing when no process lost since could have been the victim, and looks once more against the earlier look", async () => {
+    const run = twoBrowsers();
+    await run.ceiling.tick();
+    // The kill is counted before its victim is reaped: only a small renderer is gone at this look.
+    delete run.b[22];
+    run.kill();
+    await run.ceiling.tick();
+    expect(run.forced).toEqual([]);
+    // Reaped by the next look: found against the sizes from before the kill.
+    delete run.a[12];
+    await run.ceiling.tick();
+    expect(run.forced).toEqual(["bot-a"]);
+  });
+
+  it("lets a kill nothing explains go after one more look, so a later large loss is not taken for it", async () => {
+    const run = twoBrowsers();
+    await run.ceiling.tick();
+    delete run.b[22];
+    run.kill();
+    await run.ceiling.tick();
+    await run.ceiling.tick();
+    expect(run.forced).toEqual([]);
+    // bot-b closes its 800 MB tab itself afterwards, with no new kill: nothing is closed for it.
+    delete run.b[21];
+    await run.ceiling.tick();
+    expect(run.forced).toEqual([]);
+  });
 });
