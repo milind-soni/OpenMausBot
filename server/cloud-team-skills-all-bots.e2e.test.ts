@@ -58,6 +58,14 @@ it("reaches only the person's own bots, and only that person can put it on or ta
   }
   expect(await skillsOf(olivesBot)).toEqual([]);
 
+  // A bot with a different copy of its own keeps it, and cannot silently replace the one on all of Ada's bots.
+  const different = SKILL.replace("Make the folder", "Ask first, then make the folder");
+  expect((await team.as(ada, "POST", `/api/bots/${later.id}/skill-template`, { name: "client-onboarding", description: "", source: "test", text: different, enabled: true })).status).toBe(201);
+  expect(await skillsOf(later)).toEqual([expect.not.objectContaining({ allBots: true })]);
+  expect((await allBots(ada, later)).status).toBe(409);
+  expect((await team.as(ada, "DELETE", `/api/bots/${later.id}/skills/client-onboarding`)).status).toBe(200);
+  expect(await skillsOf(later)).toEqual([expect.objectContaining({ allBots: true })]);
+
   expect((await team.as(olive, "DELETE", `/api/bots/${adasResearcher.id}/skills/client-onboarding`)).status).toBe(403);
   expect(await skillsOf(adasResearcher)).toHaveLength(1);
 

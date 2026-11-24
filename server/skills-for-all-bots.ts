@@ -14,7 +14,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import { botOwner, type OwnedBot } from "../shared/bot-owner.ts";
 import { isSkillName } from "../shared/skill-md.ts";
-import { librarySkillFilePath, listLibrarySkills, readLibrarySkillFile, type LibrarySkillListing } from "./skill-library.ts";
+import { librarySkillFilePath, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, type LibrarySkillListing } from "./skill-library.ts";
 
 export const SKILLS_FOR_ALL_BOTS_DIR = "skills-for-all-bots";
 
@@ -100,7 +100,7 @@ export function allBotsSkills(botId: string): AllBotsSkillListing[] {
 /** The SKILL.md path the bot's index points at, when the person has a skill of this name on all their bots. */
 export function allBotsSkillFile(botId: string, name: string): string | null {
   const root = allBotsRootOfBot(botId);
-  return root && isSkillName(name) && listLibrarySkills(root).some((skill) => skill.name === name) ? librarySkillFilePath(name, root) : null;
+  return root && isSkillName(name) && Object.hasOwn(readSkillLibraryIndex(root), name) ? librarySkillFilePath(name, root) : null;
 }
 
 /** Its SKILL.md while it still hashes as stored; null when there is none or it changed outside OpenMausBot. */

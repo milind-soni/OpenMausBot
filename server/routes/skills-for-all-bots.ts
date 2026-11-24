@@ -7,7 +7,7 @@ import { ownerEmail } from "../../shared/bot-owner.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { listSkills } from "../skills.ts";
 import { allBotsScopeOfBot, allBotsScopeOfPerson, allBotsSkills, setAllBotsSkillOff, skillsForAllBotsOnTeam } from "../skills-for-all-bots.ts";
-import { ownCopy, putOnAllBots, removeFromAllBots } from "../skills-for-all-bots-ops.ts";
+import { copyDigest, ownCopy, putOnAllBots, removeFromAllBots, sharedCopy } from "../skills-for-all-bots-ops.ts";
 import type { BotRecord, Store } from "../store.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
@@ -45,7 +45,12 @@ export function createSkillsForAllBotsRoutes(deps: SkillsForAllBotsRouteDeps): R
       if (!own.enabled) return json(res, 409, { error: `Turn "${name}" on for this bot first, after reading it.` });
       const copy = ownCopy(bot.id, name);
       if (!copy) return json(res, 409, { error: `"${name}" changed outside OpenMausBot; remove it and add it again.` });
-      const put = putOnAllBots(allowed.scope, name, copy, { fresh: true });
+      // A different copy already on all of their bots stays: this bot keeps its own until one of the two is removed.
+      const existing = sharedCopy(allowed.scope, name);
+      if (existing && copyDigest(existing) !== copyDigest(copy)) {
+        return json(res, 409, { error: `A different "${name}" is already on all your bots. Remove this bot's own copy to use that one, or remove that one from all your bots first.` });
+      }
+      const put = putOnAllBots(allowed.scope, name, copy, { fresh: !existing });
       if ("error" in put) return json(res, 409, { error: put.error });
       return json(res, 200, { name, kept: put.kept.map((id) => deps.store.bot(id)?.name ?? id), retired: put.retired.length });
     }

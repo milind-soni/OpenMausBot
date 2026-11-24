@@ -16,12 +16,15 @@ const { createSkillSwitchHost } = await import("./host/skill-switch-host.ts");
 const { requesterScope } = await import("./routes/skills-for-all-bots.ts");
 const { learnSource } = await import("./skill-learn.ts");
 const { flushDecisionLog } = await import("./decision-log.ts");
+const { personKey } = await import("./person-key.ts");
 const { DATA_DIR } = await import("./config.ts");
 
 type Bot = { id: string; name: string; color: string; createdBy?: string; reportsTo?: string; home?: unknown };
 
 const SKILL = (name: string, body = "Do the thing.", description = "Sets up a new client the way this person does.") =>
   `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n\n${body}\n`;
+/** A path as the index line writes it: inside JSON quotes, so Windows backslashes come doubled. */
+const quoted = (path: string) => JSON.stringify(path).slice(1, -1);
 const unique = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 let bots: Bot[] = [];
 
@@ -71,11 +74,11 @@ describe("a skill on all of the person's bots", () => {
       expect(names(one.id)).toEqual(["client-onboarding"]);
       const lines = indexLines(one.id, "client-onboarding");
       expect(lines).toHaveLength(1);
-      expect(lines[0]).toContain(join(DATA_DIR, "skills-for-all-bots", "mine", "skills", "client-onboarding", "SKILL.md"));
+      expect(lines[0]).toContain(quoted(join(DATA_DIR, "skills-for-all-bots", "mine", "skills", "client-onboarding", "SKILL.md")));
     }
     // The bot with its own different copy keeps it: its own skill wins the name.
     expect(skills.resolveBotSkills(keeper.id, undefined).filter((skill) => skill.name === "client-onboarding")).toHaveLength(1);
-    expect(indexLines(keeper.id, "client-onboarding")[0]).toContain(join("workspaces", keeper.id));
+    expect(indexLines(keeper.id, "client-onboarding")[0]).toContain(quoted(join("workspaces", keeper.id)));
     expect(skills.enabledSkillFile(writer.id, "client-onboarding")).toBe(everywhere.allBotsSkillFile(writer.id, "client-onboarding"));
 
     const removed = ops.removeFromAllBots("mine", "client-onboarding");
@@ -115,7 +118,7 @@ describe("a skill on all of the person's bots", () => {
     expect(skills.listBotSkillsWithOrigin(chief.id, []).skills.map((skill) => [skill.name, skill.origin])).toEqual([["release-notes", "all-bots"]]);
     expect(skills.enabledSkillFile(chief.id, "release-notes", [])).toBe(everywhere.allBotsSkillFile(chief.id, "release-notes"));
     expect(skills.skillsSystemPrompt(chief.id, []).split("\n").filter((line) => line.startsWith("- release-notes:"))).toEqual([
-      expect.stringContaining(join("skills-for-all-bots", "mine")),
+      expect.stringContaining(quoted(join("skills-for-all-bots", "mine"))),
     ]);
     ops.removeFromAllBots("mine", "release-notes");
     expect(skills.resolveBotSkills(chief.id, [])[0]).not.toHaveProperty("allBots");
@@ -167,8 +170,8 @@ describe("skill_manage for all the person's bots", () => {
       persistence: () => ({ ok: true }),
       noteSkillChange: vi.fn(),
     });
-    const call = (from: Bot, body: Record<string, unknown>) =>
-      made.stage(from as never, "t1", body, () => (direct ? "full-access" : null), async (asked) => asked, () => true);
+    const call = (from: Bot, body: Record<string, unknown>, actsFor: string | null = null) =>
+      made.stage(from as never, "t1", body, () => (direct ? "full-access" : null), async (asked) => asked, () => true, () => actsFor);
     const last = () => messages.at(-1)!;
     const undo = (from: Bot) => made.undo(from.id, "t1", last() as never, last().card.skillRequest);
     const answer = (from: Bot, behavior: "allow" | "deny") =>
@@ -237,6 +240,32 @@ describe("skill_manage for all the person's bots", () => {
     wire(true);
     const nobodys = bot("Department Chief");
     expect(await call(nobodys, { action: "create", all_bots: true, skill_md: SKILL("x-skill"), source: "conversation" })).toMatchObject({ status: 422 });
+  });
+
+  it("on a Team Cloud, changes a member's bots only in a turn that acts for that member", async () => {
+    wire(true);
+    const alicesChief = bot("Alice's Chief", { createdBy: "alice@acme.test" });
+    const alicesWriter = bot("Alice's Writer", { createdBy: "alice@acme.test" });
+    const { call } = host(true);
+    const create = { action: "create", all_bots: true, skill_md: SKILL("team-thing"), source: "conversation" };
+    // A teammate chatting with Alice's shared bot, and a routine acting for nobody, cannot reach all of Alice's bots.
+    expect(await call(alicesChief, create, personKey({ id: "", email: "bob@acme.test" }))).toMatchObject({ status: 403 });
+    expect(await call(alicesChief, create, null)).toMatchObject({ status: 403 });
+    expect(names(alicesWriter.id)).toEqual([]);
+    expect(await call(alicesChief, create, personKey({ id: "", email: "alice@acme.test" }))).toMatchObject({ status: 201, body: { state: "applied" } });
+    expect(names(alicesWriter.id)).toEqual(["team-thing"]);
+  });
+
+  it("an update keeps the reference files it does not mention, and an empty one removes that file", async () => {
+    const chief = bot("Chief");
+    const { call } = host(true);
+    const references = [{ path: "references/steps.md", content: "# Steps\n\nOne, two.\n" }, { path: "references/tone.md", content: "# Tone\n\nPlain.\n" }];
+    await call(chief, { action: "create", all_bots: true, skill_md: SKILL("with-notes"), references, source: "conversation" });
+    await call(chief, { action: "update", skill_name: "with-notes", skill_md: SKILL("with-notes", "New way."), source: "conversation" });
+    expect(ops.sharedCopy("mine", "with-notes")?.files.map((file) => file.path)).toEqual(["references/steps.md", "references/tone.md"]);
+    await call(chief, { action: "update", skill_name: "with-notes", skill_md: SKILL("with-notes", "Newer way."), references: [{ path: "references/tone.md", content: "" }], source: "conversation" });
+    expect(ops.sharedCopy("mine", "with-notes")).toMatchObject({ files: [{ path: "references/steps.md" }] });
+    expect(ops.sharedCopy("mine", "with-notes")?.skillMd).toContain("Newer way.");
   });
 
   it("switches a shared skill on or off for the asking bot only", () => {

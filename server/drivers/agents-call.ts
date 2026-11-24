@@ -888,8 +888,8 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         // Unreviewed imports: a hostile description is still prompt content, so only names and status.
         const revision = typeof row.revision === "string" ? `, shared with your team, revision ${row.revision}` : "";
         const unlisted = row.enabled && row.listed === false ? ", not in your prompt: search to read it" : "";
-        const everywhere = row.allBots === true ? ", on all your bots" : "";
-        return `- ${row.name} (${row.enabled ? "enabled" : "disabled"}, ${row.editable === true ? "learned/editable" : "imported"}${everywhere}${revision}${unlisted})`;
+        const kind = row.allBots === true ? "on all your bots, update or delete changes every one" : row.editable === true ? "learned/editable" : "imported";
+        return `- ${row.name} (${row.enabled ? "enabled" : "disabled"}, ${kind}${revision}${unlisted})`;
       }).join("\n")
       : "(none)";
     const pending = staged.length

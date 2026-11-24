@@ -13,12 +13,14 @@ import type { OptionCardData } from "../../shared/wire.ts";
 import { writeFileAtomic } from "../atomic.ts";
 import { appendDecision } from "../decision-log.ts";
 import { UNDO_STALE, type DirectApply } from "../direct-apply.ts";
+import { botOwner } from "../../shared/bot-owner.ts";
+import { personKey } from "../person-key.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { conversationLanguage, serverLine, type ServerLineKey } from "../server-lines.ts";
 import { learnSource } from "../skill-learn.ts";
 import { parseSkillManageReferences } from "../skill-request-card.ts";
 import { listSkills, preparedLearnedSkill, STAGED_GIST_MAX, STAGED_SKILL_FILE_MAX_BYTES } from "../skills.ts";
-import { allBotsScopeOfBot, allBotsSkills, SKILLS_FOR_ALL_BOTS_DIR } from "../skills-for-all-bots.ts";
+import { allBotsScopeOfBot, allBotsSkills, SKILLS_FOR_ALL_BOTS_DIR, skillsForAllBotsOnTeam } from "../skills-for-all-bots.ts";
 import { copyDigest, putOnAllBots, removeFromAllBots, restoreOwnCopies, sharedCopy, type RetiredCopy, type SkillCopy } from "../skills-for-all-bots-ops.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
 
@@ -82,8 +84,9 @@ export function createSkillsForAllBotsHost(deps: SkillsForAllBotsHostDeps) {
   };
   const dropRecord = (requestId: string) => rmSync(recordPath(requestId), { force: true });
 
-  /** The new files a create or update brings, checked as a bot's own learned skill is. */
-  function proposed(body: Record<string, unknown>, action: "create" | "update", name: string): { copy: SkillCopy; name: string; gist: string; warnings: string[] } | { error: string } {
+  /** The new files a create or update brings, checked as a bot's own learned skill is. An update keeps the files beside
+   * SKILL.md it does not mention, and a reference sent empty removes that one, as a bot's own update does. */
+  function proposed(body: Record<string, unknown>, action: "create" | "update", name: string, current: SkillCopy | null): { copy: SkillCopy; name: string; gist: string; warnings: string[] } | { error: string } {
     const skillMd = redactSecretsInText(typeof body.skill_md === "string" ? body.skill_md : "");
     if (!skillMd.trim()) return { error: "skill_manage needs skill_md: the full SKILL.md including YAML frontmatter" };
     if (Buffer.byteLength(skillMd, "utf8") > STAGED_SKILL_FILE_MAX_BYTES) return { error: `SKILL.md files must be at most ${STAGED_SKILL_FILE_MAX_BYTES / 1024}KB` };
@@ -91,11 +94,17 @@ export function createSkillsForAllBotsHost(deps: SkillsForAllBotsHostDeps) {
     if (!source) return { error: 'source must be a URL, folder, or "conversation"' };
     const references = parseSkillManageReferences(body.references);
     if ("error" in references) return references;
-    const prepared = preparedLearnedSkill([{ path: "SKILL.md", content: skillMd }, ...references.map((file) => ({ path: file.path, content: redactSecretsInText(file.content) }))]);
+    const removals = new Set(references.filter((file) => !file.content.trim()).map((file) => file.path));
+    if (removals.size && action !== "update") return { error: `empty reference content removes a file only on update; give ${[...removals][0]} its content` };
+    const prepared = preparedLearnedSkill([{ path: "SKILL.md", content: skillMd }, ...references.filter((file) => !removals.has(file.path)).map((file) => ({ path: file.path, content: redactSecretsInText(file.content) }))]);
     if ("error" in prepared) return prepared;
     if (action === "update" && prepared.parsed.name !== name) return { error: `updated SKILL.md name must remain "${name}"` };
+    const files = new Map((action === "update" ? current?.files ?? [] : []).map((file) => [file.path, file] as const));
+    for (const path of removals) if (!files.delete(path)) return { error: `cannot remove ${path}: the skill has no such reference file` };
+    for (const file of prepared.files.slice(1)) files.set(file.path, file);
     const gist = redactSecretsInText(typeof body.gist === "string" ? body.gist : "").replace(/\s+/g, " ").trim().slice(0, STAGED_GIST_MAX) || prepared.parsed.description.slice(0, STAGED_GIST_MAX);
-    return { copy: { skillMd: prepared.files[0]!.content, files: prepared.files.slice(1), source: learnSource(source) }, name: prepared.parsed.name, gist, warnings: prepared.warnings };
+    const kept = [...files.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    return { copy: { skillMd: prepared.files[0]!.content, files: kept, source: learnSource(source) }, name: prepared.parsed.name, gist, warnings: prepared.warnings };
   }
 
   function appendCard(args: { requestId: string; bot: BotRecord; threadId: string; action: Action; name: string; gist: string; preview: string; source: string; warnings: string[]; applied?: { previous?: SkillRequestCardData["previous"] } }): string {
@@ -142,13 +151,20 @@ export function createSkillsForAllBotsHost(deps: SkillsForAllBotsHostDeps) {
     return names.length ? ` Kept their own different copy: ${names.join(", ")}.` : "";
   };
 
-  /** Null when the call is about the bot's own skill; then the usual paths take it. */
+  /** Null when the call is about the bot's own skill; then the usual paths take it. `actsFor`: on a Team Cloud, the person
+   * key the turn acts for (host/acting-person.ts); only the bot's own person's turn may change all of their bots, so a
+   * teammate chatting with a shared bot cannot reach its owner's private bots through it. */
   async function stage(from: BotRecord, threadId: string, received: Record<string, unknown>, direct: () => DirectApply | null,
-    withImport: (body: Record<string, unknown>) => Promise<Record<string, unknown> | { importError: string }>, active: () => boolean): Promise<Result | null> {
+    withImport: (body: Record<string, unknown>) => Promise<Record<string, unknown> | { importError: string }>, active: () => boolean,
+    actsFor: () => string | null = () => null): Promise<Result | null> {
     const claim = claimed(from, received);
     if (!claim) return null;
-    const scope = allBotsScopeOfBot(store.bot(from.id));
+    const live = store.bot(from.id), scope = allBotsScopeOfBot(live);
     if (!scope) return { status: 422, body: { error: "This bot belongs to no one on this team, so it has no \"all my bots\". Ask the person to have their own Chief of Staff do it, or add the skill to this bot alone without all_bots." } };
+    const owner = live ? botOwner(live) : null;
+    if (skillsForAllBotsOnTeam() && (!owner || actsFor() !== personKey({ id: "", email: owner }))) {
+      return { status: 403, body: { error: "Only the person this bot reports to can change the skills on all of their bots, in their own conversation with it." } };
+    }
     const body = claim.action === "create" ? await withImport(received) : received;
     if ("importError" in body) return { status: 422, body: { error: body.importError } };
     if (!active()) return { status: 401, body: { error: "This turn has ended." } };
@@ -162,7 +178,7 @@ export function createSkillsForAllBotsHost(deps: SkillsForAllBotsHostDeps) {
       record = { scope, action: "delete", name: claim.name, digest: copyDigest(current) };
       gist = ""; preview = current.skillMd; source = current.source;
     } else {
-      const change = proposed(body, claim.action, claim.name);
+      const change = proposed(body, claim.action, claim.name, claim.action === "update" ? sharedCopy(scope, claim.name) : null);
       if ("error" in change) return { status: 422, body: { error: change.error } };
       const current = sharedCopy(scope, change.name);
       if (claim.action === "create" && current) return { status: 422, body: { error: `"${change.name}" is already on all your bots; update it instead (action "update")` } };

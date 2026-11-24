@@ -47,7 +47,7 @@ it("puts a skill on every bot of the person's with one tool call, and takes it o
     expect(receipt.card).toMatchObject({ autoApplied: true, skillRequest: { allBots: true, action: "create", name: "client-onboarding" } });
 
     const listed = await run(writer, "Which skills do you have?", [{ tool: "skills_list", arguments: {}, expectError: false }]);
-    expect(listed[0]).toContain("client-onboarding (enabled, imported, on all your bots)");
+    expect(listed[0]).toContain("client-onboarding (enabled, on all your bots, update or delete changes every one)");
 
     const [deleted] = await run(writer, "Remove client-onboarding from all my bots.", [
       { tool: "skill_manage", arguments: { action: "delete", skill_name: "client-onboarding" }, expectError: false },
