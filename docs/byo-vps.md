@@ -36,7 +36,7 @@ host. To move the whole server to a VPS, use [Deploy on a VPS](deploy-vps.md).
 - **Locally:** a `docker` CLI, version 18.09 or newer (that is when `docker -H ssh://` shipped). The Docker
   daemon does not need to run locally — only the CLI is used; install it with the one line for your platform
   below.
-- **On the VPS:** a running Docker daemon (`dockerd`) on x86_64 Linux.
+- **On the VPS:** a running Docker daemon (`dockerd`) on x86_64 or arm64 Linux.
 - **The SSH user** must be in the `docker` group on the VPS, so `docker info` works without sudo.
 
 Be clear-eyed about that last point: membership in the `docker` group is root-equivalent on that machine.
@@ -147,7 +147,7 @@ host is unknown simply fails until you have done this once.
 
 ## A machine on your Tailscale network
 
-The server does not have to be a rented VPS. Any x86_64 Linux machine that runs Docker and that you can reach
+The server does not have to be a rented VPS. Any x86_64 or arm64 Linux machine that runs Docker and that you can reach
 over SSH works the same way: a home server, a spare desktop, or a computer on your Tailscale network. The bot
 still gets its own managed desktop container on that machine; it does not take over the machine's own screen.
 
