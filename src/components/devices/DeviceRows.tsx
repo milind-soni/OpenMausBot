@@ -163,17 +163,17 @@ export function DevicesTopLine({ needing, now, onOpen, onAdd }: { needing: reado
           <span className="min-w-0">
             {needing.map((device, index) => {
               const [before = "", after = ""] = t("devicesPage.attention.item", { status: statusText(device, now) }).split("{name}");
-              // A button is an atomic inline: the punctuation after it would wrap alone unless it is held to it.
+              // A button is laid out as one box (Chromium): a name over two lines would leave the punctuation after it
+              // alone at the line's end, so the punctuation goes inside it.
               const [, glue = "", rest = ""] = /^(\S*)([\s\S]*)$/.exec(after) ?? [];
               return <Fragment key={device.id}>
                 {index > 0 && <span aria-hidden="true" className="text-ink-tertiary">{" · "}</span>}
                 <span data-attention-device={device.id}>
                   {before}
-                  <span className="whitespace-nowrap">
-                    <button type="button" onClick={() => onOpen(device.id)}
-                      className="cursor-pointer whitespace-normal rounded-sm text-start font-medium text-accent-text hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">{device.name}</button>
-                    {glue}
-                  </span>
+                  <button type="button" onClick={() => onOpen(device.id)}
+                    className="cursor-pointer rounded-sm text-start font-medium text-accent-text hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
+                    {device.name}<span className="font-normal text-ink-secondary">{glue}</span>
+                  </button>
                   {rest}
                 </span>
               </Fragment>;

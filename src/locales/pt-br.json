@@ -11953,7 +11953,6 @@
   "keys.vps.field.cpus": "Núcleos de processador para cada bot",
   "keys.vps.sshNameLine": "Nome SSH: {alias}",
   "keys.vps.limitsLine": "O máximo que o desktop de cada bot pode usar nesta máquina. Em branco, ele recebe {memory} GB e {cpus} núcleos.",
-  "devicesPage.note.noWayIn": "Não dá para alcançar: nenhuma forma de acesso está ligada",
   "devicesPage.action.turnOnWay": "Ligar uma forma de acesso",
   "devicesPage.action.removeHere": "Remover deste app",
   "devicesPage.network.shareSwitch": "Deixar meus outros computadores se conectarem",
@@ -12013,5 +12012,6 @@
   "devicesPage.routeInline.secureLogin": "login seguro (SSH)",
   "settings.nav.phoneConnected": "Um celular está conectado",
   "settings.nav.phoneNeedsYou": "Um celular precisa de você",
-  "devices.reach.sameWifi": "no mesmo Wi-Fi"
+  "devices.reach.sameWifi": "no mesmo Wi-Fi",
+  "devicesPage.note.noWayOn": "Nenhuma forma de acesso está ligada"
 }

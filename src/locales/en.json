@@ -11953,7 +11953,6 @@
   "keys.vps.field.cpus": "Processor cores for each bot",
   "keys.vps.sshNameLine": "SSH name: {alias}",
   "keys.vps.limitsLine": "The most each bot’s desktop may use on this machine. Left empty, it gets {memory} GB and {cpus} cores.",
-  "devicesPage.note.noWayIn": "Can’t reach it: no way in is on",
   "devicesPage.action.turnOnWay": "Turn on a way in",
   "devicesPage.action.removeHere": "Remove from this app",
   "devicesPage.network.shareSwitch": "Let my other computers connect",
@@ -12013,5 +12012,6 @@
   "devicesPage.routeInline.secureLogin": "secure login (SSH)",
   "devices.reach.sameWifi": "on the same Wi-Fi",
   "settings.nav.phoneConnected": "A phone is connected",
-  "settings.nav.phoneNeedsYou": "A phone needs you"
+  "settings.nav.phoneNeedsYou": "A phone needs you",
+  "devicesPage.note.noWayOn": "No way in is on"
 }

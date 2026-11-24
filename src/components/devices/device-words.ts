@@ -38,7 +38,7 @@ export function statusText(device: Device, now = Date.now()): string {
   if (device.note === "insecure") return t("devicesPage.note.insecure");
   if (device.note === "unreachable") return t("devicesPage.note.unreachable");
   if (device.note === "reconnecting") return t("devicesPage.note.reconnecting");
-  if (device.note === "no-way-in") return t("devicesPage.note.noWayIn");
+  if (device.note === "no-way-in") return t("devicesPage.note.noWayOn");
   if (device.kind === "vm") return device.desktop ? t(DESKTOP[device.desktop]) : "";
   if (device.status === "online") return t("devicesPage.status.online");
   if (device.status === "offline") return device.lastSeen ? t("devicesPage.status.seen", { when: lastSeen(device.lastSeen, now) }) : t("devicesPage.status.offline");

@@ -204,7 +204,7 @@ describe("the Devices page", () => {
     companion = { ...companion, routes: { wifi: off, relay: off, tailscale: off, https: off } };
     await render();
     const iphone = $("[data-device-row='phone:iphone']")!;
-    expect(iphone.querySelector("[data-device-state]")?.textContent).toBe("Can’t reach it: no way in is on");
+    expect(iphone.querySelector("[data-device-state]")?.textContent).toBe("No way in is on");
     expect(iphone.querySelector("[data-device-route]")).toBeNull();
     await click("[data-device-row='phone:iphone'] [data-row-action=turn-on-way]");
     await wait(20);
@@ -1089,7 +1089,7 @@ describe("the top line", () => {
     expect([...line.querySelectorAll("[data-attention-device]")].map((item) => item.getAttribute("data-attention-device")))
       .toEqual(["phone:iphone", "phone:pixel", "place:vps"]);
     expect(line.querySelector("[data-attention-device='place:vps']")?.textContent).toBe("Hetzner box: Can’t reach it");
-    expect(line.querySelector("[data-attention-device='phone:pixel']")?.textContent).toBe("Pixel 9: Can’t reach it: no way in is on");
+    expect(line.querySelector("[data-attention-device='phone:pixel']")?.textContent).toBe("Pixel 9: No way in is on");
     expect(line.compareDocumentPosition($("[data-add-device]")!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     await click("[data-attention-device='place:vps'] button");
     await wait(20);
