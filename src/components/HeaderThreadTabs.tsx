@@ -33,7 +33,8 @@ export function HeaderThreadTabs({ bot }: { bot: Bot }) {
   return <Strip bot={bot} tabs={tabs} />;
 }
 
-function edgeFade(element: HTMLElement): string | undefined {
+/** The mask that fades a sideways-scrolling row's edges where more of it is hidden, none when it all fits. */
+export function edgeFade(element: HTMLElement): string | undefined {
   const room = element.scrollWidth - element.clientWidth;
   if (room <= 1) return undefined;
   const rtl = getComputedStyle(element).direction === "rtl";
