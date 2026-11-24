@@ -1,0 +1,6 @@
+github.com
+  X Failed to log in to github.com account octo-fixture (/tmp/x.FIXTURE/cfg/hosts.yml)
+  - Active account: true
+  - The token in /tmp/x.FIXTURE/cfg/hosts.yml is invalid.
+  - To re-authenticate, run: gh auth refresh -h github.com
+  - To forget about this account, run: gh auth logout -h github.com -u octo-fixture
