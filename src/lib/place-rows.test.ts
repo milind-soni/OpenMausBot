@@ -41,6 +41,12 @@ describe("a row of the other place as a bot of the one list", () => {
     expect(placedLine(bot, true)).toBe("");
   });
 
+  it("shows the start of its newest line, in the same plain words as this place's own rows, when the other place sent one", () => {
+    const bot = placedBot(row("cloud", "nova", { title: "Research", preview: "**Filed** the [March invoices](https://drive.example/x) in your Drive." }), "ready");
+    expect(placedLine(bot, false)).toBe("Filed the March invoices in your Drive.");
+    expect(placedLine(bot, true)).toBe("Filed the March invoices in your Drive.");
+  });
+
   it("is keyed by a place, not by My Cloud: a third place of the person's own joins with its own key, kind and name", () => {
     const studio: Place = { key: "env-7f3a", kind: "home-computer", label: "Studio Mac" };
     const rack: Place = { key: "env-91bc", kind: "own-server", label: "Basement server" };

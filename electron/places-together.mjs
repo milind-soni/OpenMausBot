@@ -4,8 +4,9 @@
 // clicked. With the switch off nothing here reads, keeps or sends anything.
 //
 // Security: the list goes only to this computer's own page and to My Cloud's own page (`asking`, which main works out from
-// the sender), never to a team's Cloud or a server saved by hand. A row is a name, a look and a state: no message, address
-// or token. A page names a bot by an id main listed itself; main opens only such an id, in a place of its own choosing.
+// the sender), never to a team's Cloud or a server saved by hand. A row is a name, a look, a state and, as the person's
+// own two pages show each other, a short preview of the bot's newest line (PREVIEW_MAX characters of plain words; never a
+// step, a card, a file or another bot's note): no whole message, address or token. A page names a bot by an id main listed itself; main opens only such an id, in a place of its own choosing.
 // A sleeping Cloud is never asked, since any request would wake it; it keeps the list it gave last.
 import { asleepAnswer, BACKGROUND_HEADERS } from "./cloud-power.mjs";
 
@@ -24,6 +25,10 @@ export const NEW_BOT_WAIT_MS = 45_000;
 /** The page that was told to make a new bot says it heard within this long, or is told to forget it. */
 export const NEW_BOT_ACK_MS = 10_000;
 const TIMEOUT_MS = 10_000;
+/** The most of a bot's newest line a row carries: the sidebar shows one truncated line of it. */
+export const PREVIEW_MAX = 300;
+/** A line another bot sent is stored with this note in front (src/lib/peer-message.ts): never shown as the person's. */
+const PEER_NOTE = /^\[(?:From @|Message from @|Delegated by @|Thread opened by @)/;
 const MAX_BOTS = 500;
 const ID = /^[\w-]{1,128}$/;
 const COLOR = /^[\w#(),.% -]{1,64}$/;
@@ -52,15 +57,34 @@ function rowState(bot) {
   return { ...(waiting ? { waiting: true } : {}), ...(working ? { working: true } : {}), ...(unread ? { unread: true } : {}), ...(lastAt !== null ? { lastAt } : {}) };
 }
 
+/** Kinds a row looks past for the newest words said: a turn's work summary, a condensed-history marker and its steps, as
+ * the sidebar's own preview does in Simple. */
+const LOOKED_PAST = new Set(["digest", "compaction", "activity"]);
+/** How many of a bot's newest messages a read carries to find them. */
+export const PREVIEW_LOOK = 3;
+
+/** The start of the newest words the person or the bot said, looking past a turn's steps and summary: what the row's
+ * second line shows, as this page's own rows do in Simple. Nothing when the newest thing is a card, a screen, a file, a
+ * voice note, a setup line or another bot's note, which stay on their own page. */
+export function previewOf(bot) {
+  const messages = Array.isArray(bot.messages) ? bot.messages : [];
+  const last = messages.findLast((message) => !(record(message) && LOOKED_PAST.has(message.kind))) ?? null;
+  if (!record(last) || last.kind !== "text" || (last.role !== "bot" && last.role !== "user") || typeof last.text !== "string") return null;
+  if (last.attachments?.length || last.setupSuggestion || last.helperIntro || last.peerAsk || last.relay || last.comm || last.threadRef || last.roomRequest) return null;
+  if (last.role === "user" && PEER_NOTE.test(last.text)) return null;
+  const line = last.text.trim().slice(0, PREVIEW_MAX);
+  return line || null;
+}
+
 /** One bot of the other place as its row: who it is, how it looks and how it is doing. A bot that is archived, hidden
  * from the sidebar, or only the pointer a move left behind, has no row. */
 export function botRow(bot, home) {
   if (!record(bot) || !ID.test(String(bot.id)) || !ID.test(String(bot.threadId)) || bot.hidden || bot.sidebarHidden || bot.movedTo) return null;
   const name = text(bot.name, 80);
   if (!name) return null;
-  const title = text(bot.title, 80), color = look(bot.color), body = look(bot.mascotBody), face = look(bot.mascotFaceColor), tint = look(bot.mascotBodyColor), fur = look(bot.mascotMaterial);
+  const title = text(bot.title, 80), preview = previewOf(bot), color = look(bot.color), body = look(bot.mascotBody), face = look(bot.mascotFaceColor), tint = look(bot.mascotBodyColor), fur = look(bot.mascotMaterial);
   return { home, id: bot.id, threadId: bot.threadId, name, ...(title ? { title } : {}), ...(color ? { color } : {}),
-    ...(body ? { mascotBody: body } : {}), ...(face ? { mascotFaceColor: face } : {}), ...(tint ? { mascotBodyColor: tint } : {}), ...(fur ? { mascotMaterial: fur } : {}), ...(bot.chiefOfStaff === true ? { chief: true } : {}), ...rowState(bot) };
+    ...(body ? { mascotBody: body } : {}), ...(face ? { mascotFaceColor: face } : {}), ...(tint ? { mascotBodyColor: tint } : {}), ...(fur ? { mascotMaterial: fur } : {}), ...(bot.chiefOfStaff === true ? { chief: true } : {}), ...(preview ? { preview } : {}), ...rowState(bot) };
 }
 
 /** The AIs a place's `GET /api/instances` answer says are ready to use: installed and signed in, never one that only
@@ -173,7 +197,8 @@ export function createPlacesTogether({ pref, onlyPair = () => false, switched = 
     if (had) tell();
   }
 
-  async function ask(home, route = "/api/bots?messages=0") {
+  // A bot's newest few messages, for its preview (previewOf); nothing more of them is kept.
+  async function ask(home, route = `/api/bots?messages=${PREVIEW_LOOK}`) {
     const signal = AbortSignal.timeout(TIMEOUT_MS);
     if (home === "computer") return local(route, { signal, headers: { accept: "application/json" } });
     const { origin } = cloud();

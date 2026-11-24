@@ -11,7 +11,9 @@ import type { Dispatch } from "react";
 import { BOT_BODY_IDS, type BotBodyId } from "../../shared/bot-body";
 import { MASCOT_FACE_COLORS, mascotBodyColorSchema, mascotMaterialSchema, type MascotFaceColor } from "../../shared/bot-avatar";
 import type { Action, Bot } from "@/state/store";
+import { citationPreviewText } from "./citations";
 import { t } from "./i18n";
+import { plainPreviewText } from "../../shared/plain-preview";
 import { MAUS_COLOR_NAMES, type MausColor } from "./mascot";
 import { openOtherPlaceBot, usePlacesTogetherPart, type BotHome, type PlaceBotRow, type PlacesTogetherState } from "./places-together";
 
@@ -36,11 +38,12 @@ export function placeOfHome(home: BotHome): Place {
 /** A bot's key in a list that holds several places: ids are unique only within one. */
 export const placeKeyed = (place: Pick<Place, "key">, id: string): string => `${place.key}:${id}`;
 
-/** Where a row of the other place comes from: its place, its own id there, and how that place is doing. */
+/** Where a row of the other place comes from: its place, its own id there, how that place is doing, and its preview. */
 export interface PlacedFrom {
   place: Place;
   id: string;
   health: PlaceHealth;
+  preview?: string;
 }
 
 export type PlacedBot = Bot & { placedFrom: PlacedFrom; lastAt?: number };
@@ -51,8 +54,8 @@ export function isPlacedBot(bot: object): bot is PlacedBot {
 
 const known = <T extends string>(list: readonly string[], value: string | undefined): T | null => (value !== undefined && list.includes(value) ? value as T : null);
 
-/** A row of the other place as a bot of this list. It carries only what the row does: a name, a look, a state and a
- * time; never a message, an engine or a setting of the other place. */
+/** A row of the other place as a bot of this list. It carries only what the row does: a name, a look, a state, a time
+ * and its preview line; never a whole message, an engine or a setting of the other place. */
 export function placedBot(row: PlaceBotRow, health: PlaceHealth, place: Place = placeOfHome(row.home)): PlacedBot {
   return {
     id: placeKeyed(place, row.id), threadId: placeKeyed(place, row.threadId),
@@ -67,7 +70,7 @@ export function placedBot(row: PlaceBotRow, health: PlaceHealth, place: Place = 
     // No engine of this place: no model badge, and nothing here runs it.
     modelSelection: { instanceId: "", model: "" },
     messages: [],
-    placedFrom: { place, id: row.id, health },
+    placedFrom: { place, id: row.id, health, ...(row.preview ? { preview: row.preview } : {}) },
     ...(row.lastAt !== undefined ? { lastAt: row.lastAt } : {}),
   };
 }
@@ -148,9 +151,12 @@ export function otherPlaceDispatch(bot: PlacedBot): Dispatch<Action> {
 /** A row of the other place opens no menu here. */
 export const NO_MENU = (): void => {};
 
-/** The second line of a row of the other place: its title in the Simple sidebar, where no role is shown, and nothing in
+/** The second line of a row of the other place: the start of its newest line, in the same plain words this page's own
+ * rows use, while the other place sent one; else its title in the Simple sidebar, where no role is shown, and nothing in
  * Advanced, whose row shows the title as its role already. */
 export function placedLine(bot: PlacedBot, advanced: boolean): string {
+  const preview = bot.placedFrom.preview;
+  if (preview) return plainPreviewText(citationPreviewText(preview));
   return advanced ? "" : bot.title;
 }
 

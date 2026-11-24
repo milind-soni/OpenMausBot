@@ -34,7 +34,7 @@ const bot = (id: string, extra: Partial<Bot> = {}): Bot => ({
 });
 const row = (id: string, over: Partial<PlaceBotRow> = {}): PlaceBotRow => ({ home: "cloud", id, threadId: `t-${id}`, name: id[0]!.toUpperCase() + id.slice(1), color: "blue", ...over });
 const said = (over: Partial<PlacesTogetherState> = {}): PlacesTogetherState => ({ v: 1, available: true, on: true, here: "computer",
-  other: { home: "cloud", state: "ready", bots: [row("scout", { title: "Open issues" }), row("tech", { unread: true, title: "Deploy check", lastAt: 9_000 })] }, ...over });
+  other: { home: "cloud", state: "ready", bots: [row("scout", { title: "Open issues" }), row("tech", { unread: true, title: "Deploy check", lastAt: 9_000, preview: "Deploy **passed** on staging." })] }, ...over });
 const OWN = [bot("mausbot", { chiefOfStaff: true }), bot("git"), bot("ledger")];
 
 const dispatch = vi.fn();
@@ -119,6 +119,7 @@ describe("switch on: one list", () => {
     expect([...host.querySelectorAll("[data-section]")].map((header) => header.getAttribute("data-section"))).not.toContain("On My Cloud");
     expect(q("[data-other-place]")).toBeNull();
     expect(q('[data-sidebar-bot-row="cloud:scout"]')!.textContent).toContain("Open issues");
+    expect(q('[data-sidebar-bot-row="cloud:tech"]')!.textContent).toContain("Deploy passed on staging.");
   });
 
   it("unread rows of both places share the one Unread group, newest first", async () => {
