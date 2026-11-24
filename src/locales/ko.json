@@ -2130,7 +2130,7 @@
   "chat.unpin": "고정 해제",
   "chat.pinnedJump": "고정된 메시지로 이동",
   "chat.you": "나",
-  "chat.peer.asked": "ask_bot으로 질문함",
+  "chat.peer.asked": "질문함",
   "chat.peer.handedTask": "작업을 맡김",
   "chat.peer.openedThread": "이 스레드를 열었음",
   "chat.peer.requested": "요청을 보냄",

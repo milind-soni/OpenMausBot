@@ -2692,7 +2692,7 @@
   "chat.pinnedJump": "Jump to the pinned message",
   "chat.pinnedMessages": "Pinned messages",
   "chat.you": "You",
-  "chat.peer.asked": "asked via ask_bot",
+  "chat.peer.asked": "asked",
   "chat.peer.handedTask": "handed on a task",
   "chat.peer.openedThread": "opened this thread",
   "chat.peer.requested": "sent a request",

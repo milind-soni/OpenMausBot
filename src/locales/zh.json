@@ -2481,7 +2481,7 @@
   "chat.unpin": "取消置顶",
   "chat.pinnedJump": "跳到置顶消息",
   "chat.you": "你",
-  "chat.peer.asked": "通过 ask_bot 提问",
+  "chat.peer.asked": "提问",
   "chat.peer.handedTask": "已转交一项任务",
   "chat.peer.openedThread": "已打开此对话",
   "chat.peer.requested": "发送了一个请求",

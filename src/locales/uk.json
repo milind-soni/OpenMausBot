@@ -955,7 +955,7 @@
   "chat.unpin": "Відкріпити",
   "chat.pinnedJump": "Перейти до закріпленого повідомлення",
   "chat.you": "Ви",
-  "chat.peer.asked": "запитав через ask_bot",
+  "chat.peer.asked": "запитав",
   "chat.peer.handedTask": "передав завдання",
   "chat.peer.openedThread": "відкрив цю гілку",
   "chat.peer.viewExchange": "Переглянути листування",

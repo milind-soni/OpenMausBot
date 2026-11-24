@@ -2690,7 +2690,7 @@
   "chat.pinnedJump": "Vai al messaggio fissato",
   "chat.pinnedMessages": "Messaggi pernici",
   "chat.you": "Tu",
-  "chat.peer.asked": "ha chiesto via ask_bot",
+  "chat.peer.asked": "ha chiesto",
   "chat.peer.handedTask": "ha affidato un'attività",
   "chat.peer.openedThread": "ha aperto questa discussione",
   "chat.peer.requested": "ha inviato una richiesta",

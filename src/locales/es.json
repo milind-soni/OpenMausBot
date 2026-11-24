@@ -1818,7 +1818,7 @@
   "chat.unpin": "Dejar de fijar",
   "chat.pinnedJump": "Ir al mensaje fijado",
   "chat.you": "Tú",
-  "chat.peer.asked": "preguntó con ask_bot",
+  "chat.peer.asked": "preguntó",
   "chat.peer.handedTask": "encargó una tarea",
   "chat.peer.openedThread": "abrió este hilo",
   "chat.peer.requested": "envió una solicitud",

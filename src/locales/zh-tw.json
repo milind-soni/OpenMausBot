@@ -2392,7 +2392,7 @@
   "chat.unpin": "取消釘選",
   "chat.pinnedJump": "跳至釘選的訊息",
   "chat.you": "你",
-  "chat.peer.asked": "透過 ask_bot 提問",
+  "chat.peer.asked": "提問",
   "chat.peer.handedTask": "已轉交一項任務",
   "chat.peer.openedThread": "已開啟此對話",
   "chat.peer.requested": "送出了一個請求",

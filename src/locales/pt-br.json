@@ -2480,7 +2480,7 @@
   "chat.pinnedJump": "Ir para a mensagem fixada",
   "chat.pinnedMessages": "Mensagens fixadas",
   "chat.you": "Você",
-  "chat.peer.asked": "perguntou via ask_bot",
+  "chat.peer.asked": "perguntou",
   "chat.peer.handedTask": "repassou uma tarefa",
   "chat.peer.openedThread": "abriu esta conversa",
   "chat.peer.requested": "enviou um pedido",

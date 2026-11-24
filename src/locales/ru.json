@@ -2010,7 +2010,7 @@
   "chat.unpin": "Открепить",
   "chat.pinnedJump": "Перейти к закреплённому сообщению",
   "chat.you": "Вы",
-  "chat.peer.asked": "задал вопрос через ask_bot",
+  "chat.peer.asked": "задал вопрос",
   "chat.peer.handedTask": "передал задачу",
   "chat.peer.openedThread": "открыл этот тред",
   "chat.peer.requested": "отправил запрос",
