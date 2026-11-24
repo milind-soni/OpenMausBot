@@ -1955,6 +1955,7 @@
   "settings.userBubbles.subtitle": "In una chat uno a uno, i tuoi messaggi hanno una sfumatura del colore di quel bot. Le chat di gruppo tengono la bolla neutra.",
   "settings.userBubbles.aria": "Colora i miei messaggi con il colore del bot",
   "settings.advancedMode.title": "Modalità avanzata",
+  "settings.advancedSetting": "Impostazione avanzata",
   "settings.advancedMode.subtitle": "Mostra tutti i controlli tecnici su questo dispositivo: utilizzo e token, l'ispettore e altri strumenti per chi costruisce. Disattivala per un'app più semplice. In entrambi i casi non si cancella nulla.",
   "settings.threadDisplay.title": "Thread",
   "settings.threadDisplay.subtitle": "Mostra elenchi e controlli dei thread solo su questo dispositivo. Nasconderli conserva tutta la cronologia e il lavoro in corso; i canali restano uguali. Riattiva per rivedere i tuoi thread.",
