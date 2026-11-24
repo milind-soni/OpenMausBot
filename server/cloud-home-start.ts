@@ -42,15 +42,17 @@ const SERVER_ENV_NAMES = new Set([
   "OMB_CLOUD_LEGACY_ORIGINS",
   // The bot box switch (server/bot-box/detect.ts): the Admin may turn a home's box off for support.
   "OMB_BOT_BOX",
+  // Antigravity accounts with no runtime of their own run Google's native CLI (server/drivers/antigravity-cli-install.ts):
+  // the Admin or a test home sets it, and without the name here a Cloud home could never turn it on.
+  "OMB_ANTIGRAVITY_NATIVE_CLI",
   // The image's own engine CLIs before older copies in the data folder (server/image-engines.ts), for one test Cloud first.
   "OMB_IMAGE_ENGINES",
   // An ended Cloud started only for its owner's export: the server runs frozen (server/move-freeze.ts).
   "OMB_CLOUD_EXPORT_ONLY",
   // The idle task workspaces' dependency sweep (server/host/start-upkeep.ts), off unless set: the Admin may turn it on.
   "OMB_TASK_WORKSPACE_RETENTION",
-  // Antigravity accounts with no runtime of their own run Google's native CLI (server/drivers/antigravity-cli-install.ts):
-  // the Admin or a test home sets it, and without the name here a Cloud home could never turn it on.
-  "OMB_ANTIGRAVITY_NATIVE_CLI",
+  // The delete-time cleanup's switch (server/host/conversation-folder-cleanup.ts): off unless the Admin sets it on.
+  "OMB_CONVERSATION_FOLDER_CLEANUP",
 ]);
 export function serverEnvironmentAllowed(name: string): boolean {
   return SERVER_ENV_NAMES.has(name) || name.startsWith("LC_");
