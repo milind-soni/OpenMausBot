@@ -375,10 +375,11 @@ describe("Bitwarden through its command line tool", () => {
       },
     });
     expect(await isolated.refresh()).toEqual({ connected: true, server: "vault.bitwarden.com", account: "bot@acme.test", items: 3 });
+    const loginId = isolated.items().find((entry) => entry.kind === "login")!.id;
     const failingCandidate = isolated.refresh(candidate);
     await candUnlockStarted;
     expect(await isolated.refresh()).toEqual({ connected: true, server: "vault.bitwarden.com", account: "bot@acme.test", items: 3 });
-    await expect(isolated.read("bitwarden:i1:github.com")).rejects.toThrow("Bitwarden could not be read");
+    await expect(isolated.read(loginId)).rejects.toThrow("Bitwarden could not be read");
     expect(overlapCalls).toBe(0);
     releaseCandUnlock();
     await expect(failingCandidate).rejects.toThrow("Bitwarden could not be read");
