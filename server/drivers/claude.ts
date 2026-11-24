@@ -883,7 +883,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (s.idleTimer) clearTimeout(s.idleTimer);
       const held = (warmHolds.get(threadId) ?? 0) - Date.now();
       s.idleTimer = armIdleClose(`${instanceId}\0${threadId}`, s.spare ? s.spareMs ?? PRESTART_IDLE_MS : Math.min(2_147_483_647, Math.max(engineIdleMs(threadId, sessionIdle), held)), { close: () => closeSession(threadId, s.spare ? "never used" : "idle"), threadId, policy: sessionIdle, spare: () => s.spare === true, // per-chat
-        idle: () => sessions.get(threadId) === s && !s.closing && !s.turn && !active.has(threadId), held: () => (warmHolds.get(threadId) ?? 0) > Date.now() });
+        idle: () => sessions.get(threadId) === s && !s.closing && !s.turn && !active.has(threadId), held: () => !s.spare && (warmHolds.get(threadId) ?? 0) > Date.now() });
     };
     // Keep-warm pings and warm summaries fork a thread's session with its live launch contract (claude-warm-summary.ts).
     const forks = claudeForks({ cli: config.cli, contracts: warmContracts, holds: warmHolds, armIdle, supports: (flag) => cliVersion === null || claudeCliSupports(cliVersion, flag),

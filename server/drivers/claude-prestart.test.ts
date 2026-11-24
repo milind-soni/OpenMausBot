@@ -290,6 +290,17 @@ describe("ClaudeDriver: a process started before the first message (fake CLI)", 
     expect(recorder.events).toEqual([]);
   });
 
+  it("closes at the end of its wait even while the person keeps the conversation in front of them (a presence hold)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    expect(await instance.adapter.prestart!.start(turn("t-held", { text: "" }))).toBe(true);
+    expect(instance.adapter.cacheKeepWarm!.hold("t-held", Date.now() + 600_000)).toBe(false);
+    vi.advanceTimersByTime(PRESTART_IDLE_MS);
+    vi.useRealTimers();
+    await until(() => !instance.adapter.prestart!.held("t-held"), "the driver to close it");
+    await until(() => pids().every((pid) => !alive(pid)), "the process to exit");
+    expect(recorder.events).toEqual([]);
+  });
+
   it("is never taken once it waited past its time by the wall clock (the machine slept)", async () => {
     expect(await started("t-slept", 1)).toBe(true);
     const [spare] = pids();
