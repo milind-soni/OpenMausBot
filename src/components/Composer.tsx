@@ -526,9 +526,9 @@ export function Composer({
   const stopInSlot = simpleDock && stoppable && !locked && !hasContent && !calling;
   const callShown = singleRow || !hasContent || busy || Boolean(!group && bot?.waitingForTeammates) || calling;
   const slot = slotColors(bot?.color, Boolean(group));
-  // A one-to-one bot at work: Enter does the chosen follow-up and Ctrl/⌘ with it the other one. Rooms keep their own queue.
-  const followUpFor = (alternate: boolean) => resolveFollowUp({ running: busy && !group && Boolean(bot), alternate, preferred: followUpDefault, canSteer }) ?? undefined;
-  const steersNow = group ? canSteer : followUpFor(false) === "steer";
+  // A bot at work: Enter does the chosen follow-up and Ctrl/⌘ with it the other one. A room joins in when its speaking engine can steer.
+  const followUpFor = (alternate: boolean) => resolveFollowUp({ running: busy && (group ? roomSteers : Boolean(bot)), alternate, preferred: followUpDefault, canSteer }) ?? undefined;
+  const steersNow = followUpFor(false) === "steer";
   const sendNames = fork.command ? { label: t("composer.command.forkDesc"), title: t("composer.command.forkDesc") }
     : sendLabels({ simple: !advanced, busy, canSteer: steersNow, name: busyName, sendLabel });
   const retryFailedSend = (failed: FailedComposerSend) => {
@@ -556,7 +556,7 @@ export function Composer({
       },
     };
     if (group) {
-      dispatch({ type: "sendGroup", groupId: group.id, mode: failedMode, ...retry });
+      dispatch({ type: "sendGroup", groupId: group.id, mode: failedMode, ...(failed.followUp ? { followUp: failed.followUp } : {}), ...retry });
     } else if (bot) {
       dispatch({ type: "send", botId: bot.id, mode: failedMode, followUp: failed.followUp, ...retry });
     }
@@ -602,7 +602,7 @@ export function Composer({
         replyToId: replyTo?.id,
         threadId,
         mode: effectiveChannelMode, mentions: sentDraft.mentions,
-        ...(points ? { pointed: points.pointed } : {}),
+        ...(points ? { pointed: points.pointed } : {}), ...(followUp ? { followUp } : {}),
         onError: () => { points?.restore(); restoreDraft(sentDraft); },
       });
       roomMessageSent(effectiveChannelMode, busy);
