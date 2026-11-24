@@ -16,7 +16,7 @@ export function startupScreenHtml(iconPath, { t = nativeText.englishText.t, lang
   button{position:absolute;right:13px;top:13px;width:30px;height:30px;display:grid;place-items:center;padding:0;color:#999da5;border:0;border-radius:7px;background:transparent;cursor:pointer;-webkit-app-region:no-drag}
   button:hover{color:#fff;background:#ffffff10}button:focus-visible{outline:2px solid #1686ff;outline-offset:2px}button svg{pointer-events:none}
   @keyframes spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.spinner{animation:none;border-color:#a6c9ff}}
-  </style></head><body><main><button aria-label="${attribute(t("native.common.close"))}" onclick="window.startupScreen.close()"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button><img src="data:image/png;base64,${icon}" alt=""><h1>OpenMausBot</h1><div class="status" role="status"><span class="spinner" aria-hidden="true"></span>Opening your workspace…</div></main></body></html>`;
+  </style></head><body><main><button aria-label="${attribute(t("native.common.close"))}" onclick="window.startupScreen.close()"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button><img src="data:image/png;base64,${icon}" alt=""><h1>OpenMausBot</h1><div class="status" role="status"><span class="spinner" aria-hidden="true"></span>${attribute(t("native.splash.openingWorkspace"))}</div></main></body></html>`;
 }
 
 export function createStartupScreen({
@@ -113,7 +113,7 @@ export function createStartupScreen({
     fallback = setTimeout(() => reveal("timeout"), 10_000);
     fallback.unref?.();
   };
-  /** The line under the name, in place of "Opening your workspace…". */
+  /** The line under the name, in place of native.splash.openingWorkspace. */
   const status = (text) => { said = String(text); say(); };
   return { ready, attach, dispose, status, window: splash };
 }
