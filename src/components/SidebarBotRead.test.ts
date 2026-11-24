@@ -120,6 +120,19 @@ describe("bot menu bulk reads", () => {
     flushSync(() => button("Mark as unread").click());
     expect(state.bots[0]!.unread).toBe(true);
   });
+
+  it("offers Mark as unread in Simple mode when the only unread threads are archived or routine runs", () => {
+    mode.advanced = false;
+    state.bots[0]!.unread = false;
+    state.bots[0]!.tasks = [
+      { threadId: "selected", title: "Selected", createdAt: 1, unread: false },
+      { threadId: "hidden", title: "Archived unread", createdAt: 2, unread: true, archivedAt: 10 },
+      { threadId: "routine", title: "Routine run", createdAt: 3, unread: true, routineRunId: "run-1" },
+    ];
+    draw();
+    expect(button("Mark as read")).toBeUndefined();
+    expect(button("Mark as unread")).toBeDefined();
+  });
 });
 
 describe("Advanced mode's bot menu", () => {

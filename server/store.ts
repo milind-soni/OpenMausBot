@@ -42,11 +42,12 @@ import { appsFromCreator } from "./inherited-apps.ts"; import { newBotOwner, sha
 import { ThreadCache, type ThreadState } from "./thread-cache.ts";
 import { lastMessageId, messagesBefore } from "./thread-history.ts";
 import { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
-import { buildTask, threadTitleFrom, UNTITLED_THREAD, type NewThreadLevel } from "./task-record.ts";
+import { buildTask, threadTitleFrom, unreadTargetTask, UNTITLED_THREAD, type NewThreadLevel } from "./task-record.ts";
 import { repairLegacyWorkThreads } from "./legacy-work-threads.ts";
 import { createBotFork, createGroupFork } from "./store-forks.ts";
 import { branchLeafFrom } from "../shared/conversation-branch.ts";
 import { createThreadBotIndex } from "./thread-bot-index.ts";
+import { endHeldUnread } from "./held-unread.ts";
 import { activeGroupTask, groupTaskByThread, groupTasks, migrateGroupTaskRead, mirrorActiveGroupTask, refreshGroupUnread, setGroupTaskRead, syncGroupReadPatch } from "./group-task-state.ts";
 export { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
 export { threadTitleFrom, UNTITLED_THREAD } from "./task-record.ts";
@@ -112,7 +113,7 @@ const ASK_NOW = { approvalMode: "ask" as const, autoApprove: false, alwaysAllow:
 
 const TASK_PATCH_FIELDS = [
   "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow",
-  "unread", "lastReadMessageId", "rewound", "archivedAt", "pinned", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
+  "unread", "heldUnread", "lastReadMessageId", "rewound", "archivedAt", "pinned", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
   "routineRunId", "surface", "surfaceSource", "snoozedUntil", "link", "linkAuto", "appliedCompactionId", "contextFloor", "lastContextModel", "usage", "setupRequest", "botApi", "botApiAsOwner", "outside",
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
@@ -255,8 +256,8 @@ export function pruneRoomHolds(group: Pick<GroupRecord, "memberIds" | "holds" | 
   }
 }
 
-function taskCountsAsBotUnread(task: { unread?: boolean; routineRunId?: string }): boolean {
-  return Boolean(task.unread) && !task.routineRunId;
+function taskCountsAsBotUnread(task: { unread?: boolean; routineRunId?: string; archivedAt?: number }): boolean {
+  return Boolean(task.unread) && !task.routineRunId && task.archivedAt === undefined;
 }
 
 export class Store {
@@ -1145,7 +1146,7 @@ export class Store {
       }
     }
     this.noteThreadActivity(threadId, full.at, movesThreadToTop(full), full.turnCompletedAt ?? full.at);
-    this.emit({ type: "message", threadId, message: full });
+    this.emit({ type: "message", threadId, message: full }); endHeldUnread(this, threadId, full);
     if (full.role === "user" && full.kind === "text") this.dismissOnboardingCard(threadId);
     return full;
   }
@@ -1165,7 +1166,7 @@ export class Store {
       }
     }
     this.noteThreadActivity(threadId, full.at, movesThreadToTop(full), full.turnCompletedAt ?? full.at);
-    this.emit({ type: "message", threadId, message: full });
+    this.emit({ type: "message", threadId, message: full }); endHeldUnread(this, threadId, full);
     // After the insert, so no client ever sees two siblings claiming the same parent.
     for (const child of children) this.patchMessage(threadId, child.id, { parentId: full.id });
     return full;
@@ -1485,14 +1486,14 @@ export class Store {
     Object.assign(bot, patch); if (patch.connectorScopes !== undefined) grantScopedApps(bot);
     for (const task of toAsk) Object.assign(task, structuredClone(ASK_NOW));
     const task = this.activeTask(id);
-    if (task) {
-      for (const key of ["resumeCursors", "rewound", "pinnedMessageId", "unread"] as const) {
-        if (Object.prototype.hasOwnProperty.call(patch, key)) {
-          Object.assign(task, { [key]: structuredClone(patch[key]) });
-        }
-      }
-      bot.unread = bot.tasks!.some(taskCountsAsBotUnread);
+    if (task) for (const key of ["resumeCursors", "rewound", "pinnedMessageId"] as const) {
+      if (Object.hasOwn(patch, key)) Object.assign(task, { [key]: structuredClone(patch[key]) });
     }
+    if (Object.hasOwn(patch, "unread") && bot.tasks?.length) {
+      const target = unreadTargetTask(bot, task, patch.unread);
+      if (target) { target.unread = Boolean(patch.unread); if (target.snoozedUntil === 0 && target.unread) target.snoozedUntil = undefined; }
+    }
+    if (bot.tasks?.length) bot.unread = bot.tasks.some(taskCountsAsBotUnread);
     if (wideningToolScope) {
       // New authority goes live only after its durable save succeeds.
       this.saveBots(this.bots.map((candidate) => candidate === bot ? { ...bot, toolScope: nextToolScope } : candidate));
@@ -2012,10 +2013,9 @@ export class Store {
     const revocation = keptRevocation(threadApproval(task, bot), threadApproval({ ...task, ...patch }, bot), patch);
     this.commitBotChange(bot, "the thread change", () => {
       for (const key of TASK_PATCH_FIELDS) {
-        if (Object.prototype.hasOwnProperty.call(patch, key)) {
-          Object.assign(task, { [key]: structuredClone(patch[key]) });
-        }
+        if (Object.prototype.hasOwnProperty.call(patch, key)) Object.assign(task, { [key]: structuredClone(patch[key]) });
       }
+      if (patch.unread !== undefined && !Object.prototype.hasOwnProperty.call(patch, "heldUnread")) delete task.heldUnread;
       if (task.snoozedUntil === 0 && patch.unread === true) task.snoozedUntil = undefined;
       if (typeof patch.title === "string") task.title = patch.title.trim().slice(0, 80) || UNTITLED_THREAD;
       if (Object.prototype.hasOwnProperty.call(patch, "pinned") && task.pinned !== true) delete task.pinned;

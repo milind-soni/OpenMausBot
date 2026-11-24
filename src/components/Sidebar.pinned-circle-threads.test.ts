@@ -94,6 +94,30 @@ describe("pinned circle frame", () => {
     expect(clipped).toContain("border-radius:22%");
     expect(clipped).not.toContain("rounded-full");
   });
+
+  it("ignores archived unread threads on the circle and collapsed pinned section while marking open unread ones", () => {
+    const archivedOnly = bot({
+      unread: true,
+      tasks: [
+        { threadId: "thread-atlas", title: "Open read", createdAt: 2, unread: false },
+        { threadId: "thread-hidden", title: "Archived unread", createdAt: 1, unread: true, archivedAt: 10 },
+      ],
+    });
+    const circleMarkup = renderCircle(archivedOnly);
+    expect(circleMarkup).not.toContain('aria-label="Unread threads"');
+    expect(circleMarkup).not.toContain("Atlas · Unread");
+    expect(renderThreads(true, [archivedOnly])).not.toContain("unread");
+
+    const openUnread = bot({
+      unread: false,
+      tasks: [
+        { threadId: "thread-atlas", title: "Open read", createdAt: 2, unread: false },
+        { threadId: "thread-open", title: "Open unread", createdAt: 1, unread: true },
+      ],
+    });
+    expect(renderCircle(openUnread)).toContain('aria-label="Unread threads"');
+    expect(renderThreads(true, [openUnread])).toContain("1 unread");
+  });
 });
 
 describe("pinned circle thread list", () => {

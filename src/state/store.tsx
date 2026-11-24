@@ -50,7 +50,7 @@ import {
 import type { Routine, RoutineInput, RoutineRun, RoutineRunStatusFilter } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { duplicateBotProfile, restrictedCopyRequest } from "@/lib/bot-duplicate";
-import { markVisibleBotThreadsRead, markVisibleGroupThreadsRead } from "./read-visible";
+import { holdMarkedUnread, markVisibleBotThreadsRead, markVisibleGroupThreadsRead, type ReadReason } from "./read-visible";
 import { applyWindowPref } from "@/lib/window-prefs"; import { applyThemeFrame } from "@/lib/theme/runtime"; import { appCatalogAnnounced } from "@/lib/app-catalog-signal";
 import { placeUnreadDivider, threadOpensUnread, threadReadCursor, unreadDividerFor, type UnreadDivider } from "@/lib/unread-divider";
 import type { ComputerStart } from "@/lib/computer-start";
@@ -216,7 +216,7 @@ export interface ModelSelection {
   variant?: string;
 }
 
-export interface Task extends Pick<WireTask, "private" | "shared" | "sharedWith" | "setupRequest" | "inbox" | "openAsks" | "askedBy" | "handoff"> {
+export interface Task extends Pick<WireTask, "heldUnread" | "private" | "shared" | "sharedWith" | "setupRequest" | "inbox" | "openAsks" | "askedBy" | "handoff"> {
   waitingForTeammates?: boolean; sharedChat?: true;
   threadId: string;
   origin?: import("../../shared/wire").ForkOrigin;
@@ -1063,7 +1063,7 @@ function reduceApp(state: AppState, action: Action): AppState {
           "switch",
         ),
         action.id,
-        (b) => ({ ...b, unread: Boolean(b.tasks?.some((task) => task.threadId !== b.threadId && task.unread)), tasks: b.tasks?.map((task) => task.threadId === b.threadId ? { ...task, unread: false } : task) }),
+        (b) => ({ ...b, unread: Boolean(b.tasks?.some((task) => task.threadId !== b.threadId && task.unread && !task.routineRunId && task.archivedAt === undefined)), tasks: b.tasks?.map((task) => task.threadId === b.threadId ? { ...task, unread: false } : task) }),
       );
     }
     case "answerCard": {
@@ -1715,7 +1715,7 @@ function reduceApp(state: AppState, action: Action): AppState {
         switched = { ...switched, unreadDivider: openedUnreadDivider(switched, opened.threadId, threadOpensUnread(opened), visibleMessages(opened), threadReadCursor(opened), opened.hasMore) };
         // The snapshot predates the switch's own announcement and must not put the unread dot back.
         if (switched.activeView === "chat") switched = updateBot(switched, opened.id, (bot) => ({ ...bot,
-          unread: Boolean(bot.tasks?.some((task) => task.threadId !== bot.threadId && task.unread)),
+          unread: Boolean(bot.tasks?.some((task) => task.threadId !== bot.threadId && task.unread && !task.routineRunId && task.archivedAt === undefined)),
           tasks: bot.tasks?.map((task) => task.threadId === bot.threadId ? { ...task, unread: false } : task) }));
       }
       return reconcileModelVariantSessions(reconcileSnapshotQueues(switched, [action.bot]));
@@ -2192,7 +2192,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const wrapped: React.Dispatch<Action> = (action) => {
       store.flushFrames(); if (["select", "newTask", "switchTask", "newGroupTask", "switchGroupTask", "showChat", "showRoutines", "showTeamMap", "showFiles", "showWebPanel", "showPublishedApps", "showSkillBurgers", "showTeamFiles", "showAnnouncements"].includes(action.type)) selectionRevision.current++;
       // Pin before any await or optimistic state change.
-      action = pinBotThreadAction(action, stateRef.current.bots); if (runNewChat(action)) return;
+      action = pinBotThreadAction(action, stateRef.current.bots); holdMarkedUnread(action, stateRef.current);
+      if (runNewChat(action)) return;
       if (action.type === "taskSwitched") action = { ...action, bot: withTaskWrites(action.bot) as Bot };
       if (action.type === "botPatched") action = { ...action, bot: withTaskWrites(action.bot) };
       if (action.type === "openForkPanel" && !action.loadId) action = { ...action, loadId: randomUuid() };
@@ -2556,9 +2557,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             .finally(() => rawDispatch({ type: "botDeletionPending", botId: action.botId, on: false }));
           break;
         case "markUnread":
-          api(`/api/bots/${action.botId}`, { method: "PATCH", body: JSON.stringify({ unread: true }) }).catch(
-            () => {},
-          );
+          api(`/api/bots/${action.botId}`, { method: "PATCH", body: JSON.stringify({ unread: true }) }).catch(() => {});
           break;
         case "openDataResult":
         case "select": {
@@ -3025,12 +3024,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     // One read per conversation at a time, covering its newest message (the task's updatedAt). An unread frame meanwhile
     // with a newer message asks for exactly one more once it finishes; one re-announcing what the read covers does not.
-    const readsInFlight = new Map<string, { covers: number; again: boolean }>();
-    const sendRead = (botId: string, threadId: string | undefined, key: string, covers: number): void => {
-      readsInFlight.set(key, { covers, again: false });
-      void serverFetch(`/api/bots/${botId}/read`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId }) }).catch(() => {}).finally(() => {
+    const readsInFlight = new Map<string, { covers: number; again: boolean; reason: ReadReason }>();
+    const sendRead = (botId: string, threadId: string | undefined, key: string, covers: number, reason: ReadReason): void => {
+      readsInFlight.set(key, { covers, again: false, reason });
+      void serverFetch(`/api/bots/${botId}/read`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId, reason }) }).catch(() => {}).finally(() => {
         const open = readsInFlight.get(key); readsInFlight.delete(key);
-        if (open?.again && alive) sendRead(botId, threadId, key, open.covers);
+        if (open?.again && alive) sendRead(botId, threadId, key, open.covers, open.reason);
       });
     };
     const stopFrames = store.handleFrames((frame) => { handleFrame(frame); stateRef.current = store.getState(); });
@@ -3083,10 +3082,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "bot": {
           const bot = frame.bot as BotAnnouncement, serverUnread = bot.unread;
-          markVisibleBotThreadsRead(stateRef.current, bot, document.hasFocus(), (_path, threadId, newest) => {
+          markVisibleBotThreadsRead(stateRef.current, bot, document.hasFocus(), (_path, threadId, newest, reason) => {
             const read = `${bot.id}:${threadId}`, open = readsInFlight.get(read);
-            if (!open) sendRead(bot.id, threadId, read, newest);
-            else if (newest > open.covers) readsInFlight.set(read, { covers: newest, again: true });
+            if (!open) sendRead(bot.id, threadId, read, newest, reason);
+            else if (newest > open.covers || reason !== open.reason) readsInFlight.set(read, { covers: Math.max(newest, open.covers), again: true, reason });
           });
           if (frame.tasksPartial && serverUnread && !bot.unread) bot.unread = unreadBeyondFrame(stateRef.current.bots.find((known) => known.id === bot.id), bot);
           rawDispatch({ type: "botPatched", bot: withTaskWrites({ ...bot, ...botPatchQueue.overlayFor(bot.id) }), ...(frame.tasksPartial ? { tasksPartial: true as const } : {}) });
