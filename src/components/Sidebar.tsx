@@ -25,7 +25,7 @@ import { copyText } from "@/lib/copy-text";
 import type { LocaleKey } from "@/locales";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { BulkSelectFilters, ThreadListFooter, deleteThreadsInBulk, retitleThreadsInBulk, useBulkSelect } from "./BulkSelectBar";
-import { SidebarThreadLabels, ThreadFoldChevron, useRowUnfolded } from "./SidebarThreadLabels";
+import { SidebarThreadLabels, ThreadFoldChevron, useFillOnLabel } from "./SidebarThreadLabels";
 import { RoomMark, StackedMauses } from "./StackedMauses";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { nextRename } from "@/lib/rename";
@@ -49,16 +49,18 @@ import {
   BOTS_SECTION_ID,
   CHANNELS_SECTION_ID,
   PINNED_SECTION_ID,
-  PINNED_THREADS_SECTION_ID,
   TOOLS_SECTION_ID,
-  activeBotsFirst,
+  UNREAD_SECTION_ID,
   partitionSidebarBots,
   partitionSidebarGroups,
   pinnedCircleThreadListVisible,
+  sectionsInUse,
+  sidebarBotRows,
   sidebarSectionLabel,
   userSectionId,
   userSectionName,
   withPrimaryTile,
+  withUnreadSection,
 } from "@/lib/sidebar-layout";
 import { stepKey, type BotDropPlace } from "@/lib/sidebar-bot-drop";
 import { BotDropLine, botRowDropClass, useSidebarBotDrag, type BotRowDrag } from "./SidebarBotDrag";
@@ -86,8 +88,8 @@ import { PHONE_TOP_BUTTON, SIMPLE_CORNER_BUTTON, SIMPLE_ROW_FOCUS, SIMPLE_TOP_BU
 import { isSidebarToggle } from "@/lib/keyboard-shortcuts";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { useBotUnread } from "./unread-notice";
-import { attentionHasRunningWork, attentionJumpAction, attentionUnpinAction, crossBotAttentionThreads, crossBotPinnedThreads, hasCrossBotRunningWork, runningRoutineRun, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
+import { useBotUnread, useUnreadHold } from "./unread-notice";
+import { attentionHasRunningWork, attentionJumpAction, crossBotAttentionThreads, hasCrossBotRunningWork, runningRoutineRun, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
 import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
 import { BotContextMenu } from "./SidebarBotMenu";
 export { BotContextMenu };
@@ -95,7 +97,6 @@ import { AvatarActivityDot, AvatarCornerDot, RowDot, RowStatusText, rowSelectedS
 
 
 import { SidebarAttentionPanel } from "./SidebarAttentionPanel";
-import { SidebarPinnedThreadsPanel } from "./SidebarPinnedThreadsPanel";
 import { useLiveMedia } from "@/lib/live-call-media";
 import { LiveCallPill, liveBadgeFor } from "./LiveCallPill";
 import { ShortcutHint } from "./ShortcutHint";
@@ -118,6 +119,7 @@ export const MAC_TRAFFIC_LIGHT_CENTER_Y = 23;
 
 const SECTION_LABEL_KEYS: Record<string, LocaleKey> = {
   [PINNED_SECTION_ID]: "sidebar.section.pinned",
+  [UNREAD_SECTION_ID]: "sidebar.section.unread",
   [CHANNELS_SECTION_ID]: "sidebar.section.channels",
   [BOT_CHATS_SECTION_ID]: "sidebar.section.botChats",
   [BOTS_SECTION_ID]: "sidebar.section.bots",
@@ -478,9 +480,9 @@ export function BotThreadList({ bot, selected, drafting, query, pendingQueued, r
   }, [selected, currentProjectId]);
   useSnoozeExpiry(tasks);
   const bulk = useBulkSelect();
-  const { own: ownTasks, helpers } = bulk.active ? { own: tasks, helpers: [] } : partitionHelperThreads(tasks, bot.threadId, query, projects);
-  const visibleTasks = orderedThreadList(visibleSidebarThreads(ownTasks, bot.threadId, query, projects, showAll || bulk.active, routineRuns));
-  const visibleProjectIndex = (projectId: string) => visibleTasks.findIndex((task) => task.projectId === projectId);
+  const { own: ownTasks, helpers } = bulk.active ? { own: tasks, helpers: [] } : partitionHelperThreads(tasks, bot.threadId, query, projects, bot.mainThreadId);
+  const visibleTasks = orderedThreadList(visibleSidebarThreads(ownTasks, bot.threadId, query, projects, showAll || bulk.active, routineRuns, bot.mainThreadId)), mainTask = visibleTasks.find((task) => task.threadId === bot.mainThreadId);
+  const visibleProjectIndex = (projectId: string) => visibleTasks.findIndex((task) => task !== mainTask && task.projectId === projectId);
   const folderRank = (projectId: string) => {
     const index = visibleProjectIndex(projectId);
     return index < 0 ? Number.POSITIVE_INFINITY : index;
@@ -509,12 +511,12 @@ export function BotThreadList({ bot, selected, drafting, query, pendingQueued, r
   }), [botId, dispatch]);
   const renderThread = (task: (typeof tasks)[number]) => {
     const thread = currentTaskBot(bot, task.threadId);
-    return <SidebarThreadRow key={task.threadId} task={{ ...task, busy: thread.busy, activity: thread.activity, waitingForTeammates: thread.waitingForTeammates }} ownerId={bot.id} current={selected && !drafting && task.threadId === bot.threadId} folders={projects}
+    return <SidebarThreadRow key={task.threadId} task={{ ...task, busy: thread.busy, activity: thread.activity, waitingForTeammates: thread.waitingForTeammates }} ownerId={bot.id} current={selected && !drafting && task.threadId === bot.threadId} main={task.threadId === bot.mainThreadId} folders={projects}
       activityLabel={task.threadId === bot.threadId ? activityLabel : undefined} now={stampClock(threadRecency(task), now)} locale={locale} {...actions}
       selectMode={bulk.active} checked={selection.has(task.threadId)} onToggleSelect={bulk.toggle} />;
   };
-  const ungrouped = visibleTasks.filter((task) => !projects.some((project) => project.id === task.projectId));
-  const shownRows = [...orderedProjects.filter((project) => query || bulk.active || !collapsed.has(project.id)).flatMap((project) => visibleTasks.filter((task) => task.projectId === project.id)), ...ungrouped]
+  const ungrouped = visibleTasks.filter((task) => task !== mainTask && !projects.some((project) => project.id === task.projectId));
+  const shownRows = [...(mainTask ? [mainTask] : []), ...orderedProjects.filter((project) => query || bulk.active || !collapsed.has(project.id)).flatMap((project) => visibleTasks.filter((task) => task !== mainTask && task.projectId === project.id)), ...ungrouped]
     .map((task) => { const thread = currentTaskBot(bot, task.threadId); return { ...task, busy: thread.busy, activity: thread.activity }; });
   const selection = bulk.forRows(shownRows);
   const projectToEdit = projects.find((project) => project.id === editingProject);
@@ -544,11 +546,11 @@ export function BotThreadList({ bot, selected, drafting, query, pendingQueued, r
       onDragOver={(event) => { if (event.dataTransfer.types.includes(FOLDER_DRAG_TYPE)) event.stopPropagation(); }}
       onDrop={(event) => { if (event.dataTransfer.types.includes(FOLDER_DRAG_TYPE)) { event.preventDefault(); event.stopPropagation(); resetFolderDrag(); } }}>
       {!hidden && <>
-      {bulk.active && <BulkSelectFilters rows={shownRows} selected={selection} now={now} onChange={bulk.setSelected} onDone={bulk.finish} />}
+      {bulk.active && <BulkSelectFilters rows={shownRows} selected={selection} now={now} onChange={bulk.setSelected} onDone={bulk.finish} />}{mainTask && renderThread(mainTask)}
       {orderedProjects.map((project) => {
         const index = projects.indexOf(project);
-        const projectTasks = tasks.filter((task) => task.projectId === project.id);
-        const visible = visibleTasks.filter((task) => task.projectId === project.id);
+        const projectTasks = tasks.filter((task) => task.projectId === project.id && task.threadId !== bot.mainThreadId);
+        const visible = visibleTasks.filter((task) => task !== mainTask && task.projectId === project.id);
         if (query && visible.length === 0 && !project.name.toLowerCase().includes(query.toLowerCase())) return null;
         const open = Boolean(query) || bulk.active || !collapsed.has(project.id);
         const waiting = projectTasks.some((task) => task.activity === "waiting-on-you");
@@ -623,7 +625,7 @@ export function BotThreadList({ bot, selected, drafting, query, pendingQueued, r
       {ungrouped.map(renderThread)}
       <HelperThreadGroup tasks={orderedThreadList(helpers)} renderThread={renderThread} />
       <ThreadListFooter bulk={bulk} rows={shownRows} selected={selection} total={ownTasks.length} canShowAll={!query && !showAll && ownTasks.length > visibleTasks.length} canSelect={tasks.length > 1}
-        onShowAll={() => setShowAll(true)} onShowFewer={showAll && !query && !bulk.active && visibleSidebarThreads(ownTasks, bot.threadId, query, projects, false, routineRuns).length < ownTasks.length ? () => setShowAll(false) : undefined} freshConversation onDelete={(threadIds) => deleteThreadsInBulk({ botId: bot.id }, threadIds, dispatch)}
+        onShowAll={() => setShowAll(true)} onShowFewer={showAll && !query && !bulk.active && visibleSidebarThreads(ownTasks, bot.threadId, query, projects, false, routineRuns, bot.mainThreadId).length < ownTasks.length ? () => setShowAll(false) : undefined} freshConversation onDelete={(threadIds) => deleteThreadsInBulk({ botId: bot.id }, threadIds, dispatch)}
         onRetitle={(threadIds) => retitleThreadsInBulk(bot.id, threadIds)} />
       <LocalComputerAutoWarning
         open={permissionRefresh?.kind === "local-auto"}
@@ -705,7 +707,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const iconOnly = density === "icons";
   const expanded = showThreads && !iconOnly && threadsOpen && hasThreadList;
   useEffect(() => { if (iconOnly) setRenaming(false); }, [iconOnly]);
-  const simpleRow = !advanced && !showThreads && density === "comfortable", unfolded = useRowUnfolded(bot, props.drafting) && simpleRow, rowSelected = selected && !unfolded;
+  const simpleRow = !advanced && !showThreads && density === "comfortable", fillOnLabel = useFillOnLabel(bot, props.drafting) && simpleRow, rowSelected = selected && !fillOnLabel;
   const simpleList = !advanced && !iconOnly;
   const railTile = iconOnly && !advanced;
   const avatarSize = iconOnly ? (railTile ? 36 : 44) : showThreads ? 32 : simpleRow ? 36 : 44;
@@ -1095,22 +1097,16 @@ export const Sidebar = memo(function Sidebar({ open, onClose, showPaneLayout = f
   const viewerEmail = useViewerEmail();
   const parts = partitionSidebarBots(botDrag.preview(matchingBots), { universalPins, viewerEmail, welcoming: useWelcomingBot(), searching: Boolean(q) });
   const saved = simpleDesk ? withPrimaryTile(parts, myDefaultBot(state.bots, viewerEmail)?.id) : { ...parts, primary: null };
-  // Shown order only: a drag or Alt+Up/Down moves a bot among the rows as drawn and saves it into the saved order.
+  // Shown order only: a drag or Alt+Up/Down moves a bot among the rows as drawn and saves it into the saved order of the
+  // rows left in place; a row Unread lists is in neither.
   const floats = (bot: Bot) => { const { waiting, working } = sidebarBotStatus(bot, state.pendingQueued); return waiting || working; };
-  const { primary, unsectionedChief, pinnedBots, sectionChiefs, sectionedBots, unsectionedBots } = { ...saved, ...activeBotsFirst(saved, floats) };
+  const { primary, unsectionedChief } = saved;
+  const { pinnedBots, filed, unreadBots, unreadCount, sectionChiefs, sectionedBots, unsectionedBots, inPlace } = sidebarBotRows(saved, floats, !q,
+    useUnreadHold(state.activeView === "chat" ? state.selectedId : null, sideLists.bots, state.newChat?.botId));
   const { botChats, sectionedRooms, unsectionedRooms } = partitionSidebarGroups(visibleGroups);
 
-  const sectionNames: string[] = [...(state.sections ?? []).filter((name) => !q || name.toLowerCase().includes(q.toLowerCase())), ...botDrag.pending];
-  for (const bot of sectionedBots) {
-    if (!sectionNames.includes(bot.section!)) sectionNames.push(bot.section!);
-  }
-  for (const bot of sectionChiefs) {
-    if (!sectionNames.includes(bot.section!)) sectionNames.push(bot.section!);
-  }
-  for (const group of sectionedRooms) {
-    if (!sectionNames.includes(group.section!)) sectionNames.push(group.section!);
-  }
-  const drops = botDrag.arrange({ enabled: (sections.interactive || density === "icons") && !phone, withinList: density === "icons", main: saved.unsectionedBots, sectioned: saved.sectionedBots, departments: sectionNames, bots: state.bots, taken: departmentNames(state), floats });
+  const sectionNames = sectionsInUse([...(state.sections ?? []).filter((name) => !q || name.toLowerCase().includes(q.toLowerCase())), ...botDrag.pending], [...filed, ...sectionedRooms]);
+  const drops = botDrag.arrange({ enabled: (sections.interactive || density === "icons") && !phone, withinList: density === "icons", main: inPlace.unsectionedBots, sectioned: inPlace.sectionedBots, departments: sectionNames, bots: state.bots, taken: departmentNames(state), floats });
   const naturalSectionIds = [
     ...(pinnedBots.length > 0 && !universalPins && !simpleDesk ? [PINNED_SECTION_ID] : []),
     ...(unsectionedRooms.length > 0 ? [CHANNELS_SECTION_ID] : []),
@@ -1119,7 +1115,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, showPaneLayout = f
     ...sectionNames.map(userSectionId),
   ];
   const layout = sections.arrange(naturalSectionIds);
-  const sectionIds = layout.sectionIds;
+  const sectionIds = withUnreadSection(layout.sectionIds, unreadBots.length > 0);
   const showPinnedCircleThreads = !simpleDesk && pinnedCircleThreadListVisible(pinnedCircles, density, pinnedBots.length);
   const tiles = simpleDesk && (primary !== null || pinnedBots.length > 0);
   const { interactive: layoutInteractive, collapsed: sectionCollapsed, toggle: toggleSection } = sections;
@@ -1127,7 +1123,6 @@ export const Sidebar = memo(function Sidebar({ open, onClose, showPaneLayout = f
   const archivedEntry = remoteClient ? undefined : { count: archivedBots.length, open: () => setArchivedBotsOpen(true) };
   const showAttention = (advanced && inboxSupport === "no") || (attentionPinned && density !== "icons");
   const attention = showAttention ? crossBotAttentionThreads(state.bots, state.pendingQueued, undefined, state.groups) : [];
-  const pinnedThreads = crossBotPinnedThreads(state.bots, state.groups, state.pendingQueued);
   const pendingBotUndo = teamFeedback?.restoreBot;
   const botRow = (bot: Bot) => botRowProps(state, dispatch, bot, { density, query: q, onMenu: setMenu, renameRequest: renameRequest?.botId === bot.id ? renameRequest.nonce : 0, ...drops.row(bot.id) });
   const railSearch = () => {
@@ -1348,15 +1343,6 @@ export const Sidebar = memo(function Sidebar({ open, onClose, showPaneLayout = f
         />
       )}
 
-      {density !== "icons" && (
-        <SidebarPinnedThreadsPanel
-          entries={pinnedThreads}
-          onJump={(entry) => dispatch(attentionJumpAction(entry))}
-          onUnpin={(entry) => dispatch(attentionUnpinAction(entry))}
-          collapsed={sectionCollapsed(PINNED_THREADS_SECTION_ID)}
-          onToggle={layoutInteractive ? () => toggleSection(PINNED_THREADS_SECTION_ID) : undefined}
-        />
-      )}
       {tiles && <SidebarTileGrid primary={primary} pinned={pinnedBots} row={botRow} corner={corner} />}
       {simpleDesk && !tiles && <SidebarNoBots />}
       </GlassBar>
@@ -1392,7 +1378,9 @@ export const Sidebar = memo(function Sidebar({ open, onClose, showPaneLayout = f
             const sectionBotItems =
               id === PINNED_SECTION_ID
                 ? pinnedBots
-                : id === BOTS_SECTION_ID
+                : id === UNREAD_SECTION_ID
+                  ? unreadBots
+                  : id === BOTS_SECTION_ID
                   ? unsectionedBots
                   : sectionName
                     ? sectionedBots.filter((bot) => bot.section === sectionName)
@@ -1436,7 +1424,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, showPaneLayout = f
                     collapsed={collapsed}
                     attention={attention}
                     onToggle={layoutInteractive ? () => toggleSection(id) : undefined}
-                    {...layout.header(id)} naming={drops.naming(sectionName)} dropInto={drops.into(sectionName)}
+                    {...layout.header(id)} {...(id === UNREAD_SECTION_ID && { ...(unreadCount > 0 && { count: unreadCount }), reorderable: false })} naming={drops.naming(sectionName)} dropInto={drops.into(sectionName)}
                     onDelete={!simple && !remoteClient && sectionName ? () => setDeletingTeam(sectionName) : undefined} onShare={!simple && !remoteClient && sectionName ? () => setShareTeam(sectionName) : undefined}
                   />
                 )}

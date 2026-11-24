@@ -3,6 +3,7 @@ import { FolderOpen, Plus, Server } from "lucide-react";
 
 import { appSwitchPatch } from "@/lib/bot-app-access";
 import { skillsLibraryEnabled } from "@/lib/feature-flags";
+import { useFeature } from "@/lib/use-feature";
 import { t } from "@/lib/i18n";
 import { mcpServersForBot, mcpServersOfBot, mcpSwitch, useMcpServers } from "@/lib/mcp-servers";
 import { fetchMemoryOverview, markMemoryReviewed, MEMORY_INDEX, saveMemoryDoc, saveThreadNotes, type LendingReview } from "@/lib/memory";
@@ -244,7 +245,7 @@ export function SkillsPage({ bot }: PageContext) {
   const [source, setSource] = useState("");
   const [importing, setImporting] = useState(false);
   const [imported, setImported] = useState<string[]>([]);
-  const libraryOn = skillsLibraryEnabled(state.config);
+  const libraryOn = skillsLibraryEnabled(state.config), skillBurger = useFeature("skillBurger");
   const own = skills.skills.filter((skill) => skill.origin !== "project" && !isBurgerSource(skill.source));
   const project = skills.skills.filter((skill) => skill.origin === "project");
 
@@ -290,7 +291,7 @@ export function SkillsPage({ bot }: PageContext) {
 
   return (
     <>
-      <SavedWorkflowsCard botId={bot.id} threadId={bot.threadId} />
+      {skillBurger && <SavedWorkflowsCard botId={bot.id} threadId={bot.threadId} />}
       <Card>
         {skills.loading ? (
           <NoteRow>{t("skills.loading")}</NoteRow>

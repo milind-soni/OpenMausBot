@@ -64,7 +64,7 @@ import { VoiceNoteBubble, type VoiceNoteAttachment } from "./VoiceNoteBubble";
 import { RawMarkdownView, RawToggleAction } from "./RawMarkdownToggle";
 import { useTeammates } from "@/state/team-people";
 import { NewConversationInstead } from "./NewConversationInstead";
-import { SkillBurgerSlot } from "./skill-burger/SkillBurgerSlot";
+import { SkillBurgerSlot } from "./skill-burger/SkillBurgerSlot"; import { useFeature } from "@/lib/use-feature";
 import { useColorUserBubbles } from "@/lib/user-bubble-preference";
 import { userBubbleStyle } from "@/lib/user-bubble-tone";
 import { DataResultChip } from "./DataResultChip"; import { PublishedPageCard } from "./PublishedPageCard"; import { TemplateChatCard } from "./TemplateCard"; import { PublishedSiteCards } from "./published-apps/PublishedSiteCards";
@@ -90,7 +90,7 @@ import { ScreenFrame } from "./ScreenFrame";
 import { CompactionChip, DigestChip } from "./DigestChip";
 import { RenameTitle } from "./RenameTitle"; import { ChatHeadRole, chiefOfStaffBadge } from "./BotRole";
 import { BotActivityPicker } from "./TaskPicker"; import { ChatHeadPill } from "./ChatHeadPill"; import { HeaderShare } from "./bot-access/HeaderShare"; import { ThreadPresenceFaces } from "./TeamPresence"; import { useStoreRef } from "@/state/store-ref"; import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { sameDrawnBots } from "@/lib/drawn-bots"; import { ChatActivityControls, chatActivityMessages, useChatActivity } from "./ChatActivity";
-import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated"; import { NewThreadHeaderButton } from "./NewThreadHeaderButton";
+import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated"; import { NewThreadHeaderButton } from "./NewThreadHeaderButton"; import { HeaderThreadTabs, useThreadTabsShown } from "./HeaderThreadTabs";
 import { ModelPicker } from "./ModelPicker"; import { useFailedTurnFix } from "./FailedTurnFix";
 import { ChatHeaderMenu, ChatMoreMenu } from "./ChatMoreMenu"; import { TeamOwnHelperHeader, TeamPrivateFirstLine, TeamPrivateHeader, TeamSharedHeader } from "./TeamPrivateChatsLine"; import { ownChatStarted } from "@/state/team-chats"; import { isNewChatThread } from "@/state/new-chat";
 import { useChatFindRequests, useChatFindShortcut } from "@/lib/chat-find";
@@ -98,6 +98,7 @@ import { CitationSelectionToolbar, SentCitations } from "./CitationUI";
 import { SpeakButton, speakReady } from "./SpeakButton";
 import { CallOverlay } from "./CallView";
 import { LiveCallBar } from "./LiveCallBar";
+import { BotExchangeLine } from "./BotExchangeLine";
 import { LiveCallChip } from "./LiveCallPill";
 import { effectivePlace, type EffectivePlace } from "@/lib/place";
 import { cn } from "@/lib/cn";
@@ -756,12 +757,13 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
   const composerDock = useComposerDockPad(composerDockRef);
   // An opened page fills the messages area, between the header and the message box, which stays usable.
   const [pagePane, setPagePane] = useState<HTMLDivElement | null>(null);
-  const advanced = useAdvancedMode(), activity = useChatActivity();
+  const advanced = useAdvancedMode(), activity = useChatActivity(), skillBurger = useFeature("skillBurger");
   const phone = useMediaQuery(PHONE_LAYOUT);
   const paneTitle = use(TiledPaneTitle);
   const compactHeader = phone || Boolean(paneTitle);
   const compactMenu = compactHeader && (!remoteClient || Boolean(paneTitle));
   const simpleHead = !advanced && !remoteClient;
+  const headTabs = useThreadTabsShown(bot.id) && !inForkPanel && !paneTitle;
   const canWrite = useCanWriteIn(bot.threadId, bot.yourAccess), mayWrite = canWrite !== false;
 
   const computerStarting = computerStartLine(state.computerStart, bot.name); useScreensWhile(Boolean(computerStarting));
@@ -928,13 +930,13 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
       <GlassScrollFrame className="flex-1 [--glass-tint:var(--color-app)]">
       {/* z-[25]: above the room set-up card (z-20), below the CallOverlay (z-30). */}
       <GlassBar edge="top" fade={!remoteClient} data-chathead-float={simpleHead ? "" : undefined} className="z-[25]">
-      <div {...headerDragProps} data-look="chat-header" className={chatHeaderContainer(Boolean(paneTitle), simpleHead)}>
+      <div {...headerDragProps} data-look="chat-header" data-chathead-tabs={headTabs ? (simpleHead ? "simple" : "advanced") : undefined} className={chatHeaderContainer(Boolean(paneTitle), simpleHead)}>
         <div data-chathead-row className={cn("flex items-center justify-between", compactHeader ? "gap-2" : "@max-[30rem]/chathead:flex-wrap @max-[30rem]/chathead:gap-y-1 @min-[30rem]/chathead:grid @min-[30rem]/chathead:grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(max-content,1fr)]")}>{advanced && !inForkPanel && <ChatActivityControls key={bot.threadId} activity={activity} compact={Boolean(paneTitle)} botId={bot.id} style={headerNoDragStyle} />}
-        <div data-chathead-identity className={cn("flex min-w-0 items-center gap-2", compactHeader ? "flex-1" : "@max-[30rem]/chathead:basis-full @min-[30rem]/chathead:col-start-2 @min-[30rem]/chathead:justify-self-center", simpleHead && phone && "justify-center")} style={headerNoDragStyle}>
+        <div data-chathead-identity className={cn("flex min-w-0 items-center gap-2", compactHeader ? "flex-1" : "@max-[30rem]/chathead:basis-full @min-[30rem]/chathead:col-start-2 @min-[30rem]/chathead:justify-self-center", simpleHead && phone && "justify-center")} style={headerNoDragStyle}>{headTabs && <HeaderThreadTabs bot={bot} />}
           {simpleHead || paneTitle ? (
             <ChatHeadPill
               threadTitle={paneTitle ?? undefined}
-              bot={bot}
+              bot={bot} switcher={phone && !inForkPanel && !paneTitle}
               avatar={{ state: stateForBot({ ...bot, messages }), motion: headerMotion, motionKey: mascotMotion?.nonce ?? 0, animated: headerAnimated }}
               privacy={privateChat ? { kind: "private" } : ownHelper ? { kind: "ownHelper" } : sharedChat && team ? { kind: "shared", team: team.name, onlyPeopleAdded: bot.onlyPeopleAdded, sharedWith: currentTask?.sharedWith?.name } : null}
               onToggle={(open) => dispatch({ type: "toggleSettings", open, ...(paneTitle && { botId: bot.id, fromPane: inForkPanel }) })}
@@ -1067,7 +1069,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
 
       <div
         ref={scrollRef}
-        className="glass-scroller h-full overflow-x-hidden overflow-y-auto overscroll-y-contain px-4 [overflow-anchor:none]" data-top-fade={simpleHead ? "" : undefined}
+        className="glass-scroller h-full overflow-x-hidden overflow-y-auto overscroll-y-contain px-4 [overflow-anchor:none]" data-top-fade={simpleHead && !headTabs ? "" : undefined}
         // Simple mode's composer sits on plain canvas, so a row scrolled into view stops clear of it.
         style={advanced ? undefined : { scrollPaddingBottom: composerDock.pad }}
         {...scrollHandlers}
@@ -1156,7 +1158,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
             answering={popping !== null}
             since={busySince}
           />{presenceVisible && sharedRun.line}
-          <SkillBurgerSlot botId={bot.id} threadId={bot.threadId} busy={Boolean(bot.busy)} canWrite={mayWrite} messages={messages} liveTools={liveTools} transcriptKey={transcriptKey} />
+          {skillBurger && <SkillBurgerSlot botId={bot.id} threadId={bot.threadId} busy={Boolean(bot.busy)} canWrite={mayWrite} messages={messages} liveTools={liveTools} transcriptKey={transcriptKey} />}
         </div>
       </div>
 
@@ -1164,11 +1166,8 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
       <div ref={setPagePane} data-page-pane-slot className="contents" style={{ "--page-pane-bottom": `${composerDock.box}px` } as CSSProperties} />
 
       <div ref={composerDockRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] chat-column-dock">
-      {showJumpToLatest && (
-        <div className="relative">
-          <JumpToLatestButton onClick={jumpToLatest} className="pointer-events-auto bottom-2" />
-        </div>
-      )}
+      {showJumpToLatest && <div className="relative"><JumpToLatestButton onClick={jumpToLatest} className="pointer-events-auto bottom-2" /></div>}
+      <BotExchangeLine />
       <LiveCallBar bot={bot} />
       {canWrite === false ? (
         <NewConversationInstead bot={bot} onNew={() => dispatch({ type: "newTask", botId: bot.id })} />

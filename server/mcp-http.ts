@@ -245,7 +245,10 @@ export class RemoteMcpClient {
     } else {
       result = await this.request("initialize", params, signal);
     }
-    if (isRecord(result) && typeof result.protocolVersion === "string") this.protocolVersion = result.protocolVersion;
+    // The session speaks the offered revision only: a server echoing a newer one must not put it on the wire.
+    if (isRecord(result) && typeof result.protocolVersion === "string") {
+      this.protocolVersion = result.protocolVersion <= PROTOCOL_VERSION ? result.protocolVersion : PROTOCOL_VERSION;
+    }
     await this.notify("notifications/initialized", undefined, signal);
     return result;
   }

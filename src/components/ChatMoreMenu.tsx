@@ -18,7 +18,8 @@ import { useContextAction } from "./ContextWarning";
 import { ELEVATED_CONTROL, ELEVATED_HOVER, ELEVATED_OPEN } from "./elevated";
 import { ShortcutHint } from "./ShortcutHint";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
-import { orderedThreadList } from "./SidebarThreadRow";
+import { MainThreadMark } from "./SidebarRowMarkers";
+import { mainThreadFirst, orderedThreadList } from "./SidebarThreadRow";
 import { openBotSettings } from "./bot-panel/panel-link";
 import { ShareBotButton, useTeamName } from "./bot-access/ShareBotButton";
 import { UsageBars } from "./EngineUsage";
@@ -46,7 +47,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
   const atFreshStart = messages.at(-1)?.compaction?.fresh === true;
   const transcript = () => conversationTranscript({ threadId: bot.threadId, hasMore: bot.hasMore, activeLeafId: bot.activeLeafId, title: bot.name, messages, botName: bot.name, isGroup: false });
   const side = useConversationSide(profile);
-  const threads = showThreads ? [] : orderedThreadList((side ? tasksOfSide(profile, side) : profile.tasks ?? []).filter((task) => !task.routineRunId));
+  const threads = showThreads ? [] : mainThreadFirst(orderedThreadList((side ? tasksOfSide(profile, side) : profile.tasks ?? []).filter((task) => !task.routineRunId)), profile.mainThreadId);
   const sharing = shareChoices(profile, profile.tasks?.find((task) => task.threadId === bot.threadId), Boolean(useTeamName()));
   const shareItems: SidebarMenuItem[] = [
     { key: TEMPLATE_ITEM, label: t("template.shareAsTemplate"), icon: <LayoutTemplate size={16} />,
@@ -116,6 +117,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
         key: `thread:${task.threadId}`,
       label: localizedTaskTitle(task.title || t("task.newShort")),
         active: task.threadId === bot.threadId,
+        trailing: task.threadId === profile.mainThreadId ? <MainThreadMark /> : undefined,
         onSelect: () => openBotThread(dispatch, profile, task.threadId, showThreads),
       })),
       onSelect: () => {},

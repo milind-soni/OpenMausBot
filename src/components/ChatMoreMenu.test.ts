@@ -121,15 +121,16 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "newTask", botId: "pepper" });
   });
 
-  it("lists the bot's threads newest first, without routine runs, marks the open one and opens another", () => {
+  it("lists the bot's main thread first, then newest first, without routine runs, marks the open one and opens another", () => {
     const threads = menuOf(createElement(ChatMoreMenu, { bot })).items.find((item) => item.key === "threads")!;
     expect(threads).toMatchObject({ label: "All threads", value: "3" });
     expect(threads.submenu!.map((item) => [item.label, Boolean(item.active)])).toEqual([
+      ["Our chat", false],
       ["Trip plan", true],
       ["Untitled chat", false],
-      ["Our chat", false],
     ]);
-    threads.submenu![2].onSelect();
+    expect(threads.submenu!.map((item) => renderToStaticMarkup(createElement("div", null, item.trailing)).includes('aria-label="Main thread"'))).toEqual([true, false, false]);
+    threads.submenu![0].onSelect();
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "pepper", threadId: "main" });
   });
 

@@ -334,10 +334,10 @@ reaches outside that folder is asked as usual. A turn fails rather than start
 when the CLI offers no mode or does not confirm `default`.
 
 A new install takes the native CLI; a computer that already has the pinned
-runtime keeps it. To move an Antigravity account to the native CLI, choose
-**Google Antigravity CLI** under **Runs on** (its CLI path becomes `antigravity`)
-and **Install Google Antigravity CLI**; to move back, choose **Classic runtime**
-(`agy_acp_server`), which runs the pinned runtime alone. An account with no CLI
+runtime keeps it. An Antigravity account on the pinned runtime moves to the
+native CLI through **Switch to Google Antigravity CLI** on its card (its CLI path
+becomes `antigravity` and the CLI is installed); Settings offers no way back. A
+saved `agy_acp_server` path still runs the pinned runtime alone. An account with no CLI
 path, or `agy`, runs the pinned runtime when it is installed, and the native CLI
 otherwise. The native CLI signs in through its own
 `acp --login`: the link opens Google, and the code or address the page ends on
@@ -347,7 +347,7 @@ pinned runtime, and the OS keyring and the Antigravity CLI in a terminal are
 never touched. Signing out or removing an account ends that account's sign-in
 alone. A server started with `OMB_ANTIGRAVITY_NATIVE_CLI=1` runs the native CLI
 for every account with no CLI path, or `agy`, even where the pinned runtime is
-installed; an account set under **Runs on** keeps its choice.
+installed; an account whose CLI path names a runtime keeps it.
 
 A new Antigravity bot starts on Auto, the default. Old Antigravity
 `auto` / `autoApprove` settings still behave as Ask and are displayed as Ask;
@@ -401,7 +401,8 @@ multi-question card renders its structured form on current apps instead.
 | Gemini CLI | Native `default` | Native `--approval-mode auto_edit` | Ask (no reviewer) | `--yolo`, plus automatic approval of remaining ACP permission requests |
 | Cline | `--auto-approve false`, you review | not offered | Ask (no reviewer) | Approve individual ACP permission requests, never task questions |
 | Droid | Session mode `normal` (reads only) | not offered | Ask (no reviewer) | Session mode `auto-high`, plus automatic approval of remaining ACP permission requests |
-| Kimi, Hermes, custom ACP agents | The agent's own default | not offered | Ask (no reviewer) | Approve individual ACP permission requests, never task questions |
+| Hermes | Its `default` session mode | Its `accept_edits` session mode, where Hermes advertises it | Ask (no reviewer) | Its `default` session mode; approve individual ACP permission requests, never task questions |
+| Kimi, custom ACP agents | The agent's own default | not offered | Ask (no reviewer) | Approve individual ACP permission requests, never task questions |
 | Pi | Pi's own tools run; computer control and custom MCP tools ask | not offered | Ask (no reviewer) | Custom MCP tools run without asking; computer-control confirms are approved |
 | API engines (OpenAI-compatible, Grok API, MiniMax, Mistral, Cerebras, Groq, Greenference, ModelGo, Meta) | OMB's tool gate asks | not offered | Ask (no reviewer) | OMB's tool gate approves each call |
 

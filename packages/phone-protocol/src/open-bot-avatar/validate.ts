@@ -1,4 +1,4 @@
-import { bounds, filledArea, flattenPath, insideRow, isInside, parsePath, PathError, serializePath, splitSubpaths } from './path.ts';
+import { bounds, edgeBands, filledArea, flattenPath, parsePath, PathError, serializePath, splitSubpaths } from './path.ts';
 import type { Bounds, Point } from './path.ts';
 import type { AvatarEyes, ValidationResult } from './types.ts';
 
@@ -110,9 +110,10 @@ export function eyeCenters(eyes: AvatarEyes): [Point, Point] {
 }
 
 export function eyesFit(polys: Point[][], eyes: AvatarEyes, dx: number, dy: number, margin: number): Point | null {
+  const index = edgeBands(polys);
   for (const [cx, cy] of eyeCenters(eyes)) {
     for (const [x, y] of eyeOutline(cx + dx, cy + dy, eyes.scale, margin)) {
-      if (!isInside(polys, x, y)) return [x, y];
+      if (index.winding(x, y) === 0) return [x, y];
     }
   }
   return null;
@@ -120,9 +121,10 @@ export function eyesFit(polys: Point[][], eyes: AvatarEyes, dx: number, dy: numb
 
 /** Like eyesFit, but for everything the renderer draws: the pill and the wider happy arc. */
 export function drawnEyesFit(polys: Point[][], eyes: AvatarEyes, dx: number, dy: number, margin: number): Point | null {
+  const index = edgeBands(polys);
   for (const [cx, cy] of eyeCenters(eyes)) {
     for (const [x, y] of drawnEyeOutline(cx + dx, cy + dy, eyes.scale, margin)) {
-      if (!isInside(polys, x, y)) return [x, y];
+      if (index.winding(x, y) === 0) return [x, y];
     }
   }
   return null;
@@ -158,6 +160,7 @@ export function analyzeBody(path: string): BodyAnalysis {
   const segs = parsePath(path);
   const polys = flattenPath(segs);
   const b = bounds(polys);
+  const whole = edgeBands(polys);
   const holes: BodyHole[] = [];
   const subpaths: BodySubpath[] = [];
   for (const sub of splitSubpaths(segs)) {
@@ -172,9 +175,10 @@ export function analyzeBody(path: string): BodyAnalysis {
     const xs: number[] = [];
     for (let x = Math.floor(ob.minX) + step / 2; x < ob.maxX; x += step) xs.push(x);
     const mine = new Uint8Array(xs.length), all = new Uint8Array(xs.length);
+    const self = edgeBands(own);
     for (let y = Math.floor(ob.minY) + step / 2; y < ob.maxY; y += step) {
-      insideRow(own, y, xs, mine);
-      if (!alone) insideRow(polys, y, xs, all);
+      self.insideRow(y, xs, mine);
+      if (!alone) whole.insideRow(y, xs, all);
       for (let k = 0; k < xs.length; k++) {
         if (!mine[k]) continue;
         inside++;

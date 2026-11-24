@@ -100,8 +100,12 @@ The `.rpm` is community-supported: every release builds and checks it, but it is
 `.deb` is on Ubuntu. Install it with the package manager so its desktop dependencies are resolved:
 
 ```sh
-sudo dnf install ./OpenMausBot-x86_64.rpm
+cd ~/Downloads   # or wherever you saved the file
+sudo dnf install ./OpenMausBot-*.rpm
 ```
+
+The glob matches both the stable-named download (`OpenMausBot-x86_64.rpm`) and the versioned one from the
+releases page (`OpenMausBot-<version>-x86_64.rpm`), so the command works no matter which asset you saved.
 
 Remove it with `sudo dnf remove openmausbot`. Updates are downloaded by the app, which then copies the `rpm` install
 command and opens a terminal for you to run it. Other RPM distributions (RHEL, openSUSE) and image-based Fedora

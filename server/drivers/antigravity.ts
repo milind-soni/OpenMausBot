@@ -45,6 +45,7 @@ import { AntigravityCliLogin, type LoginProcesses } from "./antigravity-native-l
 import { NativeSignInCache, antigravityCliRefusedSession, antigravityCliSignIn, signOutAntigravityCli } from "./antigravity-native-status.ts";
 import { AcpDiscoveryRpcError, AcpDiscoveryTimeoutError } from "./acp/custom-model-catalog.ts";
 import {
+  antigravityInstallRunning,
   antigravityManagedInstallAvailable,
   isAntigravityNativeAlias,
   isAntigravityPinnedAlias,
@@ -419,6 +420,8 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       snapshot: async () => {
         const snapshot = await base.snapshot();
         if (snapshot.state === "available") installFailure = undefined;
+        // The engine updater (or another account's card) is installing a runtime here now.
+        if (snapshot.state === "unavailable" && antigravityInstallRunning()) return { ...snapshot, installing: true };
         return snapshot.state === "unavailable" && installFailure
           ? { ...snapshot, reason: installFailure }
           : snapshot;

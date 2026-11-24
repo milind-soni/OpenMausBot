@@ -285,7 +285,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const target = resolveReplyTarget(threadId, press ? press.messageId : appSent ? appSent.messageId : body.replyToId);
       if (relayed && target?.role !== "bot") return json(res, 400, { error: "a relayed reaction answers a bot's message" });
       const passedBack = !guarded && !press && !appSent && !pointed && target ? deps.inboxReply?.(auth, threadId, target.id, text, { sendId, sender: messageSender(auth) }) : null;
-      const typedAnswer = passedBack || guarded || press || appSent || pointed ? null : await deps.typedCardAnswer?.(auth, threadId, text, target, { sendId, sender: messageSender(auth) });
+      const queuedAgain = Boolean(sendId && queuedSteeredMessage(bot.id, threadId, sendId));
+      const typedAnswer = passedBack || guarded || press || appSent || pointed || queuedAgain ? null : await deps.typedCardAnswer?.(auth, threadId, text, target, { sendId, sender: messageSender(auth) });
       const answeredBack = passedBack ?? typedAnswer;
       if (answeredBack) return json(res, answeredBack.status, answeredBack.message ? { ok: true, threadId, message: answeredBack.message } : refusalText(answeredBack.error ?? ""));
       // Only a real press or reaction, or an app's own words, marks the reply; a typed reply to the same row never does, whatever its words.
