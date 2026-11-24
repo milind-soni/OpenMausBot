@@ -9516,7 +9516,7 @@
   "native.splash.openingCloud": "正在打开 My Cloud…",
   "native.splash.wakingCloud": "正在唤醒 My Cloud…",
   "native.splash.openingNamed": "正在打开 {name}…",
-  "native.splash.openingWorkspace": "正在打开你的工作区…",
+  "native.splash.openingWorkspace": "正在打开你的安装…",
   "native.splash.wakingNamed": "正在唤醒 {name}…",
   "native.common.close": "关闭",
   "native.tray.open": "打开 OpenMausBot",
