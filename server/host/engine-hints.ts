@@ -23,7 +23,7 @@ export interface EngineHintInput {
   install: EngineInstall | undefined;
   /** How the app signs it in, when it can (the provider card's sign-in button). */
   signIn: { method: string } | undefined;
-  /** Whose account that sign-in uses, where the engine's name does not say it. */
+  /** The account whose subscription that sign-in uses (driver metadata signInAccount). */
   account?: string;
   /** The organization's rule that turns it off here. */
   policy?: string;
@@ -46,8 +46,10 @@ export function engineHint(engine: EngineHintInput): EngineHint {
   const key = `save its API key in ${placePath("keys")} (use is billed to that key)`;
   const snapshot = engine.snapshot;
   const keyOnly = keyOnlyEngine({ ...engine, snapshot: snapshot ?? {} }) || engine.install?.settings === "connections";
-  const account = engine.account ?? engine.name;
-  const signIn = `sign in with your ${account} account in ${providers}; that account's plan covers it, no API key`;
+  // A named account is a subscription sign-in (Google, ChatGPT, Claude); any other app sign-in only replaces a key.
+  const signIn = engine.account
+    ? `sign in with your ${engine.account} account in ${providers}; a subscription on that account covers it, no API key`
+    : `sign in with your ${engine.name.replace(/\s*\(.*\)$/u, "")} account in ${providers}; no API key needed`;
   if (engine.broken) return { why: "its saved settings can't be read", connect: `fix or remove it in ${providers}` };
   if (!engine.enabled) return { why: "turned off", connect: `turn it on in ${providers}` };
   if (engine.policy) return { why: "not allowed by the organization", connect: clip(engine.policy) };
@@ -59,22 +61,26 @@ export function engineHint(engine: EngineHintInput): EngineHint {
     const why = snapshot.ollama.state === "no-models" ? "its Ollama has no models yet" : "its Ollama server is not answering";
     return { why, connect: `start Ollama and pull a model, or change its address in ${providers}` };
   }
-  if (snapshot?.state === "unavailable") {
-    // The app downloads a managed runtime as part of its sign-in: nothing to install first.
-    if (engine.install?.managed && engine.signIn) return { why: "not set up yet", connect: `${signIn} (the app installs it first)` };
-    if (keyOnly && !engine.install?.command && !engine.install?.server) return { why: "no API key saved", connect: key };
-    // Claude's API-key instance has a sign-in too: an "api" engine is never said to need no key.
-    const then = keyOnly || engine.access === "api" ? `, then ${key}` : engine.signIn ? `, then sign in there with your ${engine.account ? `${engine.account} account` : "account at that provider"} (no API key)` : "; it then shows how it signs in";
-    return { why: "not installed", connect: `install it in ${providers}${then}` };
-  }
-  if (snapshot?.authenticated === false) {
-    if (snapshot.authenticationUnavailableReason) return { why: "can't be signed in here", connect: clip(snapshot.authenticationUnavailableReason) };
+  // The driver's own reason it can't sign in here wins (a ChatGPT plan on a Cloud says what to use instead).
+  if (snapshot?.authenticationUnavailableReason) return { why: "can't be signed in here", connect: clip(snapshot.authenticationUnavailableReason) };
+  const installed = snapshot?.state === "available" || Boolean(snapshot?.version);
+  if (installed && snapshot?.authenticated === false) {
     if (keyOnly) return { why: "no working API key saved", connect: key };
     if (engine.signIn && engine.access !== "api") return { why: "not signed in", connect: signIn };
     const command = engine.install?.signInCommand;
     return { why: "not signed in", connect: command ? `run \`${clip(command)}\` in a terminal on the computer the bots run on, or follow ${providers}` : `sign in from ${providers}` };
   }
-  return { why: "can't run now", connect: `${providers} shows what it needs` };
+  if (snapshot?.state === "unavailable" && !snapshot.version) {
+    // The app downloads a managed runtime as part of its sign-in: nothing to install first.
+    if (engine.install?.managed && engine.signIn) return { why: "not set up yet", connect: `${signIn} (the app installs it first)` };
+    if (keyOnly && !engine.install?.command && !engine.install?.server) return { why: "no API key saved", connect: key };
+    // Claude's API-key instance has a sign-in too: an "api" engine is never said to need no key.
+    const then = keyOnly || engine.access === "api" ? `, then ${key}` : engine.signIn ? ", then sign in there with that provider's account (no API key)" : "; it then shows how it signs in";
+    return { why: "not installed", connect: `install it in ${providers}${then}` };
+  }
+  // Installed but refused for its own reason (a key it needs, a check that failed): the key when it takes only one.
+  if (snapshot?.state === "unavailable" && keyOnly) return { why: "no working API key saved", connect: key };
+  return { why: "can't run now", connect: `${providers} shows why` };
 }
 
 /** The hints for a running server: the registry holds the status and how each engine connects, read without probing. */

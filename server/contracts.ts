@@ -660,7 +660,7 @@ export interface ProviderDriver<Config = unknown> {
     displayName: string;
     supportsMultipleInstances?: boolean;
     access?: EngineAccess;
-    /** Whose account the app's sign-in uses, where the engine's name does not say it. */
+    /** Set when the app's sign-in uses a subscription on this account (Google, ChatGPT, Claude): bots may say no API key is needed. */
     signInAccount?: string;
     /** What the engine's own CLI answers to `--version`; another answer means the CLI path runs another program. */
     cliVersion?: RegExp;
