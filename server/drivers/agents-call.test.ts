@@ -684,6 +684,23 @@ it("falls back to a nonblank camelCase groupId when group_id is blank", async ()
   });
 });
 
+describe("assignment_status", () => {
+  const stub = (status: number, body: Record<string, unknown>) => context({
+    client: { apiResponse: async () => ({ ok: false, status, body }), api: async () => ({}) },
+  });
+
+  it("answers an id sent this turn as an instruction, and keeps a real failure a failure", async () => {
+    const text = "Assignment asg-1 was handed out during this turn. Finish your response now so the teammate can work; its result returns to this conversation and resumes you. Do not check or wait for it until a later turn.";
+    const answer = await callTool("assignment_status", { id: "asg-1" }, stub(409, { error: text, sentThisTurn: true }));
+    expect(answer.isError).toBeUndefined();
+    expect(answer.text).toBe(text);
+    expect((await callTool("assignment_status", { id: "asg-1" }, stub(409, { error: text }))).isError).toBe(true);
+    const unknown = await callTool("assignment_status", { id: "asg-2" }, stub(404, { error: "unknown assignment id" }));
+    expect(unknown.isError).toBe(true);
+    expect(unknown.text).toContain("No assignment asg-2 is known here");
+  });
+});
+
 describe("blank optional arguments", () => {
   it("drops blank session_search ids, so a blank-filled search stays a search", async () => {
     const paths: string[] = [];

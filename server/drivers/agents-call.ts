@@ -344,6 +344,8 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       const why = status === 404 ? `No assignment ${id || "(none given)"} is known here: check the id against your coordinate_bots receipt or list_threads.`
         : status === 403 ? `Assignment ${id} can't be read here: ${String(r.error ?? "only the conversation that sent it can read it")}.`
         : String(r.error ?? `HTTP ${status}`);
+      // An id this turn sent is an instruction to finish the turn, not a failed call that ends it.
+      if (r.sentThisTurn === true) return { text: why };
       return { text: why, isError: true };
     }
     if (id) return { text: renderAssignmentStatus(r, id) };
