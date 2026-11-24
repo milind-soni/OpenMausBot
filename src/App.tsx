@@ -23,7 +23,7 @@ import { ChatView } from "@/components/ChatView";
 import { HandoffExchangeHost } from "@/components/HandoffExchange";
 import { GroupView } from "@/components/GroupView";
 import { ForkPanel } from "@/components/ForkPanel";
-import { SIDEBAR_AND_BOT_PANEL_FIT, SIDEBAR_AND_NARROW_PANEL_FIT, SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQuery } from "@/lib/use-media-query";
+import { PHONE_LAYOUT, SIDEBAR_AND_BOT_PANEL_FIT, SIDEBAR_AND_NARROW_PANEL_FIT, SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQuery } from "@/lib/use-media-query";
 import { anySidePanel, botPanelFloats, panelsMovingSidebar, sidebarFoldsForPanel, type OpenSidePanels } from "@/lib/sidebar-fold";
 import { preloadConnectedApps } from "@/lib/connected-apps";
 import {
@@ -31,7 +31,7 @@ import {
   PluginsPanel, preloadScreens, PublishedAppsPage, RemoteAgentSettingsPanel, SkillBurgersPage, RemoteDesktopPanel, RoomPanel, SettingsModal, TeamFilesPage, TeamMapPage, TriggersPage,
 } from "@/components/lazy-screens";
 import { useAdvancedMode } from "@/lib/interface-mode";
-import { useRoomPanelShown } from "@/lib/room-panel";
+import { closeRoomPanel, useRoomPanelShown } from "@/lib/room-panel";
 import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupRecovery";
 import { NotificationRail, NotificationsPanel } from "@/components/NotificationsPanel";
 import { useNotificationFeed } from "@/lib/notification-preferences";
@@ -48,7 +48,7 @@ import { useTeamChats } from "@/state/team-chats";
 import { needsYouVersion, useTeamPeopleLoader } from "@/state/team-people";
 import { newChatBot } from "@/state/new-chat";
 import { useTeamPresence } from "@/state/team-presence";
-import { inboxVersion, useInboxLoader, useInboxPanel, useInboxReady } from "@/state/inbox";
+import { closeInbox, inboxVersion, useInboxLoader, useInboxPanel, useInboxReady } from "@/state/inbox";
 import { PlacesRail } from "@/components/PlacesRail";
 import { NewLocalFromMenu } from "@/components/PlaceAddSheet";
 import { CloudHowTo } from "@/components/CloudHowTo";
@@ -77,7 +77,9 @@ import { botUnreadCount, showBrowserUnread } from "@/lib/bot-unread";
 import { phonePairingSettingsAction, takePhonePairingRequest } from "@/lib/phone-pairing"; import { useConnectLink } from "@/lib/use-connect-link";
 import { isSettingsPage } from "@/components/settings/settings-index";
 import { useBotListDrawer } from "@/hooks/use-bot-list-drawer";
+import { usePhoneBack } from "@/hooks/use-phone-back";
 import { useRememberedSidePanel } from "@/hooks/use-remembered-side-panel";
+import { closeSidePanels } from "@/lib/page-open";
 import { useDesktopNotificationOpens, useExternalChatLinks } from "@/hooks/use-external-chat-links"; import { useNewBotFromOtherPlace } from "@/lib/places-together";
 import { useUsageSnapshot } from "@/hooks/use-usage-snapshot";
 import { useReadShownChatOnFocus } from "@/hooks/use-read-shown-chat";
@@ -176,7 +178,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const chiefStep = useChiefStepOpen();
   const bot = group || chiefStep ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
   const chatBot = useMemo(() => bot && newChatBot(bot, state.newChat), [bot, state.newChat]);
-  const { open: drawerOpen, show: openDrawer, hide: hideDrawer, noteAction: noteDrawerAction } = useBotListDrawer({ selectedId: state.selectedId, botThread: chatBot?.threadId, groupThread: group?.threadId,
+  const { open: drawerOpen, show: openDrawer, hide: hideDrawer, noteAction: noteDrawerAction, back: drawerBack, backSteps: drawerBackSteps } = useBotListDrawer({ selectedId: state.selectedId, botThread: chatBot?.threadId, groupThread: group?.threadId,
     view: state.activeView, pluginsOpen: state.pluginsOpen, settingsOpen: state.settingsOpen });
   const closeDrawer = useCallback(() => { hideDrawer(); menuButtonRef.current?.focus(); }, [hideDrawer]);
   const notificationFeed = useNotificationFeed() && !remoteClient;
@@ -187,6 +189,17 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     notifications: notificationFeed && state.notificationsOpen,
     wide: (Boolean(bot) && (state.computerOpen || state.inspectorOpen || state.activityOpen)) || Boolean(state.forkPanel),
   };
+  const panelOpen = anySidePanel(sidePanels);
+  // On a phone, back closes the open list or side panel, and from a chat picked in the list goes back to the list.
+  const phoneLayout = useMediaQuery(PHONE_LAYOUT, false);
+  usePhoneBack(phoneLayout, drawerBackSteps + (panelOpen ? 1 : 0), () => {
+    if (drawerOpen || !panelOpen) return drawerBack();
+    closeSidePanels(dispatch);
+    dispatch({ type: "toggleNotifications", open: false });
+    dispatch({ type: "closeForkPanel" });
+    closeRoomPanel();
+    closeInbox();
+  });
   // A 320 panel leaves room for the open sidebar from 1040 up; a wider one from 1280. Narrower, the sidebar folds.
   const collapseSidebar = sidebarFoldsForPanel(sidePanels, { wide: sidebarAndPanelFit, narrow: sidebarAndNarrowPanelFit });
   // Open beside a panel below 1280, the sidebar keeps to 280 so the chat keeps its 440; Simple's bot panel never moves it.
