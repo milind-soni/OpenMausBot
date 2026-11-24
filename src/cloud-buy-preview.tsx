@@ -3,6 +3,7 @@
 //   |team-setup|team-ready|unreachable|whats-new|whats-new-plan
 // &skin=midnight&staging=1&reduced=1&plan=starter&lang=de
 // &current=pro (a subscriber's own plan says Your plan; current=personal shows a Personal subscriber's own card)
+// &bots=1 (this computer has bots of its own: the offer says a bot lives in one place)
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Cloud, FolderOpen, MessageSquare, Repeat } from "lucide-react";
@@ -88,7 +89,7 @@ function Preview() {
   }
   const view = VIEWS[state] ?? VIEWS.choose!;
   const current = params.get("current");
-  const ui: CloudAddUi = { chosen: params.get("plan"), current, offerShown: view.kind === "offer" ? view.offer : OFFER, now: NOW, busy: state === "sign-in-done", openFailed: false,
+  const ui: CloudAddUi = { botsHere: params.get("bots") === "1", chosen: params.get("plan"), current, offerShown: view.kind === "offer" ? view.offer : OFFER, now: NOW, busy: state === "sign-in-done", openFailed: false,
     email: "maya@studio.co", code: state === "sign-in-code" ? "4820" : "", profileEmail: "maya@studio.co",
     look: { typed: "My Cloud", name: "My Cloud", color: "blue" }, counting: state === "ready" ? 3 : null, copied: false, payFailed: false, interest: null };
   return <div className="relative h-screen overflow-hidden">

@@ -49,16 +49,16 @@ Use a disposable workspace on the host.
 ### The desktop app as host, without HTTPS certificates
 
 1. Leave HTTPS Certificates off at https://login.tailscale.com/admin/dns.
-2. On the host, open Settings → Phone & devices and turn on **Your other computers**. With Tailscale off in the app,
-   that one switch turns it on first. Turn it off again with nothing paired: expect Tailscale under More ways in to go
-   off with it. Then turn Tailscale on yourself, turn the share on and off: expect Tailscale to stay on. Leave the
+2. On the host, open Settings → Devices and turn on **Your other computers** (the switch on the Private network row). With Tailscale off in the app,
+   that one switch turns it on first. Turn it off again with nothing paired: expect the Private network row to go back
+   to Not set up. With a phone paired, turn the share on and off: expect the row to stay on for phones, with Turn off for phones. Leave the
    share on. Expect `Ready at http://$NAME:8799`. Do this once in Simple mode: the row is
    there without Advanced mode.
 3. On the host, run `lsof -nP -iTCP:8799 -sTCP:LISTEN`. Expect `127.0.0.1:8799` and the tailnet addresses, and never
    `*:8799`.
 4. On the host, choose **Pair a computer** under the switch. Expect the dialog to show the address `http://$NAME:8799`
    with the code, and **Copy link** to copy a link that starts with `http://$NAME:8799/pair#code=`.
-5. On the client, choose ＋ → Connect to a server and paste the link. Expect the found line to say Tailscale. Connect,
+5. On the client, choose ＋ → Connect to another computer and paste the link. Expect the found line to say Tailscale. Connect,
    then send a message and wait for a reply.
 6. From the client, check the refusals:
    - `curl -i -H 'Host: evil.example.com' http://$IP:8799/api/health` answers 421.
@@ -68,7 +68,7 @@ Use a disposable workspace on the host.
 
 ### With HTTPS certificates
 
-1. Turn on HTTPS Certificates, then press **Check again** on the host (More ways in → Tailscale). Expect
+1. Turn on HTTPS Certificates, then press **Check again** on the host (the Private network row). Expect
    `Ready at https://$NAME`.
 2. On the host, `tailscale serve status` lists 443 → `http://127.0.0.1:8799`, and `lsof` shows only `127.0.0.1:8799`.
 3. Connect the client to `https://$NAME` with a new code. The first request can take several seconds while the

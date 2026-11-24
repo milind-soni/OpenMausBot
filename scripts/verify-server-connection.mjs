@@ -242,7 +242,7 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
     // fake-engine server. Opening the page must not require local AI setup.
     win.setSize(1180, 850);
     await win.loadURL(`${url}?app=1&desktop-settings=workspaces&share-computer=cloud`);
-    await until(() => evaluate("document.querySelector('[role=dialog]')?.textContent.includes('Connect to a server')"), "app opens top-level workspace Settings");
+    await until(() => evaluate("document.querySelector('[role=dialog]')?.textContent.includes('Connect to another computer')"), "app opens top-level workspace Settings");
     assert.equal(await evaluate("location.search.includes('desktop-settings')"), false, "Settings deep link consumed");
     await until(() => evaluate("document.body.textContent.includes('My cloud team')"), "app Settings loaded connections");
     await until(() => evaluate("document.body.textContent.includes('Computer access · My cloud team')"), "post-pair target opens its access controls");
@@ -251,13 +251,13 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Server address or pairing link\"]') !== null || [...document.querySelectorAll('label')].some(el => el.textContent.includes('Server address or pairing link'))"), true);
     writeFileSync(join(output, "workspace-settings-in-app.png"), (await win.webContents.capturePage()).toPNG());
     await evaluate("window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
-    await until(() => evaluate("!document.body.textContent.includes('Connect to a server')"), "Settings closes normally");
+    await until(() => evaluate("!document.body.textContent.includes('Connect to another computer')"), "Settings closes normally");
     win.webContents.send("workspaces:open-settings");
-    await until(() => evaluate("document.querySelector('[role=dialog]')?.textContent.includes('Connect to a server')"), "native request reopens workspace Settings");
+    await until(() => evaluate("document.querySelector('[role=dialog]')?.textContent.includes('Connect to another computer')"), "native request reopens workspace Settings");
     await evaluate("(() => { const el = document.querySelector('input[aria-label=\"Search settings\"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, 'appearance'); el.dispatchEvent(new Event('input', { bubbles: true })); })()");
-    await until(() => evaluate("!document.body.textContent.includes('Connect to a server')"), "Settings search changes section");
+    await until(() => evaluate("!document.body.textContent.includes('Connect to another computer')"), "Settings search changes section");
     win.webContents.send("workspaces:open-settings");
-    await until(() => evaluate("document.body.textContent.includes('Connect to a server') && document.querySelector('input[aria-label=\"Search settings\"]').value === ''"), "native connection request clears Settings search");
+    await until(() => evaluate("document.body.textContent.includes('Connect to another computer') && document.querySelector('input[aria-label=\"Search settings\"]').value === ''"), "native connection request clears Settings search");
 
     const remote = await open(false);
     assert.deepEqual(await remote.webContents.executeJavaScript("({ server: typeof window.ogb?.environments, companion: typeof window.ogb?.remoteClient, sharing: typeof window.ogb?.computerSharing, node: typeof window.require, workspaceMethods: Object.keys(window.ogb?.workspaces ?? {}) })"),

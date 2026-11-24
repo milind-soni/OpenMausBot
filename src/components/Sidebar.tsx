@@ -22,7 +22,7 @@ import { copyText } from "@/lib/copy-text";
 import type { LocaleKey } from "@/locales";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { BulkSelectFilters, ThreadListFooter, deleteThreadsInBulk, retitleThreadsInBulk, useBulkSelect } from "./BulkSelectBar";
-import { SidebarThreadLabels, ThreadFoldChevron, useRowUnfolded } from "./SidebarThreadLabels";
+import { SidebarThreadLabels, ThreadFoldChevron, useFillOnLabel } from "./SidebarThreadLabels";
 import { RoomMark, StackedMauses } from "./StackedMauses";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { nextRename } from "@/lib/rename";
@@ -46,7 +46,6 @@ import {
   BOTS_SECTION_ID,
   CHANNELS_SECTION_ID,
   PINNED_SECTION_ID,
-  PINNED_THREADS_SECTION_ID,
   TOOLS_SECTION_ID,
   UNREAD_SECTION_ID,
   partitionSidebarBots,
@@ -87,7 +86,7 @@ import { isSidebarToggle } from "@/lib/keyboard-shortcuts";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { useBotUnread, useUnreadHold } from "./unread-notice";
-import { attentionHasRunningWork, attentionJumpAction, attentionUnpinAction, crossBotAttentionThreads, crossBotPinnedThreads, hasCrossBotRunningWork, runningRoutineRun, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
+import { attentionHasRunningWork, attentionJumpAction, crossBotAttentionThreads, hasCrossBotRunningWork, runningRoutineRun, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
 import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
 import { BotContextMenu } from "./SidebarBotMenu";
 export { BotContextMenu };
@@ -95,12 +94,11 @@ import { AvatarActivityDot, AvatarCornerDot, RowDot, RowStatusText, rowSelectedS
 
 
 import { SidebarAttentionPanel } from "./SidebarAttentionPanel";
-import { SidebarPinnedThreadsPanel } from "./SidebarPinnedThreadsPanel";
 import { useLiveMedia } from "@/lib/live-call-media";
 import { LiveCallPill, liveBadgeFor } from "./LiveCallPill";
 import { ShortcutHint } from "./ShortcutHint";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
-import { useAdvancedMode } from "@/lib/interface-mode";
+import { useAdvancedMode } from "@/lib/interface-mode"; import { useRoomFeed } from "./room-feed/use-room-feed"; import { feedPreview } from "@/lib/room-feed";
 import { myDefaultBot, useViewerEmail, useWelcomingBot } from "@/lib/default-bot";
 import { PinnedBotRoster, PinnedCircleThreadSection } from "./PinnedCircleThreads";
 import { archiveBotWithNotice, onArchiveNotice } from "./bot-archive";
@@ -151,7 +149,7 @@ export const GroupListItem = memo(function GroupListItem({
   onMenu: (menu: { groupId: string; x: number; y: number }) => void;
 }) {
   const dispatch = useStoreDispatch(), bots = useStoreSelector((s) => s.bots, sameDrawnBots), instances = useStoreSelector((s) => s.instances);
-  const advanced = useAdvancedMode();
+  const advanced = useAdvancedMode(), feed = useRoomFeed(group);
   const selected = useStoreSelector((s) => s.activeView === "chat" && s.selectedId === group.id);
   const [threadsOpen, setThreadsOpen] = useSearchDisclosure(`group:${group.id}`, query ?? "", searchMatchesThreads(query ?? "", group.tasks), selected);
   const wasSelected = useRef(selected);
@@ -159,7 +157,7 @@ export const GroupListItem = memo(function GroupListItem({
     if (selected && !wasSelected.current) setThreadsOpen(true);
     wasSelected.current = selected;
   }, [selected]);
-  const hasThreadList = (group.tasks?.length ?? 1) > 1 || Boolean(query);
+  const hasThreadList = !feed && ((group.tasks?.length ?? 1) > 1 || Boolean(query));
   const expanded = !group.dm && threadsOpen && density !== "icons" && hasThreadList;
   const simpleRow = !advanced && density === "comfortable";
   const railTile = !advanced && density === "icons";
@@ -204,7 +202,7 @@ export const GroupListItem = memo(function GroupListItem({
           {simpleRow && !expanded && group.unread && <RowDot />}
         </div>
         {!expanded && <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-[13px] leading-[18px] text-ink-secondary">{group.description || groupPreview(group, bots, instances, advanced)}</span>
+          <span className="truncate text-[13px] leading-[18px] text-ink-secondary">{group.description || (feed && feedPreview(group)) || groupPreview(group, bots, instances, advanced)}</span>
           {!simpleRow && group.unread && <span className="size-2 shrink-0 rounded-full bg-accent" />}
         </div>}
         {simpleRow && <RowStatusText unread={group.unread} />}
@@ -217,7 +215,7 @@ export const GroupListItem = memo(function GroupListItem({
       onClick={() => setThreadsOpen((open) => !open)} className="absolute left-0.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-ink-secondary outline-none hover:text-ink focus-visible:ring-1 focus-visible:ring-accent/60">
       <ChevronRight aria-hidden="true" size={12} className={cn("transition-transform", expanded && "rotate-90")} />
     </button>}
-    {!group.dm && density !== "icons" && <button type="button" disabled={roomBusy} aria-label={t("task.newShort")} title={t(roomBusy ? "task.newBusy" : "task.newShort")}
+    {!group.dm && !feed && density !== "icons" && <button type="button" disabled={roomBusy} aria-label={t("task.newShort")} title={t(roomBusy ? "task.newBusy" : "task.newShort")}
       onClick={() => { setThreadsOpen(true); dispatch({ type: "newGroupTask", groupId: group.id }); }}
       className="pointer-events-none absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink disabled:opacity-40 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:pointer-events-auto max-md:opacity-70 touch:pointer-events-auto touch:opacity-70 touch:disabled:opacity-40"><Plus size={16} /></button>}
     </div>
@@ -711,7 +709,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const iconOnly = density === "icons";
   const expanded = showThreads && !iconOnly && threadsOpen && hasThreadList;
   useEffect(() => { if (iconOnly) setRenaming(false); }, [iconOnly]);
-  const simpleRow = !advanced && !showThreads && density === "comfortable", unfolded = useRowUnfolded(bot, props.drafting) && simpleRow, rowSelected = selected && !unfolded;
+  const simpleRow = !advanced && !showThreads && density === "comfortable", fillOnLabel = useFillOnLabel(bot, props.drafting) && simpleRow, rowSelected = selected && !fillOnLabel;
   const simpleList = !advanced && !iconOnly;
   const railTile = iconOnly && !advanced;
   const avatarSize = iconOnly ? (railTile ? 36 : 44) : showThreads ? 32 : simpleRow ? 36 : 44;
@@ -1124,7 +1122,6 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const archivedEntry = remoteClient ? undefined : { count: archivedBots.length, open: () => setArchivedBotsOpen(true) };
   const showAttention = (advanced && inboxSupport === "no") || (attentionPinned && density !== "icons");
   const attention = showAttention ? crossBotAttentionThreads(state.bots, state.pendingQueued, undefined, state.groups) : [];
-  const pinnedThreads = crossBotPinnedThreads(state.bots, state.groups, state.pendingQueued);
   const pendingBotUndo = teamFeedback?.restoreBot;
   const botRow = (bot: Bot) => botRowProps(state, dispatch, bot, { density, query: q, onMenu: setMenu, renameRequest: renameRequest?.botId === bot.id ? renameRequest.nonce : 0, ...drops.row(bot.id) });
   const railSearch = () => {
@@ -1246,7 +1243,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
       <GlassScrollFrame className="flex-1" fade><PlaceTint />
       <GlassBar edge="top">
       <div
-        data-sidebar-top-row={corner ? "corner" : true}
+        data-sidebar-top-row={corner ? "corner" : simpleDesk ? "simple" : true}
         className={cn(
           "flex items-center",
           // The corner is no drag region and takes no clicks but its buttons': the tiles rise into the rest of it.
@@ -1343,15 +1340,6 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
         />
       )}
 
-      {density !== "icons" && (
-        <SidebarPinnedThreadsPanel
-          entries={pinnedThreads}
-          onJump={(entry) => dispatch(attentionJumpAction(entry))}
-          onUnpin={(entry) => dispatch(attentionUnpinAction(entry))}
-          collapsed={sectionCollapsed(PINNED_THREADS_SECTION_ID)}
-          onToggle={layoutInteractive ? () => toggleSection(PINNED_THREADS_SECTION_ID) : undefined}
-        />
-      )}
       {tiles && <SidebarTileGrid primary={primary} pinned={pinnedBots} row={botRow} corner={corner} />}
       {simpleDesk && !tiles && <SidebarNoBots />}
       </GlassBar>

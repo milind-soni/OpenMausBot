@@ -6,12 +6,14 @@
 // choice to keep this computer's bots here (Settings → MausBot Cloud, Advanced) is kept beside the journal.
 import { createHash } from "node:crypto";
 import { createReadStream, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 
 import { installCloudSend, openOwnerSession } from "./cloud-send-main.mjs";
 import { choosable, createBotMove } from "./bot-move-main.mjs";
 import { createMoveLease } from "./move-lease.mjs";
+import { moveLending as lendingFacts, shownFolder } from "./move-lending.mjs";
 import { createMoveSession } from "./move-session.mjs";
 import { createMoveStatusReport, moveStatus } from "./move-status.mjs";
 import { createHomeAgain } from "./one-home-again.mjs";
@@ -137,7 +139,7 @@ async function answer(response) {
  * installCloudSend's.
  */
 export function installOneHome({ localRequest: anyServer, clean = null, account, journalFile, tempRoot, lend, phone, openHome, openLocal, restart, version, log = () => {}, journal: kept, keep: keptChoice, openTeam, teamJournal,
-  reportTimers, other = () => null, accountsHere = () => 1, chooses = false, t = nativeText.englishText.t, ...sendDeps }) {
+  reportTimers, other = () => null, accountsHere = () => 1, chooses = false, t = nativeText.englishText.t, moveLending = () => null, allowCommands = async () => false, ...sendDeps }) {
   const fetchImpl = sendDeps.fetch ?? globalThis.fetch;
   const localRequest = clean ? clean.realCopy(anyServer) : anyServer;
   const onOwnCopy = (work) => (clean ? clean.holding(work) : work());
@@ -316,14 +318,39 @@ export function installOneHome({ localRequest: anyServer, clean = null, account,
   // Asked on whichever page is open: a person just back from buying My Cloud is looking at My Cloud. The bots come from this
   // computer's own server, never from the page; the page only names which of them.
   sendDeps.ipcMain.handle("cloud-send:bot-choices", onPage("cloud-send:bot-choices", async () => ({ bots: (await botsHere()).map((bot) => ({ id: bot.id, name: bot.name })) })));
-  sendDeps.ipcMain.handle("cloud-send:move-bots", onPage("cloud-send:move-bots", async (ids) => {
+  // What moving these bots changes for them, before the person presses Move: their setup from this computer's server,
+  // and what this computer lends My Cloud now.
+  sendDeps.ipcMain.handle("cloud-send:move-changes", localPage("cloud-send:move-changes", async (ids) => {
+    const asked = (Array.isArray(ids) ? ids.map(String) : []).filter((id) => /^[\w-]{1,128}$/u.test(id)).slice(0, 500);
+    if (!asked.length) return null;
+    const got = await local.call("GET", `/api/cloud-send/changes?bots=${asked.map(encodeURIComponent).join(",")}`);
+    if (!got.ok || !got.body?.facts) return null;
+    const lent = await Promise.resolve().then(moveLending).catch(() => null);
+    const { paths, ...facts } = got.body.facts;
+    return { facts: { ...facts, folder: shownFolder(facts.folder ?? null, homedir()) },
+      lending: lendingFacts({ state: lent?.state ?? null, paused: lent?.paused === true, folders: Array.isArray(paths) ? paths : [], home: homedir() }) };
+  }));
+  // `options`, from the move step: `folder` false keeps the bots' working folders from being lent (they were before the
+  // step showed it, and are whenever it says nothing); `commands` asks main's own dialog, which defaults to Cancel, to let
+  // the person's Clouds run commands here, unless they may already. A grant that fails is said on the move's own line.
+  sendDeps.ipcMain.handle("cloud-send:move-bots", onPage("cloud-send:move-bots", async (ids, options) => {
     if (!botMoveState().available) throw new Error(t("native.cloud.keepNoCloud"));
     const asked = new Set(Array.isArray(ids) ? ids.map(String) : []);
     const bots = (await botsHere()).filter((bot) => asked.has(bot.id)).map((bot) => ({ id: bot.id, name: bot.name }));
     if (!bots.length) throw new Error(t("teamMove.refused.notABot"));
+    let commandsError = null;
+    if (options?.commands === true) {
+      const lent = await Promise.resolve().then(moveLending).catch(() => null);
+      if (lent?.state?.terminal !== true) {
+        await Promise.resolve().then(allowCommands).catch((error) => {
+          commandsError = String(error?.message ?? error).slice(0, 300) || "?";
+          log(`bot move: commands not lent (${commandsError})`);
+        });
+      }
+    }
     choice.write({ v: 1, answered: true });
     await home.keep(true);
-    botMove.start(bots, oneHomeCloud(account()?.state())?.account ?? null);
+    botMove.start(bots, oneHomeCloud(account()?.state())?.account ?? null, { keepFolders: options?.folder !== false, ...(commandsError ? { commandsError } : {}) });
     return botMoveState();
   }));
   sendDeps.ipcMain.handle("cloud-send:move-everything", onPage("cloud-send:move-everything", () => {

@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { InstanceConfigMap } from "./contracts.ts";
 import { resolveClaudeConfigDir } from "./drivers/claude.ts";
-import { codexHome } from "./drivers/codex-identity.ts";
+import { codexHome } from "./drivers/codex-identity.ts"; import { chatgptAccountHome, chatgptAccountSignsInByDevice } from "./drivers/codex-account-home.ts";
 import { codexHasCredits } from "./codex-credits.ts";
 import { antigravityNativePlanUsage, antigravityPlanUsage, antigravityRunsNativeCli } from "./drivers/antigravity-usage-limits.ts";
 import { harnessHome, sealedFixture } from "./env-path.ts";
@@ -146,21 +146,21 @@ const PRODUCT_NAME: Record<PlanDriver, string> = {
   antigravity: "Antigravity",
 };
 
-export function planAccountsFromInstances(instances: InstanceConfigMap): PlanAccount[] {
+export function planAccountsFromInstances(instances: InstanceConfigMap, env: NodeJS.ProcessEnv = process.env): PlanAccount[] {
   const accounts: PlanAccount[] = [];
   for (const [id, entry] of Object.entries(instances)) {
     const driver = DRIVER_OF[entry.driver];
     if (!driver) continue;
-    const config = asRecord(entry.config);
-    const configDir = typeof config?.configDir === "string" ? config.configDir : undefined;
+    const config = asRecord(entry.config), configDir = typeof config?.configDir === "string" ? config.configDir : undefined;
+    const ownCodexHome = driver === "codex" && chatgptAccountSignsInByDevice(config, env);
     accounts.push({
       id,
       name: entry.displayName?.trim() || PRODUCT_NAME[driver],
       driver,
-      environment: { ...entry.environment },
+      environment: { ...entry.environment, ...(ownCodexHome ? { CODEX_HOME: chatgptAccountHome(id) } : {}) },
       ...(configDir ? { configDir } : {}),
-      // Reading ~/.codex/auth.json for a ChatGPT-plan provider would report (and hold it on) another account's limit.
-      ...(config?.authMode === "chatgpt-plan" || (driver === "claude" && config?.usageMeter === false) ? { noUsage: true as const } : driver === "antigravity" && typeof config?.cli === "string" ? { antigravityCli: config.cli } : {}),
+      // Reading ~/.codex/auth.json for a browser-signed ChatGPT plan would report (and hold it on) another account's limit.
+      ...((config?.authMode === "chatgpt-plan" && !ownCodexHome) || (driver === "claude" && config?.usageMeter === false) ? { noUsage: true as const } : driver === "antigravity" && typeof config?.cli === "string" ? { antigravityCli: config.cli } : {}),
     });
   }
   return accounts;

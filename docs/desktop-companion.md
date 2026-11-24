@@ -7,38 +7,40 @@ server**. The bots, their conversations, keys and routines stay on the host.
 Any desktop build can be the host or the client: Windows, macOS or Ubuntu. Both computers need Tailscale, signed in to
 the same Tailscale account, with MagicDNS on. Nothing here is reachable from outside your Tailscale network.
 
-A phone uses a different path: **Settings → Phone & devices → Pair a phone**. A phone's code has six digits and only
+A phone uses a different path: **Settings → Devices → Phones and tablets → Add a phone**. A phone's code has six digits and only
 the phone app can use it. The link a phone pairing creates is phone-only too: a desktop client that refuses it is
 behaving as expected. A computer needs the link below.
 
 ## Share the host
 
-1. On the host, open **Settings → Phone & devices**. Settings search finds the row too: type "other computers" or
+1. On the host, open **Settings → Devices**. Settings search finds the row too: type "other computers" or
    "tailscale".
-2. Turn on **Your other computers**. This turns Tailscale on in the app first, if it is off, and turning the share off
+2. On the **Private network** row under **You're here**, choose **Set up Tailscale** (or **Allow my other computers**),
+   then keep its switch, **Your other computers**, on. This turns Tailscale on in the app first, if it is off, and turning the share off
    turns it off again unless you turned Tailscale on yourself or a phone is paired. The app never installs, starts or
    signs in Tailscale itself: if Tailscale is not installed, not running, signed out or waiting for approval on your
    Tailscale network, the row says so.
-3. Wait for the line under the row: `Ready at https://<name>.ts.net` when Tailscale's HTTPS Certificates are on, or
-   `Ready at http://<name>.ts.net:8799` when they are off. Both are private to your Tailscale network.
-4. Choose **Pair a computer**. The dialog shows the address and a 12-character code, with **Copy link**. The code works
-   once, and the dialog says until when.
+3. Wait for the row to say **On**: the host answers at `https://<name>.ts.net` when Tailscale's HTTPS Certificates are
+   on, or at `http://<name>.ts.net:8799` when they are off. Both are private to your Tailscale network.
+4. Choose **Add a computer** in **Computers**. Its last step shows **Copy link** and a 12-character code. The code works
+   once, and the step says until when.
 
-In Advanced mode the same page also has **More ways in → Tailscale**, the switch step 2 turns on for you.
+The private network row in **You're here** on the same page is where Tailscale is set up; while it is on, phones reach
+this computer over it too, and **Turn off for phones** turns it off once the share is off.
 
 ## Connect the client
 
-1. On the client, choose **＋** at the end of the rail, then **Connect to a server**.
+1. On the client, choose **＋** at the end of the rail, then **Connect to another computer**.
 2. Paste the link. Or type the address and the code in their two boxes.
 3. The sheet names the host it found and says it is on Tailscale. Choose **Connect to** and the host's name.
 
 The host now sits on the client's rail beside This computer. To end a connection from the host's side, remove that
-device under **Paired** on the host's Phone & devices page. Turning **Your other computers** off stops the host
+device under **Computers** on the host's Devices page. Turning **Your other computers** off stops the host
 answering every other computer at once.
 
 ## Keep the host reachable
 
-The host must be on, awake and connected to Tailscale. **Keep this computer awake** on the host's Phone & devices page
+The host must be on, awake and connected to Tailscale. **Keep this computer awake** on the host's Devices page
 holds it awake while a way in is on, and that includes **Your other computers**.
 
 ## What the client says when it can't connect

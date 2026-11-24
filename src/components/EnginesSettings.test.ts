@@ -72,6 +72,35 @@ describe("Settings → Engines → ChatGPT accounts", () => {
   });
 });
 
+describe("Settings → Engines → a Cloud's ChatGPT accounts", () => {
+  const device = (instanceId: string, displayName: string, email: string): InstanceInfo => ({
+    instanceId, driverKind: "codex", displayName, cliDefault: "codex",
+    snapshot: { state: "available", authenticated: true, account: { email } },
+    models: { default: "gpt", options: [] }, authentication: { method: "device-code", signOut: true },
+  });
+
+  it("lists each device-code account by the ChatGPT account it is signed in as, each with its own sign-out", () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    const first = device("codex", "Codex", "first@example.test"), work = device("chatgpt-work", "Work", "work@example.test");
+    fixture.instances = [first, work];
+    fixture.bots = [];
+    const html = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(html).toContain('data-account="codex" data-account-state="signedIn"');
+    expect(html).toContain('data-account="chatgpt-work" data-account-state="signedIn"');
+    expect(html).toContain("first@example.test");
+    expect(html).toContain("work@example.test");
+    expect(html).toContain("Add another ChatGPT account");
+    // OpenAI's organization refusal is about the browser sign-in, which a Cloud never uses.
+    expect(html).not.toContain("3p_delegated_access_policy_denied");
+    expect(accountActions("chatgpt", first)).toEqual({ signOut: true, remove: false, hide: true });
+    expect(accountActions("chatgpt", work)).toEqual({ signOut: true, remove: true, hide: false });
+
+    fixture.instances = [first, { ...work, snapshot: { state: "available", authenticated: true, chatgptPlan: true }, authentication: { method: "browser-pkce", signOut: true } }];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain("3p_delegated_access_policy_denied");
+  });
+});
+
 describe("Settings → Engines → Grok", () => {
   function renderGrok(authenticated: boolean): string {
     vi.stubGlobal("window", {});

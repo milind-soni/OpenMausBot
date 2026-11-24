@@ -375,7 +375,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
             if (instance.authenticationMethod === "browser") {
               return json(res, 403, { error: `This sign-in happens in a browser on the computer running ${productName()}. Open ${productName()} there to sign in.` });
             }
-            return json(res, 403, { error: "Continue with ChatGPT on the computer running OpenMausBot. Hosted Pro sign-in requires OpenAI's hosted-app approval." });
+            return json(res, 403, { error: `Continue with ChatGPT on the computer running ${productName()}: this sign-in finishes in a browser there. Open ${productName()} on that computer to sign in.` });
           }
           const started = await providerAuthSessions.start(instance, owner);
           if (started.phase === "succeeded") registry.forgetSnapshots();

@@ -339,7 +339,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
       "members", ["people", "members", "invite", "roles", "admins", "sign in access"], () => "managed in Settings"),
     ownerOnly("remote.domain", "Custom domain", "The web address this self-hosted server answers on. Changing it can cut off the address the person is using right now.", "domain",
       ["domain", "custom domain", "dns", "public url"], () => cfg().customDomain ?? ""),
-    ownerOnly("remote.httpsAddress", "HTTPS address", "This computer's public HTTPS address for paired devices; turning it off can cut off the device the person is using now.", "tailscale",
+    ownerOnly("remote.httpsAddress", "HTTPS address", "This computer's public HTTPS address for paired devices; turning it off can cut off the device the person is using now.", "https-address",
       ["https", "public address"], () => "managed in Settings"),
   ];
 

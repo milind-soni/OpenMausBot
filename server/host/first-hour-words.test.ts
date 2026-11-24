@@ -13,10 +13,18 @@ describe("the first hour's words", () => {
     for (const language of FIRST_HOUR_LANGUAGES) {
       const w = firstHourWords(language);
       const english = language !== "en" ? firstHourWords("en") : null;
-      for (const line of [w.connect, w.connected, w.briefOn, w.phoneTitle, w.phoneBody, w.phoneButton, w.firstLookReady, w.firstBriefReady]) {
+      const lines = (words: typeof w) => [words.connect, words.lookLater("Gmail", 1), words.arrivedGreeting("Sam", "MausBot", ["Coder"]), words.briefOn, words.phoneTitle, words.phoneBody, words.phoneButton, words.firstLookReady, words.firstBriefReady];
+      for (const line of lines(w)) {
         expect(line.trim(), language).not.toBe("");
-        if (english) expect([english.connect, english.connected, english.briefOn, english.phoneTitle, english.phoneBody, english.phoneButton, english.firstLookReady, english.firstBriefReady], language).not.toContain(line);
+        if (english) expect(lines(english), language).not.toContain(line);
       }
+      expect(w.lookLater("Gmail and Google Calendar", 2), language).toContain("Gmail and Google Calendar");
+      for (const arrived of [["Coder"], ["Coder", "Writer"]]) {
+        const line = w.arrivedGreeting("Sam", "MausBot", arrived);
+        for (const part of ["Sam", "MausBot", ...arrived]) expect(line, language).toContain(part);
+      }
+      expect(w.arrivedGreeting(undefined, "MausBot", ["A", "B", "C", "D"]), language).toContain("4");
+      expect(w.arrivedGreeting(undefined, "MausBot", ["Coder"]), language).not.toContain("undefined");
       expect(w.greeting("Sam", "MausBot"), language).toContain("Sam");
       expect(w.greeting(undefined, "MausBot"), language).toContain("MausBot");
       expect(w.greeting(undefined, "MausBot"), language).not.toContain("undefined");

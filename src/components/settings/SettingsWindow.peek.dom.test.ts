@@ -12,6 +12,7 @@ const fx = vi.hoisted(() => ({
   listeners: new Set<() => void>(),
   dispatch: vi.fn(),
   setAdvancedMode: vi.fn(),
+  features: {} as Record<string, boolean>,
 }));
 const { marker } = vi.hoisted(() => ({ marker: (name: string) => () => `MARKER:${name};` }));
 
@@ -24,7 +25,7 @@ vi.mock("@/state/store", async (original) => {
     api: () => new Promise(() => {}),
     useStore: () => {
       const section = useSyncExternalStore(subscribe, () => fx.section);
-      return { state: { ...actual.initialState, appSettingsSection: section, config: { composio: { configured: false } }, instances: [], bots: [] }, dispatch: fx.dispatch };
+      return { state: { ...actual.initialState, appSettingsSection: section, config: { composio: { configured: false }, features: fx.features }, instances: [], bots: [] }, dispatch: fx.dispatch };
     },
   };
 });
@@ -60,6 +61,7 @@ function search(value: string) {
 beforeEach(() => {
   setLocale("en");
   fx.section = "overview";
+  fx.features = {};
   fx.dispatch.mockReset();
   fx.setAdvancedMode.mockReset();
   fx.dispatch.mockImplementation((action: { type: string; section?: AppSettingsSection }) => {
@@ -134,5 +136,30 @@ describe("an Advanced setting found from Simple", () => {
     expect(document.querySelector('[data-settings-peek="routing"]')?.textContent).toContain("Advanced setting");
     expect(body().textContent).not.toContain("MARKER:backup-model;");
     expect(fx.setAdvancedMode).not.toHaveBeenCalled();
+  });
+
+  it("opens an old link to Activity at the top of Data in the desktop app, where only a browser has Activity", async () => {
+    vi.stubGlobal("ogb", { platform: "darwin" });
+    fx.section = "activity";
+    flushSync(() => root.render(createElement(SettingsModal)));
+    await vi.waitFor(() => expect(body().getAttribute("data-settings-page-body")).toBe("data"));
+    expect(body().querySelector('[data-settings-block="storage"]')).not.toBeNull();
+    expect(body().querySelector('[data-settings-block="activity"]')).toBeNull();
+    expect(header().textContent).toContain("Advanced setting");
+    expect(fx.setAdvancedMode).not.toHaveBeenCalled();
+  });
+
+  it("finds no Repeat computer tasks without AI where the server can't repeat saved steps, so no mark sits over an empty section", async () => {
+    flushSync(() => root.render(createElement(SettingsModal)));
+    search("repeat");
+    expect(hit("saved-steps")).toBeNull();
+    flushSync(() => root.unmount());
+    fx.features = { savedStepsHere: true };
+    root = createRoot(host);
+    flushSync(() => root.render(createElement(SettingsModal)));
+    search("repeat");
+    flushSync(() => hit("saved-steps").click());
+    await vi.waitFor(() => expect(document.querySelector('[data-settings-peek="automation"]')?.textContent).toContain("Advanced setting"));
+    expect(body().querySelector('[data-settings-block="automation"]')?.textContent).toContain("Repeat computer tasks without AI");
   });
 });
