@@ -1,7 +1,7 @@
 // Mid-turn sends wait here off the transcript (else they become the active leaf mid-turn) and survive Stop: stop-then-steer is the feature.
 
 import { newId } from "./contracts.ts";
-import { chatFollowups, prepared, saveChatFollowup, settleChatFollowups } from "./message-db.ts";
+import { chatFollowups, prepared, saveChatFollowup, settleChatFollowups, writeFollowups } from "./message-db.ts";
 import { drainCoalesceHead } from "./admission.ts";
 import { spokenLineFields } from "./live-call-record.ts";
 import { workOriginSchema, type WorkOrigin } from "./peer-provenance.ts";
@@ -52,11 +52,15 @@ export type SteerQueueHead = Pick<QueueEntry["items"][number], "trigger" | "send
 
 const queues = new Map<string, QueueEntry>();
 
-/** Restore reads a thread's followups back by rowid: this moves them behind every other row, in its queue's order. */
-function persistOrder(threadId: string): void {
-  const { top } = prepared("SELECT coalesce(max(rowid), 0) AS top FROM chat_followups").get() as { top: number };
-  prepared("UPDATE chat_followups SET rowid = ?2 + 1 + (SELECT key FROM json_each(?1) WHERE value = chat_followups.id) WHERE id IN (SELECT value FROM json_each(?1))")
-    .run(JSON.stringify(queues.get(threadId)?.items.map((item) => item.messageId) ?? []), top);
+/** One FULL-sync commit, or nothing: `rows` land and, since restore reads a thread's followups by rowid, the thread's rows
+ * move behind every other row in `order`, the queue it is about to hold. */
+function saveInOrder(botId: string, threadId: string, rows: QueueEntry["items"], order: QueueEntry["items"]): void {
+  writeFollowups(() => {
+    for (const item of rows) saveChatFollowup({ id: item.messageId, kind: "bot", ownerId: botId, threadId, payload: item });
+    const { top } = prepared("SELECT coalesce(max(rowid), 0) AS top FROM chat_followups").get() as { top: number };
+    prepared("UPDATE chat_followups SET rowid = ?2 + 1 + (SELECT key FROM json_each(?1) WHERE value = chat_followups.id) WHERE id IN (SELECT value FROM json_each(?1))")
+      .run(JSON.stringify(order.map((item) => item.messageId)), top);
+  });
 }
 
 export interface HeldSteerQueue {
@@ -144,15 +148,15 @@ export function queueSteeredMessage(
     ...(options.rowId ? { rowId: options.rowId } : {}),
     ...(options.mentions?.length ? { mentions: options.mentions } : {}),
   };
-  saveChatFollowup({ id, kind: "bot", ownerId: botId, threadId, payload: item });
   // `first`: ahead of everything queued but the person's own messages sent before it; with `aheadOfOthers` (the person
   // whose request runs, where several people write), ahead of everyone else's too.
   const ahead = options.first ? entry.items.findIndex((other) => other.peerAsk !== undefined || other.unattended === true || other.queuedAt > item.queuedAt
     || (options.aheadOfOthers !== undefined && other.sender?.id !== options.aheadOfOthers)) : -1;
+  if (ahead < 0) saveChatFollowup({ id, kind: "bot", ownerId: botId, threadId, payload: item });
+  else saveInOrder(botId, threadId, [item], [...entry.items.slice(0, ahead), item, ...entry.items.slice(ahead)]);
   if (ahead < 0) entry.items.push(item);
   else entry.items.splice(ahead, 0, item);
   queues.set(threadId, entry);
-  if (ahead >= 0) persistOrder(threadId);
   changed();
   return { id };
 }
@@ -332,9 +336,10 @@ export function settleHeldSteeredQueue(held: HeldSteerQueue): void {
  * the transcript row (`rowIds`, one per item) the drain reuses instead of writing it again. */
 export function requeueSettledSteer(held: HeldSteerQueue, rowIds: readonly string[]): void {
   const items = held.items.map((item, index) => ({ ...item, rowId: rowIds[index] }));
-  for (const item of items) saveChatFollowup({ id: item.messageId, kind: "bot", ownerId: held.botId, threadId: held.threadId, payload: item });
+  const existing = queues.get(held.threadId);
+  if (existing && existing.botId !== held.botId) throw new Error("queued task belongs to another bot");
+  saveInOrder(held.botId, held.threadId, items, [...items, ...(existing?.items ?? [])]);
   restoreHeldSteeredQueue({ ...held, items });
-  persistOrder(held.threadId);
 }
 
 export function _queuedCount(threadId: string): number {

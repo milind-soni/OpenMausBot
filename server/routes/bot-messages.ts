@@ -454,11 +454,13 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         for (const message of messages) handoffs.steered(bot.threadId, steerTarget, instance?.instanceId, message.id);
         const queueIds = held.items.map((item) => item.messageId);
         settleHeldSteeredQueue(held);
-        // After it is recorded, each line loses its mark and waits once more, in order, at the head of the queue.
+        // After it is recorded, each line waits once more, in order, at the head of the queue, then loses its mark; a
+        // queue that could not be written keeps the lines as delivered, as they were.
         refusedLate = () => {
           refusedLate = () => {};
+          try { requeueSettledSteer(held, messages.map((message) => message.id)); }
+          catch (error) { console.warn("steer: could not queue a steer the agent turned down", error); return; }
           for (const message of messages) store.patchMessage(bot.threadId, message.id, { steered: undefined });
-          requeueSettledSteer(held, messages.map((message) => message.id));
         };
         return json(res, 200, { ok: true, steered: true, threadId: bot.threadId, messages, queueIds });
       }

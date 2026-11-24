@@ -7,6 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { DATA_DIR } from "./config.ts";
 import { closeMessageDb, saveChatFollowup } from "./message-db.ts";
 import { killCliTree } from "./procs.ts";
 import {
@@ -155,6 +156,69 @@ describe("steer-queue module", () => {
     const queue = holdSteeredQueue(bot.id, bot.threadId, later.id)!;
     restoreHeldSteeredQueue(queue);
     expect(queue.items.map((item) => item.text)).toEqual(["put back", "queued later"]);
+  });
+
+  // A second connection, as a restarted process would open it: it sees only what was committed.
+  const onDisk = <T,>(read: (database: DatabaseSync) => T): T => {
+    const database = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    try { return read(database); } finally { database.close(); }
+  };
+  const diskOrder = (threadId: string) => onDisk((database) => (database
+    .prepare("SELECT json_extract(payload, '$.text') AS text FROM chat_followups WHERE thread_id = ? AND status = 'pending' ORDER BY rowid")
+    .all(threadId) as Array<{ text: string }>).map((row) => row.text));
+  const queuedTexts = (botId: string, threadId: string, anyId: string) => {
+    const queue = holdSteeredQueue(botId, threadId, anyId)!;
+    restoreHeldSteeredQueue(queue);
+    return queue.items.map((item) => item.text);
+  };
+
+  it("writes nothing and queues nothing when a late refusal's batch fails halfway, across a restart", () => {
+    const bot = fakeBot("bot-late-atomic", "thread-late-atomic", true);
+    const a = queueSteeredMessage(bot.id, bot.threadId, "A");
+    queueSteeredMessage(bot.id, bot.threadId, "B");
+    const held = holdSteeredQueue(bot.id, bot.threadId, a.id)!;
+    settleHeldSteeredQueue(held);
+    const c = queueSteeredMessage(bot.id, bot.threadId, "C");
+    const notified = vi.fn();
+    const stop = onSteeredQueueChange(notified);
+    onDisk((database) => database.exec(`CREATE TRIGGER refuse_b BEFORE INSERT ON chat_followups WHEN NEW.id = '${held.items[1]!.messageId}' BEGIN SELECT RAISE(ABORT, 'disk full'); END`));
+    try {
+      expect(() => requeueSettledSteer(held, ["row-a", "row-b"])).toThrow(/disk full/);
+    } finally { onDisk((database) => database.exec("DROP TRIGGER refuse_b")); stop(); }
+    expect(notified).not.toHaveBeenCalled();
+    expect(queuedTexts(bot.id, bot.threadId, c.id)).toEqual(["C"]);
+    closeMessageDb();
+    restoreSteeredMessages();
+    expect(queuedTexts(bot.id, bot.threadId, c.id)).toEqual(["C"]);
+  });
+
+  it("writes nothing and queues nothing when a message put back at the head cannot take its place, across a restart", () => {
+    const bot = fakeBot("bot-first-atomic", "thread-first-atomic", true);
+    const later = queueSteeredMessage(bot.id, bot.threadId, "queued later", { queuedAt: 2 });
+    const notified = vi.fn();
+    const stop = onSteeredQueueChange(notified);
+    onDisk((database) => database.exec("CREATE TRIGGER refuse_order BEFORE UPDATE ON chat_followups BEGIN SELECT RAISE(ABORT, 'disk full'); END"));
+    try {
+      expect(() => queueSteeredMessage(bot.id, bot.threadId, "put back", { first: true, queuedAt: 1 })).toThrow(/disk full/);
+    } finally { onDisk((database) => database.exec("DROP TRIGGER refuse_order")); stop(); }
+    expect(notified).not.toHaveBeenCalled();
+    expect(queuedTexts(bot.id, bot.threadId, later.id)).toEqual(["queued later"]);
+    closeMessageDb();
+    restoreSteeredMessages();
+    expect(queuedTexts(bot.id, bot.threadId, later.id)).toEqual(["queued later"]);
+  });
+
+  it("announces a late refusal's queue only once its order is committed", () => {
+    const bot = fakeBot("bot-late-announce", "thread-late-announce", true);
+    const a = queueSteeredMessage(bot.id, bot.threadId, "A");
+    queueSteeredMessage(bot.id, bot.threadId, "B");
+    const held = holdSteeredQueue(bot.id, bot.threadId, a.id)!;
+    settleHeldSteeredQueue(held);
+    queueSteeredMessage(bot.id, bot.threadId, "C");
+    const seen: string[][] = [];
+    const stop = onSteeredQueueChange(() => seen.push(diskOrder(bot.threadId)));
+    try { requeueSettledSteer(held, ["row-a", "row-b"]); } finally { stop(); }
+    expect(seen).toEqual([["A", "B", "C"]]);
   });
 
   it("preserves self-opened request provenance through persistence and a capacity wait", () => {
