@@ -1,5 +1,5 @@
-import { WorkspaceChatContext } from "@/state/workspace-chat-context";
-import { MAIN_PANE } from "@/state/pane-layout";
+import { FocusedWorkspaceThread, WorkspaceLayoutContext, WorkspaceChatContext } from "@/state/workspace-chat-context";
+import { emptyPane, paneIds, placePane, MAIN_PANE, type PaneEdge } from "@/state/pane-layout";
 import { useContext } from "react";
 import { Columns2, MoreHorizontal, Rows2 } from "lucide-react";
 import { t } from "@/lib/i18n";
@@ -30,21 +30,35 @@ type Target = { ownerId: string; threadId: string };
 function usePaneOptions({ ownerId, threadId }: Target): SidebarMenuItem[] {
   const primary = useContext(WorkspaceChatContext);
   const store = useOptionalStoreRef();
-  if (!primary || !store || primary === threadId || store.state().workspacePanes?.panels[threadId]) return [];
-  return (["beside", "below"] as const).map((split) => ({
-    key: split,
-    label: t(split === "beside" ? "chat.openBeside" : "chat.openBelow"),
-    icon: split === "beside" ? <Columns2 size={16} /> : <Rows2 size={16} />,
-    onSelect: () => {
-      const kind = store.state().groups.some((group) => group.id === ownerId) ? "group" : "bot";
-      store.dispatch({ type: "openForkPanel", kind, ownerId, threadId, split, focusComposer: true });
-    },
-  }));
+  const layout = useContext(WorkspaceLayoutContext);
+  const focused = useContext(FocusedWorkspaceThread);
+  const anchor = !focused || focused === primary ? MAIN_PANE : focused;
+  const source = primary === threadId ? MAIN_PANE : threadId;
+  const ids = paneIds(layout);
+  if (!primary || !store) return [];
+  const kind = store.state().groups.some(group => group.id === ownerId) ? "group" : "bot";
+  const place = (target: string, edge: PaneEdge | "fill") => {
+    if (ids.includes(source)) store.dispatch({ type: "movePane", source, target, edge });
+    else store.dispatch({ type: "openForkPanel", kind, ownerId, threadId, target, edge, focusComposer: true });
+  };
+  const options: SidebarMenuItem[] = ids.flatMap((id, i) => emptyPane(id) ? [{
+    key: id, label: t("chat.fillSlot", { number: i + 1 }), icon: <Columns2 size={16} />, onSelect: () => place(id, "fill"),
+  }] : []);
+  if (anchor !== source && !emptyPane(anchor)) {
+    for (const [edge, label, Icon] of [
+      ["right", "chat.openBeside", Columns2], ["bottom", "chat.openBelow", Rows2],
+      ["left", "chat.openLeft", Columns2], ["top", "chat.openAbove", Rows2],
+    ] as const) {
+      options.push({ key: edge, label: t(label), icon: <Icon size={16} />,
+        disabled: !placePane(layout, source, anchor, edge), onSelect: () => place(anchor, edge) });
+    }
+  }
+  return options;
 }
 
 export function OpenPaneActions({ ownerId, threadId, onClose, menu }: Target & { onClose: () => void; menu?: boolean }) {
   return usePaneOptions({ ownerId, threadId }).map((item) =>
-    <button type="button" key={item.key} role={menu ? "menuitem" : undefined} className={MENU_ITEM + " text-ink hover:bg-menu-hover"}
+    <button type="button" key={item.key} disabled={item.disabled} role={menu ? "menuitem" : undefined} className={MENU_ITEM + " text-ink hover:bg-menu-hover disabled:opacity-40"}
       onClick={() => { onClose(); item.onSelect(); }}>{item.icon}{item.label}</button>);
 }
 

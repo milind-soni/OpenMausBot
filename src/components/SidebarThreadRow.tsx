@@ -1,4 +1,5 @@
-import { FocusedWorkspaceThread } from "@/state/workspace-chat-context";
+import { startPaneDrag } from "@/lib/workspace-pane-drag";
+import { WorkspaceChatContext, FocusedWorkspaceThread } from "@/state/workspace-chat-context";
 import { useSelectThreadPane, OpenPaneActions } from "./OpenPaneActions";
 import { memo, useContext, useEffect, useRef, useState, type Dispatch, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -272,6 +273,7 @@ const sameThreadRow = ({ task: previousTask, ...previous }: ThreadRowProps, { ta
 
 export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, current: selected, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSnooze, onLink, onRefreshPermissions, onMemory, activityLabel: liveActivity, now, selectMode = false, checked = false, onToggleSelect, panel = false, preview, main = false }: ThreadRowProps) {
   const selectPane = useSelectThreadPane(ownerId);
+  const canDrag = Boolean(useContext(WorkspaceChatContext));
   const focused = useContext(FocusedWorkspaceThread);
   const current = focused ? focused === task.threadId : selected;
   const activityLabel = useHeldText(liveActivity);
@@ -362,6 +364,8 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
         onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDraft(event.target.value)} onBlur={() => finishRename(true)}
         onKeyDown={(event) => { if (imeComposing(event.nativeEvent)) { event.stopPropagation(); return; } if (event.key === "Enter") { event.preventDefault(); finishRename(true); } else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finishRename(false); } }}
         dir="auto" className="m-1 min-w-0 flex-1 rounded border border-accent/50 bg-inset px-2 py-1 text-[13px] text-ink outline-none" /> : <button
+        draggable={canDrag && !selectMode}
+        onDragStart={(event) => { event.stopPropagation(); startPaneDrag(event, ownerId, task.threadId); }}
         type="button" data-sidebar-thread-row={task.threadId} aria-current={current ? "page" : undefined} data-look="sidebar-thread"
         title={[displayTitle, updatedStamp, status, closed ? t("task.closed") : null, archived ? t("task.archived") : null, snoozed ? t("task.snoozed") : null, task.unread ? t("task.unread") : null].filter(Boolean).join(" · ")}
         {...(selectMode ? { role: "checkbox", "aria-checked": checked, "aria-disabled": !tickable, "aria-label": t("task.bulk.rowCheck", { title: displayTitle }) } : {})}

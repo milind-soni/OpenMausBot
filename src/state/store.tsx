@@ -1,3 +1,4 @@
+import { MAX_PANES } from "./pane-layout";
 import { cloudAsleep, onCloudPower } from "../lib/cloud-power";
 import { api, ApiError, retryRequest, snapshotArrays } from "./api"; import { serverFetch } from "@/lib/relay-server";
 import { capHeldInBackground, loadOlderPage, MESSAGE_PAGE_SIZE, olderThanHeld, reduceOlderMessages, reduceTrimHeldMessages } from "./message-history";
@@ -940,7 +941,7 @@ function reduceApp(state: AppState, action: Action): AppState {
       };
     case "showChat":
       return state.activeView === "chat" ? state : { ...state, activeView: "chat" };
-    case "focusPane": case "resizePane": case "closePane": case "closeWorkspacePanes":
+    case "presetPanes": case "movePane": case "focusPane": case "resizePane": case "closePane": case "closeWorkspacePanes":
     case "forkMessage": case "openForkPanel": case "forkPanelLoaded": case "forkPanelLoadFailed":
     case "forkPanelMessage": case "forkPanelActive": case "closeForkPanel":
       return reduceForkPanel(state, action);
@@ -2196,6 +2197,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       action = pinBotThreadAction(action, stateRef.current.bots); if (runNewChat(action)) return;
       if (action.type === "taskSwitched") action = { ...action, bot: withTaskWrites(action.bot) as Bot };
       if (action.type === "botPatched") action = { ...action, bot: withTaskWrites(action.bot) };
+      if (action.type === "forkMessage" && Object.keys(store.getState().workspacePanes?.panels ?? {}).length >= MAX_PANES - 1) {
+        const message = t("chat.panesFull");
+        if (action.onError) action.onError(message);
+        else showError(new Error(message));
+        return;
+      }
       if (action.type === "openForkPanel" && !action.loadId) action = { ...action, loadId: randomUuid() };
       if ((action.type === "send" || action.type === "sendGroup" || action.type === "editMessage") && !action.sendId) action = { ...action, sendId: randomUuid() };
       const botBeforeUpdate =
@@ -2765,6 +2772,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "forkMessage": case "openForkPanel": {
+          if (action.type === "openForkPanel" && threadPanel(store.getState(), action.threadId)?.loadId !== action.loadId) break;
           runForkEffect(action, dispatch, rawDispatch, showError);
           break;
         }

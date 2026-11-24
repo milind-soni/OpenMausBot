@@ -1,3 +1,4 @@
+import { startPaneDrag } from "@/lib/workspace-pane-drag";
 import { useRef, useState, type Dispatch, type DragEvent, type KeyboardEvent, type PointerEvent, type ReactElement } from "react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -106,6 +107,8 @@ export function useSidebarRoomDrag({ dispatch, announce, enabled, groups }: {
         event.stopPropagation();
         event.dataTransfer.effectAllowed = "move";
         event.dataTransfer.setData(ROOM_ROW_DRAG_TYPE, groupId);
+        const group = latest.current.groups.find(item => item.id === groupId);
+        if (group) startPaneDrag(event, groupId, group.threadId);
         moving.from = groupId;
         setDragging(groupId);
       },

@@ -1,4 +1,4 @@
-import { firstPane, MAIN_PANE, replacePane, resizePane, type PaneLayout, type SplitDirection } from "./pane-layout";
+import { emptyPane, paneIds, placePane, presetLayout, type PaneEdge, type PanePreset, firstPane, MAIN_PANE, replacePane, resizePane, type PaneLayout, type SplitDirection } from "./pane-layout";
 import { api } from "./api";
 import { loadFullThread } from "./message-history";
 import { optimisticMessageId, optimisticUserMessage } from "./optimistic-send";
@@ -36,21 +36,46 @@ export function updatePanel(state: AppState, panel: ForkPanelState): AppState {
 }
 
 export type ForkPanelAction =
+  | { type: "presetPanes"; preset: PanePreset }
+  | { type: "movePane"; source: string; target: string; edge: PaneEdge | "fill" }
   | { type: "focusPane"; id: string }
   | { type: "resizePane"; divider: string; ratio: number }
   | { type: "closePane"; id: string; promote?: string }
   | { type: "closeWorkspacePanes" }
   | { type: "forkMessage"; kind: "bot" | "group"; ownerId: string; threadId: string; messageId?: string; branchLeafId?: string; onSuccess?: () => void; onError?: (message: string) => void }
-  | { type: "openForkPanel"; kind: "bot" | "group"; ownerId: string; threadId: string; loadId?: string; focusComposer?: boolean; split?: SplitDirection | "replace" }
+  | { type: "openForkPanel"; kind: "bot" | "group"; ownerId: string; threadId: string; loadId?: string; focusComposer?: boolean; split?: SplitDirection | "replace"; target?: string; edge?: PaneEdge | "fill" }
   | { type: "forkPanelLoaded"; threadId: string; loadId: string; messages: Message[]; activeLeafId: string | null }
   | { type: "forkPanelLoadFailed"; threadId: string; loadId: string }
   | { type: "forkPanelMessage"; threadId: string; message: Message; patch?: true }
   | { type: "forkPanelActive"; threadId: string; activeLeafId: string }
   | { type: "closeForkPanel" };
 
+export function workspaceLayout(state: Pick<AppState, "workspacePanes" | "forkPanel">): PaneLayout {
+  return state.workspacePanes?.layout ?? (state.forkPanel
+    ? { direction: "beside", ratio: 0.5, first: MAIN_PANE, second: state.forkPanel.threadId } : MAIN_PANE);
+}
+
+function workspacePanels(state: AppState): WorkspacePanes["panels"] {
+  return state.workspacePanes?.panels ?? (state.forkPanel ? { [state.forkPanel.threadId]: state.forkPanel } : {});
+}
+
 export function reduceForkPanel(state: AppState, action: ForkPanelAction): AppState {
   switch (action.type) {
     case "forkMessage": return state;
+    case "presetPanes": {
+      const layout = presetLayout(workspaceLayout(state), action.preset);
+      if (!layout) return state;
+      const panels = workspacePanels(state);
+      const previous = state.workspacePanes?.focused;
+      const focused = previous && paneIds(layout).includes(previous) ? previous : MAIN_PANE;
+      return { ...state, forkPanel: null, workspacePanes: { layout, focused, panels } };
+    }
+    case "movePane": {
+      const previous = workspaceLayout(state);
+      if (!paneIds(previous).includes(action.source)) return state;
+      const layout = placePane(previous, action.source, action.target, action.edge);
+      return layout ? { ...state, forkPanel: null, workspacePanes: { panels: workspacePanels(state), layout, focused: action.source } } : state;
+    }
     case "closeWorkspacePanes": return { ...state, workspacePanes: null };
     case "focusPane": {
       const panes = state.workspacePanes;
@@ -75,18 +100,24 @@ export function reduceForkPanel(state: AppState, action: ForkPanelAction): AppSt
       const panel: ForkPanelState = { kind: action.kind, ownerId: action.ownerId, threadId: action.threadId, messages: [],
         activeLeafId: null, loading: true, loadId: action.loadId ?? "", loadFailed: false, focusComposer: action.focusComposer };
       const closed = { ...state, settingsOpen: false, computerOpen: false, inspectorOpen: false, activityOpen: false };
-      if (!action.split) return { ...closed, forkPanel: panel, workspacePanes: null };
+      if (!action.split && !action.edge && !state.workspacePanes) return { ...closed, forkPanel: panel, workspacePanes: null };
       const panes = state.workspacePanes;
-      const anchor = panes?.focused ?? MAIN_PANE;
-      const panels = { ...panes?.panels, [action.threadId]: panel };
-      let layout = panes?.layout ?? MAIN_PANE;
+      const anchor = action.target ?? panes?.focused ?? MAIN_PANE;
+      const panels = { ...workspacePanels(state), [action.threadId]: panel };
+      let layout = workspaceLayout(state);
       if (!panes?.panels[action.threadId]) {
-        if (action.split === "replace") {
+        if (!paneIds(layout).includes(anchor)) return state;
+        if (action.split === "replace" && !emptyPane(anchor)) {
           if (anchor === MAIN_PANE) return state;
           delete panels[anchor];
           layout = replacePane(layout, anchor, action.threadId)!;
         } else {
-          layout = replacePane(layout, anchor, { direction: action.split, ratio: 0.5, first: anchor, second: action.threadId })!;
+          const vacancy = !action.split && !action.edge ? paneIds(layout).find(emptyPane) : undefined;
+          const target = vacancy ?? anchor;
+          const edge = action.edge ?? (emptyPane(target) ? "fill" : action.split === "below" ? "bottom" : "right");
+          const next = placePane(layout, action.threadId, target, edge);
+          if (!next) return state;
+          layout = next;
         }
       }
       return { ...closed, forkPanel: null, workspacePanes: { layout, focused: action.threadId, panels } };

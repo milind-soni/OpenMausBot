@@ -1,4 +1,5 @@
-import { FocusedWorkspaceThread } from "@/state/workspace-chat-context";
+import { startPaneDrag } from "@/lib/workspace-pane-drag";
+import { WorkspaceChatContext, FocusedWorkspaceThread } from "@/state/workspace-chat-context";
 import { ThreadSplitMenu, useSelectThreadPane } from "./OpenPaneActions";
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
@@ -72,6 +73,7 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
 }) {
   const unfolded = useThreadsUnfolded(bot.id) && canUnfold(bot);
   const selectPane = useSelectThreadPane(bot.id);
+  const canDrag = Boolean(useContext(WorkspaceChatContext));
   const focused = useContext(FocusedWorkspaceThread);
   const current = focused ? focused : selected && !drafting ? bot.switchingTo ?? bot.threadId : undefined;
   const { rows, more, runningMore } = threadLabels(bot, pendingQueued, { unfolded, current, rowThreadId, now: Date.now() });
@@ -165,6 +167,8 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
         const gone = leaving?.gone.has(row.task.threadId) === true;
         return (
           <div key={row.task.threadId} role="treeitem" aria-hidden={gone || undefined} inert={gone || undefined} aria-level={1} aria-selected={row.current} aria-current={row.current ? "page" : undefined}
+            draggable={canDrag && renaming !== row.task.threadId}
+            onDragStart={(event) => { event.stopPropagation(); startPaneDrag(event, bot.id, row.task.threadId); }}
             data-thread-label={row.task.threadId} data-sidebar-activity-row={row.task.threadId} tabIndex={roving(index)} title={title}
             onClick={() => { if (renaming !== row.task.threadId) open(row.task.threadId); }}
             onContextMenu={(event) => {

@@ -1,3 +1,5 @@
+import { MAIN_PANE } from "@/state/pane-layout";
+import { workspaceLayout } from "@/state/fork-panel";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, Loader2, Menu } from "lucide-react";
 import { CLOUD_LINK_SETTINGS, openBot, StoreProvider, useStore } from "@/state/store";
@@ -22,7 +24,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { HandoffExchangeHost } from "@/components/HandoffExchange";
 import { GroupView } from "@/components/GroupView";
-import { FocusedWorkspaceThread, WorkspaceChatContext } from "@/state/workspace-chat-context";
+import { WorkspaceLayoutContext, FocusedWorkspaceThread, WorkspaceChatContext } from "@/state/workspace-chat-context";
 import { WorkspacePanes } from "@/components/WorkspacePanes";
 import { ForkPanel } from "@/components/ForkPanel";
 import { SIDEBAR_AND_BOT_PANEL_FIT, SIDEBAR_AND_NARROW_PANEL_FIT, SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQuery } from "@/lib/use-media-query";
@@ -368,7 +370,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   </>;
   const primary = group ?? chatBot ?? bot;
   const paneChat = sidebarInline && primary && state.activeView === "chat" && !firstRun && !teamWelcomeOn && !chiefStep && !localVmWorkspaceBotId ? primary.threadId : null;
-  const focusedThread = state.workspacePanes && paneChat ? state.workspacePanes.panels[state.workspacePanes.focused]?.threadId ?? paneChat : null;
+  const focusedThread = state.workspacePanes && paneChat ? (state.workspacePanes.focused === MAIN_PANE ? paneChat : state.workspacePanes.focused) : null;
   useEffect(() => {
     if (!state.workspacePanes) return;
     if (!sidebarInline) dispatch({ type: "closeWorkspacePanes" });
@@ -376,7 +378,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   }, [dispatch, paneChat, sidebarInline, state.workspacePanes]);
 
   return (
-    <WorkspaceChatContext value={paneChat}><FocusedWorkspaceThread value={focusedThread}>
+    <WorkspaceLayoutContext value={workspaceLayout(state)}><WorkspaceChatContext value={paneChat}><FocusedWorkspaceThread value={focusedThread}>
     <div data-look="app" className={cn("flex h-full flex-col", framed && "bg-frame")} onClickCapture={drawerOpen ? noteDrawerAction : undefined} onKeyDownCapture={drawerOpen ? noteDrawerAction : undefined}>
       <WindowFrameBar notifications={notificationTray} sidebarUpdate={!advanced && sidebarShown} />
       <BotLimitPopup />
@@ -526,7 +528,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         visible={capabilities.windowChrome === "win-caption" && Boolean(window.ogb?.windowControls)}
       />
     </div>
-    </FocusedWorkspaceThread></WorkspaceChatContext>
+    </FocusedWorkspaceThread></WorkspaceChatContext></WorkspaceLayoutContext>
   );
 }
 

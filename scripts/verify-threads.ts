@@ -20,7 +20,9 @@ try {
   const { instances } = await api("GET", "/api/instances");
   const models = instances.find((instance: { instanceId: string }) => instance.instanceId === "claude").models.options;
   let gmailThread = pepper.threadId;
-  for (const [index, title] of ["Website ideas", "Triage Gmail", "Triage iCloud"].entries()) {
+  const titles = ["Website ideas", "Triage Gmail", "Triage iCloud"];
+  if (process.argv.some(arg => arg === "--check-panes" || arg === "--try-panes")) titles.push("Reading list");
+  for (const [index, title] of titles.entries()) {
     const threadId = index === 0 ? pepper.threadId : (await api("POST", `/api/bots/${pepper.id}/tasks`, { title, projectId: folder.id })).task.threadId;
     await api("PATCH", `/api/bots/${pepper.id}/tasks/${threadId}`, {
       title, modelSelection: { instanceId: "claude", model: models[index % models.length].id },
