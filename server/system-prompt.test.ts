@@ -162,14 +162,16 @@ describe("buildSystemPrompt", () => {
     expect(built.stable).toBe(`You are Kiwi. Set yourself up.${WEBHOOK_PROMPT}${REPLY_HABITS_PROMPT}`);
   });
 
-  it("keeps the phone part stable and where the person is volatile, so a turn from the phone keeps the cached prefix", () => {
-    const at = (place: string) => buildSystemPrompt("You are Kiwi.", "", [
-      { id: "device", label: "Phone", text: " The phone." },
+  it("keeps the phone part and where the person is volatile, so a turn from the phone keeps the cached prefix", () => {
+    const at = (device: string, place: string) => buildSystemPrompt("You are Kiwi.", "", [
+      { id: "device", label: "Phone", text: device },
       { id: "device-place", label: "Where the person is", text: place },
     ]);
-    expect(at(" On the phone.").stable).toBe(`You are Kiwi. The phone.${REPLY_HABITS_PROMPT}`);
-    expect(at(" At the computer.").stable).toBe(at(" On the phone.").stable);
-    expect(at(" On the phone.").volatile).toBe(" On the phone.");
+    // The phone part's text follows the turn's sender (may-use vs withheld), so it rides the volatile half with the place.
+    expect(at(" The phone.", " On the phone.").stable).toBe(`You are Kiwi.${REPLY_HABITS_PROMPT}`);
+    expect(at(" The phone.", " At the computer.").stable).toBe(at(" The phone.", " On the phone.").stable);
+    expect(at(" Not available here.", " On the phone.").stable).toBe(at(" The phone.", " On the phone.").stable);
+    expect(at(" The phone.", " On the phone.").volatile).toBe(" The phone. On the phone.");
   });
 
   it("has an empty volatile half when nothing mid-conversation is present", () => {
