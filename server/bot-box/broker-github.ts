@@ -66,14 +66,24 @@ export function githubGrant(deps: GithubGrantDeps): BrokerGrant {
   const upstream = new URL(deps.upstream ?? GITHUB_UPSTREAM);
   const now = deps.now ?? Date.now;
   let held: { audience: string | null; token: string | null; at: number } | null = null;
+  /** A token GitHub answered 401 to: not sent again while the sign-in still gives it, so public repositories (a
+   * package's git dependency) keep working without a credential until the person signs in again. */
+  let refusedToken: string | null = null;
   const defaults = new Map<string, string | null>();
 
   const credential = async (): Promise<{ audience: string | null; token: string | null }> => {
     const audience = deps.audience();
     if (held && held.audience === audience && now() - held.at < GITHUB_TOKEN_REUSE_MS) return held;
-    const token = audience === null ? null : await deps.token(audience).catch(() => null);
-    held = { audience, token, at: now() };
+    const given = audience === null ? null : await deps.token(audience).catch(() => null);
+    held = { audience, token: given !== null && given === refusedToken ? null : given, at: now() };
     return held;
+  };
+
+  /** GitHub refused the token: tell the sign-in, and send no credential while it gives the same one. */
+  const tokenRefused = (audience: string | null, token: string) => {
+    deps.reportAuthFailure(audience);
+    refusedToken = token;
+    if (held?.token === token) held = { ...held, token: null };
   };
 
   const send = (input: BrokerServeRequest, method: string, path: string, headers: Record<string, string | string[]>, answer: (res: IncomingMessage) => void) => {
@@ -113,8 +123,8 @@ export function githubGrant(deps: GithubGrantDeps): BrokerGrant {
     });
   };
 
-  const relay = (input: BrokerServeRequest, audience: string | null, sentToken: boolean) => (answer: IncomingMessage) => {
-    if (answer.statusCode === 401 && sentToken) deps.reportAuthFailure(audience);
+  const relay = (input: BrokerServeRequest, audience: string | null, sentToken: string | null) => (answer: IncomingMessage) => {
+    if (answer.statusCode === 401 && sentToken) tokenRefused(audience, sentToken);
     const headers = relayableHeaders(answer.headers);
     if (typeof headers.location === "string") headers.location = brokeredLocation(headers.location, upstream.href, input.prefix);
     input.res.writeHead(answer.statusCode ?? 502, headers);
@@ -150,10 +160,23 @@ export function githubGrant(deps: GithubGrantDeps): BrokerGrant {
     if (!(git.service === "git-receive-pack" && !git.advertisement)) {
       req.pause();
       const { audience, token } = await credential();
-      const forwarded = send(input, method, target, { ...headers, ...(token ? { authorization: basic(token) } : {}) }, relay(input, audience, token !== null));
-      forwarded.on("error", failed(res));
-      res.on("close", () => forwarded.destroy());
-      req.pipe(forwarded);
+      // A ref list (a GET, no body) GitHub refused with the token is asked again at once without one.
+      const forward = (sent: string | null) => {
+        const forwarded = send(input, method, target, { ...headers, ...(sent ? { authorization: basic(sent) } : {}) }, (answer) => {
+          if (answer.statusCode === 401 && sent && method === "GET") {
+            tokenRefused(audience, sent);
+            answer.resume();
+            forward(null).end();
+            return;
+          }
+          relay(input, audience, sent)(answer);
+        });
+        forwarded.on("error", failed(res));
+        res.on("close", () => forwarded.destroy());
+        return forwarded;
+      };
+      const first = forward(token);
+      if (method === "GET") { req.resume(); first.end(); } else req.pipe(first);
       return;
     }
     // A push: the command list first, then the decision, then the bytes held and the rest streamed on.
@@ -184,7 +207,7 @@ export function githubGrant(deps: GithubGrantDeps): BrokerGrant {
     const branch = touchesBranches ? await defaultBranch(input, repoPath, git.repo, token) : null;
     const refused = refusedCommands(list.commands, branch);
     if (refused.length) return refusePush(input, refusalBody({ capabilities: list.capabilities, refused, message: refusalMessage(refused, branch) }));
-    const forwarded = send(input, method, target, { ...headers, ...(token ? { authorization: basic(token) } : {}) }, relay(input, audience, token !== null));
+    const forwarded = send(input, method, target, { ...headers, ...(token ? { authorization: basic(token) } : {}) }, relay(input, audience, token));
     forwarded.on("error", failed(res));
     res.on("close", () => forwarded.destroy());
     forwarded.write(Buffer.concat(held, heldBytes));

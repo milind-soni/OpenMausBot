@@ -145,6 +145,29 @@ unixSocket("the github grant in the broker", () => {
     expect(reported).toEqual(["owner"]);
   });
 
+  it("after GitHub refuses the token, asks again without it, so a public repository still clones; a new token is sent again", async () => {
+    let current = TOKEN;
+    const reported: Array<string | null> = [];
+    const token = await start({ token: async () => current, reportAuthFailure: (who) => reported.push(who) });
+    // Like GitHub: a refused credential is a 401 even for a public repository, which answers without one.
+    answer = (_url, res) => res.writeHead(seen.at(-1)!.headers.authorization ? 401 : 200, { "content-type": "text/plain" }).end("ok");
+    const get = () => call("GET", `/b/${token}/github/acme/public/info/refs?service=git-upload-pack`);
+    expect((await get()).status).toBe(200);
+    expect(seen.map((request) => request.headers.authorization)).toEqual([basic(TOKEN), undefined]);
+    expect(reported).toEqual(["owner"]);
+    clock += GITHUB_TOKEN_REUSE_MS;
+    expect((await get()).status).toBe(200);
+    expect(seen.at(-1)!.headers.authorization).toBeUndefined();
+    expect(seen).toHaveLength(3);
+    // The person signs in again: the new token goes out.
+    current = "ghp_renewed";
+    clock += GITHUB_TOKEN_REUSE_MS;
+    answer = (_url, res) => res.writeHead(200).end("ok");
+    await get();
+    expect(seen.at(-1)!.headers.authorization).toBe(basic("ghp_renewed"));
+    expect(reported).toEqual(["owner"]);
+  });
+
   it("asks for the token on each request after a short while, and for the audience every time", async () => {
     let audience: string | null = "owner";
     const asked: Array<string | null> = [];
