@@ -46,6 +46,8 @@ const SERVER_ENV_NAMES = new Set([
   "OMB_CACHE_ROOT",
   // The image's own engine CLIs before older copies in the data folder (server/image-engines.ts), for one test Cloud first.
   "OMB_IMAGE_ENGINES",
+  // The conversation logs' cap and age limit (server/host/thread-log-sweep.ts), off unless the Admin sets it.
+  "OMB_THREAD_LOG_SWEEP", "OMB_THREAD_LOG_CAP", "OMB_THREAD_LOG_CUT",
   // An ended Cloud started only for its owner's export: the server runs frozen (server/move-freeze.ts).
   "OMB_CLOUD_EXPORT_ONLY",
   // The idle task workspaces' dependency sweep (server/host/start-upkeep.ts), off unless set: the Admin may turn it on.

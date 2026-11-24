@@ -62,6 +62,20 @@ describe("EventBus", () => {
     expect(seen).toHaveLength(0);
   });
 
+  it("says a conversation's log is quiet only when nothing of it is queued or being written", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const bus = new EventBus(async () => { await held; });
+    expect(bus.logQuiet("busy-log")).toBe(true);
+    bus.publish(testEvent({ threadId: "busy-log" }));
+    expect(bus.logQuiet("busy-log")).toBe(false);
+    await Promise.resolve();
+    expect(bus.logQuiet("busy-log")).toBe(false);
+    release();
+    await bus.flush();
+    expect(bus.logQuiet("busy-log")).toBe(true);
+  });
+
   it("tees every published event to the per-thread NDJSON log", async () => {
     const bus = new EventBus();
     bus.publish(testEvent({ threadId: "log-me" }));
