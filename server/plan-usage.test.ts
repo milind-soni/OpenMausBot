@@ -16,6 +16,7 @@ import {
   type PlanFetch,
   type PlanResponse,
 } from "./plan-usage.ts";
+import { chatgptAccountHome } from "./drivers/codex-account-home.ts";
 
 const SECRET = "plan-usage-fixture-secret";
 const NOW = 1_800_000_000_000;
@@ -650,6 +651,28 @@ describe("plan usage fetcher", () => {
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(report.providers.map((row) => row.id)).toEqual(["codex"]);
+  });
+
+  it("reads each Cloud ChatGPT account's limits from its own Codex home, never the first account's", async () => {
+    const instances = {
+      codex: { driver: "codex" },
+      chatgpt: { driver: "codex", displayName: "ChatGPT plan", config: { authMode: "chatgpt-plan" } },
+      "chatgpt-work": { driver: "codex", displayName: "Work", config: { authMode: "chatgpt-plan" } },
+    };
+    const accounts = planAccountsFromInstances(instances, { OMB_CLOUD_ROLE: "home" });
+    expect(accounts).toEqual([
+      { id: "codex", name: "Codex", driver: "codex", environment: {} },
+      { id: "chatgpt", name: "ChatGPT plan", driver: "codex", environment: { CODEX_HOME: chatgptAccountHome("chatgpt") } },
+      { id: "chatgpt-work", name: "Work", driver: "codex", environment: { CODEX_HOME: chatgptAccountHome("chatgpt-work") } },
+    ]);
+    const tokens = new Map([
+      [join("/home/fixture/.codex", "auth.json"), "first-fixture"],
+      [join(chatgptAccountHome("chatgpt-work"), "auth.json"), "work-fixture"],
+    ]);
+    const reader = fileCredentialReader({ now: () => NOW, env: { HOME: "/home/fixture" },
+      readText: (path) => tokens.has(path) ? JSON.stringify({ tokens: { access_token: tokens.get(path) } }) : null });
+    expect(await Promise.all(accounts.map(async (account) => (await reader.read(account)).token)))
+      .toEqual(["first-fixture", null, "work-fixture"]);
   });
 
   it("reads every Claude instance's login with no setting, and none whose config sets usageMeter to false", async () => {

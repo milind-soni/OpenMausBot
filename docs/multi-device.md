@@ -25,10 +25,10 @@ Pick one home, then open it from your other devices. There are three ways:
 | --- | --- | --- |
 | **My Cloud** (Starter, Pro or Max plan) | Bots that keep running when your computers are off | Sign in at **Settings → MausBot Cloud**. Once My Cloud is ready, a computer with one bot moves it there by itself and opens My Cloud from then on; with more bots the app asks which go (**Move everything**, or some of them, which leaves the rest working here), and a bot's own menu has **Move to My Cloud**. Before a bot moves, the app says what stays on this computer for it (its folder, a local model, commands, teammates) and what it may use here from My Cloud. On your other computers, sign in to the same account and choose **Open My Cloud**. See [cloud-pro.md](cloud-pro.md). |
 | **Your own server** | A VPS or always-on machine you run yourself | Pair each device with it, then right-click the server's circle at the window's left edge and choose **Make <server> my home** to move this computer's bots there. See [self-hosting.md](self-hosting.md). |
-| **One of your computers** | Two desktops on the same Tailscale network, no Cloud | On the computer with the bots, turn on **Settings → Phone & devices → Your other computers** and pair; on the other, choose **＋ → Connect to a server**. The bots stay on the first computer, which must be on. See [desktop-companion.md](desktop-companion.md). |
+| **One of your computers** | Two desktops on the same Tailscale network, no Cloud | On the computer with the bots, turn on **Settings → Devices → Private network → Your other computers** and choose **Add a computer**; on the other, choose **＋ → Connect to another computer**. The bots stay on the first computer, which must be on. See [desktop-companion.md](desktop-companion.md). |
 
 A phone is paired separately. For My Cloud, use **Settings → MausBot Cloud → Use My Cloud on your phone**; for this
-computer, **Settings → Phone & devices → Pair a phone** (a six-digit code). The phone opens the home it paired
+computer, **Settings → Devices → Phones and tablets → Add a phone** (a six-digit code). The phone opens the home it paired
 with. See [ios-companion.md](ios-companion.md).
 
 After a move to My Cloud or your own server, the computer you moved from stops running its copy, so no routine runs

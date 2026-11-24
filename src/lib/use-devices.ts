@@ -20,6 +20,8 @@ type Places = NonNullable<DeviceSources["places"]>;
 export interface DevicesView {
   devices: Device[];
   companion: CompanionState | null;
+  /** The phone apps registered here, for what each lets bots use. */
+  phoneApps: readonly PublicPhone[];
   /** Everything has answered once (or failed): before that the map holds its space without a list. */
   loaded: boolean;
   /** Read every source again now, after an action or when an added device should be showing. */
@@ -87,5 +89,5 @@ export function useDevices({ here, client, name, kind }: { here: boolean; client
     places, statuses, lending, companion, phoneApps, sessions, lent, vps,
   }), botRows, kind, (botId) => bots.find((bot) => bot.id === botId)?.name ?? null), [name, kind, places, statuses, lending, companion, phoneApps, sessions, lent, vps, botRows, bots]);
 
-  return { devices, companion, loaded: answered, refresh: () => void read() };
+  return { devices, companion, phoneApps: phoneApps ?? [], loaded: answered, refresh: () => void read() };
 }

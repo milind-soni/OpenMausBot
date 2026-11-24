@@ -1732,7 +1732,7 @@ describe("Update MausBot on your phone", () => {
   const OTHER = { ...OLD, id: "7c7c7c7c-1111-4222-8333-444455556666", name: "Old Android" };
   let devices: unknown[], retired: boolean;
   let companion: ReturnType<typeof vi.fn>, linked: ReturnType<typeof vi.fn>;
-  /** This computer's phone link and its account, as Settings → Phone & devices reads them through the same two bridges. */
+  /** This computer's phone link and its account, as Settings → Devices reads them through the same two bridges. */
   const bridgesOn = () => {
     companion = vi.fn(async () => ({ enabled: true, keepAwake: false, port: 1, devices, pairing: null }));
     linked = vi.fn(async () => ({ available: true, status: "ready", ...(retired ? { tunnelRetired: true } : {}) }));
@@ -1740,19 +1740,19 @@ describe("Update MausBot on your phone", () => {
   };
   beforeEach(() => { devices = [OLD, NEW]; retired = true; bridgesOn(); });
 
-  it("shows once this computer's link ended and a paired phone has an older app: the phone, what to do, Open Phone & devices and Not now", async () => {
+  it("shows once this computer's link ended and a paired phone has an older app: the phone, what to do, Open Devices and Not now", async () => {
     const shown = await launch();
     expect(shown).toContain(TITLE); expect(shown).toContain('data-notice="phone-update"');
     for (const text of ["Ada&#x27;s iPhone has an older version of the MausBot app, which can no longer connect to this computer away from your Wi-Fi.",
       "Update the app on that phone, then open it once on the same Wi-Fi as this computer. If that doesn&#x27;t reconnect it, pair it again.",
-      "Open Phone &amp; devices", "Not now"]) expect(shown).toContain(text);
+      "Open Devices", "Not now"]) expect(shown).toContain(text);
     expect(shown).not.toContain("Work phone");
     expect(launchNotice()).toBe("phone-app-update");
   });
 
-  it("Open Phone & devices opens pairing in Settings, and the card is done for that phone", async () => {
+  it("Open Devices opens pairing in Settings, and the card is done for that phone", async () => {
     await launch();
-    tree().find(node => node.type === "button" && node.props.children === "Open Phone & devices")!.props.onClick(); await flush();
+    tree().find(node => node.type === "button" && node.props.children === "Open Devices")!.props.onClick(); await flush();
     expect(f.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "phone", phonePairing: true });
     expect(hints()).toContain("phone-app-update:0f8c2a41");
     expect(render()).toBe("");
@@ -1796,7 +1796,7 @@ describe("Update MausBot on your phone", () => {
     expect(await relaunch(), "a plain browser").not.toContain(TITLE);
   });
 
-  it("shows on a branded build too, as Settings → Phone & devices explains it there", async () => {
+  it("shows on a branded build too, as Settings → Devices explains it there", async () => {
     f.brand = "file";
     expect(await launch()).toContain(TITLE);
   });

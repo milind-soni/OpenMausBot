@@ -1243,7 +1243,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
       <GlassScrollFrame className="flex-1" fade><PlaceTint />
       <GlassBar edge="top">
       <div
-        data-sidebar-top-row={corner ? "corner" : true}
+        data-sidebar-top-row={corner ? "corner" : simpleDesk ? "simple" : true}
         className={cn(
           "flex items-center",
           // The corner is no drag region and takes no clicks but its buttons': the tiles rise into the rest of it.

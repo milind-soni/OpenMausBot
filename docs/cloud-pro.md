@@ -2385,7 +2385,7 @@ calls `POST /api/cloud/desktop/pairing` (same device token) and expects
 `{"cloudContractVersion":1,"origin":…,"code":…,"expiresAt":…}` for the same
 origin, with `expiresAt` at most ten minutes away. It then adds or selects the
 **My Cloud** server entry and opens `<origin>/pair#code=<code>`, the same
-pairing-link flow as Connect to a server. The code stays in main-process
+pairing-link flow as Connect to another computer. The code stays in main-process
 memory for that one navigation: never on disk, never in a renderer. A
 malformed session summary or grant is treated as none.
 
