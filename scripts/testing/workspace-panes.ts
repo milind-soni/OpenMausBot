@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { removeTempDir } from "../../server/testing/cleanup.ts";
 import { openHeadlessChrome } from "./headless-chrome.ts";
 
-export async function verifyWorkspacePanes(previewUrl: string, finishGate: string, evidence: string) {
+export async function verifyWorkspacePanes(previewUrl: string, finishGate: string, evidence: string, longActivity: boolean) {
   const profile = mkdtempSync(join(tmpdir(), "omb-pane-browser-"));
   const page = await openHeadlessChrome(profile);
   const element = (selector: string) => `document.querySelector(${JSON.stringify(selector)})`;
@@ -87,6 +87,18 @@ export async function verifyWorkspacePanes(previewUrl: string, finishGate: strin
     await click(row(first));
     await page.until(`document.activeElement === ${composer(first)}`);
     await split(third, "Open below");
+    if (longActivity) {
+      const list = element(pane(third) + " .burger-layers");
+      await page.until(`${list}?.children.length === 211 && ${list}.firstElementChild.clientHeight >= 32`);
+      assert.equal(await page.evaluate(`(() => {
+        const list = ${list}, section = list.closest('[data-pane-id]'), transcript = list.closest('.glass-scroller');
+        const initial = transcript.scrollTop;
+        list.scrollTop = list.scrollHeight;
+        const last = list.lastElementChild.getBoundingClientRect(), bounds = list.getBoundingClientRect();
+        return list.scrollTop > 0 && last.top >= bounds.top - 1 && last.bottom <= bounds.bottom + 1 &&
+          transcript.scrollTop === initial && section.querySelector('textarea').getBoundingClientRect().bottom <= section.getBoundingClientRect().bottom;
+      })()`), true);
+    }
     await type(third, draft, false);
     await type(first, "Check Gmail again");
     await type(second, "Check iCloud again");

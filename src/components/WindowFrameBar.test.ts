@@ -149,6 +149,17 @@ describe("the window frame's top bar", () => {
     expect(fixture.frameDrawn).toHaveBeenLastCalledWith(true);
   });
 
+  it("opens the four pane presets beside Settings while a workspace chat is open", async () => {
+    await mount(createElement(WindowFrameBar, { showPaneLayout: true }));
+    const settings = bar()!.querySelector("[data-frame-settings]")!;
+    const trigger = settings.previousElementSibling!.querySelector<HTMLButtonElement>("button")!;
+    expect(trigger.getAttribute("aria-label")).toBe("Pane layout");
+    await act(async () => trigger.click());
+    expect([...document.querySelectorAll('[role="menuitemradio"]')].map(item => item.textContent)).toEqual([
+      "Two columns", "Two rows", "Two left, one right", "Four-pane grid",
+    ]);
+  });
+
   it("opens the app's settings", async () => {
     await mount(createElement(WindowFrameBar));
     await act(async () => bar()!.querySelector<HTMLButtonElement>("[data-frame-settings]")!.click());

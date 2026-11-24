@@ -1,3 +1,4 @@
+import { PaneLayoutMenu } from "./PaneLayoutMenu";
 import { WorkspaceChatContext } from "@/state/workspace-chat-context";
 import { startPaneDrag } from "@/lib/workspace-pane-drag";
 import { OrganizationIdentity } from "./OrganizationIdentity";
@@ -915,10 +916,10 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   );
 }, sameBotRowProps);
 
-export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = false, besidePanel = false }: {
+export const Sidebar = memo(function Sidebar({ open, onClose, showPaneLayout = false, collapseToIcons = false, besidePanel = false }: {
   open: boolean;
   onClose: () => void;
-  collapseToIcons?: boolean; besidePanel?: boolean;
+  collapseToIcons?: boolean; besidePanel?: boolean; showPaneLayout?: boolean;
 }) {
   const state = useStoreSelector(sidebarState, sameFields), dispatch = useStoreDispatch();
   const cloudOwner = useCloudOwner(state.config?.cloudHome === true);
@@ -1061,6 +1062,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   // no room for them; in Simple it is only the corner holding Search and New, with the bot tiles beside it. With the
   // frame off on macOS, the traffic lights sit in the top row's corner.
   const framed = windowFramed(capabilities), corner = framed && simpleDesk;
+  const layoutMenu = showPaneLayout && <PaneLayoutMenu className={simpleDesk || rail ? SIMPLE_TOP_BUTTON : SIMPLE_CORNER_BUTTON} />;
   const lights = capabilities.windowChrome === "mac-inset" && !framed;
   const draggableChrome = capabilities.windowChrome !== "native";
   // SAFETY: Electron's -webkit-app-region is not in React's CSSProperties type; the renderer accepts it as an inline
@@ -1267,6 +1269,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
           <button type="button" onClick={railSearch} aria-label={t("sidebar.searchAria")} title={t("sidebar.searchAria")} className={SIMPLE_TOP_BUTTON}>
             <Search size={16} aria-hidden="true" />
           </button>
+          {layoutMenu}
           <div className="relative flex">{plusControl}</div>
         </div>}
         {density !== "icons" && (simpleDesk ? <div data-sidebar-top-slot className="min-w-0 flex-1" /> : (
@@ -1282,6 +1285,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
           className={cn("relative flex shrink-0 items-center", density === "icons" ? "flex-col gap-1" : corner ? "pointer-events-auto" : simpleDesk ? "gap-2.5" : simple ? "gap-1 pl-0.5" : "ml-0.5 gap-0.5")}
           style={windowNoDragStyle}
         >
+          {layoutMenu}
           {simpleDesk && <SidebarSearchToggle ref={searchToggleRef} corner={corner} open={searchShown} onToggle={() => (searchShown ? closeSearch() : setSearchOpen(true))} />}
           {density === "icons" && <button
             type="button"

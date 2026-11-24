@@ -5,7 +5,7 @@ import { workspaceLayout } from "@/state/fork-panel";
 import { useStore } from "@/state/store";
 import { SidebarPopoverMenu } from "./SidebarPopoverMenu";
 
-export function PaneLayoutMenu() {
+export function PaneLayoutMenu({ className }: { className: string }) {
   const { state, dispatch } = useStore();
   const layout = workspaceLayout(state);
   const occupied = paneIds(layout).filter(id => !emptyPane(id)).length;
@@ -17,9 +17,6 @@ export function PaneLayoutMenu() {
       subtitle: disabled ? t("chat.presetTooSmall") : undefined,
       onSelect: () => dispatch({ type: "presetPanes", preset }) };
   });
-  return <div className="flex shrink-0 justify-end border-b border-hairline bg-app px-2">
-    <SidebarPopoverMenu items={items} ariaLabel={t("chat.layout")} align="end"
-      triggerClassName="flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-ink-secondary hover:bg-raised focus-visible:ring-1 focus-visible:ring-focus"
-      renderTrigger={() => <><PanelsTopLeft size={14} />{t("chat.layout")}</>} />
-  </div>;
+  return <SidebarPopoverMenu items={items} ariaLabel={t("chat.layout")} triggerTitle={t("chat.layout")}
+    align="end" triggerClassName={className} renderTrigger={() => <PanelsTopLeft size={16} aria-hidden="true" />} />;
 }

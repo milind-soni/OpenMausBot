@@ -16,6 +16,7 @@ export interface SidebarMenuItem {
   active?: boolean;
   /** one choice of several: announced as chosen or not; the row draws its own mark */
   checked?: boolean;
+  toggle?: boolean;
   attention?: boolean;
   attentionTone?: "danger" | "accent";
   disabled?: boolean;
@@ -120,8 +121,8 @@ function MenuRows({
           {item.heading && <div className={MENU_HEADING}>{item.heading}</div>}
           <button
             type="button"
-            role={item.checked === undefined ? "menuitem" : "menuitemradio"}
-            aria-checked={item.checked}
+            role={item.toggle !== undefined ? "menuitemcheckbox" : item.checked === undefined ? "menuitem" : "menuitemradio"}
+            aria-checked={item.toggle ?? item.checked}
             data-tour={item.tourId}
             data-menu-key={item.key}
             title={item.title}

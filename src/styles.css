@@ -3877,6 +3877,13 @@ button:disabled.bg-danger {
   from { background-color: color-mix(in srgb, var(--color-accent) 14%, var(--color-card)); }
   to { background-color: var(--color-card); }
 }
+.burger-layers > li { flex-shrink: 0; }
+@container workspace-pane (max-height: 36rem) {
+  .burger-layers { max-height: clamp(3rem, 19cqh, 8rem); }
+}
+[data-pane-focused] :is([data-chathead-pill], [data-roomhead-identity]) {
+  box-shadow: 0 0 0 1px var(--color-edge);
+}
 .burger-layer {
   overflow: hidden;
   animation: burger-drop 560ms cubic-bezier(0.22, 1, 0.36, 1) both, burger-land 1100ms ease-out 180ms both;

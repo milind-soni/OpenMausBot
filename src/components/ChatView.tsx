@@ -1,6 +1,7 @@
 import { memo, use, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
+import { TiledPaneTitle } from "@/state/workspace-chat-context";
 import { ThreadLinkContext } from "@/components/ThreadLinkMenu";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { AlertTriangle, ChevronLeft, ChevronRight, Monitor, RefreshCw, Square, Webhook } from "lucide-react";
@@ -756,7 +757,9 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
   const [pagePane, setPagePane] = useState<HTMLDivElement | null>(null);
   const advanced = useAdvancedMode(), activity = useChatActivity();
   const phone = useMediaQuery(PHONE_LAYOUT);
-  const phoneMenu = phone && !remoteClient;
+  const paneTitle = use(TiledPaneTitle);
+  const compactHeader = phone || Boolean(paneTitle);
+  const compactMenu = compactHeader && (!remoteClient || Boolean(paneTitle));
   const simpleHead = !advanced && !remoteClient;
   const canWrite = useCanWriteIn(bot.threadId, bot.yourAccess), mayWrite = canWrite !== false;
 
@@ -929,13 +932,14 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
         className={cn(
           // A container query never matches the container itself, so the row that wraps is the child below.
           "@container/chathead",
-          simpleHead ? "px-5 pt-2.5 pb-2.5 max-md:pl-14 max-md:pr-3" : "px-5 py-3 pl-11 md:pl-5 max-md:pl-14 max-md:pr-3",
+          paneTitle ? "ps-3 pe-11 py-2" : simpleHead ? "px-5 pt-2.5 pb-2.5 max-md:pl-14 max-md:pr-3" : "px-5 py-3 pl-11 md:pl-5 max-md:pl-14 max-md:pr-3",
         )}
       >
-        <div data-chathead-row className={cn("flex items-center justify-between", phone ? "gap-2" : "@max-[30rem]/chathead:flex-wrap @max-[30rem]/chathead:gap-y-1 @min-[30rem]/chathead:grid @min-[30rem]/chathead:grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(max-content,1fr)]")}>{advanced && !inForkPanel && <ChatActivityControls key={bot.threadId} activity={activity} botId={bot.id} style={headerNoDragStyle} />}
-        <div data-chathead-identity className={cn("flex min-w-0 items-center gap-2", phone ? "flex-1" : "@max-[30rem]/chathead:basis-full @min-[30rem]/chathead:col-start-2 @min-[30rem]/chathead:justify-self-center", simpleHead && phone && "justify-center")} style={headerNoDragStyle}>
-          {simpleHead ? (
+        <div data-chathead-row className={cn("flex items-center justify-between", compactHeader ? "gap-2" : "@max-[30rem]/chathead:flex-wrap @max-[30rem]/chathead:gap-y-1 @min-[30rem]/chathead:grid @min-[30rem]/chathead:grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(max-content,1fr)]")}>{advanced && !inForkPanel && <ChatActivityControls key={bot.threadId} activity={activity} compact={Boolean(paneTitle)} botId={bot.id} style={headerNoDragStyle} />}
+        <div data-chathead-identity className={cn("flex min-w-0 items-center gap-2", compactHeader ? "flex-1" : "@max-[30rem]/chathead:basis-full @min-[30rem]/chathead:col-start-2 @min-[30rem]/chathead:justify-self-center", simpleHead && phone && "justify-center")} style={headerNoDragStyle}>
+          {simpleHead || paneTitle ? (
             <ChatHeadPill
+              threadTitle={paneTitle ?? undefined}
               bot={bot}
               avatar={{ state: stateForBot({ ...bot, messages }), motion: headerMotion, motionKey: mascotMotion?.nonce ?? 0, animated: headerAnimated }}
               privacy={privateChat ? { kind: "private" } : ownHelper ? { kind: "ownHelper" } : sharedChat && team ? { kind: "shared", team: team.name, onlyPeopleAdded: bot.onlyPeopleAdded, sharedWith: currentTask?.sharedWith?.name } : null}
@@ -994,9 +998,9 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
               <ChevronRight size={14} aria-hidden="true" className="-ml-2.5 w-0 shrink-0 text-ink-secondary opacity-0 transition-[width,margin,opacity] duration-150 group-hover:ml-0 group-hover:w-3.5 group-hover:opacity-100 group-focus-visible:ml-0 group-focus-visible:w-3.5 group-focus-visible:opacity-100" />
             </button>
           )}
-          {!phone && !simpleHead && <ChatHeadRole bot={bot} />}<span role="status" className="sr-only" data-chathead-status>{bot.busy ? t("sidebar.preview.working") : ""}</span>{!simpleHead && privateChat && <TeamPrivateHeader />}{!simpleHead && ownHelper && <TeamOwnHelperHeader />}{!simpleHead && sharedChat && team && <TeamSharedHeader team={team} onlyPeopleAdded={bot.onlyPeopleAdded} sharedWith={currentTask?.sharedWith?.name} />}
-          {!simpleHead && !bot.busy && bot.waitingForTeammates && <span className="truncate text-[12px] text-ink-secondary" role="status">{t("chat.teammatesWorking")}</span>}
-          {(advanced || remoteClient) && awayFromMainThread(profile, showThreads) && (
+          {!paneTitle && !phone && !simpleHead && <ChatHeadRole bot={bot} />}<span role="status" className="sr-only" data-chathead-status>{bot.busy ? t("sidebar.preview.working") : ""}</span>{!paneTitle && !simpleHead && privateChat && <TeamPrivateHeader />}{!paneTitle && !simpleHead && ownHelper && <TeamOwnHelperHeader />}{!paneTitle && !simpleHead && sharedChat && team && <TeamSharedHeader team={team} onlyPeopleAdded={bot.onlyPeopleAdded} sharedWith={currentTask?.sharedWith?.name} />}
+          {!paneTitle && !simpleHead && !bot.busy && bot.waitingForTeammates && <span className="truncate text-[12px] text-ink-secondary" role="status">{t("chat.teammatesWorking")}</span>}
+          {!paneTitle && (advanced || remoteClient) && awayFromMainThread(profile, showThreads) && (
             <button
               type="button"
               data-chathead-back
@@ -1009,7 +1013,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
         </div>
         <div
           data-chathead-controls
-          className={cn("flex shrink-0 items-center gap-2", !phone && "@max-[30rem]/chathead:ml-auto @max-[30rem]/chathead:flex-wrap @max-[30rem]/chathead:justify-end @min-[30rem]/chathead:col-start-3 @min-[30rem]/chathead:justify-self-end")}
+          className={cn("flex shrink-0 items-center gap-2", !compactHeader && "@max-[30rem]/chathead:ml-auto @max-[30rem]/chathead:flex-wrap @max-[30rem]/chathead:justify-end @min-[30rem]/chathead:col-start-3 @min-[30rem]/chathead:justify-self-end")}
         >{sharedChat && <ThreadPresenceFaces threadId={bot.threadId} />}
           {!simpleHead && (bot.busy || bot.waitingForTeammates) && (
             <button
@@ -1027,15 +1031,15 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
           <ThreadContextWarning bot={bot} messages={messages} />
           {phone && <UsageAlert engine={bot.modelSelection?.instanceId} />}
           {/* Simple mode keeps the model here and moves only ⋯ into the bot panel; Advanced shows it under the composer's field. */}
-          {!phone && (!advanced || canWrite === false) && <ModelPicker key={bot.threadId} bot={bot} threadId={bot.threadId} folded={state.settingsOpen || state.computerOpen} />}
-          <LiveCallChip currentBotId={bot.id} onOpen={(botId, threadId) => openThread(dispatch, { botId, threadId }, store.state(), showThreads)} />{!phoneMenu && <WatchScreenButton botId={bot.id} messages={messages} liveTools={liveTools} place={place} />}
+          {!compactHeader && (!advanced || canWrite === false) && <ModelPicker key={bot.threadId} bot={bot} threadId={bot.threadId} folded={state.settingsOpen || state.computerOpen} />}
+          <LiveCallChip currentBotId={bot.id} onOpen={(botId, threadId) => openThread(dispatch, { botId, threadId }, store.state(), showThreads)} />{!compactMenu && <WatchScreenButton botId={bot.id} messages={messages} liveTools={liveTools} place={place} />}
           <PinnedMessagesMenu
             pins={pinnedPreview(messages, bot.pinnedMessageId, bot.name)}
             triggerClassName={cn(ELEVATED_FLOAT, ELEVATED_HOVER)}
             onJump={(messageId) => dispatch({ type: "focusMessage", threadId: bot.threadId, messageId })}
             onUnpin={remoteClient ? undefined : () => dispatch({ type: "updateTask", botId: bot.id, threadId: bot.threadId, patch: { pinnedMessageId: "" } })}
           />
-          {!phoneMenu && <button
+          {!compactMenu && <button
             data-tour="computer"
             onClick={(event) => { if (!state.computerOpen) rememberComputerPanelOpen({ botId: bot.id, opener: event.currentTarget, tabs: event.detail === 0 }); dispatch({ type: "toggleComputer" }); }}
             className={cn(
@@ -1047,7 +1051,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
           >
             <Monitor size={16} />{busy && place === "browser" && <span aria-hidden="true" className="absolute right-1 top-1 size-1.5 animate-pulse rounded-full bg-success" data-testid="computer-button-live" />}
           </button>}
-          <HeaderShare bot={bot} />{!inForkPanel && <NewThreadHeaderButton botId={bot.id} />}{phoneMenu ? <ChatMoreMenu bot={bot} phoneHeader /> : (advanced || remoteClient) && <ChatHeaderMenu key={`menu:${bot.threadId}`} bot={bot} />}
+          <HeaderShare bot={bot} />{!inForkPanel && <NewThreadHeaderButton botId={bot.id} />}{compactMenu ? <ChatMoreMenu bot={bot} phoneHeader /> : (advanced || remoteClient) && <ChatHeaderMenu key={`menu:${bot.threadId}`} bot={bot} />}
         </div>
         </div>
       </div>
@@ -1158,6 +1162,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
             answering={popping !== null}
             since={busySince}
           />{presenceVisible && sharedRun.line}
+          <SkillBurgerSlot botId={bot.id} threadId={bot.threadId} busy={Boolean(bot.busy)} canWrite={mayWrite} messages={messages} liveTools={liveTools} transcriptKey={transcriptKey} />
         </div>
       </div>
 
@@ -1165,7 +1170,6 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
       <div ref={setPagePane} data-page-pane-slot className="contents" style={{ "--page-pane-bottom": `${composerDock.box}px` } as CSSProperties} />
 
       <div ref={composerDockRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] chat-column-dock">
-      <SkillBurgerSlot botId={bot.id} threadId={bot.threadId} busy={Boolean(bot.busy)} canWrite={mayWrite} messages={messages} liveTools={liveTools} transcriptKey={transcriptKey} />
       {showJumpToLatest && (
         <div className="relative">
           <JumpToLatestButton onClick={jumpToLatest} className="pointer-events-auto bottom-2" />

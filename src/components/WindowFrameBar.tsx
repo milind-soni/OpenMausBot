@@ -10,6 +10,7 @@ import { captionChrome, useDesktopCapabilities, windowFrameable, windowFramed } 
 import { FrameBarPinnedPages } from "./FrameBarPinnedPages";
 import { NotificationBell } from "./NotificationsPanel";
 import { UpdateIndicator } from "./UpdateIndicator";
+import { PaneLayoutMenu } from "./PaneLayoutMenu";
 import { WindowPlaceTitle } from "./WindowPlaceTitle";
 
 /** A button in the frame's top bar: small, quiet, the bar's height and no more. */
@@ -22,7 +23,7 @@ export const FRAME_BAR_BUTTON = "flex size-[22px] shrink-0 items-center justify-
  * `notifications`: the tray is on here) and the app's settings, close the right end.
  * The whole bar drags the window. It reaches under the window's rail (the page starts --rail-beside in), so its middle
  * is the window's middle. */
-export function WindowFrameBar({ notifications = false, sidebarUpdate = false }: { notifications?: boolean; sidebarUpdate?: boolean }) {
+export function WindowFrameBar({ notifications = false, sidebarUpdate = false, showPaneLayout = false }: { notifications?: boolean; sidebarUpdate?: boolean; showPaneLayout?: boolean }) {
   const { capabilities } = useDesktopCapabilities();
   const { dispatch } = useStore();
   const frameable = windowFrameable(capabilities), framed = windowFramed(capabilities);
@@ -45,6 +46,7 @@ export function WindowFrameBar({ notifications = false, sidebarUpdate = false }:
       <div data-frame-bar-end className={cn("flex items-center justify-end gap-0.5", mac ? "pr-2" : "pr-[140px]")}>
         {!sidebarUpdate && <UpdateIndicator bar={FRAME_BAR_BUTTON} />}
         {notifications && <NotificationBell bar={FRAME_BAR_BUTTON} />}
+        {showPaneLayout && <PaneLayoutMenu className={FRAME_BAR_BUTTON} />}
         <button
           type="button"
           data-frame-settings

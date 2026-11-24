@@ -1,4 +1,5 @@
-import type { RefObject } from "react";
+import { TiledPaneTitle } from "@/state/workspace-chat-context";
+import { useContext, type RefObject } from "react";
 import { ChevronRight, Pause, Plus, Search } from "lucide-react";
 
 import { cn } from "@/lib/cn";
@@ -151,6 +152,7 @@ export function RoomHeader({
 }) {
   const { dragProps: headerDragProps, noDragStyle: headerNoDragStyle } = useCaptionChrome();
   const { state, dispatch } = useStore();
+  const paneTitle = useContext(TiledPaneTitle);
   const faces = memberMauses(group, members, busyPlaceOf(state.groups, state.bots));
   const pinned = (
     <PinnedMessagesMenu
@@ -166,7 +168,7 @@ export function RoomHeader({
   if (simple) {
     const more = members.length - SIMPLE_FACES;
     return (
-      <div {...headerDragProps} className="@container/roomhead px-5 py-3 pl-11 md:pl-5">
+      <div {...headerDragProps} className={paneTitle ? "@container/roomhead ps-3 pe-11 py-2" : "@container/roomhead px-5 py-3 pl-11 md:pl-5"}>
         <div data-roomhead-row className="flex items-center justify-between gap-3">
           <div data-roomhead-identity className="flex min-w-0 flex-col items-start" style={headerNoDragStyle}>
             <button
@@ -179,10 +181,10 @@ export function RoomHeader({
               style={headerNoDragStyle}
               className="group -mx-2 flex min-w-0 max-w-[calc(100%+1rem)] items-center gap-1 rounded-lg px-2 py-0.5 hover:bg-raised/60 focus-visible:bg-raised/60"
             >
-              <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
+              <span className="truncate text-[15px] font-semibold text-ink">{paneTitle ?? group.name}</span>
               <ChevronRight size={14} aria-hidden="true" className="-ml-1 w-0 shrink-0 text-ink-secondary opacity-0 transition-[width,margin,opacity] duration-150 group-hover:ml-0 group-hover:w-3.5 group-hover:opacity-100 group-focus-visible:ml-0 group-focus-visible:w-3.5 group-focus-visible:opacity-100" />
             </button>
-            {group.description && <p className="max-w-full truncate text-[12px] leading-4 text-ink-secondary">{group.description}</p>}
+            {!paneTitle && group.description && <p className="max-w-full truncate text-[12px] leading-4 text-ink-secondary">{group.description}</p>}
           </div>
           <div data-roomhead-controls className="flex shrink-0 items-center gap-1.5">
             <ThreadPresenceFaces threadId={group.threadId} />
@@ -216,23 +218,23 @@ export function RoomHeader({
         {...headerDragProps}
         className={cn(
           // A container query never matches the container itself, so the row that wraps is the child below.
-          "@container/roomhead px-5 py-3",
-          "pl-11 md:pl-5",
+          "@container/roomhead",
+          paneTitle ? "ps-3 pe-11 py-2" : "px-5 py-3 pl-11 md:pl-5",
         )}
       >
-        <div data-roomhead-row className="flex items-center justify-between @max-3xl/roomhead:flex-wrap @max-3xl/roomhead:gap-y-1">
-        <div data-roomhead-identity className="flex min-w-0 items-center gap-2 @max-3xl/roomhead:basis-full" style={headerNoDragStyle}>
+        <div data-roomhead-row className={cn("flex items-center justify-between", paneTitle ? "gap-2" : "@max-3xl/roomhead:flex-wrap @max-3xl/roomhead:gap-y-1")}>
+        <div data-roomhead-identity className={cn("flex min-w-0 items-center gap-2", paneTitle ? "max-w-1/2 shrink-0" : "@max-3xl/roomhead:basis-full")} style={headerNoDragStyle}>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
+              <span className="truncate text-[15px] font-semibold text-ink">{paneTitle ?? group.name}</span>
               {!setupPending && !group.dm && <GroupTaskPicker group={group} />}
             </div>
-            {group.description && <p className="truncate text-[12px] leading-4 text-ink-secondary">{group.description}</p>}
+            {!paneTitle && group.description && <p className="truncate text-[12px] leading-4 text-ink-secondary">{group.description}</p>}
           </div>
         </div>
         <div
           data-roomhead-controls
-          className="flex items-center gap-1.5 @max-3xl/roomhead:ml-auto @max-3xl/roomhead:flex-wrap @max-3xl/roomhead:justify-end"
+          className={cn("flex items-center gap-1.5", paneTitle ? "min-w-0 overflow-x-auto overscroll-x-contain [&>*]:shrink-0" : "@max-3xl/roomhead:ml-auto @max-3xl/roomhead:flex-wrap @max-3xl/roomhead:justify-end")}
         >
           <ThreadPresenceFaces threadId={group.threadId} />
           {pinned}

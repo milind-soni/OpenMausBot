@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import App from "../../src/App";
 import { setAnalyticsEnabled, setEmailGateDone } from "../../src/lib/analytics";
 import { ADVANCED_MODE_KEY, setAdvancedMode } from "../../src/lib/interface-mode";
+import { cacheDesktopCapabilities, initialDesktopCapabilities } from "../../src/lib/desktop";
 import { languageChoice, setLanguageChoice } from "../../src/lib/language-preference";
 import { BOAT_OFFER_NOTICE, GROK_MOVE_NOTICE, MODELGO_OFFER_NOTICE, TEAMS_NOTICE } from "../../src/lib/notices";
 import { markSimpleModePromptSeen } from "../../src/lib/simple-mode-prompt";
@@ -13,6 +14,9 @@ import "../../src/styles.css";
 // src/lib/voice-latency-probe stays inert without this sink.
 if (new URLSearchParams(location.search).has("ombVoiceProbe")) {
   (window as typeof window & { __ombVoiceProbe?: unknown[] }).__ombVoiceProbe = [];
+}
+if (new URLSearchParams(location.search).get("frame") === "1") {
+  cacheDesktopCapabilities({ ...initialDesktopCapabilities(), windowChrome: "mac-inset" });
 }
 setAnalyticsEnabled(false);
 // Tests use English accessibility names from the first render, including after a reload.

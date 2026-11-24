@@ -6,9 +6,8 @@ import { useStore } from "@/state/store";
 import { PanelChat } from "./ForkPanel";
 
 import { workspaceLayout } from "@/state/fork-panel";
-import { WorkspaceChatContext } from "@/state/workspace-chat-context";
+import { TiledPaneTitle, WorkspaceChatContext } from "@/state/workspace-chat-context";
 import { draggedThread } from "@/lib/workspace-pane-drag";
-import { PaneLayoutMenu } from "./PaneLayoutMenu";
 
 type Placement = PaneEdge | "fill";
 const previewArea: Record<Placement, string> = { left: "inset-y-0 left-0 w-1/2", right: "inset-y-0 right-0 w-1/2",
@@ -93,20 +92,23 @@ export function WorkspacePanes({ primary, title, children }: { primary: string; 
       leaves.push(<section key={layout} tabIndex={-1} aria-label={name} data-pane-id={layout}
         data-empty-pane={vacant ? "" : undefined}
         data-workspace-thread={panes && !vacant ? panel?.threadId ?? primary : undefined}
+        data-pane-focused={panes && focused === layout ? "" : undefined}
         onDragOver={event => handleDrag(event, layout, false)} onDrop={event => handleDrag(event, layout, true)}
         onDragLeave={event => { if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) setPreview(null); }}
         onPointerDownCapture={activate} onFocusCapture={activate}
         style={{ left: box.x + "%", top: box.y + "%", width: box.w + "%", height: box.h + "%" }}
-        className={desktop ? "absolute flex min-h-0 min-w-0 flex-col overflow-hidden outline-none" : "contents"}>
-        {panes && <div className={'flex h-8 shrink-0 items-center justify-between border-b border-hairline px-3 text-xs font-medium ' +
-          (focused === layout ? "bg-raised text-ink" : "bg-app text-ink-secondary")}>
-          <span className="truncate">{name}</span>
-          {(layout !== MAIN_PANE || ids.some(id => id !== MAIN_PANE && !emptyPane(id))) && <button type="button" aria-label={t("chat.closePane", { title: name ?? "" })} onClick={close}
-            className="rounded p-1 hover:bg-menu-hover focus-visible:ring-1 focus-visible:ring-accent"><X size={14} /></button>}
-        </div>}
-        {vacant ? <button type="button" onClick={activate} className="flex flex-1 items-center justify-center text-sm text-ink-secondary focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-focus">
+        className={desktop ? "absolute flex min-h-0 min-w-0 flex-col overflow-hidden outline-none [container:workspace-pane/size]" : "contents"}>
+        {panes && (layout !== MAIN_PANE || ids.some(id => id !== MAIN_PANE && !emptyPane(id))) &&
+          <button type="button" aria-label={t("chat.closePane", { title: name ?? "" })} onClick={close}
+            className="absolute end-2 top-3 z-30 flex size-7 items-center justify-center rounded-full text-ink-secondary hover:bg-raised focus-visible:ring-2 focus-visible:ring-focus"><X size={16} /></button>}
+        {vacant ? <button type="button" onClick={activate} className="flex flex-1 flex-col items-center justify-center gap-1 text-sm text-ink-secondary focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-focus">
+          <span className="text-xs font-medium">{name}</span>
           {t("chat.dropThread")}
-        </button> : <div className={panes ? "relative flex min-h-0 min-w-0 flex-1" : "contents"}>{panel ? <PanelChat panel={panel} /> : children}</div>}
+        </button> : <div className={panes ? "relative flex min-h-0 min-w-0 flex-1" : "contents"}>
+          <TiledPaneTitle value={panes ? name ?? title : null}>
+            {panel ? <PanelChat panel={panel} /> : children}
+          </TiledPaneTitle>
+        </div>}
         {preview?.target === layout && <div aria-hidden="true" data-drop-preview={preview.edge}
           className={`pointer-events-none absolute z-20 rounded-lg border-2 border-focus bg-accent/15 ${previewArea[preview.edge]}`} />}
       </section>);
@@ -147,8 +149,5 @@ export function WorkspacePanes({ primary, title, children }: { primary: string; 
     draw(layout.second, second, path + "1");
   }
   draw(panes?.layout ?? MAIN_PANE, { x: 0, y: 0, w: 100, h: 100 }, "");
-  return <div className={desktop ? "flex min-h-0 min-w-0 flex-1 flex-col" : "contents"}>
-    {desktop && <PaneLayoutMenu />}
-    <div ref={root} className={desktop ? "relative min-h-0 min-w-0 flex-1" : "contents"}>{leaves}{dividers}</div>
-  </div>;
+  return <div ref={root} className={desktop ? "relative min-h-0 min-w-0 flex-1" : "contents"}>{leaves}{dividers}</div>;
 }

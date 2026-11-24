@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
 import { fixtureApi, mountPreview, parkUntilSignal, type MountedPreview } from "./testing/preview-fixture.ts";
 
+const longActivity = process.argv.includes("--long-activity");
 const fixture = await launchVerificationServer();
 let ui: MountedPreview | undefined;
 try {
@@ -36,6 +37,24 @@ try {
   await api("POST", `/api/groups/${group.id}/tasks`, { title: "Weekly review" });
   await api("POST", `/api/bots/${pepper.id}/tasks/${gmailThread}`, {});
 
+  const fakeCli = fileURLToPath(new URL("../server/testing/fake-claude-cli.ts", import.meta.url));
+  if (longActivity) {
+    const calls = Array.from({ length: 211 }, (_, index) => ({
+      name: "Bash", input: { command: `mkdir -p reports/section-${String(index + 1).padStart(3, "0")}` }, ok: true, output: "Done",
+    }));
+    const callsFile = join(fixture.info.dataDir, "audit-steps.json");
+    writeFileSync(callsFile, JSON.stringify(calls));
+    const auditCli = join(fixture.info.dataDir, "audit-claude.mjs");
+    writeFileSync(auditCli, [
+      "#!/usr/bin/env node",
+      `process.env.FAKE_CLAUDE_TOOL_CALLS_FILE = ${JSON.stringify(callsFile)};`,
+      `await import(${JSON.stringify(pathToFileURL(fakeCli).href)});`,
+    ].join("\n"), { mode: 0o700 });
+    await api("PATCH", "/api/instances/claude", { cli: auditCli });
+    await control(["send", "--bot", pepper.id, "--task", pepper.threadId, "--text", "Prepare a folder for each section of the website audit."]);
+    await control(["wait", "--bot", pepper.id, "--task", pepper.threadId, "--timeout", "60"]);
+  }
+
   // New sends remain in flight for deterministic switching/Stop checks.
   // Creating finishGate (only inside this fixture home) completes them.
   const finishGate = join(fixture.info.dataDir, "finish-preview-turns");
@@ -49,7 +68,7 @@ try {
     // Fixture-only launch receipts let a verifier exercise the same live
     // permission broker as the provider, without accessing real accounts.
     `process.env.FAKE_CLAUDE_DUMP = join(${JSON.stringify(fixture.info.dataDir)}, basename(process.cwd()) + ".launch.json");`,
-    `await import(${JSON.stringify(pathToFileURL(fileURLToPath(new URL("../server/testing/fake-claude-cli.ts", import.meta.url))).href)});`,
+    `await import(${JSON.stringify(pathToFileURL(fakeCli).href)});`,
   ].join("\n"), { mode: 0o700 });
   await api("PATCH", "/api/instances/claude", { cli: wrapper });
   ui = await mountPreview(fixture, {
@@ -58,7 +77,7 @@ try {
   console.log(JSON.stringify({ ...fixture.info, previewUrl: ui.previewUrl, finishGate }));
   if (process.argv.includes("--check-panes")) {
     const { verifyWorkspacePanes } = await import("./testing/workspace-panes.ts");
-    await verifyWorkspacePanes(ui.previewUrl, finishGate, fixture.info.logPath + ".panes.png");
+    await verifyWorkspacePanes(ui.previewUrl, finishGate, fixture.info.logPath + ".panes.png", longActivity);
   } else await parkUntilSignal();
 } finally {
   await ui?.close();

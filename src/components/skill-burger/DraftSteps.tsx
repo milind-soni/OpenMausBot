@@ -124,7 +124,7 @@ export function DraftSteps({ steps, skipped, onSkip, disabled }: {
           <li key={step.id} data-burger-layer={step.kind} data-kept={kept ? "true" : "false"}
             className={cn("burger-layer burger-open flex min-w-0 flex-col rounded-[8px] bg-card px-2 py-1.5 text-[13px] shadow-sm", !kept && "opacity-50")}>
             <span className="flex min-h-7 min-w-0 items-center gap-2">
-              <label className="flex shrink-0 cursor-pointer items-center" title={t("skillBurger.draft.keep", { step: line })}>
+              <label className="relative flex shrink-0 cursor-pointer items-center" title={t("skillBurger.draft.keep", { step: line })}>
                 <input type="checkbox" className="peer sr-only" checked={kept} disabled={disabled} onChange={() => toggle(step)} aria-label={t("skillBurger.draft.keep", { step: line })} />
                 <span aria-hidden="true" className="flex size-4 items-center justify-center rounded-[5px] border border-hairline bg-raised text-ink peer-checked:border-accent peer-checked:bg-accent peer-checked:text-white peer-focus-visible:ring-2 peer-focus-visible:ring-accent/60">
                   {kept && <Check size={11} strokeWidth={3} />}

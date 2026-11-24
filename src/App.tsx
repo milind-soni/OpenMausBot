@@ -380,7 +380,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   return (
     <WorkspaceLayoutContext value={workspaceLayout(state)}><WorkspaceChatContext value={paneChat}><FocusedWorkspaceThread value={focusedThread}>
     <div data-look="app" className={cn("flex h-full flex-col", framed && "bg-frame")} onClickCapture={drawerOpen ? noteDrawerAction : undefined} onKeyDownCapture={drawerOpen ? noteDrawerAction : undefined}>
-      <WindowFrameBar notifications={notificationTray} sidebarUpdate={!advanced && sidebarShown} />
+      <WindowFrameBar showPaneLayout={Boolean(paneChat)} notifications={notificationTray} sidebarUpdate={!advanced && sidebarShown} />
       <BotLimitPopup />
       <ConversationShareDialogs />
       {!framed && strips}
@@ -413,6 +413,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       {framed && strips}
       <div className={framed ? "relative flex min-h-0 flex-1 overflow-x-clip" : "contents"}>
       {!calendarFocus && <Sidebar
+        showPaneLayout={Boolean(paneChat) && !framed}
         collapseToIcons={collapseSidebar}
         besidePanel={sidebarBesidePanel}
         open={drawerOpen}

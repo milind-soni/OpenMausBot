@@ -1,5 +1,6 @@
 import { useMemo, useState, type CSSProperties } from "react";
-import { List } from "lucide-react";
+import { Check, List } from "lucide-react";
+import { SidebarPopoverMenu } from "./SidebarPopoverMenu";
 import { Switch } from "./SettingsPrimitives";
 import { t } from "@/lib/i18n";
 import type { Message } from "@/state/store";
@@ -50,9 +51,16 @@ export function chatActivityMessages(messages: Message[], advanced: boolean, act
 }
 
 /** The chat header's Chat activity button and, once opened, its two switches and the way to the bot's run history. */
-export function ChatActivityControls({ activity, botId, style }: { activity: ChatActivity; botId: string; style?: CSSProperties }) {
+export function ChatActivityControls({ activity, botId, style, compact = false }: { compact?: boolean; activity: ChatActivity; botId: string; style?: CSSProperties }) {
   const dispatch = useStoreDispatch();
   const [open, setOpen] = useState(false);
+  if (compact) return <SidebarPopoverMenu ariaLabel={t("chat.automation.activity")} triggerTitle={t("chat.automation.activity")}
+    triggerClassName="ui-pill size-7 justify-center px-0" renderTrigger={() => <List size={16} aria-hidden="true" />}
+    items={[
+      { key: "routines", label: t("chat.automation.showInChat"), toggle: activity.routines, trailing: activity.routines && <Check size={16} />, onSelect: activity.toggleRoutines },
+      { key: "tools", label: t("chat.automation.showTools"), toggle: activity.tools, trailing: activity.tools && <Check size={16} />, onSelect: activity.toggleTools },
+      { key: "logs", label: t("chat.automation.openLogs"), onSelect: () => dispatch({ type: "showRoutines", section: "logs", botId }) },
+    ]} />;
   return (
     <section aria-label={t("chat.automation.activity")} className="flex min-w-0 flex-wrap items-center gap-1.5" style={style}>
       <button

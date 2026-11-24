@@ -16,7 +16,13 @@ switching and Stop can be exercised without a real provider or account.
 
 Run `node --experimental-strip-types scripts/verify-threads.ts --try-panes` and
 open the printed preview URL in a desktop-width browser. This version gives
-each new fake reply twelve seconds to finish.
+each new fake reply twelve seconds to finish. Add `--long-activity` to seed
+**Website ideas** with a completed 211-step run. Scroll its step list to the
+last command and open its details in one, two and three panes. The list
+scrolls independently, the transcript scrolls past the card, and the composer
+stays in view. Append `?frame=1` to the preview URL to try the framed desktop
+toolbar. Its **Pane layout** icon sits beside **Settings**. The unframed
+preview has the same icon in the sidebar toolbar.
 
 1. Expand **Pepper** and select **Triage Gmail**. Drag **Triage iCloud** from
    the sidebar to the right edge of Gmail. Release when the right half lights up.
@@ -33,7 +39,8 @@ each new fake reply twelve seconds to finish.
 To replay the scenario automatically, run
 `node --experimental-strip-types scripts/verify-threads.ts --check-panes`.
 Set `OMB_CDP_CHROME` to your Chrome or Chromium executable on Linux. This
-check controls when the fake replies finish and saves screenshots of the drop
+check also verifies step sizing and independent list scrolling when run with
+`--long-activity`. It controls when the fake replies finish and saves screenshots of the drop
 preview, the three-pane Stop scenario and the filled grid beside the server log.
 
 ## Check the real UI

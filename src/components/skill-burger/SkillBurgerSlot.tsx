@@ -20,7 +20,7 @@ export function editIn(messages: readonly RunMessage[]): { id: string; name: str
   return null;
 }
 
-/** The chat dock's burger. While a saved Skill Burger runs (or right after the turn changed one), its steps as the run
+/** The transcript’s Skill Burger. While a saved Skill Burger runs (or right after the turn changed one), its steps as the run
  * goes; else the run since the person's last ask, once it has two real steps, ready to save. Either stays until closed. */
 export function SkillBurgerSlot({ botId, threadId, busy, canWrite, messages, liveTools, transcriptKey }: {
   botId: string;
@@ -67,7 +67,7 @@ export function SkillBurgerSlot({ botId, threadId, busy, canWrite, messages, liv
     if (!runnable || closed.get(transcriptKey) === key) return null;
     const view = runView(runnable.workflow, seen, seen?.name ?? edit!.name);
     return (
-      <div className="flex justify-end px-4 pb-2">
+      <div className="flex justify-end">
         <RunBurger key={key} view={view} summary={runnable.workflow.summary} everyChat={runnable.everyChat} botId={botId} threadId={threadId} busy={busy}
           onDismiss={close(key)} {...(edit ? { edited: { undo: edit.undo } } : {})} />
       </div>
@@ -76,7 +76,7 @@ export function SkillBurgerSlot({ botId, threadId, busy, canWrite, messages, liv
   if (!run || !burgerWorthy(layers) || closed.get(transcriptKey) === run) return null;
   const summary = named.get(runKey) ?? askOf(messages) ?? layers.map(layerLine).join(", ");
   return (
-    <div className="flex justify-end px-4 pb-2">
+    <div className="flex justify-end">
       <SkillBurger
         key={`${transcriptKey}:${run}`}
         run={`${transcriptKey}:${run}`}
