@@ -61,7 +61,7 @@ function runInBox(context: ExecutorContext, input: Parameters<StepExecutors["she
     let child: ReturnType<typeof spawnCli>;
     try {
       child = spawnCli(shell.command, shell.args(input.command), {
-        cwd: input.cwd && isAbsolute(input.cwd) ? input.cwd : context.cwd,
+        cwd: input.cwd ? resolvePath(context.cwd, input.cwd) : context.cwd,
         env: { PATH: commandPath(), HOME: process.env.HOME, LANG: process.env.LANG, ...input.env },
         stdio: ["pipe", "pipe", "pipe"],
         box: { botId: context.botId },
