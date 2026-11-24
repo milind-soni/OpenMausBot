@@ -231,6 +231,8 @@ export const USER_ERROR = {
   "serverError.voice.fishTranscribeConnection": "Couldn't reach Fish Audio to hear you — check your connection.",
   "serverError.voice.elevenLabsTranscribeConnection": "Couldn't reach ElevenLabs to hear you — check your connection.",
   "serverError.file.tooLarge": "This file is {size}, over the {limit} limit for opening files from chat. The file itself is still saved as {name}.",
+  "serverError.vps.tooManyCores": "{server} has {cores} CPU cores in all. Choose {cores} or fewer.",
+  "serverError.vps.tooMuchMemory": "{server} has about {memory} GB of memory. Choose {memory} GB or less.",
 } as const;
 
 export type UserErrorKey = keyof typeof USER_ERROR;

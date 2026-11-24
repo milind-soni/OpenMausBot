@@ -12,9 +12,10 @@
 // owner only, so every copy is the server's own, as the live file is.
 // Not covered: each bot's Data tables (DuckDB, bots/<id>/data.duckdb), which the server closes after 10 idle minutes and only
 // it can let go of (releaseDataForBackup); sync/index.db (a rebuildable cache); the engines' and browsers' own databases.
-import { chmodSync, existsSync, lstatSync, mkdirSync, renameSync, rmSync, statfsSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, rmSync, statfsSync } from "node:fs";
 import { join } from "node:path";
 
+import { renameWithRetry } from "./atomic.ts";
 import { SNAPSHOT_DATABASES, snapshotDatabase } from "./workspace-backup-databases.ts";
 
 /** The stage's folder in the data folder (the boot script reads it at /mnt/omb-data/.openmausbot/backup-stage). */
@@ -69,7 +70,8 @@ export async function prepareBackupStage(options: PrepareBackupStage): Promise<P
     try {
       await snapshotDatabase(dataDir, name, partial);
       chmodSync(partial, live.mode & 0o777);
-      renameSync(partial, join(stage, name));
+      // Windows refuses a rename while anything (a scanner) holds the new file: retried briefly, as every atomic write is.
+      renameWithRetry(partial, join(stage, name));
       staged.push(name);
     } catch (error) {
       for (const path of [partial, `${partial}-journal`]) rmSync(path, { force: true });

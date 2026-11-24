@@ -366,11 +366,12 @@ describe("desktop capabilities", () => {
 });
 
 describe("Mac driver support", () => {
-  it("names macOS 12 and older as too old for the driver, before it is loaded", () => {
-    const tooOld = { reasonCode: "macos-version-unsupported", reason: "Local desktop control needs macOS 13 Ventura or later." };
+  it("names macOS 14 and older as too old for the driver, before it is loaded", () => {
+    const tooOld = { reasonCode: "macos-version-unsupported", reason: "Local desktop control needs macOS 15 Sequoia or later." };
     expect(macDriverUnsupported("darwin", "21.6.0")).toEqual(tooOld);
     expect(macDriverUnsupported("darwin", "20.6.0")).toEqual(tooOld);
-    expect(macDriverUnsupported("darwin", "22.1.0")).toBeNull();
+    expect(macDriverUnsupported("darwin", "23.6.0")).toEqual(tooOld);
+    expect(macDriverUnsupported("darwin", "24.0.0")).toBeNull();
     expect(macDriverUnsupported("darwin", "25.0.0")).toBeNull();
     expect(macDriverUnsupported("win32", "10.0.19045")).toBeNull();
     expect(macDriverUnsupported("darwin", "")).toBeNull();
@@ -379,7 +380,7 @@ describe("Mac driver support", () => {
   it("keeps the too-old code for the page", () => {
     const localConnection = { mode: "unavailable", ...macDriverUnsupported("darwin", "21.6.0") };
     expect(desktopCapabilities({ platform: "darwin", localConnection }).localComputer).toMatchObject({
-      available: false, reasonCode: "macos-version-unsupported", message: "Local desktop control needs macOS 13 Ventura or later.",
+      available: false, reasonCode: "macos-version-unsupported", message: "Local desktop control needs macOS 15 Sequoia or later.",
     });
   });
 });

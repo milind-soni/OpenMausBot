@@ -1,7 +1,7 @@
 // A Cloud server's backup of its volume packs consistent copies of the databases (cloud-backup-stage.ts): one moment of each,
 // taken while the server goes on writing, never more than the disk can hold, and only as the data folder's owner.
 import { spawn, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,9 +39,10 @@ function restored(copy: string) {
   } finally { db.close(); }
 }
 
+// The writer says how many rows it has committed on its output, one number a line. (It used to rename a progress file over
+// the one the test was reading, which Windows refuses while the file is open: EPERM, and the writer died.)
 const WRITER = `import { DatabaseSync } from "node:sqlite";
-import { renameSync, writeFileSync } from "node:fs";
-const [file, mark] = process.argv.slice(2);
+const [file] = process.argv.slice(2);
 const db = new DatabaseSync(file);
 db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA wal_autocheckpoint = 16; CREATE TABLE IF NOT EXISTS m (id INTEGER PRIMARY KEY, body TEXT NOT NULL)");
 const insert = db.prepare("INSERT INTO m (id, body) VALUES (?, ?)"), body = "x".repeat(4000);
@@ -50,7 +51,7 @@ process.on("SIGTERM", () => { stop = true; });
 const tick = () => {
   if (stop) { db.close(); process.exit(0); }
   db.exec("BEGIN"); for (let i = 0; i < 25; i++) insert.run(++n, body); db.exec("COMMIT");
-  writeFileSync(mark + ".tmp", String(n)); renameSync(mark + ".tmp", mark);
+  process.stdout.write(n + "\\n");
   setImmediate(tick);
 };
 tick();
@@ -60,10 +61,16 @@ describe("prepareBackupStage", () => {
   it("copies one moment of messages.db while another process commits and checkpoints: it restores whole, with every row committed before it began", async () => {
     const data = directory(), work = directory();
     writeFileSync(join(work, "writer.mjs"), WRITER);
-    const mark = join(work, "committed"), live = join(data, "messages.db");
-    const child = spawn(process.execPath, [join(work, "writer.mjs"), live, mark], { stdio: ["ignore", "ignore", "inherit"] });
+    const live = join(data, "messages.db");
+    const child = spawn(process.execPath, [join(work, "writer.mjs"), live], { stdio: ["ignore", "pipe", "inherit"] });
     const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-    const committed = () => (existsSync(mark) ? Number(readFileSync(mark, "utf8")) : 0);
+    let said = 0, partial = "";
+    child.stdout!.on("data", (chunk: Buffer) => {
+      const lines = (partial + chunk.toString("utf8")).split("\n");
+      partial = lines.pop() ?? "";
+      for (const line of lines) if (/^\d+$/.test(line)) said = Number(line);
+    });
+    const committed = () => said;
     try {
       for (const until = Date.now() + 60_000; committed() < 3_000;) {
         if (Date.now() > until || child.exitCode !== null) throw new Error("the writer never got going");

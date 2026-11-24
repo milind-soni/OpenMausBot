@@ -40,7 +40,7 @@ import { checkEngine, type EngineCheck } from "../engine-check.ts";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import type { ProviderAuthSessions } from "../provider-auth-sessions.ts";
 import { providerIconPatchSchema, withInstanceIcon } from "../provider-icon.ts";
-import { isLoopbackHost, isProxied, ownerOrAdmin } from "../request-auth.ts";
+import { fromPairedDevice, isLoopbackHost, isProxied, ownerOrAdmin } from "../request-auth.ts";
 import type { SessionRegistry } from "../sessions.ts";
 import type { Store } from "../store.ts";
 import type { BusyFlag, ConfigStatus } from "./config.ts";
@@ -316,10 +316,13 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       } finally { providerConfigBusy.set(false); }
     }
 
+    // Each phone has its own sign-in, so it never resumes or reads the computer's, or another phone's.
+    const signInOwner = () => auth.kind === "session" ? auth.session.id
+      : fromPairedDevice(req, auth) ? `companion:${String(req.headers["x-openmausbot-companion-device"] ?? "")}` : "loopback";
     const authStatus = /^\/api\/instances\/([\w.-]+)\/auth\/status$/.exec(path);
     if (method === "GET" && authStatus) {
       res.setHeader("cache-control", "no-store");
-      const state = await providerAuthSessions.status(authStatus[1], auth.kind === "session" ? auth.session.id : "loopback", url.searchParams.get("flowId") ?? "");
+      const state = await providerAuthSessions.status(authStatus[1], signInOwner(), url.searchParams.get("flowId") ?? "");
       // A finished device sign-in changed what the engine reports; the page reads the engines next.
       if (state.phase !== "waiting") registry.forgetSnapshots();
       return json(res, 200, { auth: state });
@@ -331,7 +334,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       }
       const instanceId = instanceAction[1];
       const action = instanceAction[2];
-      const owner = auth.kind === "session" ? auth.session.id : "loopback";
+      const owner = signInOwner();
       if (action.startsWith("auth/")) res.setHeader("cache-control", "no-store");
       try {
         if (action === "check") {
@@ -365,7 +368,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           if (!instance) return json(res, 404, { error: "unknown instance" });
           // The official local OAuth callback terminates on this machine, not a phone or a remote browser.
           if ((instance.authenticationMethod === "browser-pkce" || instance.authenticationMethod === "browser")
-            && (isProxied(req) || !isLoopbackHost(req.socket.remoteAddress))) {
+            && (isProxied(req) || !isLoopbackHost(req.socket.remoteAddress) || fromPairedDevice(req, auth))) {
             if (instance.authenticationMethod === "browser") {
               return json(res, 403, { error: `This sign-in happens in a browser on the computer running ${productName()}. Open ${productName()} there to sign in.` });
             }

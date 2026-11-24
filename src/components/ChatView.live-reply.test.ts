@@ -69,7 +69,8 @@ const liveRows = () => [...log().querySelectorAll('[data-mid^="live:"]')];
 const rowOf = (id: string) => log().querySelector(`[data-mid="${id}"]`);
 const occurrences = (text: string) => (log().textContent ?? "").split(text).length - 1;
 /** A row's markup with the ids that name it taken out: what the eye sees. */
-const looks = (row: Element) => row.outerHTML.replace(/live:[^"]+|data-mid="[^"]+"|data-citation-source="[^"]+"/g, "");
+// The streaming mark only gates the fade-in, so it is left out with the ids.
+const looks = (row: Element) => row.outerHTML.replace(/live:[^"]+|data-mid="[^"]+"|data-citation-source="[^"]+"| data-streaming=""/g, "");
 
 beforeEach(() => {
   vi.useFakeTimers({ now: started + 5_000 });

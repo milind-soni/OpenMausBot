@@ -4,7 +4,7 @@ import { forgetPresence, personAsks, sawThread, seenWithin } from "../thread-pre
 import {
   armedIdleCount, armIdleClose, engineIdleMs, idleEngineCap, idleEnginesAllowed, keepWarm, PRESTART_IDLE_MS, PRESTART_MOST, prestartAllowed, sessionIdlePolicy, SMALL_BOX_BYTES,
   SMALL_BOX_IDLE_ENGINES, SMALL_BOX_IDLE_MS, stopIdleClose, sweepIdleEngines,
-  UNWATCHED_IDLE_MS, warmEngineKeys, type WarmEngine,
+  UNWATCHED_IDLE_MS, warmEngineKeys, type WarmEngine, EXPENSIVE_IDLE_MS, EXPENSIVE_UNWATCHED_IDLE_MS, roomBesideIdle,
 } from "./session-idle.ts";
 
 const GB = 1024 ** 3;
@@ -343,5 +343,59 @@ describe("engines started before a first message", () => {
       vi.useRealTimers();
       forgetPresence();
     }
+  });
+});
+
+describe("an engine whose cold start is expensive", () => {
+  const now = 1_800_000_000_000;
+  const cloud = (factor: number) => ({ enabled: true, headroom: () => factor, roomFactor: () => factor });
+  const small = 4 * GB, large = 16 * GB;
+  afterEach(forgetPresence);
+
+  it("is kept longer only by drivers that say so, never when an idle time is configured or on a box of 1.5 GB or less", () => {
+    expect(sessionIdlePolicy("ACP", {}, small, "expensive")).toEqual({ idleMs: 10 * 60_000, minimumMs: 10_000, expensiveIdleMs: EXPENSIVE_IDLE_MS });
+    expect(sessionIdlePolicy("ACP", {}, small)).toEqual({ idleMs: 10 * 60_000, minimumMs: 10_000 });
+    expect(sessionIdlePolicy("ACP", { OMB_ACP_SESSION_IDLE_MS: "120000" }, small, "expensive").expensiveIdleMs).toBeUndefined();
+    expect(sessionIdlePolicy("ACP", { OMB_SESSION_IDLE_MS: "120000" }, small, "expensive").expensiveIdleMs).toBeUndefined();
+    expect(sessionIdlePolicy("ACP", {}, 1.5 * GB, "expensive").expensiveIdleMs).toBeUndefined();
+  });
+
+  it("needs room for one more of the largest engines above the floor beside it", () => {
+    // headroom = (free - floor) / (total / 2): 1.5 GB above the floor is 0.75 on a 4 GB Cloud, 0.1875 on a 16 GB one.
+    expect(roomBesideIdle(0.75, small)).toBe(true);
+    expect(roomBesideIdle(0.7, small)).toBe(false);
+    expect(roomBesideIdle(0.19, large)).toBe(true);
+    expect(roomBesideIdle(0.18, large)).toBe(false);
+    // A 2 GB box never has that much headroom; a 3 GB one only with nearly all of it (1,500 MiB of 1,536).
+    expect(roomBesideIdle(1, 2 * GB)).toBe(false);
+    expect(roomBesideIdle(0.97, 3 * GB)).toBe(false);
+    expect(roomBesideIdle(1, 1.5 * GB)).toBe(false);
+  });
+
+  it("keeps a watched conversation's idle process 30 minutes and an unwatched one 3 while the room allows, else the usual rule", () => {
+    const policy = sessionIdlePolicy("ACP", {}, small, "expensive");
+    sawThread("open", now - 60_000);
+    expect(engineIdleMs("open", policy, cloud(1), now, small)).toBe(EXPENSIVE_IDLE_MS);
+    expect(engineIdleMs("open", policy, cloud(0.8), now, small)).toBe(EXPENSIVE_IDLE_MS);
+    expect(engineIdleMs("open", policy, cloud(0.5), now, small)).toBe(5 * 60_000);
+    expect(engineIdleMs("open", policy, cloud(0.1), now, small)).toBe(60_000);
+    expect(engineIdleMs("routine", policy, cloud(1), now, small)).toBe(EXPENSIVE_UNWATCHED_IDLE_MS);
+    expect(engineIdleMs("routine", policy, cloud(0.5), now, small)).toBe(UNWATCHED_IDLE_MS);
+    expect(engineIdleMs("routine", policy, cloud(1), now, 2 * GB)).toBe(UNWATCHED_IDLE_MS);
+    // The desktop, with no memory to read, keeps the configured time: nothing could shorten a longer one later.
+    expect(engineIdleMs("open", policy, { enabled: false, headroom: () => 1 }, now, large)).toBe(10 * 60_000);
+  });
+
+  it("is closed by the sweep once the room shrinks below that", () => {
+    const policy = sessionIdlePolicy("ACP", {}, small, "expensive");
+    sawThread("open-sweep", now);
+    let closed = 0;
+    const engine: WarmEngine = { idle: () => true, close: () => { closed += 1; }, threadId: "open-sweep", policy };
+    armIdleClose("expensive-sweep", EXPENSIVE_IDLE_MS, engine, now);
+    const room = (factor: number) => ({ enabled: true, headroom: () => factor, roomFactor: () => factor, shortOfRoom: () => false });
+    expect(sweepIdleEngines(room(0.8), now + 20 * 60_000, small)).toBe(0);
+    expect(closed).toBe(0);
+    expect(sweepIdleEngines(room(0.5), now + 20 * 60_000, small)).toBe(1);
+    expect(closed).toBe(1);
   });
 });
