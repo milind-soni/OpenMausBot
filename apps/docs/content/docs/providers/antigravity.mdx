@@ -45,6 +45,8 @@ MausBot runs Antigravity on Google's native CLI (1.5 or later): one program of a
 
 A new install takes the Google Antigravity CLI. A computer that already has the Classic runtime keeps it, and an account signed in on it keeps working, with no new sign-in after an update. Its card in Settings offers **Switch to Google Antigravity CLI**: the switch installs the CLI for that account and is one way, and the CLI keeps its Google sign-in in a different file, so you sign in with Google once more.
 
+On a computer with no Antigravity runtime at all, MausBot installs the CLI by itself in its engine update pass (a few minutes after it starts, while no bot is working) when the server is started with `OMB_ANTIGRAVITY_NATIVE_CLI=1`, or when Antigravity is in use there: an added Google account, or a bot or the default model on a Google account. The card says it is installing, then asks you to sign in. Otherwise nothing is downloaded until you select **Install Google Antigravity CLI**. This install never replaces the Classic runtime or moves an account off it.
+
 To move an account to the CLI:
 
 1. Select **Switch to Google Antigravity CLI** on its card (or, on a new install, **Install Google Antigravity CLI**). The CLI comes from Google's update channel, checked against the SHA-512 that channel names.

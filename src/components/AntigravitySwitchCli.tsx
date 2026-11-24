@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { ArrowRightLeft, Loader2 } from "lucide-react";
 
-import { api, useStore, type InstanceInfo } from "@/state/store";
+import { api, type InstanceInfo } from "@/state/store";
+import { useStoreActions } from "@/state/store-select";
 import { t } from "@/lib/i18n";
 import { runsAntigravityCli } from "./EngineSetup";
 
@@ -15,7 +16,7 @@ export function offersAntigravityCliSwitch(instance: InstanceInfo): boolean {
 /** The one way from the Classic runtime to Google's Antigravity CLI, and one way only: the account's CLI path becomes
  * `antigravity` and the CLI is installed. When the install fails the path goes back, so a working account keeps working. */
 export function AntigravitySwitchCli({ instance }: { instance: InstanceInfo }) {
-  const { refreshInstances } = useStore();
+  const { refreshInstances } = useStoreActions();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   if (!offersAntigravityCliSwitch(instance) && !busy) return null;

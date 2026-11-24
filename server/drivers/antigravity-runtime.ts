@@ -503,14 +503,41 @@ async function installOnce(options: AntigravityInstallOptions): Promise<Antigrav
   }
 }
 
+/** One install per channel at a time. The two that can download the CLI go one after the other, so the card's install
+ * asked during the updater's (or the other way round) finds that release in place instead of downloading it again. */
 export function installAntigravityRuntime(options: AntigravityInstallOptions = {}): Promise<AntigravityRuntime> {
   const channel = options.asset !== undefined ? "pinned" : options.native ? "native" : options.nativeByDefault === false ? "pinned-only" : "default";
-  const key = `${runtimeRoot(options.baseDir)}\0${channel}`;
+  const root = `${runtimeRoot(options.baseDir)}\0`;
+  const key = `${root}${channel}`;
   const existing = installs.get(key);
   if (existing) return existing;
-  const running = installOnce(options).finally(() => installs.delete(key));
+  const takesCli = (name: string) => name === "native" || name === "default";
+  const before = takesCli(channel)
+    ? [...installs].filter(([other]) => other.startsWith(root) && takesCli(other.slice(root.length))).map(([, install]) => install.catch(() => {}))
+    : [];
+  const running = Promise.all(before).then(() => installOnce(options)).finally(() => installs.delete(key));
   installs.set(key, running);
   return running;
+}
+
+/** An install of any channel is running on this computer now. */
+export function antigravityInstallRunning(baseDir?: string): boolean {
+  const root = `${runtimeRoot(baseDir)}\0`;
+  return [...installs.keys()].some((key) => key.startsWith(root));
+}
+
+/** No Antigravity runtime here at all: no CLI or pinned release this app installed (of any version), and no pinned
+ * runtime on PATH. Starts no program. */
+export async function antigravityNothingInstalled(baseDir = DATA_DIR, env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
+  const root = runtimeRoot(baseDir);
+  if (await activeAntigravityCli(root)) return false;
+  const pinned = resolveAntigravityReleaseAsset();
+  if (pinned && (await completedRelease(join(root, "versions", pinned.sha256), pinned))) return false;
+  if ((await antigravityOlderRuntime(baseDir, pinned)) !== null) return false;
+  for (const candidate of pathCandidates(executableNames().executable, env)) {
+    if (await externalRuntime(candidate, "path")) return false;
+  }
+  return true;
 }
 
 let channelAnswer: { at: number; version: string } | undefined;

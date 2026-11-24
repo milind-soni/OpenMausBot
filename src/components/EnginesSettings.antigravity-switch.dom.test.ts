@@ -134,3 +134,13 @@ it("installs the CLI from a fresh home's install button, with no path saved firs
   await act(async () => { install[0]!.click(); });
   expect(fixture.calls.map(({ path, method }) => [method, path])).toEqual([["POST", "/api/instances/antigravity/install"]]);
 });
+
+it("says the CLI is being installed while the server installs it on its own, and starts no second install", async () => {
+  await show(google({ snapshot: { state: "unavailable", installing: true } }));
+  expect(button("Install Google Antigravity CLI")).toHaveLength(0);
+  const installing = button("Downloading and verifying…");
+  expect(installing).toHaveLength(1);
+  expect(installing[0]!.disabled).toBe(true);
+  await act(async () => { installing[0]!.click(); });
+  expect(fixture.calls).toEqual([]);
+});
