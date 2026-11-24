@@ -1,0 +1,86 @@
+// @vitest-environment happy-dom
+import { act, createElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+
+import type { GithubSignInStatus } from "../../../shared/github-sign-in";
+
+const sent = vi.hoisted(() => [] as Array<{ path: string; init?: RequestInit }>);
+vi.mock("@/state/store", () => ({
+  api: vi.fn(async (path: string, init?: RequestInit) => { sent.push({ path, init }); return { connected: true }; }),
+}));
+
+const { setLocale } = await import("@/lib/i18n");
+const { createGithubSignInStore } = await import("@/lib/github-sign-in");
+const { ApiError } = await import("@/state/api");
+const { ConnectorCard } = await import("../ConnectorCard");
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const SIGNED_OUT: GithubSignInStatus = { state: "signed-out", download: false };
+const CODE: GithubSignInStatus = { state: "signing-in", code: "WDJB-MJHT", verificationUrl: "https://github.com/login/device", expiresAt: Date.now() + 900_000 };
+const message = (status: "required" | "connected" = "required", extra = {}) => ({
+  id: "m1", role: "bot", kind: "connector", at: 1, text: "Chief couldn't push to acme/site: GitHub isn't connected.",
+  connector: { source: "github", slug: "github-sign-in", label: "GitHub", description: "Connect GitHub so Chief can push its work.", status, resumeKey: "github-1", ...extra },
+}) as never;
+
+let root: Root | null = null;
+let host: HTMLElement;
+beforeEach(() => { setLocale("en"); sent.length = 0; host = document.createElement("div"); document.body.append(host); });
+afterEach(async () => { if (root) await act(async () => root!.unmount()); root = null; document.body.innerHTML = ""; });
+
+async function show(answers: Array<GithubSignInStatus | InstanceType<typeof ApiError>>, card = message(), starts: GithubSignInStatus[] = [CODE]) {
+  const store = createGithubSignInStore({
+    api: async (path) => {
+      if (path.endsWith("/start")) return starts.shift();
+      const next = answers.length > 1 ? answers.shift()! : answers[0]!;
+      if (next instanceof ApiError) throw next;
+      return next;
+    },
+    timers: { set: () => null, clear: () => {} },
+  });
+  root = createRoot(host);
+  // The chat's own ConnectorCard: a github card is drawn by the GitHub card.
+  const { GithubChatCard } = await import("./GithubChatCard");
+  await act(async () => { root!.render(createElement(ConnectorCard, { botId: "chief", threadId: "t1", message: card })); });
+  await act(async () => { await Promise.resolve(); });
+  if (!(card as { connector: { dismissed?: boolean } }).connector.dismissed) {
+    expect(host.querySelector("[data-github-connect], [data-ask-card]"), "ConnectorCard draws a github card as the GitHub card").toBeTruthy();
+    expect(host.textContent).not.toContain("Connect securely");
+  }
+  await act(async () => { root!.render(createElement(GithubChatCard, { botId: "chief", threadId: "t1", message: card, store })); });
+  await act(async () => { await Promise.resolve(); });
+  return store;
+}
+const button = (label: string) => [...host.querySelectorAll("button")].find((candidate) => candidate.textContent === label || candidate.getAttribute("aria-label") === label);
+
+it("says what failed and connects GitHub in place: the code, GitHub's page, then Cancel", async () => {
+  await show([SIGNED_OUT]);
+  const card = host.querySelector("[data-ask-card='pending']")!;
+  expect(card.textContent).toContain("Chief couldn't push to acme/site: GitHub isn't connected.");
+  expect(card.textContent).toContain("Push bots' work to your repositories.");
+  await act(async () => { button("Connect GitHub")!.click(); await Promise.resolve(); await Promise.resolve(); });
+  expect(host.querySelector("[data-github-code]")!.textContent).toBe("WDJB-MJHT");
+  expect(host.querySelector<HTMLAnchorElement>("[data-github-open]")!.href).toBe("https://github.com/login/device");
+  expect(button("Cancel")).toBeTruthy();
+});
+
+it("settles on the server and becomes one quiet line once GitHub is connected", async () => {
+  await show([{ state: "signed-in", login: "octo", source: "mausbot", scopes: [], checkedAt: 1 }]);
+  expect(host.querySelector("[data-ask-card='settled']")!.textContent).toContain("GitHub · Connected as @octo");
+  expect(sent.some((call) => call.path === "/api/bots/chief/connector-cards/m1/status?threadId=t1")).toBe(true);
+});
+
+it("Not now sets the card aside through the card's own route", async () => {
+  await show([SIGNED_OUT]);
+  await act(async () => { button("Not now")!.click(); await Promise.resolve(); });
+  expect(sent.at(-1)).toMatchObject({ path: "/api/bots/chief/connector-cards/m1/dismiss", init: { method: "POST", body: JSON.stringify({ threadId: "t1" }) } });
+});
+
+it("shows nothing to someone whose sign-in it isn't, and nothing once set aside", async () => {
+  await show([new ApiError("Sign in to this team's Cloud to connect your own GitHub.", 403)]);
+  expect(host.innerHTML).toBe("");
+  await act(async () => root!.unmount()); root = null; host.innerHTML = "";
+  await show([SIGNED_OUT], message("required", { dismissed: true }));
+  expect(host.innerHTML).toBe("");
+});
