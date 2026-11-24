@@ -285,7 +285,11 @@ class Drafter {
 
   private delegate(id: string, layer: BurgerLayer, label: string): WorkflowStep {
     const [first = [], ...later] = layer.delegation!.rounds;
-    const tasks = first.flatMap((call) => call.bots.map((bot) => ({ bot: this.teammate(bot), message: this.text(call.message), ...(call.doneWhen ? { doneWhen: call.doneWhen.slice(0, 1_000) } : {}) })));
+    const tasks = first.flatMap((call) => {
+      const from = this.pipe(call.message);
+      const message = from ? [from] : this.text(call.message);
+      return call.bots.map((bot) => ({ bot: this.teammate(bot), message, ...(call.doneWhen ? { doneWhen: call.doneWhen.slice(0, 1_000) } : {}) }));
+    });
     const unique = tasks.filter((task, index) => tasks.findIndex((other) => other.bot.name === task.bot.name) === index).slice(0, 8);
     // What an extra round asked, with this run's inputs shown as their names, so a later run doesn't copy its values.
     const example = later.flat().map((call) => `${namesLine(call.bots.map((bot) => this.teammate(bot).name))}: ${textLine(this.text(call.message))}`).join("\n").slice(0, EXAMPLE_MAX);
