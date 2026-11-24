@@ -14,14 +14,27 @@ describe("thread tabs", () => {
     expect(tabs[0].pinned).toBe(true);
   });
 
-  it("leaves out archived, snoozed, closed and bot-started threads, unless one is open", () => {
+  it("leaves out archived, snoozed, closed, routine and burst threads, unless one is open", () => {
     const tasks = [
       task("mine", 9), task("gone", 8, { archivedAt: 1 }), task("later", 7, { snoozedUntil: 0 }), task("run", 6, { routineRunId: "r1" }),
-      task("helper", 5, { openedBy: { botId: "b", name: "Rio", at: 1 } }), task("closed", 4, { closedBy: { botId: "b", name: "Rio", at: 1 } }),
+      task("burst", 5, { openedBy: { botId: "b", name: "Rio", at: 1, burstId: "x" } }), task("closed", 4, { closedBy: { botId: "b", name: "Rio", at: 1 } }),
     ];
     expect(threadTabs(bot(tasks, { threadId: "mine" })).map((tab) => tab.threadId)).toEqual(["mine"]);
     expect(threadTabs(bot(tasks, { threadId: "gone" })).map((tab) => tab.threadId)).toEqual(["mine", "gone"]);
     expect(threadTabs(bot(tasks, { threadId: "mine", switchingTo: "run" })).map((tab) => tab.threadId)).toEqual(["mine", "run"]);
+  });
+
+  it("counts a thread another bot opened while it is still going, so a bot whose work comes from teammates gets its switcher", () => {
+    const rio = { botId: "lead", name: "Lead", at: 1 };
+    const tasks = [task("main", 1, { openedBy: rio }), task("steer", 3, { openedBy: rio }), task("gemini", 2, { openedBy: rio }), task("done", 4, { openedBy: rio, closedBy: rio })];
+    const helper = bot(tasks, { threadId: "main", mainThreadId: "main" });
+    expect(threadTabs(helper).map((tab) => tab.threadId)).toEqual(["steer", "gemini", "main"]);
+    expect(botShowsTabs(helper, null)).toBe(true);
+  });
+
+  it("keeps the main thread whoever opened it, even when another thread is on screen", () => {
+    const tasks = [task("main", 1, { routineRunId: "r" }), task("other", 2)];
+    expect(threadTabs(bot(tasks, { threadId: "other", mainThreadId: "main" })).map((tab) => tab.threadId)).toEqual(["other", "main"]);
   });
 
   it("shows the strip only for two threads or more, the blank New thread chat counted", () => {

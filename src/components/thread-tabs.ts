@@ -1,7 +1,6 @@
 import type { Bot, Task } from "@/state/store";
 import type { NewChat } from "@/state/new-chat";
 import { isNewChatThread, newChatThreadId } from "@/state/new-chat";
-import { ownThread } from "./sidebar-thread-labels";
 import { isArchived, isSnoozed, isWorking, orderedThreadList } from "./SidebarThreadRow";
 
 export interface ThreadTab {
@@ -20,8 +19,11 @@ export type TabsBot = Pick<Bot, "id" | "threadId"> & Partial<Pick<Bot, "mainThre
 /** The open thread: where a switch is going, or the blank New thread chat. */
 export const openTabId = (bot: Pick<Bot, "threadId" | "switchingTo">): string => bot.switchingTo ?? bot.threadId;
 
-const tabbed = (task: Task, open: string) =>
-  task.threadId === open || task.pinned === true || (ownThread(task) && !isArchived(task) && !isSnoozed(task) && !task.closedBy);
+/** A thread someone is still talking in: not a routine's run or a burst's, and not ended, archived or snoozed. */
+const stillOpen = (task: Task) => !task.routineRunId && !task.openedBy?.burstId && !isArchived(task) && !isSnoozed(task) && !task.closedBy;
+
+const tabbed = (task: Task, open: string, main: string | undefined) =>
+  task.threadId === open || task.threadId === main || task.pinned === true || stillOpen(task);
 
 /**
  * A bot's threads as tabs, in its sidebar order: pinned first, then by recent use. The blank New thread chat sits where
@@ -29,7 +31,7 @@ const tabbed = (task: Task, open: string) =>
  */
 export function threadTabs(bot: TabsBot): ThreadTab[] {
   const open = openTabId({ threadId: bot.threadId, switchingTo: bot.switchingTo });
-  const tasks = orderedThreadList((bot.tasks ?? []).filter((task) => tabbed(task, open)));
+  const tasks = orderedThreadList((bot.tasks ?? []).filter((task) => tabbed(task, open, bot.mainThreadId)));
   const main = bot.mainThreadId;
   const real = tasks.length;
   const tabs: ThreadTab[] = tasks.map((task) => {
