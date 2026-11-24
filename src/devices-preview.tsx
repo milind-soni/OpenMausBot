@@ -7,10 +7,12 @@
 //  &code=1 (a phone code still open) &notice=1 (an update kept Same Wi-Fi on) &retired=1 (an older phone app's link ended)
 //  &home=on|off (Always-on home on this computer) &vps=default (a default SSH server too; page=ai&advanced=1 shows the
 //  Self-hosted VPS panel under AI's computers) &e2e=0 (an older phone link: a typed code beside the QR)
+//  &map=0|1 (the picture above the list off or on, whatever SHOW_DEVICE_MAP says)
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { parseServerInput } from "../electron/server-address.mjs";
 import { SettingsModal } from "@/components/SettingsModal";
+import { overrideDeviceMap } from "@/components/devices/DeviceMap";
 import type { CompanionState } from "@/lib/companion-types";
 import { loadLocale } from "@/lib/i18n";
 import { setAdvancedMode } from "@/lib/interface-mode";
@@ -32,6 +34,7 @@ const homeParam = params.get("home");
 const retired = params.get("retired") === "1";
 applySkinChoice(SKIN_IDS.includes(skin as SkinId) ? (skin as SkinId) : "midnight");
 setAdvancedMode(params.get("advanced") === "1");
+overrideDeviceMap(params.get("map") === "0" ? false : params.get("map") === "1" ? true : null);
 await loadLocale(params.get("lang") ?? "en");
 
 const now = Date.now();

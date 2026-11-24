@@ -12,6 +12,7 @@ import { initialState, StoreContext } from "@/state/store";
 import { fullContext, resolveSettingsTarget, searchSettings } from "../settings-index";
 import { SettingsShellContext, type SettingsShell } from "../settings-shell";
 import { DevicesPage, nextNetworkStep, tailscaleDownload } from "./DevicesPage";
+import { overrideDeviceMap } from "../../devices/DeviceMap";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const NOW = Date.now();
@@ -1041,5 +1042,55 @@ describe("a server bots reach over SSH, in its details", () => {
     expect(editor.querySelector("[data-vps-limits-line]")?.textContent).toContain("Left empty, it gets 4 GB and 2 cores.");
     expect(editor.querySelector("button[data-danger]")?.textContent).toBe("Remove");
     expect($("[data-device-details='vps:gpu']")?.textContent).not.toContain("Name and limits");
+  });
+});
+
+describe("the map above the list", () => {
+  afterEach(() => overrideDeviceMap(null));
+
+  it("opens a node's row below, with its details open and focus on its row, and nothing over the page", async () => {
+    overrideDeviceMap(true);
+    await render();
+    const map = $("[data-settings-block=map]")!;
+    expect(map.getAttribute("role")).toBe("group");
+    expect(map.getAttribute("aria-label")).toBe("Your devices and how they connect");
+    expect(map.compareDocumentPosition($("[data-settings-block=add]")!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect([...map.querySelectorAll("[data-map-node]")].map((node) => node.getAttribute("data-map-node")))
+      .toEqual(["here", "phone:iphone", "phone:pixel", "place:home", "place:vps"]);
+    expect(map.querySelector("[data-map-node='place:vps']")?.getAttribute("aria-label")).toBe("Hetzner box, Your own server, Can’t reach it, Over the internet");
+    await click("[data-map-node='place:vps']");
+    await wait(20);
+    expect($("[data-device-details='place:vps']")).not.toBeNull();
+    expect(document.activeElement).toBe($("[data-device-node='place:vps']"));
+    expect([...map.querySelectorAll("button, a, input, [role=switch]")].every((control) => control.hasAttribute("data-map-node")), "the map has no actions of its own").toBe(true);
+    expect(layers()).toBe(0);
+  });
+
+  it("puts the private network on the hub, draws an away device's line dashed, and says it all in one line for a narrow window", async () => {
+    overrideDeviceMap(true);
+    await render();
+    expect($("[data-map-node=here] [data-map-network]")).not.toBeNull();
+    expect($("[data-map-node=here]")?.getAttribute("aria-label")).toContain("Private network: Not set up");
+    expect($("[data-map-node='phone:pixel']")?.getAttribute("data-map-line")).toBe("away");
+    expect($("[data-map-node='phone:iphone']")?.getAttribute("data-map-line")).toBe("on");
+    expect($("[data-map-summary]")?.textContent).toBe("2 phones · 2 Clouds and your own servers");
+  });
+
+  it("with nothing else connected, draws the hub alone and says so", async () => {
+    overrideDeviceMap(true);
+    companion = { ...companion, devices: [], connectedDeviceIds: [] };
+    saved = [{ id: "local", kind: "local", name: "This computer" }];
+    await render();
+    expect([...document.querySelectorAll("[data-map-node]")].map((node) => node.getAttribute("data-map-node"))).toEqual(["here"]);
+    expect($("[data-map-empty]")?.textContent).toBe("Nothing else is connected yet");
+    expect($("[data-map-summary]")?.textContent).toBe("Nothing else is connected yet");
+  });
+
+  it("draws nothing while it is turned off", async () => {
+    overrideDeviceMap(false);
+    await render();
+    expect($("[data-settings-block=map]")).toBeNull();
+    expect($("[data-map-node]")).toBeNull();
+    expect($("[data-device-node='place:vps']")).not.toBeNull();
   });
 });

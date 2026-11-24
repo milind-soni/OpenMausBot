@@ -13,6 +13,7 @@ import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { AddDevicePanel, lastInputWasKeys, withinPage, type AddKind } from "../../devices/AddDevicePanel";
 import { DevicesNotice, GroupSection, HereSection, type NetworkAction, type NetworkShare, type Opened } from "../../devices/DeviceRows";
 import { PhoneCodeInline } from "../../devices/CodeCard";
+import { DeviceMap, deviceMapShown } from "../../devices/DeviceMap";
 import { usePairAccess } from "../../devices/PairCodePanel";
 import { ComputerNameMore, OtherPlacesSection, PairWithCloudRow, PhoneAppFacts, ServerPhoneNotes } from "../../devices/PhoneSections";
 import { networkLine } from "../../devices/device-words";
@@ -240,6 +241,17 @@ export function DevicesPage() {
   const groups = groupByKind(devices, { all: true });
   const now = Date.now();
   const onAction = (device: Device, action: DeviceAction) => void act(device, action);
+  const openFromMap = (id: string) => {
+    setNotice(null);
+    setPairing(false);
+    setOpen(id);
+    window.requestAnimationFrame(() => {
+      const row = document.querySelector<HTMLElement>(`[data-device-row="${CSS.escape(id)}"]`);
+      const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      row?.scrollIntoView?.({ block: "start", behavior: still ? "auto" : "smooth" });
+      row?.querySelector<HTMLElement>("[data-device-node]")?.focus({ preventScroll: true });
+    });
+  };
   // Beside the next step, at most one quiet button: ask again after installing or approving.
   const secondary = network && !blocked && networkAction?.href
     ? <button type="button" className="settings-quiet cursor-pointer" disabled={c.busy} onClick={() => void check()}>{c.busy ? t("common.checking") : t("remote.checkAgain")}</button> : null;
@@ -266,6 +278,7 @@ export function DevicesPage() {
     {state && <RouteNotices c={c} notices={state.notices ?? []} />}
     {error && <p role="alert" className="px-4 text-[13px] leading-[18px] text-danger">{error}</p>}
     {notice && !notice.group && noticeLine}
+    {deviceMapShown() && <DeviceMap devices={devices} mark={mark} network={network} loaded={loaded} onOpen={openFromMap} now={now} />}
     <HereSection device={here} mark={mark} opened={opened} onAction={onAction} onAdd={() => startAdding(null, "[data-add-device]")} now={now}
       network={network && { network, line: blocked ?? networkLine(network), action: network.state === "ready" ? null : networkAction, secondary, share }} pending={ctx.here}
       more={!ctx.here && ctx.advanced && !ctx.cloud && access.pairingCodes === true && canPairDevices(access.session) ? <ComputerNameMore /> : null} />

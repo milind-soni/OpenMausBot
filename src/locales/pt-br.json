@@ -11952,5 +11952,12 @@
   "remote.devices.homeOrPrivate": "Só em casa ou na minha rede privada",
   "phone.signIn.sameTailscaleNote": "O outro aparelho precisa estar conectado à mesma conta do Tailscale.",
   "phone.verifying.privateNetworkDetail": "Seu código de pareamento vai usar sua rede privada.",
-  "remote.diagnosis.route.privateNetwork": "Seu celular consegue alcançar este computador pela sua rede privada."
+  "remote.diagnosis.route.privateNetwork": "Seu celular consegue alcançar este computador pela sua rede privada.",
+  "devicesPage.map.phonesOne": "{count} celular",
+  "devicesPage.map.phonesMany": "{count} celulares",
+  "devicesPage.map.computersOne": "{count} computador",
+  "devicesPage.map.computersMany": "{count} computadores",
+  "devicesPage.map.serversOne": "{count} Cloud ou servidor próprio",
+  "devicesPage.map.serversMany": "{count} Clouds e servidores próprios",
+  "devicesPage.map.nothingYet": "Nada mais está conectado ainda"
 }

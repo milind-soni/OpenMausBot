@@ -44,7 +44,7 @@ function DeviceRow({ device, mark, opened, onAction, now }: {
   const node = device.here ? "here" : device.id;
   const label = [device.name, statusText(device, now), botsLabel(bots)].filter(Boolean).join(", ");
   return (
-    <div data-device-row={device.id} data-device-status={device.status} data-open={open ? "" : undefined}>
+    <div data-device-row={device.id} data-device-status={device.status} data-open={open ? "" : undefined} className="scroll-mt-4">
       <div className="relative flex min-h-11 items-center gap-3 px-4 py-3">
         <span aria-hidden="true" className={SLOT}>{mark ?? <SettingsMark><Icon /></SettingsMark>}</span>
         <button type="button" data-device-node={node} aria-expanded={open} aria-controls={detailsId} aria-label={label} title={device.name}
@@ -70,7 +70,8 @@ function DeviceRow({ device, mark, opened, onAction, now }: {
 }
 
 const NETWORK_MARK: Partial<Record<PrivateNetwork["state"], Device["status"]>> = { ready: "online", unknown: "unknown" };
-const networkMark = (network: PrivateNetwork): Device["status"] => (network.state === "ready" && !network.shared ? "offline" : NETWORK_MARK[network.state] ?? "attention");
+/** The private network's mark: a choice left off reads as away, not as needing the person. */
+export const networkMark = (network: PrivateNetwork): Device["status"] => (network.state === "ready" && !network.shared ? "offline" : NETWORK_MARK[network.state] ?? "attention");
 
 /** Your other computers on the private network, as a switch once Tailscale is on: on lets them open this computer. */
 export interface NetworkShare {
@@ -106,7 +107,7 @@ function NetworkRow({ network, line, action, secondary, share }: { network: Priv
           </div>
         </div>
         {(action || secondary || share) && (
-          <span className="flex shrink-0 items-center gap-2 ps-11 @min-[480px]/rows:ps-0">
+          <span className="ms-auto flex shrink-0 items-center gap-2 ps-11 @min-[480px]/rows:ps-0">
             {action && (action.href
               ? <a href={action.href} target="_blank" rel="noreferrer" className="ui-button ui-button-sm" data-network-action="">{action.label}</a>
               : <button type="button" className="ui-button ui-button-sm" data-network-action="" disabled={action.busy} onClick={action.run}>{action.label}</button>)}

@@ -11952,5 +11952,12 @@
   "remote.devices.homeOrPrivate": "Only at home or on my private network",
   "phone.signIn.sameTailscaleNote": "The other device must be signed in to the same Tailscale account.",
   "phone.verifying.privateNetworkDetail": "Your pairing code will use your private network.",
-  "remote.diagnosis.route.privateNetwork": "Your phone can reach this computer on your private network."
+  "remote.diagnosis.route.privateNetwork": "Your phone can reach this computer on your private network.",
+  "devicesPage.map.phonesOne": "{count} phone",
+  "devicesPage.map.phonesMany": "{count} phones",
+  "devicesPage.map.computersOne": "{count} computer",
+  "devicesPage.map.computersMany": "{count} computers",
+  "devicesPage.map.serversOne": "{count} Cloud or your own server",
+  "devicesPage.map.serversMany": "{count} Clouds and your own servers",
+  "devicesPage.map.nothingYet": "Nothing else is connected yet"
 }
