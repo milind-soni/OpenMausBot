@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { acpMediaUri, findMediaPaths, readAcpMediaLinks } from "./media-links.ts";
@@ -32,6 +32,16 @@ describe("findMediaPaths", () => {
   it("treats two spellings of the same file as one", async () => {
     const other = process.platform === "win32" ? photo.replaceAll("\\", "/") : photo.replace(scratch, `${scratch}/.`);
     expect((await findMediaPaths(`${photo} and ${other}`)).map((file) => file.path)).toEqual([photo]);
+  });
+
+  it("reads a handed-on inbox/... path from the turn's own folder, and only when that folder is given", async () => {
+    const handed = join(scratch, "inbox", "bot-a", "task one", "handed clip.mp4");
+    mkdirSync(dirname(handed), { recursive: true });
+    writeFileSync(handed, Buffer.alloc(100));
+    const text = `1 file, listed below as copies in your own folder.\n- ${join("inbox", "bot-a", "task one", "handed clip.mp4")} (video/mp4, 1 KB)`;
+    expect((await findMediaPaths(text, scratch)).map((file) => file.path)).toEqual([handed]);
+    expect(await findMediaPaths(text)).toEqual([]);
+    expect(await findMediaPaths(`- not${join("inbox", "bot-a", "task one", "handed clip.mp4")}`, scratch)).toEqual([]);
   });
 
   it("ignores text without media", async () => {

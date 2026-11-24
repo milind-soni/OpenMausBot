@@ -510,6 +510,25 @@ describe("ACP turns (fake CLI)", () => {
     expect(JSON.stringify(prompt)).not.toContain("private-acp-video-bytes");
   });
 
+  it("links media another bot handed on, named by its inbox/... path in the turn's own folder", async () => {
+    const dump = join(scratch, "media-link-inbox-prompt.json");
+    const folder = join(scratch, "media-link-thread-folder");
+    const handed = join(folder, "inbox", "bot-a", "task-1", "handed clip.mp4");
+    mkdirSync(dirname(handed), { recursive: true });
+    writeFileSync(handed, Buffer.from("private-acp-video-bytes"));
+    process.env.FAKE_ACP_DUMP = dump;
+    process.env.FAKE_ACP_DUMP_PROMPT = "1";
+    await create(MediaLinksDriver);
+
+    const named = join("inbox", "bot-a", "task-1", "handed clip.mp4");
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-acp-media-link-inbox", cwd: folder, text: `Describe the video.\n- ${named} (video/mp4, 1 KB)` });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+
+    const prompt = JSON.parse(readFileSync(`${dump}.prompt.json`, "utf8"));
+    expect(prompt[1]).toEqual({ type: "resource_link", uri: acpMediaUri(handed), name: "handed clip.mp4" });
+    expect(JSON.stringify(prompt)).not.toContain("private-acp-video-bytes");
+  });
+
   it("delivers the full prompt once per native session and rides volatile changes as notes", async () => {
     const dump = join(scratch, "acp-prompt-split.json");
     process.env.FAKE_ACP_DUMP = dump;
