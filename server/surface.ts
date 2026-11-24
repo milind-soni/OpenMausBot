@@ -351,7 +351,7 @@ export function surfacePrompt(
     for (const [nowhere, places] of OWN_COMPUTER_WORDING) text = text.replace(nowhere, places);
     text += ownComputerSentence(opts.lentToServer, computer);
     // With no place chosen, "select_computer is the way to connect them" read as the way to the lent computer too, and a
-    // bot asked for desktop apps selected a Local VM that was never set up (#6754).
+    // bot asked for desktop apps selected a Local VM that was never set up.
     if (!computer && !opts.pinned) text += ` No other computer is set for this conversation: for desktop apps, use ${theirComputer(opts.lentToServer).theirs} through shared_computer, and don't select a Local VM or another place for it unless they ask.`;
   }
   if (opts.thisComputer && !opts.cloudHome && !reportBack && mounted.computer !== "local") {

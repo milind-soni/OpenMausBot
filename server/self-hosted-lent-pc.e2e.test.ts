@@ -1,8 +1,8 @@
 // A self-hosted server of one person's own (`openmausbot serve` on a VPS) with a synthetic engine, and the person's Windows
 // PC lent to it by the desktop app (apps and screen, no folder, no terminal). A conversation on Auto, with no Local VM set
 // up and no other computer chosen: its turn is told plainly that it has their PC and how to reach it (list_shared_computers,
-// then shared_computer), and nothing in the prompt sends it to a Local VM that is not set up (#6754). A conversation a bot
-// opened is told why it can't use the PC, never an empty list that reads like an offline PC (#6241).
+// then shared_computer), and nothing in the prompt sends it to a Local VM that is not set up. A conversation a bot
+// opened is told why it can't use the PC, never an empty list that reads like an offline PC.
 import { randomBytes, randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -103,7 +103,7 @@ it("tells an Auto turn on the person's own server that it has their lent PC and 
   expect(listed.computers).toEqual([expect.objectContaining({ id: PC.id, name: "OFFICE-PC", computer: true })]);
 }, 60_000);
 
-it("tells a conversation a routine started why it can't use the lent PC, instead of an empty list that reads as offline (#6241)", async () => {
+it("tells a conversation a routine started why it can't use the lent PC, instead of an empty list that reads as offline", async () => {
   const bot = (await api("POST", "/api/bots", { name: "Nightly" }, asOwner)).body.bot as { id: string };
   const turn = await turnFor(async () => {
     const created = await api("POST", "/api/routines", {

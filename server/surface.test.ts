@@ -462,7 +462,7 @@ describe("surfacePrompt", () => {
       .toBe(surfacePrompt({ computer: "vm", browser: false }, { canSelect: true, thisComputer }));
   });
 
-  // #6754: on a VPS with a lent PC and no place chosen, "select_computer is the way to connect them" sent a bot asked for
+  // On a VPS with a lent PC and no place chosen, "select_computer is the way to connect them" sent a bot asked for
   // desktop apps to a Local VM that was never set up, and This computer (the VPS) was offered for the person's files.
   it("with a lent computer and no place set, says to use it for desktop apps, and offers This computer only where the app runs", () => {
     const lent = [{ name: "OFFICE-PC", platform: "win32" as const }];

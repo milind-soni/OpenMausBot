@@ -1,6 +1,6 @@
 // A server of one person's own lends their computer only to a conversation they started with their own message
 // (shared-computers.ts provenRequestPerson). Any other conversation (one a bot, a routine or a webhook started) used to
-// get an empty list, which reads exactly like a computer that is off (#6241): it now gets why, for the bot and for the
+// get an empty list, which reads exactly like a computer that is off: it now gets why, for the bot and for the
 // person, in one line each. Only on a server nobody else signs in to, so nobody learns of another person's computer.
 import { theirComputer } from "./lent-computers.ts";
 import type { LentPlatform } from "./lent-computers.ts";
