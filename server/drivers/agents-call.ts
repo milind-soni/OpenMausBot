@@ -21,7 +21,7 @@ import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.t
 import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.ts";
 import { callWhatChangedTool, WHAT_CHANGED_TOOL } from "./agents-what-changed-tool.ts";
 import { callUsageLimitsTool, USAGE_LIMITS_TOOL } from "./agents-usage-tool.ts";
-import { callThreadPostTool, THREAD_POST_TOOL } from "./agents-thread-post-tool.ts"; import { callListThreadsTool, LIST_THREADS_TOOL } from "./agents-list-threads-tool.ts"; import { callRenameThreadTool, RENAME_THREAD_TOOL } from "./agents-thread-title-tool.ts"; import { callWorkflowTool, WORKFLOW_TOOL_NAMES } from "./agents-workflow-tool.ts";
+import { callThreadPostTool, THREAD_POST_TOOL } from "./agents-thread-post-tool.ts"; import { callListThreadsTool, closedThreadText, LIST_THREADS_TOOL } from "./agents-list-threads-tool.ts"; import { callRenameThreadTool, RENAME_THREAD_TOOL } from "./agents-thread-title-tool.ts"; import { callWorkflowTool, WORKFLOW_TOOL_NAMES } from "./agents-workflow-tool.ts";
 import { callWaitTool, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts"; import { callCheckBackTool, CHECK_BACK_TOOL_NAMES } from "./agents-check-back-tool.ts";
 import { callBurstTool } from "./agents-burst-tool.ts";
 import { callComputerAskTool, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
@@ -435,12 +435,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (!threadId) return { text: "close_thread needs the thread_id from list_threads or start_thread.", isError: true };
     const r = await api(`/api/internal/threads/${encodeURIComponent(threadId)}/close`, { method: "POST", body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID }) });
     if (r.error) return { text: `Couldn't close that thread: ${String(r.error)}`, isError: true };
-    const thread = `#${String(r.title)}${r.botName ? ` on @${String(r.botName)}` : ""}`;
-    if (r.alreadyClosed === true) {
-      const by = typeof r.closedBy === "string" && r.closedBy ? ` by @${r.closedBy}` : "";
-      return { text: `${thread} was already closed${by}, so nothing changed. ${r.archived === true ? "It is archived: it is no longer in the person's sidebar." : "It stays in the person's sidebar, idle."}` };
-    }
-    return { text: `Closed ${thread}. ${r.archived === true ? "It was archived already, so it stays out of the person's sidebar, with a note that you closed it." : "It stays in the person's sidebar, idle, with a note that you closed it."}` };
+    return { text: closedThreadText(r) };
   }
   if (name === "start_thread") {
     const title = String(args.title ?? "").trim();

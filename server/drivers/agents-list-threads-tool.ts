@@ -1,5 +1,5 @@
 // The agents catalog's list_threads tool: this bot's own threads and the ones it opened on teammates, newest first,
-// one page of the internal route (server/routes/internal-threads.ts) at a time.
+// one page of the internal route (server/routes/internal-threads.ts) at a time; and the words close_thread replies with.
 import type { Json } from "./agents-client.ts";
 import type { ToolCallContext, ToolCallResult } from "./agents-call.ts";
 
@@ -31,4 +31,14 @@ export async function callListThreadsTool(args: Json, context: ToolCallContext):
   const last = first + threads.length - 1;
   const more = last < total ? `\n\nShowing ${first}-${last} of ${total}. For older ones call list_threads with page ${page + 1}.` : "";
   return { text: `Threads, newest first:\n${threads.map(threadLine).join("\n")}${more}` };
+}
+
+/** close_thread's reply: what closing did, or that the thread was already closed and by whom, and whether the person's sidebar still shows it. */
+export function closedThreadText(r: Json): string {
+  const thread = `#${String(r.title)}${r.botName ? ` on @${String(r.botName)}` : ""}`;
+  if (r.alreadyClosed === true) {
+    const by = typeof r.closedBy === "string" && r.closedBy ? ` by @${r.closedBy}` : "";
+    return `${thread} was already closed${by}, so nothing changed. ${r.archived === true ? "It is archived: it is no longer in the person's sidebar." : "It stays in the person's sidebar, idle."}`;
+  }
+  return `Closed ${thread}. ${r.archived === true ? "It was archived already, so it stays out of the person's sidebar, with a note that you closed it." : "It stays in the person's sidebar, idle, with a note that you closed it."}`;
 }
