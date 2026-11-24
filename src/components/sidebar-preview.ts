@@ -1,6 +1,7 @@
 import { approvalCardOutcome } from "./ApprovalCard";
 import type { Bot, Group, InstanceInfo, Message } from "@/state/store";
 import type { RoutineRunCardData } from "../../shared/routine-run";
+import { automationNote, automationNoteTitle, knownWaits } from "@/lib/automation-note";
 import { peerLine } from "@/lib/peer-message";
 import { isReceipt } from "@/lib/receipts";
 import { activityPreview, botEngine, failedTurnCause, STATUS_MARKER } from "@/lib/failed-turn";
@@ -39,12 +40,12 @@ function plainStep(message: Message): boolean {
   return Boolean(tool) && tool!.ok !== false && !message.dataResult && failedTurnCause(tool!.name) === null && !isStoppedTurnName(tool!.name) && !STATUS_MARKER.test(tool!.name);
 }
 
-/** Simple mode quotes the bot: a step that went fine gives way to the newest thing said since the person last wrote. */
+/** Simple mode quotes the bot: a step that went fine gives way to the newest thing said since the person last wrote. A wait's note is the app's line, said, not the person's. */
 function quotedLine(messages: readonly Message[], last: Message, advanced: boolean): Message {
   if (advanced || !plainStep(last)) return last;
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index]!;
-    if (message.role === "user") break;
+    if (message.role === "user") return automationNote(message, knownWaits(messages)) ? message : last;
     if (message.kind !== "activity" && !isReceipt(message) && message.kind !== "screen") return message;
   }
   return last;
@@ -65,6 +66,8 @@ export function lastLine(bot: Bot, visible: Message[], instances: InstanceInfo[]
   if (last.kind === "routine.run" && last.routineRun) return automationRunPreview(last.routineRun);
   const peer = peerLine(last);
   if (peer) return `${peer.name}: ${plainPreviewText(peer.body)}`;
+  const note = automationNote(last, knownWaits(visible));
+  if (note) return automationNoteTitle(note);
   if (last.role !== "user" && isClientCancellation(last.text ?? "")) return t("chat.turnStopped");
   return plainPreviewText(citationPreviewText(serverCardText(last) ?? last.text ?? ""));
 }

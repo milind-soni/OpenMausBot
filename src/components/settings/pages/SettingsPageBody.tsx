@@ -5,6 +5,7 @@ import { DataPage, ImportExportPage, InstallationsPage, PeoplePage, SpendingPage
 import { DevicesPage } from "./DevicesPage";
 import { PhonePage } from "./PhonePage";
 import { AiPage, BotsPage, DesktopsPage, OverviewPage } from "./PlacePages";
+import { StoragePage } from "./StoragePage";
 
 const PAGES: Record<SettingsPageId, () => React.ReactNode> = {
   overview: OverviewPage,
@@ -16,6 +17,7 @@ const PAGES: Record<SettingsPageId, () => React.ReactNode> = {
   vault: VaultPage,
   usage: SpendingPage,
   transfer: ImportExportPage,
+  storage: StoragePage,
   data: DataPage,
   people: PeoplePage,
   installations: InstallationsPage,

@@ -6,10 +6,20 @@ import { notThisCli } from "./drivers/acp/version-probe.ts";
 import { augmentedPath } from "./env-path.ts";
 import { describeSpawnFailure, execCli } from "./procs.ts";
 
-export async function testCliBinary(
-  cli: string,
-  driver: (typeof BUILT_IN_DRIVERS)[number] | undefined,
-): Promise<{ ok: boolean; version?: string; message?: string; install?: (typeof BUILT_IN_DRIVERS)[number]["install"] }> {
+type CliTestResult = { ok: boolean; version?: string; message?: string; install?: (typeof BUILT_IN_DRIVERS)[number]["install"] };
+
+export async function testCliBinary(cli: string, driver: (typeof BUILT_IN_DRIVERS)[number] | undefined): Promise<CliTestResult> {
+  if (driver?.driverKind === "antigravityAgent") {
+    const antigravity = await import("./drivers/antigravity-runtime.ts");
+    if (antigravity.isAntigravityNativeAlias(cli) || antigravity.isAntigravityPinnedAlias(cli)) {
+      const appInstalled = await antigravity.resolveAntigravityRuntime(cli, cliProbeEnvironment()).catch(() => null);
+      return { ok: true, ...(appInstalled?.version ? { version: appInstalled.version } : {}) };
+    }
+  }
+  return runVersion(cli, driver);
+}
+
+function runVersion(cli: string, driver: (typeof BUILT_IN_DRIVERS)[number] | undefined): Promise<CliTestResult> {
   return new Promise((resolve) => {
     execCli(
       cli,

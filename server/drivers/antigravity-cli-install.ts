@@ -20,20 +20,28 @@ import { writeFileAtomic } from "../atomic.ts";
 import type { AntigravityCliReleaseAsset } from "./antigravity-cli-release.ts";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
 
-/** The one switch: `OMB_ANTIGRAVITY_NATIVE_CLI=1` in the server's environment, read at start. */
+/** Whether the native CLI's channel is used at all. Off, installs and updates use the pinned runtime only, and a CLI
+ * this app installed earlier is left where it is and not started. */
+export const ANTIGRAVITY_NATIVE_CLI = true;
+
 export const ANTIGRAVITY_NATIVE_CLI_ENV = "OMB_ANTIGRAVITY_NATIVE_CLI";
 
-/** Whether the native CLI is the runtime. Off (the default), everything is as before the CLI: the pinned 1.4.3 runtime
- * is installed and run, Google's CLI channel is never asked, and a CLI this app installed earlier is left where it is
- * and not started. On, the CLI is installed and run wherever the channel has a build, a computer that has the pinned
- * runtime moves to it, and the pinned one is removed once an account there signed in on the CLI. Opt-in because the
- * CLI's `--login` sign-in has not been run against Google, and every signed-in account signs in again after the move. */
-export const ANTIGRAVITY_NATIVE_CLI = process.env[ANTIGRAVITY_NATIVE_CLI_ENV] === "1";
+/** `OMB_ANTIGRAVITY_NATIVE_CLI=1` in the server's environment, read at start: an account whose CLI path names no runtime
+ * (none, or `agy`) runs the native CLI even where the pinned runtime is installed, and the engine updater installs the
+ * CLI there. An account set to a runtime under Runs on keeps it; nothing is removed. Off (the default), such an account
+ * keeps the pinned runtime where it is installed, and only a new install takes the CLI. */
+export const ANTIGRAVITY_CLI_FIRST = process.env[ANTIGRAVITY_NATIVE_CLI_ENV] === "1";
 
 /** Where the CLI keeps a Google sign-in, under `<profile>/antigravity-acp/`, when it does not use the OS keyring (which
  * it skips while SSH_CONNECTION is set). It never writes the pinned runtime's `acp_token.json`, and stores no OAuth
  * client, so this app cannot refresh it. */
 export const ANTIGRAVITY_CLI_TOKEN_FILE = "antigravity-oauth-token";
+
+/** Whether a configuration that does not name the native CLI (no path, or `agy`) runs it on `platform` when no pinned
+ * runtime is installed to go first. The path `antigravity` always asks for the native CLI. */
+export function antigravityNativeByDefault(_platform: NodeJS.Platform = process.platform): boolean {
+  return true;
+}
 
 const DOWNLOAD_TIMEOUT_MS = 45 * 60_000;
 const MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024;

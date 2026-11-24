@@ -1,4 +1,4 @@
-import type { ModelSelection } from "../../shared/wire.ts";
+import { EFFORT_LEVELS, type ModelSelection } from "../../shared/wire.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 /** Per engine without `search`, as in t3code's orchestrator_capabilities: one call lands whole in the bot's context. */
@@ -16,7 +16,7 @@ export interface MenuEngine {
   instanceId: string;
   driverKind: string;
   displayName: string | undefined;
-  models: { default: string; options: ReadonlyArray<{ id: string; label: string; orgBlocked?: true; needsCliUpdate?: string }> };
+  models: { default: string; options: ReadonlyArray<{ id: string; label: string; orgBlocked?: true; needsCliUpdate?: string; effortLevels?: readonly string[] }> };
   adapter: { capabilities: { effortLevels?: readonly string[] } };
 }
 
@@ -95,7 +95,12 @@ export function modelMenu(input: {
       continue;
     }
     room -= listed.length;
-    const efforts = engine.adapter.capabilities.effortLevels ?? [];
+    const effortByModel = new Map(engine.models.options.map((option) => [option.id, option.effortLevels]));
+    const fallbackEfforts = engine.adapter.capabilities.effortLevels ?? [];
+    const seenEfforts = new Set<string>(
+      listed.length ? listed.flatMap((id) => effortByModel.get(id) ?? fallbackEfforts) : fallbackEfforts,
+    );
+    const efforts = [...new Set([...EFFORT_LEVELS, ...fallbackEfforts])].filter((level) => seenEfforts.has(level));
     engines.push({
       instanceId, name,
       ...(listed.length ? { models: listed.map((id): MenuModel => {

@@ -39,17 +39,22 @@ Antigravity uses the same MausBot approval cards as other ACP engines. Connected
 
 The normal mode asks before protected actions. Full access maps to Antigravity's native `yolo` mode, but native questions still wait for a person instead of being guessed automatically.
 
-## Trying Google's native Antigravity CLI (opt-in)
+## Google Antigravity CLI or Classic runtime
 
-MausBot can run Google's newer native Antigravity CLI (1.5 or later, `agy acp`) instead of the packaged 1.4.3 runtime. It is one program of about 220 MB on a Mac and 275 MB on Linux, instead of about 400 MB and 1 GB, and starts much faster. It is **off by default** for two reasons: its Google sign-in has not yet been tried with a real account in MausBot, and it keeps the sign-in in a different file, so **every Antigravity account signs in with Google once more** after the switch.
+MausBot runs Antigravity on one of two runtimes, chosen for each Antigravity account under **Runs on** on its card in Settings:
 
-To try it on one server or computer:
+- **Google Antigravity CLI**: Google's native CLI (1.5 or later). One program of about 220 MB on a Mac and 275 MB on Linux, which starts much faster.
+- **Classic runtime**: the packaged 1.4.3 runtime MausBot has used so far, about 400 MB on a Mac and 1 GB on Linux.
 
-1. Start MausBot with `OMB_ANTIGRAVITY_NATIVE_CLI=1` in its environment, then restart it. (The setting is read when MausBot starts.)
-2. A few minutes later, while no bot is working, the engine updater installs the CLI from Google's update channel, checked against the SHA-512 that channel names. On a computer with no Antigravity runtime yet, **Install official Antigravity** on the account card installs the CLI instead.
-3. The account card shows **Sign in with Google**. Sign in in your browser. Google's Antigravity page then shows a code: paste it into **Code from the Antigravity page** on the card and select **Send code**.
-4. Send a bot on that account a message and check that it answers.
+A new install takes the Google Antigravity CLI. A computer that already has the Classic runtime keeps it, and nothing changes for its accounts until you choose the CLI under **Runs on**. The two runtimes keep their Google sign-ins in different files, so an account signs in with Google once more the first time it runs on the other one; switching back finds its earlier sign-in.
 
-With the CLI on, MausBot updates it itself (a few minutes after it starts, then once a day), keeps its release folder read-only, turns the CLI's own self-update off, and starts it so that each account keeps its sign-in in its own folder. The CLI always runs in its `default` mode and MausBot answers its requests by the bot's approval level. Once an account on that computer has signed in on the CLI, the 1.4.3 runtime is removed from disk.
+To move an account to the CLI:
 
-To go back, remove `OMB_ANTIGRAVITY_NATIVE_CLI` and restart. Accounts use their 1.4.3 sign-in again if it is still there; MausBot keeps it during the switch. If 1.4.3 was already removed, **Install official Antigravity** downloads it again (about 340 MB on Linux).
+1. Choose **Google Antigravity CLI** under **Runs on**, then **Install Google Antigravity CLI** if the card offers it. The CLI comes from Google's update channel, checked against the SHA-512 that channel names.
+2. Select **Sign in with Google** and sign in in your browser. Google's page then shows a code: paste it, or the full address of that page, into the card and select **Send code**.
+3. Send a bot on that account a message and check that it answers.
+
+MausBot updates the CLI itself (a few minutes after it starts, then once a day), keeps its release folder read-only, turns the CLI's own self-update off, and starts it so that each account keeps its sign-in in its own folder: two accounts can be two Google accounts, and a sign-in of the Antigravity CLI in a terminal is neither used nor signed out. The CLI always runs in its `default` mode and MausBot answers its requests by the bot's approval level. The Classic runtime stays on disk.
+
+A server or Cloud started with `OMB_ANTIGRAVITY_NATIVE_CLI=1` in its environment runs the CLI for every account that has not chosen a runtime, even where the Classic runtime is installed: the engine updater installs the CLI there while no bot is working. An account set to **Classic runtime** keeps it. The setting is read when MausBot starts.
+

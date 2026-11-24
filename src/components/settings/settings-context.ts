@@ -7,6 +7,7 @@ export { useSettingsPlace, type PlaceKind, type SettingsPlace } from "./settings
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { railShown, usePlaces, type RailPlace } from "@/lib/places";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
+import { useStorageReport } from "@/lib/use-storage-report";
 import { useStoreSelector } from "@/state/store-select";
 import { workspacesAvailable } from "../WorkspacesSection";
 import type { SettingsContext } from "./settings-index";
@@ -30,8 +31,9 @@ export function useSettingsContext(): SettingsContext {
   const environments = Boolean(ogb?.environments);
   const installations = workspacesAvailable(config);
   const skills = skillsLibraryEnabled(config);
-  return useMemo(() => ({ desktop, here, home, cloud, team, client, admin, places: placesShown, plan, organization, environments, installations, skills, advanced }),
-    [desktop, here, home, cloud, team, client, admin, placesShown, plan, organization, environments, installations, skills, advanced]);
+  const storage = useStorageReport({ enabled: admin && !client }).status === "ready";
+  return useMemo(() => ({ desktop, here, home, cloud, team, client, admin, places: placesShown, plan, organization, environments, installations, skills, advanced, storage }),
+    [desktop, here, home, cloud, team, client, admin, placesShown, plan, organization, environments, installations, skills, advanced, storage]);
 }
 
 /** How many places this app knows (a hidden rail's included), from main's environments list. */
