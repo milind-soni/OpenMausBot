@@ -1,4 +1,4 @@
-import { emptyPane, paneIds, placePane, presetLayout, type PaneEdge, type PanePreset, firstPane, MAIN_PANE, replacePane, resizePane, type PaneLayout, type SplitDirection } from "./pane-layout";
+import { emptyPane, paneIds, placePane, presetLayout, type PaneEdge, type PanePreset, MAIN_PANE, replacePane, resizePane, type PaneLayout, type SplitDirection } from "./pane-layout";
 import { api } from "./api";
 import { loadFullThread } from "./message-history";
 import { optimisticMessageId, optimisticUserMessage } from "./optimistic-send";
@@ -102,7 +102,7 @@ export function reduceForkPanel(state: AppState, action: ForkPanelAction): AppSt
       if (!layout || layout === MAIN_PANE) return { ...state, workspacePanes: null };
       const panels = { ...panes.panels };
       delete panels[action.promote ?? action.id];
-      const focused = panes.focused === action.id || panes.focused === action.promote ? firstPane(layout) : panes.focused;
+      const focused = panes.focused === action.id || panes.focused === action.promote ? MAIN_PANE : panes.focused;
       return { ...state, workspacePanes: { layout, panels, focused } };
     }
     case "openForkPanel": {

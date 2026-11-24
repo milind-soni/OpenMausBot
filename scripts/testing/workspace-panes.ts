@@ -85,6 +85,23 @@ export async function verifyWorkspacePanes(previewUrl: string, finishGate: strin
     await click(element('[aria-label="Expand Pepper threads"]'));
     await click(row(first));
     await page.until(composer(first));
+    const reading = "Reading list";
+    await preset("Four-pane grid");
+    await drag(row(reading), element('[data-pane-id="slot:1"]'), 0.5, 0.5, "fill");
+    await drag(row(second), element('[data-pane-id="slot:3"]'), 0.5, 0.5, "fill");
+    await type(reading, "Read", false);
+    for (const [closeButton, suffix] of [
+      [element("[data-empty-pane] .workspace-pane-close"), " this"],
+      [element(pane(second) + " .workspace-pane-close"), " next"],
+    ]) {
+      await click(closeButton);
+      await page.until(`document.activeElement === ${composer(reading)} && ${element(pane(reading))}.hasAttribute("data-pane-focused")`);
+      await page.send("Input.insertText", { text: suffix });
+    }
+    await page.until(`${composer(reading)}.value === "Read this next"`);
+    await page.evaluate(`${element(pane(reading) + " .workspace-pane-close")}.focus()`);
+    await key("Enter", 13);
+    await page.until(`document.activeElement === ${composer(first)}`);
     await drag(row(second), element(pane(first)), 0.92, 0.5, "right");
     await page.until(composer(second));
     await type(first, "Summarize the Gmail inbox");
@@ -126,7 +143,9 @@ export async function verifyWorkspacePanes(previewUrl: string, finishGate: strin
     await key("Tab", 9);
     for (const [orientation, keyName, code] of [["vertical", "ArrowRight", 39], ["horizontal", "ArrowDown", 40]] as const) {
       const divider = element(`[role=separator][aria-label="Resize panes"][aria-orientation=${orientation}]`);
-      await page.evaluate(`${divider}.focus()`);
+      await click(composer(third));
+      await click(divider);
+      await page.until(`document.activeElement === ${divider}`);
       const reachable = await page.evaluate(`(() => {
         const divider = ${divider}, r = divider.getBoundingClientRect(), vertical = divider.ariaOrientation === "vertical";
         const length = vertical ? r.height : r.width;
@@ -156,9 +175,9 @@ export async function verifyWorkspacePanes(previewUrl: string, finishGate: strin
     await page.until(reply(first, "Check Gmail again"));
     assert.equal(await page.evaluate(reply(second, "Check iCloud again")), false);
     await click(element(`[aria-label="Close pane for ${first}"]`));
-    await page.until(`document.querySelectorAll('[data-workspace-thread]').length === 2 && ${composer(third)}?.value === ${JSON.stringify(draft)}`);
+    await page.until(`document.querySelectorAll('[data-workspace-thread]').length === 2 && document.activeElement === ${composer(third)} && ${composer(third)}?.value === ${JSON.stringify(draft)}`);
     await click(element(`[aria-label="Close pane for ${second}"]`));
-    await page.until(`!document.querySelector('[data-workspace-thread]') && ${composer(third)}?.value === ${JSON.stringify(draft)}`);
+    await page.until(`!document.querySelector('[data-workspace-thread]') && document.activeElement === ${composer(third)} && ${composer(third)}?.value === ${JSON.stringify(draft)}`);
     await click(row(first));
     await page.until(reply(first, "Summarize the Gmail inbox"));
     unlinkSync(finishGate);

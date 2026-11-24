@@ -106,6 +106,15 @@ it("keeps four occupied panes across rejected splits, fork opens and smaller pre
   expect(balanced.workspacePanes?.panels).toBe(state.workspacePanes?.panels);
 });
 
+it("keeps focus on the promoted conversation when an empty slot precedes it", () => {
+  const grid = reduceForkPanel(initialState, { type: "presetPanes", preset: "grid" });
+  const state = reduceForkPanel(grid, { type: "openForkPanel", kind: "bot", ownerId: "bot",
+    threadId: "reading", target: "slot:1", edge: "fill" });
+  expect(state.workspacePanes?.focused).toBe("reading");
+  const closed = reduceForkPanel(state, { type: "closePane", id: "primary", promote: "reading" });
+  expect(closed.workspacePanes?.focused).toBe("primary");
+});
+
 it("moves the main pane into a vacant slot and leaves the other slots available", () => {
   const rows = reduceForkPanel(initialState, { type: "presetPanes", preset: "rows" });
   const swapped = reduceForkPanel(rows, { type: "movePane", source: "primary", target: "slot:1", edge: "fill" });

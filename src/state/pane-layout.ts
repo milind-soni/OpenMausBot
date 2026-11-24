@@ -7,10 +7,6 @@ export type PaneLayout = string | {
 };
 
 export const MAIN_PANE = "primary";
-export function firstPane(layout: PaneLayout): string {
-  return typeof layout === "string" ? layout : firstPane(layout.first);
-}
-
 export function replacePane(layout: PaneLayout, id: string, next: PaneLayout | null): PaneLayout | null {
   if (typeof layout === "string") return layout === id ? next : layout;
   const first = replacePane(layout.first, id, next);

@@ -1,4 +1,4 @@
-import { useContext, useEffect, useLayoutEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState, type DragEvent, type ReactNode, type SyntheticEvent } from "react";
 import { X } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { emptyPane, paneIds, placePane, MAIN_PANE, replacePane, type PaneEdge, type PaneLayout } from "@/state/pane-layout";
@@ -65,7 +65,7 @@ export function WorkspacePanes({ primary, title, children }: { primary: string; 
     const pane = root.current?.querySelector<HTMLElement>(`[data-pane-id="${CSS.escape(focused ?? MAIN_PANE)}"]`);
     if (!pane || pane.contains(document.activeElement) && pane !== document.activeElement) return;
     (pane.querySelector<HTMLElement>('[data-tour="composer"] textarea:not(:disabled)') ?? pane).focus({ preventScroll: true });
-  }, [focused, loading]);
+  }, [focused, loading, ids.length]);
 
   const leaves: ReactNode[] = [];
   const dividers: ReactNode[] = [];
@@ -75,7 +75,10 @@ export function WorkspacePanes({ primary, title, children }: { primary: string; 
       const owner = panel && (panel.kind === "bot" ? state.bots : state.groups).find((item) => item.id === panel.ownerId);
       const vacant = emptyPane(layout);
       const name = vacant ? t("chat.slot", { number: ids.indexOf(layout) + 1 }) : panel ? owner?.tasks?.find((task) => task.threadId === layout)?.title ?? owner?.name : title;
-      const activate = () => { if (panes && focused !== layout) dispatch({ type: "focusPane", id: layout }); };
+      const activate = (event: SyntheticEvent) => {
+        if (event.target instanceof Element && event.target.closest(".workspace-pane-close")) return;
+        if (panes && focused !== layout) dispatch({ type: "focusPane", id: layout });
+      };
       const close = () => {
         if (!panes) return;
         const remaining = replacePane(panes.layout, MAIN_PANE, null);
@@ -107,7 +110,7 @@ export function WorkspacePanes({ primary, title, children }: { primary: string; 
           </TiledPaneTitle>
         </div>}
         {panes && (layout !== MAIN_PANE || ids.some(id => id !== MAIN_PANE && !emptyPane(id))) &&
-          <button type="button" aria-label={t("chat.closePane", { title: name ?? "" })} onClick={close}
+          <button type="button" aria-label={t("chat.closePane", { title: name ?? "" })} onPointerDown={event => { if (event.button === 0) event.preventDefault(); }} onClick={close}
             className="workspace-pane-close absolute end-2 top-3 z-30 flex size-7 items-center justify-center rounded-full text-ink-secondary hover:bg-raised focus-visible:ring-2 focus-visible:ring-focus"><X size={16} /></button>}
         {preview?.target === layout && <div aria-hidden="true" data-drop-preview={preview.edge}
           className={`pointer-events-none absolute z-20 rounded-lg border-2 border-focus bg-accent/15 ${previewArea[preview.edge]}`} />}
@@ -131,6 +134,7 @@ export function WorkspacePanes({ primary, title, children }: { primary: string; 
       onPointerDown={(event) => {
         if (event.button !== 0 || !root.current) return;
         event.preventDefault();
+        event.currentTarget.focus({ preventScroll: true });
         event.currentTarget.setPointerCapture(event.pointerId);
         move.current = { start: beside ? event.clientX : event.clientY, ratio: layout.ratio,
           size: beside ? root.current.clientWidth * box.w / 100 : root.current.clientHeight * box.h / 100 };
