@@ -36,9 +36,21 @@ describe("handoffLines", () => {
 
   it("joins side-by-side cards from the giver's facing edge to the receiver's, labelled mid-way", () => {
     expect(handoffLines([{ sourceBotId: "a", targetBotId: "b", state: "running" }], boxes)).toEqual([{
-      key: "a:b", state: "running", path: "M 100 25 C 200 25 200 125 300 125", label: { x: 200, y: 75 },
+      key: "a:b", state: "running", path: "M 100 25 C 200 25 200 125 300 125", arrow: "M 300 125 L 291 129.5 L 291 120.5 Z", label: { x: 200, y: 75 },
     }]);
-    expect(handoffLines([{ sourceBotId: "b", targetBotId: "a", state: "queued" }], boxes)[0].path).toBe("M 300 125 C 200 125 200 25 100 25");
+    const back = handoffLines([{ sourceBotId: "b", targetBotId: "a", state: "queued" }], boxes)[0];
+    expect(back.path).toBe("M 300 125 C 200 125 200 25 100 25");
+    expect(back.arrow).toBe("M 100 25 L 109 20.5 L 109 29.5 Z");
+  });
+
+  it("goes around a card standing between the two bots, label and all", () => {
+    const stack = new Map([["a", box(0, 0)], ["b", box(0, 100)], ["c", box(0, 200)]]);
+    const [line] = handoffLines([{ sourceBotId: "a", targetBotId: "c", state: "running" }], stack);
+    expect(line.path).toBe("M 100 25 C 148 25 148 225 100 225");
+    expect(line.arrow).toBe("M 100 225 L 109 220.5 L 109 229.5 Z");
+    expect(line.label).toEqual({ x: 136, y: 125 });
+    expect(line.label.x).toBeGreaterThan(stack.get("b")!.x + stack.get("b")!.width);
+    expect(handoffLines([{ sourceBotId: "a", targetBotId: "b", state: "running" }], stack)[0].path).toBe("M 50 50 C 50 75 50 75 50 100");
   });
 
   it("joins stacked cards bottom to top, and skips bots that are not on the canvas", () => {

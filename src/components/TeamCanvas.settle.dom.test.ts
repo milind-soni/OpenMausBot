@@ -160,4 +160,5 @@ it("draws a line between bots that hand work to each other, labelled with what t
   expect(lines.map((line) => line.dataset.state)).toEqual(["running", "connected"]);
   expect(lines.every((line) => /^M [\d.]+ [\d.]+ C /.test(line.getAttribute("d") ?? ""))).toBe(true);
   expect([...world.querySelectorAll("[data-handoff-label]")].map((label) => label.textContent)).toEqual(["Running"]);
+  expect(world.querySelectorAll("[data-handoff-arrow]")).toHaveLength(1);
 });

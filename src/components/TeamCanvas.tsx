@@ -520,6 +520,7 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
           {handoffs.map((line) => <path key={line.key} data-handoff-line data-state={line.state} d={line.path} fill="none" strokeLinecap="round"
             strokeWidth={line.state === "connected" ? 1.5 : 2.25} strokeDasharray={line.state === "connected" ? undefined : "7 5"}
             className={line.state === "running" ? "animate-link-flow stroke-success/80" : line.state === "queued" ? "stroke-warning/80" : "stroke-ink-secondary/35"} />)}
+          {handoffs.map((line) => line.arrow && <path key={`${line.key}:arrow`} data-handoff-arrow d={line.arrow} className={line.state === "running" ? "fill-success/80" : "fill-warning/80"} />)}
         </svg>
         {handoffs.filter((line) => line.state !== "connected").map((line) => <span key={line.key} data-handoff-label style={{ left: line.label.x, top: line.label.y }}
           className={cn("absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full bg-panel px-2 py-0.5 text-[11px] font-medium shadow-sm ring-1",
