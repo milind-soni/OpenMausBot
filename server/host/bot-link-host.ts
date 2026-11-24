@@ -36,6 +36,8 @@ export interface BotLinkHostDeps {
   /** A work thread a far bot opened here is named from the job it handed, behind "@Sender · ". */
   titleHanded?(botId: string, threadId: string, brief: string, prefix: string): void;
   refusal(bot: BotRecord): string | null;
+  /** The person paused this bot, or its plan keeps it asleep: the other places are told, so they do not offer it. */
+  paused?(botId: string): boolean;
   language(threadId: string): string | undefined;
   personName(threadId: string): string | undefined;
   sessions: { issue(input: { label: string; scopes: Array<"admin" | "client">; email?: string; userId?: string }): { token: string; session: { id: string } }; revoke(id: string): boolean };
@@ -96,6 +98,7 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
     dataDir: deps.dataDir, coordinator: deps.coordinator, kick: deps.kick, log: deps.log, rooms, directoryChanged: () => { syncStandIns(); }, revoke: (sessionId) => { deps.sessions.revoke(sessionId); },
     bots: () => store.bots, bot: (id) => store.bot(id),
     refusal: (bot) => deps.refusal(bot as BotRecord),
+    paused: (bot) => deps.paused?.(bot.id) ?? false,
     model: (bot) => (bot as BotRecord).modelSelection.model,
     level: (bot) => deps.level(bot as BotRecord),
     openThread: (bot, title, opener, brief) => {

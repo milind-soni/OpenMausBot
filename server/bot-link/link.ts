@@ -53,6 +53,8 @@ const FILE_RETRY_MS = 5_000;
 const FILE_RETRY_MAX_MS = 5 * 60_000;
 /** This place's bots changed: the other places hear the new list once changes settle, so a burst of them is one hello. */
 const TELL_AFTER_MS = 250;
+/** Under changes that do not stop, the other places still hear at least this often. */
+const TELL_WITHIN_MS = 1_500;
 
 /** How a computer moves a file's bytes: it puts the ones it sends and gets the ones it is sent. `holds`: the Cloud already
  * has this file, so it is not sent again. `gone` on an error: the Cloud said it will not take it or has no such file, so
@@ -158,8 +160,12 @@ export interface BotLinkDeps {
   revoke?(sessionId: string): void;
   now?: () => number;
   log?(line: string): void;
-  /** How long after a change to this place's bots the other places are told (TELL_AFTER_MS). */
+  /** How long after the last change to this place's bots the other places are told (TELL_AFTER_MS), and the longest a
+   * change waits while more keep coming (TELL_WITHIN_MS). */
   tellAfterMs?: number;
+  tellWithinMs?: number;
+  /** The person paused this bot, or the plan keeps it asleep: it takes no work now. */
+  paused?(bot: LocalBot): boolean;
 }
 
 export interface CoordinateContext {
@@ -199,8 +205,8 @@ export function createBotLink(deps: BotLinkDeps) {
   /** Hand-offs whose result came: the rest that end here (cut by restarts, refused, stopped) are stopped where they run. */
   const resulted = new Set<string>();
   let alive: NodeJS.Timeout | undefined;
-  /** A change to this place's bots waits here to be told. */
-  let telling: NodeJS.Timeout | undefined;
+  /** A change to this place's bots waits here to be told, since `tellingSince`. */
+  let telling: NodeJS.Timeout | undefined, tellingSince = 0;
   /** Hand-offs whose files are being taken in, and results whose files are being sent: one at a time each. */
   const accepting = new Set<string>(), resultsGoing = new Set<string>();
   /** What waits to be tried again because a file could not cross yet, by what it is for. */
@@ -211,12 +217,14 @@ export function createBotLink(deps: BotLinkDeps) {
   const linkOf = (peer: string): Live => { let one = live.get(peer); if (!one) { one = { online: false, seq: 0, outbox: [], level: 1 }; live.set(peer, one); } return one; };
   const isOnline = (peer: string) => live.get(peer)?.online === true;
   const placeName = (peer: string) => state?.peers[peer]?.place.name ?? "the other place";
-  const directory = (): LinkedBot[] => deps.bots().filter((bot) => !bot.hidden && !bot.movedTo && /^[\w-]{1,128}$/u.test(bot.id)).map((bot) => ({
+  /** A bot that moved to another place for good leaves a hidden stub here; one still moving is here and says so. */
+  const movedAway = (bot: LocalBot) => (bot.movedTo as { state?: unknown } | null | undefined)?.state === "moved";
+  const directory = (): LinkedBot[] => deps.bots().filter((bot) => !bot.hidden && !movedAway(bot) && /^[\w-]{1,128}$/u.test(bot.id)).map((bot) => ({
     id: bot.id, name: bot.name, ...(bot.title ? { title: bot.title.slice(0, 200) } : {}), ...(bot.description ? { description: bot.description.slice(0, 400) } : {}),
     ...(deps.model?.(bot) ? { model: deps.model(bot)!.slice(0, 200) } : {}), level: deps.level(bot),
     ...(bot.color ? { color: bot.color.slice(0, 64) } : {}), ...(bot.mascotBody ? { mascotBody: bot.mascotBody.slice(0, 64) } : {}), ...(bot.mascotFaceColor ? { mascotFaceColor: bot.mascotFaceColor.slice(0, 64) } : {}),
     ...(bot.mascotBodyColor ? { mascotBodyColor: bot.mascotBodyColor.slice(0, 64) } : {}), ...(bot.mascotMaterial ? { mascotMaterial: bot.mascotMaterial.slice(0, 64) } : {}),
-    ...(bot.chiefOfStaff ? { chief: true } : {}), ...(bot.threadId ? { threadId: bot.threadId } : {}),
+    ...(bot.chiefOfStaff ? { chief: true } : {}), ...(bot.threadId ? { threadId: bot.threadId } : {}), ...(deps.paused?.(bot) ? { paused: true } : {}),
   })).slice(0, 500);
 
   function send(peer: string, frame: Frame): void {
@@ -332,14 +340,17 @@ export function createBotLink(deps: BotLinkDeps) {
    * A bot's id here, in any case, or the start of one (8+ characters), stays with the local resolver, so a bot elsewhere
    * named after it never takes that bot's work or its files. */
   function resolve(raw: string): Remote | undefined {
-    const matches = candidates(raw);
-    return matches.length === 1 ? matches[0] : undefined;
+    const matches = candidates(raw), awake = matches.length > 1 ? matches.filter((remote) => !remote.bot.paused) : matches;
+    return awake.length === 1 ? awake[0] : undefined;
   }
   /** Every bot of another place `raw` could name, by the rules of `resolve`: one is that bot, more say nothing. */
   function candidates(raw: string): Remote[] {
     if (!state) return [];
     const wanted = raw.trim(), lower = wanted.toLowerCase();
-    const local = deps.bots();
+    // A bot that moved away is named by its own id still: that is the bot of the place it moved to, never its stub here.
+    const stub = deps.bots().find((bot) => movedAway(bot) && bot.id.toLowerCase() === lower);
+    if (stub) return Object.entries(state.peers).flatMap(([peer, known]) => known.bots.filter((bot) => bot.id === stub.id).map((bot) => ({ peer, bot })));
+    const local = deps.bots().filter((bot) => !movedAway(bot));
     if (local.some((bot) => bot.id.toLowerCase() === lower)) return [];
     if (isLinkedId(wanted)) { const remote = remoteOf(wanted); return remote ? [remote] : []; }
     if (isIdStart(wanted) && local.some((bot) => bot.id.toLowerCase().startsWith(lower))) return [];
@@ -349,7 +360,8 @@ export function createBotLink(deps: BotLinkDeps) {
   }
   /** A name more than one bot of the other places has (and no bot here): which one is meant, by its address. */
   function sharedName(raw: string): string | null {
-    const matches = candidates(raw);
+    // A bot its place paused would refuse the work, so it is no choice to offer.
+    const matches = candidates(raw).filter((remote) => !remote.bot.paused);
     if (matches.length < 2) return null;
     const listed = matches.slice(0, 12).map((remote) => `${remote.bot.name} on ${placeName(remote.peer)} (id ${linkedId(remote.peer, remote.bot.id)})`).join("; ");
     return `${matches.length} bots of the person's other places are named "${raw.trim().slice(0, 120)}", so nothing was sent: ${listed}${matches.length > 12 ? `; and ${matches.length - 12} more` : ""}. Send it again with the id of the one you mean.`;
@@ -801,7 +813,7 @@ export function createBotLink(deps: BotLinkDeps) {
      * it can reach through the link, each by the id that reaches it. */
     reachableElsewhere(): string {
       if (!state) return "";
-      const far = Object.entries(state.peers).flatMap(([peer, known]) => known.bots.map((bot) => ({ peer, bot })));
+      const far = Object.entries(state.peers).flatMap(([peer, known]) => known.bots.filter((bot) => !bot.paused).map((bot) => ({ peer, bot })));
       const places = [...new Set(Object.keys(state.peers).map(placeName))].join(", ");
       if (!far.length) return `This place is linked to ${places}, but no bot there can be reached through the link now.`;
       const listed = far.slice(0, 12).map(({ peer, bot }) => `${bot.name} on ${placeName(peer)} (id ${linkedId(peer, bot.id)})`).join(", ");
@@ -858,11 +870,15 @@ export function createBotLink(deps: BotLinkDeps) {
     },
     /** Housekeeping, at start and once a day: old records go, and on the Cloud a computer long gone is unlinked. */
     tidy(): void { prune(); expire(); sweep(); },
-    /** This place's bots changed (one was made, renamed, hidden, moved, deleted, its look, model or level changed): once
-     * changes settle, the other places hear the new list, and nothing when what they are told did not change. */
+    /** This place's bots changed (one was made, renamed, hidden, moved, deleted, paused, its look, model or level changed):
+     * once changes settle (or every TELL_WITHIN_MS while they do not), the other places hear the new list, and nothing when
+     * what they are told did not change. */
     botsChanged(): void {
-      if (!state || telling) return;
-      telling = setTimeout(tellBots, deps.tellAfterMs ?? TELL_AFTER_MS);
+      if (!state) return;
+      const at = Date.now();
+      if (!telling) tellingSince = at;
+      clearTimeout(telling);
+      telling = setTimeout(tellBots, Math.max(0, Math.min(deps.tellAfterMs ?? TELL_AFTER_MS, tellingSince + (deps.tellWithinMs ?? TELL_WITHIN_MS) - at)));
       telling.unref?.();
     },
     setOnline,
