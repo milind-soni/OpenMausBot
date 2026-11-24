@@ -49,3 +49,36 @@ describe("a step inside a page", () => {
     host.remove();
   });
 });
+
+describe("the page's one action", () => {
+  const draw = (narrow: boolean, sub: { title: string; back: string; onBack: () => void } | null = null) => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    act(() => root.render(createElement(SettingsPageHeader, {
+      page: pageById("devices"), ctx: fullContext({ advanced: false }), place: { name: "This computer", kind: "computer", color: null, named: false }, narrow, sub,
+      action: createElement("button", { type: "button", "data-test-action": "" }, "Add a device"),
+    })));
+    const found = { title: host.querySelector("#settings-page-title"), action: host.querySelector("[data-test-action]"), scope: host.querySelector("[data-settings-scope]") };
+    return { ...found, done: () => { act(() => root.unmount()); host.remove(); } };
+  };
+
+  it("sits on the title's line in a wide window", () => {
+    const { title, action, done } = draw(false);
+    expect(action?.closest("[data-settings-header-action]")?.parentElement).toBe(title?.parentElement);
+    done();
+  });
+
+  it("sits beside the scope line where the window's own header holds the title", () => {
+    const { title, action, scope, done } = draw(true);
+    expect(title).toBeNull();
+    expect(action?.closest("[data-settings-header-action]")?.parentElement).toBe(scope?.parentElement);
+    done();
+  });
+
+  it("gives way to a step's own title and way back", () => {
+    const { action, done } = draw(false, { title: "Add a computer", back: "Add a device", onBack: vi.fn() });
+    expect(action).toBeNull();
+    done();
+  });
+});

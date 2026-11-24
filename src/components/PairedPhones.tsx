@@ -49,7 +49,7 @@ export function PhoneControls({ device, c, onPairAgain, onChanged }: { device: P
       )}
       {e2eEnabled && (
         <div className="flex items-center justify-between gap-3">
-          <div className="text-[13px] leading-[18px] text-ink">{t("remote.devices.connectFrom")}</div>
+          <div className="text-[14px] leading-5 text-ink">{t("remote.devices.connectFrom")}</div>
           <div role="radiogroup" aria-label={t("remote.devices.connectFrom")} className="inline-flex h-7 items-center rounded-full bg-ink/[0.05] p-0.5">
             {(["any", "local"] as const).map((routes) => (
               <button
@@ -70,8 +70,8 @@ export function PhoneControls({ device, c, onPairAgain, onChanged }: { device: P
       )}
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-[13px] leading-[18px] text-ink">{t("remote.devices.desktopsTitle")}</div>
-          <div className="text-[12px] leading-4 text-ink-secondary">{t("remote.devices.desktopsLine")}</div>
+          <div className="text-[14px] leading-5 text-ink">{t("remote.devices.desktopsTitle")}</div>
+          <div className="mt-0.5 text-[13px] leading-[18px] text-ink-secondary">{t("remote.devices.desktopsLine")}</div>
         </div>
         <Switch
           checked={device.cloudDesktopAccess}
@@ -83,8 +83,8 @@ export function PhoneControls({ device, c, onPairAgain, onChanged }: { device: P
       </div>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-[13px] leading-[18px] text-ink">{t("remote.devices.browserTitle")}</div>
-          <div className="text-[12px] leading-4 text-ink-secondary">{t("remote.devices.browserLine")}</div>
+          <div className="text-[14px] leading-5 text-ink">{t("remote.devices.browserTitle")}</div>
+          <div className="mt-0.5 text-[13px] leading-[18px] text-ink-secondary">{t("remote.devices.browserLine")}</div>
         </div>
         <Switch
           checked={device.browserControlAccess === true}

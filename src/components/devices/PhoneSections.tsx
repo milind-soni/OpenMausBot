@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { ArrowUpRight, Cloud, Laptop } from "lucide-react";
+import { ArrowUpRight, Cloud, Laptop, Server, type LucideIcon } from "lucide-react";
+import type { Device } from "@/lib/devices";
 import { t } from "@/lib/i18n";
 import { phoneAppChips, type PublicPhone } from "@/lib/phones";
 import type { SessionState } from "@/lib/session";
@@ -10,9 +11,10 @@ import { pairingBlockedReason } from "../ServerPairingCard";
 import { SettingsGroup, SettingsLinkRow, SettingsMark, SettingsRows } from "../SettingsPrimitives";
 import { useCloudPhoneDestination } from "../SidebarProfileMenu";
 import { TeamPhoneCard } from "../TeamPhoneCard";
-import { useOtherPlaces } from "../settings/settings-context";
+import { useOtherPlaces, type OtherPlace } from "../settings/settings-context";
 import { useSettingsShell } from "../settings/settings-shell";
 import { Detail } from "./DeviceDetails";
+import { KIND_ICON } from "./device-words";
 
 /** This computer's door to pairing with My Cloud, the first row of Phones and tablets: My Cloud opens with its own Add a
  * phone. Null while there is no ready Cloud to pair with. */
@@ -39,9 +41,11 @@ export function PairWithCloudRow() {
   );
 }
 
-/** The way to each other place's phones, one row each, marked like a device row. A Cloud already offered by Pair with
- * My Cloud is left out, so the page never has two doors to the same place's phones. */
-export function OtherPlacesSection() {
+const PLACE_ICON: Record<OtherPlace["kind"], LucideIcon> = { computer: Laptop, server: Server, cloud: Cloud, team: Cloud, account: Cloud };
+
+/** The way to each other place's phones, one row each, marked like its device row (`devices`) or else by its kind. A Cloud
+ * already offered by Pair with My Cloud is left out, so the page never has two doors to the same place's phones. */
+export function OtherPlacesSection({ devices }: { devices: readonly Device[] }) {
   const { ctx } = useSettingsShell();
   const { cloud, bridge } = useCloudPhoneDestination(ctx.here);
   const callout = ctx.here && cloud === "ready" && Boolean(bridge);
@@ -50,11 +54,12 @@ export function OtherPlacesSection() {
   return (
     <SettingsGroup label={t("devicesPage.otherPlaces.title")} block="other-places">
       <SettingsRows icons>
-        {others.map((place) => (
-          <SettingsLinkRow key={place.key} title={place.name} subtitle={t("devicesPage.otherPlaces.line")}
-            leading={<SettingsMark>{place.kind === "computer" ? <Laptop /> : <Cloud />}</SettingsMark>}
-            external onClick={place.open} data={{ "data-other-place": place.key }} />
-        ))}
+        {others.map((place) => {
+          const row = devices.find((device) => device.id === `place:${place.key}`);
+          const Icon = row ? KIND_ICON[row.kind] : PLACE_ICON[place.kind];
+          return <SettingsLinkRow key={place.key} title={place.name} subtitle={t("devicesPage.otherPlaces.line")}
+            leading={<SettingsMark><Icon /></SettingsMark>} external onClick={place.open} data={{ "data-other-place": place.key }} />;
+        })}
       </SettingsRows>
     </SettingsGroup>
   );
