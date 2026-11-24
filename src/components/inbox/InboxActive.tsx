@@ -4,6 +4,7 @@ import { Pin, PinOff } from "lucide-react";
 import type { InboxView } from "../../../shared/inbox";
 import { t } from "@/lib/i18n";
 import { roomFeedEnabled } from "@/lib/feature-flags";
+import { roomFeedShows } from "@/lib/room-feed";
 import { type AppState } from "@/state/store";
 import { sameJson } from "@/state/same-json";
 import { useStoreSelector } from "@/state/store-select";
@@ -30,7 +31,8 @@ export function inboxAttentionEntries(state: Pick<AppState, "bots" | "pendingQue
     .filter((entry) => !asked.has(entry.task.threadId) && inProgress(entry.task));
 }
 
-/** The conversation open beside the chat, or else the one the chat window shows: a bot's current thread, or the room's. */
+/** The conversation open beside the chat, or else the one the chat window shows: a bot's current thread, or the room's
+ * (none for a room's feed). */
 export function inboxOpenThread(state: Pick<AppState, "activeView" | "selectedId" | "bots" | "groups"> & Partial<Pick<AppState, "forkPanel" | "config">>): OpenThread | undefined {
   const panel = roomFeedEnabled(state.config) ? state.forkPanel : null;
   if (panel) return panel.kind === "bot" ? { kind: "bot", botId: panel.ownerId, threadId: panel.threadId } : { kind: "group", groupId: panel.ownerId, threadId: panel.threadId };
@@ -38,7 +40,7 @@ export function inboxOpenThread(state: Pick<AppState, "activeView" | "selectedId
   const bot = state.bots.find((one) => one.id === state.selectedId);
   if (bot) return { kind: "bot", botId: bot.id, threadId: bot.threadId };
   const group = state.groups.find((one) => one.id === state.selectedId);
-  return group ? { kind: "group", groupId: group.id, threadId: group.threadId } : undefined;
+  return group && !roomFeedShows(state.config, group) ? { kind: "group", groupId: group.id, threadId: group.threadId } : undefined;
 }
 
 /** The conversations whose news lines have all been read: reading in the Inbox counts as reading them. Finished work

@@ -8122,6 +8122,8 @@
   "settings.features.skillBurgerLine": "ボットの実行を、もう一度実行できる手順として保存します",
   "settings.features.threadTabs": "スレッドのタブ",
   "settings.features.threadTabsLine": "ボットのスレッドをチャットの上にタブで表示します",
+  "settings.features.roomFeed": "ルームのフィード",
+  "settings.features.roomFeedLine": "ルームのスレッドを1つのフィードに並べ、開いたスレッドを横に表示します",
   "settings.features.error": "保存できませんでした。接続を確認して、もう一度お試しください。",
   "chat.botExchange.open": "{asker} と {helper} のやり取りを開く",
   "chat.botExchange.teammate": "チームメイト",

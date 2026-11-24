@@ -3996,6 +3996,8 @@
   "settings.features.skillBurgerLine": "Enregistre l'exécution d'un bot en étapes que tu peux relancer",
   "settings.features.threadTabs": "Onglets de fils",
   "settings.features.threadTabsLine": "Affiche les fils d'un bot en onglets au-dessus du chat",
+  "settings.features.roomFeed": "Fil du salon",
+  "settings.features.roomFeedLine": "Affiche les fils d'un salon en un seul fil d'actualité, avec le fil ouvert à côté",
   "settings.features.error": "Impossible d'enregistrer. Vérifie ta connexion et réessaie.",
   "chat.botExchange.open": "Ouvrir l’échange entre {asker} et {helper}",
   "chat.botExchange.teammate": "Un coéquipier",

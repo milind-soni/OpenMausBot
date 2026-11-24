@@ -4268,6 +4268,8 @@
   "settings.features.skillBurgerLine": "Зберігає роботу бота як кроки, які можна запустити знову",
   "settings.features.threadTabs": "Вкладки гілок",
   "settings.features.threadTabsLine": "Показує гілки бота вкладками над чатом",
+  "settings.features.roomFeed": "Стрічка кімнати",
+  "settings.features.roomFeedLine": "Показує гілки кімнати однією стрічкою, а відкриту гілку поруч",
   "settings.features.error": "Не вдалося зберегти. Перевірте з'єднання і спробуйте ще раз.",
   "chat.botExchange.open": "Відкрити обмін між {asker} і {helper}",
   "chat.botExchange.teammate": "Колега",

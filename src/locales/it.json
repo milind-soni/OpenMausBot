@@ -11735,6 +11735,8 @@
   "settings.features.skillBurgerLine": "Salva l'esecuzione di un bot come passaggi da rieseguire",
   "settings.features.threadTabs": "Schede dei thread",
   "settings.features.threadTabsLine": "Mostra i thread di un bot come schede sopra la chat",
+  "settings.features.roomFeed": "Feed della stanza",
+  "settings.features.roomFeedLine": "Mostra i thread di una stanza in un unico feed, con il thread aperto accanto",
   "settings.features.error": "Impossibile salvare. Controlla la connessione e riprova.",
   "chat.botExchange.open": "Apri lo scambio tra {asker} e {helper}",
   "chat.botExchange.teammate": "Un collega",

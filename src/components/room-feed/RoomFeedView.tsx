@@ -12,6 +12,7 @@ import { ChatErrorBanner, ChatNotice } from "../ChatErrorBanner";
 import { ChatBackdrop, GlassBar, GlassScrollFrame } from "../GlassScrollFrame";
 import { ManageMembersPanel } from "../ManageMembersPanel";
 import { RoomBulletin } from "../RoomBulletin";
+import { RoomChiefAbsent } from "../RoomChiefAbsent";
 import { RoomHeader } from "../RoomHeader";
 import { RoomHoldsBanner } from "../RoomHoldsBanner";
 import { RoomWorkingFolder } from "../RoomWorkingFolder";
@@ -75,12 +76,18 @@ export function RoomFeedView({ group }: { group: Group }) {
   const open = useCallback((threadId: string) => { if (threadId) dispatch(openFeedThread(group.id, threadId)); }, [dispatch, group.id]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const atFoot = useRef(true);
-  const count = rows?.length ?? 0;
   useLayoutEffect(() => {
-    const scroller = scrollRef.current;
-    if (scroller && atFoot.current) scroller.scrollTop = scroller.scrollHeight;
-  }, [count, composerDock.pad, group.id]);
+    const scroller = scrollRef.current, content = contentRef.current;
+    if (!scroller || !content) return;
+    const keep = () => { if (atFoot.current) scroller.scrollTop = scroller.scrollHeight; };
+    keep();
+    const sizes = new ResizeObserver(keep);
+    sizes.observe(content);
+    sizes.observe(scroller);
+    return () => sizes.disconnect();
+  }, [group.id]);
 
   return (
     <main data-look="chat" data-room-feed={group.id} className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
@@ -93,13 +100,14 @@ export function RoomFeedView({ group }: { group: Group }) {
             membersTriggerRef={membersTriggerRef} />
           <ChatErrorBanner message={error} onDismiss={() => dispatch({ type: "error", message: null })} />
           <ChatNotice notice={notice} />
+          {!remoteClient && <RoomChiefAbsent group={group} />}
           <RoomHoldsBanner group={group} members={members} />
           {!simpleHeader && <RoomBulletin group={group} remoteClient={remoteClient} />}
           {folderOpen && <div className="w-full px-5"><div className="mb-1"><RoomWorkingFolder group={group} /></div></div>}
         </GlassBar>
         <div ref={scrollRef} className="glass-scroller h-full overflow-x-hidden overflow-y-auto px-4 [overflow-anchor:none]"
           onScroll={(event) => { const el = event.currentTarget; atFoot.current = el.scrollHeight - el.scrollTop - el.clientHeight < FOOT_PX; }}>
-          <div className="glass-scroller-content chat-column flex min-h-full w-full flex-col justify-end" style={{ paddingBottom: composerDock.pad }}>
+          <div ref={contentRef} className="glass-scroller-content chat-column flex min-h-full w-full flex-col justify-end" style={{ paddingBottom: composerDock.pad }}>
             {rows === null ? (
               failed && (
                 <p role="alert" className="flex items-center justify-center gap-2 py-6 text-[13px] text-ink-secondary">

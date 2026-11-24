@@ -7812,6 +7812,8 @@
   "settings.features.skillBurgerLine": "봇의 실행을 다시 실행할 수 있는 단계로 저장해요",
   "settings.features.threadTabs": "스레드 탭",
   "settings.features.threadTabsLine": "봇의 스레드를 채팅 위에 탭으로 보여줘요",
+  "settings.features.roomFeed": "대화방 피드",
+  "settings.features.roomFeedLine": "대화방의 스레드를 하나의 피드로 보여주고, 연 스레드는 옆에 보여줘요",
   "settings.features.error": "저장하지 못했어요. 연결을 확인하고 다시 시도해 주세요.",
   "chat.botExchange.open": "{asker}와 {helper}의 대화 열기",
   "chat.botExchange.teammate": "팀원",

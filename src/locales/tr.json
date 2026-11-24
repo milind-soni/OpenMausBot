@@ -6083,6 +6083,8 @@
   "settings.features.skillBurgerLine": "Bir botun çalışmasını yeniden çalıştırabileceğin adımlar olarak kaydeder",
   "settings.features.threadTabs": "Konuşma sekmeleri",
   "settings.features.threadTabsLine": "Bir botun konuşmalarını sohbetin üstünde sekmeler olarak gösterir",
+  "settings.features.roomFeed": "Oda akışı",
+  "settings.features.roomFeedLine": "Bir odanın konuşmalarını tek bir akışta, açık konuşmayı yanında gösterir",
   "settings.features.error": "Kaydedilemedi. Bağlantını kontrol edip tekrar dene.",
   "chat.botExchange.open": "{asker} ile {helper} arasındaki konuşmayı aç",
   "chat.botExchange.teammate": "Bir ekip arkadaşı",

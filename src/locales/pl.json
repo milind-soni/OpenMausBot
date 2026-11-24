@@ -7284,6 +7284,8 @@
   "settings.features.skillBurgerLine": "Zapisuje przebieg pracy bota jako kroki, które można uruchomić ponownie",
   "settings.features.threadTabs": "Karty wątków",
   "settings.features.threadTabsLine": "Pokazuje wątki bota jako karty nad czatem",
+  "settings.features.roomFeed": "Kanał pokoju",
+  "settings.features.roomFeedLine": "Pokazuje wątki pokoju w jednym kanale, z otwartym wątkiem obok",
   "settings.features.error": "Nie udało się zapisać. Sprawdź połączenie i spróbuj ponownie.",
   "chat.botExchange.open": "Otwórz wymianę między {asker} a {helper}",
   "chat.botExchange.teammate": "Członek zespołu",

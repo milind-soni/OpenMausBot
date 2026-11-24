@@ -4348,6 +4348,7 @@
   "settings.features.threadTabsLine": "Zeigt die Threads eines Bots als Tabs über dem Chat",
   "settings.features.roomFeed": "Raum-Feed",
   "settings.features.roomFeedLine": "Zeigt die Threads eines Raums als einen Feed, mit dem geöffneten Thread daneben",
+  "composer.placeholder.newThread": "Einen Thread in {name} beginnen",
   "room.feed.aria": "Threads in {name}",
   "room.feed.replyOne": "1 Antwort",
   "room.feed.replyMany": "{count} Antworten",

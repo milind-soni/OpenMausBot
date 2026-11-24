@@ -7338,6 +7338,8 @@
   "settings.features.skillBurgerLine": "Сохраняет работу бота как шаги, которые можно запустить снова",
   "settings.features.threadTabs": "Вкладки веток",
   "settings.features.threadTabsLine": "Показывает ветки бота вкладками над чатом",
+  "settings.features.roomFeed": "Лента комнаты",
+  "settings.features.roomFeedLine": "Показывает ветки комнаты одной лентой, а открытую ветку — рядом",
   "settings.features.error": "Не удалось сохранить. Проверьте подключение и попробуйте ещё раз.",
   "chat.botExchange.open": "Открыть обмен между {asker} и {helper}",
   "chat.botExchange.teammate": "Коллега",
