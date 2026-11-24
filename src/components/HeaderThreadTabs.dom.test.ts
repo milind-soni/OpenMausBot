@@ -11,7 +11,7 @@ const store = vi.hoisted(() => ({ state: { bots: [] as unknown[], newChat: null 
 vi.mock("@/lib/use-feature", () => ({ useFeature: (name: string) => name === "threadTabs" && feature.on }));
 vi.mock("@/state/store-select", () => ({ useStoreDispatch: () => dispatch, useStoreSelector: (select: (state: unknown) => unknown) => select(store.state) }));
 
-import { ThreadTabStrip } from "./ThreadTabStrip";
+import { HeaderThreadTabs } from "./HeaderThreadTabs";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -25,7 +25,7 @@ const FIVE = [
 let root: Root | null = null;
 const render = (bot: Bot) => {
   root = createRoot(document.body.appendChild(document.createElement("div")));
-  act(() => root!.render(createElement(ThreadTabStrip, { bot })));
+  act(() => root!.render(createElement(HeaderThreadTabs, { bot })));
 };
 const tabs = () => [...document.querySelectorAll<HTMLElement>('[role="tab"]')];
 const tab = (title: string) => tabs().find((element) => element.textContent?.includes(title))!;

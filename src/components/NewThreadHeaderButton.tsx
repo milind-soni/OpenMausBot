@@ -2,7 +2,7 @@ import { Plus } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { useStoreDispatch } from "@/state/store-select";
-import { useThreadTabsShown } from "./ThreadTabStrip";
+import { useThreadTabsShown } from "./HeaderThreadTabs";
 
 export function NewThreadHeaderButton({ botId }: { botId: string }) {
   const dispatch = useStoreDispatch();

@@ -7,26 +7,26 @@ import { localizedTaskTitle } from "@/lib/task-title";
 import { useFeature } from "@/lib/use-feature";
 import type { Bot } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
-import { useCaptionChrome, useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
+import { BotAvatar } from "./Avatar";
 import { reducedMotion } from "./MenuMotion";
 import { botShowsTabs, neighbourOf, openTabId, showsTabs, threadTabs, type ThreadTab } from "./thread-tabs";
 import { useTabMotion } from "./thread-tab-motion";
 import { UndoToast, useUndoToast } from "./UndoToast";
 
-const TAB = "thread-tab group/tab relative flex h-7 min-w-24 max-w-42 shrink items-center rounded-t-xl ps-3 pe-1 text-[13px] leading-[18px] outline-none transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
+const TAB = "thread-tab group/tab relative flex h-9 min-w-24 max-w-42 shrink items-center rounded-t-xl ps-3 pe-1 text-[13px] leading-[18px] outline-none transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
 const CLOSE = "pointer-events-none ms-1 flex size-5 shrink-0 items-center justify-center rounded-full text-ink-tertiary opacity-0 transition-opacity duration-[120ms] hover:bg-ink/[0.08] hover:text-ink group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-focus-within/tab:pointer-events-auto group-focus-within/tab:opacity-100 touch:pointer-events-auto touch:opacity-100 motion-reduce:transition-none";
 const FADE = 24;
 
-/** Whether the strip shows for this bot: the chat header then leaves New thread and the open thread's name to it, in
- * windows wide enough for the strip. */
+/** Whether the chat header shows this bot's threads as tabs in place of its pill and New thread, in windows wide enough
+ * for them. */
 export function useThreadTabsShown(botId: string): boolean {
   const on = useFeature("threadTabs");
   const shown = useStoreSelector((state) => botShowsTabs(state.bots.find((bot) => bot.id === botId), state.newChat));
   return on && shown;
 }
 
-/** A bot's threads as tabs above its chat, once Thread tabs is on and the bot has two threads or more. */
-export function ThreadTabStrip({ bot }: { bot: Bot }) {
+/** A bot's threads as tabs in the chat header, once Thread tabs is on and the bot has two threads or more. */
+export function HeaderThreadTabs({ bot }: { bot: Bot }) {
   const on = useFeature("threadTabs");
   const tabs = useMemo(() => threadTabs(bot), [bot.id, bot.threadId, bot.switchingTo, bot.mainThreadId, bot.tasks, bot.busy]);
   if (!on || !showsTabs(tabs)) return null;
@@ -45,9 +45,7 @@ function edgeFade(element: HTMLElement): string | undefined {
 
 function Strip({ bot, tabs }: { bot: Bot; tabs: ThreadTab[] }) {
   const dispatch = useStoreDispatch();
-  const { dragProps } = useCaptionChrome();
-  const { capabilities } = useDesktopCapabilities();
-  const underCaptionButtons = capabilities.windowChrome === "win-caption" && !windowFramed(capabilities);
+  const panelOpen = useStoreSelector((state) => state.settingsOpen);
   const scroller = useRef<HTMLDivElement>(null);
   const { shown, entering } = useTabMotion(tabs, scroller);
   const active = openTabId(bot);
@@ -136,10 +134,15 @@ function Strip({ bot, tabs }: { bot: Bot; tabs: ThreadTab[] }) {
   };
 
   return (
-    <div data-thread-tabs={bot.id} {...dragProps} className={cn("thread-strip relative z-[1] flex h-9 shrink-0 items-end max-md:hidden", underCaptionButtons && "pe-36")}>
+    <div data-thread-tabs={bot.id} className="flex h-9 min-w-0 flex-1 items-center max-md:hidden">
+      <button type="button" data-thread-tabs-bot aria-label={t("chat.openProfileAria", { name: bot.name })} title={t("chat.openBotPanel")} aria-expanded={panelOpen}
+        onClick={() => dispatch({ type: "toggleSettings", open: !panelOpen })}
+        className="flex size-7 shrink-0 items-center justify-center rounded-full transition-colors duration-[120ms] hover:bg-ink/[0.06] active:bg-ink/[0.08] motion-reduce:transition-none">
+        <BotAvatar bot={bot} size={16} />
+      </button>
       <div ref={scroller} role="tablist" aria-label={t("task.namedList", { name: bot.name })} onKeyDown={onKey} onScroll={measure} onWheel={scrollSideways}
         style={{ maskImage: fade, WebkitMaskImage: fade }}
-        className="flex min-w-0 items-end overflow-x-auto overflow-y-hidden px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        className="flex h-9 min-w-0 items-end overflow-x-auto overflow-y-hidden px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {shown.map((tab) => {
           const selected = tab.threadId === active && !tab.leaving;
           const title = tab.draft ? t("task.newShort") : localizedTaskTitle(tab.title);

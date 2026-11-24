@@ -46,8 +46,8 @@ where they belong instead of adding new places.
   pinned message) is fine: it opens a menu and is gone when there is nothing
   to show. One exception: **New thread** (a plus, also ⌘T) sits at the end of the
   header in both modes, because starting a thread is an everyday action people
-  look for at the top. With Thread tabs on, the plus and the open thread's name
-  move to the tab strip above the chat, which is not a header button.
+  look for at the top. With Thread tabs on, the bot's threads take the pill's
+  place in the header as tabs, with the plus at their end.
 - **No count badges and no "needs you" summaries** above the sidebar list or
   in the header. A status mark on the row it belongs to is fine.
 - **Settings for one bot live in its bot panel.** App-wide settings live in

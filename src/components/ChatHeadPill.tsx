@@ -6,7 +6,6 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { Bot } from "@/state/store"; import { useStoreSelector } from "@/state/store-select";
 import { awayFromMainThread } from "@/state/thread-navigation";
-import { useThreadTabsShown } from "./ThreadTabStrip";
 import { BotAvatar } from "./Avatar";
 import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated";
 import { sidebarBotActivityTasks } from "./SidebarBotActivity";
@@ -33,9 +32,8 @@ function privacyLabelOf(privacy: ChatHeadPrivacy): string | null {
 /** Simple mode's whole chat header: the bot's face and name in one pill, which opens and closes the bot panel. Away from
  * the bot's main conversation it also names the one on screen. A dot says another of the bot's conversations needs a
  * look; a team chat says who can read it with one quiet glyph. */
-export function ChatHeadPill({ bot, avatar, privacy, onToggle, tabsAbove = false }: {
+export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
   bot: Bot;
-  tabsAbove?: boolean;
   avatar: Pick<ComponentProps<typeof BotAvatar>, "state" | "motion" | "motionKey" | "animated">;
   privacy: ChatHeadPrivacy;
   onToggle: () => void;
@@ -49,7 +47,6 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle, tabsAbove = false
   const conversation = !awayFromMainThread(bot, false) ? (privacy?.kind === "shared" ? t("task.sharedChat") : null)
     : !title || title === UNTITLED ? t("task.untitledChat") : localizedTaskTitle(title);
   const label = t("chat.openProfileAria", { name: bot.name });
-  const tabsName = useThreadTabsShown(bot.id) && tabsAbove;
   return (
     <button
       type="button"
@@ -66,8 +63,8 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle, tabsAbove = false
       <span dir="auto" className="min-w-0 truncate text-[14px] font-medium leading-5">{bot.name}</span>
       {conversation && (
         <>
-          <ChevronRight size={12} aria-hidden="true" className={cn("shrink-0 text-ink-tertiary", tabsName && "md:hidden")} />
-          <span data-chathead-conversation dir="auto" className={cn(tabsName && "md:hidden", "min-w-0 max-w-[180px] truncate text-[14px] font-medium leading-5 text-ink-secondary")}>{conversation}</span>
+          <ChevronRight size={12} aria-hidden="true" className="shrink-0 text-ink-tertiary" />
+          <span data-chathead-conversation dir="auto" className="min-w-0 max-w-[180px] truncate text-[14px] font-medium leading-5 text-ink-secondary">{conversation}</span>
         </>
       )}
       {privacyLabel && (
