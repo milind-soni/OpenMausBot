@@ -1,0 +1,13 @@
+# The bots' sandbox on a self-hosted server: COMPOSE_FILE=compose.yaml:compose.box.yaml in .env.
+# Docker's default seccomp and AppArmor profiles refuse the user namespaces and mounts bubblewrap needs, so the host
+# must first carry connector/profiles: seccomp-omb-home.json in /etc/mausbot and omb-home-narrow loaded with
+# apparmor_parser. systempaths=unconfined lifts Docker's /proc masks; omb-home-narrow denies those paths instead.
+services:
+  omb:
+    environment:
+      OMB_BOT_BOX: "1"
+    security_opt:
+      - apparmor=omb-home-narrow
+      - seccomp=/etc/mausbot/seccomp-omb-home.json
+      - no-new-privileges=true
+      - systempaths=unconfined
