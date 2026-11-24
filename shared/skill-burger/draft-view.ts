@@ -146,7 +146,7 @@ export function applyChoices(workflow: Workflow, choices: DraftChoices | undefin
     if (missing) return { error: `"${step.label}" uses what "${workflow.steps.find((one) => one.id === missing)!.label}" returns; leave both out or keep both.` };
   }
   const args: Workflow["args"] = {};
-  const used = (name: string) => JSON.stringify(steps).includes(`"$arg":"${name}"`) || steps.some((step) => step.kind === "shell" && new RegExp(`OMB_ARG_${name.toUpperCase()}(?![A-Z0-9_])`).test(step.run));
+  const used = (name: string) => JSON.stringify(steps).includes(`"$arg":"${name}"`) || JSON.stringify(steps).includes(`{${name}}`) || steps.some((step) => step.kind === "shell" && new RegExp(`OMB_ARG_${name.toUpperCase()}(?![A-Z0-9_])`).test(step.run));
   for (const [name, arg] of Object.entries(workflow.args)) {
     const choice: { name?: string; value?: string } | undefined = choices.inputs?.[name];
     const to = choice?.name?.trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_") || name;

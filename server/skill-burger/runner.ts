@@ -191,6 +191,11 @@ function checkRule(step: WorkflowStep): { says: string; rule?: { path?: string; 
 
 const TEAMMATES_PROMPT = (names: string, token: string) => `${names} have the work now. End your turn: their replies resume you. Then call run_workflow with resume ${JSON.stringify(token)} and response "back".`;
 
+/** A prompt's {input} names as this run's values: the request a judgement step was saved with, as asked this time. */
+export function fillPrompt(prompt: string, args: Record<string, unknown>): string {
+  return prompt.replace(/\{([a-z][a-z0-9_]{0,39})\}/g, (whole, name: string) => (Object.hasOwn(args, name) ? asText(args[name]) : whole));
+}
+
 function handedPrompt(step: WorkflowStep, type: HandedType, missing?: { decide: string; case: string }): string {
   if (type === "missing_case") return `The run reached the "${missing!.case}" case of "${step.label}", which has no saved steps yet. Do that part yourself, by judgement, then resume the run with a one-line note of what you did.`;
   if (step.kind === "decide") return `${step.prompt ?? `Decide: ${step.label}`} Answer with exactly one of: ${step.cases.map((one) => JSON.stringify(one)).join(", ")}.`;
@@ -223,7 +228,7 @@ export async function runFrom(state: Omit<RunState, "waiting" | "createdAt"> & {
     return envelope({
       status: "needs_input",
       requiresInput: {
-        type, step: step.id, label: step.label, prompt: extra.prompt ?? handedPrompt(step, type, missing), resumeToken: id,
+        type, step: step.id, label: step.label, prompt: fillPrompt(extra.prompt ?? handedPrompt(step, type, missing), args), resumeToken: id,
         ...(value !== undefined ? { input: clip(redactSecretsInText(asText(value)), HANDED_INPUT_MAX) } : {}),
         ...(step.kind === "ai" && step.example ? { example: step.example } : {}),
         ...(step.kind === "decide" && type === "decide" ? { cases: step.cases } : {}),

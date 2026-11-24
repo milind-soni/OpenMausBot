@@ -167,7 +167,7 @@ class Drafter {
     if (!read && !looked) return null;
     const aiId = `${id}_write`;
     const what = file ?? `the ${field.replace(/_/g, " ")}`;
-    const request = this.askText.replace(/\s+/g, " ").slice(0, 400) || this.summary;
+    const request = this.request(400);
     this.steps.push({
       id: aiId, kind: "ai", deterministic: false, label: `Write ${what}`.slice(0, 120),
       prompt: read
@@ -192,6 +192,11 @@ class Drafter {
     if (Array.isArray(node)) return node.map((item) => this.values(id, item, key));
     if (isRecord(node)) return Object.fromEntries(Object.entries(node).map(([childKey, child]) => [childKey, this.values(id, child, childKey)]));
     return node;
+  }
+
+  /** The person's request in a prompt, each of its inputs as {name}: the runner fills in this run's values. */
+  private request(max: number): string {
+    return textLine(this.text(this.askText.replace(/\s+/g, " ").slice(0, max) || this.summary));
   }
 
   /** A message with the ask's typed values in it as parts: ["QA-test ", {"$arg": "site"}, " for…"]. */
@@ -306,7 +311,7 @@ class Drafter {
       const words = String(layer.args?.text ?? "");
       this.steps.push({
         id, kind: "ai", deterministic: false, label,
-        prompt: `Review what came back against the request and report to the person: ${this.askText.replace(/\s+/g, " ").slice(0, 600)}`,
+        prompt: `Review what came back against the request and report to the person: ${this.request(600)}`,
         ...(from ? { input: { $step: from.id, path: "text" } } : {}), ...(words ? { example: redactSecretsInText(words).slice(0, EXAMPLE_MAX) } : {}),
       });
     } else if (layer.replay !== "exact" || !layer.args) {
@@ -320,7 +325,7 @@ class Drafter {
       const target = /(?:>{1,2})\s*["']?([^\s"';|&]+)/.exec(command)?.[1]?.split("/").pop() ?? "the file";
       this.steps.push({
         id, kind: "ai", deterministic: false, label: `Write ${target}`.slice(0, 120),
-        prompt: `Write ${target} again from what this run reads now, for the request: ${this.askText.replace(/\s+/g, " ").slice(0, 400)}. Match the example's shape; don't copy its values. Last time the command was: ${redactSecretsInText(command.replace(CONVERSATION_FOLDER, ".").split("\n", 1)[0]!).slice(0, 300)}`,
+        prompt: `Write ${target} again from what this run reads now, for the request: ${this.request(400)}. Match the example's shape; don't copy its values. Last time the command was: ${redactSecretsInText(command.replace(CONVERSATION_FOLDER, ".").split("\n", 1)[0]!).slice(0, 300)}`,
         example: redactSecretsInText(heredoc[3]!).slice(0, EXAMPLE_MAX),
       });
     } else if (layer.kind === "shell") {
