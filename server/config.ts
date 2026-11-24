@@ -1,4 +1,3 @@
-// ~/.openmausbot/config.json, with env vars overriding its credentials.
 import { readFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
 import { dataHome, defaultDataDir } from "./data-dir.ts";
 import { signInFromEnv } from "./sign-in-env.ts";
@@ -687,8 +686,7 @@ export function ensureDirs() {
   if (!existsSync(DATA_DIR) && existsSync(LEGACY_DATA_DIR)) {
     try {
       renameSync(LEGACY_DATA_DIR, DATA_DIR);
-    } catch {
-    }
+    } catch {}
   }
   for (const dir of [DATA_DIR, EVENTS_DIR, NATIVE_DIR]) mkdirSync(dir, { recursive: true });
   migrateLegacyFeatureFlags(DATA_DIR);

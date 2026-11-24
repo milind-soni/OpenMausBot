@@ -22,7 +22,7 @@ import { claudeOwnMcpOverHttp, withLoopbackNoProxy } from "./own-mcp-http.ts"; i
 import { claudeElicitations } from "./claude-elicitation.ts"; import { claudePrestartTools, type ClaudePrestartTools } from "./claude-prestart.ts"; import { spawnContractDiff } from "./claude-spawn-contract.ts"; import { claudeContextUsage, liveContextBreakdown, writeControlFrame } from "./claude-context-usage.ts";
 import { claudeCostSnapshot, readCostHistory, recordCostState, restoredCostBase, turnCostFromRunningTotal } from "./claude-cost-history.ts";
 export { claudeCostSnapshot, restoredCostBase, turnCostFromRunningTotal, type ClaudeCostSnapshot } from "./claude-cost-history.ts";
-import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
+import { rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
 import { ClaudeLoginController } from "./claude-login-auth.ts";
 
 import type {
@@ -41,7 +41,7 @@ import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { askInputSummary, commandSummary, toolDetailPreview } from "../tool-summary.ts";
-import { classifyError, computeBackoff, interruptibleDelay, mayResendTurn, USAGE_LIMIT } from "./retry.ts";
+import { classifyError, claudeResumeRefusal, computeBackoff, interruptibleDelay, mayResendTurn, retryableClaudeResume, USAGE_LIMIT } from "./retry.ts";
 import { claudeApiError, claudeApiErrorMessage, claudeLimitError, claudeLimitFacts, claudeLimitRefusal, claudeUsageLimit, claudeVersionTooOld, type ClaudeLimit } from "./claude-limits.ts";
 import { createOrgModelBlocks, modelSwapNotice, withOrgBlocks } from "./claude-model-access.ts";
 import { engineHomes } from "../engine-homes/engine-homes.ts";
@@ -778,9 +778,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       sessionId: string | null;
       /** `init` arrived; before it the CLI took nothing, so a resume retry is safe */
       sawInit: boolean;
-      /** why the CLI refused `--resume` with an error result instead of exiting, for the log line */
-      resumeRefusal?: string;
-      resumeSessionMissing?: boolean;
+      resumeRefusal?: ReturnType<typeof claudeResumeRefusal>;
       /** the mode `init` reports: the CLI accepts `--permission-mode auto` for any model but runs
        * "default" silently where auto is unavailable (Haiku 4.5, Sonnet 4.5, an org that disabled it) */
       nativePermissionMode: string | null;
@@ -1548,9 +1546,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             // After a long idle 2.1.295 answers a --resume it no longer has with an error result ("No
             // conversation found with session ID …") and stays up; end it so its close rebuilds once.
             if (o.is_error === true && sessionId && !session.sawInit && session.turn && !session.turn.settled) {
-              session.resumeRefusal = claudeResultError(o);
-              session.resumeSessionMissing = o.num_turns === 0
-                && session.resumeRefusal === `No conversation found with session ID: ${sessionId}`;
+              session.resumeRefusal = claudeResumeRefusal(claudeResultError(o), o.num_turns, sessionId);
               closeSession(threadId, "resume refused");
               break;
             }
@@ -1685,10 +1681,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           const quotaStop = session.turn.limitReached === true || verdict.reason === "quota" || verdict.reason === "rate_limited";
           const trackedTurnStarted = Boolean(turn.replayAttempt && session.sawInit);
           const unverifiedDispatch = trackedTurnStarted || Boolean(turn.replayAttempt && session.turn.awaitingInit !== true);
-          // A fresh --resume can reject the cursor before init. Only a confirmed
-          // missing session can bypass the conservative exit guard on a tracked turn.
-          const confirmedResumeRefusal = session.resumeSessionMissing === true && !session.sawInit
-            && session.turn.answered !== true && !session.turn.sawStreamDelta;
           const endedBeforeTurn = session.turn.awaitingInit === true || (refusedAutocompact && !session.turn.sawStreamDelta && session.turn.answered !== true);
           if (!retry.cancelled && !stoppedForRoom(threadId, session.child.pid) && mayResendTurn({ endedBeforeTurn, exitCode: code, transient: verdict.transient,
             streamed: session.turn.sawStreamDelta, answered: session.turn.answered === true, attempt: retry.attempt, quotaStop, unverifiedDispatch })) {
@@ -1733,17 +1725,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             })();
             return;
           }
-          // A --resume the CLI exited from before `init` never read the prompt; without one fresh
-          // session the dead cursor would fail every later turn identically.
-          const resumeFailure = classifyResumeFailure({
-            attempted: Boolean(sessionId),
-            rejected: !session.sawInit,
-            promptSubmitted: session.sawInit,
-            producedOutput: session.turn.sawStreamDelta,
-          });
-          if (!quotaStop && !trackedTurnStarted && (!unverifiedDispatch || confirmedResumeRefusal) && mayReplay(resumeFailure) && !retry.cancelled) {
+          const resumeFailure = retryableClaudeResume(session, session.turn, Boolean(sessionId), unverifiedDispatch);
+          if (!quotaStop && resumeFailure && !retry.cancelled) {
             // Without this line a refused --resume looks like an ordinary new session in the logs.
-            console.error(`claude (${instanceId}): could not resume session ${sessionId} for thread ${threadId}, starting a new one: ${redactSecretsInText(session.resumeRefusal ?? message)}`);
+            console.error(`claude (${instanceId}): could not resume session ${sessionId} for thread ${threadId}, starting a new one: ${redactSecretsInText(session.resumeRefusal?.message ?? message)}`);
             const recovery = recoveryPromptFor({
               recoveryText: turn.recoveryText,
               currentText: turn.text,

@@ -1,6 +1,7 @@
 // Transient-failure classification and capped backoff for turn drivers: a provider hiccup
 // (429/5xx/overloaded/reset) gets up to MAX_ATTEMPTS tries, an auth or request-shape problem none.
 import type { ProviderErrorCode } from "../contracts.ts";
+import { classifyResumeFailure, mayReplay } from "../resume-recovery.ts";
 import { isProviderSafetyBlock } from "../../shared/provider-safety.ts";
 
 export const RETRY_MAX_ATTEMPTS = 3;
@@ -221,6 +222,28 @@ export function mayResendTurn(turn: { endedBeforeTurn: boolean; exitCode: number
   if (turn.quotaStop || turn.unverifiedDispatch) return false;
   if (turn.endedBeforeTurn) return true;
   return turn.exitCode !== 0 && turn.transient && !turn.streamed && !turn.answered && turn.attempt < RETRY_MAX_ATTEMPTS - 1;
+}
+
+// Claude Code 2.1.295 reports a missing resume cursor before init, with zero turns.
+export function claudeResumeRefusal(message: string, turns: unknown, cursor: string) {
+  return { message, sessionMissing: turns === 0 && message === `No conversation found with session ID: ${cursor}` };
+}
+
+export function retryableClaudeResume(
+  session: { sawInit: boolean; resumeRefusal?: ReturnType<typeof claudeResumeRefusal> },
+  turn: { answered?: boolean; sawStreamDelta: boolean },
+  attempted: boolean,
+  unverifiedDispatch: boolean,
+) {
+  const confirmedResumeRefusal = session.resumeRefusal?.sessionMissing === true && !session.sawInit
+    && turn.answered !== true && !turn.sawStreamDelta;
+  const failure = classifyResumeFailure({
+    attempted,
+    rejected: !session.sawInit,
+    promptSubmitted: session.sawInit,
+    producedOutput: turn.sawStreamDelta,
+  });
+  return (!unverifiedDispatch || confirmedResumeRefusal) && mayReplay(failure) ? failure : undefined;
 }
 
 export function computeBackoff(attempt: number, random: () => number = Math.random): number {

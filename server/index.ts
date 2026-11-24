@@ -8539,9 +8539,8 @@ async function beginTurn(
       if (e instanceof PlaceUnavailableError) clearFailedAutoPin(bot.id, threadId, e.place);
       let message = e instanceof Error ? e.message : String(e);
       const current = store.projectBotForTask(bot.id, threadId), takeoverScope = e instanceof TurnUsageLimitRefusedError ? e.scope : e instanceof TurnAuthenticationRefusedError ? "signed-out" as const : undefined;
-      const switchingEnabled = quotaSwitchEnabled;
-      const weighed = takeoverScope && current && switchingEnabled ? limitTakeover.weighBackups(bot.id, current.modelSelection, takeoverScope, approvalModeFor(current)) : null; if (weighed && takeoverScope && current) limitTakeover.passedOver(current, current.modelSelection, takeoverScope, weighed.skipped);
-      const backups = switchingEnabled && current ? weighed?.backups ?? startupBackups(current, cfg.automaticRecovery) : [];
+      const weighed = takeoverScope && current && quotaSwitchEnabled ? limitTakeover.weighBackups(bot.id, current.modelSelection, takeoverScope, approvalModeFor(current)) : null; if (weighed && takeoverScope && current) limitTakeover.passedOver(current, current.modelSelection, takeoverScope, weighed.skipped);
+      const backups = quotaSwitchEnabled && current ? weighed?.backups ?? startupBackups(current, cfg.automaticRecovery) : [];
       const nextIndex = backups.findIndex((candidate, index) => index >= (opts?.automaticRecoveryIndex ?? 0) &&
         registry.get(candidate.instanceId)?.enabled && (e instanceof TurnUsageLimitRefusedError ? (candidate.instanceId === instanceId ? e.scope !== "engine" : limitBackupAllowed(instance, registry.get(candidate.instanceId)!, instanceConfigs(cfg)[candidate.instanceId]))
           : !(e instanceof TurnAuthenticationRefusedError) || candidate.instanceId !== instanceId) &&
@@ -11713,8 +11712,7 @@ function configStatus() {
     language: appLanguage() ?? "", computerName: cfg.computerName ?? "", everyBotRules: cfg.everyBotRules ?? "",
     rooms: { turnTimeoutMinutes: roomTurnTimeoutMinutes(cfg) },
     mcp: { callTimeoutMinutes: mcpCallTimeoutMinutes(cfg) },
-    quotaSwitchEnabled,
-    automaticRecovery: cfg.automaticRecovery ?? { enabled: false },
+    quotaSwitchEnabled, automaticRecovery: cfg.automaticRecovery ?? { enabled: false },
     cacheKeepWarm: cacheKeepWarmSettings(cfg),
     newBots: cfg.newBots?.effort ? { effort: cfg.newBots.effort } : {},
     threads: {
