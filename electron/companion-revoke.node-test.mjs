@@ -4,7 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 
 /** companionRevoke alone, with the sidecar, its store and the transition queue stubbed. */
-function revokeWith({ running, removeAtRest = () => true, control = async () => ({}) }) {
+function revokeWith({ running, removeAtRest = () => true, control = async () => ({}), portServed = false }) {
   const source = readFileSync(new URL("./companion.mjs", import.meta.url), "utf8");
   const start = source.indexOf("export async function companionRevoke");
   const end = source.indexOf("\n}\n", start);
@@ -12,6 +12,8 @@ function revokeWith({ running, removeAtRest = () => true, control = async () => 
   const calls = [];
   const context = vm.createContext({
     proc: running ? {} : null,
+    CONTROL_PORT: 8811,
+    controlPortServed: async () => { calls.push(["port probe"]); return portServed; },
     serialize: (work) => { calls.push(["serialize"]); return Promise.resolve().then(work); },
     removePairedDeviceAtRest: (id) => { calls.push(["at rest", id]); return removeAtRest(id); },
     control: async (...args) => { calls.push(args); return control(...args); },
@@ -25,7 +27,13 @@ function revokeWith({ running, removeAtRest = () => true, control = async () => 
 test("Remove with the phone link asleep takes the phone out of the store it loads at start", async () => {
   const { revoke, calls } = revokeWith({ running: false });
   await revoke("phone-1");
-  assert.deepEqual(calls, [["serialize"], ["at rest", "phone-1"]]);
+  assert.deepEqual(calls, [["serialize"], ["port probe"], ["at rest", "phone-1"]]);
+});
+
+test("asleep, a companion this app did not start keeps the phone: the removal is refused, the store untouched", async () => {
+  const { revoke, calls } = revokeWith({ running: false, portServed: true });
+  await assert.rejects(revoke("phone-1"), /already serving another companion/);
+  assert.deepEqual(calls, [["serialize"], ["port probe"]]);
 });
 
 test("a removal that could not be saved while asleep is an error, never a quiet success", async () => {
