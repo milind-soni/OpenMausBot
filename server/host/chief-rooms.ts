@@ -2,6 +2,7 @@
 // that can't be changed then, or that never had its Chief, says so to the person instead.
 import { chiefScope } from "../../shared/bot-owner.ts";
 import type { GroupDefaultResponder } from "../../shared/wire.ts";
+import { chiefLevel } from "../chief-level.ts";
 import { conversationLanguage, serverLine } from "../server-lines.ts";
 import type { BotRecord, GroupRecord, Store } from "../store.ts";
 
@@ -17,12 +18,14 @@ const ledBy = (room: Pick<GroupRecord, "defaultResponder">, botId: string): bool
   return lead.kind === "member" ? lead.botId === botId : lead.kind === "auto" && lead.fallbackBotId === botId;
 };
 
-/** The department's Chief, when this room is a department's room and that Chief is not in it. */
+/** The department's Chief, when this room is a department's room and no Chief-level bot is in it (work a Chief-level
+ * member hands out already runs at its level). */
 export function chiefAbsentFrom(room: Pick<GroupRecord, "dm" | "section" | "memberIds">, bots: readonly BotRecord[]): { botId: string; name: string } | undefined {
   if (room.dm) return undefined;
   const scope = chiefScope({ section: room.section });
   const chief = bots.find((bot) => bot.chiefOfStaff && !bot.hidden && chiefScope(bot) === scope);
-  return chief && !room.memberIds.includes(chief.id) ? { botId: chief.id, name: chief.name } : undefined;
+  const chiefHere = bots.some((bot) => !bot.hidden && room.memberIds.includes(bot.id) && chiefLevel(bot));
+  return chief && !chiefHere ? { botId: chief.id, name: chief.name } : undefined;
 }
 
 export function createChiefRooms(deps: ChiefRoomsDeps) {

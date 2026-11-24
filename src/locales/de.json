@@ -4325,12 +4325,9 @@
   "skillBurger.list.removed": "{name} entfernt.",
   "skillBurger.list.removeFailed": "Dieser Skill konnte nicht entfernt werden. Versuch es noch einmal.",
   "skillBurger.list.loadFailed": "Gespeicherte Skills konnten nicht geladen werden.",
-  "skillBurger.everyChat": "In jedem Chat verwenden",
-  "skillBurger.everyChatFailed": "Konnte nicht ändern, wo dieser Skill Burger verwendet wird. Versuch es noch einmal.",
   "skillBurger.renameFailed": "Dieser Skill Burger konnte nicht umbenannt werden. Versuch es noch einmal.",
   "skillBurger.menu.aria": "Mehr zu {name}",
   "skillBurger.menu.rename": "Umbenennen…",
-  "skillBurger.card.everyChat": "Jeder Chat",
   "skillBurger.page.empty": "Skill Burger deiner Bots erscheinen hier.",
   "chat.notice.savedToThread": "In diesem Thread gespeichert",
   "memoryPage.thisThread": "Dieser Thread",
@@ -4353,5 +4350,11 @@
   "skillBurger.run.pathUndone": "Weg entfernt",
   "skillBurger.run.addPathFailed": "Das hat nicht geklappt. Versuch es noch einmal.",
   "activity.tool.team.runWorkflow": "Skill Burger ausführen",
-  "activity.tool.team.workflowEdit": "Skill Burger ändern"
+  "activity.tool.team.workflowEdit": "Skill Burger ändern",
+  "skillBurger.pill.cooking": "Wird gekocht… {count}",
+  "skillBurger.pill.add": "Hinzufügen",
+  "skillBurger.pill.running": "Läuft… {count}",
+  "skillBurger.pill.stopped": "Angehalten",
+  "skillBurger.pill.addPath": "Weg hinzufügen",
+  "skillBurger.card.madeBy": "Erstellt von {name}"
 }

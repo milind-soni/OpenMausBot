@@ -6,13 +6,9 @@ import type { LocaleKey } from "@/locales";
 import { readBurgerWorkflow, removeBurger, restoreBurger, runBurgerIn, useSavedBurgers, type SavedWorkflow } from "@/lib/skill-burger";
 import { useStoreDispatch } from "@/state/store-select";
 import { Card, NoteRow, TrashButton } from "../bot-panel/rows";
-import { EveryChatToggle } from "./EveryChatToggle";
 import { MiniBurger } from "./MiniBurger";
 import { RunWithInputs } from "./RunInputs";
 import { LayerIcon } from "./SkillBurger";
-
-/** A burger this bot uses: its own, and every one used in every chat. */
-export const usedBy = (botId: string) => (skill: SavedWorkflow) => skill.everyChat || skill.botId === botId;
 
 /** Takes a burger away, keeping what it takes to put it back. */
 export function useBurgerRemoval() {
@@ -41,13 +37,13 @@ export function useBurgerRemoval() {
   return { removed, problem, remove, undo };
 }
 
-/** The bot panel's Skill Burgers: the ones this bot uses. Open one to see its steps; switch it to every chat; remove it with
- * an Undo. */
+/** The bot panel's Skill Burgers: every saved one, which every bot uses. Open one to see its steps; remove one (whoever
+ * saved it, or an admin) with an Undo. */
 export function SavedWorkflowsCard({ botId, threadId }: { botId: string; threadId: string }) {
   const { skills: all, error } = useSavedBurgers();
   const dispatch = useStoreDispatch();
   const advanced = useAdvancedMode();
-  const skills = all?.filter(usedBy(botId)) ?? null;
+  const skills = all;
   const [open, setOpen] = useState<string | null>(null);
   const { removed, problem, remove, undo } = useBurgerRemoval();
 
@@ -58,9 +54,9 @@ export function SavedWorkflowsCard({ botId, threadId }: { botId: string; threadI
       ) : skills.length === 0 && !removed ? (
         <NoteRow>{t("skillBurger.list.empty")}</NoteRow>
       ) : skills.map((skill) => {
-        const key = `${skill.everyChat ? "every" : skill.botId}:${skill.name}`;
+        const key = skill.name;
         const expanded = open === key;
-        const listId = `skill-burger-${skill.everyChat ? "every" : "bot"}-${skill.name}`;
+        const listId = `skill-burger-${skill.name}`;
         return (
           <div key={key} data-panel-row={`skill-burger:${skill.name}`}>
             <div className="flex min-h-[46px] flex-wrap items-start gap-3 px-3.5 py-[10px]">
@@ -76,11 +72,10 @@ export function SavedWorkflowsCard({ botId, threadId }: { botId: string; threadI
                   <span dir="auto" className="line-clamp-2 text-[14px] font-medium leading-[18px] text-ink">{skill.summary}</span>
                   {advanced && <span className="mt-px block truncate font-mono text-[11px] text-ink-tertiary">{skill.name}</span>}
                 </button>
-                <EveryChatToggle compact skill={skill} />
               </div>
               <RunWithInputs skill={skill} iconOnly panelAction={`run-skill-burger:${skill.name}`} onRun={(inputs) => runBurgerIn(dispatch, { id: botId, threadId }, skill.name, inputs)}
                 className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-ink/[0.05] hover:text-ink" />
-              <TrashButton data-panel-action={`remove-skill-burger:${skill.name}`} label={t("skillBurger.list.remove", { name: skill.name })} onClick={() => void remove(skill)} />
+              {skill.canChange !== false && <TrashButton data-panel-action={`remove-skill-burger:${skill.name}`} label={t("skillBurger.list.remove", { name: skill.name })} onClick={() => void remove(skill)} />}
             </div>
             <ol id={listId} hidden={!expanded} aria-label={t("skillBurger.layers")} className="flex flex-col gap-1 px-3.5 pb-3">
               {skill.layers.map((layer, index) => (

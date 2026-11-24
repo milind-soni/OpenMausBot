@@ -6577,12 +6577,9 @@
   "skillBurger.list.removed": "{name} quitada.",
   "skillBurger.list.removeFailed": "No se pudo quitar esta habilidad. Inténtalo de nuevo.",
   "skillBurger.list.loadFailed": "No se pudieron cargar las habilidades guardadas.",
-  "skillBurger.everyChat": "Usar en todos los chats",
-  "skillBurger.everyChatFailed": "No se pudo cambiar dónde se usa este Skill Burger. Inténtalo de nuevo.",
   "skillBurger.renameFailed": "No se pudo cambiar el nombre de este Skill Burger. Inténtalo de nuevo.",
   "skillBurger.menu.aria": "Más de {name}",
   "skillBurger.menu.rename": "Cambiar nombre…",
-  "skillBurger.card.everyChat": "Todos los chats",
   "skillBurger.page.empty": "Aquí aparecen los Skill Burgers que hacen tus bots.",
   "chat.notice.savedToThread": "Guardado en este hilo",
   "memoryPage.thisThread": "Este hilo",
@@ -6623,5 +6620,11 @@
   "chat.botExchange.gone": "Este intercambio no se puede detener desde aquí.",
   "chat.botExchange.stopFailed": "No se pudo detener. Comprueba tu conexión e inténtalo de nuevo.",
   "chat.botExchange.waiting": "{helper} aún no ha empezado con esto. Está esperando su turno.",
-  "chat.botExchange.unknown": "No está claro qué mensajes de la conversación de {helper} pertenecen a este intercambio, así que no se muestra ninguno."
+  "chat.botExchange.unknown": "No está claro qué mensajes de la conversación de {helper} pertenecen a este intercambio, así que no se muestra ninguno.",
+  "skillBurger.pill.cooking": "Cocinando… {count}",
+  "skillBurger.pill.add": "Añadir",
+  "skillBurger.pill.running": "Ejecutando… {count}",
+  "skillBurger.pill.stopped": "Detenido",
+  "skillBurger.pill.addPath": "Añadir camino",
+  "skillBurger.card.madeBy": "Hecho por {name}"
 }

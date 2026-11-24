@@ -555,6 +555,11 @@ function windowsTarget(word: string, percent: boolean, host: Host): FloorVerdict
   return home && drive && home === `${drive}\\${parts.join("\\")}`.toLowerCase() ? DELETE_HOME : null;
 }
 
+/** PowerShell also takes an en dash, em dash or horizontal bar where a parameter's dash goes. */
+function parameterName(arg: string): string {
+  return arg.toLowerCase().replace(/^[\u2013\u2014\u2015]/, "-");
+}
+
 /** `powershell`: PowerShell on macOS or Linux, whose deletes take POSIX paths. */
 type Mode = "posix" | "windows" | "powershell";
 
@@ -636,8 +641,8 @@ function judge(command: Command, source: string, pass: Pass, mode: Mode, depth: 
   if (mode === "powershell") {
     // Remove-Item's aliases off Windows, where `rm` and `rmdir` are the real programs the POSIX reading judges.
     if (!["remove-item", "ri", "rd", "del", "erase"].includes(program)) return null;
-    const isSwitch = (arg: string) => /^-./.test(arg);
-    if (!args.some((arg) => isSwitch(arg) && "-recurse".startsWith(arg.toLowerCase()))) return null;
+    const isSwitch = (arg: string) => /^-./.test(parameterName(arg));
+    if (!args.some((arg) => isSwitch(arg) && "-recurse".startsWith(parameterName(arg)))) return null;
     for (const target of args) {
       // PowerShell takes either slash in a path.
       const verdict = isSwitch(target) ? null : posixTarget(target.replace(/\\/g, "/"), host);
@@ -650,10 +655,10 @@ function judge(command: Command, source: string, pass: Pass, mode: Mode, depth: 
   const cmdStyle = program === "rd" || program === "rmdir" || program === "del" || program === "erase";
   if (cmdStyle || program === "ri" || program === "remove-item" || program === "rm") {
     // cmd switches are /s /q or /s/q; PowerShell takes -Recurse or any unambiguous start of it.
-    const isSwitch = (arg: string) => /^-./.test(arg) || (cmdStyle && /^\/[A-Za-z?]/.test(arg));
+    const isSwitch = (arg: string) => /^-./.test(parameterName(arg)) || (cmdStyle && /^\/[A-Za-z?]/.test(arg));
     const recursive = args.some((arg) => isSwitch(arg) && (arg[0] === "/"
       ? arg.toLowerCase().split("/").includes("s")
-      : "-recurse".startsWith(arg.toLowerCase())));
+      : "-recurse".startsWith(parameterName(arg))));
     if (!recursive) return null;
     for (const target of args) {
       // After `rm` a lone backslash is a POSIX line continuation; after the others it is the drive root.
@@ -665,12 +670,11 @@ function judge(command: Command, source: string, pass: Pass, mode: Mode, depth: 
   }
   if (program === "format") return args.some((arg) => /^[A-Za-z]:\\?$/.test(arg)) ? FORMAT_DISK : null;
   // Windows Storage module: Format-Volume formats whatever volume it is given, also one piped in; Clear-Disk erases
-  // a disk's data only with -RemoveData, and refuses a disk holding data partitions without it. PowerShell also takes
-  // an en dash, em dash or horizontal bar where a parameter's dash goes.
+  // a disk's data only with -RemoveData, and refuses a disk holding data partitions without it.
   if (program === "format-volume") return FORMAT_DISK;
   if (program === "clear-disk") {
     return args.some((arg) => {
-      const name = arg.split(":")[0].toLowerCase().replace(/^[\u2013\u2014\u2015]/, "-");
+      const name = parameterName(arg.split(":")[0]);
       return name.length >= "-removed".length && "-removedata".startsWith(name);
     }) ? FORMAT_DISK : null;
   }

@@ -43,6 +43,10 @@ export interface AcpDriverHooks {
   /** The failure a turn's thrown error stands for, in the person's words (a usage limit with its reset), or undefined to
    * keep the error as it is. Must not throw. */
   reportedFailure?(error: unknown): Error | undefined;
+  /** Gets the last text chunk of a prompt the agent answered with end_turn. When the agent sent a failed model call as
+   * that chunk instead of failing the prompt, returns the failure in its words, which fails the turn as a thrown one
+   * does; the text before the chunk stays the reply. Null for any other chunk. */
+  replyFailure?(chunk: string): string | null;
   /** initialize's own `_meta` (beside clientCapabilities' vendor `_meta`), for an agent that reads who its client is there. */
   initializeMeta?: Record<string, unknown>;
   /** session/cancel's `_meta`, for an agent that reads how its turn was stopped there. */

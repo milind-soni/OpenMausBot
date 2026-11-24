@@ -50,7 +50,7 @@ const ago = (at: number) => {
 
 /** The burger's last runs (newest first), and "Update the burger with this fix" when the newest one in this chat went on
  * from a failed step after the bot fixed it. */
-export function RunHistory({ name, everyChat, botId, threadId, refreshKey }: { name: string; everyChat: boolean; botId: string; threadId: string; refreshKey: string }) {
+export function RunHistory({ name, botId, threadId, refreshKey }: { name: string; botId: string; threadId: string; refreshKey: string }) {
   const [runs, setRuns] = useState<BurgerRunRecord[] | null>(null);
   const [kept, setKept] = useState<"idle" | "saving" | "done" | "error">("idle");
   useEffect(() => {
@@ -64,7 +64,7 @@ export function RunHistory({ name, everyChat, botId, threadId, refreshKey }: { n
     if (!fixed?.fixedBy || kept === "saving") return;
     setKept("saving");
     try {
-      await keepBurgerFix({ name, everyChat, runBotId: botId, threadId, run: fixed.run, step: fixed.fixedBy });
+      await keepBurgerFix({ name, runBotId: botId, threadId, run: fixed.run, step: fixed.fixedBy });
       setKept("done");
     } catch {
       setKept("error");

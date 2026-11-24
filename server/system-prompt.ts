@@ -201,7 +201,7 @@ export const CLOUD_ENGINES_HERE = " The AIs bots run on (Claude, Codex, Cursor a
 export const CLOUD_REUSE_INSTALLS = " Reuse, and update if needed, what is already installed or cloned in your working folder instead of installing or cloning it again, unless the person asks for a fresh copy.";
 
 /** Work on a Cloud disk lives only there: code with a remote goes up as a branch, never over anyone's main line. */
-export const CLOUD_PUSH_CODE_WORK = " When a project has a git remote you can push to, commit your work and push it to a new branch instead of leaving it only on this disk: never force-push, never push to the default branch, and never commit secrets, .env files or installed packages such as node_modules.";
+export const CLOUD_PUSH_CODE_WORK = " When a project in your working folder has a git remote the person works in and you can push to it, commit your work and push it to one branch of your own, reusing that branch, instead of leaving it only on this disk: never force-push, never push to the default branch, and never commit secrets, .env files or installed packages such as node_modules.";
 
 /** `asks`: the person's own Cloud, whose bots ask them to turn on what their computer doesn't give now (ask_for_computer). */
 export function cloudHomePrompt(sharedComputerTools: boolean, synced: ReadonlyArray<{ computerName: string; pcPath: string; cloudPath: string }> = [],

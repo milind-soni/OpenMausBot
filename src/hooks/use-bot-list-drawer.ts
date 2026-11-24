@@ -11,24 +11,48 @@ export interface DrawerPlace {
 
 const KEEPS_LIST_OPEN = "[data-team-side]";
 
+interface DrawerState {
+  open: boolean;
+  /** What is on screen was reached from the list, so going back shows the list again. */
+  fromList: boolean;
+  /** The list came back with the back button: it is the first screen, and back from it leaves the app. */
+  first: boolean;
+}
+
+const CLOSED: DrawerState = { open: false, fromList: false, first: false };
+
 /**
  * The bot list that covers a narrow window. It closes when the person goes somewhere: another chat or page, or a
  * conversation they picked while it was open. A conversation that changes under it by itself (the one the app settles on
  * as it starts, a switch made on another device) leaves it open.
  */
 export function useBotListDrawer(place: DrawerPlace) {
-  const [open, setOpen] = useState(false);
+  const [state, setState] = useState<DrawerState>(CLOSED);
   const acted = useRef(false);
-  const show = useCallback(() => { acted.current = false; setOpen(true); }, []);
-  const hide = useCallback(() => setOpen(false), []);
+  const show = useCallback(() => { acted.current = false; setState((s) => ({ ...s, open: true, first: false })); }, []);
+  const hide = useCallback(() => setState((s) => ({ ...s, open: false, first: false })), []);
   const noteAction = useCallback((event: SyntheticEvent) => {
     if (!(event.target instanceof Element && event.target.closest(KEEPS_LIST_OPEN))) acted.current = true;
   }, []);
+  const leave = useCallback(() => setState((s) => (s.open ? { open: false, fromList: true, first: false } : s)), []);
   useEffect(() => {
-    setOpen(false);
-  }, [place.selectedId, place.view, place.pluginsOpen, place.settingsOpen]);
+    leave();
+  }, [place.selectedId, place.view, leave]);
+  // Opening the apps page or a bot's settings goes somewhere; closing one (as back does from it) does not.
   useEffect(() => {
-    if (acted.current) setOpen(false);
-  }, [place.botThread, place.groupThread]);
-  return { open, show, hide, noteAction };
+    if (place.pluginsOpen) leave();
+  }, [place.pluginsOpen, leave]);
+  useEffect(() => {
+    if (place.settingsOpen) leave();
+  }, [place.settingsOpen, leave]);
+  useEffect(() => {
+    if (acted.current) leave();
+  }, [place.botThread, place.groupThread, leave]);
+  /** One step back: the open list closes, and a screen reached from the list brings the list back. */
+  const back = useCallback(() => {
+    acted.current = false;
+    setState((s) => (s.open ? { ...s, open: false, first: false } : s.fromList ? { open: true, fromList: false, first: true } : s));
+  }, []);
+  const backSteps = (state.open && !state.first ? 1 : 0) + (state.fromList ? 1 : 0);
+  return { open: state.open, show, hide, noteAction, back, backSteps };
 }
