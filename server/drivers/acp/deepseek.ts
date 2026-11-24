@@ -20,19 +20,26 @@
 //     it downloaded the dependency tree, so the catalog is only probed on an
 //     explicit Refresh, never at app startup).
 //
+// With @deepseek-ai/dsh 0.2.2-rc.5 (verified 2026-11-24), Approve for me keeps
+// workspace-write, adds the bot's memory directory and reviews sandbox escalations
+// with the session model. The official plugin registers the auto-review purpose
+// and the auto preset dsh needs to restore a session before switching it back.
+//
 // Picker ids are `<provider>/<model>` so bot settings, badges and config.json
 // stay readable; resolveTurnModel turns them into dsh's wire pair just before
 // the core selects the model.
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { join, resolve } from "node:path";
+import { parse as parseYaml, stringify } from "yaml";
 
+import { DATA_DIR } from "../../config.ts";
 import type { ModelCatalog } from "../../contracts.ts";
 import { harnessHome } from "../../env-path.ts";
 import { killCliTree, resolveCli, spawnCli } from "../../procs.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 import { acpVariantOption } from "./config-options.ts";
+import { DSH_APPROVAL_PLUGIN } from "./dsh-approval-plugin.ts";
 
 export const DEEPSEEK_MODELS: ModelCatalog = {
   default: "deepseek-official/deepseek-v4-flash",
@@ -303,6 +310,22 @@ export function fetchDeepSeekCatalog(
   });
 }
 
+const approvalDir = resolve(DATA_DIR, "engines", "dsh");
+const approvalPlugin = join(approvalDir, "approval-preset.mjs");
+const reviewPatch = join(approvalDir, "approval-review.patch.yml");
+const sandboxPatch = join(approvalDir, "approval-sandbox.patch.yml");
+
+function approvalPatch(review: boolean): string {
+  const patch = review ? reviewPatch : sandboxPatch;
+  mkdirSync(approvalDir, { recursive: true });
+  writeFileSync(approvalPlugin, DSH_APPROVAL_PLUGIN);
+  writeFileSync(patch, stringify([{ insert: [
+    { id: "auto-review", name: "@deepseek-ai/dsh-experimental-auto-review" },
+    { id: "openmausbot-approval-preset", name: approvalPlugin, config: { review, dataDir: DATA_DIR } },
+  ] }]));
+  return patch;
+}
+
 export const deepseekSupport: AcpSupport = {
   driverKind: "deepseekAgent",
   displayName: "DeepSeek Harness",
@@ -325,7 +348,28 @@ export const deepseekSupport: AcpSupport = {
     settings: "connections",
   },
 
-  spawnArgs: () => ["--profile", "acp"],
+  spawnArgs: (_config, turn) => ["--profile", "acp", "--patch", approvalPatch(turn.approvalMode === "auto")],
+  resolveCommand: async (_env, { cli }) => ({ command: cli, ro: [approvalPlugin, reviewPatch, sandboxPatch] }),
+  updateFilter: (calls) => (update) => {
+    const { sessionUpdate, toolCallId, status } = update;
+    if ((sessionUpdate === "tool_call" || sessionUpdate === "tool_call_update") && toolCallId) {
+      if (status === "completed" || status === "failed") calls.delete(toolCallId);
+      else calls.set(toolCallId, { ...calls.get(toolCallId), ...update });
+    }
+    return update;
+  },
+  permissionRequest: (params, calls) => {
+    // dsh sends the call details in session/update and only its ID in session/request_permission.
+    const call = calls.get(params.toolCall.toolCallId);
+    if (!call) return params;
+    const { title, kind, rawInput, locations } = call;
+    const isCommand = typeof rawInput?.command === "string";
+    const path = rawInput?.path ?? rawInput?.file_path;
+    return { ...params, toolCall: {
+      title: !isCommand && typeof path === "string" ? `${title} ${path}` : title,
+      kind: isCommand ? "execute" : kind, rawInput, locations, ...params.toolCall,
+    } };
+  },
   credentialEnv: ["DEEPSEEK_API_KEY"],
   // Model and reasoning effort are session config options (see header).
   selectModel: { configId: "model" },

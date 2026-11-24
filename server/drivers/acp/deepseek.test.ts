@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { parse } from "yaml";
 
+import { DATA_DIR } from "../../config.ts";
 import type { ProviderInstance } from "../../contracts.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { recordEvents } from "../../testing/events.ts";
@@ -20,6 +22,7 @@ import {
   hasDeepSeekKey,
   parseDeepSeekCatalog,
 } from "./deepseek.ts";
+import { DSH_APPROVAL_PLUGIN } from "./dsh-approval-plugin.ts";
 
 describe("DeepSeek model ids", () => {
   it("maps a picker id to dsh's JSON pair and back", () => {
@@ -46,6 +49,56 @@ describe("DeepSeek model ids", () => {
       "deepseek-official/deepseek-flash",
       "deepseek-official/deepseek-v4-pro",
     ]);
+  });
+});
+
+describe("DeepSeek permission requests", () => {
+  const toolCallId = "call-1";
+  const params = { sessionId: "s", toolCall: { toolCallId }, options: [{ optionId: "allow-once" }] };
+  const rawInput = { command: "pwd", justification: "Show the working directory" };
+  const locations = [{ path: "/project" }];
+  const start = { sessionUpdate: "tool_call", toolCallId, status: "in_progress", title: "bash", kind: "other", rawInput, locations };
+
+  it.each(["completed", "failed"])("merges partial command details until the call is %s", (status) => {
+    const calls = new Map();
+    const filter = deepseekSupport.updateFilter!(calls);
+    const request = deepseekSupport.permissionRequest!;
+    expect(filter(start)).toBe(start);
+    const update = { sessionUpdate: "tool_call_update", toolCallId, title: "shell" };
+    expect(filter(update)).toBe(update);
+    const result = request(params, calls);
+    expect(result).toEqual({ ...params, toolCall: { toolCallId, title: "shell", kind: "execute", rawInput, locations } });
+    expect(result.options).toBe(params.options);
+    expect(params.toolCall).toEqual({ toolCallId });
+    expect(request(params, new Map())).toBe(params);
+    const end = { sessionUpdate: "tool_call_update", toolCallId, status };
+    expect(filter(end)).toBe(end);
+    expect(request(params, calls)).toBe(params);
+  });
+
+  it.each(["path", "file_path"])("includes the %s in a file tool title", (key) => {
+    const calls = new Map();
+    const input = { [key]: "/project/README.md", content: "Notes" };
+    deepseekSupport.updateFilter!(calls)({ ...start, title: "write", kind: "edit", rawInput: input });
+    expect(deepseekSupport.permissionRequest!(params, calls).toolCall)
+      .toEqual({ toolCallId, title: "write /project/README.md", kind: "edit", rawInput: input, locations });
+  });
+
+  it("preserves the request's own tool call fields", () => {
+    const calls = new Map();
+    deepseekSupport.updateFilter!(calls)(start);
+    const toolCall = { toolCallId, kind: "read", title: "read", rawInput: { path: "/file" }, locations: [] };
+    expect(deepseekSupport.permissionRequest!({ ...params, toolCall }, calls).toolCall).toEqual(toolCall);
+  });
+
+  it("passes unrelated updates and unknown requests through unchanged", () => {
+    const calls = new Map();
+    const filter = deepseekSupport.updateFilter!(calls);
+    for (const update of [{ sessionUpdate: "agent_message_chunk", toolCallId }, { sessionUpdate: "tool_call" }]) {
+      expect(filter(update)).toBe(update);
+    }
+    expect(calls.size).toBe(0);
+    expect(deepseekSupport.permissionRequest!(params, calls)).toBe(params);
   });
 });
 
@@ -134,11 +187,31 @@ describe("DeepSeek key detection", () => {
 });
 
 describe("DeepSeek ACP support", () => {
-  it("spawns dsh in its ACP profile and selects model + variants over the wire", () => {
+  const dir = join(DATA_DIR, "engines", "dsh");
+  const plugin = join(dir, "approval-preset.mjs");
+  it.each([
+    ["ask", "sandbox", false], ["auto", "review", true], ["full", "sandbox", false], [undefined, "sandbox", false],
+  ] as const)("loads the ACP profile and its approval patch for mode %s", (approvalMode, name, review) => {
+    const patch = join(dir, `approval-${name}.patch.yml`);
+    expect(deepseekSupport.spawnArgs({ cli: "dsh", fullAuto: approvalMode === "full" }, { threadId: "t", text: "hi", approvalMode }))
+      .toEqual(["--profile", "acp", "--patch", patch]);
+    expect(parse(readFileSync(patch, "utf8"))).toEqual([{ insert: [
+      { id: "auto-review", name: "@deepseek-ai/dsh-experimental-auto-review" },
+      { id: "openmausbot-approval-preset", name: plugin, config: { review, dataDir: DATA_DIR } },
+    ] }]);
+    expect(readFileSync(plugin, "utf8")).toBe(DSH_APPROVAL_PLUGIN);
+  });
+
+  it("exposes only the plugin and both patches as read-only mounts", async () => {
+    expect(await deepseekSupport.resolveCommand!({}, { cli: "fixture-dsh", fullAuto: false }, "deepseek")).toEqual({
+      command: "fixture-dsh", ro: [plugin, join(dir, "approval-review.patch.yml"), join(dir, "approval-sandbox.patch.yml")],
+    });
+  });
+
+  it("selects the model and variants over ACP", () => {
     expect(deepseekSupport.driverKind).toBe("deepseekAgent");
     expect(deepseekSupport.displayName).toBe("DeepSeek Harness");
     expect(deepseekSupport.defaultCli).toBe("dsh");
-    expect(deepseekSupport.spawnArgs({ cli: "dsh", fullAuto: false }, {} as never)).toEqual(["--profile", "acp"]);
     expect(deepseekSupport.selectModel).toEqual({ configId: "model" });
     expect(deepseekSupport.modelVariants).toBe(true);
     expect(deepseekSupport.resumeMethod).toBe("resume");

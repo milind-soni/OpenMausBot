@@ -202,8 +202,8 @@ export interface AcpSupport extends AcpDriverHooks {
   clientReadRoots?(turn: SendTurnInput): readonly string[];
   /** Sent as `clientCapabilities._meta` on initialize, where agents read vendor capabilities. */
   clientCapabilitiesMeta?: Record<string, unknown>;
-  /** Made once per process: rewrites a session/update before the turn reads it, or drops it by returning null. */
-  updateFilter?(): (update: Record<string, any>) => Record<string, any> | null; /** Rewrites a session/request_permission's params (its options and tool call) before the card is built. */ permissionRequest?(params: Record<string, any>): Record<string, any>;
+  /** Made once per process: rewrites a session/update before the turn reads it, or drops it by returning null; `calls` is this session's tool-call record, shared with permissionRequest. */
+  updateFilter?(calls: Map<string, Record<string, any>>): (update: Record<string, any>) => Record<string, any> | null; /** Rewrites a session/request_permission's params (its options and tool call) before the card is built, with the tool calls this session's filter recorded. */ permissionRequest?(params: Record<string, any>, calls: ReadonlyMap<string, Record<string, any>>): Record<string, any>;
   /** OpenMausBot's own MCP servers as this server's endpoints, no process each: always, or in each session whose agent's `initialize` says it reaches MCP servers by URL. */
   ownMcpOverHttp?: boolean | "advertised";
   /** How many tools the agent lists of its own beside the MCP servers', counted against a provider's tool limit. */
@@ -558,7 +558,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       ): AcpSession => {
         const commandCwd = permissionLaunchCwd(cwd);
         const host = hostFor(threadId, launch, argv, env, cwd, hostKey);
-        const acp = host.link(threadId, cwd);
+        const acp = host.link(threadId, cwd); const toolCalls = new Map<string, Record<string, any>>();
         const send = (obj: unknown) => acp.send(obj); const nodeVersion = support.minNodeVersion ? readNodeVersion(env) : undefined;
 
         const handleServerRequest = (msg: any, current: AcpTurn) => {
@@ -573,7 +573,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           // An unanswered server request blocks the agent.
             return send({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
           }
-          const params = support.permissionRequest ? support.permissionRequest(msg.params ?? {}) : msg.params ?? {};
+          const params = support.permissionRequest ? support.permissionRequest(msg.params ?? {}, toolCalls) : msg.params ?? {};
           current.flushAssistantText();
           const options: Array<{ optionId?: string; kind?: string; name?: string }> = Array.isArray(params.options) ? params.options : [];
           const optionFor = (want: "allow" | "reject") =>
@@ -608,7 +608,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           const tool = mcpTitle ?? (kind === "execute" ? "shell" : kind === "edit" ? "edit" : kind || "tool");
           const isShellCommand = !isQuestion && kind === "execute" && !/^mcp(?:__|[.:])/i.test(String(toolCall.title ?? ""));
           const rawSummary = String(toolCall.rawInput?.command ?? toolCall.title ?? tool);
-          const summary = rawSummary.slice(0, isQuestion ? MAX_QUESTION_TEXT : 200);
+          const summary = rawSummary.slice(0, isQuestion ? MAX_QUESTION_TEXT : 200) + (!isQuestion && typeof toolCall.rawInput?.justification === "string" ? `\nReason: ${toolCall.rawInput.justification.slice(0, 300)}` : "");
           const questionChoices = isQuestion
             ? options.flatMap((option) => typeof option.name === "string" && option.name.trim() ? [option.name.trim()] : [])
             : [];
@@ -692,7 +692,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           });
         };
 
-        const filterUpdate = support.updateFilter?.();
+        const filterUpdate = support.updateFilter?.(toolCalls);
         const handleNotification = (msg: any) => {
           // Vendor side-channels (grok's `_x.ai/*`) are only teed to the native log.
           if (msg.method !== "session/update") return;
