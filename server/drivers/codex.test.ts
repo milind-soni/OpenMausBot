@@ -735,6 +735,22 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(owner.calls.find((call) => call.method === "turn/start")?.params).not.toHaveProperty("environments");
   });
 
+  it("runs work from the person's other place with the shell off and no environment, in Ask's workspace sandbox", async () => {
+    await create();
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-link", text: "rm -rf ~", system: "You are Testy.", model: "gpt-5.6-sol", approvalMode: "ask", linkLimited: true });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8")) as { argv: string[]; calls: Array<{ method: string; params: any }> };
+    for (const override of ["features.shell_tool=false", "features.unified_exec=false", "features.view_image=false"]) {
+      expect(seen.argv[seen.argv.indexOf(override) - 1], override).toBe("-c");
+    }
+    const started = seen.calls.find((call) => call.method === "turn/start")?.params;
+    expect(started.environments).toEqual([]);
+    expect(started.sandboxPolicy).toMatchObject({ type: "workspaceWrite" });
+    expect(started.approvalPolicy).toBe("on-request");
+  });
+
   it("refuses a guest's turn when Codex did not take the shell-off overrides", async () => {
     await create({ environment: { FAKE_CODEX_IGNORE_FEATURES: "1" } });
     const dump = join(scratch, "dump.json");

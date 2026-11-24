@@ -2,7 +2,7 @@ import { decodeRoutedCodexConfig, managedCodexArgs, endpointCodexArgs, type Code
 export { managedCodexArgs, endpointCodexArgs } from "./codex-endpoint-config.ts";
 import { codexActionFailure } from "./codex-action-notice.ts";
 import { codexToolSurfaceArgs } from "./codex-tool-surface.ts";
-import { codexShellDisabled, codexTurnConfigArgs } from "./codex-guest.ts";
+import { codexShellDisabled, codexTurnConfigArgs } from "./codex-guest.ts"; import { shellOff } from "./shell-off.ts";
 import { TEAM_TOOLS_FAILED, teamToolsFailed } from "./team-tools.ts";
 import { enabledMcpMounts, mcpStartupTracker, supportsMcpStartup } from "./codex-mcp-startup.ts";
 import { boxAdmittedEnv, boxProxyEnvNames, customServerEnvBox, type McpApprovalMode, mountMcpServer } from "./codex-mcp-mount.ts";
@@ -1229,7 +1229,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           }
         }
         // A Codex that did not take the overrides runs nothing for a guest.
-        if (turn.guestConfined && !codexShellDisabled(effectiveConfig)) {
+        if (shellOff(turn) && !codexShellDisabled(effectiveConfig)) {
           throw new Error(`This Codex could not turn its shell off, so it can't run this turn. Update Codex, or switch this bot to Claude.${turn.confinedWhy ? ` ${turn.confinedWhy}` : ""}`);
         }
         const stableInstructions = typeof turn.systemStable === "string" && typeof turn.systemVolatile === "string"
@@ -1238,7 +1238,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const promptSplit = stableInstructions !== null;
         // Omitting these on a resumed thread would keep the previous named mode.
         let approvalParams: CodexApprovalParams = approvalMode === "custom" ? customApprovalParams(effectiveConfig) : namedApprovalParams(approvalMode);
-        const instructionsFor = (params: CodexApprovalParams) => codexDeveloperInstructions(effectiveConfig, stableInstructions ?? turn.system ?? "", turn.guestConfined ? "" : codexSandboxNote(params));
+        const instructionsFor = (params: CodexApprovalParams) => codexDeveloperInstructions(effectiveConfig, stableInstructions ?? turn.system ?? "", shellOff(turn) ? "" : codexSandboxNote(params));
         // Validate effectiveConfig upfront so invalid native rules fail before thread creation/reuse.
         instructionsFor(approvalParams);
         // Codex's `never` means "do not ask to escalate", not "grant every requested permission":
@@ -1301,7 +1301,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               model: selection.model,
               ...(selection.modelProvider ? { modelProvider: selection.modelProvider } : {}),
               ...approvalParams.thread,
-              ...(turn.guestConfined ? { environments: [] } : {}),
+              ...(shellOff(turn) ? { environments: [] } : {}),
               ephemeral: turn.ephemeral === true,
             });
           let started;
@@ -1348,7 +1348,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             ...approvalParams.turn,
             // No environment: exec_command, apply_patch and view_image are refused (codex-cli 0.159.0).
             // Without the experimental API the field is rejected, not ignored.
-            ...(turn.guestConfined ? { environments: [] } : {}),
+            ...(shellOff(turn) ? { environments: [] } : {}),
             // Spread, not `effort ?? null`: codex-cli 0.146.0 treats null as absent (the thread keeps
             // its effort), rejects "", and thread/start takes no effort, so a thread keeps its last level.
             ...(turn.effort ? { effort: turn.effort } : {}), ...(selection.serviceTier ? { serviceTierForTurn: selection.serviceTier } : {}),

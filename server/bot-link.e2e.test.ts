@@ -30,7 +30,8 @@ function place(fixture: Fixture) {
 }
 
 it("a bot on the computer and a bot on the person's own server hand each other work and get the result back", async () => {
-  const fixtures = [await launchVerificationServer({}, undefined, undefined, undefined, undefined, { scripted: true }),
+  // The computer's Claude is one that can run a turn without its shell (--restricted).
+  const fixtures = [await launchVerificationServer({ FAKE_CLAUDE_VERSION: "2.1.284" }, undefined, undefined, undefined, undefined, { scripted: true }),
     await launchVerificationServer({}, undefined, undefined, undefined, undefined, { scripted: true })];
   const computer = place(fixtures[0]!), home = place(fixtures[1]!);
   try {
@@ -124,6 +125,9 @@ it("a bot on the computer and a bot on the person's own server hand each other w
     expect(shown.find((message) => message.roomRequest?.phase === "result").tool.name).toContain("Atlas (My server)");
     expect(shown.filter((message) => message.kind === "text").at(-1)).toMatchObject({ role: "bot", text: "Atlas says 42." });
     expect(home.providerTurns().filter((turn) => turn.botId === atlas.id)).toHaveLength(1);
+    // Work the person started on the computer, and work the computer hands its server, run at each bot's own level.
+    expect(computer.providerTurns().find((turn) => turn.botId === writer.id)).toMatchObject({ permissionMode: "bypassPermissions", restricted: false });
+    expect(home.providerTurns().find((turn) => turn.botId === atlas.id)).toMatchObject({ permissionMode: "bypassPermissions", restricted: false });
     const there = (await home.api("GET", "/api/bots")).bots.find((bot: any) => bot.id === atlas.id);
     const work = there.tasks.find((task: any) => /Writer/.test(task.title ?? ""));
     expect(work, JSON.stringify(there.tasks)).toBeTruthy();
@@ -160,6 +164,14 @@ it("a bot on the computer and a bot on the person's own server hand each other w
     await expect.poll(async () => (await home.messages(atlas.activeTaskId)).some((message) => message.roomRequest?.phase === "result" && /drafted the summary/.test(message.tool?.output ?? "")), { timeout: 40_000 }).toBe(true);
     expect((await home.cli("wait", "--bot", atlas.id, "--task", atlas.activeTaskId, "--timeout", "30")).status).toBe("settled");
     expect((await home.messages(atlas.activeTaskId)).filter((message) => message.kind === "text").at(-1)).toMatchObject({ role: "bot", text: "Writer drafted it." });
+    // That work came from the server, and the person never let their Clouds run commands on the computer: Writer worked
+    // there with no shell and no writes outside its working folder, and was told why. Nothing asked the person.
+    const drafted = computer.providerTurns().filter((turn) => turn.botId === writer.id).at(-1);
+    expect(drafted).toMatchObject({ permissionMode: "acceptEdits", restricted: true });
+    expect(JSON.stringify(drafted.prompt)).toContain("Running commands on this computer is off for work from My Cloud");
+    const workHere = (await computer.api("GET", "/api/bots")).bots.find((bot: any) => bot.id === writer.id).tasks.find((task: any) => /Atlas/.test(task.title ?? ""));
+    expect(workHere, "the work's own thread on the computer").toBeTruthy();
+    expect((await computer.messages(workHere.threadId)).filter((message) => message.kind === "options")).toEqual([]);
 
     // From a room: the other place's bot is in no room here, so it gets the work directly and its result comes back to the room.
     const editor = (await computer.cli("new-bot", "--name", "Editor")).bot;

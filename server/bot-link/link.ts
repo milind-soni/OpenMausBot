@@ -10,8 +10,13 @@
 // hand-off, its result and its stop go only to the place they belong to.
 //
 // Security: the link joins only servers the same person signs in to as owner (server/routes/bot-link.ts), and work that
-// crosses it counts as the person's own, as it does between two bots of one place. Open risk: whoever controls one side
-// can have the other side's bots act at their own approval levels; turning the link off on the computer ends that.
+// crosses it counts as the person's own, as it does between two bots of one place. Work the Cloud hands a computer
+// follows the person's grant to their Clouds on that computer (server/bot-link/far-side.ts): while "Let Clouds run
+// commands on this computer" is off, it runs there with no shell, computer use, reads outside its working folders or
+// writes outside its working folder, and an engine that can't be held to that refuses it. Work a computer hands its Cloud
+// runs in the Cloud's box. Still open: what comes back (results, files) is read by the person's own turns at their
+// level; a limited turn's writes to its working folder and memory are read by later turns there; the grant is read when
+// each turn starts. Turning the link off on the computer ends all of it.
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { basename, join } from "node:path";

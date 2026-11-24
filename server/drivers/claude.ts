@@ -18,7 +18,7 @@ import { botSettingsFor, folderSettingsEnv, withBotSettings } from "./claude-bot
 import { claudeBilling, claudeCallUsage } from "./claude-billing.ts";
 import { claudeAuthFailure, claudeAuthRecovery, claudeOAuthExpired } from "./claude-auth-recovery.ts"; import { AWS_CREDENTIAL_ENV_KEYS, bedrockResultError, withBedrockCredentialError } from "./claude-bedrock-aws.ts";
 import { CLAUDE_MODEL_ID, STATIC_CLAUDE_MODELS, claudeModelExtras, currentEngineCatalog, endpointModelCatalog, withCliVersionGate } from "./claude-model-extras.ts";
-import { claudeOwnMcpOverHttp, withLoopbackNoProxy } from "./own-mcp-http.ts"; import { claudeAgentsMount, claudeToolSearchSetting } from "./claude-tool-search.ts"; import { claudeDisabledNativeSkillRules, unusableBuiltIns } from "./claude-unusable-tools.ts"; import { EMAIL_READ_TOOL_NAMES } from "../../shared/email.ts";
+import { claudeOwnMcpOverHttp, withLoopbackNoProxy } from "./own-mcp-http.ts"; import { claudeAgentsMount, claudeToolSearchSetting } from "./claude-tool-search.ts"; import { claudeDisabledNativeSkillRules, unusableBuiltIns } from "./claude-unusable-tools.ts"; import { shellOff } from "./shell-off.ts"; import { EMAIL_READ_TOOL_NAMES } from "../../shared/email.ts";
 import { claudeElicitations } from "./claude-elicitation.ts"; import { claudePrestartTools, type ClaudePrestartTools } from "./claude-prestart.ts"; import { spawnContractDiff } from "./claude-spawn-contract.ts"; import { claudeContextUsage, liveContextBreakdown, writeControlFrame } from "./claude-context-usage.ts";
 import { claudeCostSnapshot, readCostHistory, recordCostState, restoredCostBase, turnCostFromRunningTotal } from "./claude-cost-history.ts";
 export { claudeCostSnapshot, restoredCostBase, turnCostFromRunningTotal, type ClaudeCostSnapshot } from "./claude-cost-history.ts";
@@ -981,10 +981,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         "--include-partial-messages",
         "--permission-mode", permissionMode,
       ];
-      if (turn.guestConfined && permissionMode !== "default") {
-        throw new Error("A guest's turn on this Cloud runs only in Ask.");
+      if (shellOff(turn) && permissionMode !== "default" && !(turn.linkLimited && permissionMode === "acceptEdits")) {
+        throw new Error(turn.guestConfined ? "A guest's turn on this Cloud runs only in Ask." : "Work from the person's other place runs here only in Ask or Auto-accept edits.");
       }
-      if (turn.guestConfined) args.push("--restricted", "--tools", GUEST_CLAUDE_TOOLS.join(","));
+      if (shellOff(turn)) args.push("--restricted", "--tools", GUEST_CLAUDE_TOOLS.join(","));
       else if (config.tools !== undefined) args.push("--tools", config.tools.join(","));
       const turnEnvironment = environment();
       const turnModel = config.managed ? turn.model : await resolveClaudeTurnModel(turn.model, turnEnvironment, config.endpointModels);
@@ -992,13 +992,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const launchCli = findCliCandidates(config.cli, turnEnvironment.PATH ?? "")[0]; await ensureCliVersion(turnEnvironment);
       for (let tries = 0; tries < 2 && cliVersionChecked && cliProbedAt !== launchCli; tries++) await ensureCliVersion(turnEnvironment); // another copy's late check landed while this turn waited
       const ownCli = cliProbedAt === launchCli, turnCliVersion = ownCli ? cliVersion : null; // still another copy's state: none of its flags, its version counts as unknown
-      if (turn.guestConfined && !claudeCliSupports(turnCliVersion, "--restricted")) {
+      if (shellOff(turn) && !claudeCliSupports(turnCliVersion, "--restricted")) {
         throw new Error(withWhy("This Claude Code is too old to run this turn without a shell. Update Claude Code.", turn.confinedWhy));
       }
       const replaysUserMessages = turnCliVersion === null || versionAtLeast(turnCliVersion, CLAUDE_REPLAY_FLOOR);
       if (replaysUserMessages) args.push("--replay-user-messages");
       const isolated = !inheritsUserConfig(turnEnvironment); const projectSettingsOnly = isolated && claudeCliSupports(turnCliVersion, "--setting-sources");
-      const disallowed = [...(config.disallowedTools ?? []), ...unusableBuiltIns({ isolated, listsTools: config.tools !== undefined, guest: Boolean(turn.guestConfined) }), ...claudeDisabledNativeSkillRules(botId)];
+      const disallowed = [...(config.disallowedTools ?? []), ...unusableBuiltIns({ isolated, listsTools: config.tools !== undefined, guest: shellOff(turn) }), ...claudeDisabledNativeSkillRules(botId)];
       if (disallowed.length) args.push("--disallowedTools", disallowed.join(","));
       if (turn.toolScope !== undefined && (!isolated || turn.mcpFromUserConfig || turnCliVersion === null || !claudeCliSupports(turnCliVersion, "--strict-mcp-config"))) {
         throw new Error("Claude cannot confirm a restricted MCP configuration for this account. Disable inherited Claude MCP servers and use a current, identifiable Claude CLI before using tool selection.");
@@ -1074,7 +1074,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       }
       // --strict-mcp-config makes this the CLI's only MCP source, so the bot project's servers merge
       // last, never shadowing a harness mount. Never for a guest: its folder could declare a command.
-      if (isolated && turn.cwd && !turn.guestConfined) {
+      if (isolated && turn.cwd && !shellOff(turn)) {
         for (const [name, server] of Object.entries(projectMcpServers(turn.cwd))) {
           if (Object.hasOwn(mcpServers, name)) continue;
           mcpServers[name] = server;
@@ -1127,11 +1127,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // Project-only settings still find the personal memory and rules via ancestors when the bot lives under HOME.
       if (isolated) own.claudeMdExcludes = [join(homedir(), ".claude", "CLAUDE.md"), join(homedir(), ".claude", "rules", "**")];
       if (hooks) own.hooks = claudeHookSettings(HOOK_HELPER_PATH);
-      if (turn.guestConfined) own.permissions = GUEST_CLAUDE_PERMISSIONS;
+      if (shellOff(turn)) own.permissions = GUEST_CLAUDE_PERMISSIONS;
       // Approvals and browser credentials expire at the turn boundary; native background workers and cron jobs must not outlive it.
       env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = env.CLAUDE_CODE_DISABLE_CRON = "1";
       // Never for a guest: --restricted leaves project settings out, and a hook is a command. The MCP output limit comes after, so one the bot set there is kept.
-      const botSettings = turn.guestConfined ? {} : botSettingsFor(turn.botSettingsFile, cwd, env); limitUngatedOutput(env, mcpServers, botOwned, turn.integrations?.customResultBudgets, (botSettings.env as Record<string, unknown> | undefined)?.MAX_MCP_OUTPUT_TOKENS ?? (turn.guestConfined ? undefined : folderSettingsEnv(cwd, "MAX_MCP_OUTPUT_TOKENS", projectSettingsOnly)));
+      const botSettings = shellOff(turn) ? {} : botSettingsFor(turn.botSettingsFile, cwd, env); limitUngatedOutput(env, mcpServers, botOwned, turn.integrations?.customResultBudgets, (botSettings.env as Record<string, unknown> | undefined)?.MAX_MCP_OUTPUT_TOKENS ?? (shellOff(turn) ? undefined : folderSettingsEnv(cwd, "MAX_MCP_OUTPUT_TOKENS", projectSettingsOnly)));
       const settings = withBotSettings(botSettings, own);
       const authSettingsPath = mcpConfigPath && Object.keys(settings).length
         ? join(dirname(mcpConfigPath), "auth-settings.json") : null;
@@ -1299,7 +1299,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         cleanupUnownedLaunch();
         throw error;
       }
-      if (turn.guestConfined) warmContracts.delete(threadId);
+      if (shellOff(turn)) warmContracts.delete(threadId);
       else {
         warmContracts.set(threadId, {
           args: [...args], env: { ...env }, cwd, system: launchSystem ?? null,
@@ -1408,7 +1408,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             if (o.subtype === "init") {
               // A guest's CLI that kept a command-running tool is stopped before it does anything.
               const tools: unknown[] = Array.isArray(o.tools) ? o.tools : [];
-              if (session.turn?.input.guestConfined && (o.permissionMode !== "default" || tools.some((tool) => typeof tool === "string" && GUEST_FORBIDDEN_TOOLS.has(tool)))) {
+              if (session.turn && shellOff(session.turn.input) && (o.permissionMode !== (session.turn.input.linkLimited && session.turn.input.approvalMode === "edits" ? "acceptEdits" : "default") || tools.some((tool) => typeof tool === "string" && GUEST_FORBIDDEN_TOOLS.has(tool)))) {
                 emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: withWhy("This Claude Code kept its shell, so it can't run this turn. Update Claude Code.", session.turn?.input.confinedWhy) });
                 session.closing = true;
                 stopSession(session);

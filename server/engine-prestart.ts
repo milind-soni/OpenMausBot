@@ -66,7 +66,7 @@ const OWN_SERVERS = new Set(["agents", "phone", "data", "device", "email", "hook
 function startsOnlyOwnServers(input: SendTurnInput): boolean {
   const mounted = input.integrations ?? {};
   return Object.keys(mounted).every((name) => OWN_SERVERS.has(name)) && Object.keys(mounted.custom ?? {}).length === 0
-    && !input.guestConfined && !input.mcpFromUserConfig && input.toolScope === undefined;
+    && !input.guestConfined && !input.linkLimited && !input.mcpFromUserConfig && input.toolScope === undefined;
 }
 
 const RELEASE_AFTER_MS = 5_000;

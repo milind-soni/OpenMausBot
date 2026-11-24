@@ -572,7 +572,7 @@ import { PhoneSecretBridge, PhoneSecretSubmissionRegistry } from "./phone-secret
 // Keep these two last, so loading the route table leaves module start-up order as is.
 import { gzipTunnelReplies, json, onJsonBody, parsedBodyOf, readBody } from "./harness/http.ts";
 import { holdBodyDeadline } from "./body-deadline.ts";
-import { createNoAiNotice } from "./host/no-ai-notice.ts"; import { PASS, ROUTES, dispatchRoutes } from "./routes/table.ts"; import { createBotLinkHost } from "./host/bot-link-host.ts"; import { followRoomMentions } from "./host/bot-link-rooms.ts"; import { standInAmong, standInWriteRefusal } from "./host/stand-in-guard.ts"; import { isBotLinkHeldPath, linkSessionRefusal } from "./routes/bot-link.ts"; import { createSecretCards } from "./host/secret-cards.ts"; import { createInternalCredentialRequestRoutes, createSecretCardRoutes } from "./routes/secret-cards.ts"; import { applyIncludedPagesMessage, pagesAccess, pagesNotOffered } from "./pages/access.ts"; import { createPublishedPages } from "./pages/service.ts"; import { createInternalToolRoutes } from "./routes/internal-tools.ts"; import { createHelperSuggestionRoutes } from "./routes/helper-suggestion.ts"; import { createXConnectorRoutes } from "./routes/x-connector.ts"; import { createMoveFreeze, switchAutomationsOff } from "./move-freeze.ts"; import { createMoveFreezeRoutes } from "./routes/move-freeze.ts"; import { createMoveWaits } from "./move-waits.ts"; import { assertBotHere, botMoveRefusal, createBotMoves } from "./bot-moves.ts"; import { createBotMoveRoutes } from "./routes/bot-moves.ts"; import { createTeamMoveIn, moveInRefusal } from "./team-move-in.ts";
+import { createNoAiNotice } from "./host/no-ai-notice.ts"; import { PASS, ROUTES, dispatchRoutes } from "./routes/table.ts"; import { createBotLinkHost } from "./host/bot-link-host.ts"; import { createLinkLimits, LINK_ACTION_DENIED, LINK_COMMANDS_OFF, LINK_ENGINE_REFUSAL } from "./bot-link/far-side.ts"; import { followRoomMentions } from "./host/bot-link-rooms.ts"; import { standInAmong, standInWriteRefusal } from "./host/stand-in-guard.ts"; import { isBotLinkHeldPath, linkSessionRefusal } from "./routes/bot-link.ts"; import { createSecretCards } from "./host/secret-cards.ts"; import { createInternalCredentialRequestRoutes, createSecretCardRoutes } from "./routes/secret-cards.ts"; import { applyIncludedPagesMessage, pagesAccess, pagesNotOffered } from "./pages/access.ts"; import { createPublishedPages } from "./pages/service.ts"; import { createInternalToolRoutes } from "./routes/internal-tools.ts"; import { createHelperSuggestionRoutes } from "./routes/helper-suggestion.ts"; import { createXConnectorRoutes } from "./routes/x-connector.ts"; import { createMoveFreeze, switchAutomationsOff } from "./move-freeze.ts"; import { createMoveFreezeRoutes } from "./routes/move-freeze.ts"; import { createMoveWaits } from "./move-waits.ts"; import { assertBotHere, botMoveRefusal, createBotMoves } from "./bot-moves.ts"; import { createBotMoveRoutes } from "./routes/bot-moves.ts"; import { createTeamMoveIn, moveInRefusal } from "./team-move-in.ts";
 import { createHostedSlackRoutes } from "./routes/hosted-slack.ts";
 import { createBotPresetRoutes } from "./routes/bot-presets.ts"; import { createWorkspaceBannerRoutes, workspaceBannerStore, workspaceBannerSummary } from "./routes/workspace-banner.ts";
 import { createBotMemoryRoutes } from "./routes/bot-memory.ts"; import { createBotLibraryRoutes } from "./routes/bot-library.ts";
@@ -1400,7 +1400,7 @@ type UtilityParentPort = {
   postMessage(message: object): void;
 };
 // Only Electron's utility process supplies parentPort, private to the desktop main process; plain Node leaves it absent.
-const utilityParentPort = (process as NodeJS.Process & { parentPort?: UtilityParentPort }).parentPort;
+const utilityParentPort = (process as NodeJS.Process & { parentPort?: UtilityParentPort }).parentPort; const linkLimits = createLinkLimits({ cloud: () => Boolean(CLOUD_HOME) || botLink.link.role() === "acceptor", node: (id) => coordinator.node(id), confinable: (bot) => registry.get(store.bot(bot.id)?.modelSelection.instanceId ?? "")?.adapter.capabilities.guestTurns === "confined" });
 type DesktopPrivateMessage = BrowserCleanupWireRequest | import("./login-handoff.ts").LoginHandoffResult | {
   type: "openmausbot:browser-control";
   botId: string;
@@ -1470,7 +1470,7 @@ utilityParentPort?.on("message", (event) => {
   const message = event?.data;
   try {
     if (applyDesktopMutationTokenMessage(message) || desktopComputer.receive(message) || tailnetShare.receive(message, (answer) => utilityParentPort?.postMessage(answer))) return;
-    if (handleDesktopTrustedApprovalMessage(message)) return;
+    if (handleDesktopTrustedApprovalMessage(message) || linkLimits.receive(message)) return;
     if (browserCleanup.receive(message)) return;
     if (phoneSecrets.receive(message) || botLogins.receiveHandoff(message, postDesktopPrivateMessage, (what) => cloudConnections.handoff(what))) return;
     if (applyIncludedPagesMessage(message)) return; if (applyIncludedXMessage(message)) return void broadcast({ kind: "config", ...configStatus() }); if (applyPhoneLinkMessage(message) || phonePushAccess.receive(message)) return;
@@ -3841,7 +3841,7 @@ const questionRouting = createQuestionRouting({ store, handedInUnproven, active:
   steer: async (threadId, text) => canSteerThread(threadId) && (await steerThread(threadId, text)) !== "refused", mayReach: outsideLineage.mayReach });
 const remoteTeammates = new RemoteTeammates(); const remoteHandoff = createRemoteHandoff({ teammates: remoteTeammates, coordinator: () => coordinator, localBots: () => store.bots, botName: (id) => store.bot(id)?.name, outside: (threadId) => (outsideLineage.outsideDrivenThread(threadId) || outsideLineage.cloudGuestDriven(threadId) ? OUTSIDE_STAYS_HERE : undefined), file: join(DATA_DIR, "remote-teammate-work.json"), log: (line) => console.error(line) }); const handoffFiles = createHandoffFiles({ dataDir: DATA_DIR, attachmentsDir: ATTACHMENTS_DIR, botName: (id) => store.bot(id)?.name, node: (id) => coordinator.node(id), children: (id) => coordinator.children(id), discard: deleteAttachment, threadsReferencing, changes: (listener) => store.onChange(listener), log: (line) => console.error(line),
   worksInOwnFolder: (botId, threadId) => turnsRunInOwnFolder(botId, threadId, store.taskByThread(botId, threadId)?.cwd, store.bot(botId)?.cwd, Boolean(store.groupByThread(threadId))), vmHome: (botId) => localVmMode(cfg) === "per-bot" ? perBotLocalVmTarget(botId).workspaceDir : null, withheld: (child, parent) => Boolean(roomHandoffProblem(child, parent)) || keptPrivate({ child: teamHost.privateTo(child.threadId), parent: teamHost.privateTo(parent.threadId) }) });
-const titleHandedThread = createHandedThreadTitle({ store, gate: threadTitleGate, generate: generateThreadTitle }); const botLink = createBotLinkHost({ roomLine: (threadId, key, params) => serverLine(threadLanguage(threadId), key, params), roomWindow: (threadId, reader) => roomTranscript.window(threadId, userNameFor(threadId), undefined, reader), roomOpener: (botId, threadId) => handoffOpener({ botId, threadId }, threadId), roomChanged: (groupId) => { const room = store.group(groupId); if (room) broadcast({ kind: "group", group: publicGroupState(room) }); }, roomFollow: followRoomMentions<GroupTurnOperation>({ members: (groupId) => (store.group(groupId)?.memberIds ?? []).map((id) => store.bot(id)).filter((bot): bot is BotRecord => Boolean(bot)), mentioned: (text, members) => roomResponders(text, members, { kind: "mentions" }), begin: beginGroupTurnOperation, finish: finishGroupTurnOperation, queue: groupQueues, wait: waitForChatRoomMember, run: (groupId, threadId, botId, hop, spoken, operation) => runGroupMemberTurn(groupId, threadId, botId, hop, spoken, undefined, undefined, () => operation.cancelled, undefined, undefined, undefined, undefined, operation) }), dataDir: DATA_DIR, environmentId: ENVIRONMENT_ID, store, coordinator: () => coordinator, kick: () => handoffTicks.kick(), level: (bot) => approvalModeForTurn(bot, true, bot.threadId), titleHanded: titleHandedThread, refusal: botMoveRefusal, language: (threadId) => threadLanguage(threadId), personName: personNameIn, sessions, power: () => cloudPower, files: handoffFiles, storeFile: (path, name, root) => saveBotAttachment({ path, name, roots: [root], byContent: true }), log: (line) => console.error(line), local: (auth) => auth.kind === "loopback" && auth.trust !== "service" && !CLOUD_HOME && !HOSTED_WORKSPACE, owner: (auth) => !sharedMembership() && !HOSTED_WORKSPACE && (ownHome.owner(auth) || (CLOUD_PERSONAL && cloudOwnerSession(auth))) }); ROUTES.push(botLink.routes); const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoordinator({
+const titleHandedThread = createHandedThreadTitle({ store, gate: threadTitleGate, generate: generateThreadTitle }); const botLink = createBotLinkHost({ roomLine: (threadId, key, params) => serverLine(threadLanguage(threadId), key, params), roomWindow: (threadId, reader) => roomTranscript.window(threadId, userNameFor(threadId), undefined, reader), roomOpener: (botId, threadId) => handoffOpener({ botId, threadId }, threadId), roomChanged: (groupId) => { const room = store.group(groupId); if (room) broadcast({ kind: "group", group: publicGroupState(room) }); }, roomFollow: followRoomMentions<GroupTurnOperation>({ members: (groupId) => (store.group(groupId)?.memberIds ?? []).map((id) => store.bot(id)).filter((bot): bot is BotRecord => Boolean(bot)), mentioned: (text, members) => roomResponders(text, members, { kind: "mentions" }), begin: beginGroupTurnOperation, finish: finishGroupTurnOperation, queue: groupQueues, wait: waitForChatRoomMember, run: (groupId, threadId, botId, hop, spoken, operation) => runGroupMemberTurn(groupId, threadId, botId, hop, spoken, undefined, undefined, () => operation.cancelled, undefined, undefined, undefined, undefined, operation) }), dataDir: DATA_DIR, environmentId: ENVIRONMENT_ID, store, coordinator: () => coordinator, kick: () => handoffTicks.kick(), level: (bot) => approvalModeForTurn(bot, true, bot.threadId), titleHanded: titleHandedThread, refusal: (bot) => botMoveRefusal(bot) ?? linkLimits.acceptRefusal(bot), language: (threadId) => threadLanguage(threadId), personName: personNameIn, sessions, power: () => cloudPower, files: handoffFiles, storeFile: (path, name, root) => saveBotAttachment({ path, name, roots: [root], byContent: true }), log: (line) => console.error(line), local: (auth) => auth.kind === "loopback" && auth.trust !== "service" && !CLOUD_HOME && !HOSTED_WORKSPACE, owner: (auth) => !sharedMembership() && !HOSTED_WORKSPACE && (ownHome.owner(auth) || (CLOUD_PERSONAL && cloudOwnerSession(auth))) }); ROUTES.push(botLink.routes); const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoordinator({
   dataDir: DATA_DIR, restartCut: restartCutStop({ dataDir: DATA_DIR, lines: (threadId) => store.activePath(threadId) }),
   now: Date.now, wrote: () => { handoffTicks.kick(); handoffStatus.changed(); }, handoffLimit: { refusal: (botId, open, origin) => botHolds.handoff(botId) ?? starterCaps.handoffs.refusal(botId, open) ?? usageCapGate.handoff(botId, origin) },
   log: line => console.error("coordinator:", line),
@@ -6436,20 +6436,20 @@ bus.subscribe((event: RuntimeEvent) => {
       const asker = bot ?? (speaker ? store.bot(speaker.botId) : undefined); if (asker && proactive.fence.answers(event, asker, pushMessage)) break;
       const unattended = permission && asker && event.requestId ? isUnattended(asker.id, event.threadId) : false;
       // No command the owner saved answers for a guest-driven turn.
-      const guestDriven = cloudGuestDriven(event.threadId) || botApiThread(event.threadId);
+      const guestDriven = cloudGuestDriven(event.threadId) || botApiThread(event.threadId), linkHeld = linkLimits.held(event.threadId); // work from the far side: its own capped level, no saved grant, never a card
       const ownApprovalMode = (who: BotRecord) => liveApprovalMode(who, event.threadId, isInternalTurn(event.threadId));
-      const effectiveApprovalMode = !asker || guestDriven ? "ask"
+      const effectiveApprovalMode = !asker || guestDriven ? "ask" : linkHeld ? linkHeld.level(ownApprovalMode(asker))
         : group && speaker?.botId === asker.id ? roomTurnLevels.forRequest(event.threadId, asker.id, () => ownApprovalMode(asker))
           : ownApprovalMode(asker);
       const notAsked = !permission && asker && event.requestId ? questionRouting.notAsked({ botId: asker.id, threadId: event.threadId, level: effectiveApprovalMode, question: event.summary }) : undefined;
       if (notAsked !== undefined && asker && event.requestId) { void answerRequest(event.threadId, event.providerInstanceId ?? asker.modelSelection.instanceId, event.requestId, "answer", notAsked); pushMessage({ role: "bot", kind: "activity", tool: { name: serverLine(threadLanguage(event.threadId), "server.questions.notAsked", { question: event.summary.slice(0, 160) }), ok: true } }); break; }
       // Shell descriptors are distinct from computer/MCP permissions: a local desktop must not disable an exact shell grant.
-      const command = permission && asker && event.requestId && !event.requiresExplicitApproval && event.command && !guestDriven
+      const command = permission && asker && event.requestId && !event.requiresExplicitApproval && event.command && !guestDriven && !linkHeld
         ? commandAllowlistCandidate({ ...event.command, providerInstanceId: event.providerInstanceId ?? asker.modelSelection.instanceId })
         : null;
       // Bound to provider and server config, so a switch or edit invalidates the grant; a built-in bridge is named, never its turn token, and a local-computer ask is never remembered.
       const providerInstanceId = asker ? event.providerInstanceId ?? asker.modelSelection.instanceId : "";
-      const providerTool = permission && asker && event.requestId && !event.requiresExplicitApproval && !guestDriven && event.approvalScope !== "local-computer"
+      const providerTool = permission && asker && event.requestId && !event.requiresExplicitApproval && !guestDriven && !linkHeld && event.approvalScope !== "local-computer"
         ? providerMcpTool(event.tool)
         : null;
       const configuredMcp = providerTool && asker ? providerToolConfig(providerTool.server, engineMcpServers(asker)) : undefined;
@@ -6460,7 +6460,7 @@ bus.subscribe((event: RuntimeEvent) => {
         ? heldAtSafetyFloor(event, autoVerdict(effectiveApprovalMode, event.tool, {
           requiresExplicitApproval: event.requiresExplicitApproval,
           commandAllowed: Boolean(command && commandAllowlist.matches(asker.id, command)),
-          toolAllowed: savedToolGrant(toolAllowKey, asker.alwaysAllow, store.bot(asker.id)?.alwaysAllow), ownFilesRead: !guestDriven && readsOwnFiles(DATA_DIR, asker.id, event), // never in a guest's turn: the folder holds its owner's memory
+          toolAllowed: savedToolGrant(toolAllowKey, asker.alwaysAllow, store.bot(asker.id)?.alwaysAllow), ownFilesRead: !guestDriven && !linkHeld && readsOwnFiles(DATA_DIR, asker.id, event), // never in a guest's turn: the folder holds its owner's memory
         }))
         : null;
       // Claude accepts --permission-mode auto for any model but silently starts in Manual where auto is unavailable (Haiku 4.5, Sonnet 4.5, an org that disabled it).
@@ -6529,7 +6529,7 @@ bus.subscribe((event: RuntimeEvent) => {
         });
         break;
       }
-      const heldContext = { source: verdict?.source, permission };
+      if (linkHeld && permission && asker && event.requestId) { void (runningTurnEngines.get(event.threadId) ?? registry.get(event.providerInstanceId ?? asker.modelSelection.instanceId))?.adapter.respondToRequest(event.threadId, event.requestId, { behavior: "deny", message: LINK_ACTION_DENIED }).catch(() => {}); break; } const heldContext = { source: verdict?.source, permission };
       const message = pushMessage({
         role: "bot",
         kind: "options",
@@ -7473,7 +7473,7 @@ async function beginTurn(
   let computerSkipped: string | undefined;
   const transitionError = providerTransitionForTurn(bot, opts?.runOn, threadId);
   if (transitionError && !answer.incident) throw Object.assign(new Error(transitionError), { status: 409 });
-  if (transitionError) computerSkipped = transitionError;
+  if (transitionError) computerSkipped = transitionError; const linkLimited = linkLimits.limited(opts?.coordination?.id); if (linkLimited) computerSkipped ??= LINK_COMMANDS_OFF;
   if (providerInstancesChanging.has(bot.modelSelection.instanceId)) {
     throw Object.assign(new Error("this provider account is being updated — try again shortly"), { status: 409, code: "settling" });
   }
@@ -7506,11 +7506,11 @@ async function beginTurn(
   const policyRefusal = policyModelRefusal(instance);
   if (policyRefusal) throw Object.assign(new Error(policyRefusal), { status: 409, code: "managed_policy" });
   const toolScope = toolScopeForTurn(bot.id);
-  guestDrivenTurns.delete(threadId);
+  guestDrivenTurns.delete(threadId); linkLimits.begin(threadId, linkLimited, instance.driverKind);
   const guestConfined = cloudGuestDriven(threadId) || cloudGuestDrivenHandoff(opts?.coordination?.id) || botApiThread(threadId);
   if (guestConfined && instance.adapter.capabilities.guestTurns !== "confined") {
     throw Object.assign(new Error(botApiThread(threadId) ? serverLine(threadLanguage(threadId), "server.botApi.engineRefusal") : guestEngineRefusal(threadId)), { status: 409, code: "guest_engine" });
-  }
+  } if (linkLimited && instance.adapter.capabilities.guestTurns !== "confined") throw Object.assign(new Error(LINK_ENGINE_REFUSAL), { status: 409, code: "link_engine" });
   const resolvedImages = extractTurnImages(text);
   const usesNativeImageInput = instance.adapter.capabilities.nativeImageInput === true;
   let providerText = promptWithDataContext(usesNativeImageInput ? resolvedImages.text : text, opts?.dataContext);
@@ -7782,7 +7782,7 @@ async function beginTurn(
         ],
         skills,
       );
-      setup.lap("context"); if (phoneOffered) integrations.phone = phoneIntegration(bot.id, threadId, dispatchClaimId);
+      setup.lap("context"); if (phoneOffered && !linkLimited) integrations.phone = phoneIntegration(bot.id, threadId, dispatchClaimId);
       if (bot.composio !== false && composio.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
         Object.assign(integrations, await teamConnections.appsIntegrations(bot, threadId, dispatchClaimId, instance.adapter.capabilities.mcpToolsFoundByName ? "dotted" : "plain")); setup.lap("apps");
       }
@@ -8185,7 +8185,7 @@ async function beginTurn(
       if (phone) integrations.device = phone;
       const mountedComputer = surfaceOfComputerKind(computerKind);
       if (
-        liveBot &&
+        liveBot && !linkLimited &&
         plan.browser &&
         builtInBrowserEnabled(cfg) &&
         liveBot.browser !== false &&
@@ -8305,7 +8305,7 @@ async function beginTurn(
       const startupRecovery = (opts?.automaticRecoveryIndex ?? 0) < startupBackups(liveBot ?? bot, cfg.automaticRecovery).length; const posted = unreadThreadPosts(store.activePath(threadId)); // post_to_thread messages left here since its last run
       const held = limitTakeover.heldAtStart(bot, { instanceId, model }, startupRecovery); // a limit or a sign-out already known: straight to an AI that can carry on, with the reset only when one was named
       if (held) throw held.scope === "signed-out" ? Object.assign(new TurnAuthenticationRefusedError(`signed-out-${randomUUID()}`, `${engineName(instanceId)} is signed out.`, true), userErrorFields(userError("serverError.engine.signedOut", { name: engineName(instanceId) }))) : new TurnUsageLimitRefusedError(`limit-${randomUUID()}`, `${engineName(instanceId)} is at its usage limit.`, held.resetsAt, held.scope, true); perf.noteSetup(threadId, setup.done());
-      const dispatch = await guardTurnDispatch(shareNote.after(savedSteps.dispatch.sendTurn(instance, personLine && !opts?.unattended && !opts?.app?.context && !guestConfined ? { botId: bot.id, message: userMessage, turnText: text, placePicked: wants === "local" && placeSource !== "auto-pin" } : null, {
+      const dispatch = await guardTurnDispatch(shareNote.after(savedSteps.dispatch.sendTurn(instance, personLine && !opts?.unattended && !opts?.app?.context && !guestConfined ? { botId: bot.id, message: userMessage, turnText: text, placePicked: wants === "local" && placeSource !== "auto-pin" } : null, linkLimits.input(linkLimited, instance, {
         threadId,
         botId: bot.id,
         startupRecovery,
@@ -8332,7 +8332,7 @@ async function beginTurn(
         ...skillsHost.turnSettings(bot, threadId, instance, managedPolicy.restrictsMcp(), cwd),
         cwd, ...(worksInWorkspace || guestConfined || cloudGuestOpened(threadId) ? {} : { toolResultFolder: messageFileRootsForThread(bot.id, threadId).find((root) => root !== ATTACHMENTS_DIR) }),
         botSettingsFile: botSettingsFile(bot),
-      }, (input) => quickFallback.sendTurn(instance, enginePrestart.note(instance.instanceId, input, personLine && !automated), route.quickModel ? { model, own: bot.modelSelection, onFallback: () => store.patchMessage(threadId, userMessage.id, { quickModel: undefined }) } : undefined))), () => companyShutdown || !directTurnClaimExists(bot.id, dispatchClaimId, threadId), async () => {
+      }), (input) => quickFallback.sendTurn(instance, enginePrestart.note(instance.instanceId, input, personLine && !automated), route.quickModel ? { model, own: bot.modelSelection, onFallback: () => store.patchMessage(threadId, userMessage.id, { quickModel: undefined }) } : undefined))), () => companyShutdown || !directTurnClaimExists(bot.id, dispatchClaimId, threadId), async () => {
         await (runningTurnEngines.get(threadId) ?? instance).adapter.interruptTurn(threadId).catch(() => {});
       });
       if (dispatch.cancelled) {
@@ -9527,9 +9527,9 @@ async function runClaimedGroupMemberTurn(
     return true;
   }
   const roomPolicyRefusal = instance ? policyModelRefusal(instance) : undefined;
-  if (!groupSpeakers.has(threadId)) guestDrivenTurns.delete(threadId);
-  const roomGuestConfined = cloudGuestDriven(threadId) || cloudGuestDrivenHandoff(orchestration?.roomHandoffId);
-  const roomGuestRefusal = roomGuestConfined && instance?.adapter.capabilities.guestTurns !== "confined" ? guestEngineRefusal(threadId) : undefined;
+  if (!groupSpeakers.has(threadId)) { guestDrivenTurns.delete(threadId); linkLimits.begin(threadId, false, undefined); }
+  const roomGuestConfined = cloudGuestDriven(threadId) || cloudGuestDrivenHandoff(orchestration?.roomHandoffId), roomLinkLimited = linkLimits.limited(orchestration?.roomHandoffId);
+  const roomGuestRefusal = roomGuestConfined && instance?.adapter.capabilities.guestTurns !== "confined" ? guestEngineRefusal(threadId) : roomLinkLimited && instance?.adapter.capabilities.guestTurns !== "confined" ? LINK_ENGINE_REFUSAL : undefined;
   if (!instance || roomPolicyRefusal || roomGuestRefusal) {
     const message = roomPolicyRefusal ?? roomGuestRefusal ?? `${bot.name}'s model is unavailable`;
     store.appendMessage(threadId, {
@@ -9560,7 +9560,7 @@ async function runClaimedGroupMemberTurn(
   const internalGeneration = beginInternalCapabilityGeneration(threadId);
   if (orchestration?.roomHandoffId) gmailDrafts.forRoomTurn(internalGeneration, orchestration.roomHandoffId);
   if (operation) roomTurnStarted(internalGeneration, operation);
-  if (roomGuestConfined) guestDrivenTurns.set(threadId, internalGeneration);
+  if (roomGuestConfined) guestDrivenTurns.set(threadId, internalGeneration); if (roomLinkLimited) linkLimits.begin(threadId, true, instance.driverKind);
   // Only a personal Cloud's owner answering their own line in a room they alone wrote in is theirs.
   if (CLOUD_HOME && (!CLOUD_PERSONAL || cloudHomeLendingRefusal(cloudLendingTurn({ botId: bot.id, threadId, generation: internalGeneration })) !== null)) {
     noteForeignTurn(bot.id, threadId, internalGeneration);
@@ -9823,7 +9823,7 @@ async function runClaimedGroupMemberTurn(
   if (instance.adapter.capabilities.emailMcp === true) { const mail = emailIntegration(readyBot, { threadId, generation: internalGeneration }); if (mail) integrations.email = mail; }
   const phone = instance.adapter.capabilities.deviceMcp === true ? phones.integration(readyBot, { threadId, generation: internalGeneration }) : null;
   if (phone) integrations.device = phone;
-  if (roomPlan.browser && !(roomPlan.computer === undefined && roomTeamComputer)) {
+  if (roomPlan.browser && !roomLinkLimited && !(roomPlan.computer === undefined && roomTeamComputer)) {
     const roomComputer = roomTeamComputer ? "cloud" : roomPlan.computer === "off" ? null : roomPlan.computer ?? null;
     const browser = await openBrowserBeside(() => browserIntegration(readyBot.id, readyBot.browserProfile, { threadId, generation: internalGeneration }), roomComputer, (error) => console.warn(`[browser] room thread ${threadId}: left out beside ${roomComputer} (${redactSecretsInText(String(error))})`));
     if (browser) integrations.browser = browser.integration;
@@ -10171,12 +10171,12 @@ async function runClaimedGroupMemberTurn(
     const clock = turnClockLine(Date.now(), hostTimeZone()), roomPick = cardContinuation ? "" : takeRoomPick(operation, readyBot.id); oneTimeInputTaken = Boolean(roomPick) || heldReplay.messageIds.length > 0;
     const roomToolScope = toolScopeForTurn(readyBot.id), roomUserMcp = claudeUserMcpEnabled(cfg) && !managedPolicy.restrictsMcp();
     const roomSession = roomSessions.dispatch({
-      threadId, botId: readyBot.id, claimId: internalGeneration, instance, guestConfined: roomGuestConfined, reset: Boolean(roomReset), hooks: Boolean(integrations.hooks),
+      threadId, botId: readyBot.id, claimId: internalGeneration, instance, guestConfined: roomGuestConfined || roomLinkLimited, reset: Boolean(roomReset), hooks: Boolean(integrations.hooks),
       context: () => ({ ...roomMemberContexts.forThread(threadId)?.[readyBot.id], compactAt: nativeCompactTokens(instance, roomSelection.model) }),
       config: [roomSystem.stable, cwd, roomSelection, turnApprovalMode, roomToolScope, roomUserMcp, integrations],
       window: roomWindow, tail: roomTail, wrap: (body) => withTurnClock(clock, withRecalled(roomRecalled, roomPick + attachmentsForBox(body, cwd, { botId: readyBot.id, threadId }) + roomShareNote.text + devsReports.note(threadId, Boolean(integrations.agents)))),
     });
-    guardTurnDispatch(roomShareNote.after(instance.adapter.sendTurn({
+    guardTurnDispatch(roomShareNote.after(instance.adapter.sendTurn(linkLimits.input(roomLinkLimited, instance, {
         ...roomSession.send,
         threadId,
         botId: readyBot.id,
@@ -10197,7 +10197,7 @@ async function runClaimedGroupMemberTurn(
         ...(instance.instanceId === roomSelection.instanceId
           ? memberTurnSelection(roomSelection)
           : { model: instance.models.default }),
-      })), () => abandoned || Boolean(isCancelled?.()), async () => {
+      }))), () => abandoned || Boolean(isCancelled?.()), async () => {
         // Stop may have landed before the adapter had a process to interrupt: interrupt again now.
         await instance.adapter.interruptTurn(threadId).catch(() => {});
       })
