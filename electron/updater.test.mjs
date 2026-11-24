@@ -132,6 +132,19 @@ afterEach(() => {
   rmSync(fixture.home, { recursive: true, force: true });
 });
 
+it("keeps a packaged test build pinned when updates are disabled", async () => {
+  vi.stubEnv("OMB_DISABLE_UPDATES", "1");
+  try {
+    const { updater, autoUpdater } = await load(() => false);
+    updater.startUpdater();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(updater.unattendedUpdates()).toBe("none");
+    expect(autoUpdater.checkForUpdates).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
 function bridgeFor(origin, { clicked = false, rule = null } = {}) {
   let bridge;
   const invoked = [];

@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { cleanWorkspaceConfig, profileDir } from "../electron/clean-workspace.mjs";
 import { createProfileRegistry } from "../electron/local-profiles.mjs";
 import { connectCdp } from "../server/browser-sites.ts";
+import { launchVerificationServer } from "./control-omb.ts";
 import { handleToolCall } from "./mcp-server.ts";
 
 const executable = resolve(process.argv[2] ?? "release/linux-unpacked/openmausbot");
@@ -26,12 +27,30 @@ const replies = join(fixture, "chat-replies.json");
 writeFileSync(replies, JSON.stringify({
   "Amber window reply": [{ say: "Amber received." }], "Indigo window reply": [{ say: "Indigo received." }],
 }));
+const remote = process.argv.includes("--saved-servers");
+const saved = [];
+if (remote) {
+  const legacyUi = join(fixture, "server-ui");
+  mkdirSync(legacyUi);
+  writeFileSync(join(legacyUi, "index.html"), "<title>Earlier server UI</title>");
+  try {
+    for (const id of ["studio", "personal"]) {
+      const server = await launchVerificationServer({ FAKE_CLAUDE_MODE: "slow", FAKE_STREAM_SCRIPT: replies, FAKE_CLAUDE_SLOW_FINISH_GATE: finish },
+        undefined, undefined, undefined, undefined, undefined, [], undefined, legacyUi);
+      saved.push({ id, kind: "remote", name: id, origin: server.info.url, close: server.close });
+    }
+    writeFileSync(join(user, "environments.json"), JSON.stringify({ version: 2, activeId: "local", environments: saved }));
+  } catch (error) {
+    await Promise.all(saved.map(entry => entry.close()));
+    throw error;
+  }
+}
 const display = Object.fromEntries(["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR", "XDG_CURRENT_DESKTOP", "HYPRLAND_INSTANCE_SIGNATURE"].filter(k => process.env[k]).map(k => [k, process.env[k]]));
 const platform = display.WAYLAND_DISPLAY ? "wayland" : "x11";
 const app = spawn(executable, [`--ozone-platform=${platform}`, "--password-store=basic", `--user-data-dir=${user}`, "--remote-debugging-port=0"], {
   cwd: home, env: { ...display, PATH: process.env.PATH, HOME: home, XDG_CONFIG_HOME: join(home, ".config"),
     XDG_CACHE_HOME: join(home, ".cache"), XDG_DATA_HOME: join(home, ".local/share"), TMPDIR: home,
-    OMB_DATA_DIR: data, OMB_COMPOSIO_BROKER_URL: "http://127.0.0.1:1", OMB_WEBHOOK_PORT: "0", FAKE_STREAM_SCRIPT: replies, FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: finish },
+    OMB_DISABLE_UPDATES: "1", OMB_DATA_DIR: data, OMB_COMPOSIO_BROKER_URL: "http://127.0.0.1:1", OMB_WEBHOOK_PORT: "0", FAKE_STREAM_SCRIPT: replies, FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: finish },
   stdio: "ignore",
 });
 const ended = new Promise((done, fail) => { app.once("exit", done); app.once("error", fail); });
@@ -68,20 +87,57 @@ try {
       assert.ok(status < 400, `${route}: ${status} ${JSON.stringify(body)}`);
       return body;
     });
-    async function menu(selector) {
+    async function menu(selector, label = "Open in new window") {
       await evaluate('document.querySelector("[data-mausbot-welcome-later]")?.click()', true);
       await until(() => evaluate(`document.querySelector(${JSON.stringify(selector)}) !== null`), selector);
-      await evaluate(`document.querySelector(${JSON.stringify(selector)}).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }))`, true);
-      await until(() => evaluate('Boolean(document.querySelector("[data-open-window]"))'), "Open in new window");
-      await evaluate('document.querySelector("[data-open-window]").click()', true);
+      const button = selector.includes("data-sidebar-thread-row") ? "[data-thread-overlay] [data-open-window]" :
+        selector.includes("data-sidebar-group-row") ? "[data-room-menu] [data-open-window]" : "[data-open-window]";
+      const action = label === "Open in new window" ? `document.querySelector(${JSON.stringify(button)})` :
+        `[...document.querySelectorAll('button[role="menuitem"]')].find(button => button.textContent.trim() === ${JSON.stringify(label)})`;
+      await until(async () => {
+        if (await evaluate(`Boolean(${action})`)) return true;
+        await evaluate(`document.querySelector(${JSON.stringify(selector)})?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }))`, true);
+        return false;
+      }, `${label} on ${selector}`);
+      await evaluate(`${action}.click()`, true);
+      await until(() => evaluate(`!(${action})`), `closing ${label} menu for ${selector}`);
     }
-    return { ...page, evaluate, control, menu, close: () => cdp.send("Target.closeTarget", { targetId: page.targetId }) };
+    return { ...page, evaluate, control, menu, cookies: () => cdp.send("Network.getCookies", {}, sessionId), close: () => cdp.send("Target.closeTarget", { targetId: page.targetId }) };
   }
   const rail = await attach(p => p.url.endsWith("/rail"), "workspace rail");
   const origin = new URL(rail.url).origin;
-  const main = await attach(p => p.url === origin + "/", "main workspace");
-  await rail.menu('[data-rail-place="profile:personal"]');
-  const other = await attach(p => /^http:\/\/127\.0\.0\.1:\d+\/$/.test(p.url) && new URL(p.url).origin !== origin, "Personal workspace");
+  async function signIn(entry) {
+    const post = async (path, body) => {
+      const response = await fetch(entry.origin + path, { method: "POST", headers: { origin: entry.origin, "content-type": "application/json" }, body: JSON.stringify(body) });
+      assert.equal(response.status, 200, path);
+      return response;
+    };
+    const { code } = await (await post("/api/auth/pairing", { scopes: ["admin", "client"] })).json();
+    const pairing = await post("/api/auth/pair", { code, cookie: true, label: "Workspace fixture" });
+    const [name, value] = pairing.headers.getSetCookie()[0].split(";")[0].split("=");
+    await cdp.send("Storage.setCookies", { cookies: [{ name, value, url: entry.origin, httpOnly: true, sameSite: "Lax" }] });
+  }
+  for (const entry of saved) await signIn(entry);
+  for (const entry of saved) {
+    assert.ok((await (await fetch(entry.origin)).text()).includes("Earlier server UI"));
+    await rail.menu(`[data-rail-place="${entry.id}"]`);
+    await attach(p => p.url === entry.origin + "/", entry.name);
+  }
+  const main = await attach(p => p.url === (remote ? saved[0].origin : origin) + "/", "first workspace");
+  const otherSelector = remote ? '[data-rail-place="personal"]' : '[data-rail-place="profile:personal"]';
+  if (!remote) await rail.menu(otherSelector);
+  const isOther = p => remote ? p.url === saved[1].origin + "/" : /^http:\/\/127\.0\.0\.1:\d+\/$/.test(p.url) && new URL(p.url).origin !== origin;
+  const other = await attach(isOther, "Personal workspace");
+  if (remote) {
+    for (const page of [main, other]) {
+      assert.equal(await page.evaluate('fetch("/api/auth/session").then(r => r.json()).then(r => r.kind)'), "session");
+      assert.equal(await page.evaluate("typeof window.ogb"), "undefined");
+      const { cookies } = await page.cookies();
+      assert.equal(cookies.filter(cookie => cookie.name.startsWith("omb_session_")).length, 1);
+    }
+    assert.equal(await main.evaluate(`fetch(${JSON.stringify(saved[1].origin + "/api/auth/session")}).then(() => true, () => false)`), false);
+    assert.equal(await main.evaluate(`fetch(${JSON.stringify(origin + "/api/auth/session")}).then(() => true, () => false)`), false);
+  }
   const [work, homeBot] = await Promise.all([main.control("create_bot", { name: "Studio Echo" }), other.control("create_bot", { name: "Personal Echo" })].map(p => p.then(r => r.bot)));
   const { task } = await main.control("create_task", { target_type: "bot", target_id: work.id, title: "Studio sketches" });
   const send = (page, bot, text) => page.control("send_bot_message", { bot_id: bot.id, task_id: bot.activeTaskId, text });
@@ -98,16 +154,21 @@ try {
   for (const [page, bot, prompt] of [[main, work, "Studio fixture note"], [other, homeBot, "Personal fixture note"]]) {
     await until(async () => (await messages(page, bot, bot.activeTaskId)).messages.some(m => m.role === "bot" && m.text?.includes(prompt)), `${bot.name} reply`);
   }
-  console.log("Both local workspaces ran a bot concurrently and retained separate conversations.");
+  console.log("Both workspaces ran a bot concurrently and retained separate conversations.");
   await main.menu(`[data-sidebar-bot-row="${work.id}"]`);
   const isChat = thread => p => new URL(p.url).searchParams.get("chatWindow") === thread;
   const first = await attach(isChat(work.activeTaskId), "first chat window");
-  await main.evaluate('localStorage.setItem("omb-advanced-mode","1"); location.reload()');
-  const selectBot = `document.querySelector('[data-sidebar-bot-row="${work.id}"]')`;
-  await until(() => main.evaluate(`Boolean(${selectBot})`), "advanced sidebar");
-  await until(() => main.evaluate(`Boolean(${selectBot}?.parentElement.querySelector("button[aria-expanded]"))`), "thread disclosure");
-  await main.evaluate(`${selectBot}.parentElement.querySelector('button[aria-expanded="false"]')?.click()`, true);
-  await main.menu(`[data-sidebar-thread-row="${task.taskId}"]`);
+  if (remote) {
+    await main.menu(`[data-sidebar-bot-row="${work.id}"]`, "View threads");
+    await main.menu(`[data-conversation="${task.taskId}"] [data-sidebar-thread-row]`);
+  } else {
+    await main.evaluate('localStorage.setItem("omb-advanced-mode","1"); location.reload()');
+    const selectBot = `document.querySelector('[data-sidebar-bot-row="${work.id}"]')`;
+    await until(() => main.evaluate(`Boolean(${selectBot})`), "advanced sidebar");
+    await until(() => main.evaluate(`Boolean(${selectBot}?.parentElement.querySelector("button[aria-expanded]"))`), "thread disclosure");
+    await main.evaluate(`${selectBot}.parentElement.querySelector('button[aria-expanded="false"]')?.click()`, true);
+    await main.menu(`[data-sidebar-thread-row="${task.taskId}"]`);
+  }
   const second = await attach(isChat(task.taskId), "second chat window");
   async function compose(page, text) {
     await until(() => page.evaluate('Boolean(document.querySelector("[data-chat-window] textarea:not([disabled])"))'), "pinned chat composer");
@@ -125,24 +186,32 @@ try {
     await until(() => page.evaluate(`document.body.innerText.includes(${JSON.stringify(reply)})`), "visible transcript");
     assert.ok(!(await page.evaluate("document.body.innerText")).includes(sibling));
   }
-  assert.equal(await main.evaluate(`window.ogb.workspaces.openThread(${JSON.stringify(work.id)},${JSON.stringify(task.taskId)})`, true), true);
+  assert.equal(await main.evaluate(`(window.ombChatWindow ?? window.ogb.workspaces).openThread(${JSON.stringify(work.id)},${JSON.stringify(task.taskId)})`, true), true);
   assert.equal((await pages()).filter(isChat(task.taskId)).length, 1);
+  if (remote) {
+    const { channel } = await other.control("create_channel", { name: "Studio room", member_ids: [homeBot.id] });
+    await other.menu(`[data-sidebar-group-row="${channel.id}"]`);
+    const group = await attach(isChat(channel.activeTaskId), "group conversation");
+    await until(() => group.evaluate('Boolean(document.querySelector("[data-chat-window] textarea"))'), "group composer");
+    assert.equal(new URL(group.url).origin, saved[1].origin);
+    await group.close();
+  }
   await other.menu(`[data-sidebar-bot-row="${homeBot.id}"]`);
   const personalChat = await attach(isChat(homeBot.activeTaskId), "chat belonging to Personal");
   assert.equal(new URL(personalChat.url).origin, new URL(other.url).origin);
   await other.close();
   await until(() => personalChat.evaluate('document.body.innerText.includes("Personal fixture note")'), "Personal chat after workspace window closed");
   await personalChat.close();
-  await until(() => !existsSync(join(personal, "openmausbot-server.lease")), "last Personal window to release its server");
+  if (!remote) await until(() => !existsSync(join(personal, "openmausbot-server.lease")), "last Personal window to release its server");
   await first.close();
   assert.ok((await second.evaluate("document.body.innerText")).includes("Indigo window reply"));
-  await rail.menu('[data-rail-place="profile:personal"]');
-  const reopened = await attach(p => p.url.endsWith("/") && new URL(p.url).origin !== origin, "reopened Personal");
+  await rail.menu(otherSelector);
+  const reopened = await attach(isOther, "reopened Personal");
   assert.ok((await messages(reopened, homeBot, homeBot.activeTaskId)).messages.some(m => m.text?.includes("Personal fixture note")));
   console.log("Two chats of one bot sent and received independently. Reopening reused a window, and closing and reopening Personal preserved its history.");
 } finally {
   cdp?.close();
   app.kill("SIGTERM");
   const timer = setTimeout(() => app.kill("SIGKILL"), 15_000);
-  try { await ended; } finally { clearTimeout(timer); rmSync(fixture, { recursive: true, force: true }); }
+  try { await ended; } finally { clearTimeout(timer); await Promise.all(saved.map(entry => entry.close())); rmSync(fixture, { recursive: true, force: true }); }
 }

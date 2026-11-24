@@ -16,6 +16,19 @@ function loopbackHost(hostname) {
 }
 
 const profileSessions = new Map();
+const savedOrigins = new WeakMap();
+
+export function restrictSessionToOrigin(browser, origin) {
+  savedOrigins.set(browser, origin);
+}
+
+function outsideSavedOrigin(url, browser) {
+  const origin = savedOrigins.get(browser);
+  if (!origin) return false;
+  const target = URL.parse(url);
+  if (target?.protocol === "blob:" || target?.protocol === "data:") return false;
+  return target?.origin.replace(/^ws(s?):/, "http$1:") !== origin;
+}
 
 export function reserveProfilePort(port) {
   if (profileSessions.has(port)) throw new Error("The workspace port is already in use.");
@@ -51,7 +64,7 @@ export function installServerSessions({ app, defaultSession, serverPort, ownerTo
   });
   app.on("session-created", (created) => {
     if (created === defaultSession) return;
-    created.webRequest.onBeforeRequest((details, callback) => callback({ cancel: otherServer(details.url, created, serverPort()) }));
+    created.webRequest.onBeforeRequest((details, callback) => callback({ cancel: outsideSavedOrigin(details.url, created) || otherServer(details.url, created, serverPort()) }));
   });
 }
 

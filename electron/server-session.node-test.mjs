@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import test from "node:test";
 
-import { installServerSessions, reportOwnListeners, reserveProfilePort } from "./server-session.mjs";
+import { installServerSessions, reportOwnListeners, reserveProfilePort, restrictSessionToOrigin } from "./server-session.mjs";
 
 const SERVER_PORT = 48799;
 
@@ -59,6 +59,18 @@ test("no session but the app window's may reach the server, in any spelling of t
   }
   created(defaultSession);
   assert.equal(await request(defaultSession, `http://127.0.0.1:${SERVER_PORT}/`), false);
+});
+
+test("a saved window can reach its own HTTP and WebSocket endpoints", async () => {
+  const { created } = install();
+  const browser = created(fakeSession());
+  restrictSessionToOrigin(browser, "https://example.test:8443");
+  for (const url of ["https://example.test:8443/api/bots", "wss://example.test:8443/view"]) {
+    assert.equal(await request(browser, url), false, url);
+  }
+  for (const url of ["https://example.test/", "ws://example.test:8443/", "https://other.test:8443/", `http://localhost:${SERVER_PORT}/`]) {
+    assert.equal(await request(browser, url), true, url);
+  }
 });
 
 test("every session main creates gets the guard before it loads anything", () => {

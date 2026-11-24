@@ -30,12 +30,16 @@ CUA supply-chain work is tracked in [issue #113](https://github.com/milind-soni/
 
 ## Work side by side on Omarchy
 
-Right-click a local workspace in the left rail and choose **Open in new window**.
-Each workspace can run its own bots while both windows are open. Right-click
-a bot or an individual chat in the sidebar and choose the same action to open
-that conversation in a separate tile. Opening it again focuses its window.
-Closing the last window for an independently opened workspace stops its server.
-Its conversations are available the next time you open it.
+Right-click a saved server or local workspace in the left rail and choose **Open in new window**.
+Repeat for the second server. Omarchy can tile the two windows side by side.
+
+Inside either window, right-click a bot, group chat, or thread and choose **Open in new window**.
+For two threads from the same bot in Simple mode, right-click the bot, choose **View threads**,
+then right-click each conversation. Each window sends and receives in its own thread.
+Opening the same thread again focuses its window.
+
+Closing the last window for an independently opened local workspace stops its local server.
+Closing a saved server's window leaves the server running.
 
 ## Download packages
 

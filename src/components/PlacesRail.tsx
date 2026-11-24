@@ -248,7 +248,7 @@ function ListedMenu({ place, top, onClose }: { place: RailPlace; top: number; on
       <PlaceMark place={place} size={22} />
       <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{name}</span>
     </div>
-    {place.kind === "computer" && <OpenWindowAction target={{ place: place.id }} onOpened={onClose} />}
+    {(place.kind === "computer" || (place.kind === "server" && place.opens && place.forget)) && <OpenWindowAction target={{ place: place.id }} onOpened={onClose} />}
     {place.renames && <div className="px-0.5 pt-1"><RenameRow current={place.name} save={(next) => renamePlace(place.id, next)} onSaved={onClose} /></div>}
     {paint && <>
       <p className="px-2 pt-1 text-[12px] text-ink-secondary">{t("placeLook.title")}</p>

@@ -1509,6 +1509,7 @@ function mainWindowTitle() { return workspaceWindowTitle(environmentsState, desk
 function persistEnvironments(next) {
   environmentsStore.write(next);
   environmentsState = next;
+  workspaceWindows.savedChanged();
   refreshApplicationMenu();
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setTitle(mainWindowTitle());
   try { railChanged(); } catch {}
@@ -2591,6 +2592,7 @@ const workspaceWindows = installWorkspaceWindows({
     return { dir: runningDataDir, origin: rendererOrigin(), name: mainWindowTitle() };
   },
   canOpenPlace: event => app.isPackaged && !desktopRemoteAccess && (chromeRail.owns(event) || (event.sender === mainWindow?.webContents && event.senderFrame === event.sender.mainFrame && senderIsLocal(event))),
+  savedOrigin: id => environmentsState.environments.find(entry => entry.id === id && handSaved(entry))?.origin,
   places: () => railList(), profileDir, prepareProfile: id => cleanWorkspace.prepare(id), dataDir: desktopDataDir,
   runningDir: () => runningDataDir, switching: () => localSwitchInFlight, resourcesPath: process.resourcesPath,
   userData: () => app.getPath("userData"), environment: desktopServerEnvironment,

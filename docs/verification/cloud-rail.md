@@ -154,7 +154,10 @@ node --test electron/local-profiles.node-test.mjs electron/cloud-rail.node-test.
 pnpm exec vitest run src/components/PlacesRail.test.ts src/components/PlaceAddSheet.test.ts src/components/HomeLine.test.ts src/components/WindowPlaceTitle.test.ts
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/rail-profile-ui.e2e.test.ts
 node scripts/verify-workspace-windows.mjs release/linux-unpacked/openmausbot
+node scripts/verify-workspace-windows.mjs release/linux-unpacked/openmausbot --saved-servers
 ```
+
+The saved-server fixture pairs two disposable servers with separate sessions and older web UIs, opens both rail menus, and sends and receives in two native thread windows. The fixture sets `OMB_DISABLE_UPDATES=1` so the AppImage stays on the build under test across relaunches.
 
 The UI test walks every path through the real pages: ＋ with Escape, Close and
 Back at each step, an empty and a taken name, a new workspace opening fresh,

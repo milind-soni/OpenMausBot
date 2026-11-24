@@ -34,6 +34,7 @@ import { openCommandPalette } from "./CommandPalette";
 import { RenameTitle } from "./RenameTitle";
 import { BotProjectDialog, FolderActions, FolderIcon, navigateThreadMenu } from "./BotProjects";
 import { NewTaskFolderDialog } from "./NewTaskFolderDialog";
+import { OpenWindowAction } from "./OpenWindowAction";
 import { GroupThreadList } from "./SidebarGroupThreadList";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { draggedFolder, FOLDER_DRAG_TYPE, moveFolder, placeFolder } from "@/lib/folder-order";
@@ -292,6 +293,7 @@ function RoomContextMenu({
       style={{ top, left }}
       className={cn("fixed z-40 w-[228px] overflow-hidden", MENU_SHEET, motion.className)} {...motion.exitProps}
     >
+      {!renaming && !describing && <OpenWindowAction menuItem target={{ bot: group.id, thread: group.threadId }} onOpened={onClose} />}
       {!remoteClient && describing ? (
         <div className="flex items-center gap-1 px-2 py-1">
           <input

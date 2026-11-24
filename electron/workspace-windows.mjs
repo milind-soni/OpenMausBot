@@ -4,13 +4,15 @@ import { BrowserWindow, ipcMain, session, utilityProcess } from "electron";
 import auth from "./desktop-server-auth.cjs";
 import { waitForChildExit } from "./server-child-launch.mjs";
 import { startProfileServer } from "./profile-server.mjs";
+import { createSavedWindowSession } from "./saved-window-session.mjs";
 
 const preload = fileURLToPath(new URL("./chat-window-preload.cjs", import.meta.url));
 const validId = value => typeof value === "string" && value.length > 0 && value.length <= 256;
 const focus = win => { if (win.isMinimized()) win.restore(); win.show(); win.focus(); };
 
-export function installWorkspaceWindows({ primary, canOpenPlace, places, profileDir, prepareProfile, dataDir, runningDir, switching, resourcesPath, userData, environment, bounds, icon, log }) {
+export function installWorkspaceWindows({ primary, canOpenPlace, places, savedOrigin, profileDir, prepareProfile, dataDir, runningDir, switching, resourcesPath, userData, environment, bounds, icon, log }) {
   const servers = new Map();
+  const saved = new Map();
   const views = new Map();
   let quitting = false;
 
@@ -19,11 +21,15 @@ export function installWorkspaceWindows({ primary, canOpenPlace, places, profile
   }
 
   function stopIfUnused(context) {
-    if (!context?.owner) return;
+    if (!context?.owner && !context?.savedId) return;
     for (const view of views.values()) {
       if (view.context === context) return;
     }
-    context.owner.controller.abort();
+    if (context.savedId) {
+      if (saved.get(context.savedId) === context) saved.delete(context.savedId);
+      context.dispose?.();
+      context.dispose = null;
+    } else context.owner.controller.abort();
   }
 
   function server(dir, name, profile) {
@@ -65,8 +71,29 @@ export function installWorkspaceWindows({ primary, canOpenPlace, places, profile
     return owner.ready;
   }
 
+  async function savedServer(id, name) {
+    const origin = savedOrigin(id);
+    if (!origin) return null;
+    const current = saved.get(id);
+    if (current?.origin === origin) return current.ready;
+    const context = { savedId: id, origin, name };
+    saved.set(id, context);
+    context.ready = createSavedWindowSession(origin, resourcesPath).then(runtime => {
+      Object.assign(context, runtime);
+      if (quitting || saved.get(id) !== context || savedOrigin(id) !== origin) {
+        stopIfUnused(context);
+        return null;
+      }
+      return context;
+    }).catch(error => {
+      if (saved.get(id) === context) saved.delete(id);
+      throw error;
+    });
+    return context.ready;
+  }
+
   async function open(context, bot, thread) {
-    if (!context || quitting || (context.owner && (context.owner.context !== context || context.owner.controller.signal.aborted))) return false;
+    if (!context || quitting || (context.savedId && savedOrigin(context.savedId) !== context.origin) || (context.owner && (context.owner.context !== context || context.owner.controller.signal.aborted))) return false;
     const key = JSON.stringify([context.dir, context.origin, bot, thread]);
     for (const view of views.values()) {
       if (view.key === key) {
@@ -119,8 +146,13 @@ export function installWorkspaceWindows({ primary, canOpenPlace, places, profile
   handle("workspace-window:thread", (event, bot, thread) => validId(bot) && validId(thread) && open(senderContext(event), bot, thread));
   async function openPlace(event, id) {
     if (quitting || !canOpenPlace(event) || switching()) return false;
-    const place = places().find(row => row.id === id && row.kind === "computer" && row.opens);
-    if (!place) return false;
+    const place = places().find(row => row.id === id && row.opens);
+    if (place?.kind === "server" && place.forget) {
+      const context = await savedServer(id, place.name);
+      try { return await open(context, null, null); }
+      finally { stopIfUnused(context); }
+    }
+    if (place?.kind !== "computer") return false;
     const dir = place.profile ? profileDir(dataDir(), place.profile) : dataDir();
     const previous = servers.get(dir);
     if (previous?.controller.signal.aborted) {
@@ -141,6 +173,13 @@ export function installWorkspaceWindows({ primary, canOpenPlace, places, profile
       if (!view) return false;
       focus(view.win);
       return true;
+    },
+    savedChanged() {
+      for (const [id, context] of saved) {
+        if (savedOrigin(id) === context.origin) continue;
+        saved.delete(id);
+        closeViews(view => view.context === context);
+      }
     },
     closePrimary(dir) { closeViews(view => !view.context.owner && view.context.dir === dir); },
     async shutdown() {
