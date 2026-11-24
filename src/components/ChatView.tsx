@@ -1012,7 +1012,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
           data-chathead-controls
           className={cn("flex shrink-0 items-center gap-2", !phone && "@max-[30rem]/chathead:ml-auto @max-[30rem]/chathead:flex-wrap @max-[30rem]/chathead:justify-end @min-[30rem]/chathead:col-start-3 @min-[30rem]/chathead:justify-self-end")}
         >{sharedChat && <ThreadPresenceFaces threadId={bot.threadId} />}
-          {!simpleHead && (bot.busy || bot.waitingForTeammates) && (
+          {!simpleHead && canWrite === false && (bot.busy || bot.waitingForTeammates) && (
             <button
               onClick={() => dispatch({ type: "interrupt", botId: bot.id, threadId: bot.threadId })}
               className={cn(

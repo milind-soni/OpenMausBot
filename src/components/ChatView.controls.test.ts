@@ -108,25 +108,38 @@ describe("the header's right side", () => {
     }
   });
 
-  it("moves Stop out of the Simple header into the composer's round button while a turn runs, Call beside it", () => {
+  it("moves Stop out of the Simple header into the composer while a turn runs, Call beside it", () => {
     fixture.advanced = false;
     try {
       const busy = { ...bot, busy: true, tasks: (bot.tasks ?? []).map((task) => ({ ...task, busy: true })) };
       const { markup, controls } = header(busy);
       expect(controls).not.toContain("Stop this turn");
-      const stop = markup.match(/<button[^>]*data-composer-stop="slot"[^>]*>/)?.[0] ?? "";
+      const stop = markup.match(/<button[^>]*data-composer-stop[^>]*>/)?.[0] ?? "";
       expect(stop).toContain('aria-label="Stop this turn"');
       expect(markup).toContain('data-call-button="composer"');
       expect(header({ ...busy, waitingForTeammates: true, busy: false, tasks: (bot.tasks ?? []).map((task) => ({ ...task, busy: false, waitingForTeammates: true })) }).markup)
-        .toContain('data-composer-stop="slot"');
+        .toContain("data-composer-stop");
     } finally {
       fixture.advanced = true;
     }
   });
 
-  it("keeps Stop in the Advanced header while a turn runs", () => {
-    const { controls } = header({ ...bot, busy: true, tasks: (bot.tasks ?? []).map((task) => ({ ...task, busy: true })) });
-    expect(controls).toContain('title="Stop this turn"');
+  it.each([["Advanced", true, false], ["a remote client's Simple", false, true]])("shows one Stop in %s mode, the composer's, and the header's only to someone who cannot write", (_, advanced, remote) => {
+    fixture.advanced = advanced;
+    if (remote) window.ogb = { remoteClient: { active: true } } as NonNullable<Window["ogb"]>;
+    try {
+      const busy = { ...bot, busy: true, tasks: (bot.tasks ?? []).map((task) => ({ ...task, busy: true })) };
+      const { markup, controls } = header(busy);
+      expect(controls).not.toContain("Stop this turn");
+      expect(markup.match(/(aria-label|title)="Stop this turn"/g)).toHaveLength(1);
+      expect(markup).toContain("data-composer-stop");
+      fixture.canWrite = false;
+      expect(header(busy).controls).toContain('title="Stop this turn"');
+    } finally {
+      fixture.canWrite = null;
+      delete window.ogb;
+      fixture.advanced = true;
+    }
   });
 
   it("leaves Advanced mode's model, computer and ⋯ exactly as they were, the inspector unlocked", () => {

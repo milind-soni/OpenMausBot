@@ -223,22 +223,22 @@ describe("the Simple composer in a bot chat", () => {
     expectBotButton(sendButton(), "yellow");
   });
 
-  it("keeps Call beside Stop while the bot works, including while typing", () => {
+  it("keeps Stop beside Call while the bot works, and lets Send take Call's place once there is text", () => {
     const busy = { ...bot, busy: true };
     render({ bot: busy });
-    const slot = container.querySelector<HTMLButtonElement>('[data-composer-stop="slot"]')!;
-    expect(slot.getAttribute("aria-label")).toBe("Stop this turn");
-    expectBotButton(slot, "purple");
+    const stop = container.querySelector<HTMLButtonElement>("[data-composer-stop]")!;
+    expect(stop.getAttribute("aria-label")).toBe("Stop this turn");
+    expect(stop.className.split(" ")).toEqual(expect.arrayContaining(["size-7", "bg-ink/[0.06]"]));
     expect(fixture.call).toMatchObject({ bot: { id: "atlas" }, placement: "composer" });
-    click(slot);
+    click(stop);
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "interrupt", botId: "atlas", threadId: "atlas-thread" });
 
     restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "and also this", attachments: [] });
     fixture.call = null;
     render({ bot: busy });
-    expect(container.querySelector('[data-composer-stop="beside"]')).not.toBeNull();
-    expect(container.querySelector('[data-composer-stop="slot"]')).toBeNull();
-    expect(fixture.call).toMatchObject({ bot: { id: "atlas" }, placement: "composer" });
+    expect(container.querySelectorAll("[data-composer-stop]")).toHaveLength(1);
+    expect(fixture.call).toBeNull();
+    expectBotButton(container.querySelector<HTMLElement>("[data-composer-follow-up] > button:last-child"), "purple");
   });
 
   it("shows the approval level as a chip only while this conversation overrides the bot, in the panel's words", () => {
