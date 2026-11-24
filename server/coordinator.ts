@@ -261,6 +261,8 @@ export interface CoordinatorOptions {
   legacyThreads?: LegacyThreadResolver;
   /** After every write to the assignment store, so a host that ticks only when work is due can tick again. */
   wrote?: () => void;
+  /** What a turn a restart cut ends with in place of starting again, or null (runtime/runtime.ts RuntimeOptions). */
+  restartCut?: (threadId: string, startedAt: number | undefined) => string | null;
 }
 
 export function createCoordinator(options: CoordinatorOptions): Coordinator {

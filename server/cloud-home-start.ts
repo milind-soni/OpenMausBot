@@ -42,10 +42,16 @@ const SERVER_ENV_NAMES = new Set([
   "OMB_CLOUD_LEGACY_ORIGINS",
   // The bot box switch (server/bot-box/detect.ts): the Admin may turn a home's box off for support.
   "OMB_BOT_BOX",
+  // The image's own engine CLIs before older copies in the data folder (server/image-engines.ts), for one test Cloud first.
+  "OMB_IMAGE_ENGINES",
   // The conversation logs' cap and age limit (server/host/thread-log-sweep.ts), off unless the Admin sets it.
   "OMB_THREAD_LOG_SWEEP", "OMB_THREAD_LOG_CAP", "OMB_THREAD_LOG_CUT",
   // An ended Cloud started only for its owner's export: the server runs frozen (server/move-freeze.ts).
   "OMB_CLOUD_EXPORT_ONLY",
+  // The idle task workspaces' dependency sweep (server/host/start-upkeep.ts), off unless set: the Admin may turn it on.
+  "OMB_TASK_WORKSPACE_RETENTION",
+  // The delete-time cleanup's switch (server/host/conversation-folder-cleanup.ts): off unless the Admin sets it on.
+  "OMB_CONVERSATION_FOLDER_CLEANUP",
 ]);
 export function serverEnvironmentAllowed(name: string): boolean {
   return SERVER_ENV_NAMES.has(name) || name.startsWith("LC_");

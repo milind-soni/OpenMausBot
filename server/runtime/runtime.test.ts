@@ -1647,3 +1647,31 @@ describe("Runtime: turns a restart cut start again a few at a time", () => {
     expect(store.get(newer.id)?.status).toBe("running");
   });
 });
+
+describe("Runtime: a turn cut by the restart after a memory freeze", () => {
+  it("ends with the given line instead of starting again, and other cut turns start again as before", () => {
+    const store = openRuntimeStore(":memory:");
+    const first = world(undefined, {}, store);
+    first.runtime.begin(beginReq({ id: "root-browsed", assignee: { botId: "chief", destination: { kind: "standing_thread", threadId: "browsed-chat" } } }));
+    first.runtime.begin(beginReq({ id: "root-other", assignee: { botId: "chief", destination: { kind: "standing_thread", threadId: "other-chat" } } }));
+    first.runtime.close();
+
+    const asked: string[] = [];
+    const line = "Ran out of room, so I closed the browser to keep everything else running.";
+    const runner = fakeRunner(() => "hold");
+    const runtime = new Runtime(store, runner, { clock: fakeClock(), restartCut: (threadId, startedAt) => {
+      asked.push(`${threadId} ${typeof startedAt}`);
+      return threadId === "browsed-chat" ? line : null;
+    } });
+    runtime.open();
+    expect(asked.sort()).toEqual(["browsed-chat number", "other-chat number"]);
+    expect(store.get("root-browsed")).toMatchObject({ status: "failed", outcome: "interrupted", result: line });
+    expect(store.get("root-other")).toMatchObject({ status: "queued", restart: "rerun", restarts: 1 });
+    expect(runner.reports.map(r => r.a.id)).toEqual(["root-browsed"]);
+    runtime.tick();
+    expect(runner.runs.map(r => r.a.id)).toEqual(["root-other"]);
+    expect(checkInvariants(store, runner.live())).toEqual([]);
+    runtime.close();
+    store.close();
+  });
+});
