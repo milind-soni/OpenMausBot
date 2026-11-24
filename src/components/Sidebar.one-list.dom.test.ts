@@ -141,7 +141,7 @@ describe("switch on: one list", () => {
   it("every row names its place to a screen reader; on screen the mark waits for hover or keyboard focus", async () => {
     window.ogb = { placesTogether: page } as never;
     await render();
-    for (const [id, label, home] of [["git", "On this computer", "computer"], ["cloud:scout", "On My Cloud", "cloud"]] as const) {
+    for (const [id, label, home] of [["git", "Lives on this computer", "computer"], ["cloud:scout", "Lives on My Cloud", "cloud"]] as const) {
       const icon = mark(id)!;
       expect(icon.getAttribute("aria-label")).toBe(label);
       expect(icon.getAttribute("role")).toBe("img");
@@ -221,8 +221,8 @@ describe("switch on: one list", () => {
     window.ogb = { placesTogether: page } as never;
     mode.advanced = true;
     await render(OWN, true);
-    expect(q('[data-sidebar-bot-row="cloud:scout"]')!.getAttribute("aria-label")).toContain("On My Cloud");
-    expect(q('[data-sidebar-bot-row="git"]')!.getAttribute("aria-label")).toContain("On this computer");
+    expect(q('[data-sidebar-bot-row="cloud:scout"]')!.getAttribute("aria-label")).toContain("Lives on My Cloud");
+    expect(q('[data-sidebar-bot-row="git"]')!.getAttribute("aria-label")).toContain("Lives on this computer");
   });
 
   it("the rail's two circles: this computer's page has the one list; My Cloud's page lists My Cloud's bots only, as with the switch off", async () => {
@@ -243,6 +243,82 @@ describe("switch on: one list", () => {
     expect(cloudPage).not.toContain("computer:");
     expect(cloudPage).not.toContain("data-bot-place");
     expect(cloudPage).not.toContain("data-other-place");
+  });
+
+  it("rows of the other place never push rows under the pointer: they come in plain at the end, and take their place once the list is quiet", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      window.ogb = { placesTogether: page } as never;
+      let release!: (value: PlacesTogetherState) => void;
+      answer = () => new Promise((resolve) => { release = resolve; });
+      await render();
+      const aside = q("aside")!;
+      aside.dispatchEvent(new Event("pointerenter"));
+      const local = ids();
+      await act(async () => release(said({ other: { home: "cloud", state: "ready", bots: [row("tech", { unread: true, lastAt: 9_000 }), row("scout", { working: true })] } })));
+      // The pointer is over the list: this computer's rows stay where they were, the new rows wait at the end, plain.
+      expect(ids().slice(0, local.length)).toEqual(local);
+      expect(ids('[data-sidebar-section-id="builtin:bots"]')).toEqual(["git", "ledger", "cloud:tech", "cloud:scout"]);
+      expect(q('[data-sidebar-section-id="builtin:unread"]')).toBeNull();
+      await act(async () => { vi.advanceTimersByTime(10_000); });
+      expect(q('[data-sidebar-section-id="builtin:unread"]')).toBeNull();
+      // Gone from the list, then a click on it within the quiet time: still waiting.
+      aside.dispatchEvent(new Event("pointerleave"));
+      aside.dispatchEvent(new Event("pointerdown"));
+      await act(async () => { vi.advanceTimersByTime(1_500); });
+      expect(q('[data-sidebar-section-id="builtin:unread"]')).toBeNull();
+      await act(async () => { vi.advanceTimersByTime(600); });
+      expect(ids('[data-sidebar-section-id="builtin:unread"]')).toEqual(["cloud:tech"]);
+      expect(ids('[data-sidebar-section-id="builtin:bots"]')).toEqual(["cloud:scout", "git", "ledger"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("an answer that changes nothing moves nothing: the same rows stay, the same elements", async () => {
+    window.ogb = { placesTogether: page } as never;
+    await render();
+    const before = [...host.querySelectorAll("[data-sidebar-bot-row]")];
+    await act(async () => changed());
+    await act(async () => { await Promise.resolve(); });
+    const after = [...host.querySelectorAll("[data-sidebar-bot-row]")];
+    expect(after.length).toBe(before.length);
+    after.forEach((element, index) => expect(element).toBe(before[index]));
+  });
+
+  it("a row kept from before My Cloud slept is not working: it does not float, and its mark says asleep", async () => {
+    window.ogb = { placesTogether: page } as never;
+    answer = async () => said({ other: { home: "cloud", state: "asleep", bots: [row("scout", { working: true }), row("atlas")] } });
+    await render();
+    expect(ids('[data-sidebar-section-id="builtin:bots"]')).toEqual(["git", "ledger", "cloud:scout", "cloud:atlas"]);
+    expect(mark("cloud:scout")!.getAttribute("data-bot-place")).toBe("cloud-asleep");
+    expect(q('[data-sidebar-bot-row="cloud:scout"] [data-testid="working-dot"]')).toBeNull();
+  });
+
+  it("in the avatars-only sidebar a row of the other place keeps a small place badge, in its informative icon while there is one", async () => {
+    window.ogb = { placesTogether: page } as never;
+    mode.advanced = true;
+    answer = async () => said({ other: { home: "cloud", state: "asleep", bots: [row("scout")] } });
+    await render(OWN, true);
+    expect(q('[data-sidebar-bot-row="cloud:scout"] [data-bot-place-badge]')!.getAttribute("data-bot-place-badge")).toBe("cloud-asleep");
+    expect(q('[data-sidebar-bot-row="git"] [data-bot-place-badge]')).toBeNull();
+    answer = async () => said({ other: { home: "cloud", state: "ready", bots: [row("scout")] } });
+    await act(async () => changed());
+    await act(async () => { await Promise.resolve(); });
+    expect(q('[data-sidebar-bot-row="cloud:scout"] [data-bot-place-badge]')!.getAttribute("data-bot-place-badge")).toBe("cloud");
+  });
+
+  it("a bot moved to My Cloud keeps today's row unless My Cloud's rows already list it", async () => {
+    window.ogb = { placesTogether: page } as never;
+    const moved = bot("old", { hidden: true, movedTo: { team: { id: "my-cloud", name: "My Cloud" }, state: "moved", at: 1 } } as Partial<Bot>);
+    answer = async () => said({ other: { home: "cloud", state: "signin", bots: [] } });
+    await render([...OWN, moved]);
+    expect(q("[data-moved-to-my-cloud]")).not.toBeNull();
+    answer = async () => said({ other: { home: "cloud", state: "ready", bots: [row("old")] } });
+    await act(async () => changed());
+    await act(async () => { await Promise.resolve(); });
+    expect(q("[data-moved-to-my-cloud]")).toBeNull();
+    expect(q('[data-sidebar-bot-row="cloud:old"]')).not.toBeNull();
   });
 
   it("a place that never answers leaves this place's list whole, and the first answer adds its rows without a wait", async () => {

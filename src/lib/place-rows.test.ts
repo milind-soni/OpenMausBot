@@ -27,9 +27,9 @@ describe("a row of the other place as a bot of the one list", () => {
   });
 
   it("carries a name, a look, a state and a time, and nothing of the other place's engine or settings", () => {
-    const bot = placedBot(row("cloud", "nova", { name: "Nova", title: "Research", color: "pink", mascotBody: "classic", unread: true, working: true, chief: true, lastAt: 42 }), "asleep");
+    const bot = placedBot(row("cloud", "nova", { name: "Nova", title: "Research", color: "pink", mascotBody: "classic", unread: true, working: true, chief: true, lastAt: 42 }), "ready");
     expect(bot).toMatchObject({ name: "Nova", title: "Research", color: "pink", unread: true, busy: true, activity: "working", lastAt: 42, messages: [] });
-    expect(bot.placedFrom).toEqual({ place: { key: "cloud", kind: "my-cloud", label: "My Cloud" }, id: "nova", health: "asleep" });
+    expect(bot.placedFrom).toEqual({ place: { key: "cloud", kind: "my-cloud", label: "My Cloud" }, id: "nova", health: "ready" });
     expect(bot.modelSelection).toEqual({ instanceId: "", model: "" });
     // The Chief stays where it started: the other place's is an ordinary row here.
     expect(bot.chiefOfStaff).toBeUndefined();
@@ -43,6 +43,21 @@ describe("a row of the other place as a bot of the one list", () => {
     expect(placedLine(bot, true)).toBe("");
   });
 
+  it("is not working while its place is asleep, waking or can't be reached: a row kept from before is not working now", () => {
+    for (const health of ["asleep", "waking", "offline", "loading"] as const) {
+      const bot = placedBot(row("cloud", "scout", { working: true }), health);
+      expect([bot.busy, bot.activity], health).toEqual([undefined, undefined]);
+    }
+    expect(placedBot(row("cloud", "scout", { working: true }), "ready")).toMatchObject({ busy: true, activity: "working" });
+    expect(placedBot(row("cloud", "scout", { waiting: true }), "asleep").activity).toBe("waiting-on-you");
+  });
+
+  it("with no preview, its second line is the conversation it has open there, before its role", () => {
+    const bot = placedBot(row("cloud", "nova", { title: "Research", chat: "Leeds trip" }), "ready");
+    expect(placedLine(bot, false)).toBe("Leeds trip");
+    expect(placedLine(bot, true)).toBe("Leeds trip");
+  });
+
   it("shows the start of its newest line, in the same plain words as this place's own rows, when the other place sent one", () => {
     const bot = placedBot(row("cloud", "nova", { title: "Research", preview: "**Filed** the [March invoices](https://drive.example/x) in your Drive." }), "ready");
     expect(placedLine(bot, false)).toBe("Filed the March invoices in your Drive.");
@@ -54,7 +69,7 @@ describe("a row of the other place as a bot of the one list", () => {
     const rack: Place = { key: "env-91bc", kind: "own-server", label: "Basement server" };
     expect(placedBot(row("computer", "render"), "ready", studio).id).toBe("env-7f3a:render");
     expect(placedBot(row("computer", "render"), "ready", rack).id).toBe("env-91bc:render");
-    expect(placeMark(studio, "ready", false, "Render")).toMatchObject({ place: "env-7f3a", kind: "home-computer", icon: "computer", label: "On Studio Mac", shows: "hover" });
+    expect(placeMark(studio, "ready", false, "Render")).toMatchObject({ place: "env-7f3a", kind: "home-computer", icon: "computer", label: "Lives on Studio Mac", shows: "hover" });
     expect(placeMark(rack, "ready", true, "Render")).toMatchObject({ icon: "server", label: "Working on Basement server now", shows: "always" });
     expect(placeMark(rack, "offline", false, "Render")).toMatchObject({ icon: "server-off", label: "Basement server can't be reached right now. Render carries on when it's back.", shows: "always" });
     expect(placeMark(studio, "offline", false, "Render").icon).toBe("computer-off");
@@ -124,8 +139,8 @@ describe("what a row of the other place does", () => {
 
 describe("the device mark", () => {
   it("names where the bot lives, on hover and keyboard focus only, while there is nothing more to say", () => {
-    expect(placeMark(placeOfHome("computer"), "ready", false, "Git")).toEqual({ place: "computer", kind: "this-computer", icon: "computer", label: "On this computer", shows: "hover" });
-    expect(placeMark(placeOfHome("cloud"), "ready", false, "Scout")).toEqual({ place: "cloud", kind: "my-cloud", icon: "cloud", label: "On My Cloud", shows: "hover" });
+    expect(placeMark(placeOfHome("computer"), "ready", false, "Git")).toEqual({ place: "computer", kind: "this-computer", icon: "computer", label: "Lives on this computer", shows: "hover" });
+    expect(placeMark(placeOfHome("cloud"), "ready", false, "Scout")).toEqual({ place: "cloud", kind: "my-cloud", icon: "cloud", label: "Lives on My Cloud", shows: "hover" });
     expect(placeMark(placeOfHome("cloud"), "loading", false, "Scout").shows).toBe("hover");
   });
 
@@ -144,12 +159,36 @@ describe("the device mark", () => {
 
   it("speaks the person's language", () => {
     setLocale("pt-br");
-    expect(placeMark(placeOfHome("cloud"), "ready", false, "Scout").label).toBe("No My Cloud");
+    expect(placeMark(placeOfHome("cloud"), "ready", false, "Scout").label).toBe("Fica no My Cloud");
     expect(placeMark(placeOfHome("cloud"), "asleep", false, "Atlas").label).toBe("O My Cloud está em repouso. Abrir Atlas o ativa.");
   });
 });
 
 describe("a steady list", () => {
+  it("a later answer that brings no rows only because the place is asleep, waking, loading or unreachable keeps the rows it had", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    let changed = () => {};
+    let said: PlacesTogetherState = { v: 1, available: true, on: true, here: "computer", other: { home: "cloud", state: "ready", bots: [row("cloud", "scout"), row("cloud", "nova")] } };
+    window.ogb = { placesTogether: { state: async () => said, onChanged: (callback: () => void) => { changed = callback; return () => {}; } } } as never;
+    const seen: Array<readonly Bot[]> = [];
+    const Probe = () => { seen.push(useOtherPlaceBots("")); return null; };
+    const host = document.createElement("div"), root = createRoot(host);
+    await act(async () => root.render(createElement(Probe)));
+    await act(async () => { await Promise.resolve(); });
+    for (const state of ["loading", "asleep", "waking", "offline"] as const) {
+      said = { ...said, other: { home: "cloud", state, bots: [] } };
+      await act(async () => changed());
+      await act(async () => { await Promise.resolve(); });
+      expect(seen.at(-1)!.map((bot) => bot.id), state).toEqual(["cloud:scout", "cloud:nova"]);
+    }
+    said = { ...said, other: { home: "cloud", state: "signin", bots: [] } };
+    await act(async () => changed());
+    await act(async () => { await Promise.resolve(); });
+    expect(seen.at(-1)).toEqual([]);
+    await act(async () => root.unmount());
+  });
+
+
   it("main answering again with the same rows keeps the same list and the same bots, so no row is drawn again; a changed row is new", async () => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     let changed = () => {};

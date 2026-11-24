@@ -16,7 +16,7 @@ const SAID: Record<Said, { icon: typeof Cloud; words: LocaleKey; opens?: true }>
   "cloud:signin": { icon: Cloud, words: "together.state.signin", opens: true },
   "cloud:asleep": { icon: CloudMoon, words: "together.line.asleep", opens: true },
   "cloud:waking": { icon: Cloud, words: "together.state.waking" },
-  "cloud:offline": { icon: CloudOff, words: "together.state.offlineCloud" },
+  "cloud:offline": { icon: CloudOff, words: "together.state.offlineCloud", opens: true },
   "computer:offline": { icon: MonitorOff, words: "together.state.offlineComputer" },
 };
 

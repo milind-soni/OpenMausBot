@@ -82,8 +82,9 @@ export function botRow(bot, home) {
   if (!record(bot) || !ID.test(String(bot.id)) || !ID.test(String(bot.threadId)) || bot.hidden || bot.sidebarHidden || bot.movedTo) return null;
   const name = text(bot.name, 80);
   if (!name) return null;
-  const title = text(bot.title, 80), preview = previewOf(bot), color = look(bot.color), body = look(bot.mascotBody), face = look(bot.mascotFaceColor), tint = look(bot.mascotBodyColor), fur = look(bot.mascotMaterial);
-  return { home, id: bot.id, threadId: bot.threadId, name, ...(title ? { title } : {}), ...(color ? { color } : {}),
+  const open = Array.isArray(bot.tasks) ? bot.tasks.find((task) => record(task) && task.threadId === bot.threadId) : null;
+  const title = text(bot.title, 80), chat = text(open?.title, 80), preview = previewOf(bot), color = look(bot.color), body = look(bot.mascotBody), face = look(bot.mascotFaceColor), tint = look(bot.mascotBodyColor), fur = look(bot.mascotMaterial);
+  return { home, id: bot.id, threadId: bot.threadId, name, ...(title ? { title } : {}), ...(chat ? { chat } : {}), ...(color ? { color } : {}),
     ...(body ? { mascotBody: body } : {}), ...(face ? { mascotFaceColor: face } : {}), ...(tint ? { mascotBodyColor: tint } : {}), ...(fur ? { mascotMaterial: fur } : {}), ...(bot.chiefOfStaff === true ? { chief: true } : {}), ...(preview ? { preview } : {}), ...rowState(bot) };
 }
 

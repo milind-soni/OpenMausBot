@@ -11,6 +11,19 @@ const ICONS: Record<PlaceIcon, LucideIcon> = {
 /** Asleep and can't-be-reached are drawn quieter than the rest, never in an alarm colour. */
 const QUIET = new Set<PlaceIcon>(["cloud-asleep", "cloud-off", "computer-off", "server-off"]);
 
+/** The avatars-only sidebar has no name to put the mark after: a row of the other place carries it as a small badge at
+ * its avatar's bottom-left instead, always (as the old group's rows did), in its informative icon while there is one.
+ * Rows of the other place have no model badge, which sits there for this page's own rows. */
+export function BotPlaceBadge({ mark }: { mark: PlaceMark | null }) {
+  if (!mark) return null;
+  const Icon = ICONS[mark.icon];
+  return (
+    <span data-bot-place-badge={mark.icon} className="absolute -bottom-0.5 -left-0.5 flex size-[18px] items-center justify-center rounded-full border-2 border-panel bg-panel">
+      <Icon size={12} strokeWidth={2} aria-hidden="true" className={cn("shrink-0", QUIET.has(mark.icon) ? "text-ink-tertiary" : "text-ink-secondary", mark.icon === "cloud-waking" && "animate-pulse motion-reduce:animate-none")} />
+    </span>
+  );
+}
+
 export function BotPlaceMark({ mark }: { mark: PlaceMark | null }) {
   if (!mark) return null;
   const Icon = ICONS[mark.icon];

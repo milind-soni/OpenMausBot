@@ -65,7 +65,7 @@ it("a Cloud this window is not signed in to says so in one quiet line that opens
   expect(document.body.querySelector("[role=alert], [role=dialog]")).toBeNull();
 });
 
-it("a sleeping Cloud with nothing kept says so as normal, and opening it wakes it; one that can't be reached only says so", async () => {
+it("a sleeping or unreachable Cloud with nothing kept says so as normal, and the line opens it; while it wakes the line only says so", async () => {
   const openMyCloud = vi.fn(async () => {});
   window.ogb = { placesTogether: page, cloudSendPage: { openMyCloud } } as never;
   said = state({ other: { home: "cloud", state: "asleep", bots: [] } });
@@ -77,6 +77,10 @@ it("a sleeping Cloud with nothing kept says so as normal, and opening it wakes i
   said = state({ other: { home: "cloud", state: "offline", bots: [] } });
   await act(async () => changed());
   expect(q("[data-other-place-line]")!.textContent).toBe("My Cloud can't be reached right now.");
+  await act(async () => q("button[data-other-place-line]")!.click());
+  expect(openMyCloud).toHaveBeenCalledTimes(2);
+  said = state({ other: { home: "cloud", state: "waking", bots: [] } });
+  await act(async () => changed());
   expect(q("[data-other-place-line]")!.tagName).toBe("P");
   expect(q("[data-other-place-line]")!.getAttribute("role")).toBe("status");
 });

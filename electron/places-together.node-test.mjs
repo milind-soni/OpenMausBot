@@ -433,6 +433,12 @@ test("a row carries the start of its bot's newest line while that is words said,
   assert.equal("preview" in botRow(bot("none", "None", { messages: [] }), "cloud"), false);
 });
 
+test("a row carries the title of the conversation its bot has open there, and only that one", () => {
+  const row = botRow(bot("scout", "Scout", { title: "Research", tasks: [{ threadId: "t-other", title: "Not this one" }, { threadId: "t-scout", title: " Leeds trip " }] }), "cloud");
+  assert.equal(row.chat, "Leeds trip");
+  assert.equal("chat" in botRow(bot("none", "None", { tasks: [{ threadId: "t-other", title: "Elsewhere" }] }), "cloud"), false);
+});
+
 test("a row carries when its conversations last moved there: their own times, never a word of them and never a routine run's", () => {
   const row = botRow(bot("scout", "Scout", { tasks: [{ threadId: "t1", updatedAt: 3_000 }, { threadId: "t2", updatedAt: 9_000 }, { threadId: "t3", updatedAt: 99_000, routineRunId: "r" },
     { threadId: "t4", updatedAt: 50_000, archivedAt: 1 }, { threadId: "t5", updatedAt: "soon" }] }), "cloud");
