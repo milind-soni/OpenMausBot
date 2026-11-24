@@ -76,21 +76,66 @@ const RING = 38.8 * (116 / 114.2705);
  */
 const RIM_STEPS = 180;
 
-/** How far `outlines` reach from (cx, cy) along a direction (radians), either way, exactly. */
-function reachAlong(outlines: Point[][][], cx: number, cy: number, a: number): number {
-  const ux = Math.cos(a), uy = Math.sin(a);
-  let far = 0;
-  for (const poly of outlines.flat()) {
-    for (let i = 0; i < poly.length; i++) {
-      const [x1, y1] = poly[i], [x2, y2] = poly[(i + 1) % poly.length];
-      const ex = x2 - x1, ey = y2 - y1, den = ux * ey - uy * ex;
+/** Directions a half turn is cut into for finding the edges a line through the centre can cross. */
+const RIM_FANS = 180;
+
+/**
+ * How far `outlines` reach from (cx, cy) along a direction (radians), either way, exactly.
+ *
+ * A line through the centre only crosses the edges that span its direction as seen from there, so
+ * the edges are listed by the directions they span, with a fan to spare on either side, and a
+ * line is tested against the edges of its own fan. An edge left out lies a whole fan off the
+ * line, far more than the test's rounding, so it would not have counted: the answer is the same
+ * as from testing every edge.
+ */
+function reachFinder(outlines: Point[][][], cx: number, cy: number): (a: number) => number {
+  let count = 0;
+  for (const outline of outlines) for (const poly of outline) count += poly.length;
+  // x1, y1 and the edge vector, per edge.
+  const e = new Float64Array(4 * count);
+  // The fans each edge spans: first and how many more. Edges at the centre span them all.
+  const first = new Int32Array(count), more = new Int32Array(count);
+  const start = new Int32Array(RIM_FANS + 1);
+  let k = 0;
+  for (const outline of outlines) {
+    for (const poly of outline) {
+      for (let i = 0; i < poly.length; i++, k++) {
+        const p = poly[i], q = poly[(i + 1) % poly.length];
+        e[4 * k] = p[0]; e[4 * k + 1] = p[1]; e[4 * k + 2] = q[0] - p[0]; e[4 * k + 3] = q[1] - p[1];
+        const px = p[0] - cx, py = p[1] - cy, qx = q[0] - cx, qy = q[1] - cy;
+        // The turn from p to q about the centre, the short way round.
+        const from = Math.atan2(py, px), turn = Math.atan2(px * qy - py * qx, px * qx + py * qy);
+        const near = px * px + py * py < 1e-6 || qx * qx + qy * qy < 1e-6 || Math.abs(turn) > Math.PI - 0.1;
+        const lo = Math.floor((Math.min(from, from + turn) / Math.PI) * RIM_FANS) - 1;
+        const hi = Math.floor((Math.max(from, from + turn) / Math.PI) * RIM_FANS) + 1;
+        first[k] = near ? 0 : ((lo % RIM_FANS) + RIM_FANS) % RIM_FANS;
+        more[k] = near || !(hi - lo < RIM_FANS) ? RIM_FANS - 1 : hi - lo;
+        for (let f = 0; f <= more[k]; f++) start[((first[k] + f) % RIM_FANS) + 1]++;
+      }
+    }
+  }
+  for (let f = 0; f < RIM_FANS; f++) start[f + 1] += start[f];
+  const items = new Int32Array(start[RIM_FANS]), next = start.slice(0, RIM_FANS);
+  for (k = 0; k < count; k++) for (let f = 0; f <= more[k]; f++) items[next[(first[k] + f) % RIM_FANS]++] = 4 * k;
+
+  return (a) => {
+    const ux = Math.cos(a), uy = Math.sin(a);
+    // The fan of the direction itself, so an angle of any size lands in the right one.
+    const turns = Math.atan2(uy, ux) / Math.PI;
+    const fan = Math.floor((turns - Math.floor(turns)) * RIM_FANS);
+    // A direction that is in no fan (not a number) is tested against every edge.
+    const known = fan >= 0 && fan < RIM_FANS;
+    let far = 0;
+    for (let n = known ? start[fan] : 0, end = known ? start[fan + 1] : count; n < end; n++) {
+      const at = known ? items[n] : 4 * n;
+      const x1 = e[at], y1 = e[at + 1], ex = e[at + 2], ey = e[at + 3], den = ux * ey - uy * ex;
       if (Math.abs(den) < 1e-12) continue;
       // Where the line through the centre crosses this edge: t along the line, s along the edge.
       const t = ((x1 - cx) * ey - (y1 - cy) * ex) / den, s = ((x1 - cx) * uy - (y1 - cy) * ux) / den;
       if (s >= 0 && s <= 1) far = Math.max(far, Math.abs(t));
     }
-  }
-  return far;
+    return far;
+  };
 }
 
 /** How each hoop is rolled in the picture, for an avatar's seed: hoop 0 is a working turn's. */
@@ -106,7 +151,7 @@ export interface Rim {
   max: number;
 }
 export function rimOf(outlines: Point[][][], cx: number, cy: number): Rim {
-  const at = (angle: number) => reachAlong(outlines, cx, cy, angle);
+  const at = reachFinder(outlines, cx, cy);
   const steps = Array.from({ length: RIM_STEPS }, (_, k) => at((k * Math.PI) / RIM_STEPS));
   // A spike between two samples can reach a little further than either: allow for a degree's sweep.
   return { cx, cy, at, max: Math.max(...steps) * 1.02 };
