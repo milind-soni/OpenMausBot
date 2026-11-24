@@ -4,9 +4,11 @@ import {
   setFinishedNotifications,
   setNotificationFeed,
   setNotificationSounds,
+  setReportNotifications,
   useFinishedNotifications,
   useNotificationFeed,
   useNotificationSounds,
+  useReportNotifications,
 } from "@/lib/notification-preferences";
 import { requestNotificationPermission } from "@/lib/notify";
 import { SettingRow, Switch } from "./SettingsPrimitives";
@@ -15,6 +17,7 @@ export function NotificationRows({ simple = false }: { simple?: boolean }) {
   return (
     <>
       <DeviceNotificationsRow simple={simple} />
+      <ReportNotificationsRow simple={simple} />
       <NotificationSoundsRow simple={simple} />
       <NotificationFeedRow simple={simple} />
     </>
@@ -23,10 +26,9 @@ export function NotificationRows({ simple = false }: { simple?: boolean }) {
 
 const currentPermission = (): NotificationPermission => (typeof Notification !== "undefined" ? Notification.permission : "default");
 
-/** A browser shows nothing until it is asked from a click; the person may also change the site permission elsewhere. */
-export function DeviceNotificationsRow({ simple = false }: { simple?: boolean }) {
+/** The person may change the site permission elsewhere, so it is read again whenever the app comes back. */
+function useNotificationPermission() {
   const [permission, setPermission] = useState(currentPermission);
-  const enabled = useFinishedNotifications();
   useEffect(() => {
     const refresh = () => {
       if (document.visibilityState === "visible") setPermission(currentPermission());
@@ -38,6 +40,13 @@ export function DeviceNotificationsRow({ simple = false }: { simple?: boolean })
       document.removeEventListener("visibilitychange", refresh);
     };
   }, []);
+  return [permission, setPermission] as const;
+}
+
+/** A browser shows nothing until it is asked from a click. */
+export function DeviceNotificationsRow({ simple = false }: { simple?: boolean }) {
+  const [permission, setPermission] = useNotificationPermission();
+  const enabled = useFinishedNotifications();
   if (typeof Notification === "undefined") return null;
 
   const blocked = permission === "denied";
@@ -59,6 +68,24 @@ export function DeviceNotificationsRow({ simple = false }: { simple?: boolean })
         disabled={blocked}
         aria-label={t("settings.deviceNotifications.show")}
         onClick={() => void toggle()}
+      />
+    </SettingRow>
+  );
+}
+
+/** Scheduled routine reports, apart from chat replies; it can be changed once the browser lets this app notify. */
+export function ReportNotificationsRow({ simple = false }: { simple?: boolean }) {
+  const [permission] = useNotificationPermission();
+  const enabled = useReportNotifications();
+  if (typeof Notification === "undefined") return null;
+  const allowed = permission === "granted";
+  return (
+    <SettingRow title={t("settings.reportNotifications.title")} subtitle={t(simple ? "settings.simple.reportNotifications" : "settings.reportNotifications.subtitle")}>
+      <Switch
+        checked={allowed && enabled}
+        disabled={!allowed}
+        aria-label={t("settings.reportNotifications.show")}
+        onClick={() => setReportNotifications(!enabled)}
       />
     </SettingRow>
   );
