@@ -198,7 +198,7 @@ export function SkillBurger({ run, layers, draft, summary: initialSummary, canSa
           <DraftSteps steps={draft.steps} skipped={skipped} onSkip={setSkipped} disabled={Boolean(saved)} />
           {draft.outcome && (
             <details className="burger-layer burger-open min-w-0 rounded-[8px] bg-card px-3 py-1.5 text-[12px] text-ink-secondary shadow-sm" data-burger-outcome>
-              <summary className="cursor-pointer truncate outline-none focus-visible:ring-2 focus-visible:ring-accent/60"><span className="text-ink-tertiary">{t("skillBurger.draft.outcome")}</span>{" · "}{draft.outcome.split("\n", 1)[0]}</summary>
+              <summary className="cursor-pointer truncate outline-none focus-visible:ring-2 focus-visible:ring-accent/60"><span className="text-ink-tertiary">{t("skillBurger.draft.outcome")}</span>{" · "}{draft.outcome.split("\n", 1)[0]!.replace(/[*_`#]+/g, "").trim()}</summary>
               <p className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap">{draft.outcome}</p>
             </details>
           )}
