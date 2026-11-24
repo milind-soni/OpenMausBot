@@ -1,4 +1,5 @@
 // GET /api/updates/check: whether a newer version exists, and how this install is updated. Read-only, so client sessions may ask.
+// ?fresh=1 is a press of Check for updates, which skips the hour-long cache (server/update-check.ts).
 // GET and POST /api/updates/server: the Update server button, for an admin's session only (server/server-update.ts).
 import type { IncomingMessage } from "node:http";
 
@@ -11,7 +12,7 @@ import { createUpdateChecker, installKind, updateChannel, type UpdateCheck } fro
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface UpdateCheckRouteDeps {
-  check(): Promise<UpdateCheck>;
+  check(options?: { fresh?: boolean }): Promise<UpdateCheck>;
   server?: ServerUpdater;
   actor?(auth: RequestAuth, req: IncomingMessage): AdminActor;
 }
@@ -25,7 +26,7 @@ export function mayUpdateServer(auth: RequestAuth): boolean {
 }
 
 export function createUpdateCheckRoutes(deps: UpdateCheckRouteDeps): RouteHandler {
-  return async ({ req, res, path, method, json, auth }) => {
+  return async ({ req, res, url, path, method, json, auth }) => {
     if (path === "/api/updates/server" && deps.server && (method === "GET" || method === "POST")) {
       if (!mayUpdateServer(auth)) return json(res, 403, { error: "Only an admin of this server, signed in, can update it.", code: "admin_only" });
       if (method === "GET") return json(res, 200, await deps.server.status());
@@ -34,7 +35,7 @@ export function createUpdateCheckRoutes(deps: UpdateCheckRouteDeps): RouteHandle
     }
     if (path !== "/api/updates/check" || method !== "GET") return PASS;
     try {
-      return json(res, 200, await deps.check());
+      return json(res, 200, await deps.check({ fresh: url.searchParams.get("fresh") === "1" }));
     } catch (error) {
       return json(res, 502, { error: `Could not check for updates: ${error instanceof Error ? error.message : String(error)}` });
     }

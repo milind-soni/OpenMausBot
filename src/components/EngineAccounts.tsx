@@ -190,9 +190,11 @@ function RenameForm({ instance, onDone }: { instance: InstanceInfo; onDone: () =
   );
 }
 
-function AccountRow({ group, instance, signingIn, onSignIn, onSignInDone }: {
+function AccountRow({ group, instance, several, signingIn, onSignIn, onSignInDone }: {
   group: AccountGroup;
   instance: InstanceInfo;
+  /** The card lists more than one account, so a device code could be entered while ChatGPT shows another of them. */
+  several: boolean;
   signingIn: boolean;
   onSignIn: () => void;
   onSignInDone: () => void;
@@ -243,7 +245,10 @@ function AccountRow({ group, instance, signingIn, onSignIn, onSignInDone }: {
                 </details>
               )}
             </>
-            : <DeviceSignIn instanceId={instance.instanceId} provider="codex" browserPkce={instance.authentication?.method === "browser-pkce"} autoStart onDone={onSignInDone} />}
+            : <>
+              {several && instance.authentication?.method === "device-code" && <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("accounts.chatgptDeviceHint")}</p>}
+              <DeviceSignIn instanceId={instance.instanceId} provider="codex" browserPkce={instance.authentication?.method === "browser-pkce"} autoStart onDone={onSignInDone} />
+            </>}
         </div>
       )}
       {group === "chatgpt" && state === "signedIn" && instance.snapshot.chatgptPlan && (
@@ -328,6 +333,8 @@ export function AccountsCard({ group, accounts, advanced, bare = false }: { grou
   const primary = accounts[0]!;
   const installed = accounts.some((instance) => instance.snapshot.state === "available");
   const policy = accounts.find((instance) => instance.policy)?.policy;
+  // Only the browser sign-in can be refused by a ChatGPT organization; Codex's own device-code sign-in is not.
+  const browserAccounts = group === "chatgpt" && accounts.some((instance) => instance.snapshot.chatgptPlan === true || instance.authentication?.method === "browser-pkce");
   const noteId = useId();
   return (
     <EngineCard instance={primary} summary={summaryFor(group, accounts)} bare={bare}>
@@ -338,7 +345,7 @@ export function AccountsCard({ group, accounts, advanced, bare = false }: { grou
         <div className="space-y-2">
           <ul data-accounts={group} className="divide-y divide-hairline/40 rounded-xl border border-hairline/50 bg-panel/40">
             {accounts.map((instance) => (
-              <AccountRow key={instance.instanceId} group={group} instance={instance}
+              <AccountRow key={instance.instanceId} group={group} instance={instance} several={accounts.length > 1}
                 signingIn={signingIn === instance.instanceId}
                 onSignIn={() => setSigningIn(instance.instanceId)}
                 onSignInDone={() => setSigningIn((current) => current === instance.instanceId ? null : current)} />
@@ -346,8 +353,8 @@ export function AccountsCard({ group, accounts, advanced, bare = false }: { grou
           </ul>
           {!primary.snapshot.authenticationUnavailableReason && <>
             <AddAccount label={t(COPY[group].add)} endpoint={`/api/instances/${group}-accounts`} folder={group === "claude"}
-              describedBy={group === "chatgpt" ? noteId : undefined} onAdded={setSigningIn} />
-            {group === "chatgpt" && <p id={noteId} className="px-2 text-[12px] leading-relaxed text-ink-secondary">{t("accounts.addChatgptWorkspaceNote")}</p>}
+              describedBy={browserAccounts ? noteId : undefined} onAdded={setSigningIn} />
+            {browserAccounts && <p id={noteId} className="px-2 text-[12px] leading-relaxed text-ink-secondary">{t("accounts.addChatgptWorkspaceNote")}</p>}
           </>}
           {group === "chatgpt" && <p data-codex-shared-setup className="px-2 text-[12px] leading-relaxed text-ink-secondary">{t("accounts.chatgptSharedSetupNote")}</p>}
         </div>

@@ -17,6 +17,13 @@ describe("where a Skill Burger's steps run", () => {
     expect(appFrame("gmail.search_emails", { query: "invoice" }, undefined, 8).slug).toMatch(/^GMAIL_/);
   });
 
+  it("opens a page with the browser's own open tool", async () => {
+    const sent: unknown[] = [];
+    const exec = createExecutors({ botId: "b", cwd: folder(), internal: async (kind, path, body) => { sent.push([kind, path, body]); return { ok: true, body: { result: { content: [{ type: "text", text: "Opened example.com" }] } } }; } });
+    expect(await exec.browser({ url: "https://example.com/pricing", signal: signal() })).toEqual({ ok: true, output: "Opened example.com" });
+    expect(sent).toEqual([["browser", "/api/internal/browser/mcp", expect.objectContaining({ method: "tools/call", params: { name: "agent_browser_open", arguments: { url: "https://example.com/pricing" } } })]]);
+  });
+
   it("writes a file only inside the conversation's folder", async () => {
     const cwd = folder();
     const exec = createExecutors({ botId: "b", cwd, internal: async () => ({ ok: false, body: {} }) });

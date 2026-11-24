@@ -75,7 +75,9 @@ export async function openProviderDesktop({ botId, title, request, join, current
     if (mine && window.ogb?.desktopViewer) recordViewerLease(botId, mine);
     if (!current()) throw changed();
     const { joinUrl } = await join(AbortSignal.timeout(JOIN_TIMEOUT_MS), mine);
-    const viewerUrl = typeof joinUrl === "string" && joinUrl ? joinUrl : null;
+    // A server reached over the network hands back its own viewer page as a path; the native viewer window
+    // (and any consumer of the link) needs a whole address, so resolve it against the page this is.
+    const viewerUrl = typeof joinUrl === "string" && joinUrl ? new URL(joinUrl, location.href).toString() : null;
     if (!current()) throw changed();
     if (!viewerUrl) throw new LocalizedPanelError("computer.err.noDesktopLink");
     if (window.ogb?.desktopViewer) {

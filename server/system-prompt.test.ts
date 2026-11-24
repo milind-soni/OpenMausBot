@@ -421,7 +421,8 @@ describe("cloudHomePrompt", () => {
       const text = cloudHomePrompt(tools);
       expect(text).toContain(CLOUD_REUSE_INSTALLS + CLOUD_PUSH_CODE_WORK);
     }
-    expect(CLOUD_PUSH_CODE_WORK).toMatch(/push it to a new branch/);
+    expect(CLOUD_PUSH_CODE_WORK).toMatch(/a git remote the person works in and you can push to it/);
+    expect(CLOUD_PUSH_CODE_WORK).toMatch(/push it to one branch of your own, reusing that branch/);
     expect(CLOUD_PUSH_CODE_WORK).toMatch(/never force-push, never push to the default branch/);
     expect(CLOUD_PUSH_CODE_WORK).toMatch(/never commit secrets, \.env files or installed packages/);
   });

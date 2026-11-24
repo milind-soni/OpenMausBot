@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import { engineInstallRoots } from "../engine-roots.ts";
 import { githubFolders } from "../github/sign-in.ts";
+import { chatgptAccountHome } from "../drivers/codex-account-home.ts";
+import { boxEnvironment } from "./env.ts";
 import { BOX_MUTATIONS, CPU_LIST_FILES, argvPaths, bwrapArgs, planBox, taskWorkspaceIds, under, visibleInBox, type BoxAudience, type BoxMutation, type BoxRequest, type BoxSetup } from "./plan.ts";
 
 const home = "/data";
@@ -264,6 +266,15 @@ linuxBox("the box plan", () => {
     expect(visibleInBox(ask({ XDG_CACHE_HOME: join(dataDir, "workspaces", "b", "cache") }, true), join(dataDir, "workspaces", "b", "cache", "x"))).toBe("rw");
     // An engine OpenMausBot starts keeps the home it was given there.
     expect(visibleInBox(ask({ CODEX_HOME: join(dataDir, "providers", "codex-1") }, false), join(dataDir, "providers", "codex-1", "auth.json"))).toBe("rw");
+  });
+
+  it("gives a ChatGPT account's turn its own Codex home and no other account's", () => {
+    const work = chatgptAccountHome("chatgpt-work", dataDir), spare = chatgptAccountHome("chatgpt-spare", dataDir);
+    const env = boxEnvironment({ HOME: home, CODEX_HOME: work, OMB_DATA_DIR: dataDir });
+    expect(env).toEqual({ HOME: home, CODEX_HOME: work });
+    const plan = planBox(setup(), { command: "codex", args: ["app-server"], cwd, env });
+    expect(visibleInBox(plan, join(work, "auth.json"))).toBe("rw");
+    expect(visibleInBox(plan, join(spare, "auth.json"))).toBe("none");
   });
 
   it("never shows a GitHub sign-in's folder (its token, gh's config and HOME), whatever the turn asks", () => {

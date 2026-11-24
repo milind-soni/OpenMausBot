@@ -1,5 +1,5 @@
 import {
-  Archive, ArrowLeftRight, Bot, Coins, CreditCard, HardDrive, LockKeyhole, Monitor, Network, Palette, Server, SlidersHorizontal, Sparkles, Users,
+  Archive, ArrowLeftRight, Bot, Coins, CreditCard, HardDrive, LockKeyhole, Monitor, Network, Palette, Server, SlidersHorizontal, Sparkles, ToggleRight, Users,
   type LucideIcon,
 } from "lucide-react";
 import type { LocaleKey } from "@/locales";
@@ -34,6 +34,8 @@ export interface SettingsContext {
   advanced: boolean;
   /** this place's server answers with a storage report (a Cloud home), read only by an owner or admin */
   storage?: boolean;
+  /** this place's server can repeat a computer task's saved steps (a Mac) */
+  savedSteps?: boolean;
 }
 
 export interface SettingsPage {
@@ -47,11 +49,13 @@ export interface SettingsPage {
 }
 
 const notClient = (ctx: SettingsContext) => !ctx.client;
+const browserAdmin = (ctx: SettingsContext) => !ctx.desktop && ctx.admin;
 /** What only an admin can use: a team's member isn't offered it at all (the installation's AI, desktops, spending, data). */
 const adminPage = (ctx: SettingsContext) => !ctx.client && !(ctx.team && !ctx.admin);
 /** A page Simple mode leaves out: its everyday rows show elsewhere in Simple (Overview, This app, Plan & billing). */
 const advancedOnly = (when: (ctx: SettingsContext) => boolean) => (ctx: SettingsContext) => ctx.advanced && when(ctx);
-/** Simple mode's ten entries: the place (Overview, Devices, AI, Vault, Spending, Import & export, and Storage on a Cloud), Your account (Plan & billing) and This app (Appearance). Advanced adds You and your bots, Desktops & browser,
+/** Simple mode's eleven entries: the place (Overview, Devices, AI, Vault, Spending, Import & export, Storage on a Cloud,
+ * and Features), Your account (Plan & billing) and This app (Appearance). Advanced adds You and your bots, Desktops & browser,
  * Data and General. */
 export const ADVANCED_PAGES: readonly SettingsPageId[] = ["bots", "desktops", "data", "general"];
 
@@ -82,6 +86,8 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     synonyms: ["people", "members", "invite", "roles", "bot access", "sharing", "team"] },
   { id: "installations", owner: "place", labelKey: "settings.section.workspaces", icon: Server, when: (ctx) => !ctx.client && ctx.installations,
     synonyms: ["installations", "fleet", "clients", "tenants"] },
+  { id: "features", owner: "place", labelKey: "settings.page.features", icon: ToggleRight, when: adminPage,
+    synonyms: ["features", "turn off", "turn on", "hide", "skill burger", "skill burgers", "tabs", "thread tabs"] },
   { id: "account", owner: "account", labelKey: "settings.page.account", when: () => true,
     synonyms: ["account", "sign in", "log in", "log out", "sign out", "email", "organization", "mausbot cloud"] },
   { id: "plan", owner: "account", labelKey: "settings.page.plan", icon: CreditCard, when: (ctx) => !ctx.client && ctx.plan,
@@ -123,10 +129,11 @@ export const LEGACY_SETTINGS: Record<Exclude<AppSettingsSection, SettingsPageId>
   computer: () => ({ page: "desktops" }),
   logins: () => ({ page: "vault" }),
   botAccess: () => ({ page: "people", anchor: "bot-access" }),
-  activity: () => ({ page: "data", anchor: "activity" }),
+  // Only an admin in a browser has Activity; anyone else lands at the top of Data.
+  activity: (ctx) => (browserAdmin(ctx) ? { page: "data", anchor: "activity" } : { page: "data" }),
   backups: () => ({ page: "transfer", anchor: "take-out" }),
   workspaces: () => ({ page: "installations" }),
-  skills: () => ({ page: "bots", anchor: "skills" }),
+  skills: (ctx) => (ctx.skills ? { page: "bots", anchor: "skills" } : { page: "bots" }),
   import: () => ({ page: "transfer", anchor: "bring-in" }),
   updates: (ctx) => (ctx.desktop ? { page: "app", anchor: "updates" } : { page: "overview" }),
 };
@@ -153,7 +160,7 @@ export function resolveSettingsTarget(requested: AppSettingsSection, ctx: Settin
 /** A context with every page showing (Advanced mode), for tests and previews to narrow down. */
 export const fullContext = (over: Partial<SettingsContext> = {}): SettingsContext => ({
   desktop: true, here: true, home: true, cloud: false, team: false, client: false, admin: true, places: false, plan: true,
-  organization: false, environments: true, installations: false, skills: false, advanced: true, ...over,
+  organization: false, environments: true, installations: false, skills: false, advanced: true, savedSteps: true, ...over,
 });
 
 /** One row, section or page search can open. `label` beats `labelKey` where the name is not a string of the app's. */
@@ -179,7 +186,6 @@ export interface SettingsIndexEntry {
 
 const desk = (ctx: SettingsContext) => ctx.desktop && !ctx.client;
 const hereOnly = (ctx: SettingsContext) => ctx.here;
-const browserAdmin = (ctx: SettingsContext) => !ctx.desktop && ctx.admin;
 
 export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "add-device", page: "devices", anchor: "add", labelKey: "devicesPage.add", topFor: ["add a device", "add device", "new device"], synonyms: ["add a computer", "add a server", "add a phone", "connect a device"] },
@@ -219,7 +225,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "all-bots", page: "bots", labelKey: "settings.page.bots", topFor: ["all bots"] },
   { id: "browser", page: "desktops", anchor: "browser", labelKey: "settings.experimental.browser", synonyms: ["browser", "profiles", "browser profiles", "open sites", "new browser"] },
   { id: "desktop-kinds", page: "desktops", anchor: "desktops", labelKey: "settings.desktops.title", topFor: ["private desktop", "sandbox", "docker", "podman", "container", "vps", "own server"], synonyms: ["cloud desktops", "desktop", "vm"] },
-  { id: "saved-steps", page: "desktops", anchor: "automation", labelKey: "settings.savedSteps.title", advanced: true, synonyms: ["repeat", "saved steps", "without ai"] },
+  { id: "saved-steps", page: "desktops", anchor: "automation", labelKey: "settings.savedSteps.title", advanced: true, when: (ctx) => ctx.savedSteps === true, synonyms: ["repeat", "saved steps", "without ai"] },
   { id: "vault", page: "vault", labelKey: "settings.section.vault", topFor: ["password", "passwords", "login", "logins"], synonyms: ["secrets", "1password", "2fa", "totp"] },
   { id: "spending", page: "usage", labelKey: "settings.page.spending", topFor: ["spending", "cost", "costs", "tokens", "money"], synonyms: ["usage"] },
   { id: "grok-move", page: "transfer", anchor: "grok-move", labelKey: "settings.import.grokTitle", sectionKey: "settings.data.bringIn", topFor: ["grok", "grok bot", "move from"], synonyms: ["import", "bring", "another app"] },
@@ -253,6 +259,8 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "bubbles", page: "appearance", anchor: "look", labelKey: "settings.userBubbles.simpleTitle", synonyms: ["message color", "my messages", "bubbles"] },
   { id: "tool-calls", page: "appearance", anchor: "chat", labelKey: "settings.appearance.chat", synonyms: ["tool calls", "this run", "chat width", "font", "typeface"] },
   { id: "layout", page: "appearance", anchor: "appearance", labelKey: "settings.appearance.layout", advanced: true, synonyms: ["show your computers", "rail", "window frame", "title bar", "threads", "tools layout", "pinned", "circles", "universal pins", "pinned panels"] },
+  { id: "skill-burger-switch", page: "features", anchor: "features", labelKey: "settings.features.skillBurger", topFor: ["skill burger", "skill burgers"], synonyms: ["burger", "saved runs", "workflows"] },
+  { id: "thread-tabs", page: "features", anchor: "features", labelKey: "settings.features.threadTabs", synonyms: ["tabs", "threads"] },
   { id: "apps", page: "overview", labelKey: "settings.search.apps", jump: "apps", synonyms: ["apps", "gmail", "slack", "calendar", "notion", "connect app", "integrations"] },
   { id: "bot-settings", page: "overview", labelKey: "settings.search.bot", jump: "bot", synonyms: ["approvals", "safety", "routines", "memory", "bot's notifications"] },
   { id: "shortcuts", page: "app", labelKey: "sidebar.menu.shortcuts", jump: "shortcuts", synonyms: ["keyboard shortcuts", "hotkeys", "cheat sheet"] },

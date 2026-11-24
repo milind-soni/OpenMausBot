@@ -124,7 +124,13 @@ describe("browser sign-in from a paired phone", () => {
     instance(onPhone).authenticationMethod = "browser-pkce";
     const pkce = await start(onPhone.base);
     expect(pkce.status).toBe(403);
-    expect(((await pkce.json()) as { error: string }).error).toMatch(/Continue with ChatGPT on the computer/);
+    const pkceError = ((await pkce.json()) as { error: string }).error;
+    expect(pkceError).toMatch(/Continue with ChatGPT on the computer/);
+    expect(pkceError).not.toMatch(/hosted-app approval/);
+
+    // A Cloud's added ChatGPT account signs in by device code (no browser callback), from any browser.
+    instance(onPhone).authenticationMethod = undefined;
+    expect((await start(onPhone.base)).status).toBe(200);
 
     instance(onPhone).authenticationMethod = "code";
     expect((await start(onPhone.base)).status).toBe(200);
