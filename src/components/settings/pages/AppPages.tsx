@@ -109,7 +109,7 @@ function PlacesFromHere() {
             <button type="button" className="ui-button" data-place-switch={other.key} onClick={other.open}>{t("servers.switch")}</button>
           </SettingRow>
         ))}
-        {workspaces.add && <SettingsLinkRow title={t("connect.title")} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Plus size={18} aria-hidden="true" /></span>}
+        {workspaces.add && <SettingsLinkRow title={t("connect.otherTitle")} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Plus size={18} aria-hidden="true" /></span>}
           onClick={() => void workspaces.add?.("address")} data={{ "data-server-connect": "" }} />}
       </SettingsRows>
     </SettingsGroup>

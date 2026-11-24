@@ -98,7 +98,7 @@ function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget, onAddClou
     ...(onAddCloud ? [{ id: "workspace-add-cloud", label: t("native.menu.addCloud"), sublabel: t("native.switcher.addCloudSub"), click: onAddCloud }] : []),
     { type: "separator" },
     ...fresh,
-    { id: "workspace-connect", label: t("native.menu.connect"), click: onConnect },
+    { id: "workspace-connect", label: t("native.menu.connectOther"), click: onConnect },
     ...(active && !listedPlace(active) ? [{ id: "workspace-forget", label: t("native.switcher.forgetNamed", { name: active.name }), click: () => onForget(active.id) }] : []),
   ];
 }
