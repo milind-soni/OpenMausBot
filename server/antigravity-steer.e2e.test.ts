@@ -17,7 +17,9 @@ const posixOnly = describe.skipIf(process.platform === "win32");
 
 posixOnly("Antigravity CLI steer through the message route", () => {
   let child: ChildProcess;
-  let home: string, tools: string, finishGate: string, rejectGate: string, rpc: string;
+  let home: string, tools: string;
+  // One Antigravity instance per order of the CLI's two answers, each with its own gates and log.
+  const cli = (name: string) => ({ finishGate: join(tools, `${name}.finish`), rejectGate: join(tools, `${name}.reject`), rpc: join(tools, `${name}.rpc.jsonl`) });
   let stderr = "";
 
   const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
@@ -30,7 +32,7 @@ posixOnly("Antigravity CLI steer through the message route", () => {
   };
   const getBot = async (id: string) => (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === id);
   // The turn's own CLI, not the one the server starts in a scratch folder to read the account's memory model.
-  const calls = (method: string) => existsSync(rpc) ? readFileSync(rpc, "utf8").split("\n")
+  const calls = (name: string, method: string) => existsSync(cli(name).rpc) ? readFileSync(cli(name).rpc, "utf8").split("\n")
     .filter((line) => line.includes(`"${method}"`) && line.includes("task-workspaces")).length : 0;
   const waitFor = async (predicate: () => Promise<boolean> | boolean, what: string, ms = 30_000) => {
     const deadline = Date.now() + ms;
@@ -45,30 +47,25 @@ posixOnly("Antigravity CLI steer through the message route", () => {
     tools = mkdtempSync(join(tmpdir(), "omb-agy-steer-cli-"));
     const data = join(home, ".openmausbot");
     mkdirSync(data, { recursive: true });
-    finishGate = join(tools, "finish.gate");
-    rejectGate = join(tools, "reject.gate");
-    rpc = join(tools, "rpc.jsonl");
     chmodSync(FAKE_ACP, 0o755);
     const executable = join(tools, "antigravity");
     writeFileSync(executable, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(FAKE_ACP)} "$@"\n`);
     chmodSync(executable, 0o755);
-    const token = antigravityCliTokenPath("agy", data);
-    mkdirSync(dirname(token), { recursive: true });
-    writeFileSync(token, "{}", { mode: 0o600 });
-    writeFileSync(join(data, "config.json"), JSON.stringify({
-      instances: {
-        agy: {
-          driver: "antigravityAgent",
-          environment: {
-            FAKE_ACP_AUTH_METHOD: "oauth-personal", FAKE_ACP_MODELS: "gemini-3.8-flash", FAKE_ACP_MODES: "default,plan",
-            FAKE_ACP_AGENT_NAME: "Antigravity ACP Server", FAKE_ACP_VERSION: "1.5.15", FAKE_ACP_AGENT_VERSION: "1.5.15",
-            FAKE_ACP_MODE: "antigravity-steer", FAKE_ACP_GATE_FILE: finishGate, FAKE_ACP_RPC_APPEND_FILE: rpc,
-            FAKE_ACP_STEER_FAIL: "asking-late", FAKE_ACP_STEER_FAIL_GATE: rejectGate,
-          },
-          config: { cli: executable, fullAuto: true },
-        },
+    for (const token of [antigravityCliTokenPath("agy", data), antigravityCliTokenPath("agyLate", data)]) {
+      mkdirSync(dirname(token), { recursive: true });
+      writeFileSync(token, "{}", { mode: 0o600 });
+    }
+    const instance = (name: string) => ({
+      driver: "antigravityAgent",
+      environment: {
+        FAKE_ACP_AUTH_METHOD: "oauth-personal", FAKE_ACP_MODELS: "gemini-3.8-flash", FAKE_ACP_MODES: "default,plan",
+        FAKE_ACP_AGENT_NAME: "Antigravity ACP Server", FAKE_ACP_VERSION: "1.5.15", FAKE_ACP_AGENT_VERSION: "1.5.15",
+        FAKE_ACP_MODE: "antigravity-steer", FAKE_ACP_GATE_FILE: cli(name).finishGate, FAKE_ACP_RPC_APPEND_FILE: cli(name).rpc,
+        FAKE_ACP_STEER_FAIL: "asking-late", FAKE_ACP_STEER_FAIL_GATE: cli(name).rejectGate,
       },
-    }));
+      config: { cli: executable, fullAuto: true },
+    });
+    writeFileSync(join(data, "config.json"), JSON.stringify({ instances: { agy: instance("agy"), agyLate: instance("agyLate") } }));
     child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
       cwd: join(SERVER_DIR, ".."),
       env: { ...(process.env.PATH ? { PATH: process.env.PATH } : {}), HOME: home, USERPROFILE: home, OMB_PORT: String(PORT), OMB_ANTIGRAVITY_NATIVE_CLI: "1" },
@@ -96,19 +93,19 @@ posixOnly("Antigravity CLI steer through the message route", () => {
     const created = (await api("POST", "/api/bots")).body.bot;
     expect((await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "agy", model: "gemini-3.8-flash" } })).status).toBe(200);
     expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "Build the report." })).status).toBe(202);
-    await waitFor(async () => (await getBot(created.id)).busy === true && calls("session/prompt") === 1, "the turn to start");
+    await waitFor(async () => (await getBot(created.id)).busy === true && calls("agy", "session/prompt") === 1, "the turn to start");
 
     const sent = api("POST", `/api/bots/${created.id}/messages`, { text: "Use pytest." });
-    await waitFor(() => calls("session/prompt.held") === 1, "the CLI to hold the steer");
+    await waitFor(() => calls("agy", "session/prompt.held") === 1, "the CLI to hold the steer");
     // Past the 5 s after which a steer used to be reported as possibly taken in and recorded as steered.
     await new Promise((r) => setTimeout(r, 6_000));
-    writeFileSync(rejectGate, "reject");
+    writeFileSync(cli("agy").rejectGate, "reject");
     const answer = await sent;
     expect(answer.status).toBe(202);
     expect(answer.body).toMatchObject({ ok: true, queued: true, queueId: expect.any(String) });
     expect(answer.body.steered).toBeUndefined();
 
-    writeFileSync(finishGate, "finish");
+    writeFileSync(cli("agy").finishGate, "finish");
     await waitFor(async () => {
       const bot = await getBot(created.id);
       return !bot.busy && bot.messages.filter((m: any) => m.role === "bot" && m.kind === "text" && m.text.includes("done")).length === 2;
@@ -117,7 +114,37 @@ posixOnly("Antigravity CLI steer through the message route", () => {
     const typed = bot.messages.filter((m: any) => m.role === "user" && m.kind === "text");
     expect(typed.map((m: any) => m.text)).toEqual(["Build the report.", "Use pytest."]);
     expect(typed.some((m: any) => m.steered)).toBe(false);
-    expect(calls("session/prompt.rejected")).toBe(1);
-    expect(calls("session/prompt")).toBe(3);
+    expect(calls("agy", "session/prompt.rejected")).toBe(1);
+    expect(calls("agy", "session/prompt")).toBe(3);
+  }, 60_000);
+
+  it("a message taken as steered that the CLI rejects once the turn's own run has ended loses the mark and runs once as the next turn", async () => {
+    const created = (await api("POST", "/api/bots")).body.bot;
+    expect((await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "agyLate", model: "gemini-3.8-flash" } })).status).toBe(200);
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "Build the report." })).status).toBe(202);
+    await waitFor(async () => (await getBot(created.id)).busy === true && calls("agyLate", "session/prompt") === 1, "the turn to start");
+
+    const sent = api("POST", `/api/bots/${created.id}/messages`, { text: "Use pytest." });
+    await waitFor(() => calls("agyLate", "session/prompt.held") === 1, "the CLI to hold the steer");
+    writeFileSync(cli("agyLate").finishGate, "finish");
+    const answer = await sent;
+    expect(answer.status).toBe(202);
+    expect(answer.body).toMatchObject({ ok: true, steered: true });
+    const steeredRow = (await getBot(created.id)).messages.find((m: any) => m.role === "user" && m.text === "Use pytest.");
+    expect(steeredRow.steered).toBe(true);
+
+    writeFileSync(cli("agyLate").rejectGate, "reject");
+    await waitFor(async () => {
+      const bot = await getBot(created.id);
+      return !bot.busy && calls("agyLate", "session/prompt") === 3
+        && bot.messages.filter((m: any) => m.role === "bot" && m.kind === "text" && m.text.includes("done")).length === 2;
+    }, "the refused message to run after the first turn");
+    const bot = await getBot(created.id);
+    const typed = bot.messages.filter((m: any) => m.role === "user" && m.kind === "text");
+    expect(typed.map((m: any) => m.text)).toEqual(["Build the report.", "Use pytest."]);
+    expect(typed[1].id).toBe(steeredRow.id);
+    expect(typed.some((m: any) => m.steered)).toBe(false);
+    expect(bot.messages.some((m: any) => m.kind === "error")).toBe(false);
+    expect(calls("agyLate", "session/prompt.rejected")).toBe(1);
   }, 60_000);
 });

@@ -1,7 +1,7 @@
 // ACP has no steer method, so each agent takes a message into its running turn its own way: a slash command it
 // advertises (`available_commands_update`, Hermes), an extension request (`_session/steering`, OpenCode 2.3.0), or a
 // second session/prompt (Devin, 3000.13.4; Antigravity's native CLI, 1.5).
-import type { SteerOutcome } from "../../contracts.ts";
+import type { SteerLate, SteerOutcome } from "../../contracts.ts";
 
 /** How an agent takes a person's message into its running turn. */
 export interface AcpCommandSteer {
@@ -45,7 +45,7 @@ export type AcpSteerSupport = AcpCommandSteer | AcpRequestSteer | AcpPromptSteer
 export interface AcpTurnSteering {
   /** True for the agent's answer to a steer still out, which is never part of the reply. */
   swallow(chunk: string): boolean;
-  steer(text: string): Promise<SteerOutcome>;
+  steer(text: string, late?: SteerLate): Promise<SteerOutcome>;
   /** The turn's own prompt is answered: no new steer starts. Null when no steer is out; otherwise resolves once they
    * have ended, and a steer the agent ran as a prompt of its own streams into this turn until then. */
   promptAnswered(): Promise<void> | null;
@@ -156,21 +156,27 @@ export function acpPromptSteering(running: () => boolean, send: (text: string) =
   let carrier = new Promise<void>((resolve) => { markAnswered = resolve; });
   let previous: Promise<unknown> = Promise.resolve();
   const pending = new Set<Promise<unknown>>();
-  const track = (reply: Promise<unknown>, refusable: () => boolean) => {
+  const track = (reply: Promise<unknown>, refused: (error: unknown) => boolean) => {
     const sent = reply.then(
       (answer) => { steering.replies!.push(answer); },
-      (error) => { if (!(refusable() && takeOver?.rejected(error))) steering.failure ??= error; },
+      (error) => { if (!refused(error)) steering.failure ??= error; },
     ).finally(() => pending.delete(sent));
     pending.add(sent);
   };
-  const takenOver = async (guidance: string): Promise<SteerOutcome> => {
+  const takenOver = async (guidance: string, late?: SteerLate): Promise<SteerOutcome> => {
     if (!guidance || (answered && !pending.size) || !running()) return "refused";
     let outcome: SteerOutcome | undefined;
     let report: (verdict: SteerOutcome) => void = () => {};
     const reported = new Promise<SteerOutcome>((resolve) => { report = resolve; });
     const decide = (verdict: SteerOutcome) => { if (outcome === undefined) report(outcome = verdict); return outcome; };
     const reply = send(guidance);
-    track(reply, () => outcome !== "steered");
+    // The CLI also answers the carrying prompt when that run ends on its own, and only then rejects the steer.
+    track(reply, (error) => {
+      if (!takeOver!.rejected(error)) return false;
+      if (outcome !== "steered") return true;
+      late?.refused();
+      return late !== undefined;
+    });
     // A reply that comes before the carrying prompt's answer only ends a stopped turn: the agent never took the steer.
     void reply.then(() => decide(live() ? "steered" : "refused"), () => decide("refused"));
     carrier = carrier.then(() => decide(live() ? "steered" : "refused") === "steered" ? reply.then(() => undefined, () => undefined) : undefined);
@@ -179,10 +185,10 @@ export function acpPromptSteering(running: () => boolean, send: (text: string) =
   const steering: AcpTurnSteering = {
     replies: [],
     swallow: () => false,
-    async steer(text) {
+    async steer(text, late) {
       const guidance = text.trim();
       if (takeOver) {
-        const outcome = previous.then(() => takenOver(guidance));
+        const outcome = previous.then(() => takenOver(guidance, late));
         previous = outcome;
         return outcome;
       }

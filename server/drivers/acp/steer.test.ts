@@ -198,6 +198,33 @@ describe("acpPromptSteering", () => {
       expect(steering.failure).toBeUndefined();
     });
 
+    it("tells the caller, once and without failing the turn, when the agent rejects a steer after the turn's own prompt ended", async () => {
+      const { steering, sent } = takeOver();
+      const refused = vi.fn();
+      const outcome = steering.steer("use pytest", { refused });
+      await tick();
+      const ended = steering.promptAnswered();
+      expect(await outcome).toBe("steered");
+      expect(refused).not.toHaveBeenCalled();
+      sent[0]!.fail({ code: -32603, message: "Can't add this prompt" });
+      await ended;
+      expect(refused).toHaveBeenCalledTimes(1);
+      expect(steering.failure).toBeUndefined();
+    });
+
+    it("keeps any other error of a steer taken in, and the rejection of one whose caller cannot hear it", async () => {
+      const { steering, sent } = takeOver();
+      const refused = vi.fn();
+      const outcome = steering.steer("use pytest", { refused });
+      await tick();
+      const ended = steering.promptAnswered();
+      expect(await outcome).toBe("steered");
+      sent[0]!.fail(new Error("socket closed"));
+      await ended;
+      expect(refused).not.toHaveBeenCalled();
+      expect(steering.failure).toEqual(new Error("socket closed"));
+    });
+
     it("keeps the error of a steer that fails after it was taken in", async () => {
       const { steering, sent } = takeOver();
       const outcome = steering.steer("use pytest");
