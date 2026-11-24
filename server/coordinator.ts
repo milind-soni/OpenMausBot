@@ -13,8 +13,8 @@ export type CoordinateBotsCall = {
   message: string;
   reason?: string;
   rework: boolean;
-  /** "standing" (the conversation's one work thread with each teammate), "new", or the id of a thread the caller opened on
-   * that teammate. */
+  /** "standing" (the conversation's work thread with each teammate; while a turn runs there, another idle one or a new one,
+   * unless work it still waits on is there), "new", or the id of a thread the caller opened on that teammate. */
   thread: string;
   reply: "resume" | "none";
   consult: boolean;
