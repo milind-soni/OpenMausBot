@@ -10,6 +10,7 @@ import { engineInstallRoots } from "../engine-roots.ts";
 import { homeProgramDirs, resetPathCache } from "../env-path.ts";
 import { SERVER_ROOT, resolveProxy } from "../proxy-paths.ts";
 import { bridgedCommand, type BridgeTools } from "./bridge.ts";
+import { GITHUB_GRANT, boxGithubGit } from "../github/git-access.ts";
 import { brokerRewrite } from "./broker-env.ts";
 import { openCredentialBroker, type BrokerGrant, type CredentialBroker } from "./broker.ts";
 import { detectBox, type BoxDetection, type BoxKind } from "./detect.ts";
@@ -185,7 +186,9 @@ export class BoxRunner {
     }
   }
 
-  /** Keys become a per-process token when the broker is on and the box has its own network (the bridge to the broker). */
+  /** Keys become a per-process token when the broker is on and the box has its own network (the bridge to the broker).
+   * With a GitHub sign-in for the spawn's conversation, the same token also carries the github grant, and git is pointed
+   * at it (server/github/git-access.ts). */
   private broker(env: Record<string, string>, plan: BoxPlan, request: BoxRequest): { env: Record<string, string>; token: string | null; release(): void; unbrokered: string[] } {
     const broker = this.options.broker;
     if (!broker || plan.net !== "isolated") return { env, token: null, release: () => {}, unbrokered: [] };
@@ -196,10 +199,12 @@ export class BoxRunner {
     const minted = broker.mintForProcess({ botId: plan.botId, threadId, grants: {} });
     const rewrite = brokerRewrite(env, minted.token, broker.port);
     broker.revoke(minted.token);
-    if (!Object.keys(rewrite.grants).length) return { env, token: null, release: () => {}, unbrokered: rewrite.unbrokered };
-    const granted = broker.mintForProcess({ botId: plan.botId, threadId, grants: rewrite.grants });
+    const github = boxGithubGit(request.botThreads ? null : this.conversation(request).threadId, [request.cwd, request.conversationFolder].filter((folder): folder is string => Boolean(folder)));
+    if (!Object.keys(rewrite.grants).length && !github) return { env, token: null, release: () => {}, unbrokered: rewrite.unbrokered };
+    const granted = broker.mintForProcess({ botId: plan.botId, threadId, grants: { ...rewrite.grants, ...(github ? { [GITHUB_GRANT]: github.grant } : {}) } });
     const again = brokerRewrite(env, granted.token, broker.port);
-    return { env: again.env, token: granted.token, release: () => broker.revoke(granted.token), unbrokered: again.unbrokered };
+    const out = github ? { ...again.env, ...github.env({ port: broker.port, token: granted.token }) } : again.env;
+    return { env: out, token: granted.token, release: () => broker.revoke(granted.token), unbrokered: again.unbrokered };
   }
 }
 
