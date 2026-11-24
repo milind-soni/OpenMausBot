@@ -381,7 +381,7 @@ describe("closing this data dir's browsers nothing uses", () => {
     vi.mocked(runningBrowserSessionNames).mockResolvedValueOnce(["bot-keep"]);
     vi.mocked(runningBrowserSessionNames).mockResolvedValueOnce(["bot-keep"]);
     vi.mocked(runningBrowserSessionNames).mockResolvedValueOnce(["bot-keep"]);
-    const keepAlive = vi.fn(async () => {});
+    const keepAlive = vi.fn(async (_session: string): Promise<boolean | void> => {});
     const closeIdle = vi.fn(async () => false);
     let now = 1_000;
     let held = false;
@@ -406,6 +406,17 @@ describe("closing this data dir's browsers nothing uses", () => {
     await running.sweep();
     expect(keepAlive).toHaveBeenCalledTimes(2);
     expect(closeIdle).toHaveBeenCalledTimes(2);
+
+    // Skipped keep-alive callbacks returning false must not advance the throttle timestamp.
+    vi.mocked(runningBrowserSessionNames).mockResolvedValue(["bot-keep"]);
+    keepAlive.mockResolvedValueOnce(false);
+    now += 600;
+    await running.sweep();
+    expect(keepAlive).toHaveBeenCalledTimes(3);
+    keepAlive.mockResolvedValueOnce(true);
+    now += 50;
+    await running.sweep();
+    expect(keepAlive).toHaveBeenCalledTimes(4);
     vi.unstubAllEnvs();
     info.mockRestore();
   });

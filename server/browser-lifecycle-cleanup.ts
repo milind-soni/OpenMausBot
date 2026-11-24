@@ -401,7 +401,7 @@ export class BrowserSweep {
   readonly #live: (session: string) => boolean;
   readonly #held: (session: string) => boolean;
   readonly #closeIdle: (session: string) => Promise<boolean>;
-  readonly #keepAlive?: (session: string) => Promise<void>;
+  readonly #keepAlive?: (session: string) => Promise<boolean | void>;
   readonly #keepAliveIntervalMs: number;
   readonly #now: () => number;
   readonly #lastKeepAlive = new Map<string, number>();
@@ -419,7 +419,7 @@ export class BrowserSweep {
     held: (session: string) => boolean;
     closeIdle: (session: string) => Promise<boolean>;
     /** Called periodically on live unclosed sessions so agent-browser's built-in 1h idle timer stays reset when idle-close is off. */
-    keepAlive?: (session: string) => Promise<void>;
+    keepAlive?: (session: string) => Promise<boolean | void>;
     keepAliveIntervalMs?: number;
     now?: () => number;
     intervalMs?: number;
@@ -504,8 +504,7 @@ export class BrowserSweep {
       return;
     }
     if (now - last >= this.#keepAliveIntervalMs) {
-      this.#lastKeepAlive.set(session, now);
-      await this.#keepAlive(session);
+      if ((await this.#keepAlive(session)) !== false) this.#lastKeepAlive.set(session, now);
     }
   }
 

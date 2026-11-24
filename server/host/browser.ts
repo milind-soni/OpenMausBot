@@ -287,10 +287,10 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     held: (session) => !turnResources.free(`browser:${session}`),
     closeIdle: (session) => browserRuntime.closeIfIdle(session, idleMs(), usedBrowserSessions.get(session)),
     keepAlive: async (session) => {
-      if (idleMs() > 0 && turnResources.free(`browser:${session}`)) return;
+      if (idleMs() > 0 && turnResources.free(`browser:${session}`)) return false;
       const spec = usedBrowserSessions.get(session);
-      if (!spec || chromeTarget(session, spec) || attachesToChrome(spec.env)) return;
-      await inRunningBrowser(spec.command, browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session }), ["get", "url"]).then(() => undefined, () => undefined);
+      if (!spec || chromeTarget(session, spec) || attachesToChrome(spec.env)) return false;
+      return inRunningBrowser(spec.command, browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session }), ["get", "url"]).then(() => true, () => false);
     },
   });
   // A browser that has ended keeps no loopback listener: its gate opens again with it, on the same port where it can, and
