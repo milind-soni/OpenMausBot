@@ -18,10 +18,11 @@ type LabelBot = Pick<Bot, "threadId"> & Partial<Pick<Bot, "mainThreadId" | "task
 /** The person started it: not a routine run, and not opened by a bot (its own new thread, a burst or a hand-off). */
 export const ownThread = (task: Pick<Task, "routineRunId" | "openedBy">): boolean => !task.routineRunId && !task.openedBy;
 
-const ownOpen = (bot: Pick<LabelBot, "tasks">) => (bot.tasks ?? []).filter((task) => ownThread(task) && !isArchived(task) && !isSnoozed(task));
+/** The threads a bot unfolds to: the person's own open ones, and its main thread whoever opened it and whatever its state. */
+const ownOpen = (bot: Pick<LabelBot, "tasks" | "mainThreadId">) => (bot.tasks ?? []).filter((task) => task.threadId === bot.mainThreadId || (ownThread(task) && !isArchived(task) && !isSnoozed(task)));
 
 /** Only a bot with more than one thread of the person's own has anything to unfold. */
-export const canUnfold = (bot: Pick<LabelBot, "tasks">): boolean => ownOpen(bot).length > 1;
+export const canUnfold = (bot: Pick<LabelBot, "tasks" | "mainThreadId">): boolean => ownOpen(bot).length > 1;
 
 export function labelStatus(task: LabelTask): LabelStatus {
   if (task.activity === "waiting-on-you") return "waiting";
@@ -46,8 +47,9 @@ function capRunning(tasks: LabelTask[]): { kept: LabelTask[]; runningMore: numbe
 
 /**
  * The rows under a bot in Simple mode's sidebar. Folded: its threads that are working, wait on the person or have an
- * unread reply, except the one its row opens. Unfolded: also its active threads of the person's own (the open one, any
- * still going, and those used in the last week), at most `ACTIVE_LIMIT`, and how many more the bot panel lists.
+ * unread reply, except the one its row opens. Unfolded: also its active threads of the person's own (the open one, its
+ * main thread, any still going, and those used in the last week), at most `ACTIVE_LIMIT`, and how many more the bot
+ * panel lists.
  */
 export function threadLabels(
   bot: LabelBot,
@@ -63,11 +65,11 @@ export function threadLabels(
   }
   const own = ownOpen(bot).map((task) => ({ ...task, queued: Boolean(queued[task.threadId]?.length) }));
   const recent = (task: LabelTask) => now - threadRecency(task) < ACTIVE_DAYS * DAY_MS;
-  const active = own.filter((task) => task.threadId === current || labelStatus(task) !== null || recent(task))
-    .sort((a, b) => threadRecency(b) - threadRecency(a));
-  let shown = active.slice(0, ACTIVE_LIMIT);
-  const open = active.find((task) => task.threadId === current);
-  if (open && !shown.includes(open)) shown = [...shown.slice(0, ACTIVE_LIMIT - 1), open];
+  const anchored = (task: LabelTask) => task.threadId === current || task.threadId === bot.mainThreadId;
+  const active = own.filter((task) => anchored(task) || labelStatus(task) !== null || recent(task))
+    .sort((a, b) => Number(b.threadId === bot.mainThreadId) - Number(a.threadId === bot.mainThreadId) || threadRecency(b) - threadRecency(a));
+  const others = active.filter((task) => !anchored(task)).slice(0, Math.max(0, ACTIVE_LIMIT - active.filter(anchored).length));
+  const shown = active.filter((task) => anchored(task) || others.includes(task));
   const listed = new Set(shown.map((task) => task.threadId));
   const { kept, runningMore } = capRunning([...shown, ...attention.filter((task) => !listed.has(task.threadId))]);
   const rows = new Set(kept.map((task) => task.threadId));

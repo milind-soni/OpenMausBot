@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { readRegistry } from "./testing/registry.ts";
+import { launchRestartableServer } from "./testing/restartable-server.ts";
 
 async function launch() {
   const fixture = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
@@ -186,3 +187,297 @@ it("marks a job's review answer and a webhook post unread where they land", asyn
     await fixture.close();
   }
 }, 120_000);
+
+it("keeps the main thread an install already had across an update, then moves it only when the person does or archives it", async () => {
+  const server = await launchRestartableServer();
+  const api = async (method: string, path: string, body?: unknown, status = 200) => {
+    const response = await fetch(`${server.url}${path}`, {
+      method, headers: { "content-type": "application/json", origin: server.url },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const value = await response.json() as any;
+    expect(response.status, `${method} ${path}: ${JSON.stringify(value)}`).toBe(status);
+    return value;
+  };
+  const cli = (...args: string[]) => runControlOmb([...args, "--url", server.url]) as Promise<any>;
+  try {
+    const { bot } = await cli("new-bot", "--name", "Keeper");
+    const first = bot.activeTaskId as string;
+    const main = async () => (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id).mainThreadId;
+    const open = async (title: string) => (await api("POST", `/api/bots/${bot.id}/tasks`, { title, approvalMode: "ask" }, 201)).task.threadId as string;
+    const write = async (threadId: string) => {
+      await cli("send", "--bot", bot.id, "--task", threadId, "--text", "Note this.");
+      await expect.poll(async () => ((await api("GET", `/api/threads/${threadId}/messages?limit=50`)).messages as any[]).some((message) => message.role !== "user"), { timeout: 20_000 }).toBe(true);
+      await expect.poll(async () => (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id).busy, { timeout: 20_000 }).toBe(false);
+    };
+    const saved = () => readRegistry(server.dataDir).bots.find((candidate: any) => candidate.id === bot.id);
+    const second = await open("Second");
+    const third = await open("Third");
+    await write(second);
+
+    // What an install saved before a main thread was kept: threads stamped where the person wrote, and no choice.
+    await server.stop();
+    const file = join(server.dataDir, "bots.json");
+    writeFileSync(file, JSON.stringify((JSON.parse(readFileSync(file, "utf8")) as any[]).map(({ mainThreadChoice: _choice, mainThreadKept: _kept, ...rest }) => rest)));
+    expect(saved().tasks.find((task: any) => task.threadId === second).askedAt).toEqual(expect.any(Number));
+    await server.start();
+    expect(await main(), "the thread the person last wrote in, as before the update").toBe(second);
+    await write(third);
+    expect(await main()).toBe(second);
+    await server.stop();
+    expect(saved()).toMatchObject({ mainThreadKept: { id: second } });
+    expect(saved().mainThreadChoice).toBeUndefined();
+    await server.start();
+    expect(await main()).toBe(second);
+
+    await api("PATCH", `/api/bots/${bot.id}/tasks/${second}`, { archivedAt: Date.now() });
+    expect(await main(), "the oldest open conversation the person started takes over").toBe(first);
+    await api("PATCH", `/api/bots/${bot.id}/tasks/${second}`, { archivedAt: null });
+    await write(second);
+    expect(await main(), "reopening the old main thread moves nothing").toBe(first);
+
+    await api("PATCH", `/api/bots/${bot.id}`, { mainThreadChoice: third });
+    expect(await main()).toBe(third);
+    await api("PATCH", `/api/bots/${bot.id}/tasks/${third}`, { archivedAt: Date.now() });
+    expect(await main()).toBe(first);
+    await api("PATCH", `/api/bots/${bot.id}/tasks/${third}`, { archivedAt: null });
+    expect(await main()).toBe(first);
+    await api("DELETE", `/api/bots/${bot.id}/tasks/${first}`);
+    expect(await main(), "deleting it moves it once more").toBe(second);
+  } finally {
+    await server.close();
+  }
+}, 180_000);
+
+it("keeps the selected thread as the main one across an update for a bot nobody wrote to", async () => {
+  const server = await launchRestartableServer();
+  const api = async (method: string, path: string, body?: unknown, status = 200) => {
+    const response = await fetch(`${server.url}${path}`, {
+      method, headers: { "content-type": "application/json", origin: server.url },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const value = await response.json() as any;
+    expect(response.status, `${method} ${path}: ${JSON.stringify(value)}`).toBe(status);
+    return value;
+  };
+  try {
+    const { bot } = await runControlOmb(["new-bot", "--name", "Quiet", "--url", server.url]) as any;
+    const first = bot.activeTaskId as string;
+    const main = async () => (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id).mainThreadId;
+    const saved = () => readRegistry(server.dataDir).bots.find((candidate: any) => candidate.id === bot.id);
+    const second = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Second", approvalMode: "ask" }, 201)).task.threadId as string;
+
+    // What an install saved before a main thread was kept: no choice, the second thread selected, nothing written anywhere.
+    await server.stop();
+    const file = join(server.dataDir, "bots.json");
+    writeFileSync(file, JSON.stringify((JSON.parse(readFileSync(file, "utf8")) as any[]).map(({ mainThreadChoice: _choice, mainThreadKept: _kept, ...rest }) => rest)));
+    expect(saved()).toMatchObject({ threadId: second });
+    expect(saved().tasks.some((task: any) => task.askedAt !== undefined)).toBe(false);
+    await server.start();
+    expect(await main(), "the selected thread, as before the update").toBe(second);
+    await api("POST", `/api/bots/${bot.id}/tasks/${first}`);
+    expect((await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id).threadId).toBe(first);
+    expect(await main(), "selecting another thread moves nothing").toBe(second);
+    await server.stop();
+    expect(saved()).toMatchObject({ mainThreadKept: { id: second } });
+    expect(saved().mainThreadChoice).toBeUndefined();
+    await server.start();
+    expect(await main()).toBe(second);
+  } finally {
+    await server.close();
+  }
+}, 120_000);
+
+it("moves an archived or deleted main thread to the only open one, a thread the bot opened, and keeps it there", async () => {
+  const { fixture, dataDir, api, cli, wire, thread, replied } = await launch();
+  try {
+    const { bot } = await cli("new-bot", "--name", "Keeper");
+    writeFileSync(join(dataDir, "room-plan.json"), JSON.stringify({
+      [bot.id]: { turns: [
+        { steps: [{ tool: "start_thread", arguments: { title: "Side job", message: "Check the side job." } }], reply: "Opened a side job." },
+        { reply: "Side job checked." },
+      ] },
+    }));
+    const first = bot.activeTaskId as string;
+    await cli("send", "--bot", bot.id, "--task", first, "--text", "Open a side job.");
+    const side = await thread(bot.id, "Side job");
+    await replied(bot.id, side.threadId, "Side job checked.");
+    expect(side.openedBy).toMatchObject({ botId: bot.id });
+    const main = async () => (await wire(bot.id)).mainThreadId;
+    const open = async (title: string) => (await api("POST", `/api/bots/${bot.id}/tasks`, { title, approvalMode: "ask" }, 201)).task.threadId as string;
+
+    await api("PATCH", `/api/bots/${bot.id}`, { mainThreadChoice: first });
+    expect(await main()).toBe(first);
+    await api("PATCH", `/api/bots/${bot.id}/tasks/${first}`, { archivedAt: Date.now() });
+    expect(await main(), "the thread the bot opened is the only one open").toBe(side.threadId);
+    await api("PATCH", `/api/bots/${bot.id}/tasks/${first}`, { archivedAt: null });
+    expect(await main(), "reopening the old main thread moves nothing").toBe(side.threadId);
+
+    await api("PATCH", `/api/bots/${bot.id}`, { mainThreadChoice: first });
+    expect(await main()).toBe(first);
+    await api("DELETE", `/api/bots/${bot.id}/tasks/${first}`);
+    expect(await main()).toBe(side.threadId);
+    await open("Later");
+    expect(await main(), "a thread the person opens afterwards moves nothing").toBe(side.threadId);
+  } finally {
+    await fixture.close();
+  }
+}, 120_000);
+
+it("leaves an install's memory where it was when the update saves its main thread, and moves it only with the person's own choice", async () => {
+  const server = await launchRestartableServer();
+  const api = async (method: string, path: string, body?: unknown, status = 200) => {
+    const response = await fetch(`${server.url}${path}`, {
+      method, headers: { "content-type": "application/json", origin: server.url },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const value = await response.json() as any;
+    expect(response.status, `${method} ${path}: ${JSON.stringify(value)}`).toBe(status);
+    return value;
+  };
+  const cli = (...args: string[]) => runControlOmb([...args, "--url", server.url]) as Promise<any>;
+  try {
+    const { bot } = await cli("new-bot", "--name", "Counsel");
+    const oldest = bot.activeTaskId as string;
+    const main = async () => (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id).mainThreadId;
+    const ownNotes = async (threadId: string) => (await api("GET", `/api/bots/${bot.id}/memory/thread/${threadId}`)).scoped as boolean;
+    const saved = () => readRegistry(server.dataDir).bots.find((candidate: any) => candidate.id === bot.id);
+    const written = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Acme NDA", approvalMode: "ask" }, 201)).task.threadId as string;
+    await cli("send", "--bot", bot.id, "--task", written, "--text", "Note this.");
+    await expect.poll(async () => ((await api("GET", `/api/threads/${written}/messages?limit=50`)).messages as any[]).some((message) => message.role !== "user"), { timeout: 20_000 }).toBe(true);
+    await expect.poll(async () => (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id).busy, { timeout: 20_000 }).toBe(false);
+
+    // What an install saved before a main thread was kept: no choice, so the oldest conversation held the bot's memory.
+    await server.stop();
+    const file = join(server.dataDir, "bots.json");
+    writeFileSync(file, JSON.stringify((JSON.parse(readFileSync(file, "utf8")) as any[]).map(({ mainThreadChoice: _choice, mainThreadKept: _kept, ...rest }) => rest)));
+    await server.start();
+    expect(await main(), "the thread the person last wrote in, as before the update").toBe(written);
+    expect([await ownNotes(oldest), await ownNotes(written)], "the oldest conversation still holds the bot's memory").toEqual([false, true]);
+    await api("POST", `/api/bots/${bot.id}/tasks/${oldest}`);
+    await server.stop();
+    expect(saved()).toMatchObject({ mainThreadKept: { id: written } });
+    expect(saved().mainThreadChoice).toBeUndefined();
+    await server.start();
+    expect([await main(), await ownNotes(oldest), await ownNotes(written)]).toEqual([written, false, true]);
+
+    await api("PATCH", `/api/bots/${bot.id}`, { mainThreadChoice: written });
+    expect([await main(), await ownNotes(oldest), await ownNotes(written)], "the person's choice takes the bot's memory, as it did").toEqual([written, true, false]);
+    await server.stop();
+    expect(saved()).toMatchObject({ mainThreadChoice: written });
+    expect(saved().mainThreadKept).toBeUndefined();
+  } finally {
+    await server.close();
+  }
+}, 180_000);
+
+it("shows the main thread the person chose in an older version, not the one saved for them before that", async () => {
+  const server = await launchRestartableServer();
+  const api = async (method: string, path: string, body?: unknown, status = 200) => {
+    const response = await fetch(`${server.url}${path}`, {
+      method, headers: { "content-type": "application/json", origin: server.url },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const value = await response.json() as any;
+    expect(response.status, `${method} ${path}: ${JSON.stringify(value)}`).toBe(status);
+    return value;
+  };
+  const cli = (...args: string[]) => runControlOmb([...args, "--url", server.url]) as Promise<any>;
+  try {
+    const { bot } = await cli("new-bot", "--name", "Returner");
+    const oldest = bot.activeTaskId as string;
+    const main = async () => (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id).mainThreadId;
+    const saved = () => readRegistry(server.dataDir).bots.find((candidate: any) => candidate.id === bot.id);
+    const file = join(server.dataDir, "bots.json");
+    const rewrite = (change: (record: any) => any) => writeFileSync(file, JSON.stringify((JSON.parse(readFileSync(file, "utf8")) as any[]).map(change)));
+    const written = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Written", approvalMode: "ask" }, 201)).task.threadId as string;
+    const bystander = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Bystander", approvalMode: "ask" }, 201)).task.threadId as string;
+    await cli("send", "--bot", bot.id, "--task", written, "--text", "Note this.");
+    await expect.poll(async () => ((await api("GET", `/api/threads/${written}/messages?limit=50`)).messages as any[]).some((message) => message.role !== "user"), { timeout: 20_000 }).toBe(true);
+    await expect.poll(async () => (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id).busy, { timeout: 20_000 }).toBe(false);
+
+    await server.stop();
+    rewrite(({ mainThreadChoice: _choice, mainThreadKept: _kept, ...rest }) => rest);
+    await server.start();
+    expect(await main()).toBe(written);
+    await api("POST", `/api/bots/${bot.id}/tasks/${oldest}`);
+    await server.stop();
+    expect(saved().mainThreadKept).toEqual({ id: written });
+
+    // An older version knows only mainThreadChoice: the person's pick there leaves the thread saved for them on disk.
+    rewrite((record) => ({ ...record, mainThreadChoice: oldest }));
+    await server.start();
+    expect(await main(), "the person's later choice").toBe(oldest);
+
+    await api("PATCH", `/api/bots/${bot.id}/tasks/${oldest}`, { archivedAt: Date.now() });
+    expect(await main(), "the oldest open conversation takes over").toBe(written);
+    await api("PATCH", `/api/bots/${bot.id}/tasks/${oldest}`, { archivedAt: null });
+    expect(await main(), "reopening the choice moves nothing").toBe(written);
+    await api("POST", `/api/bots/${bot.id}/tasks/${bystander}`);
+    await server.stop();
+    expect(saved()).toMatchObject({ mainThreadChoice: oldest, mainThreadKept: { id: written, under: oldest } });
+    await server.start();
+    expect(await main()).toBe(written);
+
+    // The older version again, clearing the choice: the substitute was kept under a choice that is gone.
+    await server.stop();
+    rewrite(({ mainThreadChoice: _choice, ...rest }) => rest);
+    await server.start();
+    expect(await main(), "what a bot with no choice shows: the conversation the person last wrote in").toBe(written);
+  } finally {
+    await server.close();
+  }
+}, 180_000);
+
+it("drops the thread saved for a bot once an older version chooses another, so clearing that choice does not bring it back", async () => {
+  const server = await launchRestartableServer();
+  const api = async (method: string, path: string, body?: unknown, status = 200) => {
+    const response = await fetch(`${server.url}${path}`, {
+      method, headers: { "content-type": "application/json", origin: server.url },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const value = await response.json() as any;
+    expect(response.status, `${method} ${path}: ${JSON.stringify(value)}`).toBe(status);
+    return value;
+  };
+  const cli = (...args: string[]) => runControlOmb([...args, "--url", server.url]) as Promise<any>;
+  try {
+    const { bot } = await cli("new-bot", "--name", "Switcher");
+    const chosen = bot.activeTaskId as string;
+    const main = async () => (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id).mainThreadId;
+    const saved = () => readRegistry(server.dataDir).bots.find((candidate: any) => candidate.id === bot.id);
+    const file = join(server.dataDir, "bots.json");
+    const rewrite = (change: (record: any) => any) => writeFileSync(file, JSON.stringify((JSON.parse(readFileSync(file, "utf8")) as any[]).map(change)));
+    const writeIn = async (threadId: string) => {
+      await cli("send", "--bot", bot.id, "--task", threadId, "--text", "Note this.");
+      await expect.poll(async () => ((await api("GET", `/api/threads/${threadId}/messages?limit=50`)).messages as any[]).some((message) => message.role !== "user"), { timeout: 20_000 }).toBe(true);
+      await expect.poll(async () => (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id).busy, { timeout: 20_000 }).toBe(false);
+    };
+    const kept = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Kept", approvalMode: "ask" }, 201)).task.threadId as string;
+    const later = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Later", approvalMode: "ask" }, 201)).task.threadId as string;
+    await writeIn(kept);
+
+    await server.stop();
+    rewrite(({ mainThreadChoice: _choice, mainThreadKept: _kept, ...rest }) => rest);
+    await server.start();
+    expect(await main()).toBe(kept);
+    await api("POST", `/api/bots/${bot.id}/tasks/${chosen}`);
+    await server.stop();
+    expect(saved().mainThreadKept).toEqual({ id: kept });
+
+    // An older version knows only mainThreadChoice: the person picks another thread there.
+    rewrite((record) => ({ ...record, mainThreadChoice: chosen }));
+    await server.start();
+    expect(await main(), "the person's later choice").toBe(chosen);
+    await writeIn(later);
+    await server.stop();
+    expect(saved().mainThreadKept, "the thread kept under no choice is gone from disk").toBeUndefined();
+
+    // The older version again, clearing the choice.
+    rewrite(({ mainThreadChoice: _choice, ...rest }) => rest);
+    await server.start();
+    expect(await main(), "what a bot with no choice shows: the conversation the person last wrote in").toBe(later);
+  } finally {
+    await server.close();
+  }
+}, 180_000);
