@@ -34,6 +34,8 @@ export interface SettingsContext {
   advanced: boolean;
   /** this place's server answers with a storage report (a Cloud home), read only by an owner or admin */
   storage?: boolean;
+  /** this place's server can repeat a computer task's saved steps (a Mac) */
+  savedSteps?: boolean;
 }
 
 export interface SettingsPage {
@@ -47,6 +49,7 @@ export interface SettingsPage {
 }
 
 const notClient = (ctx: SettingsContext) => !ctx.client;
+const browserAdmin = (ctx: SettingsContext) => !ctx.desktop && ctx.admin;
 /** What only an admin can use: a team's member isn't offered it at all (the installation's AI, desktops, spending, data). */
 const adminPage = (ctx: SettingsContext) => !ctx.client && !(ctx.team && !ctx.admin);
 /** A page Simple mode leaves out: its everyday rows show elsewhere in Simple (Overview, This app, Plan & billing). */
@@ -125,10 +128,11 @@ export const LEGACY_SETTINGS: Record<Exclude<AppSettingsSection, SettingsPageId>
   computer: () => ({ page: "desktops" }),
   logins: () => ({ page: "vault" }),
   botAccess: () => ({ page: "people", anchor: "bot-access" }),
-  activity: () => ({ page: "data", anchor: "activity" }),
+  // Only an admin in a browser has Activity; anyone else lands at the top of Data.
+  activity: (ctx) => (browserAdmin(ctx) ? { page: "data", anchor: "activity" } : { page: "data" }),
   backups: () => ({ page: "transfer", anchor: "take-out" }),
   workspaces: () => ({ page: "installations" }),
-  skills: () => ({ page: "bots", anchor: "skills" }),
+  skills: (ctx) => (ctx.skills ? { page: "bots", anchor: "skills" } : { page: "bots" }),
   import: () => ({ page: "transfer", anchor: "bring-in" }),
   updates: (ctx) => (ctx.desktop ? { page: "app", anchor: "updates" } : { page: "overview" }),
 };
@@ -155,7 +159,7 @@ export function resolveSettingsTarget(requested: AppSettingsSection, ctx: Settin
 /** A context with every page showing (Advanced mode), for tests and previews to narrow down. */
 export const fullContext = (over: Partial<SettingsContext> = {}): SettingsContext => ({
   desktop: true, here: true, home: true, cloud: false, team: false, client: false, admin: true, places: false, plan: true,
-  organization: false, environments: true, installations: false, skills: false, advanced: true, ...over,
+  organization: false, environments: true, installations: false, skills: false, advanced: true, savedSteps: true, ...over,
 });
 
 /** One row, section or page search can open. `label` beats `labelKey` where the name is not a string of the app's. */
@@ -181,7 +185,6 @@ export interface SettingsIndexEntry {
 
 const desk = (ctx: SettingsContext) => ctx.desktop && !ctx.client;
 const hereOnly = (ctx: SettingsContext) => ctx.here;
-const browserAdmin = (ctx: SettingsContext) => !ctx.desktop && ctx.admin;
 
 export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "add-device", page: "devices", anchor: "add", labelKey: "devicesPage.add", topFor: ["add a device", "add device", "new device"], synonyms: ["add a computer", "add a server", "add a phone", "connect a device"] },
@@ -221,7 +224,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "all-bots", page: "bots", labelKey: "settings.page.bots", topFor: ["all bots"] },
   { id: "browser", page: "desktops", anchor: "browser", labelKey: "settings.experimental.browser", synonyms: ["browser", "profiles", "browser profiles", "open sites", "new browser"] },
   { id: "desktop-kinds", page: "desktops", anchor: "desktops", labelKey: "settings.desktops.title", topFor: ["private desktop", "sandbox", "docker", "podman", "container", "vps", "own server"], synonyms: ["cloud desktops", "desktop", "vm"] },
-  { id: "saved-steps", page: "desktops", anchor: "automation", labelKey: "settings.savedSteps.title", advanced: true, synonyms: ["repeat", "saved steps", "without ai"] },
+  { id: "saved-steps", page: "desktops", anchor: "automation", labelKey: "settings.savedSteps.title", advanced: true, when: (ctx) => ctx.savedSteps === true, synonyms: ["repeat", "saved steps", "without ai"] },
   { id: "vault", page: "vault", labelKey: "settings.section.vault", topFor: ["password", "passwords", "login", "logins"], synonyms: ["secrets", "1password", "2fa", "totp"] },
   { id: "spending", page: "usage", labelKey: "settings.page.spending", topFor: ["spending", "cost", "costs", "tokens", "money"], synonyms: ["usage"] },
   { id: "grok-move", page: "transfer", anchor: "grok-move", labelKey: "settings.import.grokTitle", sectionKey: "settings.data.bringIn", topFor: ["grok", "grok bot", "move from"], synonyms: ["import", "bring", "another app"] },

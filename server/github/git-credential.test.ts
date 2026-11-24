@@ -66,7 +66,11 @@ describe("the unboxed credential helper", () => {
     expect(good.headers.get("cache-control")).toBe("no-store");
     expect(await good.text()).toBe(`username=x-access-token\npassword=${TOKEN}\n`);
     expect((await ask({})).status).toBe(403);
-    expect((await ask({ [GIT_CREDENTIAL_HEADER]: `${secret.slice(0, -1)}x` })).status).toBe(403);
+    // One character off. The secret is random base64url, so a fixed replacement character would be the secret itself
+    // one time in 64 (this test failed that way once): pick one that differs from the last.
+    const wrong = `${secret.slice(0, -1)}${secret.endsWith("A") ? "B" : "A"}`;
+    expect(wrong).not.toBe(secret);
+    expect((await ask({ [GIT_CREDENTIAL_HEADER]: wrong })).status).toBe(403);
     expect((await ask({ [GIT_CREDENTIAL_HEADER]: secret }, "POST")).status).toBe(403);
     clock += GIT_CREDENTIAL_TTL_MS;
     expect((await ask({ [GIT_CREDENTIAL_HEADER]: secret })).status).toBe(403);

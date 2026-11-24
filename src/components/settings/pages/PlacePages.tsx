@@ -198,7 +198,7 @@ export function DesktopsPage() {
         </SettingsDisclosureRow>
       </AdminOnly>
     )}
-    <AdvancedSection anchor="automation"><SettingsGroup label={t("settings.desktops.automation")} block="automation"><SettingsRows><SavedStepsRow /></SettingsRows></SettingsGroup></AdvancedSection>
+    {ctx.savedSteps && <AdvancedSection anchor="automation"><SettingsGroup label={t("settings.desktops.automation")} block="automation"><SettingsRows><SavedStepsRow /></SettingsRows></SettingsGroup></AdvancedSection>}
   </>;
 }
 
