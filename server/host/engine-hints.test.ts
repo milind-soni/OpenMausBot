@@ -27,7 +27,7 @@ describe("engineHint", () => {
     expect(hint({ ...antigravity, snapshot: signedOut, install: managed })).toEqual({ why: "not signed in",
       connect: `sign in with your Google account in ${PROVIDERS}; that account's plan covers it, no API key` });
     // On a platform with no runtime to download it is installed first, then signed in the same way.
-    expect(hint({ ...antigravity, snapshot: notInstalled }).connect).toBe(`install it in ${PROVIDERS}, then sign in there with that provider's account (no API key)`);
+    expect(hint({ ...antigravity, snapshot: notInstalled }).connect).toBe(`install it in ${PROVIDERS}, then sign in there with your Google account (no API key)`);
   });
 
   it("sends a key-only engine to the key, billed to it, and never claims a plan covers it", () => {
@@ -123,7 +123,7 @@ describe("list_models on a fresh install with nothing set up", () => {
     // Before: the names alone. The lines repeat once per group, not once per engine.
     const before = JSON.stringify({ current, engines: [], unavailable: named });
     const added = JSON.stringify(menu).length - before.length;
-    expect(menu.unavailable!.length).toBeLessThanOrEqual(6);
-    expect(added).toBeLessThan(900)
+    expect(menu.unavailable!.length).toBeLessThanOrEqual(7);
+    expect(added).toBeLessThan(1_000);
   });
 });

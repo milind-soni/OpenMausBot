@@ -33,6 +33,8 @@ export interface MenuRow {
   efforts?: readonly string[];
   /** Why no thread can run on this engine now; it then lists no models. */
   unusable?: string;
+  /** How the person connects it again, when it is signed out. */
+  connect?: string;
   /** Models the engine has but won't run until something changes, with what: the bot can say so instead of calling them gone. */
   blocked?: Array<{ id: string; why: string }>;
 }
@@ -43,7 +45,7 @@ export type UnavailableGroup = { engines: string[] } & EngineHint;
 export interface ModelMenu {
   current: ModelSelection;
   engines: MenuRow[];
-  /** Engines that can't run anything now (not set up, signed out, turned off, unreachable), by why and how to connect. */
+  /** Engines that can't run anything now (not set up, turned off, unreachable), by why and how to connect. */
   unavailable?: UnavailableGroup[];
 }
 
@@ -58,6 +60,8 @@ export function modelMenu(input: {
   refusal(selection: ModelSelection): string | null;
   /** Why `engine` can't run now and how it is connected; null while it can. */
   down(engine: MenuEngine): EngineHint | null;
+  /** A signed-out engine's hint: its row keeps start_thread's own refusal as the reason and adds how to connect. */
+  signedOut?(engine: MenuEngine): EngineHint | null;
   /** Engines whose saved settings could not be read, with the same. */
   broken?: ReadonlyArray<{ name: string; hint: EngineHint }>;
   search?: string;
@@ -89,7 +93,12 @@ export function modelMenu(input: {
       unavailable(name, down);
       continue;
     }
-    if (!matching.length && !blocked.length) continue;
+    if (!matching.length && !blocked.length) {
+      // Signed out with no models to try: named with why, like an engine that is down.
+      const signedOut = nameMatches(name) ? input.signedOut?.(engine) : null;
+      if (signedOut) unavailable(name, signedOut);
+      continue;
+    }
     const cap = terms.length ? room : matching.length <= MENU_WHOLE ? matching.length : MENU_SHORT;
     const listed: string[] = [];
     let examined = 0, refusedInRow = 0, why: string | null = null;
@@ -107,7 +116,8 @@ export function modelMenu(input: {
     }
     const more = matching.length - examined;
     if (!listed.length && why) {
-      engines.push({ instanceId, name, unusable: why, ...(blocked.length ? { blocked } : {}) });
+      const connect = input.signedOut?.(engine)?.connect;
+      engines.push({ instanceId, name, unusable: why, ...(connect ? { connect } : {}), ...(blocked.length ? { blocked } : {}) });
       continue;
     }
     room -= listed.length;

@@ -64,7 +64,7 @@ export function engineHint(engine: EngineHintInput): EngineHint {
     if (engine.install?.managed && engine.signIn) return { why: "not set up yet", connect: `${signIn} (the app installs it first)` };
     if (keyOnly && !engine.install?.command && !engine.install?.server) return { why: "no API key saved", connect: key };
     // Claude's API-key instance has a sign-in too: an "api" engine is never said to need no key.
-    const then = keyOnly || engine.access === "api" ? `, then ${key}` : engine.signIn ? ", then sign in there with that provider's account (no API key)" : "; it then shows how it signs in";
+    const then = keyOnly || engine.access === "api" ? `, then ${key}` : engine.signIn ? `, then sign in there with your ${engine.account ? `${engine.account} account` : "account at that provider"} (no API key)` : "; it then shows how it signs in";
     return { why: "not installed", connect: `install it in ${providers}${then}` };
   }
   if (snapshot?.authenticated === false) {

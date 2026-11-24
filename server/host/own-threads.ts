@@ -81,7 +81,8 @@ export function createOwnThreads(deps: Pick<SpawnLevelDeps, "sourceLevel" | "may
       if (!bot) return null;
       const current = deps.current(botId, threadId) ?? bot.modelSelection;
       return modelMenu({ engines: deps.registry.instances(), current, pinned: [bot.modelSelection], refusal: (selection) => refusal(selection, bot),
-        down: (engine) => deps.givesWay({ instanceId: engine.instanceId, model: engine.models.default }, bot.modelSelection) ? deps.hint(engine.instanceId) : null,
+        down: (engine) => deps.givesWay({ instanceId: engine.instanceId, model: engine.models.default }, bot.modelSelection) === "unavailable" ? deps.hint(engine.instanceId) : null,
+        signedOut: (engine) => deps.givesWay({ instanceId: engine.instanceId, model: engine.models.default }, bot.modelSelection) === "signed-out" ? deps.hint(engine.instanceId) : null,
         broken: deps.broken?.() ?? [], search });
     },
   };
