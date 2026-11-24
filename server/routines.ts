@@ -1288,27 +1288,16 @@ export class RoutineManager {
       if (this.closing && (!event.ok || event.stopReason === "cancelled" || event.stopReason === "interrupted")) return null;
       if (event.cost != null) run.cost = (run.cost ?? 0) + event.cost;
       if (event.denials?.length) run.denials = [...new Set([...(run.denials ?? []), ...event.denials])];
-      if (!event.ok) {
-        const facts = { ...this.failureFacts.get(run.id), stopReason: event.stopReason };
-        // A run whose reply was already delivered (partial: the answer streamed first) is not failed by the last tool
-        // call that went wrong after it: the output holds the finished deliverable, so the run completes with the
-        // failing step kept in its error line. A run-limit stop or a network failure still fails the run (#7186).
-        if (event.stopReason === "tool_error" && facts.partial && run.output) {
-          Object.assign(run, { status: "completed", attention: undefined, finishedAt: this.now(), partial: true } satisfies Partial<RoutineRun>);
-          this.saveLater();
-          this.emitRun(run);
-          queueMicrotask(() => this.tickInBackground());
-          return cloneRun(run);
-        }
-        this.settleFailure(run, routineFailure(run.error, event.stopReason), facts);
-        return cloneRun(run);
-      }
+      const facts = { ...this.failureFacts.get(run.id), stopReason: event.stopReason };
+      // A last tool call that failed after the reply was delivered (partial) leaves a finished deliverable: the run completes partly done, its failing step kept in its error line. Any other stop fails it.
+      const delivered = !event.ok && event.stopReason === "tool_error" && facts.partial === true && Boolean(run.output);
+      if (!event.ok && !delivered) { this.settleFailure(run, routineFailure(run.error, event.stopReason), facts); return cloneRun(run); }
       this.failureFacts.delete(run.id);
       const waitsOnTeammates = this.options.hasPendingDelegations?.(event.threadId) === true, handoffRefused = waitsOnTeammates ? null : this.options.refusedHandoff?.(event.threadId);
       if (handoffRefused) { const said = typeof handoffRefused === "string" ? { text: handoffRefused } : handoffRefused; this.failRun(Object.assign(run, { partial: (said.partial !== false && Boolean(run.output)) || undefined }, said.lendingRefused ? { lendingRefused: true as const } : {}), said.text); queueMicrotask(() => this.tickInBackground()); return cloneRun(run); }
       if (waitsOnTeammates) this.wait(run, ROUTINE_HANDOFF_WAIT);
-      else { Object.assign(run, { status: "completed", attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>); this.ownerNotices = this.ownerNotices.filter((notice) => notice.botId !== run.botId); }
-      run.error = undefined;
+      else { Object.assign(run, { status: "completed", attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>, delivered ? { partial: true } : {}); this.ownerNotices = this.ownerNotices.filter((notice) => notice.botId !== run.botId); }
+      if (!delivered) run.error = undefined;
     } else {
       return null;
     }
