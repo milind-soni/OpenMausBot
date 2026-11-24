@@ -98,7 +98,7 @@ describe.skipIf(WINDOWS)("the native Antigravity CLI compacting a turn's session
     expect(replyAt).toBeGreaterThan(noticeAt);
   }, 120_000);
 
-  it.each(["window", "model"])("does not say so, and writes no boundary, when the collapse is followed by a reading that cannot be compared (%s)", async (then) => {
+  it.each(["window", "model"])("does not say so when the collapse is followed by a reading that cannot be compared (%s)", async (then) => {
     const t = await thread(`blind-${then}`, { FAKE_AGY_AUTO_COMPACT: "1", FAKE_AGY_AUTO_COMPACT_THEN: then });
     const { done, events } = await t.send();
     expect(done).toMatchObject({ ok: true, stopReason: null });
