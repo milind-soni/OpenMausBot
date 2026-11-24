@@ -192,6 +192,12 @@ export function isProxied(req: IncomingMessage): boolean {
   return PROXY_HEADERS.some((name) => req.headers[name] !== undefined);
 }
 
+/** A paired phone's request. The companion marks everything it forwards and the mark only narrows, so this also
+ * covers the standalone companion, which has no desktop token and so never sets `companionDevice`. */
+export function fromPairedDevice(req: IncomingMessage, auth: RequestAuth): boolean {
+  return (auth.kind === "loopback" && auth.companionDevice !== undefined) || req.headers?.["x-openmausbot-companion"] === "1";
+}
+
 const LOOPBACK_PEER = /^(?:127\.|::1$|::ffff:127\.)/;
 
 /** A TCP peer other than this machine. */
@@ -506,6 +512,7 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   // Skill Burgers: the routes check who may change which (a bot's own: its editors; every chat: an admin).
   { methods: ["GET", "POST"], path: /^\/api\/skill-burgers$/ },
   { methods: ["GET", "PATCH", "DELETE"], path: /^\/api\/skill-burgers\/[^/]+$/ },
+  { methods: ["POST"], path: /^\/api\/skill-burgers\/[^/]+\/paths$/ },
   { methods: ["POST"], path: /^\/api\/skill-burger-summary$/ },
   { methods: ["POST"], path: /^\/api\/slack\/team\/messages(?:\/[0-9a-f-]{36}\/stop)?$/ },
 ];

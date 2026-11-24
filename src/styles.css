@@ -1337,6 +1337,22 @@
   line-height: 1.75;
 }
 
+/* A streaming reply's blocks fade in as each one arrives, so a chunk of text does not pop in. @starting-style applies
+   only when an element is first put on the page, and the rule holds only while the reply streams, so opening a
+   finished reply never plays it. Opacity only, once per block, no layout change, nothing running after the stream. */
+@media (prefers-reduced-motion: no-preference) {
+  .chat-md[data-streaming] > *,
+  .chat-md[data-streaming] [data-stream-fade] {
+    transition: opacity 600ms ease-out;
+  }
+  @starting-style {
+    .chat-md[data-streaming] > *,
+    .chat-md[data-streaming] [data-stream-fade] {
+      opacity: 0;
+    }
+  }
+}
+
 .chat-code-actions > button:focus-visible {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;

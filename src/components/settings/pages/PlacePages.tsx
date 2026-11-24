@@ -35,6 +35,7 @@ import { SkillsSection } from "../../SkillsSection";
 import { ThreadConcurrencySettings } from "../../ThreadConcurrencySettings";
 import { usePhonePlaceState } from "../phone-status";
 import { KeysPage } from "../../keys/KeysPage";
+import { KEYS_ANCHOR_FOR_FOCUS } from "../../keys/key-focus";
 import { BrowserProfilesRow, ExperimentalFeaturesRow, NewBotEffortRow } from "../../AppSettingsRows";
 import { ServerUpdateRow } from "../../ServerUpdateRow";
 import { versionLine } from "../settings-context";
@@ -121,9 +122,10 @@ export function AiPage() {
   const { ctx, anchor } = useSettingsShell();
   const [more, setMore] = useState(false);
   // Simple ends after Providers: Other services is one closed fold row, so the page fits one window.
-  const [services, setServices] = useState(ctx.advanced || anchor === "ai-keys");
-  // A key asked for by search or a link opens Other services whatever the fold says.
-  const shown = ctx.advanced || services || anchor === "ai-keys";
+  const asksForKeys = anchor === "ai-keys" || anchor === KEYS_ANCHOR_FOR_FOCUS;
+  const [services, setServices] = useState(ctx.advanced || asksForKeys);
+  useEffect(() => { if (asksForKeys) setServices(true); }, [asksForKeys]);
+  const shown = ctx.advanced || services;
   const count = KEY_SECTIONS.filter((section) => section.id !== "ai").length;
   return <>
     <AdminOnly>
