@@ -1,4 +1,4 @@
-import { REPLAY_BLOCKED, type ReplayRef } from "../replay-guard.ts";
+import { replayBlocked, type ReplayRef } from "../replay-guard.ts";
 import { failedTurnTool } from "../../shared/failed-turn.ts";
 import { admit } from "../admission.ts";
 import { engineMemory, memoryStopped } from "../engine-memory.ts";
@@ -127,7 +127,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     const refused = retryRefusal(input.bot.id, input.threadId);
     if (refused) throw new Error(refused);
     const replay = deps.guardReplay?.(input.bot.id, input.threadId);
-    if (deps.guardReplay && !replay) throw new Error(REPLAY_BLOCKED);
+    if (deps.guardReplay && !replay) throw new Error(replayBlocked(input.threadId));
     const chief = peerName(input.chief.name);
     const lead = input.automatic
       ? `${AUTO_RETRY_LEAD}, once, before telling ${chief}, your Chief of Staff, that this thread's last run failed.`

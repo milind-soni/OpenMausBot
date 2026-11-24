@@ -1,4 +1,4 @@
-import { REPLAY_BLOCKED } from "../replay-guard.ts";
+import { replayBlocked } from "../replay-guard.ts";
 import { allowsTool } from "../../shared/tool-scope.ts";
 import { newId, type ProviderAdapter, type ProviderInstance, type RuntimeEvent, type SendTurnInput, type TurnStartResult } from "../contracts.ts";
 import { createChatToolApproval } from "../drivers/chat-tool-approval.ts";
@@ -226,7 +226,7 @@ export class SavedStepsDispatch {
   private async fallBack(run: Run, failed: Failed, input: SendTurnInput, start: Start): Promise<void> {
     if (!failed.gate) this.forget(run);
     if (run.controller.signal.aborted || this.deps.stopped(run.threadId)) return this.end(run, STOPPED);
-    if (this.deps.guardReplay && !this.deps.guardReplay(input, run.engine.instanceId)) return this.end(run, { kind: "error", message: REPLAY_BLOCKED });
+    if (this.deps.guardReplay && !this.deps.guardReplay(input, run.engine.instanceId)) return this.end(run, { kind: "error", message: replayBlocked(run.threadId) });
     this.deps.engines.set(run.threadId, run.engine);
     const note = fallbackNote(failed);
     const noted = (text: string) => `${text}\n\n${note}`;

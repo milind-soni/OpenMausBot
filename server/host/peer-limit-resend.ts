@@ -1,4 +1,4 @@
-import { REPLAY_BLOCKED, type ReplayRef } from "../replay-guard.ts";
+import { replayBlocked, type ReplayRef } from "../replay-guard.ts";
 import { approvalModeFor } from "../../shared/approval-mode.ts";
 import { recoveryCapabilityError } from "../automatic-recovery.ts";
 import type { InstanceConfigMap } from "../contracts.ts";
@@ -192,7 +192,7 @@ export function createPeerLimitResend<Opts extends PeerTurnOpts<Outcome>, Outcom
       try {
         deps.assertWithinBudget();
         const replay = deps.guardReplay?.(turn);
-        if (deps.guardReplay && !replay) return giveUp(REPLAY_BLOCKED);
+        if (deps.guardReplay && !replay) return giveUp(replayBlocked(threadId));
         turn.opts = { ...turn.opts, replay };
         store.switchTaskModel(turn.botId, threadId, checked.selection, false, false, { ...deps.hostedModels?.resetTask(from, checked.selection), rewound: true });
       } catch (error) {

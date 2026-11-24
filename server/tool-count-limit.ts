@@ -97,19 +97,26 @@ export function forgetToolCountLimits(): void {
   learned.clear();
 }
 
+/** Why resending a refused turn cannot repeat work: its prompt never left, or the provider's own proof that the model never ran. */
+export type ToolLimitResendProof = { kind: "prompt-not-sent" } | { kind: string; evidence: Record<string, unknown> };
+
 /** A turn the provider refused for carrying too many tools, before the model ran: learns the limit and starts `retry` once,
- * which lists the turn's tools within it; `failed` reports a retry that could not start. True when it retried. */
+ * which lists the turn's tools within it; `failed` reports a retry that could not start. True when it retried. Without a
+ * `proof` nothing is resent; the decision and its proof are recorded once, at the resend. */
 export function retryUnderToolLimit(error: unknown, turn: {
   key: string;
   model?: string;
   engine: string;
+  proof: ToolLimitResendProof | null;
   retry: () => Promise<unknown>;
   failed: (error: unknown) => void;
 }): boolean {
+  if (!turn.proof) return false;
   const limit = toolCountLimitFromError(error);
   if (limit === undefined) return false;
   learnToolCountLimit(turn.key, limit);
   console.warn(`[${turn.engine}] ${turn.model ?? "this model"} takes at most ${limit} tools; retrying the turn once with its MCP tool lists trimmed to fit`);
+  console.warn(`[${turn.engine}] tool-limit resend admitted; proof: ${JSON.stringify(turn.proof)}`);
   turn.retry().catch(turn.failed);
   return true;
 }

@@ -12,6 +12,7 @@ import { OUTSIDE_STAYS_HERE } from "./host/outside-lineage.ts";
 import { markLeftBehind } from "./testing/cloud-left-behind.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 import { readRegistry, writeRegistry } from "./testing/registry.ts";
+import { readReplayAudit } from "./testing/replay-audit.ts";
 
 const tag = randomBytes(6).toString("hex");
 const dump = join(tmpdir(), `outside-${tag}.json`), release = join(tmpdir(), `outside-${tag}.release`), failing = join(tmpdir(), `outside-${tag}.fail`), notes = join(tmpdir(), `outside-${tag}.notes`),
@@ -38,7 +39,7 @@ const atFull = (turn: { argv: string[] }) => turn.argv[turn.argv.indexOf("--perm
 let fx: CloudSendFixture, team: CloudTeamFixture, ada: string;
 beforeAll(async () => {
   fx = await launchCloudSendFixture({ onePasswordToken: `ops_fake-${randomBytes(8).toString("hex")}`, cloudEngine: engine, desktopEngine: engine, env: { OMB_TEST_INTERNAL_CAPABILITY_KEY: KEY },
-    team: { id: "team-acme-1", name: "Acme", engine } });
+    team: { id: "team-acme-1", name: "Acme", engine, env: { OMB_TEST_STARTUP_REFUSAL: "1" } } });
   team = fx.team!;
   ada = (await team.pair({ email: "ada@acme.test", role: "admin" })).token!;
 }, hostTimeout(180_000));
@@ -84,6 +85,22 @@ const finish = async (...ids: string[]) => {
   for (const file of [release, held, holding, dump]) rmSync(file, { force: true });
 };
 const linesOf = async (threadId: string) => (await team.as(ada, "GET", `/api/threads/${threadId}/messages?limit=200`)).body.messages as any[];
+const crash = "claude exited 3 before result: fake-claude: simulated crash before result";
+const replayBlocked = /Replay was blocked because work may already have run/;
+const teamData = () => join(team.home, ".openmausbot");
+const engineLog = () => { try { return readFileSync(join(teamData(), "startup-refusals.log"), "utf8").trim().split("\n").filter(Boolean).map((line) => line.split(" ")); } catch { return []; } };
+/** What each turn on `threadId` met at its engine: "refused" before dispatch, or "sent". */
+const engineTurns = (threadId: string) => engineLog().filter(([, thread]) => thread === threadId).map(([what]) => what);
+/** The next turn whose prompt carries `marker` is refused by its engine before anything is sent to it (startup-refusal-hooks);
+ * the thread of that refusal, once it happens. */
+const refuseOnce = (marker: string) => {
+  const before = engineLog().length;
+  writeFileSync(join(teamData(), "startup-refusals.json"), JSON.stringify({ [marker]: crash }));
+  return () => until("a refused turn", () => engineLog().slice(before).find(([what]) => what === "refused")?.[1]);
+};
+/** The refused attempt settled, recorded as never dispatched. */
+const settledUnsent = (threadId: string) => until("the refused attempt to settle", () => (readReplayAudit(teamData()).attempts as any[])
+  .some((row) => row.thread === threadId && row.evidence === "confirmed:no-dispatch" && row.outcome === "failed"));
 /** The webhook's turn is running on `bot`. */
 const webhookTurn = async (botId: string, name: string, marker: string) => {
   const hook = await hookOn(botId, name);
@@ -170,7 +187,7 @@ describe("a Team Cloud", () => {
     await finish(scout.id);
   }, hostTimeout(120_000));
 
-  it("refuses a retry from a confined turn into a person's thread, and keeps its own work confined when it retries that", async () => {
+  it("refuses a retry from a confined turn into a person's thread, and its retry of its own interrupted work, which may have run", async () => {
     const chief = await newChief("Retry chief");
     const mate = await newBot("Retry mate");
     const { thread } = await webhookTurn(chief.id, "Retry hook", "marker-retry");
@@ -185,8 +202,36 @@ describe("a Team Cloud", () => {
     expect(refused).toMatchObject({ status: 403, body: { error: OUTSIDE_STAYS_HERE } });
     await sleep(800);
     expect(said("note-into-main")).toBeNull();
+    const blocked = await internal(chief.id, thread, "/api/internal/retry-thread", { toBotId: mate.id, toThreadId: child, note: "note-own-work" }, capability);
+    expect(blocked.status).toBe(409);
+    expect(blocked.body?.error).toMatch(replayBlocked);
+    await sleep(800);
+    expect(said("note-own-work")).toBeNull();
+    expect(engineTurns(child)).toEqual(["sent"]);
+    await finish(chief.id, mate.id);
+  }, hostTimeout(120_000));
+
+  it("refuses a retry from a confined turn into a person's thread, and keeps its own work confined when it retries that", async () => {
+    const chief = await newChief("Refused retry chief");
+    const mate = await newBot("Refused retry mate");
+    const { thread } = await webhookTurn(chief.id, "Refused retry hook", "marker-refused-retry");
+    const capability = await team.capability(chief.id, thread);
+    const refusedThread = refuseOnce("brief-refused-retry");
+    const sent = await internal(chief.id, thread, "/api/internal/coordinate-bots", { botIds: [mate.id], message: "brief-refused-retry", reply: "none" }, capability);
+    const child = sent.body.receipts[0].threadId as string;
+    expect(await refusedThread()).toBe(child);
+    await idle(mate.id);
+    await settledUnsent(child);
+    expect(engineTurns(child)).toEqual(["refused"]);
+    expect(said("brief-refused-retry")).toBeNull();
+    const refused = await internal(chief.id, thread, "/api/internal/retry-thread", { toBotId: mate.id, toThreadId: mate.threadId, note: "note-into-main-2" }, capability);
+    expect(refused).toMatchObject({ status: 403, body: { error: OUTSIDE_STAYS_HERE } });
+    await sleep(800);
+    expect(said("note-into-main-2")).toBeNull();
     expect((await internal(chief.id, thread, "/api/internal/retry-thread", { toBotId: mate.id, toThreadId: child, note: "note-own-work" }, capability)).status).toBe(200);
     expect(confined(await turnWith("note-own-work"))).toBe(true);
+    expect(engineTurns(child)).toEqual(["refused", "sent"]);
+    expect(readReplayAudit(teamData()).decisions).toContainEqual(expect.objectContaining({ decision: "admitted" }));
     await finish(chief.id, mate.id);
   }, hostTimeout(120_000));
 
@@ -207,7 +252,7 @@ describe("a Team Cloud", () => {
     await finish(scout.id, mate.id);
   }, hostTimeout(120_000));
 
-  it("tells a person, not a Chief, when a confined run fails, and a person's retry of that run stays confined", async () => {
+  it("tells a person, not a Chief, when a confined run crashes, and a retry of that run, which may have run, is refused", async () => {
     const chief = await newChief("Failure chief");
     const mate = await newBot("Failure mate");
     const hook = await hookOn(mate.id, "Failure hook");
@@ -219,8 +264,33 @@ describe("a Team Cloud", () => {
     await sleep(1_000);
     const bots = (await team.as(ada, "GET", "/api/bots")).body.bots as any[];
     expect(bots.find((bot) => bot.id === chief.id).tasks.map((task: any) => task.title), "no notices chat on the Chief").not.toEqual(expect.arrayContaining([expect.stringMatching(/Problems to look at|Team incidents/)]));
+    const blocked = await internal(chief.id, chief.threadId, "/api/internal/retry-thread", { toBotId: mate.id, toThreadId: run.threadId, note: "person-chief-retry" });
+    expect(blocked.status).toBe(409);
+    expect(blocked.body?.error).toMatch(replayBlocked);
+    await sleep(800);
+    expect(said("person-chief-retry")).toBeNull();
+    expect(engineTurns(run.threadId)).toEqual(["sent"]);
+    await finish(chief.id, mate.id);
+  }, hostTimeout(180_000));
+
+  it("tells a person, not a Chief, when a confined run fails, and a person's retry of that run stays confined", async () => {
+    const chief = await newChief("Refused failure chief");
+    const mate = await newBot("Refused failure mate");
+    const hook = await hookOn(mate.id, "Refused failure hook");
+    rmSync(dump, { force: true });
+    const refusedThread = refuseOnce("marker-refused-failure");
+    await deliver(hook, "marker-refused-failure");
+    const run = await until("the run to fail", async () => { const one = await runOf(hook); return one && ["failed", "missed"].includes(one.status) ? one : null; }, hostTimeout(60_000));
+    expect(await refusedThread()).toBe(run.threadId);
+    await settledUnsent(run.threadId);
+    expect(engineTurns(run.threadId)).toEqual(["refused"]);
+    expect(said("marker-refused-failure")).toBeNull();
+    await sleep(1_000);
+    const bots = (await team.as(ada, "GET", "/api/bots")).body.bots as any[];
+    expect(bots.find((bot) => bot.id === chief.id).tasks.map((task: any) => task.title), "no notices chat on the Chief").not.toEqual(expect.arrayContaining([expect.stringMatching(/Problems to look at|Team incidents/)]));
     expect((await internal(chief.id, chief.threadId, "/api/internal/retry-thread", { toBotId: mate.id, toThreadId: run.threadId, note: "person-chief-retry" })).status).toBe(200);
     expect(confined(await turnWith("person-chief-retry"))).toBe(true);
+    expect(engineTurns(run.threadId)).toEqual(["refused", "sent"]);
     await finish(chief.id, mate.id);
   }, hostTimeout(180_000));
 
@@ -473,7 +543,7 @@ describe("a Team Cloud", () => {
     await finish(scout.id);
   }, hostTimeout(180_000));
 
-  it("leaves a person's own work as it was: their level, hand-offs, threads, posts, notes and retries", async () => {
+  it("leaves a person's own work as it was: their level, hand-offs, threads, posts and notes, and blocks a retry of interrupted work", async () => {
     const chief = await newChief("Person chief");
     const mate = await newBot("Person mate");
     const room = (await team.as(ada, "POST", "/api/groups", { name: "Person room", memberIds: [chief.id, mate.id], setup: { bulletin: "", defaultResponder: { kind: "member", botId: mate.id } } })).body.group;
@@ -492,9 +562,34 @@ describe("a Team Cloud", () => {
     await team.as(ada, "POST", `/api/bots/${mate.id}/interrupt`, { threadId: handed.body.receipts[0].threadId });
     await idle(mate.id);
     await sleep(500);
-    expect((await internal(chief.id, chief.threadId, "/api/internal/retry-thread", { toBotId: mate.id, toThreadId: handed.body.receipts[0].threadId, note: "person-retry" }, capability)).status).toBe(200);
+    const blocked = await internal(chief.id, chief.threadId, "/api/internal/retry-thread", { toBotId: mate.id, toThreadId: handed.body.receipts[0].threadId, note: "person-retry" }, capability);
+    expect(blocked.status).toBe(409);
+    expect(blocked.body?.error).toMatch(replayBlocked);
+    await sleep(800);
+    expect(said("person-retry")).toBeNull();
+    expect(engineTurns(handed.body.receipts[0].threadId)).toEqual(["sent"]);
+    await finish(chief.id, mate.id);
+  }, hostTimeout(180_000));
+
+  it("leaves a person's retry of their own hand-off, refused before it reached the engine, at their level", async () => {
+    const chief = await newChief("Refused person chief");
+    const mate = await newBot("Refused person mate");
+    expect((await team.as(ada, "POST", `/api/bots/${chief.id}/messages`, { text: "person-line-refused", threadId: chief.threadId })).status).toBe(202);
+    expect(atFull(await turnWith("person-line-refused"))).toBe(true);
+    const capability = await team.capability(chief.id, chief.threadId);
+    const refusedThread = refuseOnce("person-handed-refused");
+    const handed = await internal(chief.id, chief.threadId, "/api/internal/coordinate-bots", { botIds: [mate.id], message: "person-handed-refused", reply: "none" }, capability);
+    const child = handed.body.receipts[0].threadId as string;
+    expect(await refusedThread()).toBe(child);
+    await idle(mate.id);
+    await settledUnsent(child);
+    expect(engineTurns(child)).toEqual(["refused"]);
+    expect(said("person-handed-refused")).toBeNull();
+    expect((await internal(chief.id, chief.threadId, "/api/internal/retry-thread", { toBotId: mate.id, toThreadId: child, note: "person-retry" }, capability)).status).toBe(200);
     const retried = await turnWith("person-retry");
     expect(confined(retried)).toBe(false);
+    expect(atFull(retried)).toBe(true);
+    expect(engineTurns(child)).toEqual(["refused", "sent"]);
     await finish(chief.id, mate.id);
   }, hostTimeout(180_000));
 });

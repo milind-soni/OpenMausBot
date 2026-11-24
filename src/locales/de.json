@@ -4366,5 +4366,6 @@
   "skillBurger.pill.running": "Läuft… {count}",
   "skillBurger.pill.stopped": "Angehalten",
   "skillBurger.pill.addPath": "Weg hinzufügen",
-  "skillBurger.card.madeBy": "Erstellt von {name}"
+  "skillBurger.card.madeBy": "Erstellt von {name}",
+  "server.replay.blocked": "Unterbrochen. Die Wiederholung wurde blockiert, weil der Auftrag bereits ausgeführt worden sein könnte oder die ursprüngliche Freigabe nicht mehr verfügbar ist. Bewahre die bisherigen Ergebnisse auf und kläre offene Aktionen, bevor du den Auftrag kontrolliert fortsetzt."
 }

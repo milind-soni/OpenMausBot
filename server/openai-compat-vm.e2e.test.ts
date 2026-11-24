@@ -201,7 +201,7 @@ describe("openai-compat Local VM tools", () => {
     expect(nativeToolNames(bot.threadId)).toContain("computer_screenshot");
   }, 60_000);
 
-  it("mounts the Local VM tools on the select_computer continuation", async () => {
+  it("mounts the Local VM tools on a fresh message after select_computer, which does not resend the old request", async () => {
     vmState({ containers: [] });
     requests.length = 0;
     pendingSelect = null;
@@ -209,26 +209,28 @@ describe("openai-compat Local VM tools", () => {
     await api("PATCH", `/api/bots/${bot.id}/model`, { instanceId: "openaiCompat", model: "fixture-model" });
     pendingSelect = { surface: "vm" };
     await api("POST", `/api/bots/${bot.id}/messages`, { text: "Open a browser on my Local VM." });
-    try {
-      await until(() => requests.length, count => count >= 3);
-    } catch (error) {
-      const state = await api("GET", "/api/bots");
-      const current = state.bots.find((item: any) => item.id === bot.id);
-      console.error("CONTINUATION MISSING", JSON.stringify({
-        requests: requests.map(r => ({ tools: toolNames(r), roles: r.messages?.map(m => m.role) })),
-        messages: current?.messages?.map((m: any) => ({ role: m.role, kind: m.kind, text: m.text, tool: m.tool, error: m.error })),
-      }, null, 2));
-      throw error;
-    }
+    const current = async () => (await api("GET", "/api/bots")).bots.find((item: any) => item.id === bot.id);
+    // The pick is saved and the original request is not sent again: it may already have run, so its replay is blocked.
+    await until(current, (one: any) => (one?.messages ?? []).some((message: any) => /Replay was blocked because work may already have run/.test(JSON.stringify(message))));
     await idle(bot.id);
-    const continuation = requests[2];
-    expect(toolNames(continuation), JSON.stringify({ tools: toolNames(continuation), requests: requests.length })).toContain("computer_screenshot");
+    await new Promise(r => setTimeout(r, 1_000));
+    expect(requests).toHaveLength(2);
     expect(toolNames(requests[0])).toContain("agents_select_computer");
-    // The continuation is listed the agents tools its request was, select_computer too: the route refuses a second pick.
+    const task = (await current()).tasks.find((one: any) => one.threadId === bot.threadId);
+    expect(task).toMatchObject({ surface: "vm", surfaceAuto: true });
+    // A fresh message from the person, on the same conversation and with no replay ticket, starts on the chosen VM.
+    await api("POST", `/api/bots/${bot.id}/messages`, { text: "Take a screenshot there.", threadId: bot.threadId });
+    await until(() => requests.length, count => count >= 3);
+    await idle(bot.id);
+    await new Promise(r => setTimeout(r, 1_000));
+    expect(requests).toHaveLength(3);
+    const fresh = requests[2];
+    expect(toolNames(fresh), JSON.stringify({ tools: toolNames(fresh), requests: requests.length })).toContain("computer_screenshot");
+    // The fresh turn is listed the agents tools the first request was, select_computer too.
     const agentsTools = (request: ChatRequest | undefined) => toolNames(request).filter((name) => name.startsWith("agents_"));
-    expect(agentsTools(continuation)).toEqual(agentsTools(requests[0]));
-    expect(toolNames(continuation)).toContain("agents_select_computer");
-    const shown = (await api("GET", "/api/bots")).bots.find((item: any) => item.id === bot.id).messages;
+    expect(agentsTools(fresh)).toEqual(agentsTools(requests[0]));
+    expect(toolNames(fresh)).toContain("agents_select_computer");
+    const shown = (await current()).messages;
     expect(shown.filter((message: any) => message.card)).toEqual([]);
   }, 60_000);
 

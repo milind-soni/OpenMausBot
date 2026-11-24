@@ -123,6 +123,26 @@ describe("a model that takes a limited number of tools", () => {
     expect(prompts(f.scratch)).toHaveLength(4);
   });
 
+  it("records the resend once, with the provider's refusal as its proof", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const f = await open(createOpenCodeDriver(async () => ({ default: "", options: [] })), "opencodeGo", (scratch) => ({
+      FAKE_ACP_MODELS: "opencode/beam-free", FAKE_ACP_TOOL_LIMIT: "30", FAKE_ACP_RPC_APPEND_FILE: join(scratch, "rpc.jsonl"),
+    }));
+    const custom = { big: toolsFile(f.scratch, "big", 40), small: toolsFile(f.scratch, "small", 10) };
+    const { done } = await f.run("t-limit-proof", { model: "opencode/beam-free", integrations: { custom } });
+    expect(done).toMatchObject({ ok: true });
+    expect(prompts(f.scratch)).toEqual(["session/prompt", "session/prompt.tool-limit", "session/prompt"]);
+    const records = warn.mock.calls.map(([line]) => String(line)).filter((line) => line.includes("tool-limit resend admitted"));
+    expect(records).toHaveLength(1);
+    expect(JSON.parse(records[0]!.slice(records[0]!.indexOf("proof: ") + 7))).toEqual({
+      kind: "opencode-tool-limit-refusal",
+      evidence: {
+        sameErrorAsFirstPrompt: true, method: "session/prompt", code: -32603, service: "session", errorName: "APIError",
+        message: "Internal error: Invalid value for 'tools': maximum number of items is 30.", output: false, activity: false, usage: null,
+      },
+    });
+  });
+
   it("retries only once, then says in plain words what to turn off", async () => {
     const f = await open(createOpenCodeDriver(async () => ({ default: "", options: [] })), "opencodeGo", (scratch) => ({
       FAKE_ACP_MODELS: "opencode/beam-free", FAKE_ACP_RPC_FAILURE_FILE: join(scratch, "failure.json"), FAKE_ACP_RPC_APPEND_FILE: join(scratch, "rpc.jsonl"),
@@ -137,4 +157,18 @@ describe("a model that takes a limited number of tools", () => {
       message: expect.stringContaining("this model takes at most 128 tools and this bot offers more, even with its tool lists trimmed"),
     })]);
   });
+  it("does not retry a tool-limit error after the model has produced output", async () => {
+    const f = await open(createOpenCodeDriver(async () => ({ default: "", options: [] })), "opencodeGo", (scratch) => ({
+      FAKE_ACP_MODELS: "opencode/beam-free", FAKE_ACP_RPC_FAILURE_FILE: join(scratch, "failure.json"),
+      FAKE_ACP_RPC_FAILURE_AFTER_OUTPUT: "1", FAKE_ACP_RPC_APPEND_FILE: join(scratch, "rpc.jsonl"),
+    }));
+    writeFileSync(join(f.scratch, "failure.json"), JSON.stringify({
+      code: -32603, message: "Internal error: Invalid value for 'tools': maximum number of items is 128.", data: { service: "session", errorName: "APIError" },
+    }));
+    const { done, events } = await f.run("t-limit-after-output", { model: "opencode/beam-free" });
+    expect(done).toMatchObject({ ok: false });
+    expect(events.some((event) => event.type === "content.delta" || event.type === "item.completed")).toBe(true);
+    expect(prompts(f.scratch)).toEqual(["session/prompt", "session/prompt.error"]);
+  });
+
 });

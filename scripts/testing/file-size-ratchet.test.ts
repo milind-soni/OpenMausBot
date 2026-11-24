@@ -43,6 +43,7 @@ const LINES: Record<string, number> = {
   "server/cli.ts": 1053,
   "src/components/AttachmentPreview.tsx": 1025,
   "server/meetings/meetbot.ts": 1047,
+  "packages/phone-protocol/src/wire.ts": 1001, // Preserve quota-card replay tickets across restart. Owner: Rey. Expires: 2026-12-31.
   "electron/data-dir-lease.node-test.mjs": 846, // the data-folder lease's own tests: many platform cases (Windows probes in data-dir-lease-windows.node-test.mjs)
 };
 

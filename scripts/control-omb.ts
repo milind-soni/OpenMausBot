@@ -247,6 +247,8 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
   if (parentEnv.OMB_TEST_RESUME_CLOCK === "1") childEnv.OMB_TEST_RESUME_CLOCK = "1";
   // The memory gate runs here too, on the memory a fixture file says this machine has.
   if (parentEnv.OMB_TEST_MEMORY_GATE === "1") childEnv.OMB_TEST_MEMORY_GATE = "1";
+  // A thread named in a fixture file has its next turn refused before any engine starts, as a typed pre-dispatch refusal.
+  if (parentEnv.OMB_TEST_STARTUP_REFUSAL === "1") childEnv.OMB_TEST_STARTUP_REFUSAL = "1";
   // The first-reply rescue's delay in ms, so a check need not sit through 20 s of silence.
   if (/^\d{1,6}$/.test(parentEnv.OMB_FIRST_REPLY_NOTICE_MS ?? "")) childEnv.OMB_FIRST_REPLY_NOTICE_MS = parentEnv.OMB_FIRST_REPLY_NOTICE_MS;
   // How long a tool call may hold the person's message unread, in ms, so a check need not sit through a minute.
@@ -282,6 +284,7 @@ export function verificationServerArgs(childEnv: NodeJS.ProcessEnv): string[] {
     ...(childEnv.OMB_TEST_STALL_CLOCK === "1" ? hook("stall-clock-hooks.mjs") : []),
     ...(childEnv.OMB_TEST_RESUME_CLOCK === "1" ? hook("resume-clock-hooks.mjs") : []),
     ...(childEnv.OMB_TEST_MEMORY_GATE === "1" ? hook("memory-gate-hooks.mjs") : []),
+    ...(childEnv.OMB_TEST_STARTUP_REFUSAL === "1" ? hook("startup-refusal-hooks.mjs") : []),
     join(ROOT, "server", "index.ts"),
   ];
 }

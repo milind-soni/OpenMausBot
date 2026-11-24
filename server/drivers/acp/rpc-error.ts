@@ -67,3 +67,24 @@ export function acpMissingSession(error: unknown, cursor: string): boolean {
   const named = refusal.message.match(MISSING_SESSION_MESSAGE);
   return named?.[1] === cursor;
 }
+
+/** OpenCode's provider rejects this exact tools-array validation before starting the model. */
+function openCodePromptToolLimitRefusal(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const refusal = vendorFailures.get(error);
+  const { code, data } = error as Error & { code?: unknown; data?: { service?: unknown; errorName?: unknown } };
+  return refusal?.method === "session/prompt" && code === -32603
+    && data?.service === "session" && data.errorName === "APIError"
+    && /^Internal error: Invalid value for 'tools': maximum number of items is [1-9]\d{0,4}\.$/.test(refusal.message);
+}
+
+/** Proof that a sent OpenCode prompt never ran: the first prompt call's own error is the exact tools-array refusal, and
+ * the turn saw no activity or usage (the caller has already checked for no output, tools or asks). Null otherwise. */
+export function openCodeToolLimitProof(error: unknown, turn: { firstPromptError: unknown; startupActivity: boolean; usage: unknown }) {
+  if (error !== turn.firstPromptError || turn.startupActivity || turn.usage !== null || !openCodePromptToolLimitRefusal(error)) return null;
+  const { data } = error as Error & { data: { service: string; errorName: string } };
+  return { kind: "opencode-tool-limit-refusal", evidence: {
+    sameErrorAsFirstPrompt: true, method: "session/prompt", code: -32603, service: data.service, errorName: data.errorName,
+    message: vendorFailures.get(error as Error)!.message, output: false, activity: false, usage: null,
+  } };
+}

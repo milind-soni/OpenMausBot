@@ -5,11 +5,12 @@
 // lent computer refused because its routine isn't confirmed as theirs. A run that never started work counts for nothing here.
 import { envWhole } from "./env-limits.ts";
 import { afterSpacing, noStartSpacing } from "./routine-no-start.ts";
+import { replayBlocked } from "./replay-guard.ts";
 import { outcomesNewestFirst } from "./routine-outcomes.ts";
 import type { RoutineAlert } from "./routine-recovery.ts";
 import type { SkipWhy } from "./routine-skips.ts";
 
-type Outcome = { id: string; routineId: string; status: string; error?: string | null; createdAt: number; startedAt?: number | null; finishedAt?: number | null; ownerCause?: string; lendingRefused?: true };
+type Outcome = { id: string; threadId?: string | null; routineId: string; status: string; error?: string | null; createdAt: number; startedAt?: number | null; finishedAt?: number | null; ownerCause?: string; lendingRefused?: true };
 type Spaced = { id: string; updatedAt: number };
 
 export interface FailureSpacingLimits {
@@ -61,7 +62,9 @@ export function runSpacing<T extends Outcome>(routine: Spaced, runs: readonly T[
 export function failureSpacingAlert<T extends Outcome>(routine: Spaced & { enabled?: boolean } | undefined, runs: readonly T[], run: T, limits = failureSpacingLimits()): RoutineAlert | undefined {
   const failed = routine && routine.enabled !== false ? failedRuns(routine, runs) : [];
   if (failed.length !== limits.runs || failed[0]?.id !== run.id) return undefined;
-  return { detail: `${run.error} ${limits.runs} runs in a row failed. It stays on, and tries again less often until a run completes.` };
+  const spacing = `${limits.runs} runs in a row failed. It stays on, and tries again less often until a run completes.`;
+  // An appended replay refusal can fill the incident chip before it reaches the schedule change.
+  return { detail: run.error?.endsWith(replayBlocked(run.threadId)) ? `${spacing} ${run.error}` : `${run.error} ${spacing}` };
 }
 
 /** The routine as wake and sleep planning should see it: its next run is the first occurrence a spacing does not skip. */

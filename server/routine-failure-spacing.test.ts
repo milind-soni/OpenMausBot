@@ -7,6 +7,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FAILURE_FIRST_SPACING_MS, FAILURE_SPACING_MS, failedRuns, failureSpacing, failureSpacingAlert, failureSpacingLimits, runSpacing } from "./routine-failure-spacing.ts";
+import { incidentChip } from "./incidents.ts";
+import { REPLAY_BLOCKED } from "./replay-guard.ts";
 import { sessionHolds, startPrompt } from "./routine-recovery.ts";
 import { RoutineManager, type RoutineManagerOptions, type RoutineRun } from "./routines.ts";
 
@@ -28,6 +30,17 @@ const completed = (id: string, at: number) => ({ id, routineId: "r", status: "co
 const routine = { id: "r", updatedAt: 0 };
 
 describe("failed runs in a row", () => {
+  it("keeps the schedule-spacing reason visible when replay was blocked", () => {
+    const third = failed("c", 300, { error: `claude exited 3 before result: fake-claude: simulated crash before result ${REPLAY_BLOCKED}` });
+    const alert = failureSpacingAlert(routine, [failed("a", 100), failed("b", 200), third], third);
+    const chip = incidentChip({
+      kind: "routine-failed", bot: { id: "bot", name: "Ada" }, threadId: "thread",
+      detail: `Inbox brief: ${alert?.detail}`,
+    });
+    expect(chip).toContain("3 runs in a row failed. It stays on, and tries again less often until a run completes.");
+    expect(alert?.detail).toContain(REPLAY_BLOCKED);
+  });
+
   it("space the routine's scheduled runs an hour after the third and four hours after each later one", () => {
     expect(failureSpacing(routine, [failed("a", 100), failed("b", 200)])).toBeNull();
     expect(failureSpacing(routine, [failed("a", 100), failed("b", 200), failed("c", 300)])).toMatchObject({ streak: 3, until: 350 + FAILURE_FIRST_SPACING_MS, last: { id: "c" } });

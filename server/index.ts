@@ -1,4 +1,4 @@
-import { createReplayLedger, REPLAY_BLOCKED, requireReplayAdmission, type ReplayRef, type ReplaySite } from "./replay-guard.ts";
+import { createReplayLedger, replayBlocked, requireReplayAdmission, type ReplayRef, type ReplaySite } from "./replay-guard.ts";
 import { createReplayEvents } from "./replay-events.ts";
 // Import first: it reads a Cloud home's secrets off the launcher's pipe before any module can start a process.
 import { BOOT_CLOUD_SECRETS } from "./cloud-secrets-boot.ts";
@@ -3943,8 +3943,8 @@ const titleHandedThread = createHandedThreadTitle({ store, gate: threadTitleGate
       const recovering = composed.turn === "rerun" || node.restart !== undefined;
       const replay = recovering ? guardTaskReplay(node.botId, node.threadId, replayLedger.latestForTask(`coordination:${node.id}`), "held-request") : undefined;
       if (recovering && !replay) {
-        if (!node.parentId && !group) routines?.failThread(node.threadId, REPLAY_BLOCKED, { cause: "refused" });
-        return { ok: false, text: REPLAY_BLOCKED };
+        if (!node.parentId && !group) routines?.failThread(node.threadId, replayBlocked(node.threadId), { cause: "refused" });
+        return { ok: false, text: replayBlocked(node.threadId) };
       }
       const bot = store.bot(node.botId)!; if (node.answeredBy) askCards.decided(node, (node.answeredBy.kind === "bot" ? store.bot(node.answeredBy.botId)?.name : undefined) ?? bot.name);
       if (!node.parentId && !group && !resumed) return runRootTurn(node, bot, signal, composed, replay);
@@ -6102,8 +6102,8 @@ function continueComputerSelection(threadId: string, generation: string | undefi
     if (hasQueuedSteeredMessages(bot.id, threadId)) { giveUp(); drainQueuedSends(); return; }
     if (selection.source && store.activePath(threadId).findLast(message => message.role === "user" && message.kind === "text")?.id !== selection.source.id) return;
     store.patchTask(bot.id, threadId, { surface, surfaceSource: "auto" });
-    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: failedTurnTool(REPLAY_BLOCKED) });
-    if (selection.handoff) settleDirectCoordination(generation, { ok: false, text: REPLAY_BLOCKED });
+    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: failedTurnTool(replayBlocked(threadId)) });
+    if (selection.handoff) settleDirectCoordination(generation, { ok: false, text: replayBlocked(threadId) });
   });
   return true;
 }
@@ -6908,7 +6908,7 @@ const { reportIncident, incidentRefused, retryThread } = createChiefNotices({
   ...(teamOwners.noticeRouting ? { routing: teamOwners.noticeRouting } : {}),
   continueRequest: async (botId, threadId, text) => {
     const replay = guardTaskReplay(botId, threadId, replayLedger.latest(threadId), "chief-retry");
-    if (!replay) throw new Error(REPLAY_BLOCKED);
+    if (!replay) throw new Error(replayBlocked(threadId));
     return startTurn(botId, text, { threadId, unattended: true, cardContinuation: true, replay, requestMessageId: directRequestOwners.get(threadId)?.messageId });
   },
 });
@@ -7461,7 +7461,7 @@ function replayInline(input: SendTurnInput, instance: string, model: string, sit
   const scope = replayScope(input.botId, input.threadId);
   if (!ref || !scope || !replayLedger.begin(ref, scope, { configuredInstance: instance, configuredModel: model }, true) ||
       !replayLedger.markSubmitted(ref, replayExecution(input), scope)) {
-    store.appendMessage(input.threadId, { role: "bot", kind: "activity", tool: failedTurnTool(REPLAY_BLOCKED) });
+    store.appendMessage(input.threadId, { role: "bot", kind: "activity", tool: failedTurnTool(replayBlocked(input.threadId)) });
     return false;
   }
   replayEvents.begin(input.threadId, ref, instance, true);
@@ -7527,8 +7527,8 @@ async function beginTurn(
   requireReplayAdmission(opts,
     Boolean(suppliedRequest && replayLedger.hasRequest(threadId, suppliedRequest)),
     // The goal loop advances after a successful step, but reuses the request ID when retrying a failed step.
-    Boolean(controlledRequest && replayLedger.hasDispatchedForRequest(threadId, controlledRequest, Boolean(opts?.goalRunId))));
-  if (opts?.replay && !replayLedger.isAdmitted(opts.replay, threadId)) throw Object.assign(new Error(REPLAY_BLOCKED), { status: 409 });
+    Boolean(controlledRequest && replayLedger.hasDispatchedForRequest(threadId, controlledRequest, Boolean(opts?.goalRunId))), threadId);
+  if (opts?.replay && !replayLedger.isAdmitted(opts.replay, threadId)) throw Object.assign(new Error(replayBlocked(threadId)), { status: 409 });
   const continuingRoutine = opts?.cardContinuation ? activeRoutineRunForThread(threadId) : null;
   if (continuingRoutine) {
     const onDispatchError = opts?.onDispatchError;
@@ -7635,7 +7635,7 @@ async function beginTurn(
   const previousRoutine = routineId ? replayLedger.latestForTask(routineId) : undefined;
   if (previousRoutine && !opts?.replay) {
     const replay = guardTaskReplay(botId, threadId, previousRoutine, "routine-recovery");
-    if (!replay) throw Object.assign(new Error(REPLAY_BLOCKED), { status: 409 });
+    if (!replay) throw Object.assign(new Error(replayBlocked(threadId)), { status: 409 });
     opts = { ...opts, replay };
   }
 
@@ -7683,7 +7683,7 @@ async function beginTurn(
   const firstCoordinationTask = coordinationTask && !replayLedger.latestForTask(coordinationTask) ? coordinationTask : undefined;
   const replayRef = replay ?? { logicalTaskId: routineId || firstCoordinationTask || randomUUID(), generation: dispatchClaimId };
   if (!replayScopeAtStart || !replayLedger.begin(replayRef, replayScopeAtStart, { configuredInstance: instance.instanceId, configuredModel: route.model, requestId: replay ? undefined : controlledRequest ?? userMessage.id }, Boolean(replay))) {
-    throw Object.assign(new Error(REPLAY_BLOCKED), { status: 409 });
+    throw Object.assign(new Error(replayBlocked(threadId)), { status: 409 });
   }
   replayEvents.begin(threadId, replayRef, instance.instanceId);
   if (opts?.trigger) turnTriggers.set(threadId, opts.trigger);
@@ -8403,7 +8403,7 @@ async function beginTurn(
       if (held) throw held.scope === "signed-out" ? Object.assign(new TurnAuthenticationRefusedError(`signed-out-${randomUUID()}`, `${engineName(instanceId)} is signed out.`, true), userErrorFields(userError("serverError.engine.signedOut", { name: engineName(instanceId) }))) : new TurnUsageLimitRefusedError(`limit-${randomUUID()}`, `${engineName(instanceId)} is at its usage limit.`, held.resetsAt, held.scope, true); perf.noteSetup(threadId, setup.done());
       const liveReplayScope = replayScope(bot.id, threadId);
       if (!liveReplayScope || !replayLedger.markSubmitted(replayRef, replayExecution({ approvalMode: approvalModeForTurn(bot, commsDepth > 0, threadId), cwd, guestConfined, toolScope }), replay ? liveReplayScope : undefined)) {
-        throw new Error(REPLAY_BLOCKED);
+        throw new Error(replayBlocked(threadId));
       }
       replayEvents.submitted(threadId, instance.driverKind === "claudeAgent" && integrations.hooks?.replayGuard === true);
       const dispatch = await guardTurnDispatch(shareNote.after(savedSteps.dispatch.sendTurn(instance, personLine && !opts?.unattended && !opts?.app?.context && !guestConfined ? { botId: bot.id, message: userMessage, turnText: text, placePicked: wants === "local" && placeSource !== "auto-pin" } : null, {
@@ -8565,7 +8565,7 @@ async function beginTurn(
           try {
             assertWithinBudget(cfg, DATA_DIR);
             const replay = guardTaskReplay(bot.id, threadId, replayRef, "startup-refusal");
-            if (!replay) throw new Error(REPLAY_BLOCKED);
+            if (!replay) throw new Error(replayBlocked(threadId));
             store.switchTaskModel(bot.id, threadId, checked.selection, false, false, {
               ...hostedModels?.resetTask(current.modelSelection, checked.selection), rewound: true,
             });
@@ -12887,7 +12887,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const ref = actionRef.replay;
         const actionId = `bridge:${randomUUID()}`;
         if (!replayLedger.reserveAction(ref, actionId, "effect") || !replayLedger.actionState(ref, actionId, "dispatched")) {
-          return json(res, 409, { error: REPLAY_BLOCKED });
+          return json(res, 409, { error: replayBlocked(internalCapability.threadId) });
         }
         res.once("close", () => { replayLedger.actionState(ref, actionId, "unknown"); });
       }

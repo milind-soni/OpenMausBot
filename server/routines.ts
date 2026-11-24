@@ -1,4 +1,4 @@
-import { REPLAY_BLOCKED } from "./replay-guard.ts";
+import { replayBlocked } from "./replay-guard.ts";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -382,7 +382,7 @@ export class RoutineManager {
         continue;
       } const froze = run.threadId && turnRan ? this.options.restartCut?.(run.threadId, run.startedAt) ?? null : null; // A run waiting on hand-offs keeps waiting; one whose turn ran through a memory freeze ends.
       if (this.options.replayEvidence && !this.options.replayEvidence(run)) {
-        Object.assign(run, { status: "failed", error: REPLAY_BLOCKED, attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>);
+        Object.assign(run, { status: "failed", error: replayBlocked(run.threadId), attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>);
         if (run.target === "room-goal") run.goalStatus = "failed";
         cut.push(cloneRun(run));
         continue;
@@ -1151,7 +1151,7 @@ export class RoutineManager {
         if (!this.ledger.ready(run)) continue; if (this.ledger.startedElsewhere(run)) { const line = codedLine("error", "routines.server.duplicate"); Object.assign(run, line.codes); void this.cancelRun(run.id, line.text); continue; }
         if (paused) { if (triggerSource !== "manual" && this.options.held?.(run.botId)) void this.cancelRun(run.id, paused); else this.failRun(run, paused); continue; } const startedBy = run.byPerson ? "manual" : triggerSource, capped = this.options.capText?.(run.botId, startedBy); if (capped) { if (startedBy === "manual") this.failRun(run, capped); else void this.cancelRun(run.id, capped); continue; } const gated = triggerSource === "manual" ? false : this.gate.hold(run); if (gated === true) { if (this.options.preparing && run.attention !== this.options.preparing) { run.attention = this.options.preparing; this.emitRun(run); } continue; } if (gated) { const again = wakeRetry(run, gated, definition, this.now()); if (again === true) { this.saveLater(); this.emitRun(run); } else this.failRun(run, again); continue; }
         if (run.retried && this.options.replayEvidence && !this.options.replayEvidence(run)) {
-          this.failRun(run, REPLAY_BLOCKED);
+          this.failRun(run, replayBlocked(run.threadId));
           continue;
         }
         const startedAt = this.now();

@@ -26,7 +26,7 @@ import { acpCapabilities } from "./capabilities.ts"; import { readAcpMediaLinks 
 import { acpNativeLogMessage } from "./tool-log.ts";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
 import { formatQuietLimit, lastSeenPhrase, LIMIT_WORDS, promptIdleTimeoutMs, type LogSignal } from "./quiet-status.ts"; import { startAcpQuietWatch } from "./quiet-watch.ts"; import { AppliedConfig } from "./applied-config.ts"; import { modelRefused, roomForReadBeside, startupRefresh } from "./startup-refresh.ts"; import { stderrFailureOf, watchStderrFailure, type StderrFailure } from "./harness-failure.ts"; import { timed, turnStartClock, type TurnStartClock } from "../../perf/turn-starts.ts";
-import { acpMissingSession, retryTransient } from "./rpc-error.ts";
+import { acpMissingSession, openCodeToolLimitProof, retryTransient } from "./rpc-error.ts";
 import { readSessionReport } from "./session-reports.ts";
 import { promptTokenUsage } from "./prompt-usage.ts";
 import { advertisedCommands, turnAnswers, turnSteering, type AcpSteerSupport } from "./steer.ts";
@@ -1060,6 +1060,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
 
         (async () => {
           let pendingSplitReceipt: PendingPromptSplitReceipt | null = null;
+          let initialPromptRejection: unknown;
           try {
             const handshake = async (): Promise<boolean> => {
               for (const child of retiring.get(threadId) ?? []) {
@@ -1300,7 +1301,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 return `${support.displayName} sent nothing for ${formatQuietLimit(promptIdleMs)} with no tool running, so the turn was stopped as stuck` +
                   `${last ? ` (last seen: ${lastSeenPhrase(last)})` : ""}. Send the message again to retry.`;
               },
-              );
+              ).catch((error: unknown) => { initialPromptRejection = error; throw error; });
             const harnessFailed = stderrFailureOf(session.host); if (harnessFailed) throw harnessFailed;
             const steersOut = current.steering?.promptAnswered();
             if (steersOut && !state.stopped) { current.flushAssistantText(); await steersOut; }
@@ -1349,7 +1350,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "rpc_error", cost: null });
                 });
               }
-              if (untouched && !state.promptSent && retryUnderToolLimit(e, { key: toolLimitKey, model: resolvedModel, engine: DRIVER_KIND, retry: () => {
+              if (untouched && retryUnderToolLimit(e, { key: toolLimitKey, model: resolvedModel, engine: DRIVER_KIND, proof: !state.promptSent ? { kind: "prompt-not-sent" } : DRIVER_KIND === "opencodeGo" ? openCodeToolLimitProof(e, { firstPromptError: initialPromptRejection, startupActivity: state.startupActivity, usage: state.usageLast }) : null, retry: () => {
                 acknowledge(); state.settled = true; session.current = null; active.delete(threadId); current.stopQuietWatch?.();
                 return sendTurn({ ...turn, startupRecovery: undefined, sessionReset: undefined, resumeCursor: session.sessionId ?? turn.resumeCursor }, turnId);
               }, failed: (error) => { acknowledge(); emit({ ...base(threadId, turnId), type: "runtime.error", message: error instanceof Error ? error.message : String(error) });

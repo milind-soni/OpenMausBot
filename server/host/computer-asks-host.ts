@@ -2,7 +2,7 @@
 // lends now and the ask_for_computer call itself.
 import type { ServerResponse } from "node:http";
 
-import { REPLAY_BLOCKED } from "../replay-guard.ts";
+import { replayBlocked } from "../replay-guard.ts";
 import { failedTurnTool } from "../../shared/failed-turn.ts";
 import { ComputerAsks } from "../computer-asks.ts";
 import type { json as sendJson } from "../harness/http.ts";
@@ -41,7 +41,7 @@ export function createComputerAsksHost(deps: ComputerAsksHostDeps) {
       if (deps.threadBusy(botId, threadId) || deps.queued(botId, threadId)) return false;
       // Someone wrote since the bot asked: they lead now.
       if (store.activePath(threadId).findLast((message) => message.role === "user" && message.kind === "text")?.id !== requestMessageId) return true;
-      store.appendMessage(threadId, { role: "bot", kind: "activity", tool: failedTurnTool(REPLAY_BLOCKED) });
+      store.appendMessage(threadId, { role: "bot", kind: "activity", tool: failedTurnTool(replayBlocked(threadId)) });
       return true;
     },
   });

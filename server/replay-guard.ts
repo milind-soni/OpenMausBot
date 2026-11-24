@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { closeSync, openSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import { conversationLanguage, serverLine } from "./server-lines.ts";
 
 export type ReplaySite = "direct-quota" | "peer-limit" | "startup-refusal" | "quota-card" | "quick-model" | "saved-steps" | "routine-recovery" | "chief-retry" | "held-request";
 export type ReplayRef = { logicalTaskId: string; generation: string };
@@ -21,14 +22,16 @@ export interface ActionRecord {
 export type ReplayScope = { owner: string; threadId: string; approval: string; tools: unknown; workspace: string; authority: unknown };
 type Attempt = { generation: string; owner: string; thread: string; scope: string; evidence: string; outcome: string; next: string | null; predecessor: string | null };
 type Attribution = { configuredInstance: string; configuredModel: string; requestId?: string };
-export const REPLAY_BLOCKED = "Interrupted. Replay was blocked because work may already have run or the original authorization may be unavailable. Preserve the original results and reconcile any outstanding action before starting a controlled continuation.";
+export const REPLAY_BLOCKED = serverLine(undefined, "server.replay.blocked");
+export const replayBlocked = (threadId?: string | null): string =>
+  threadId ? serverLine(conversationLanguage(threadId), "server.replay.blocked") : REPLAY_BLOCKED;
 type ReplayDispatch = { replay?: ReplayRef; peerLimitResent?: boolean; automaticRecoveryAttempted?: boolean;
   automaticRecoveryIndex?: number; computerSelectionContinuation?: boolean; recoveringCoordination?: boolean };
 
-export function requireReplayAdmission(dispatch: ReplayDispatch | undefined, reusedRequest = false, priorDispatch = false): void {
+export function requireReplayAdmission(dispatch: ReplayDispatch | undefined, reusedRequest = false, priorDispatch = false, threadId?: string): void {
   if (!dispatch?.replay && (reusedRequest || priorDispatch || dispatch?.peerLimitResent || dispatch?.automaticRecoveryAttempted ||
       dispatch?.automaticRecoveryIndex !== undefined || dispatch?.computerSelectionContinuation || dispatch?.recoveringCoordination)) {
-    throw Object.assign(new Error(REPLAY_BLOCKED), { status: 409 });
+    throw Object.assign(new Error(replayBlocked(threadId)), { status: 409 });
   }
 }
 

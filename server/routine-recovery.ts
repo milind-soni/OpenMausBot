@@ -16,7 +16,7 @@ import type { Routine, RoutineRun } from "./routines.ts";
 import { codedLine, fittedLine, type RoutineLine, type RoutineLineKey } from "./routine-lines.ts";
 import { hostTimeZone } from "./turn-clock.ts";
 import { classifyContinuable } from "./turn-continuation.ts";
-import { REPLAY_BLOCKED } from "./replay-guard.ts";
+import { replayBlocked } from "./replay-guard.ts";
 
 export type RoutineOwnerCause = "signed_out" | "credits" | "usage_limit" | "setup";
 
@@ -225,7 +225,7 @@ export function recoverRun(run: RoutineRun, failure: string, facts: RoutineFailu
     return requeueOnce(run, cause, failure, now, at);
   };
   const failed = (line: RoutineLine, alert?: RoutineAlert | null): RoutineRecovery => {
-    if (blocked) line = fittedLine("error", `${line.text} ${REPLAY_BLOCKED}`, undefined);
+    if (blocked) line = fittedLine("error", `${line.text} ${replayBlocked(run.threadId)}`, undefined);
     Object.assign(run, line.codes);
     return { queued: false, error: line.text, ...(alert === undefined ? {} : { alert }) };
   };

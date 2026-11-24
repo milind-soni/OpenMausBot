@@ -11885,5 +11885,6 @@
   "skillBurger.pill.running": "Running… {count}",
   "skillBurger.pill.stopped": "Stopped",
   "skillBurger.pill.addPath": "Add path",
-  "skillBurger.card.madeBy": "Made by {name}"
+  "skillBurger.card.madeBy": "Made by {name}",
+  "server.replay.blocked": "Interrupted. Replay was blocked because work may already have run or the original authorization may be unavailable. Preserve the original results and reconcile any outstanding action before starting a controlled continuation."
 }

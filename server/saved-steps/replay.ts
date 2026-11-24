@@ -1,4 +1,4 @@
-import { REPLAY_BLOCKED } from "../replay-guard.ts";
+import { replayBlocked } from "../replay-guard.ts";
 import { newId, type RuntimeEvent } from "../contracts.ts";
 import { resolveStepSoon, type CallOutcome, type ComputerCaller, type Patience } from "./resolve.ts";
 import { stepLabel, type Recipe, type RecipeStep } from "./rules.ts";
@@ -56,7 +56,7 @@ export async function runSteps(
     if (signal.aborted) return STOPPED;
     if (!allowed) return { kind: "declined", tool: step.tool, label };
     const itemId = newId();
-    if (deps.reserveAction && !deps.reserveAction(itemId, tool, target.args)) return failed({ ok: false, error: REPLAY_BLOCKED });
+    if (deps.reserveAction && !deps.reserveAction(itemId, tool, target.args)) return failed({ ok: false, error: replayBlocked(turn.threadId) });
     publish({ ...base(itemId), type: "item.started", itemType: "tool", title: tool, input: summary });
     const result = await caller.call(step.tool, target.args, signal);
     publish({ ...base(itemId), type: "item.completed", itemType: "tool", ok: result.ok, output: result.ok ? "done" : result.error });

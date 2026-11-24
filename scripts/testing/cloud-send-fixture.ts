@@ -244,7 +244,8 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       claude: { driver: "claudeAgent", displayName: "Claude", config: { cli } },
     } }));
     const offline = `data:text/javascript,${encodeURIComponent('const real = globalThis.fetch; const admin = process.env.FIXTURE_ADMIN_STAND_IN; globalThis.fetch = async (url, init) => admin && String(url).startsWith("https://cloud.example.test/") ? real(admin + String(url).slice(26), init) : String(url).startsWith("http://127.0.0.1:") ? real(url, init) : new Response("offline fixture", { status: 503 });')}`;
-    const child = spawn(process.execPath, ["--import", offline, ...extra, join(SERVER_DIR, "index.ts")], {
+    const refusing = ({ ...env, ...own }).OMB_TEST_STARTUP_REFUSAL === "1" ? ["--import", pathToFileURL(join(SERVER_DIR, "testing", "startup-refusal-hooks.mjs")).href] : [];
+    const child = spawn(process.execPath, ["--import", offline, ...refusing, ...extra, join(SERVER_DIR, "index.ts")], {
       cwd: join(SERVER_DIR, ".."),
       env: { PATH: process.env.PATH, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}), HOME: home, USERPROFILE: home, OMB_DATA_DIR: dataDir,
         OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_DUCKDB_DIR: fakeOnePassword(join(home, "native"), acceptedToken, onePasswordItems), ...env, ...own },

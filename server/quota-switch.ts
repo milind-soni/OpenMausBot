@@ -1,4 +1,5 @@
-import { REPLAY_BLOCKED, type ReplayRef } from "./replay-guard.ts";
+import { isServerLine } from "./server-lines.ts";
+import { replayBlocked, type ReplayRef } from "./replay-guard.ts";
 import { type ServerText } from "../shared/server-text.ts";
 // Security invariants: only an "answer" may name an engine (a decline, or typed words matching no option, is "Not now"),
 // so a bot's own shell with decline-only service trust can never switch the engine or resend the person's message.
@@ -186,7 +187,7 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
       const held = heldBy(botId, threadId, rootOf(threadId, request));
       if (held || deps.request(threadId) !== request || !resendable(store, threadId, request.messageId)) return { why: "conversation-changed" };
       replay = deps.guardReplay(botId, threadId, request.replay, "direct-quota");
-      if (!replay) return { why: "switch-refused", detail: REPLAY_BLOCKED };
+      if (!replay) return { why: "switch-refused", detail: replayBlocked(threadId) };
     }
     try {
       store.switchTaskModel(botId, threadId, checked.selection, false, false, deps.reset?.(bot.modelSelection, checked.selection));
@@ -267,8 +268,8 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
             return null;
           }
           skipped.push({ selection, ...why });
-          if (why.detail === REPLAY_BLOCKED) {
-            notice(threadId, REPLAY_BLOCKED, false);
+          if (isServerLine("server.replay.blocked", why.detail ?? "")) {
+            notice(threadId, replayBlocked(threadId), false);
             break;
           }
         }
@@ -347,9 +348,9 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     let replay: ReplayRef | undefined;
     if (deps.guardReplay) {
       const ref = card.quotaSwitch!.replay;
-      if (heldBy(botId, threadId, card.quotaSwitch!.rootId) || !resendable(store, threadId, card.quotaSwitch!.messageId)) return refuse(REPLAY_BLOCKED, closed);
+      if (heldBy(botId, threadId, card.quotaSwitch!.rootId) || !resendable(store, threadId, card.quotaSwitch!.messageId)) return refuse(replayBlocked(threadId), closed);
       replay = deps.guardReplay(botId, threadId, ref, "quota-card");
-      if (!replay) return refuse(REPLAY_BLOCKED, closed);
+      if (!replay) return refuse(replayBlocked(threadId), closed);
     }
     if (!already) {
       try {

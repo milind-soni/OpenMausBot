@@ -11885,5 +11885,6 @@
   "skillBurger.pill.running": "Executando… {count}",
   "skillBurger.pill.stopped": "Parado",
   "skillBurger.pill.addPath": "Adicionar caminho",
-  "skillBurger.card.madeBy": "Feito por {name}"
+  "skillBurger.card.madeBy": "Feito por {name}",
+  "server.replay.blocked": "Interrompido. A repetição foi bloqueada porque o trabalho pode já ter sido executado ou a autorização original pode estar indisponível. Preserve os resultados e verifique as ações pendentes antes de continuar de forma controlada."
 }
