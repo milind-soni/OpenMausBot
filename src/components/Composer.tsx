@@ -3,7 +3,7 @@ import { TeamAudienceLabel } from "./TeamSideSwitch";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
 import { ComposerForkError, useComposerFork } from "./ComposerFork";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
-import { Mic, Square } from "lucide-react";
+import { Mic, Square, X } from "lucide-react";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { useStoreRef } from "@/state/store-ref"; import { sameDrawnBots } from "@/lib/drawn-bots";
 import { visibleMessages, currentTaskBot, type Bot, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -231,7 +231,7 @@ export function Composer({
     },
     [text, editText, editAttachments],
   );
-  const { recording, ready: micReady, speechError, toggle: toggleMic, stop: stopDictation } = useComposerDictation({ draftId, text, onText: editText });
+  const { recording, ready: micReady, speechError, dismissSpeechError, toggle: toggleMic, stop: stopDictation } = useComposerDictation({ draftId, text, onText: editText });
   const fork = useComposerFork({ ownerId: forkOwnerId, kind: group ? "group" : "bot", threadId,
     branchLeafId: group ? undefined : bot?.activeLeafId ?? undefined, draftId, text, editText, stopDictation });
   const micShown = !locked && !busy && micReady;
@@ -711,8 +711,21 @@ export function Composer({
   return (
     <div className={cn("pointer-events-none relative px-4", simpleDock ? "pb-4" : "pb-3")}>
       {speechError && (
-        <div className="pointer-events-auto mb-2 w-full rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning">
-          {speechError}
+        <div className={cn("pointer-events-auto mb-2 w-full rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning", dismissSpeechError && "flex items-start gap-2")}>
+          {dismissSpeechError ? (
+            <>
+              <span role="status" className="min-w-0 flex-1 break-words">{speechError}</span>
+              <button
+                type="button"
+                onClick={() => { dismissSpeechError(); inputRef.current?.focus(); }}
+                aria-label={t("composer.notice.dismiss")}
+                title={t("composer.notice.dismiss")}
+                className="ui-icon-button -my-1 size-6 min-h-6 shrink-0 p-0 text-warning hover:bg-ink/[0.06] active:bg-ink/[0.08] touch:size-10"
+              >
+                <X size={14} aria-hidden="true" />
+              </button>
+            </>
+          ) : speechError}
         </div>
       )}
       <div className="pointer-events-auto relative w-full">

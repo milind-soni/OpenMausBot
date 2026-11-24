@@ -16,7 +16,7 @@ export function useComposerDictation({ draftId, text, onText }: {
   const configNow = useRef(config);
   configNow.current = config;
   const [recording, setRecording] = useState(false);
-  const [speechError, setSpeechError] = useState<ReactNode>(null);
+  const [speechError, setSpeechError] = useState<{ message: ReactNode; dismissible?: boolean } | null>(null);
   const draft = useRef({ id: draftId, text });
   draft.current = { id: draftId, text };
   const session = useRef({ draftId: "", base: "" });
@@ -63,17 +63,21 @@ export function useComposerDictation({ draftId, text, onText }: {
       active = false;
       setRecording(false);
       if (code === 2) {
-        setSpeechError(t("composer.dictation.macOnly"));
+        setSpeechError({ message: t("composer.dictation.macOnly") });
       } else if (code === 1) {
         // A refused permission comes with a way to the pane that grants it.
-        setSpeechError(message ?? (reason === "speech-not-authorized" ? withOpenSettings(t("composer.dictation.permission"), "speech")
-          : t(reason === "dictation-disabled" ? "composer.dictation.disabled" : "composer.dictation.failed")));
+        const dismissible = reason === "dictation-disabled";
+        setSpeechError({
+          message: message ?? (reason === "speech-not-authorized" ? withOpenSettings(t("composer.dictation.permission"), "speech")
+            : t(dismissible ? "composer.dictation.disabled" : "composer.dictation.failed")),
+          dismissible,
+        });
       }
     });
     void bridge.speechStart().catch(() => {
       if (!active) return;
       cancelSession();
-      setSpeechError(t("composer.dictation.failed"));
+      setSpeechError({ message: t("composer.dictation.failed") });
     });
     return () => {
       if (cancel.current === cancelSession) cancel.current = null;
@@ -89,7 +93,7 @@ export function useComposerDictation({ draftId, text, onText }: {
 
   const toggle = () => {
     if (!ready || !speechBridge(config)) {
-      setSpeechError(t("composer.dictation.unavailable"));
+      setSpeechError({ message: t("composer.dictation.unavailable") });
     } else if (recording) {
       if (finish.current) finish.current();
       else stop();
@@ -98,5 +102,8 @@ export function useComposerDictation({ draftId, text, onText }: {
       setRecording(true);
     }
   };
-  return { recording, ready, speechError, toggle, stop };
+  const dismissSpeechError = speechError?.dismissible
+    ? () => setSpeechError((current) => current?.dismissible ? null : current)
+    : undefined;
+  return { recording, ready, speechError: speechError?.message ?? null, dismissSpeechError, toggle, stop };
 }

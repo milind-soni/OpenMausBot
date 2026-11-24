@@ -46,7 +46,7 @@ describe("native dictation in the real composer", () => {
   let root: Root;
   let container: HTMLDivElement;
   let transcript: (line: Transcript) => void;
-  let end: (info: { code: number; reason?: string }) => void;
+  let end: (info: { code: number; reason?: string; message?: string }) => void;
   let speechStop: ReturnType<typeof vi.fn>;
   let speechStart: ReturnType<typeof vi.fn>;
 
@@ -189,5 +189,39 @@ describe("native dictation in the real composer", () => {
     flushSync(() => end({ code: 1, reason: "recognition-error" }));
     hear("");
     expect(input().value).toBe("失敗しても残す文章。");
+  });
+
+  it("dismisses the dictation-disabled warning, refocuses the draft and shows the warning again after retry", () => {
+    const draft = "失敗しても残す文章。";
+    const warning = t("composer.dictation.disabled");
+    const dismissLabel = t("composer.notice.dismiss");
+    const failDictation = () => flushSync(() => end({ code: 1, reason: "dictation-disabled" }));
+    hear(draft);
+    failDictation();
+    expect(container.textContent).toContain(warning);
+
+    const dismiss = button(dismissLabel);
+    expect(dismiss).not.toBeNull();
+    dismiss?.focus();
+    expect(document.activeElement).toBe(dismiss);
+    click(dismissLabel);
+    expect(container.textContent).not.toContain(warning);
+    expect(button(dismissLabel)).toBeNull();
+    expect(document.activeElement).toBe(input());
+    expect(input().value).toBe(draft);
+
+    click(t("composer.dictation.start"));
+    expect(speechStart).toHaveBeenCalledTimes(2);
+    failDictation();
+    expect(container.textContent).toContain(warning);
+    expect(button(dismissLabel)).not.toBeNull();
+    expect(input().value).toBe(draft);
+  });
+
+  it("does not offer dismissal for a different error with the same message", () => {
+    const message = t("composer.dictation.disabled");
+    flushSync(() => end({ code: 1, reason: "recognition-error", message }));
+    expect(container.textContent).toContain(message);
+    expect(button(t("composer.notice.dismiss"))).toBeNull();
   });
 });
