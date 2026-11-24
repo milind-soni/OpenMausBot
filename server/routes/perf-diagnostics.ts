@@ -18,6 +18,9 @@ export const LAUNCH_PATH = "/api/diagnostics/launch";
 const LAUNCH_BODY_MAX = 16 * 1024;
 
 export interface StorageViewDeps {
+  /** This server's environment id (already public at /.well-known/openmausbot/environment): the app keys what it remembers
+   * of a storage answer by it, so two Clouds never share a "seen" mark or numbers. */
+  serverId?: string;
   storageNow?(): Promise<VolumeBytes | null>;
   storageMeasureInS?(): number | null;
   measureStorage?(): MeasureAnswer | null;
@@ -46,5 +49,5 @@ export function createPerfDiagnosticsRoutes(deps: { text(): string; bots?(): Bot
 async function storageBody(deps: { storage?(): StorageReport | null } & StorageViewDeps) {
   const storage = deps.storage?.() ?? null;
   if (!storage || !deps.storageNow) return { storage };
-  return { storage, now: await deps.storageNow().catch(() => null), measureInS: deps.storageMeasureInS?.() ?? null };
+  return { storage, now: await deps.storageNow().catch(() => null), measureInS: deps.storageMeasureInS?.() ?? null, ...(deps.serverId ? { server: deps.serverId } : {}) };
 }

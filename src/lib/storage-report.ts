@@ -26,6 +26,16 @@ export interface StorageAnswer {
   storage: StorageReportWire | null;
   now?: Volume | null;
   measureInS?: number | null;
+  /** The server's environment id: what the app remembers of this answer is kept under it. */
+  server?: string;
+}
+
+/** Whose answer this is: the server's own id, or (an older server without one) this page's origin. What the app remembers
+ * of a storage answer (the "seen" mark) is kept per scope, so switching Clouds never hides another Cloud's line. */
+export function storageScope(answer: Pick<StorageAnswer, "server"> | null | undefined): string {
+  const server = typeof answer?.server === "string" ? answer.server.trim() : "";
+  if (server) return `server:${server}`;
+  try { return `origin:${globalThis.location?.origin ?? ""}`; } catch { return "origin:"; }
 }
 
 export type StorageGroupKey = "work" | "precious" | "rebuildable" | "other" | "unmeasured";
@@ -100,16 +110,18 @@ export function storageNotice(percent: number | null, seen: StorageBand | null):
 }
 
 const SEEN_KEY = "openmausbot.storageNotice.seen.v1";
-export function readStorageSeen(): StorageBand | null {
+/** The "seen" mark of one Cloud (storageScope). */
+export const storageSeenKey = (scope: string): string => `${SEEN_KEY}:${scope}`;
+export function readStorageSeen(scope: string): StorageBand | null {
   try {
-    const value = globalThis.localStorage?.getItem(SEEN_KEY);
+    const value = globalThis.localStorage?.getItem(storageSeenKey(scope));
     return value === "near" || value === "full" ? value : null;
   } catch { return null; }
 }
-export function writeStorageSeen(seen: StorageBand | null): void {
+export function writeStorageSeen(scope: string, seen: StorageBand | null): void {
   try {
-    if (seen === null || seen === "ok") globalThis.localStorage?.removeItem(SEEN_KEY);
-    else globalThis.localStorage?.setItem(SEEN_KEY, seen);
+    if (seen === null || seen === "ok") globalThis.localStorage?.removeItem(storageSeenKey(scope));
+    else globalThis.localStorage?.setItem(storageSeenKey(scope), seen);
   } catch { /* storage may be blocked: the line shows again next launch */ }
 }
 
@@ -122,13 +134,27 @@ export function storageSize(bytes: number, locale = activeLocale()): string {
 }
 
 export const BOTS_SHOWN = 5;
-export interface StorageBotRow { key: string; name: string | null; bytes: number; kind: "bot" | "gone" | "rest" }
+/** `private`: on a Team Cloud, a bot this person is not shown (a teammate's own MausBot): counted, never named. */
+export interface StorageBotRow { key: string; name: string | null; bytes: number; kind: "bot" | "private" | "gone" | "rest" }
 
-/** The largest bots first, named by the app (null when it has no name for the id), then deleted bots' leftovers and any
- * other bot folders together. */
-export function storageBots(report: StorageReportWire, nameOf: (id: string) => string | null | undefined, shown = BOTS_SHOWN): StorageBotRow[] {
+/** The names Storage may show: on a Team Cloud never another person's own MausBot (the server keeps it from an admin too;
+ * this holds should one still reach the list), which then reads as a private bot. */
+export function storageBotNames(bots: ReadonlyArray<{ id: string; name: string; defaultBot?: { person?: string } }>, team: { me: string | null } | null): Map<string, string> {
+  const me = team?.me?.trim().toLowerCase() ?? "";
+  return new Map(bots.filter((bot) => {
+    const person = bot.defaultBot?.person?.trim().toLowerCase();
+    return !team || !person || person === me;
+  }).map((bot) => [bot.id, bot.name]));
+}
+
+/** The largest bots first, named by the app (null when it has no name for the id; on a Team Cloud such a bot is a private
+ * one, someone else's), then deleted bots' leftovers and any other bot folders together. */
+export function storageBots(report: StorageReportWire, nameOf: (id: string) => string | null | undefined, shown = BOTS_SHOWN, team = false): StorageBotRow[] {
   const listed = report.bots.filter((bot) => bot.bytes > 0).sort((a, b) => b.bytes - a.bytes);
-  const rows: StorageBotRow[] = listed.slice(0, shown).map((bot) => ({ key: bot.id, name: nameOf(bot.id)?.trim() || null, bytes: bot.bytes, kind: "bot" }));
+  const rows: StorageBotRow[] = listed.slice(0, shown).map((bot) => {
+    const name = nameOf(bot.id)?.trim() || null;
+    return { key: bot.id, name, bytes: bot.bytes, kind: team && name === null ? "private" : "bot" };
+  });
   const gone = report.botsGone?.bytes ?? 0;
   const folded = listed.slice(shown).reduce((sum, bot) => sum + bot.bytes, 0);
   const rest = Math.max(0, report.botsRest.bytes - gone) + folded;

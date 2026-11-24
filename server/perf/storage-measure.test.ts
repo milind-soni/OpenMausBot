@@ -88,6 +88,7 @@ describe("the storage routes", () => {
     expect(await call("GET", STORAGE_PATH, deps)).toEqual({ status: 200, body: { storage: report, now: volume, measureInS: 0 } });
     expect(await call("GET", STORAGE_PATH, { ...deps, storage: () => null })).toEqual({ status: 200, body: { storage: null } });
     expect(await call("GET", STORAGE_PATH, { ...deps, storageNow: async () => { throw new Error("EIO"); } })).toEqual({ status: 200, body: { storage: report, now: null, measureInS: 0 } });
+    expect(await call("GET", STORAGE_PATH, { ...deps, serverId: "env-a" })).toEqual({ status: 200, body: { storage: report, now: volume, measureInS: 0, server: "env-a" } });
   });
 
   it("POST asks for a pass, and is 404 where nothing is measured", async () => {

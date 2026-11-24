@@ -1,8 +1,10 @@
+// @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
 
 import { GB, storageReport } from "./storage-report-fixture";
 import {
-  settleSeen, storageBand, storageBots, storageFullness, storageNotice, storageSize, storageSummary, type StorageAnswer, type StorageReportWire,
+  readStorageSeen, settleSeen, storageBand, storageBotNames, storageBots, storageFullness, storageNotice, storageScope, storageSeenKey, storageSize, storageSummary,
+  writeStorageSeen, type StorageAnswer, type StorageReportWire,
 } from "./storage-report";
 
 const answer = (report: StorageReportWire | null, over: Partial<StorageAnswer> = {}): StorageAnswer => ({ storage: report, ...over });
@@ -88,6 +90,39 @@ describe("the bots list", () => {
     const rows = storageBots(report, () => "Bot");
     expect(rows.map((row) => row.kind)).toEqual(["bot", "bot", "bot", "bot", "bot", "rest"]);
     expect(rows.at(-1)!.bytes).toBe(2 * GB + 3 * GB);
+  });
+});
+
+describe("on a Team Cloud", () => {
+  it("names only the bots this person may see, never a teammate's own MausBot, and counts an unnamed one as a private bot", () => {
+    const names = storageBotNames([
+      { id: "chief", name: "Chief" }, { id: "research", name: "Research", defaultBot: { person: "Ada@Example.com" } },
+      { id: "theirs", name: "Bo's MausBot", defaultBot: { person: "bo@example.com" } },
+    ], { me: "ada@example.com" });
+    expect([...names]).toEqual([["chief", "Chief"], ["research", "Research"]]);
+    expect(storageBots(storageReport(), (id) => names.get(id), undefined, true).map((row) => [row.key, row.kind, row.name])).toEqual([
+      ["chief", "bot", "Chief"], ["research", "bot", "Research"], ["gone", "gone", null], ["rest", "rest", null],
+    ]);
+    expect(storageBots(storageReport(), (id) => (id === "chief" ? "Chief" : undefined), undefined, true).map((row) => row.kind)).toEqual(["bot", "private", "gone", "rest"]);
+  });
+
+  it("off a team every bot keeps its name, and one without a name is unnamed, not private", () => {
+    expect([...storageBotNames([{ id: "theirs", name: "Bo's MausBot", defaultBot: { person: "bo@example.com" } }], null)]).toEqual([["theirs", "Bo's MausBot"]]);
+    expect(storageBots(storageReport(), () => undefined).map((row) => row.kind)).toEqual(["bot", "bot", "gone", "rest"]);
+  });
+});
+
+describe("what is remembered, per Cloud", () => {
+  it("keys the seen mark by the server's own id, or the page's origin for a server that sends none", () => {
+    expect(storageScope({ server: "env-a" })).toBe("server:env-a");
+    expect(storageScope({})).toBe(`origin:${location.origin}`);
+    localStorage.clear();
+    writeStorageSeen(storageScope({ server: "env-a" }), "full");
+    expect(readStorageSeen("server:env-a")).toBe("full");
+    expect(readStorageSeen("server:env-b")).toBeNull();
+    expect(localStorage.getItem(storageSeenKey("server:env-a"))).toBe("full");
+    writeStorageSeen("server:env-a", null);
+    expect(readStorageSeen("server:env-a")).toBeNull();
   });
 });
 

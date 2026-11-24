@@ -41,7 +41,7 @@ describe("Settings → Storage", () => {
     await show({ storage: storageReport({ at: null, ageS: null, running: true, volume: null, categories: [], bots: [] }), now: used(40), measureInS: 600 });
     expect(summary()?.dataset.band).toBe("ok");
     expect(summary()?.textContent).toContain("40%full");
-    expect(container.textContent).toContain("Measuring what uses this space. This can take a few minutes.");
+    expect(container.textContent).toContain("Measuring what uses this space. This can take a while on a large Cloud.");
     expect(container.querySelector("[data-storage-group]")).toBeNull();
     expect(container.querySelector("[data-storage-bot]")).toBeNull();
     expect(container.textContent).toContain("Measuring…");
@@ -82,10 +82,26 @@ describe("Settings → Storage", () => {
     expect(footnote()).toContain("The last measurement didn't finish, so these figures are from the one before.");
   });
 
-  it("lists the largest bots by name, an unnamed bot as such, deleted bots apart", async () => {
+  it("lists the largest bots by name, an unnamed bot as such, deleted bots apart, and says a bot's size counts its cache too", async () => {
     await show({ storage: storageReport(), now: used(30), measureInS: 0 });
     expect([...container.querySelectorAll("[data-storage-bot]")].map((row) => row.textContent)).toEqual([
       "Chief7 GB", "Unnamed bot3 GB", "Deleted bots1.5 GB", "Other bots512 MB",
     ]);
+    expect(container.querySelector('[data-settings-block="storage-bots"] > p:last-child')?.textContent)
+      .toBe("A bot's size includes its own cache and downloads, also counted under Cache and downloads.");
+  });
+
+  it("on a Team Cloud a bot this person isn't shown is a private bot, never its name", async () => {
+    await show({ storage: storageReport(), now: used(30), measureInS: 0 }, { team: true });
+    expect([...container.querySelectorAll("[data-storage-bot]")].map((row) => row.textContent)).toEqual([
+      "Chief7 GB", "Private bot3 GB", "Deleted bots1.5 GB", "Other bots512 MB",
+    ]);
+  });
+
+  it("the faint groups' legend dots carry a ring, so they read on a dark skin", async () => {
+    await show({ storage: storageReport(), now: used(50), measureInS: 0 });
+    const dot = (key: string) => container.querySelector(`[data-storage-group="${key}"] > span`)?.className ?? "";
+    expect(dot("other")).toContain("var(--color-ink-tertiary)");
+    expect(dot("unmeasured")).toContain("var(--color-ink-tertiary)");
   });
 });

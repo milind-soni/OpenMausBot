@@ -29,7 +29,7 @@ const CONFIG = {
 };
 const session = (scopes: string[]) => ({ kind: "session", id: "s1", label: "Chrome on Mac", email: "ada@example.com", scopes, expiresAt: 0 });
 const ADMIN = session(["admin", "client"]);
-const REPORT = { storage: storageReport(), now: { totalBytes: 100 * GB, freeBytes: 15 * GB, usedBytes: 85 * GB }, measureInS: 0 };
+const REPORT = { storage: storageReport(), now: { totalBytes: 100 * GB, freeBytes: 15 * GB, usedBytes: 85 * GB }, measureInS: 0, server: "env-a" };
 
 let root: Root | null = null;
 const requests: string[] = [];
@@ -92,7 +92,8 @@ describe("who gets Settings → Storage", () => {
     expect(document.querySelector("[data-storage-summary]")?.getAttribute("data-band")).toBe("near");
     expect(document.querySelector("[data-storage-bot]")?.textContent).toBe("Chief7 GB");
     // Seeing it here is what keeps the sidebar's line for this band away.
-    expect(localStorage.getItem("openmausbot.storageNotice.seen.v1")).toBe("near");
+    expect(localStorage.getItem("openmausbot.storageNotice.seen.v1:server:env-a")).toBe("near");
+    expect(localStorage.getItem("openmausbot.storageNotice.seen.v1")).toBeNull();
   });
 
   it("a team member who is not an admin: no Storage page, and the route is never asked", async () => {
