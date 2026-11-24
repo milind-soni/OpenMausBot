@@ -23,6 +23,7 @@ import {
   loadedIdsFromPayloads,
   LOCAL_HOSTS,
   mergeLocalInject,
+  probeLocalInjects,
   resolveInjectId,
 } from "./local-inject.ts";
 
@@ -43,6 +44,56 @@ describe("inject ids", () => {
   it("rejects official cloud slugs", () => {
     expect(decodeInjectId("claude-sonnet-5")).toBeNull();
     expect(decodeInjectId("gpt-5.6-sol")).toBeNull();
+  });
+
+  it("decodes a Rapid-MLX model id", () => {
+    expect(decodeInjectId("rapid_mlx::mlx-community/Qwen3.5-4B-MLX-4bit")).toEqual({
+      host: "rapid_mlx",
+      model: "mlx-community/Qwen3.5-4B-MLX-4bit",
+    });
+  });
+});
+
+describe("Rapid-MLX discovery", () => {
+  it.each([undefined, "rapid-secret"])("lists only Rapid-MLX records with API key %s", async (apiKey) => {
+    const catalog = await mergeLocalInject(
+      { default: "keep", options: [{ id: "keep", label: "Keep" }] },
+      { VITEST: "true", OPENMAUSBOT_PROBE_LOCAL_INJECT: "1", RAPID_MLX_API_KEY: apiKey },
+      async (url, init) => {
+        if (String(url) !== "http://127.0.0.1:8000/v1/models") return new Response("nope", { status: 500 });
+        expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${apiKey ?? "rapid-mlx"}`);
+        return new Response(JSON.stringify({
+          default_model: "other-chat",
+          data: [
+            { id: "mlx-community/Qwen3.5-4B-MLX-4bit", owned_by: "rapid-mlx", capabilities: ["text", "vision", "tools"] },
+            { id: "other-chat", owned_by: "vllm", loaded: true },
+            { id: "unknown-chat", loaded: true },
+            { id: "nomic-embed", owned_by: "rapid-mlx" },
+            { id: "mlx-community/Qwen3-Reranker-0.6B-4bit", owned_by: "rapid-mlx", capabilities: ["rerank"] },
+            { id: "mlx-community/embeddinggemma-2-4bit", owned_by: "rapid-mlx", capabilities: ["embedding"] },
+          ],
+        }));
+      },
+    );
+    expect(catalog.options).toEqual([
+      { id: "keep", label: "Keep" },
+      {
+        id: "rapid_mlx::mlx-community/Qwen3.5-4B-MLX-4bit",
+        label: "mlx-community/Qwen3.5-4B-MLX-4bit (Rapid-MLX)",
+        custom: true,
+      },
+    ]);
+  });
+
+  it.each(["vllm", undefined])("ignores a server on port 8000 with owned_by %s", async (ownedBy) => {
+    const models = await probeLocalInjects({}, async (url) => {
+      if (String(url) !== "http://127.0.0.1:8000/v1/models") return new Response("nope", { status: 500 });
+      return new Response(JSON.stringify({
+        default_model: "other-chat",
+        data: [{ id: "other-chat", owned_by: ownedBy, loaded: true }],
+      }));
+    });
+    expect(models).toEqual([]);
   });
 });
 
