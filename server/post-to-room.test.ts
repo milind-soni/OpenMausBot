@@ -774,4 +774,23 @@ describe("limits counted per turn on a bearer that outlives the turn", () => {
     expect(field(later.body, "assignment", "id")).toBe(requestId);
     expect(field(later.body, "assignment", "botId")).toBe(to.id);
   }, 40_000);
+
+  it("tells a same-turn one-way (reply: none) hand-off that nothing comes back", async () => {
+    const from = await makeBot("One Way Delegator", "One way delegations");
+    const to = await makeBot("One Way Delegate", "One way delegations");
+    const token = await startTurn(from.id, from.threadId);
+    const delegated = await asTurn(token, "POST", "/api/internal/coordinate-bots", {
+      botIds: [to.id], message: "File the note.", reply: "none",
+    });
+    expect(delegated.status, JSON.stringify(delegated.body)).toBe(200);
+    const receipts = Array.isArray(delegated.body.receipts) ? delegated.body.receipts : [];
+    const requestId = str(field(receipts[0] as Record<string, unknown>, "requestId"));
+    expect(requestId).not.toBe("");
+    const early = await asTurn(token, "GET", `/api/internal/assignment-status?id=${requestId}`);
+    expect(early.status).toBe(409);
+    expect(early.body.sentThisTurn).toBe(true);
+    expect(str(early.body.error)).toContain(`Assignment ${requestId} was handed out during this turn`);
+    expect(str(early.body.error)).toContain("nothing comes back from it");
+    expect(str(early.body.error)).not.toContain("resumes you");
+  }, 40_000);
 });
