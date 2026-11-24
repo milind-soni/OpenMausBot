@@ -336,12 +336,18 @@ describe("the Simple composer beside Advanced", () => {
   });
 });
 
-it.each([false, true])("keeps Call for a shared viewer without Stop permission (waiting for teammates: %s)", waiting => {
+it.each([false, true])("shows no Stop to a shared viewer without Stop permission, with Call in the end place while the box is empty (waiting for teammates: %s)", waiting => {
   fixture.admin = false;
   fixture.config = { team: true };
   const shared: Bot = { ...bot, tasks: [{ threadId: bot.threadId, title: "Shared", createdAt: 1, busy: !waiting, waitingForTeammates: waiting, askedBy: { id: "other-person", name: "Other person" } }] };
-  restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "Follow-up from another viewer", attachments: [] });
   render({ bot: shared });
   expect(container.querySelector('[aria-label="Stop this turn"]')).toBeNull();
   expect(fixture.call).toMatchObject({ bot: { id: "atlas" }, placement: "composer" });
+
+  fixture.call = null;
+  restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "Follow-up from another viewer", attachments: [] });
+  render({ bot: shared });
+  expect(container.querySelector('[aria-label="Stop this turn"]')).toBeNull();
+  expect(fixture.call).toBeNull();
+  expect(container.querySelector(`[aria-label="${waiting ? "Send message" : "Sends when Atlas is done"}"]`)).not.toBeNull();
 });

@@ -124,7 +124,7 @@ describe("the header's right side", () => {
     }
   });
 
-  it.each([["Advanced", true, false], ["a remote client's Simple", false, true]])("shows one Stop in %s mode, the composer's, and the header's only to someone who cannot write", (_, advanced, remote) => {
+  it.each([["Advanced", true, false], ["a remote client's Simple", false, true]])("shows one Stop in %s mode, the composer's", (_, advanced, remote) => {
     fixture.advanced = advanced;
     if (remote) window.ogb = { remoteClient: { active: true } } as NonNullable<Window["ogb"]>;
     try {
@@ -133,11 +133,26 @@ describe("the header's right side", () => {
       expect(controls).not.toContain("Stop this turn");
       expect(markup.match(/(aria-label|title)="Stop this turn"/g)).toHaveLength(1);
       expect(markup).toContain("data-composer-stop");
-      fixture.canWrite = false;
-      expect(header(busy).controls).toContain('title="Stop this turn"');
+    } finally {
+      delete window.ogb;
+      fixture.advanced = true;
+    }
+  });
+
+  it.each([
+    ["Advanced, working", true, { busy: true }],
+    ["Advanced, waiting for teammates", true, { busy: false, waitingForTeammates: true }],
+    ["Simple, working", false, { busy: true }],
+    ["Simple, waiting for teammates", false, { busy: false, waitingForTeammates: true }],
+  ])("shows no Stop to someone who can only view (%s)", (_, advanced, state) => {
+    fixture.advanced = advanced;
+    fixture.canWrite = false;
+    try {
+      const { markup } = header({ ...bot, ...state, tasks: (bot.tasks ?? []).map((task) => ({ ...task, ...state })) });
+      expect(markup).not.toContain("Stop this turn");
+      expect(markup).not.toContain("data-composer-stop");
     } finally {
       fixture.canWrite = null;
-      delete window.ogb;
       fixture.advanced = true;
     }
   });
@@ -267,7 +282,7 @@ describe("header name", () => {
       expect(pillOf(busyMarkup)).toBe(pillOf(idleMarkup));
       expect(busyMarkup).toMatch(/<span role="status" class="sr-only" data-chathead-status="true">Working…<\/span>/);
       expect(idleMarkup).toMatch(/<span role="status" class="sr-only" data-chathead-status="true"><\/span>/);
-      expect(busyMarkup).toContain(advanced ? 'title="Stop this turn"' : 'aria-label="Stop this turn"');
+      expect(busyMarkup).toContain('aria-label="Stop this turn"');
     }
     fixture.advanced = true;
   });
