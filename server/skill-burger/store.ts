@@ -19,6 +19,11 @@ export type { SavedWorkflow };
 const PROMPT_MAX_SKILLS = 20;
 const PROMPT_MAX_BYTES = 2_000;
 
+/** Skill Burgers are on unless `features.skillBurger` is false; off, saved ones stay where they are. */
+export function skillBurgerEnabled(cfg: { features?: { skillBurger?: boolean } }): boolean {
+  return cfg.features?.skillBurger !== false;
+}
+
 /** Where a saved burger is: one bot's own skills, or the shared library. */
 export type BurgerPlace = { botId: string } | { everyChat: true };
 type Failure = { error: string; taken?: true };
