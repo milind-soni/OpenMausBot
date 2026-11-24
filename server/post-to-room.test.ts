@@ -776,13 +776,15 @@ describe("limits counted per turn on a bearer that outlives the turn", () => {
   }, 40_000);
 
   it("tells a same-turn one-way (reply: none) hand-off that nothing comes back", async () => {
-    // The case above resumes its delegator when the delegate reports; a new bot's department is set only while every bot is idle.
-    await expect.poll(async () => {
-      const bots = field((await api("GET", "/api/bots?messages=0")).body, "bots");
-      return Array.isArray(bots) && bots.some((bot) => Boolean(field(bot as Record<string, unknown>, "busy")));
-    }, { timeout: 20_000 }).toBe(false);
-    const from = await makeBot("One Way Delegator", "One way delegations");
-    const to = await makeBot("One Way Delegate", "One way delegations");
+    // Made with their department at creation: the case above may still be resuming its delegator, and the local API
+    // moves an existing bot to another department only while every bot is idle.
+    const created = async (name: string) => {
+      const made = await api("POST", "/api/bots", { name, section: "One way delegations", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } });
+      expect(made.status, JSON.stringify(made.body)).toBe(201);
+      return { id: str(field(made.body, "bot", "id")), threadId: str(field(made.body, "bot", "threadId")) };
+    };
+    const from = await created("One Way Delegator");
+    const to = await created("One Way Delegate");
     const token = await startTurn(from.id, from.threadId);
     const delegated = await asTurn(token, "POST", "/api/internal/coordinate-bots", {
       botIds: [to.id], message: "File the note.", reply: "none",
