@@ -3,6 +3,7 @@ import { FolderOpen, Plus, Server } from "lucide-react";
 
 import { appSwitchPatch } from "@/lib/bot-app-access";
 import { skillsLibraryEnabled } from "@/lib/feature-flags";
+import { useFeature } from "@/lib/use-feature";
 import { t } from "@/lib/i18n";
 import { mcpServersForBot, mcpServersOfBot, mcpSwitch, useMcpServers } from "@/lib/mcp-servers";
 import { fetchMemoryOverview, markMemoryReviewed, MEMORY_INDEX, saveMemoryDoc, saveThreadNotes, type LendingReview } from "@/lib/memory";
@@ -172,7 +173,7 @@ export function RoutinesPage({ bot, derived }: PageContext) {
  * memory, its topic files included, with the lines they saved to the team's memory. */
 export function MemoryPage({ bot }: PageContext) {
   const memory = useMemoryDoc(bot);
-  const memoryOn = bot.memoryEnabled !== false;
+  const memoryOn = bot.memoryEnabled !== false, threadNotes = useFeature("threadNotes");
   const teamSaved = useTeamMemoryEntries(bot.id, memory.mine && memoryOn && !bot.defaultBot?.person, memory.docs);
   if (!memoryOn) return <Card><NoteRow>{t("botPanel.library.memoryOff", { name: bot.name })}</NoteRow></Card>;
   if (memory.error) return <Card><NoteRow tone="warn">{t("botPanel.library.memoryError")}</NoteRow></Card>;
@@ -183,7 +184,7 @@ export function MemoryPage({ bot }: PageContext) {
   return (
     <div key={`${bot.id}:${bot.threadId}`} data-panel-memory="" className="flex flex-col gap-4 px-1 pt-2">
       {!memory.mine && <MemoryReviewNotice bot={bot} />}
-      {thread && (thread.scoped || thread.text.trim()) && (
+      {threadNotes && thread && (thread.scoped || thread.text.trim()) && (
         <MemoryText attr="thread" label={t("memoryPage.thisThread")} doc={thread} placeholder={t("memoryPage.empty")}
           save={(text, hash) => saveThreadNotes(bot.id, bot.threadId, text, hash)} />
       )}
@@ -244,7 +245,7 @@ export function SkillsPage({ bot }: PageContext) {
   const [source, setSource] = useState("");
   const [importing, setImporting] = useState(false);
   const [imported, setImported] = useState<string[]>([]);
-  const libraryOn = skillsLibraryEnabled(state.config);
+  const libraryOn = skillsLibraryEnabled(state.config), skillBurger = useFeature("skillBurger");
   const own = skills.skills.filter((skill) => skill.origin !== "project" && !isBurgerSource(skill.source));
   const project = skills.skills.filter((skill) => skill.origin === "project");
 
@@ -290,7 +291,7 @@ export function SkillsPage({ bot }: PageContext) {
 
   return (
     <>
-      <SavedWorkflowsCard botId={bot.id} threadId={bot.threadId} />
+      {skillBurger && <SavedWorkflowsCard botId={bot.id} threadId={bot.threadId} />}
       <Card>
         {skills.loading ? (
           <NoteRow>{t("skills.loading")}</NoteRow>

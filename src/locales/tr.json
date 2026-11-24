@@ -6100,5 +6100,15 @@
   "skillBurger.run.pathUndone": "Yol kaldırıldı",
   "skillBurger.run.addPathFailed": "Yapılamadı. Tekrar deneyin.",
   "activity.tool.team.runWorkflow": "Skill Burger çalıştır",
-  "activity.tool.team.workflowEdit": "Skill Burger değiştir"
+  "activity.tool.team.workflowEdit": "Skill Burger değiştir",
+  "settings.page.features": "Özellikler",
+  "settings.features.skillBurger": "Skill Burger",
+  "settings.features.skillBurgerLine": "Bir botun çalışmasını yeniden çalıştırabileceğin adımlar olarak kaydeder",
+  "settings.features.threadTabs": "Konuşma sekmeleri",
+  "settings.features.threadTabsLine": "Bir botun konuşmalarını sohbetin üstünde sekmeler olarak gösterir",
+  "settings.features.threadNotes": "Konuşma notları",
+  "settings.features.threadNotesLine": "Bir botun her konuşma için not aldıklarını gösterir",
+  "settings.features.mascotMotion": "Maskot animasyonları",
+  "settings.features.mascotMotionLine": "Botların maskotları çalışırken hareket eder",
+  "settings.features.error": "Kaydedilemedi. Bağlantını kontrol edip tekrar dene."
 }

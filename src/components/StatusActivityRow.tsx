@@ -2,6 +2,7 @@ import { Brain, Info, RefreshCw } from "lucide-react";
 import { statusActivity } from "@/lib/activity-runs";
 import { isSavedToThreadLine } from "@/lib/activity-text";
 import { t } from "@/lib/i18n";
+import { useFeature } from "@/lib/use-feature";
 import { useStore, type Message } from "@/state/store";
 import { bugReportFixedText } from "./BugReportNote";
 import { CancelledTurnRow } from "./CancelledTurnRow";
@@ -11,10 +12,11 @@ const pill = "rounded-full border border-hairline/40 px-2.5 py-1 text-[13px] tex
 
 export function StatusActivityRow({ message }: { message: Message }) {
   const { dispatch } = useStore();
-  const status = statusActivity(message);
+  const status = statusActivity(message), threadNotes = useFeature("threadNotes");
   if (!status) return null;
   if (status.kind === "stopped") return <CancelledTurnRow name={message.tool?.name} stoppedBy={message.stoppedBy} />;
   if (isSavedToThreadLine(message)) {
+    if (!threadNotes) return null;
     return <div role="status" data-saved-to-thread="" className="flex w-fit items-center gap-1.5 px-1 text-[12px] leading-4 text-ink-tertiary"><Brain size={14} aria-hidden="true" />{status.text}</div>;
   }
   if (message.tool?.rescue) return <FirstReplyRescueRow rescue={message.tool.rescue} text={status.text} at={message.at} />;

@@ -3902,3 +3902,37 @@ button:disabled.bg-danger {
 .burger-layer.burger-open { animation: burger-land 1100ms ease-out 180ms both; }
 @media (prefers-reduced-motion: reduce) { .burger-fold { transition: none; } }
 :root[data-reduced-motion="true"] .burger-fold { transition: none; }
+/* Thread tabs: from tablet width up, the chat header becomes one band in the chat's ground with a touch of ink, whose
+   tabs replace the pill and stand on its bottom edge; the open tab is the chat's own ground, so it runs into the chat
+   below, and its foot curves out into the band on both sides. Separators sit between closed tabs only. */
+@media (min-width: 768px) {
+  [data-chathead-tabs] { background-color: color-mix(in srgb, var(--color-ink) 4%, var(--color-app)); padding-top: 12px; padding-bottom: 0; }
+  [data-chathead-tabs="advanced"] { padding-top: 6px; }
+  [data-chathead-tabs] [data-chathead-row] { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; }
+  [data-chathead-tabs] [data-chathead-identity] { grid-column: 2; justify-self: stretch; align-self: stretch; -webkit-app-region: drag !important; }
+  [data-chathead-tabs] [data-chathead-identity] > :not([data-thread-tabs], [data-chathead-status]) { display: none; }
+  [data-chathead-tabs="advanced"] [data-chathead-identity] { margin-inline-start: 8px; }
+  [data-chathead-tabs] [data-chathead-controls] { grid-column: 3; margin-inline-start: 8px; }
+}
+.thread-tab[aria-selected="true"] { background: var(--color-app); }
+.thread-tab[aria-selected="true"]::before,
+.thread-tab[aria-selected="true"]::after {
+  content: ""; position: absolute; bottom: 0; width: var(--radius-xl); height: var(--radius-xl); pointer-events: none;
+}
+.thread-tab[aria-selected="true"]::before { right: 100%; background: radial-gradient(circle at 0 0, transparent calc(var(--radius-xl) - 0.5px), var(--color-app) var(--radius-xl)); }
+.thread-tab[aria-selected="true"]::after { left: 100%; background: radial-gradient(circle at 100% 0, transparent calc(var(--radius-xl) - 0.5px), var(--color-app) var(--radius-xl)); }
+.thread-tab:not([aria-selected="true"]) + .thread-tab:not([aria-selected="true"])::before {
+  content: ""; position: absolute; inset-inline-start: 0; top: 8px; bottom: 8px; width: 1px; background: var(--color-hairline);
+  transition: opacity 120ms ease-out;
+}
+.thread-tab:hover + .thread-tab:not([aria-selected="true"])::before,
+.thread-tab:not([aria-selected="true"]):hover::before { opacity: 0; }
+.thread-tab[data-entering] { animation: thread-tab-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.thread-tab[data-leaving] { animation: thread-tab-out 180ms cubic-bezier(0.22, 1, 0.36, 1) both; pointer-events: none; }
+@keyframes thread-tab-in { from { max-width: 0; padding-inline: 0; opacity: 0; } }
+@keyframes thread-tab-out { to { max-width: 0; padding-inline: 0; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .thread-tab, .thread-tab::before { animation: none !important; transition: none !important; }
+}
+:root[data-reduced-motion="true"] .thread-tab,
+:root[data-reduced-motion="true"] .thread-tab::before { animation: none !important; transition: none !important; }
