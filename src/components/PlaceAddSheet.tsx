@@ -134,7 +134,8 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
         className={inline ? cn(SETTINGS_INPUT, "font-normal") : "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] font-normal text-ink outline-none focus:border-accent/50"} />
     </label>
     {shownProblem && inline && <p ref={problemLine} role="alert" data-connect-problem className="-mt-2 text-[13px] leading-[18px] text-danger">{shownProblem}
-      {!failure && <>{" "}<button type="button" data-connect-retry="" className="cursor-pointer font-medium text-ink underline-offset-2 hover:underline" onClick={() => setAsks((n) => n + 1)}>{t("remote.checkAgain")}</button></>}</p>}
+    </p>}
+    {shownProblem && inline && !failure && <div className="-mt-2"><button type="button" data-connect-retry="" className="ui-button ui-button-sm" disabled={probing} onClick={() => setAsks((n) => n + 1)}>{probing ? t("common.checking") : t("remote.checkAgain")}</button></div>}
     {!connect && !start && !inline && <p data-connect-other-computer className="text-[12px] leading-4 text-ink-secondary">{t("connect.otherComputer", { app: productName() })}</p>}
     {codeOnlyHint && <p data-connect-hint className="text-[13px] text-ink-secondary">{t("connect.addAddress", { example: EXAMPLE_ADDRESS })}</p>}
     {found && <p data-connect-found className={cn("text-[13px] text-ink-secondary", inline && "flex items-center gap-1.5")}>
@@ -142,7 +143,7 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
     </p>}
     {showCode && <label className="flex flex-col gap-1.5 text-[13px] font-medium text-ink">{t("connect.code")}
       <input ref={codeField} data-autofocus={start?.locked ? true : undefined} data-own-server-code value={code} disabled={busy} onChange={(event) => { setCode(event.target.value); setFailure(null); }}
-        placeholder="7KQ2-M9XD-H4TP" autoCapitalize="characters" autoCorrect="off" autoComplete="off" spellCheck={false}
+        placeholder={inline ? t("connect.codeFromServer") : "7KQ2-M9XD-H4TP"} autoCapitalize="characters" autoCorrect="off" autoComplete="off" spellCheck={false}
         className={inline ? cn(SETTINGS_INPUT, "font-mono font-normal") : "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[14px] font-normal text-ink outline-none focus:border-accent/50"} />
       <span className="flex flex-col gap-1 text-[12px] font-normal text-ink-secondary">{t("connect.noCode")}<CommandLine command={PAIR_COMMAND} inline={inline} /></span>
     </label>}

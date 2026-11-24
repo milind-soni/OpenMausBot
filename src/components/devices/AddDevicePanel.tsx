@@ -15,6 +15,14 @@ import { StatusMark } from "./device-parts";
 
 const TAILSCALE_GET = "https://tailscale.com/download";
 
+let pointerAt = 0, keyAt = 0;
+if (typeof window !== "undefined") {
+  window.addEventListener("pointerdown", () => { pointerAt = Date.now(); }, true);
+  window.addEventListener("keydown", () => { keyAt = Date.now(); }, true);
+}
+/** Whether the last thing the person did was press a key rather than point. */
+export const lastInputWasKeys = () => keyAt > pointerAt;
+
 export type AddKind = "phone" | "computer" | "server" | "cloud";
 
 const CARD = "settings-card relative flex flex-col gap-5 rounded-[12px] bg-menu p-4 after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:shadow-[inset_0_0_0_0.5px_var(--settings-edge)] after:content-['']";
@@ -43,14 +51,17 @@ function Steps({ children }: { children: ReactNode }) {
 }
 
 /** The private network's state and its one button, as a step of adding a computer. */
-function NetworkStep({ network, action, waiting }: { network: PrivateNetwork; action: NetworkAction | null; waiting: boolean }) {
+function NetworkStep({ network, action, waiting, onCheck, checking }: { network: PrivateNetwork; action: NetworkAction | null; waiting: boolean; onCheck?: () => void; checking: boolean }) {
   return (
     <div data-add-network={waiting ? "waiting" : network.state} className="flex flex-col items-start gap-2">
       <span className="flex items-center gap-1.5 text-[13px] leading-[18px] text-ink"><StatusMark status={network.state === "ready" ? "online" : network.state === "unknown" ? "unknown" : "attention"} />{networkShort(network)}</span>
       <span className={BODY}>{waiting ? t("devices.computers.waiting", { app: productName() }) : networkLine(network)}</span>
-      {action && (action.href
-        ? <a href={action.href} target="_blank" rel="noreferrer" className="ui-button ui-button-sm" data-network-action="">{action.label}</a>
-        : <button type="button" className="ui-button ui-button-sm" data-network-action="" disabled={action.busy} onClick={action.run}>{action.label}</button>)}
+      <span className="flex flex-wrap items-center gap-2">
+        {action && (action.href
+          ? <a href={action.href} target="_blank" rel="noreferrer" className="ui-button ui-button-sm" data-network-action="">{action.label}</a>
+          : <button type="button" className="ui-button ui-button-sm" data-network-action="" disabled={action.busy} onClick={action.run}>{action.label}</button>)}
+        {action?.href && onCheck && <button type="button" className="settings-quiet cursor-pointer" disabled={checking} onClick={onCheck}>{checking ? t("common.checking") : t("remote.checkAgain")}</button>}
+      </span>
     </div>
   );
 }
@@ -100,6 +111,8 @@ export interface AddDeviceProps {
   checking?: boolean;
   /** A phone-narrow window: its header names this step and goes back, so the page leaves out its own. */
   setSub?: SettingsShell["setSub"];
+  /** Opened from the keyboard. */
+  viaKeys?: boolean;
 }
 
 /**
@@ -113,11 +126,14 @@ export function AddDevicePanel(props: AddDeviceProps) {
   const [known] = useState(() => new Set(devices.map((device) => device.id)));
   const heading = useRef<HTMLDivElement>(null);
   const left = useRef<AddKind | null>(null);
+  // Keys move focus to the step's first control; a pointer leaves it on the step itself, with no ring.
+  const keys = useRef(props.viaKeys ?? false);
+  const choose = (next: AddKind) => { keys.current = lastInputWasKeys(); setKind(next); };
   // Into a step, focus goes to its heading; back on the choices, to the choice just left.
   useEffect(() => {
     const panel = heading.current?.parentElement;
     const chosen = !kind && left.current ? panel?.querySelector<HTMLElement>(`[data-add-kind="${left.current}"]`) : null;
-    const first = kind ? panel?.querySelector<HTMLElement>("[data-add-card] :is(button:not([disabled]), a[href], input:not([disabled]))") : null;
+    const first = kind && keys.current ? panel?.querySelector<HTMLElement>("[data-add-card] :is(button:not([disabled]), a[href], input:not([disabled]))") : null;
     document.querySelector("[data-settings-scroll]")?.scrollTo?.({ top: 0 });
     (chosen ?? first ?? heading.current)?.focus({ preventScroll: true });
   }, [kind]);
@@ -159,10 +175,10 @@ export function AddDevicePanel(props: AddDeviceProps) {
       </div>
       {!kind && (
         <SettingsRows icons>
-          <SettingsLinkRow leading={<SettingsMark><Smartphone /></SettingsMark>} title={t("devicesPage.add.phone")} subtitle={t("devicesPage.add.phoneLine", { app: productName() })} onClick={() => setKind("phone")} data={{ "data-add-kind": "phone" }} />
-          <SettingsLinkRow leading={<SettingsMark><Laptop /></SettingsMark>} title={t("devicesPage.add.computer")} subtitle={t("devicesPage.add.computerLine")} onClick={() => setKind("computer")} data={{ "data-add-kind": "computer" }} />
-          <SettingsLinkRow leading={<SettingsMark><Server /></SettingsMark>} title={t("devicesPage.add.server")} subtitle={t("devicesPage.add.serverLine")} onClick={() => setKind("server")} data={{ "data-add-kind": "server" }} />
-          {onGetCloud && <SettingsLinkRow leading={<SettingsMark><Cloud /></SettingsMark>} title={t("devicesPage.add.cloud")} subtitle={t("devicesPage.add.cloudLine")} onClick={() => setKind("cloud")} data={{ "data-add-kind": "cloud" }} />}
+          <SettingsLinkRow leading={<SettingsMark><Smartphone /></SettingsMark>} title={t("devicesPage.add.phone")} subtitle={t("devicesPage.add.phoneLine", { app: productName() })} onClick={() => choose("phone")} data={{ "data-add-kind": "phone" }} />
+          <SettingsLinkRow leading={<SettingsMark><Laptop /></SettingsMark>} title={t("devicesPage.add.computer")} subtitle={t("devicesPage.add.computerLine")} onClick={() => choose("computer")} data={{ "data-add-kind": "computer" }} />
+          <SettingsLinkRow leading={<SettingsMark><Server /></SettingsMark>} title={t("devicesPage.add.server")} subtitle={t("devicesPage.add.serverLine")} onClick={() => choose("server")} data={{ "data-add-kind": "server" }} />
+          {onGetCloud && <SettingsLinkRow leading={<SettingsMark><Cloud /></SettingsMark>} title={t("devicesPage.add.cloud")} subtitle={t("devicesPage.add.cloudLine")} onClick={() => choose("cloud")} data={{ "data-add-kind": "cloud" }} />}
         </SettingsRows>
       )}
       {kind && (
@@ -173,7 +189,7 @@ export function AddDevicePanel(props: AddDeviceProps) {
               ? <p className={BODY}>{t("devicesPage.addFlow.computerCloud", { app: productName() })}</p>
               : <Steps>
                 {here && network && <Step n={1} title={t("devicesPage.addFlow.networkFirst")} state={networkReady ? "done" : "now"}>
-                  {!networkReady && <NetworkStep network={network} action={stepAction} waiting={Boolean(shared && !tailnetAddress)} />}
+                  {!networkReady && <NetworkStep network={network} action={stepAction} waiting={Boolean(shared && !tailnetAddress)} onCheck={onCheck} checking={checking} />}
                 </Step>}
                 <Step n={here && network ? 2 : 1} title={t(here && network ? "devicesPage.addFlow.installBoth" : "devicesPage.addFlow.installStep", { app: productName() })} state={!here || networkReady ? "now" : "later"}>
                   {here && network && <p className={BODY}>{t("devicesPage.addFlow.installBothLine")}</p>}
@@ -212,5 +228,5 @@ export function AddDevicePanel(props: AddDeviceProps) {
   );
 }
 
-const TITLE = { phone: "devicesPage.add.phoneTitle", computer: "devicesPage.add.computerTitle", server: "devicesPage.add.server", cloud: "devicesPage.add.cloudTitle" } as const;
+const TITLE = { phone: "devicesPage.add.phoneTitle", computer: "devicesPage.add.computerTitle", server: "devicesPage.add.serverTitle", cloud: "devicesPage.add.cloudAdd" } as const;
 const LEDE = { phone: "devicesPage.addFlow.phoneLede", computer: "devicesPage.addFlow.computerLede", server: "devicesPage.addFlow.serverLede", cloud: "devicesPage.addFlow.cloudLede" } as const;

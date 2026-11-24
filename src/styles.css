@@ -2215,6 +2215,8 @@ body {
 [data-settings-look] :is([data-settings-page], [data-settings-hit], [data-settings-key-result], [data-settings-rows] > button, [data-settings-rows] > * > button[aria-expanded], [data-settings-fold] > button, [data-settings-rows] > button[data-pair-with-cloud]):focus-visible {
   outline-offset: -2px;
 }
+/* A whole-row button in a card takes the card's corners, so its inset ring never cuts across a rounded corner. */
+[data-settings-look] [data-settings-rows] > button:focus-visible { border-radius: 12px; }
 /* A menu row shows keyboard focus as its hover fill. */
 [role="menu"] :is(button, [role^="menuitem"]):focus-visible {
   outline: none;

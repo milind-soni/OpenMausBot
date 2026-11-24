@@ -244,7 +244,7 @@ function RouteCard({ route, chosen, disabled, onChoose, needs, action, hint }: {
       className={cn("flex flex-col gap-1 rounded-[12px] bg-menu px-4 py-3", chosen ? "shadow-[inset_0_0_0_1px_var(--color-ink)]" : "shadow-[inset_0_0_0_0.5px_var(--settings-edge)]")}>
       <label className={cn("flex items-start gap-3", disabled ? "cursor-default" : "cursor-pointer")}>
         <input type="radio" name="pair-route" value={route} checked={chosen} disabled={disabled} onChange={onChoose}
-          className="mt-0.5 size-4 shrink-0 accent-[var(--color-ink)] disabled:opacity-40" />
+          className="rounded-full mt-0.5 size-4 shrink-0 accent-[var(--color-ink)] disabled:opacity-40" />
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className={cn("text-[14px] leading-5", disabled ? "text-ink-secondary" : "text-ink")}>{t(ROUTE_TEXT[route].name, { app: productName() })}</span>
           {/* One measure for the card's text: the line wraps like the hint under it (no early "pretty" wrap). */}

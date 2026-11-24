@@ -60,8 +60,8 @@ function DeviceRow({ device, mark, opened, onAction, now }: {
         </button>
         {bots.length > 0 && <span className="hidden @min-[480px]/rows:flex"><BotsOn bots={bots} /></span>}
         {need && (
-          <button type="button" data-row-action={need.type} onClick={() => onAction(device, need)} aria-label={`${need.type === "copy-update" ? t("devicesPage.tile.update") : actionLabel(need)}: ${device.name}`}
-            className="ui-button ui-button-sm relative z-10 shrink-0">{need.type === "copy-update" ? t("devicesPage.tile.update") : actionLabel(need)}</button>
+          <button type="button" data-row-action={need.type} onClick={() => onAction(device, need)} aria-label={`${actionLabel(need)}: ${device.name}`}
+            className="ui-button ui-button-sm relative z-10 shrink-0">{actionLabel(need)}</button>
         )}
         <ChevronRight size={14} aria-hidden="true" className={cn("-me-1 shrink-0 text-ink-tertiary transition-transform duration-150 motion-reduce:transition-none rtl:-scale-x-100", open && "rotate-90")} />
       </div>

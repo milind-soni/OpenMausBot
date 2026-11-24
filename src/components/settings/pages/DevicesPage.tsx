@@ -8,7 +8,7 @@ import { useDevices } from "@/lib/use-devices";
 import type { CompanionState } from "@/lib/companion-types";
 import { api } from "@/state/api";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
-import { AddDevicePanel, type AddKind } from "../../devices/AddDevicePanel";
+import { AddDevicePanel, lastInputWasKeys, type AddKind } from "../../devices/AddDevicePanel";
 import { GroupSection, HereSection, type NetworkAction, type Opened } from "../../devices/DeviceRows";
 import { PhoneCodeInline } from "../../devices/CodeCard";
 import { networkLine } from "../../devices/device-words";
@@ -27,12 +27,12 @@ export function tailscaleDownload(platform: string | undefined): string {
 }
 
 /** The private network's one next step, for its row and the Add flow. Null while an organization turned remote access off. */
-export function nextNetworkStep(network: PrivateNetwork | null, run: { check: () => void; addComputer: () => void }, opts: { busy: boolean; blocked: boolean; platform?: string }): NetworkAction | null {
+export function nextNetworkStep(network: PrivateNetwork | null, run: { check: () => void }, opts: { busy: boolean; blocked: boolean; platform?: string }): NetworkAction | null {
   if (!network || opts.blocked) return null;
   switch (network.state) {
     case "unknown": return { label: t("devicesPage.network.setUp"), run: run.check, busy: opts.busy };
     case "not-installed": return { label: t("remote.tailscale.getIt"), href: tailscaleDownload(opts.platform) };
-    case "ready": return network.shared ? { label: t("devicesPage.network.addComputer"), run: run.addComputer } : { label: t("devicesPage.network.allow"), run: run.check, busy: opts.busy };
+    case "ready": return network.shared ? null : { label: t("devicesPage.network.allow"), run: run.check, busy: opts.busy };
     default: return { label: t("remote.checkAgain"), run: run.check, busy: opts.busy };
   }
 }
@@ -43,8 +43,9 @@ const TAILSCALE_ADMIN = "https://login.tailscale.com/admin/machines";
 /** A recheck when the person comes back to the window: at most this often, and only after they asked once here. */
 const RECHECK_MS = 5_000;
 
-const ADD_LABEL: Record<DeviceGroup, Parameters<typeof t>[0]> = { phones: "devicesPage.addGroup.phone", computers: "devicesPage.addGroup.computer", servers: "devicesPage.addGroup.server" };
-const ADD_KIND: Record<DeviceGroup, AddKind> = { phones: "phone", computers: "computer", servers: "server" };
+const ADD_LABEL: Record<DeviceGroup, Parameters<typeof t>[0]> = { phones: "devicesPage.addGroup.phone", computers: "devicesPage.addGroup.computer", servers: "devicesPage.addGroup.cloudOrServer" };
+/** Each group's Add opens its own steps; Clouds and your own servers opens the choice, which has both. */
+const ADD_KIND: Record<DeviceGroup, AddKind | null> = { phones: "phone", computers: "computer", servers: null };
 
 export function DevicesPage() {
   const { ctx, place, go, setSub } = useSettingsShell();
@@ -54,7 +55,7 @@ export function DevicesPage() {
   const c = usePhoneSetupController(config?.profile?.email);
   const [open, setOpen] = useState<string | null>(null);
   const [pairing, setPairing] = useState(false);
-  const [adding, setAdding] = useState<{ start: AddKind | null; from: string } | null>(null);
+  const [adding, setAdding] = useState<{ start: AddKind | null; from: string; keys: boolean } | null>(null);
   const [problem, setProblem] = useState<CompanionState["tailscaleProblem"] | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -82,8 +83,8 @@ export function DevicesPage() {
   }, [problem, check]);
 
   const focusNode = (id: string) => window.requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-device-node="${CSS.escape(id)}"]`)?.focus());
-  const startAdding = (start: AddKind | null, from: string) => { setNotice(null); setFailure(null); setAdding({ start, from }); };
-  const networkAction = nextNetworkStep(network, { check: () => void check(), addComputer: () => startAdding("computer", "[data-network-action]") },
+  const startAdding = (start: AddKind | null, from: string) => { setNotice(null); setFailure(null); setAdding({ start, from, keys: lastInputWasKeys() }); };
+  const networkAction = nextNetworkStep(network, { check: () => void check() },
     { busy: c.busy, blocked: Boolean(blocked), platform: window.ogb?.platform });
 
   const environments = ctx.here ? window.ogb?.environments : undefined;
@@ -143,7 +144,7 @@ export function DevicesPage() {
       else window.requestAnimationFrame(() => document.querySelector<HTMLElement>(from)?.focus());
     };
     return <AddDevicePanel here={ctx.here} cloud={ctx.cloud} devices={devices} network={network} networkAction={networkAction}
-      tailnetAddress={companion?.tailnetShare?.origin ?? null} start={adding.start} onBack={leave} onConnected={refresh}
+      tailnetAddress={companion?.tailnetShare?.origin ?? null} start={adding.start} viaKeys={adding.keys} onBack={leave} onConnected={refresh}
       phoneSteps={ctx.here && c.state ? (onClose) => <PairPhoneSteps c={c} state={c.state!} onClose={() => { refresh(); onClose(); }} codeView={<PhoneCodeInline c={c} />} /> : null}
       setSub={setSub}
       canConnectServer={Boolean(workspaces?.add)} onCheck={() => void check()} checking={c.busy}

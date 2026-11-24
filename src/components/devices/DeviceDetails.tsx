@@ -15,10 +15,10 @@ import { kindLabel, routeLabel } from "./device-words";
 export function actionLabel(action: DeviceAction): string {
   switch (action.type) {
     case "switch": return t("devicesPage.action.switch");
-    case "retry": return t("servers.tryNow");
+    case "retry": return t("devicesPage.action.reconnect");
     case "pair-again": return t("servers.pairAgain");
     case "copy-address": return t("servers.copyAddress");
-    case "copy-update": return t("devicesPage.tile.update");
+    case "copy-update": return t("devicesPage.action.howToUpdate");
     case "manage": return action.page === "phone" ? t("devicesPage.action.openPhonePage") : t("devicesPage.action.manage");
     case "remove":
       return t("remote.devices.removeShort");
@@ -88,8 +88,9 @@ export function DeviceDetails({ device, onAction, onRemoved, now, pairing, onPai
   return (
     <div className="flex flex-col gap-4">
       <dl className="flex flex-col gap-2">
-        <Detail label={t("devicesPage.detail.kind")}>{kindLabel(device.kind)}</Detail>
-        {!device.here && <Detail label={t("devicesPage.detail.reaches")}>{device.routes.map(routeLabel).join(", ")}</Detail>}
+        <Detail label={t("devicesPage.detail.type")}>{kindLabel(device.kind)}</Detail>
+        {!device.here && <Detail label={t("devicesPage.detail.connectedBy")}>{device.routes.map(routeLabel).join(", ")}</Detail>}
+        {vps && <Detail label={t("devicesPage.detail.sshName")}><span className="select-text font-mono text-[12px]">{device.sources.find((one) => one.type === "vps")?.id}</span></Detail>}
         {device.address && <Detail label={t("devicesPage.detail.address")}><span className="select-text break-all font-mono text-[12px]">{device.address}</span></Detail>}
         {device.version && <Detail label={t("devicesPage.detail.version")}>{device.version}</Detail>}
         {device.lastSeen && device.status !== "online" && <Detail label={t("devicesPage.detail.lastSeen")}>{lastSeen(device.lastSeen, now)}</Detail>}
@@ -103,8 +104,10 @@ export function DeviceDetails({ device, onAction, onRemoved, now, pairing, onPai
       )}
       {device.usesThisComputer && !lend && <p className="text-[13px] leading-[18px] text-ink-secondary">{t("servers.share.on", { name: device.name })}</p>}
       {lend && <LendComputerSwitch id={lend} className="-mx-3" />}
-      {vps && <div data-device-ssh-editor="" className="flex flex-col gap-2">
-        <p className="text-[13px] leading-[18px] text-ink-secondary">{t("devicesPage.detail.sshEditorAlias", { alias: device.sources.find((one) => one.type === "vps")?.id ?? "" })}</p>
+      {/* The editor names its server by its SSH name, which the details above already show. */}
+      {vps && <div data-device-ssh-editor="" className="flex flex-col gap-2 [&_[data-vps-server]_span.font-mono]:hidden [&_[data-vps-server]_button:last-of-type]:ms-auto">
+        <p className="text-[13px] font-medium leading-[18px] text-ink">{t("devicesPage.detail.sshEditorTitle")}</p>
+        <p className="-mt-1 text-[13px] leading-[18px] text-ink-secondary">{t("devicesPage.detail.sshEditorLine")}</p>
         <VpsServerEditor serverId={vps} onRemoved={onRemoved} />
       </div>}
       {pairing && pairAgain?.type === "pair-again"

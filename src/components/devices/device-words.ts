@@ -24,7 +24,7 @@ export const groupLabel = (group: DeviceGroup): string => t(GROUP[group]);
 
 /** One short line: how it is, or the one thing it needs. */
 export function statusText(device: Device, now = Date.now()): string {
-  if (device.here) return t("devicesPage.status.hub");
+  if (device.here) return t("devicesPage.status.online");
   if (device.note === "update") return t("devicesPage.note.updateReady");
   if (device.note === "signed-out") return t("devicesPage.note.signedOut");
   if (device.note === "insecure") return t("devicesPage.note.insecure");

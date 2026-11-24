@@ -36,11 +36,10 @@ export function CommandRow({ label, command }: { label: string; command: string 
   );
 }
 
-/** A link that breaks only after its scheme, at its slashes and before its code, never inside the code. */
-export function BreakableLink({ link }: { link: string }) {
-  const parts = link.split(/(?<=\/\/|\/)|(?=#)/);
-  return <>{parts.map((part, index) => <span key={index} className={part.startsWith("#") ? "whitespace-nowrap" : undefined}>{index > 0 && <wbr />}{part}</span>)}</>;
-}
+/** The computer a link opens, by its first name: "ada-macbook". */
+const hostName = (link: string): string | null => {
+  try { return new URL(link).hostname.split(".")[0] || null; } catch { return null; }
+};
 
 /**
  * A pairing code for another device, from the same endpoint and with the same gates as Phone & devices: only the owner
@@ -146,11 +145,11 @@ export function PairCodePanel({ kind, address, onConnected }: { kind: "phone" | 
     <div className="flex flex-col gap-3" data-pair-panel={kind}>
       <p className="text-[13px] leading-[18px] text-ink">{t("devicesPage.addFlow.computerPasteLink", { app: productName() })}</p>
       {link && (
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 rounded-lg bg-ink/[0.05] px-3 py-2">
-          <code data-pair-link="" className="min-w-0 flex-1 select-text font-mono text-[12px] leading-4 text-ink [overflow-wrap:anywhere]"><BreakableLink link={link.link} /></code>
-          <button type="button" onClick={copy} data-copy-link="" className="ui-button ui-button-sm shrink-0">
+        <div className="flex flex-col items-start gap-1.5">
+          <button type="button" onClick={copy} data-copy-link="" data-pair-link={link.link} className="ui-button ui-button-primary">
             {t(copied === "copied" ? "remote.serverPairing.copied" : copied === "failed" ? "common.copyFailed" : "remote.serverPairing.copyLink")}
           </button>
+          {address && hostName(link.link) && <span className="text-[12px] leading-4 text-ink-tertiary">{t("devicesPage.addFlow.linkOpens", { host: hostName(link.link)! })}</span>}
         </div>
       )}
       <TypedCode label={t("devicesPage.addFlow.ifAsked")} code={offer.code} expiresAt={offer.expiresAt} />
