@@ -104,6 +104,7 @@ describe("Spending Overview plan vs billed separation", () => {
     expect(list.textContent).toContain("On plan · not billed");
     expect(list.textContent).toContain("$2.78");
     expect(list.textContent).not.toContain("100% of spend");
+    expect(host.textContent).toContain("Includes estimated plan value");
   });
 
   it("computes spend shares out of billed spend when metered and plan usage coexist", () => {
@@ -126,6 +127,7 @@ describe("Spending Overview plan vs billed separation", () => {
     expect(items[1]).toContain("OpenAI");
     expect(items[1]).toContain("$1.00");
     expect(items[1]).toContain("33% of spend");
+    expect(host.textContent).toContain("Includes estimated plan value");
   });
 
   it("keeps pure billed and token views free of plan annotations", () => {
@@ -137,6 +139,7 @@ describe("Spending Overview plan vs billed separation", () => {
     expect(host.textContent).toContain("$2.50");
     expect(host.textContent).not.toContain("estimated value on your plans");
     expect(host.textContent).not.toContain("On plan");
+    expect(host.textContent).not.toContain("Includes estimated plan value");
 
     const withPlan = baseInsights(
       [modelEntry({ costUsd: 2.78, billedCostUsd: 0, planCostUsd: 2.78, input: 1_200, output: 300 })],
@@ -144,6 +147,7 @@ describe("Spending Overview plan vs billed separation", () => {
     );
     renderOverview(withPlan, "tokens");
     expect(host.textContent).not.toContain("estimated value on your plans");
+    expect(host.textContent).not.toContain("Includes estimated plan value");
     expect(host.textContent).toContain("100% of tokens");
   });
 });

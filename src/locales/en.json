@@ -11577,6 +11577,7 @@
   "insights.onPlan": "On plan",
   "insights.onPlanNotBilled": "On plan · not billed",
   "insights.onPlanAmount": "{cost} on plan",
+  "insights.includesPlanValue": "Includes estimated plan value",
   "changes.open": "What changed",
   "changes.openAria": "What changed in {name}",
   "changes.title": "What changed in {name}",

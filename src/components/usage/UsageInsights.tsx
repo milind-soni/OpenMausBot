@@ -209,7 +209,7 @@ function axisAnchor(index: number, count: number): "start" | "end" | "middle" {
   return index === count - 1 ? "end" : "middle";
 }
 
-function ProviderChart({ data, metric, providers }: { data: UsageInsights; metric: InsightMetric; providers: readonly Provider[] }) {
+function ProviderChart({ data, metric, providers, includesPlan = false }: { data: UsageInsights; metric: InsightMetric; providers: readonly Provider[]; includesPlan?: boolean }) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const buckets = data.buckets;
@@ -242,7 +242,12 @@ function ProviderChart({ data, metric, providers }: { data: UsageInsights; metri
   const title = t(CHART_TITLES[metric][data.unit]);
   return (
     <section className="flex min-w-0 flex-col gap-2" aria-label={title}>
-      <h3 className="text-[13px] font-medium leading-[18px] text-ink">{title}</h3>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-[13px] font-medium leading-[18px] text-ink">{title}</h3>
+        {includesPlan && (
+          <span className="text-[11px] leading-4 text-ink-tertiary">{t("insights.includesPlanValue")}</span>
+        )}
+      </div>
       <div ref={ref} tabIndex={0} role="group" aria-label={title} data-testid="insight-chart"
         className="relative cursor-crosshair touch-pan-y rounded-lg outline-none focus-visible:outline-2 focus-visible:outline-focus"
         onPointerMove={pick} onPointerDown={pick} onPointerLeave={() => setHover(null)} onKeyDown={onKey} onBlur={() => setHover(null)}>
@@ -358,7 +363,7 @@ export function Overview({ data, metric }: { data: UsageInsights; metric: Insigh
           })}
         </ul>
       </div>
-      <ProviderChart data={data} metric={metric} providers={providers} />
+      <ProviderChart data={data} metric={metric} providers={providers} includesPlan={hasPlan} />
     </div>
   );
 }
