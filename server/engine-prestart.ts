@@ -79,11 +79,19 @@ function startsOnlyOwnServers(input: SendTurnInput): boolean {
     && !input.guestConfined && !input.mcpFromUserConfig && input.toolScope === undefined;
 }
 
+/** Nothing starts ahead for an archived bot or conversation, or on an engine whose last status read was signed out or
+ * unavailable. */
+export function prestartClosed(bot: { hidden?: boolean }, task: { archivedAt?: number } | null | undefined,
+  engine: { authenticated?: boolean; state?: string } | null | undefined): boolean {
+  return Boolean(bot.hidden) || task?.archivedAt !== undefined || engine?.authenticated === false || engine?.state === "unavailable";
+}
+
 const RELEASE_AFTER_MS = 5_000;
 /** An open is acted on once the conversation stayed in front of the person this long, so clicking through conversations
  * starts nothing, and the switch itself never waits on the work. */
 export const OPENED_SETTLE_MS = 1_000;
-/** An opened conversation whose engine went unused is not started again this soon, though the person stays active in it. */
+/** An opened conversation whose engine went unused is not started again this soon on the person's activity alone; typing
+ * in its composer starts it again. */
 export const OPENED_AGAIN_AFTER_MS = 15 * 60_000;
 /** One launch per bot, for the bots a person wrote to most recently. */
 const LAUNCHES_KEPT = 32;
@@ -195,6 +203,11 @@ export function createEnginePrestart(deps: EnginePrestartDeps) {
       }, OPENED_SETTLE_MS);
       timer.unref?.();
       settling = { threadId, timer };
+    },
+
+    /** A person is typing in the conversation: an engine that went unused there before may start again. */
+    typedIn(threadId: string): void {
+      unused.delete(threadId);
     },
 
     /** The conversation's bearers were retired (a Stop, a delete): an engine started ahead with them goes too. */

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SendTurnInput } from "./contracts.ts";
 import { OPENED_PRESTART_IDLE_MS, PRESTART_IDLE_MS, PRESTART_MOST } from "./drivers/session-idle.ts";
-import { createEnginePrestart, OPENED_AGAIN_AFTER_MS, OPENED_SETTLE_MS, type EnginePrestartDeps, type SessionCredentials } from "./engine-prestart.ts";
+import { createEnginePrestart, OPENED_AGAIN_AFTER_MS, OPENED_SETTLE_MS, prestartClosed, type EnginePrestartDeps, type SessionCredentials } from "./engine-prestart.ts";
 
 const FIRST = "11111111-aaaa-4aaa-8aaa-111111111111";
 const NEXT = "22222222-bbbb-4bbb-8bbb-222222222222";
@@ -321,6 +321,18 @@ describe("starting the engine of a conversation a person opens or types in", () 
     expect(setup.started).toHaveLength(2);
   });
 
+  it("starts it again at once when the person types in its composer", () => {
+    const setup = afterATurn();
+    opened(setup, NEXT);
+    vi.advanceTimersByTime(OPENED_PRESTART_IDLE_MS + 5_000);
+    setup.held.clear();
+    opened(setup, NEXT);
+    expect(setup.started).toHaveLength(1);
+    setup.prestart.typedIn(NEXT);
+    opened(setup, NEXT);
+    expect(setup.started.map((launch) => launch.threadId)).toEqual([NEXT, NEXT]);
+  });
+
   it("starts it again at once after a message was sent there", () => {
     const setup = afterATurn();
     opened(setup, NEXT);
@@ -378,5 +390,17 @@ describe("starting the engine of a conversation a person opens or types in", () 
     setup.prestart.drop(NEXT);
     vi.advanceTimersByTime(OPENED_SETTLE_MS);
     expect(setup.started).toEqual([]);
+  });
+});
+
+describe("what is never started ahead", () => {
+  it("an archived bot or conversation, or an engine signed out or unavailable at its last status read", () => {
+    const signedIn = { state: "available", authenticated: true };
+    expect(prestartClosed({}, {}, signedIn)).toBe(false);
+    expect(prestartClosed({}, null, undefined)).toBe(false);
+    expect(prestartClosed({ hidden: true }, {}, signedIn)).toBe(true);
+    expect(prestartClosed({}, { archivedAt: 1 }, signedIn)).toBe(true);
+    expect(prestartClosed({}, {}, { state: "available", authenticated: false })).toBe(true);
+    expect(prestartClosed({}, {}, { state: "unavailable" })).toBe(true);
   });
 });
