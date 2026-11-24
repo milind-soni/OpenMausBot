@@ -188,21 +188,17 @@ it("a Cloud of the person's own has no lending control here, since this computer
   expect(render().html).not.toContain("data-cloud-lending-link");
 });
 
-it("a server of the person's own has Share this computer with the maintainer flag off: the switch asks main, and its computer access opens", async () => {
-  const sharing = { state: vi.fn(), revoke: vi.fn(), servers: vi.fn().mockResolvedValue([{ id: "vps", enabled: false, connected: false, paused: false }]), allow: vi.fn().mockResolvedValue({ enabled: true }) };
+it("a server of the person's own: its row's lend switch (ServerList) stands in for the maintainer's button, and Choose opens its computer access", async () => {
+  const sharing = { state: vi.fn(), revoke: vi.fn(), servers: vi.fn().mockResolvedValue([{ id: "vps", enabled: true, connected: true, paused: false }]) };
   stub({ computerSharing: sharing });
   await mount();
   render(); for (const effect of f.effects) effect(); await flush();
   const { html, nodes: tree } = render();
-  expect(html).toContain('data-server-share="vps"');
-  expect(html).toContain("Share this computer");
   expect(html, "the switch stands in for the maintainer's button").not.toContain('aria-label="Computer access for VPS"');
-  const list = tree.find(node => (node.props as { onShare?: unknown }).onShare) as unknown as { props: { onShare: (id: string, on: boolean) => void } };
-  list.props.onShare("vps", true); await flush();
-  expect(sharing.allow).toHaveBeenCalledWith("vps");
+  const list = tree.find(node => (node.props as { onComputerAccess?: unknown }).onComputerAccess) as unknown as { props: { onComputerAccess: (id: string) => void; onShare?: unknown } };
+  expect(list.props.onShare, "the switch keeps its own state now").toBeUndefined();
+  list.props.onComputerAccess("vps"); await flush();
   expect(render().html).toContain("Computer access · VPS");
-  list.props.onShare("vps", false); await flush();
-  expect(sharing.revoke).toHaveBeenCalledWith("vps");
 });
 
 it("shows local environment controls in Simplified Chinese", async () => {
