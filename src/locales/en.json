@@ -5387,8 +5387,6 @@
   "computer.problem.localWindows": "Bots can't use this PC right now. Restart {app}, and if that doesn't help, open Settings → This app → Help.",
   "computer.problem.localMac": "Bots can't use this Mac yet. Check that {app} is allowed under Screen Recording and Accessibility in System Settings → Privacy & Security, then restart it.",
   "computer.problem.localMacTooOld": "Bots can't use this Mac: local desktop control needs macOS 15 Sequoia or later. Update macOS to use it.",
-  "computer.problem.localRemoteServer": "Bots on your own server can't use this computer. Switch back to This computer to use it.",
-  "computer.problem.localMacTooOld": "Bots can't use this Mac: local desktop control needs macOS 13 Ventura or later. Update macOS to use it.",
   "computer.problem.oldImage": "The private desktop is out of date; replace it",
   "computer.problem.unmanaged": "The existing container was not created by {app}; recreate it",
   "computer.problem.publicViewer": "The private desktop's viewer is open to the network; replace it",
