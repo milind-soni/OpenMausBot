@@ -1,0 +1,123 @@
+// POSIX-gated like the other CLI e2es: the fake is a shebang script.
+import { spawn, type ChildProcess } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { antigravityCliTokenPath } from "./drivers/antigravity-acp.ts";
+import { workerPort } from "./testing/worker-port.ts";
+
+const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
+const FAKE_ACP = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
+const PORT = workerPort(19900, 10_000);
+const BASE = `http://127.0.0.1:${PORT}`;
+const posixOnly = describe.skipIf(process.platform === "win32");
+
+posixOnly("Antigravity CLI steer through the message route", () => {
+  let child: ChildProcess;
+  let home: string, tools: string, finishGate: string, rejectGate: string, rpc: string;
+  let stderr = "";
+
+  const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
+    const res = await fetch(`${BASE}${path}`, {
+      method,
+      headers: body ? { "content-type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return { status: res.status, body: await res.json() };
+  };
+  const getBot = async (id: string) => (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === id);
+  // The turn's own CLI, not the one the server starts in a scratch folder to read the account's memory model.
+  const calls = (method: string) => existsSync(rpc) ? readFileSync(rpc, "utf8").split("\n")
+    .filter((line) => line.includes(`"${method}"`) && line.includes("task-workspaces")).length : 0;
+  const waitFor = async (predicate: () => Promise<boolean> | boolean, what: string, ms = 30_000) => {
+    const deadline = Date.now() + ms;
+    while (!(await predicate())) {
+      if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}. stderr: ${stderr.slice(-2000)}`);
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  };
+
+  beforeAll(async () => {
+    home = mkdtempSync(join(tmpdir(), "omb-agy-steer-"));
+    tools = mkdtempSync(join(tmpdir(), "omb-agy-steer-cli-"));
+    const data = join(home, ".openmausbot");
+    mkdirSync(data, { recursive: true });
+    finishGate = join(tools, "finish.gate");
+    rejectGate = join(tools, "reject.gate");
+    rpc = join(tools, "rpc.jsonl");
+    chmodSync(FAKE_ACP, 0o755);
+    const executable = join(tools, "antigravity");
+    writeFileSync(executable, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(FAKE_ACP)} "$@"\n`);
+    chmodSync(executable, 0o755);
+    const token = antigravityCliTokenPath("agy", data);
+    mkdirSync(dirname(token), { recursive: true });
+    writeFileSync(token, "{}", { mode: 0o600 });
+    writeFileSync(join(data, "config.json"), JSON.stringify({
+      instances: {
+        agy: {
+          driver: "antigravityAgent",
+          environment: {
+            FAKE_ACP_AUTH_METHOD: "oauth-personal", FAKE_ACP_MODELS: "gemini-3.8-flash", FAKE_ACP_MODES: "default,plan",
+            FAKE_ACP_AGENT_NAME: "Antigravity ACP Server", FAKE_ACP_VERSION: "1.5.15", FAKE_ACP_AGENT_VERSION: "1.5.15",
+            FAKE_ACP_MODE: "antigravity-steer", FAKE_ACP_GATE_FILE: finishGate, FAKE_ACP_RPC_APPEND_FILE: rpc,
+            FAKE_ACP_STEER_FAIL: "asking-late", FAKE_ACP_STEER_FAIL_GATE: rejectGate,
+          },
+          config: { cli: executable, fullAuto: true },
+        },
+      },
+    }));
+    child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
+      cwd: join(SERVER_DIR, ".."),
+      env: { ...(process.env.PATH ? { PATH: process.env.PATH } : {}), HOME: home, USERPROFILE: home, OMB_PORT: String(PORT), OMB_ANTIGRAVITY_NATIVE_CLI: "1" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stderr!.on("data", (c) => (stderr += c));
+    await waitFor(async () => {
+      if (child.exitCode !== null) throw new Error(`server exited ${child.exitCode}. stderr:\n${stderr}`);
+      return fetch(`${BASE}/api/health`).then((res) => res.ok, () => false);
+    }, "the server", 20_000);
+  }, 30_000);
+
+  afterAll(async () => {
+    child?.kill("SIGTERM");
+    await new Promise<void>((resolve) => {
+      if (!child || child.exitCode !== null) return resolve();
+      child.on("close", () => resolve());
+      setTimeout(() => (child.kill("SIGKILL"), resolve()), 5_000).unref?.();
+    });
+    rmSync(home, { recursive: true, force: true });
+    rmSync(tools, { recursive: true, force: true });
+  });
+
+  it("a message the CLI rejects only after a while is queued once, never shown as steered, and runs as the next turn", async () => {
+    const created = (await api("POST", "/api/bots")).body.bot;
+    expect((await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "agy", model: "gemini-3.8-flash" } })).status).toBe(200);
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "Build the report." })).status).toBe(202);
+    await waitFor(async () => (await getBot(created.id)).busy === true && calls("session/prompt") === 1, "the turn to start");
+
+    const sent = api("POST", `/api/bots/${created.id}/messages`, { text: "Use pytest." });
+    await waitFor(() => calls("session/prompt.held") === 1, "the CLI to hold the steer");
+    // Past the 5 s after which a steer used to be reported as possibly taken in and recorded as steered.
+    await new Promise((r) => setTimeout(r, 6_000));
+    writeFileSync(rejectGate, "reject");
+    const answer = await sent;
+    expect(answer.status).toBe(202);
+    expect(answer.body).toMatchObject({ ok: true, queued: true, queueId: expect.any(String) });
+    expect(answer.body.steered).toBeUndefined();
+
+    writeFileSync(finishGate, "finish");
+    await waitFor(async () => {
+      const bot = await getBot(created.id);
+      return !bot.busy && bot.messages.filter((m: any) => m.role === "bot" && m.kind === "text" && m.text.includes("done")).length === 2;
+    }, "the queued message to run after the first turn");
+    const bot = await getBot(created.id);
+    const typed = bot.messages.filter((m: any) => m.role === "user" && m.kind === "text");
+    expect(typed.map((m: any) => m.text)).toEqual(["Build the report.", "Use pytest."]);
+    expect(typed.some((m: any) => m.steered)).toBe(false);
+    expect(calls("session/prompt.rejected")).toBe(1);
+    expect(calls("session/prompt")).toBe(3);
+  }, 60_000);
+});

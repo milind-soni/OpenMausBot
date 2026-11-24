@@ -120,6 +120,7 @@
 //     prompt answers {stopReason:"end_turn"} at once with no usage, and the new one carries the turn and ends it with the usage,
 //     or with {stopReason:"cancelled"} and the usage on session/cancel. FAKE_ACP_STEER_FAIL=asking: the CLI waits on a
 //     permission the app has not shown, so it rejects the prompt (-32603 "Can't add this prompt") and the turn runs on.
+//     FAKE_ACP_STEER_FAIL=asking-late: the same rejection, held until FAKE_ACP_STEER_FAIL_GATE exists.
 //   FAKE_ACP_STEERING=off  the two steer modes above report no steering capability.
 //   FAKE_ACP_MODE=grok-complete  grok 1.0.41's `_x.ai/session/prompt_complete`: a prompt says "answered", then sends the
 //     notification {sessionId, promptId: the prompt's _meta.promptId, stopReason: FAKE_ACP_COMPLETE_STOP (end_turn),
@@ -900,6 +901,17 @@ function gatedPrompt(msg: any) {
     recordMethod("session/prompt.steer");
     gatedTurn.steers.push(text);
     result(msg.id, { stopReason: "cancelled", _meta: { completionKind: "removedFromQueue" } });
+    return;
+  }
+  if (gatedTurn && mode === "antigravity-steer" && process.env.FAKE_ACP_STEER_FAIL === "asking-late") {
+    recordMethod("session/prompt.held");
+    const gate = process.env.FAKE_ACP_STEER_FAIL_GATE!;
+    const poll = setInterval(() => {
+      if (!existsSync(gate)) return;
+      clearInterval(poll);
+      recordMethod("session/prompt.rejected");
+      out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: `Can't add this prompt to session ${msg.params?.sessionId}` } });
+    }, 50);
     return;
   }
   if (gatedTurn && mode === "antigravity-steer" && process.env.FAKE_ACP_STEER_FAIL === "asking") {

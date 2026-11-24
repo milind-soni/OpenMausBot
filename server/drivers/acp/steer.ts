@@ -143,44 +143,38 @@ export function acpRequestSteering(running: () => boolean, send: (text: string) 
   };
 }
 
-/** How long a steer that takes the turn over waits for the agent to answer the prompt carrying it before it is reported as
- * possibly taken in. The CLI answers within milliseconds. */
-export const STEER_TAKEOVER_MS = 5_000;
-
 /** `send` carries one `session/prompt` and settles when the agent answers it, at the end of the run. Without `takeOver` a
  * steer is reported as steered once it is sent: the agent gives no earlier answer. With it, steers go one at a time, each
- * taken in when the prompt carrying the turn is answered, and the turn waits for every steer the agent took. */
-export function acpPromptSteering(running: () => boolean, send: (text: string) => Promise<unknown>, takeOver?: AcpPromptSteer["takeOver"]): AcpTurnSteering {
+ * decided by the agent: taken in when it answers the prompt carrying the turn while the turn is `live`, refused when it
+ * rejects the steer or the turn stops or ends first (a settled turn fails every request still out). The turn waits for
+ * every steer the agent took. */
+export function acpPromptSteering(running: () => boolean, send: (text: string) => Promise<unknown>, takeOver?: AcpPromptSteer["takeOver"],
+  live: () => boolean = running): AcpTurnSteering {
   let answered = false;
   let markAnswered = () => {};
   // Resolves when the prompt carrying the turn is answered: first the turn's own, then each steer the agent took.
   let carrier = new Promise<void>((resolve) => { markAnswered = resolve; });
   let previous: Promise<unknown> = Promise.resolve();
   const pending = new Set<Promise<unknown>>();
-  const track = (reply: Promise<unknown>, refusable: () => boolean, onRefused?: () => void) => {
+  const track = (reply: Promise<unknown>, refusable: () => boolean) => {
     const sent = reply.then(
       (answer) => { steering.replies!.push(answer); },
-      (error) => { if (refusable() && takeOver?.rejected(error)) onRefused?.(); else steering.failure ??= error; },
+      (error) => { if (!(refusable() && takeOver?.rejected(error))) steering.failure ??= error; },
     ).finally(() => pending.delete(sent));
     pending.add(sent);
   };
   const takenOver = async (guidance: string): Promise<SteerOutcome> => {
     if (!guidance || (answered && !pending.size) || !running()) return "refused";
-    // The steer owns the turn only once the agent answers the prompt that carried it; until then a rejection is a
-    // refusal, also one that comes after this steer was reported as indeterminate.
-    let accepted = false, refused = false;
+    let outcome: SteerOutcome | undefined;
+    let report: (verdict: SteerOutcome) => void = () => {};
+    const reported = new Promise<SteerOutcome>((resolve) => { report = resolve; });
+    const decide = (verdict: SteerOutcome) => { if (outcome === undefined) report(outcome = verdict); return outcome; };
     const reply = send(guidance);
-    const owner = carrier;
-    void owner.then(() => { if (!refused) accepted = true; });
-    track(reply, () => !accepted, () => { refused = true; });
-    carrier = owner.then(() => refused ? undefined : reply.then(() => undefined, () => undefined));
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const outcome = await Promise.race<SteerOutcome>([
-      owner.then(() => refused ? new Promise<never>(() => {}) : "steered"),
-      reply.then(() => "steered", (error) => refused ? "refused" : takeOver!.rejected(error) ? "refused" : "indeterminate"),
-      new Promise((resolve) => { timer = setTimeout(() => resolve("indeterminate"), STEER_TAKEOVER_MS); timer.unref?.(); }),
-    ]).finally(() => clearTimeout(timer));
-    return outcome;
+    track(reply, () => outcome !== "steered");
+    // A reply that comes before the carrying prompt's answer only ends a stopped turn: the agent never took the steer.
+    void reply.then(() => decide(live() ? "steered" : "refused"), () => decide("refused"));
+    carrier = carrier.then(() => decide(live() ? "steered" : "refused") === "steered" ? reply.then(() => undefined, () => undefined) : undefined);
+    return reported;
   };
   const steering: AcpTurnSteering = {
     replies: [],
@@ -235,7 +229,7 @@ export function turnSteering(support: AcpSteerSupport, io: AcpSteerIo): AcpTurnS
     const allowed = () => support.supported ? support.supported(io.initializeResult())
       : support.enabled ? support.enabled(io.env)
       : io.initializeResult()?.agentCapabilities?._meta?.[support.capability ?? ""] === true;
-    return acpPromptSteering(() => io.open() && !(support.notWhileAsking && io.asking()) && allowed(), io.prompt, support.takeOver);
+    return acpPromptSteering(() => io.open() && !(support.notWhileAsking && io.asking()) && allowed(), io.prompt, support.takeOver, io.open);
   }
   return acpTurnSteering(support, () => io.open() && io.commands()?.has(support.command) === true, io.prompt);
 }
