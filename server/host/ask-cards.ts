@@ -405,7 +405,8 @@ export function createAskCards(deps: AskCardsDeps) {
     const answered = await deps.answerCard({ auth, threadId, requestId, behavior: "answer", message: typedAnswer(asked.card, text) });
     if (!answered.ok) {
       spent.delete(key);
-      return { status: answered.status, error: answered.error };
+      // In the bot's own chat the line was never meant only for the card: one that could not answer it is sent as usual.
+      return ownChat ? null : { status: answered.status, error: answered.error };
     }
     const posted = store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId: asked.id,
       ...(line.sendId ? { sendId: line.sendId } : {}), ...(line.sender ? { sender: line.sender } : {}) });

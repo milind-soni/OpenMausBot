@@ -469,6 +469,17 @@ describe("a typed line answers a question card", () => {
     expect(await w.cards.typed(AUTH, "work", "Yes", undefined, {})).toEqual({ status: 403, error: "This question is Ben's to answer." });
     expect(w.rows("work").filter((row) => row.role === "user")).toEqual([]);
   });
+
+  it("leaves a line in the bot's own chat to the usual send when its card could not take it as the answer", async () => {
+    for (const refusal of [{ status: 403, error: "This question is Ben's to answer." }, { status: 409, error: "This card was already answered." }]) {
+      const w = world({ live: ["req-1"] });
+      const asked = question(w, "chat");
+      w.refuse(refusal);
+      expect(await w.cards.typed(AUTH, "chat", "What time is it?", undefined, { sendId: "send-9" })).toBeNull();
+      expect(w.deps.answerCard).toHaveBeenCalledWith(expect.objectContaining({ requestId: "req-1", behavior: "answer" }));
+      expect(w.rows("chat")).toEqual([asked]);
+    }
+  });
 });
 
 describe("a reminder of work parked on the person", () => {
