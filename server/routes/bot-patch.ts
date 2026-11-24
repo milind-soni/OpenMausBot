@@ -26,6 +26,7 @@ import type { createApprovalModeSupport } from "../harness-capabilities.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
 import type { hostedModelPolicy } from "../hosted-models.ts";
 import { heldFrom } from "../host/room-reads.ts";
+import { unreadTargetTask } from "../task-record.ts";
 import { MAX_MCP_SERVERS, mcpServerNameError } from "../mcp-registry.ts";
 import type { MemoryUpkeep } from "../memory-upkeep.ts";
 import { phoneAppsFor } from "../phones/access.ts";
@@ -741,7 +742,10 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       }
       if (!bot) return json(res, 404, { error: "no such bot" });
       if (typeof body.unread === "boolean") {
-        store.patchTask(bot.id, bot.threadId, { unread: body.unread, heldUnread: body.unread ? heldFrom(store.activePath(bot.threadId), store.messagesFor(bot.threadId)) : undefined });
+        // A mark skips a routine run or an archived conversation for the open main one (task-record.ts).
+        const target = unreadTargetTask(bot, store.activeTask(bot.id), body.unread);
+        if (target) store.patchTask(bot.id, target.threadId, { unread: body.unread, heldUnread: body.unread ? heldFrom(store.activePath(target.threadId), store.messagesFor(target.threadId)) : undefined });
+        else if (!bot.tasks?.length) bot = store.patchBot(bot.id, { unread: body.unread }) ?? bot;
       }
       if (body.applyToAllThreads === true && requestedApprovalMode !== "custom") store.setAllThreadApprovalMode(bot.id, requestedApprovalMode);
       if (body.memoryUpkeep === false || body.memoryEnabled === false) memoryUpkeep.dropBot(bot.id);
