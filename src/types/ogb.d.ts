@@ -62,6 +62,8 @@ const __APP_VERSION__: string;
       driverSource?: "bundled" | "environment" | "user-local" | "path" | "system-package";
       session?: "x11" | "wayland" | "headless" | "unknown";
       compositor?: "gnome-mutter" | "hyprland";
+      /** Set with the Wayland seat-safety block: false on a desktop that isn't Ubuntu, which may have no Xorg session. */
+      ubuntuDesktop?: boolean;
     };
   };
 

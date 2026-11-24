@@ -4298,7 +4298,9 @@
       "skillBurger.run.pathUndone": "2a2c3d46532dea203b843ff140a412c5a0942d79f6748ea28d9fc5a911c744cd",
       "skillBurger.run.addPathFailed": "969dd8cc30abc64e096bd0bf22d36198b8b082d004e31ceb4ece3261d05bf747",
       "activity.tool.team.runWorkflow": "89bbf828d17d4d85dc2811f06cd02c3e2619ee3119475991e95b508c28c815a8",
-      "activity.tool.team.workflowEdit": "f4db6d696f437b450c9dcfb1e4b9976ae3774af77166d9df39f63835dac4c1e7"
+      "activity.tool.team.workflowEdit": "f4db6d696f437b450c9dcfb1e4b9976ae3774af77166d9df39f63835dac4c1e7",
+      "computer.problem.localWaylandBlockedOther": "350a7ad5cba076518d35be7a83a24eb473f6c8316f5204d05951319266b8e147",
+      "computer.linux.waylandOtherDesktop": "3f2dd5c5c584d38fcd9dd39756a9096087a42af246781c13e41cb89c61c9be45"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -38518,7 +38520,9 @@
       "skillBurger.run.pathUndone": "2a2c3d46532dea203b843ff140a412c5a0942d79f6748ea28d9fc5a911c744cd",
       "skillBurger.run.addPathFailed": "969dd8cc30abc64e096bd0bf22d36198b8b082d004e31ceb4ece3261d05bf747",
       "activity.tool.team.runWorkflow": "89bbf828d17d4d85dc2811f06cd02c3e2619ee3119475991e95b508c28c815a8",
-      "activity.tool.team.workflowEdit": "f4db6d696f437b450c9dcfb1e4b9976ae3774af77166d9df39f63835dac4c1e7"
+      "activity.tool.team.workflowEdit": "f4db6d696f437b450c9dcfb1e4b9976ae3774af77166d9df39f63835dac4c1e7",
+      "computer.problem.localWaylandBlockedOther": "350a7ad5cba076518d35be7a83a24eb473f6c8316f5204d05951319266b8e147",
+      "computer.linux.waylandOtherDesktop": "3f2dd5c5c584d38fcd9dd39756a9096087a42af246781c13e41cb89c61c9be45"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
