@@ -2118,7 +2118,6 @@
   "chat.webhookTask": "웹훅 작업",
   "chat.viewPayload": "이벤트 페이로드 보기",
   "chat.sentMidTurn": "턴 도중 보냄",
-  "chat.sentMidTurnHint": "봇이 작업하는 동안 보냈어요 — 같은 턴 안에서 다음 단계 전에 이 메시지를 봤어요.",
   "chat.viaCall": "통화로",
   "chat.callRecord.title": "{name}와(과)의 통화",
   "chat.callRecord.label": "실시간 통화: {title}, {duration}",

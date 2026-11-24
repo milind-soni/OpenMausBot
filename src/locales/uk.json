@@ -963,7 +963,6 @@
   "chat.webhookTask": "Завдання вебхука",
   "chat.viewPayload": "Переглянути payload події",
   "chat.sentMidTurn": "надіслано посеред запиту",
-  "chat.sentMidTurnHint": "Надіслано, поки бот працював — він побачив це перед наступним кроком, у межах того самого запиту.",
   "chat.showFull": "Показати повне повідомлення",
   "chat.showLess": "Показати менше",
   "chat.generatedImage": "Згенероване зображення",

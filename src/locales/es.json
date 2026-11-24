@@ -1833,7 +1833,6 @@
   "chat.webhookTask": "Tarea de webhook",
   "chat.viewPayload": "Ver el contenido del evento",
   "chat.sentMidTurn": "enviado durante el turno",
-  "chat.sentMidTurnHint": "Enviado mientras el bot trabajaba: lo vio antes de su siguiente paso, dentro del mismo turno.",
   "chat.viaCall": "por llamada",
   "chat.callRecord.title": "Llamada con {name}",
   "chat.callRecord.label": "Llamada en vivo: {title}, {duration}",

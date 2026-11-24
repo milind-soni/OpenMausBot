@@ -1537,7 +1537,6 @@
   "chat.webhookTask": "Webhook görevi",
   "chat.viewPayload": "Etkinlik verisini görüntüle",
   "chat.sentMidTurn": "tur ortasında gönderildi",
-  "chat.sentMidTurnHint": "Bot çalışırken gönderildi — aynı tur içinde bir sonraki adımından önce bunu gördü.",
   "chat.viaCall": "arama üzerinden",
   "chat.callRecord.title": "{name} ile arama",
   "chat.callRecord.label": "Canlı arama: {title}, {duration}",

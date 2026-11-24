@@ -826,7 +826,6 @@
   "chat.webhookTask": "Tâche de webhook",
   "chat.viewPayload": "Voir la charge utile de l'événement",
   "chat.sentMidTurn": "envoyé pendant le tour",
-  "chat.sentMidTurnHint": "Envoyé pendant que le bot travaillait — il l'a vu avant son étape suivante, dans le même tour.",
   "chat.showFull": "Afficher le message entier",
   "chat.showLess": "Afficher moins",
   "chat.generatedImage": "Image générée",

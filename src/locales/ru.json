@@ -1998,7 +1998,6 @@
   "chat.webhookTask": "Задача вебхука",
   "chat.viewPayload": "Просмотреть данные события",
   "chat.sentMidTurn": "отправлено посреди хода",
-  "chat.sentMidTurnHint": "Отправлено, пока бот работал — он увидел это до следующего шага внутри того же хода.",
   "chat.viaCall": "через звонок",
   "chat.callRecord.title": "Звонок с {name}",
   "chat.callRecord.label": "Живой звонок: {title}, {duration}",

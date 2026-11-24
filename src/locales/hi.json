@@ -824,7 +824,6 @@
   "chat.webhookTask": "वेबहुक कार्य",
   "chat.viewPayload": "इवेंट का पेलोड देखें",
   "chat.sentMidTurn": "बारी के बीच भेजा गया",
-  "chat.sentMidTurnHint": "बॉट के काम करते समय भेजा गया — उसने इसे अगले चरण से पहले, उसी बारी में देखा।",
   "chat.showFull": "पूरा संदेश दिखाएँ",
   "chat.showLess": "कम दिखाएँ",
   "chat.generatedImage": "बनाई गई छवि",
