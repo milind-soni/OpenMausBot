@@ -962,7 +962,7 @@ describe("ChatMarkdown attachments", () => {
         const html = render(false, filePath, true);
         expect(html).not.toContain("This file is outside this chat&#x27;s working folder, so it can&#x27;t be saved from here");
         expect(html).not.toContain("the linked file is outside");
-        expect(html).toContain('title="Open containing folder"');
+        expect(html).toContain('title="Show in folder"');
         expect(html).toContain("lucide-folder-open");
         expect(html).not.toContain("<code");
       } finally {
@@ -974,7 +974,7 @@ describe("ChatMarkdown attachments", () => {
       vi.stubGlobal("window", { ogb: { revealInFolder, remoteClient: { active: true } } });
       try {
         const html = render(true, filePath, null);
-        expect(html).not.toContain('title="Open containing folder"');
+        expect(html).not.toContain('title="Show in folder"');
         expect(html).toMatch(/<code[^>]*select-all[^>]*>C:\\Users\\Maus\\_draft\\ollama-gen\.js<\/code>/);
       } finally {
         vi.unstubAllGlobals();
@@ -1049,7 +1049,7 @@ describe("ChatMarkdown attachments", () => {
         const root = createRoot(host);
         try {
           await act(async () => root.render(createElement(ChatMarkdown, { text, message: { threadId: "thread-1", messageId: "message-1" } })));
-          const show = host.querySelector('button[title="Open containing folder"]') as HTMLButtonElement;
+          const show = host.querySelector('button[title="Show in folder"]') as HTMLButtonElement;
           await act(async () => show.click());
           expect(reveal).toHaveBeenCalledWith(folder);
         } finally {
@@ -1079,7 +1079,7 @@ describe("ChatMarkdown attachments", () => {
           text: `[ollama-gen.js](${filePath})`, message: { threadId: "thread-1", messageId: "message-1" },
         }));
         expect(html).toContain("the linked file is outside this conversation&#x27;s workspace");
-        expect(html).not.toContain('title="Open containing folder"');
+        expect(html).not.toContain('title="Show in folder"');
         expect(html).not.toContain(filePath);
       } finally {
         vi.unstubAllGlobals();

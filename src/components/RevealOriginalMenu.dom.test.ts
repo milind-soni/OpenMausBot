@@ -69,7 +69,7 @@ it("offers the original on a file the reply links inline instead of showing it i
   }));
   const link = [...document.querySelectorAll("span[dir=ltr]")].at(-1)!;
   await openMenu(link);
-  expect(menuButton()?.textContent).toBe("Open containing folder");
+  expect(menuButton()?.textContent).toBe("Show in folder");
   await act(async () => { menuButton()!.click(); });
   expect(revealInFolder).toHaveBeenCalledWith(ORIGINAL);
   act(() => root.unmount());
@@ -84,7 +84,7 @@ it("reveals an ordinary Windows file link without a delivered attachment", async
   }));
   const link = [...document.querySelectorAll("button")].find(button => button.textContent === "report")!;
   await openMenu(link);
-  expect(menuButton()?.textContent).toBe("Open containing folder");
+  expect(menuButton()?.textContent).toBe("Show in folder");
   await act(async () => { menuButton()!.click(); });
   expect(revealInFolder).toHaveBeenCalledWith("C:/My Files/report.pdf");
   act(() => root.unmount());
