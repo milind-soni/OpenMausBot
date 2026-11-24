@@ -1,9 +1,12 @@
-import { mkdtempSync, readFileSync, symlinkSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { appFrame, createExecutors, shellQuote } from "./executors.ts";
+import { draftWorkflow } from "../../shared/skill-burger/draft.ts";
+import type { RunMessage } from "../../shared/skill-burger/layers.ts";
+import { startRun } from "./runner.ts";
 
 const folder = () => mkdtempSync(join(tmpdir(), "burger-exec-"));
 const signal = () => new AbortController().signal;
@@ -43,5 +46,34 @@ describe("where a Skill Burger's steps run", () => {
     expect(await exec.shell({ command: "exit 3", env: {}, where: "bot", tool: "shell", signal: signal(), maxBytes: 1_000 })).toMatchObject({ ok: false });
     expect(await exec.shell({ command: "yes | head -c 5000", env: {}, where: "bot", tool: "shell", signal: signal(), maxBytes: 1_000 })).toMatchObject({ ok: false, tooLarge: true });
     expect(shellQuote(value)).toBe(`'it'\\''s $(rm -rf /) \`x\`'`);
+  });
+
+  it.skipIf(process.platform === "win32")("replays a recorded CSV workflow with its header and every appended row", async () => {
+    const cwd = folder();
+    try {
+      const commands = [
+        "printf 'name,score\\n' > report.csv",
+        "printf 'Ada,10\\n' >> report.csv",
+        "printf 'Bob,20\\n' >> report.csv",
+        "cp report.csv backup.csv",
+      ];
+      const messages: RunMessage[] = [
+        { id: "ask", role: "user", kind: "text", text: "Prepare the reports" },
+        ...commands.map((command, index) => ({
+          id: `m${index}`, role: "bot", kind: "activity", tool: { name: "Bash", ok: true, input: JSON.stringify({ command }) },
+        })),
+      ];
+      const draft = draftWorkflow(messages)!;
+      const result = await startRun({ name: "reports", botId: "b", threadId: "t", sha256: "test", workflow: draft.workflow }, {
+        exec: createExecutors({ botId: "b", cwd, internal: async () => ({ ok: false, body: {} }) }),
+        events: { started() {}, ended() {} }, save() {},
+      });
+      expect(result).toMatchObject({ ok: true, status: "ok" });
+      for (const name of ["report.csv", "backup.csv"]) {
+        expect(readFileSync(join(cwd, name), "utf8")).toBe("name,score\nAda,10\nBob,20\n");
+      }
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
   });
 });
