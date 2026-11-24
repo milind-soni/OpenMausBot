@@ -1,4 +1,5 @@
 import { EFFORT_LEVELS, type ModelSelection } from "../../shared/wire.ts";
+import type { EngineHint } from "../host/engine-hints.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 /** Per engine without `search`, as in t3code's orchestrator_capabilities: one call lands whole in the bot's context. */
@@ -36,11 +37,14 @@ export interface MenuRow {
   blocked?: Array<{ id: string; why: string }>;
 }
 
+/** Engines that can't run now for the same reason, fixed the same way: one entry each would repeat the line. */
+export type UnavailableGroup = { engines: string[] } & EngineHint;
+
 export interface ModelMenu {
   current: ModelSelection;
   engines: MenuRow[];
-  /** Engines that can't run anything now (not set up, turned off, unreachable), by name: a row each would cost more than they say. */
-  unavailable?: string[];
+  /** Engines that can't run anything now (not set up, signed out, turned off, unreachable), by why and how to connect. */
+  unavailable?: UnavailableGroup[];
 }
 
 const squash = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -52,12 +56,22 @@ export function modelMenu(input: {
   current: ModelSelection;
   pinned: readonly ModelSelection[];
   refusal(selection: ModelSelection): string | null;
-  down(engine: MenuEngine): boolean;
+  /** Why `engine` can't run now and how it is connected; null while it can. */
+  down(engine: MenuEngine): EngineHint | null;
+  /** Engines whose saved settings could not be read, with the same. */
+  broken?: ReadonlyArray<{ name: string; hint: EngineHint }>;
   search?: string;
 }): ModelMenu {
   const terms = input.search?.toLowerCase().split(/\s+/).filter(Boolean) ?? [];
   let room = MENU_FOUND;
-  const engines: MenuRow[] = [], unavailable: string[] = [];
+  const engines: MenuRow[] = [], groups = new Map<string, UnavailableGroup>();
+  const nameMatches = (name: string) => terms.every((term) => name.toLowerCase().includes(term));
+  const unavailable = (name: string, hint: EngineHint) => {
+    const key = `${hint.why}\n${hint.connect}`;
+    const group = groups.get(key);
+    if (group) group.engines.push(name);
+    else groups.set(key, { engines: [name], ...hint });
+  };
   for (const engine of input.engines) {
     const { instanceId } = engine;
     const name = engine.displayName || engine.driverKind;
@@ -68,9 +82,11 @@ export function modelMenu(input: {
     const matching = ids.filter((id) => matches(id, labels.get(id)));
     const blocked = engine.models.options.filter((option) => (option.orgBlocked || option.needsCliUpdate) && matches(option.id, option.label)).slice(0, MENU_SHORT)
       .map((option) => ({ id: option.id, why: option.orgBlocked ? "turned off by this account's organization" : `needs ${name} CLI ${option.needsCliUpdate} or newer: update it` }));
-    if (!matching.length && !blocked.length && !(terms.length && terms.every((term) => name.toLowerCase().includes(term)))) continue;
-    if (input.down(engine)) {
-      unavailable.push(name);
+    // An engine not set up often has no models to match yet: without a search it is still named, with why.
+    if (!matching.length && !blocked.length && !nameMatches(name)) continue;
+    const down = input.down(engine);
+    if (down) {
+      unavailable(name, down);
       continue;
     }
     if (!matching.length && !blocked.length) continue;
@@ -112,7 +128,8 @@ export function modelMenu(input: {
       ...(blocked.length ? { blocked } : {}),
     });
   }
-  return { current: input.current, engines, ...(unavailable.length ? { unavailable } : {}) };
+  for (const { name, hint } of input.broken ?? []) if (nameMatches(name)) unavailable(name, hint);
+  return { current: input.current, engines, ...(groups.size ? { unavailable: [...groups.values()] } : {}) };
 }
 
 /** Only dispatch inside the internal capability gate: the menu is the calling bot's own. */
