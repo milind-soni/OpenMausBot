@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCompanionEntry } from "./companion-entry.mjs";
-import { anyRouteOn, COMPANION_SETTINGS_VERSION, countPairedPhones, directRoutesOn, hasTailnetAddress, phoneLinkStartsAtLaunch, readCompanionSettings, readPairedDevices, setRoute } from "./companion-settings.mjs";
+import { anyRouteOn, COMPANION_SETTINGS_VERSION, countPairedPhones, directRoutesOn, hasTailnetAddress, phoneLinkStartsAtLaunch, readCompanionSettings, readPairedDevices, removePairedDeviceAtRest, setRoute } from "./companion-settings.mjs";
 import {
   cleanupCompanionOriginEndpoint,
   companionOriginHealth,
@@ -434,10 +434,13 @@ export async function companionPairing(open, expectedToken) {
 }
 
 export async function companionRevoke(deviceId) {
-  if (!proc) return companionState();
   // the id came from the renderer, so it does not get to shape a path
   if (!/^[\w-]{1,64}$/.test(String(deviceId ?? ""))) return companionState();
-  await control("DELETE", `/devices/${deviceId}`).catch(() => {});
+  // Asleep, nothing listens: the phone leaves the store the sidecar loads when it starts. In the transition queue, so
+  // a start never loads the store halfway through; a start that got there first takes the removal itself.
+  if (!proc && await serialize(() => (proc ? false : (removePairedDeviceAtRest(deviceId), true)))) return companionState();
+  // A removal that failed is an error on the page, never a quiet "Removed".
+  await control("DELETE", `/devices/${deviceId}`);
   e2eHooks.changed();
   return companionState();
 }
