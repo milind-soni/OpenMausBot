@@ -163,7 +163,7 @@ export interface WireTask extends InboxTask, HandoffStatusField {
   approvalMode?: ApprovalMode;
   autoApprove?: boolean;
   alwaysAllow?: string[];
-  unread?: boolean;
+  unread?: boolean; /** Marked unread by the person with it open: the newest message then ("" for none). Being on screen alone does not read it until a reply follows; opening it, writing in it or a new reply ends the mark. */ heldUnread?: string;
   /** The newest message on screen the last time the person read this
    * conversation. The New divider goes after it. */
   lastReadMessageId?: string;
