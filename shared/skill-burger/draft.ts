@@ -165,7 +165,8 @@ class Drafter {
   private composer(id: string, field: string, example: string, looked = false, file?: string): WorkflowRef | null {
     const read = [...this.recorded].reverse().find((entry) => entry.read) ?? [...this.recorded].reverse().find((entry) => entry.output !== undefined && entry.output !== "");
     if (!read && !looked) return null;
-    const aiId = `${id}_write`;
+    let aiId = `${id}_write`;
+    for (let n = 2; this.steps.some((step) => step.id === aiId); n += 1) aiId = `${id}_write_${n}`;
     const what = file ?? `the ${field.replace(/_/g, " ")}`;
     const request = this.request(400);
     this.steps.push({
