@@ -301,25 +301,24 @@ describe("bounded scheduled overlap and run health", () => {
     await h.manager.tick();
   });
 
-  it("does not fail a run whose reply came back before its last tool call went wrong: it completes partly done", async () => {
+  it("keeps a run that failed only on a step, after its reply came back, failed but marked partly done", async () => {
     const h = harness(start);
     const routine = h.manager.create({ ...input(), enabled: false });
     const event = (threadId: string, patch: Record<string, unknown>) => h.manager.handleRuntimeEvent({ eventId: `e-${Math.random()}`, provider: "fake", threadId, createdAt: new Date().toISOString(), ...patch } as Parameters<typeof h.manager.handleRuntimeEvent>[0]);
-    const attempt = async (threadId: string, partial: boolean, { reply = true, cutOff = false, stopReason }: { reply?: boolean; cutOff?: boolean; stopReason?: string } = {}) => {
+    const attempt = async (threadId: string, partial: boolean, { reply = true, cutOff = false } = {}) => {
       h.manager.runNow(routine.id); await h.manager.tick();
       if (reply) event(threadId, { type: "item.completed", itemType: "assistant_text", itemId: "reply", text: "Here is the summary." });
       event(threadId, { type: "runtime.error", message: "Stopped because the tool call “read_file” failed.", terminal: true, ...(partial ? { partial: true } : {}) });
       if (cutOff) h.manager.failThread(threadId, "Provider settings changed");
-      else event(threadId, { type: "turn.completed", ok: false, stopReason: stopReason ?? (partial ? "tool_error" : "refusal") });
+      else event(threadId, { type: "turn.completed", ok: false, stopReason: partial ? "tool_error" : "refusal" });
     };
     await attempt("thread-1", true);
     await attempt("thread-2", false);
     await attempt("thread-3", true, { reply: false });
     await attempt("thread-4", true, { cutOff: true });
-    await attempt("thread-5", true, { stopReason: "refusal" });
-    const [done, failed, silent, cutOff, limited] = h.manager.listRuns().sort((a, b) => a.threadId!.localeCompare(b.threadId!));
-    expect(done).toMatchObject({ status: "completed", partial: true, output: "Here is the summary.", error: expect.stringContaining("read_file") });
-    expect([failed, silent, cutOff, limited].map((run) => [run.status, run.partial])).toEqual([["failed", undefined], ["failed", undefined], ["queued", undefined], ["failed", true]]);
+    const [partly, failed, silent, cutOff] = h.manager.listRuns().sort((a, b) => a.threadId!.localeCompare(b.threadId!));
+    expect(partly).toMatchObject({ status: "failed", partial: true, output: "Here is the summary.", error: expect.stringContaining("read_file") });
+    expect([failed, silent, cutOff].map((run) => [run.status, run.partial])).toEqual([["failed", undefined], ["failed", undefined], ["queued", undefined]]);
   });
 
   it("tells of a failure once per streak, and again when it changes or after a run completes", async () => {

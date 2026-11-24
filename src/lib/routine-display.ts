@@ -13,11 +13,9 @@ export function latestRoutineRun(routineId: string, runs: readonly RoutineRun[])
     .reduce<RoutineRun | undefined>((latest, run) => !latest || routineRunTime(run) > routineRunTime(latest) ? run : latest, undefined);
 }
 
-/** A run that failed only because a step did, after its reply came back: either recorded as failed with the reply in
- * its output, or completed with the failing step kept in its error line. */
+/** A run that failed only because a step did, after its reply came back. */
 export function partlyDone(run: RoutineRun): boolean {
-  return !run.goalStatus && run.partial === true &&
-    (run.status === "failed" || (run.status === "completed" && !!run.error));
+  return run.status === "failed" && run.partial === true && !run.goalStatus;
 }
 
 export function routineRunLabel(run: RoutineRun): string {

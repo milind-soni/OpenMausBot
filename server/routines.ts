@@ -1288,16 +1288,16 @@ export class RoutineManager {
       if (this.closing && (!event.ok || event.stopReason === "cancelled" || event.stopReason === "interrupted")) return null;
       if (event.cost != null) run.cost = (run.cost ?? 0) + event.cost;
       if (event.denials?.length) run.denials = [...new Set([...(run.denials ?? []), ...event.denials])];
-      const facts = { ...this.failureFacts.get(run.id), stopReason: event.stopReason };
-      // A last tool call that failed after the reply was delivered (partial) leaves a finished deliverable: the run completes partly done, its failing step kept in its error line. Any other stop fails it.
-      const delivered = !event.ok && event.stopReason === "tool_error" && facts.partial === true && Boolean(run.output);
-      if (!event.ok && !delivered) { this.settleFailure(run, routineFailure(run.error, event.stopReason), facts); return cloneRun(run); }
+      if (!event.ok) {
+        this.settleFailure(run, routineFailure(run.error, event.stopReason), { ...this.failureFacts.get(run.id), stopReason: event.stopReason });
+        return cloneRun(run);
+      }
       this.failureFacts.delete(run.id);
       const waitsOnTeammates = this.options.hasPendingDelegations?.(event.threadId) === true, handoffRefused = waitsOnTeammates ? null : this.options.refusedHandoff?.(event.threadId);
       if (handoffRefused) { const said = typeof handoffRefused === "string" ? { text: handoffRefused } : handoffRefused; this.failRun(Object.assign(run, { partial: (said.partial !== false && Boolean(run.output)) || undefined }, said.lendingRefused ? { lendingRefused: true as const } : {}), said.text); queueMicrotask(() => this.tickInBackground()); return cloneRun(run); }
       if (waitsOnTeammates) this.wait(run, ROUTINE_HANDOFF_WAIT);
-      else { Object.assign(run, { status: "completed", attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>, delivered ? { partial: true } : {}); this.ownerNotices = this.ownerNotices.filter((notice) => notice.botId !== run.botId); }
-      if (!delivered) run.error = undefined;
+      else { Object.assign(run, { status: "completed", attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>); this.ownerNotices = this.ownerNotices.filter((notice) => notice.botId !== run.botId); }
+      run.error = undefined;
     } else {
       return null;
     }
