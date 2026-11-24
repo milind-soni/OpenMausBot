@@ -456,7 +456,17 @@ export async function resumeRun(state: RunState, response: string, deps: RunDeps
     const chosen = results[step.id]?.case;
     results[step.id] = { state: "done", ...(chosen ? { case: chosen, output: { case: chosen } } : {}) };
   } else {
-    results[step.id] = { state: "done", output: parsed(response) };
+    const output = parsed(response);
+    const check = checkRule(step);
+    if (check?.rule && !compare(valueAt(output, check.rule.path), check.rule.op, check.rule.value)) {
+      const why = `its check didn't hold: ${check.says}`;
+      results[step.id] = { state: "failed", error: why, detail: { check: { passed: false, says: check.says } } };
+      deps.events.ended(state.id, state.name, step, results[step.id]!);
+      deps.save({ ...state, results, waiting: { step: step.id, type: "failed" }, createdAt: Date.now() });
+      return { protocolVersion: 1, ok: false, run: state.id, steps: [], error: { type: "step_failed", message: `"${step.label}" failed: ${why}`, step: step.id, resumeToken: state.id } };
+    }
+    results[step.id] = { state: "done", output, ...(check?.rule ? { detail: { check: { passed: true, says: check.says } } } : {}) };
+    if (check && !check.rule) return ask("check", fillPrompt(`Check this step's result against: "${check.says}". Resume with "pass", or "fail: <why>".`, state.args), {}, asText(output));
     deps.events.ended(state.id, state.name, step, results[step.id]!);
   }
   return goOn(index + 1);
