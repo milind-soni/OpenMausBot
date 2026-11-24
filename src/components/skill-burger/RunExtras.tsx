@@ -74,13 +74,13 @@ export function RunHistory({ name, everyChat, botId, threadId, refreshKey }: { n
     <div className="flex flex-col gap-[3px]">
       {fixed && kept !== "done" && (
         <button type="button" onClick={() => void keep()} disabled={kept === "saving"} data-burger-keep-fix
-          className="burger-layer flex min-h-8 items-center justify-center rounded-[8px] bg-card px-3 text-[12px] font-medium text-accent-text shadow-sm outline-none hover:bg-ink/[0.04] focus-visible:ring-2 focus-visible:ring-accent/60 disabled:text-ink-tertiary">
+          className="burger-layer burger-open flex min-h-8 items-center justify-center rounded-[8px] bg-card px-3 text-[12px] font-medium text-accent-text shadow-sm outline-none hover:bg-ink/[0.04] focus-visible:ring-2 focus-visible:ring-accent/60 disabled:text-ink-tertiary">
           {t("skillBurger.run.keepFix")}
         </button>
       )}
       {kept === "done" && <p className="px-3 text-[12px] text-ink-secondary">{t("skillBurger.run.fixKept")}</p>}
       {kept === "error" && <p role="alert" className="px-3 text-[12px] text-danger">{t("skillBurger.run.addPathFailed")}</p>}
-      <details className="burger-layer rounded-[8px] bg-card px-3 py-1.5 text-[12px] shadow-sm" data-burger-history>
+      <details className="burger-layer burger-open rounded-[8px] bg-card px-3 py-1.5 text-[12px] shadow-sm" data-burger-history>
         <summary className="cursor-pointer text-ink-secondary outline-none focus-visible:ring-2 focus-visible:ring-accent/60">{t("skillBurger.run.history")}</summary>
         <ul className="mt-1 flex flex-col gap-0.5">
           {runs.slice(0, 5).map((run) => (

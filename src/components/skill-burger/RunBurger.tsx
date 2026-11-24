@@ -36,6 +36,7 @@ function Row({ row }: { row: RunRow }) {
       data-status={row.state}
       className={cn(
         "burger-layer flex min-h-9 min-w-0 flex-col justify-center rounded-[8px] bg-card px-3 py-1.5 text-[13px] shadow-sm",
+        row.detail && "burger-open",
         row.depth === 1 && "ms-5",
         passed && "opacity-50",
         row.state === "waiting" && "text-ink-secondary",

@@ -5,6 +5,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { writeFileAtomic } from "../atomic.ts";
+import { RUN_STATE_TTL_MS } from "./run-state.ts";
 import type { RunEnvelope } from "./runner.ts";
 
 export const RUNS_KEPT = 12;
@@ -71,7 +72,9 @@ export function createRunHistory(dir: string, now: () => number = Date.now) {
     },
     /** The burger's recent runs, newest first, by the bots in `botIds` (every bot when absent). */
     list(name: string, botIds?: ReadonlySet<string>): RunRecord[] {
-      return (read()[name] ?? []).filter((one) => !botIds || botIds.has(one.botId));
+      // A run still waiting after its pause can no longer be resumed (a day) never finished: it shows as stopped.
+      return (read()[name] ?? []).filter((one) => !botIds || botIds.has(one.botId))
+        .map((one) => (one.status === "waiting" && now() - one.at > RUN_STATE_TTL_MS ? { ...one, status: "cancelled" as const } : one));
     },
   };
 }
