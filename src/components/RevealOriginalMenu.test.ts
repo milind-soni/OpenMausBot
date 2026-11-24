@@ -25,8 +25,8 @@ describe("Show in Finder for the original of a bot's attachment", () => {
 
   it("says Finder on a Mac and folder elsewhere", () => {
     expect(revealOriginalLabel("darwin")).toBe("Show in Finder");
-    expect(revealOriginalLabel("win32")).toBe("Show in folder");
-    expect(revealOriginalLabel("linux")).toBe("Show in folder");
+    expect(revealOriginalLabel("win32")).toBe("Open containing folder");
+    expect(revealOriginalLabel("linux")).toBe("Open containing folder");
   });
 
   it("shows the original, and says so when it moved or is gone instead of falling back to the copy", async () => {
