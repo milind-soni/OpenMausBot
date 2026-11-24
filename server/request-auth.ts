@@ -515,6 +515,10 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/skill-burgers\/[^/]+\/paths$/ },
   { methods: ["POST"], path: /^\/api\/skill-burger-summary$/ },
   { methods: ["POST"], path: /^\/api\/slack\/team\/messages(?:\/[0-9a-f-]{36}\/stop)?$/ },
+  // GitHub sign-in: a Team Cloud member's own only; anywhere else the handler takes the owner or an admin alone and never
+  // answers with a token (routes/github-sign-in.ts)
+  { methods: ["GET"], path: /^\/api\/github\/sign-in$/ },
+  { methods: ["POST"], path: /^\/api\/github\/sign-in\/(?:start|cancel|token|sign-out)$/ },
 ];
 
 export function requiredScope(method: string, path: string, features: { sharedComputers?: boolean } = {}): Scope {
