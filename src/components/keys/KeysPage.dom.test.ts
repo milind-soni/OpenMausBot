@@ -545,10 +545,33 @@ describe("Boat's credit offer on the Boat card", () => {
 });
 
 describe("Self-hosted VPS servers", () => {
+  it("labels the add row's fields the way the editor above it does", async () => {
+    const { VpsConnection } = await import("./VpsServersPanel");
+    render(() => createElement(VpsConnection, { key: "vps" }));
+    const labels = [...host.querySelectorAll("[data-vps-add] label")].map((label) => label.textContent);
+    expect(labels).toEqual(["Name", "SSH name", "Memory for each bot (GB)", "Processor cores for each bot"]);
+    for (const label of host.querySelectorAll<HTMLLabelElement>("[data-vps-add] label")) expect(document.getElementById(label.htmlFor)?.tagName).toBe("INPUT");
+  });
+
   const status = (vps: Record<string, unknown>) => ({ ...fx.config, vps: { configured: true, memoryGb: 4, cpus: 2, servers: [], ...vps } });
   const rowFor = (alias: string) => host.querySelector<HTMLElement>(`[data-vps-server="${alias}"]`)!;
   const aliases = () => [...host.querySelectorAll<HTMLElement>("[data-vps-server]")].map((element) => element.dataset.vpsServer);
-  const field = (label: string) => host.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
+  // An editor's fields carry their own visible labels inside a group named for the server; the add row's carry aria-labels.
+  const labelled = (scope: ParentNode | null, text: string) => {
+    const label = [...(scope?.querySelectorAll("label") ?? [])].find((one) => one.textContent === text);
+    return (label ? document.getElementById(label.htmlFor) : null) as HTMLInputElement;
+  };
+  const group = (name: string) => host.querySelector<HTMLElement>(`[data-vps-server][aria-label="${name}"]`);
+  const field = (label: string): HTMLInputElement => {
+    const limit = /^(.+) (memory \(GB\)|CPU cores)$/.exec(label);
+    if (limit && group(limit[1]!)) return labelled(group(limit[1]!), limit[2] === "CPU cores" ? "Processor cores for each bot" : "Memory for each bot (GB)");
+    const name = /^(.+) server name$/.exec(label);
+    if (name) return labelled(rowFor(name[1]!), "Name");
+    const adding = host.querySelector("[data-vps-add]");
+    const ADD: Record<string, string> = { "Server name": "Name", "Server SSH config alias": "SSH name", "Memory (GB)": "Memory for each bot (GB)", "CPU cores": "Processor cores for each bot" };
+    if (ADD[label]) return labelled(adding, ADD[label]!);
+    return host.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`) ?? labelled(host.querySelector("[data-vps-server]"), label === "Self-hosted VPS SSH config alias" ? "SSH name" : label);
+  };
   const button = (scope: ParentNode, text: string) => [...scope.querySelectorAll<HTMLButtonElement>("button")].find((candidate) => candidate.textContent === text)!;
   const lastBody = () => JSON.parse((fx.api.mock.lastCall![1] as RequestInit).body as string);
   const echo = (base: Record<string, unknown>) => async (_path: string, init: RequestInit) => {

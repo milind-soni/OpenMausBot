@@ -1,5 +1,5 @@
 import {
-  Archive, ArrowLeftRight, Bot, Coins, CreditCard, HardDrive, LockKeyhole, Monitor, Network, Palette, Server, SlidersHorizontal, Smartphone, Sparkles, ToggleRight, Users,
+  Archive, ArrowLeftRight, Bot, Coins, CreditCard, HardDrive, LockKeyhole, Monitor, Network, Palette, Server, SlidersHorizontal, Sparkles, ToggleRight, Users,
   type LucideIcon,
 } from "lucide-react";
 import type { LocaleKey } from "@/locales";
@@ -54,17 +54,17 @@ const browserAdmin = (ctx: SettingsContext) => !ctx.desktop && ctx.admin;
 const adminPage = (ctx: SettingsContext) => !ctx.client && !(ctx.team && !ctx.admin);
 /** A page Simple mode leaves out: its everyday rows show elsewhere in Simple (Overview, This app, Plan & billing). */
 const advancedOnly = (when: (ctx: SettingsContext) => boolean) => (ctx: SettingsContext) => ctx.advanced && when(ctx);
-/** Simple mode's twelve entries: the place (Overview, Devices, Phone & devices, AI, Vault, Spending, Import & export, Storage
- * on a Cloud, and Features), Your account (Plan & billing) and This app (Appearance). Advanced adds You and your bots, Desktops & browser,
+/** Simple mode's eleven entries: the place (Overview, Devices, AI, Vault, Spending, Import & export, Storage on a Cloud,
+ * and Features), Your account (Plan & billing) and This app (Appearance). Advanced adds You and your bots, Desktops & browser,
  * Data and General. */
 export const ADVANCED_PAGES: readonly SettingsPageId[] = ["bots", "desktops", "data", "general"];
 
 export const SETTINGS_PAGES: readonly SettingsPage[] = [
   { id: "overview", owner: "place", labelKey: "settings.page.overview", synonyms: ["overview", "place", "status", "version", "domain", "address", "sidebar"], when: () => true },
   { id: "devices", owner: "place", labelKey: "settings.page.devices", icon: Network, when: notClient,
-    synonyms: ["devices", "my devices", "all devices", "device map", "map", "computers", "laptops", "servers", "mac mini", "vps", "cloud", "private network", "tailnet", "add a device", "add device"] },
-  { id: "phone", owner: "place", labelKey: "settings.section.phoneDevices", icon: Smartphone, when: notClient,
-    synonyms: ["phone", "pair", "pairing", "qr", "code", "iphone", "android", "mobile", "tablet", "device", "devices", "wifi", "wi-fi", "anywhere", "relay", "remote", "companion", "tailscale", "connect your phone", "get the phone app", "pair a device", "this server", "remote access"] },
+    synonyms: ["devices", "device", "my devices", "all devices", "device map", "map", "computers", "laptops", "servers", "mac mini", "vps", "cloud", "private network", "tailnet", "add a device", "add device",
+      "phone", "phones", "phone & devices", "pair", "pairing", "qr", "code", "iphone", "android", "mobile", "tablet", "wifi", "wi-fi", "anywhere", "relay", "remote", "companion", "tailscale",
+      "connect your phone", "get the phone app", "pair a device", "this server", "remote access"] },
   { id: "ai", owner: "place", labelKey: "settings.group.ai", icon: Sparkles, when: adminPage,
     synonyms: ["ai", "models", "model providers", "providers", "engines", "api keys", "keys", "key", "claude", "codex", "openai", "anthropic", "ollama", "lm studio", "local model"] },
   { id: "bots", owner: "place", labelKey: "settings.page.bots", icon: Bot, when: advancedOnly(notClient),
@@ -123,8 +123,9 @@ export const LEGACY_SETTINGS: Record<Exclude<AppSettingsSection, SettingsPageId>
   decisionModel: () => ({ page: "ai", anchor: "routing" }),
   imageGeneration: () => ({ page: "ai", anchor: "images" }),
   engines: () => ({ page: "ai", anchor: "providers" }),
-  companion: () => ({ page: "phone" }),
-  remote: (ctx) => (ctx.client ? { page: "app", anchor: "your-computers" } : { page: "phone" }),
+  phone: () => ({ page: "devices", anchor: "phones" }),
+  companion: () => ({ page: "devices", anchor: "phones" }),
+  remote: (ctx) => (ctx.client ? { page: "app", anchor: "your-computers" } : { page: "devices", anchor: ctx.here ? "reach" : "phones" }),
   computer: () => ({ page: "desktops" }),
   logins: () => ({ page: "vault" }),
   botAccess: () => ({ page: "people", anchor: "bot-access" }),
@@ -189,20 +190,20 @@ const hereOnly = (ctx: SettingsContext) => ctx.here;
 export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "add-device", page: "devices", anchor: "add", labelKey: "devicesPage.add", topFor: ["add a device", "add device", "new device"], synonyms: ["add a computer", "add a server", "add a phone", "connect a device"] },
   { id: "private-network", page: "devices", anchor: "network", labelKey: "devicesPage.network.title", when: hereOnly, synonyms: ["tailscale", "tailnet", "private network", "vpn"] },
-  { id: "pair", page: "phone", anchor: "pair", labelKey: "phone.pair.button", sectionKey: "phone.pair.section", topFor: ["phone", "pair", "pairing", "qr", "iphone", "android", "this server", "pair a device", "connect your phone"],
+  { id: "pair", page: "devices", anchor: "phones", labelKey: "devicesPage.addGroup.phone", sectionKey: "devicesPage.group.phonesTablets", topFor: ["phone", "pair", "pairing", "qr", "iphone", "android", "this server", "pair a device", "connect your phone"],
     synonyms: ["code", "mobile", "tablet", "companion", "get the phone app"] },
-  { id: "paired", page: "phone", anchor: "paired", labelKey: "devices.paired", synonyms: ["devices", "remove", "revoke", "pair again"] },
-  { id: "wifi", page: "phone", anchor: "reach", labelKey: "devices.route.wifi", sectionKey: "phone.reach.title", when: hereOnly, synonyms: ["wifi", "wi-fi", "lan", "local network"] },
-  { id: "relay", page: "phone", anchor: "reach", labelKey: "devices.route.relay", sectionKey: "phone.reach.title", when: hereOnly, synonyms: ["anywhere", "relay", "away"] },
-  { id: "keep-awake", page: "phone", anchor: "reach", labelKey: "remote.keepAwake", sectionKey: "phone.reach.title", when: hereOnly, synonyms: ["sleep", "awake", "overnight", "scheduled"] },
-  { id: "wake-automations", page: "phone", labelKey: "settings.search.wakeAutomations", jump: "automations", when: hereOnly, topFor: ["sleep", "overnight", "scheduled"], synonyms: ["awake"] },
-  { id: "always-on", page: "phone", anchor: "always-on", labelKey: "alwaysOn.title", macLabelKey: "alwaysOn.titleMac", sectionKey: "alwaysOn.section", when: hereOnly,
+  { id: "paired", page: "devices", anchor: "phones", labelKey: "devicesPage.group.phonesTablets", synonyms: ["paired", "phones", "remove", "revoke", "pair again"] },
+  { id: "wifi", page: "devices", anchor: "reach", labelKey: "devices.route.wifi", sectionKey: "phone.reach.title", when: hereOnly, synonyms: ["wifi", "wi-fi", "lan", "local network"] },
+  { id: "relay", page: "devices", anchor: "reach", labelKey: "devices.route.relay", sectionKey: "phone.reach.title", when: hereOnly, synonyms: ["anywhere", "relay", "away"] },
+  { id: "keep-awake", page: "devices", anchor: "reach", labelKey: "remote.keepAwake", sectionKey: "phone.reach.title", when: hereOnly, synonyms: ["sleep", "awake", "overnight", "scheduled"] },
+  { id: "wake-automations", page: "devices", labelKey: "settings.search.wakeAutomations", jump: "automations", when: hereOnly, topFor: ["sleep", "overnight", "scheduled"], synonyms: ["awake"] },
+  { id: "always-on", page: "devices", anchor: "always-on", labelKey: "alwaysOn.title", macLabelKey: "alwaysOn.titleMac", sectionKey: "alwaysOn.section", when: hereOnly,
     topFor: ["always on", "always-on", "home server", "spare computer", "mac mini"], synonyms: ["mini", "server at home", "run all day", "24/7", "open at login", "awake"] },
-  { id: "add-always-on", page: "phone", anchor: "always-on", labelKey: "alwaysOn.add.title", sectionKey: "alwaysOn.section", when: hereOnly,
+  { id: "add-always-on", page: "devices", anchor: "always-on", labelKey: "alwaysOn.add.title", sectionKey: "alwaysOn.section", when: hereOnly,
     topFor: ["add a mac mini", "add mac mini", "add a computer", "add always-on computer"], synonyms: ["mac mini", "mini", "home server", "spare computer", "move my bots"] },
-  { id: "other-computers", page: "phone", anchor: "computers", labelKey: "devices.computers.title", when: hereOnly, topFor: ["tailscale", "other computers", "another computer", "other computer", "my other computer"],
-    synonyms: ["computer", "computers", "laptop", "desktop", "mac", "pc", "share", "tailnet", "connect to a server"] },
-  { id: "tailscale", page: "phone", anchor: "more-ways", labelKey: "devices.moreWays", sectionKey: "phone.reach.title", when: hereOnly, advanced: true, synonyms: ["tailscale", "https", "tailnet"] },
+  { id: "other-computers", page: "devices", anchor: "network", labelKey: "devices.computers.title", sectionKey: "devicesPage.network.title", when: hereOnly, topFor: ["tailscale", "other computers", "another computer", "other computer", "my other computer"],
+    synonyms: ["computer", "computers", "laptop", "desktop", "mac", "pc", "share", "tailnet", "connect to another computer", "connect to a server"] },
+  { id: "https-address", page: "devices", anchor: "more-ways", labelKey: "devices.route.https", sectionKey: "phone.reach.title", when: hereOnly, advanced: true, synonyms: ["https", "web address", "https address"] },
   { id: "domain", page: "overview", anchor: "address", labelKey: "settings.overview.address", advanced: true, when: (ctx) => !ctx.here && !ctx.client, synonyms: ["domain", "dns", "https", "custom domain"] },
   { id: "sidebar-color", page: "overview", anchor: "sidebar", labelKey: "placeLook.sidebarColor", sectionKey: "settings.overview.sidebar", synonyms: ["color", "colour", "tint", "cloud color"] },
   { id: "sidebar-picture", page: "overview", anchor: "sidebar", labelKey: "placeLook.sidebarPicture", sectionKey: "settings.overview.sidebar", topFor: ["wallpaper", "background", "sidebar image"], synonyms: ["picture", "banner", "image"] },
@@ -245,7 +246,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "together", page: "plan", anchor: "together", labelKey: "together.switch.title", sectionKey: "settings.page.plan", synonyms: ["together", "one list", "both places", "cloud bots", "sidebar"] },
   { id: "this-week", page: "plan", anchor: "this-week", labelKey: "settings.plan.thisWeek", sectionKey: "settings.page.plan", synonyms: ["usage", "weekly", "limits", "cloud desktop hours", "voice replies"] },
   { id: "updates", page: "app", anchor: "updates", labelKey: "settings.updates.title", when: desk, synonyms: ["update", "version", "check for updates", "release"] },
-  { id: "your-computers", page: "app", anchor: "your-computers", labelKey: "settings.app.computers", when: desk, synonyms: ["servers", "connect to a server", "environments", "switch"] },
+  { id: "your-computers", page: "app", anchor: "your-computers", labelKey: "settings.app.computers", when: desk, synonyms: ["servers", "connect to another computer", "connect to a server", "environments", "switch"] },
   { id: "help", page: "app", anchor: "help", labelKey: "sidebar.menu.helpShort", synonyms: ["help center", "feedback", "diagnostics", "logs", "tour", "welcome tour"] },
   { id: "language", page: "general", anchor: "typing", labelKey: "settings.language.title", simple: { page: "app", anchor: "typing" }, synonyms: ["language", "translate"] },
   { id: "send-key", page: "general", anchor: "typing", labelKey: "settings.sendKey.title", synonyms: ["enter", "return", "shift+enter", "new line", "keyboard"] },
@@ -274,8 +275,9 @@ export interface SearchHit {
   advanced?: boolean;
 }
 
-const PAGE_TOP: Partial<Record<SettingsPageId, readonly string[]>> = {
-  phone: ["phone", "phones", "pair", "pairing", "qr", "phone pairing", "mobile"],
+/** Words that name a page before any of its rows, and the section they open it at. */
+const PAGE_TOP: Partial<Record<SettingsPageId, { words: readonly string[]; anchor?: string }>> = {
+  devices: { words: ["phone", "phones", "pair", "pairing", "qr", "phone pairing", "mobile"], anchor: "phones" },
 };
 
 const LOCAL_ONLY_WORDS = ["wifi", "wi-fi", "lan", "local network", "tailscale"];
@@ -305,12 +307,15 @@ export function searchSettings(rawQuery: string, ctx: SettingsContext, label: (e
   const every = { ...ctx, advanced: true };
   const simpleHides = (page: SettingsPageId) => !pageById(page).when(ctx);
   for (const page of visiblePages(every)) {
-    // A place with no Same Wi-Fi of its own doesn't offer its phone page for "wifi": This computer's row does.
-    if (page.id === "phone" && !ctx.here && LOCAL_ONLY_WORDS.includes(query)) continue;
-    // A page named by the word itself ("phone", "pair") comes before its own rows.
-    const top = PAGE_TOP[page.id] ?? [];
-    const value = top.includes(query) ? 101 : score(query, pageLabel(page), page.synonyms, []) - 1;
-    if (value > 0) hits.push({ entry: { id: `page:${page.id}`, page: page.id, labelKey: page.labelKey }, elsewhere: false, score: value, advanced: simpleHides(page.id) || undefined });
+    // A place with no Same Wi-Fi of its own doesn't offer its Devices page for "wifi": This computer's row does.
+    if (page.id === "devices" && !ctx.here && LOCAL_ONLY_WORDS.includes(query)) continue;
+    // A page named by the word itself ("phone", "pair") comes before its own rows, open at the section the word means.
+    const top = PAGE_TOP[page.id];
+    const named = top?.words.includes(query) === true;
+    const value = named ? 101 : score(query, pageLabel(page), page.synonyms, []) - 1;
+    if (value > 0) {
+      hits.push({ entry: { id: `page:${page.id}`, page: page.id, labelKey: page.labelKey, ...(named && top?.anchor ? { anchor: top.anchor } : {}) }, elsewhere: false, score: value, advanced: simpleHides(page.id) || undefined });
+    }
   }
   for (const listed of SETTINGS_INDEX) {
     // Simple shows some of an Advanced page's rows on a page of its own: search lands there instead.

@@ -9,7 +9,7 @@ import { setLocale } from "@/lib/i18n";
 import { usePhoneSetupController, type CompanionState } from "./PhoneSetupFlow";
 
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: { config: {} } }) }));
-const { PairDeviceDialog } = await import("./PhoneDevicesSection");
+const { PairPhoneSteps } = await import("./PhoneDevicesSection");
 
 const off = { on: false, since: null };
 const closed: CompanionState = { enabled: false, keepAwake: false, port: 8810, devices: [], pairing: null,
@@ -17,12 +17,12 @@ const closed: CompanionState = { enabled: false, keepAwake: false, port: 8810, d
 
 function Page() {
   const c = usePhoneSetupController();
-  return c.state ? createElement(PairDeviceDialog, { c, state: c.state, onClose: () => {} }) : null;
+  return c.state ? createElement("div", { "data-steps": "" }, createElement(PairPhoneSteps, { c, state: c.state, codeView: createElement("div", { "data-code": "" }) })) : null;
 }
 
 let host: HTMLDivElement;
 let root: Root;
-const dialog = () => document.querySelector<HTMLElement>("[data-pair-dialog]");
+const steps = () => document.querySelector<HTMLElement>("[data-steps]");
 const turnOn = () => document.querySelector<HTMLButtonElement>("[data-pair-turn-on]");
 
 beforeEach(() => {
@@ -50,9 +50,10 @@ it("stays on the choice and says why when the chosen way in could not be turned 
   await vi.waitFor(() => expect(turnOn()?.disabled).toBe(false));
   turnOn()!.click();
   await vi.waitFor(() => expect(companion.setRoute).toHaveBeenCalledWith("wifi", true));
-  await vi.waitFor(() => expect(dialog()?.querySelector('[role="alert"]')?.textContent).toBe(
+  await vi.waitFor(() => expect(steps()?.querySelector('[role="alert"]')?.textContent).toBe(
     "Remote access could not be updated. Open Advanced & troubleshooting and try again.",
   ));
-  expect(dialog()?.dataset.pairDialog).toBe("consent");
+  expect(steps()?.querySelector("[data-code]")).toBeNull();
+  expect(turnOn()).not.toBeNull();
   expect(companion.pairing).not.toHaveBeenCalled();
 });

@@ -130,7 +130,7 @@ describe("reads", () => {
   it("names real places only: find falls back to where a thing is, places lists them all", async () => {
     const { host, turn } = fixture();
     const owner = await host.handle({ action: "get", id: "phone.pairing" }, turn);
-    expect(JSON.parse(String(owner.body.text))).toMatchObject({ where: "Settings → Phone & devices → Pair a phone", change: "only the person, in Settings → Phone & devices → Pair a phone" });
+    expect(JSON.parse(String(owner.body.text))).toMatchObject({ where: "Settings → Devices → Phones and tablets → Add a phone", change: "only the person, in Settings → Devices → Phones and tablets → Add a phone" });
     const none = await host.handle({ action: "find", query: "invoice" }, turn);
     expect(none.body.text).toMatch(/^No setting you can change matches "invoice"\. Where the person finds it in the app: Settings → Plan & billing/);
     expect((await host.handle({ action: "places", query: "spending" }, turn)).body.text).toMatch(/^Settings → Spending$/m);
@@ -383,7 +383,7 @@ describe("owner-only tier", () => {
     expect(on.body.text).toMatch(/^Done: Let your paired phones reach this computer from anywhere, through MausBot's relay\./);
     expect(fx.windowValues.get("remote.relay")).toBe(true);
     const off = await fx.set("remote.relay", false);
-    expect(off).toMatchObject({ status: 409, body: { error: "Turning off Reach from anywhere is changed only by the person, in Settings → Phone & devices → How your phone reaches this computer → Anywhere, through MausBot (only in the desktop app, on this computer's own page). Tell them where in one line; do not try another way." } });
+    expect(off).toMatchObject({ status: 409, body: { error: "Turning off Reach from anywhere is changed only by the person, in Settings → Devices → How your phone reaches this computer → Anywhere, through MausBot (only in the desktop app, on this computer's own page). Tell them where in one line; do not try another way." } });
     expect(fx.windowValues.get("remote.relay")).toBe(true);
     expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
     expect(fx.windowValues.get("remote.relay")).toBe(false);
