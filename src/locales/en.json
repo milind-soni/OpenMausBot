@@ -4756,7 +4756,6 @@
   "botPanel.folder.ownHint": "Nothing on this computer is touched",
   "botPanel.folder.pick": "A folder you choose",
   "botPanel.folder.pickHint": "Desktop, a project, Downloads",
-  "botPanel.tryAsking": "Try asking",
   "computer.simple.dest.letItChoose": "Let it choose",
   "botSettings.visibility.title": "Who can see it",
   "botSettings.sections.overview": "Overview",

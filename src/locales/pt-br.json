@@ -8263,7 +8263,6 @@
   "botPanel.folder.ownHint": "Não altera nada neste computador",
   "botPanel.folder.pick": "Uma pasta que você escolher",
   "botPanel.folder.pickHint": "Mesa/Área de Trabalho, um projeto, Downloads",
-  "botPanel.tryAsking": "Experimente perguntar",
   "computer.simple.dest.letItChoose": "Deixar o bot escolher",
   "model.fallback.add": "Adicionar uma IA reserva",
   "model.fallback.none": "Nenhuma outra IA disponível",

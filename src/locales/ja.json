@@ -4041,7 +4041,6 @@
   "botPanel.folder.ownHint": "このコンピューターのファイルには一切触れません",
   "botPanel.folder.pick": "選択したフォルダー",
   "botPanel.folder.pickHint": "デスクトップ、プロジェクト、ダウンロードなど",
-  "botPanel.tryAsking": "こんなふうに頼んでみましょう",
   "computer.simple.dest.letItChoose": "お任せ",
   "botSettings.visibility.title": "見られる人",
   "botSettings.sections.overview": "概要",
