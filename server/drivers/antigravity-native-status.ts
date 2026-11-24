@@ -1,6 +1,7 @@
 // What the native Antigravity CLI says about the Google account an instance is signed in with, and signing it out.
 //
-// The CLI keeps its sign-in in the OS keyring (or a file in the profile) and has no status command: the answer is
+// The CLI keeps its sign-in in the profile's file (antigravity-acp.ts starts it as over SSH) and has no status command,
+// and the file says nothing of whether Google still honours it: the answer is
 // whether `session/new` is accepted. `-32000 Authentication required` is signed out; anything else that stops the
 // answer (a timeout, a crash) says nothing, and is thrown, never counted as signed out.
 import type { ChildProcess } from "node:child_process";
@@ -13,6 +14,7 @@ import {
   type AntigravityProfile,
 } from "./antigravity-acp.ts";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
+import { ANTIGRAVITY_CLI_TOKEN_FILE } from "./antigravity-cli-install.ts";
 import { acpVendorMessage } from "./acp/rpc-error.ts";
 
 export type NativeSignIn = "in" | "out";
@@ -42,9 +44,9 @@ export function antigravityCliRefusedSession(error: unknown): boolean {
 
 const advertised = (value: unknown) => value === true || (typeof value === "object" && value !== null && !Array.isArray(value));
 
-/** The CLI's own file store for the sign-in, which it falls back to when the keyring is unavailable. */
+/** The CLI's own file store for the sign-in: the only one it uses as this app starts it. */
 export const antigravityNativeTokenPath = (profile: Pick<AntigravityProfile, "directory">) =>
-  join(profile.directory, "antigravity-acp", "antigravity-oauth-token");
+  join(profile.directory, "antigravity-acp", ANTIGRAVITY_CLI_TOKEN_FILE);
 
 /** Runs `work` on a new CLI process and ends it; with `waitForExit` the process is gone before this resolves, or it throws. */
 async function withCli<T>(
@@ -175,11 +177,6 @@ export class NativeSignInCache {
     const clear = () => { if (this.#reading.get(instanceId) === current) this.#reading.delete(instanceId); };
     current.read.then(clear, clear);
     return current.read;
-  }
-
-  /** A sign-in or sign-out of the CLI's one shared sign-in changes every instance's answer. */
-  forgetAll(): void {
-    for (const instanceId of new Set([...this.#entries.keys(), ...this.#reading.keys(), ...this.#generations.keys()])) this.forget(instanceId);
   }
 
   /** The next question asks the CLI again: a sign-in, sign-out, runtime switch or refusal changed the answer. */

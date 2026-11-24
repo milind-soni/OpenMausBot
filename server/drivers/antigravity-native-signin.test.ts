@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,11 +9,10 @@ import type { ProviderInstance } from "../contracts.ts";
 import { antigravityRuntimesRoot } from "../engine-roots.ts";
 import { ProviderAuthSessions } from "../provider-auth-sessions.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
-import { fakeAntigravityScript, installFakeManagedCli, loginAt, nativeFixture, sessionAcceptedAt, type NativeFixture } from "../testing/antigravity-native-fixture.ts";
+import { installFakeManagedCli, loginAt, nativeFixture, sessionAcceptedAt, type NativeFixture } from "../testing/antigravity-native-fixture.ts";
 import { recordEvents } from "../testing/events.ts";
 import { antigravityProfileDirectory, antigravityTokenPath } from "./antigravity-acp.ts";
 import { AntigravityDriver } from "./antigravity.ts";
-import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
 
 const WINDOWS = process.platform === "win32";
 const LOGIN_NOTE = "Antigravity needs a Google account";
@@ -40,19 +39,6 @@ function pinnedRuntime(name = "agy_acp_server"): string {
     chmodSync(harness, 0o755);
   }
   return executable;
-}
-
-/** The pinned release laid down by hand in the app's install folder: sparse files of the pinned sizes. */
-function installPinnedByHand(baseDir: string): void {
-  const pinned = resolveAntigravityReleaseAsset()!;
-  const directory = join(antigravityRuntimesRoot(baseDir), `${process.platform}-${process.arch}`, "versions", pinned.sha256);
-  mkdirSync(directory, { recursive: true });
-  for (const file of [pinned.executable, pinned.harness]) {
-    writeFileSync(join(directory, file.name), "");
-    truncateSync(join(directory, file.name), file.bytes);
-    chmodSync(join(directory, file.name), 0o755);
-  }
-  writeFileSync(join(directory, ".install-complete.json"), JSON.stringify({ sha256: pinned.sha256, version: pinned.version, executable: pinned.executable, harness: pinned.harness }));
 }
 
 afterEach(async () => {
@@ -235,7 +221,8 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
       expect(existsSync(credentials(instanceId))).toBe(false);
     }, 120_000);
 
-    it("signs out every native account when the CLI keeps each profile's sign-in in its own file", async () => {
+    // The app starts the CLI as over SSH (antigravity-acp.ts), so each account keeps its own sign-in in its own profile.
+    it("signs this account alone out: another account on the native CLI keeps its own sign-in", async () => {
       const fixture = nativeFixture(folder());
       const [one, two] = ["antigravity-native-file-one", "antigravity-native-file-two"];
       const first = await create(one, fixture);
@@ -244,48 +231,20 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
       expect(await second.snapshot()).toMatchObject({ authenticated: true });
       await first.signOut!();
       expect(existsSync(credentials(one))).toBe(false);
-      expect(existsSync(credentials(two))).toBe(false);
-      expect(await second.snapshot()).toMatchObject({ authenticated: false });
+      expect(existsSync(credentials(two))).toBe(true);
+      expect(await first.snapshot()).toMatchObject({ authenticated: false });
+      expect(await second.snapshot()).toMatchObject({ authenticated: true });
     }, 120_000);
 
-    it("signs out an account on agy that runs the native CLI, though it has neither started nor signed in since the app started", async () => {
+    it("signs out an account on agy that runs the native CLI", async () => {
       installFakeManagedCli(DATA_DIR);
       const fixture = nativeFixture(folder());
-      const [agy, other] = ["antigravity-native-agy-idle", "antigravity-native-agy-signs-out"];
-      await create(agy, fixture, {}, "agy");
-      const signingOut = await create(other, fixture);
-      for (const instanceId of [agy, other]) await loginAt(fixture, antigravityProfileDirectory(instanceId), "fixture-code");
-      await signingOut.signOut!();
-      expect(existsSync(credentials(agy))).toBe(false);
-    }, 120_000);
-
-    it("signs each other account out through its own CLI", async () => {
-      const fixture = nativeFixture(folder());
-      const own = nativeFixture(folder()), ownLog = join(own.directory, "own.log");
-      writeFileSync(own.executable, fakeAntigravityScript().replace("exec ", `FAKE_AGY_LOG=${JSON.stringify(ownLog)} exec `));
-      const [other, signsOut] = ["antigravity-native-own-cli", "antigravity-native-own-cli-initiator"];
-      await create(other, own);
-      const signingOut = await create(signsOut, fixture);
-      await loginAt(own, antigravityProfileDirectory(other), "fixture-code");
-      await loginAt(fixture, antigravityProfileDirectory(signsOut), "fixture-code");
-      await signingOut.signOut!();
-      expect(existsSync(ownLog) ? readFileSync(ownLog, "utf8") : "").toContain("logout-start");
-      expect(existsSync(credentials(other))).toBe(false);
-    }, 120_000);
-
-    it.skipIf(!resolveAntigravityReleaseAsset())("ends the native turns of an account on agy whose path has since come to name the pinned runtime", async () => {
-      installFakeManagedCli(DATA_DIR);
-      const fixture = nativeFixture(folder());
-      const [agy, signsOut] = ["antigravity-native-agy-now-pinned", "antigravity-native-agy-now-pinned-other"];
-      const running = await create(agy, fixture, {}, "agy");
-      await loginAt(fixture, antigravityProfileDirectory(agy), "fixture-code");
-      expect((await turn(running, "agy-native", fixture.directory)).done).toMatchObject({ ok: true });
-      const pid = fixture.entries().find((entry) => entry.method === "session/prompt")!.pid as number;
-      installPinnedByHand(DATA_DIR);
-      const signingOut = await create(signsOut, fixture);
-      await loginAt(fixture, antigravityProfileDirectory(signsOut), "fixture-code");
-      await signingOut.signOut!();
-      expect(() => process.kill(pid, 0)).toThrow();
+      const instanceId = "antigravity-native-agy-signs-out";
+      const agy = await create(instanceId, fixture, {}, "agy");
+      await loginAt(fixture, antigravityProfileDirectory(instanceId), "fixture-code");
+      await agy.signOut!();
+      expect(fixture.methods()).toContain("logout");
+      expect(existsSync(credentials(instanceId))).toBe(false);
     }, 120_000);
 
     it("leaves the pinned sign-in of an account that ran the native CLI and was moved back to the pinned runtime", async () => {
@@ -319,7 +278,7 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
       expect(existsSync(token)).toBe(true);
     }, 120_000);
 
-    it("stops a sign-in in progress on an account whose path names no CLI but signs in through the native one", async () => {
+    it("leaves another account's sign-in in progress alone", async () => {
       installFakeManagedCli(DATA_DIR);
       const fixture = nativeFixture(folder());
       const signingIn = await create("antigravity-native-agy-login", fixture, {}, "agy");
@@ -328,17 +287,21 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
       const other = await create("antigravity-native-agy-other", fixture);
       await loginAt(fixture, antigravityProfileDirectory("antigravity-native-agy-other"), "fixture-code");
       await other.signOut!();
-      expect(await signingIn.getAuthentication!(started.flowId!)).not.toMatchObject({ phase: "waiting" });
+      expect(await signingIn.getAuthentication!(started.flowId!)).toMatchObject({ phase: "waiting" });
     }, 120_000);
 
-    it.each([["answers logout and keeps the sign-in", "ignore"], ["refuses logout", "refuse"]])("fails, with the account kept, when the CLI %s in its keyring", async (_name, logout) => {
+    // 1.5.14 keeps one keyring entry per computer unless it runs over SSH; started as over SSH it never uses the keyring.
+    it.each([["answers logout and keeps the sign-in", "ignore"], ["refuses logout", "refuse"]])("signs out, never touching the keyring, when the CLI %s", async (_name, logout) => {
       const fixture = nativeFixture(folder());
+      const keyring = folder();
       const instanceId = `antigravity-native-keyring-${logout}`;
-      const instance = await create(instanceId, fixture, { FAKE_AGY_KEYRING: folder(), FAKE_AGY_LOGOUT: logout });
+      const instance = await create(instanceId, fixture, { FAKE_AGY_KEYRING: keyring, FAKE_AGY_LOGOUT: logout });
       const started = await instance.startAuthentication!();
       await instance.completeAuthentication!(started.flowId!, "fixture-code");
-      await expect(instance.signOut!()).rejects.toThrow("still reports a Google sign-in");
-      expect(await instance.snapshot()).toMatchObject({ authenticated: true });
+      expect(existsSync(credentials(instanceId))).toBe(true);
+      await instance.signOut!();
+      expect(await instance.snapshot()).toMatchObject({ authenticated: false });
+      expect(readdirSync(keyring)).toEqual([]);
     }, 120_000);
 
     it("fails, with the account kept, when the CLI cannot be asked to confirm", async () => {
@@ -355,18 +318,13 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
       await expect(instance.signOut!()).rejects.toThrow(/Antigravity CLI is not installed/u);
       const agy = await create("antigravity-native-agy-missing-cli", nativeFixture(folder()), { PATH: "/usr/bin:/bin" }, "agy");
       await expect(agy.signOut!()).rejects.toThrow();
-      const gone = nativeFixture(folder());
-      await create("antigravity-native-other-moved-cli", gone);
-      renameSync(gone.executable, join(gone.directory, "moved-away"));
-      const signingOut = await create("antigravity-native-other-moved-initiator", nativeFixture(folder()));
-      await expect(signingOut.signOut!()).rejects.toThrow();
       const moved = nativeFixture(folder());
       const custom = await create("antigravity-native-moved-cli", moved);
       renameSync(moved.executable, join(moved.directory, "moved-away"));
       await expect(custom.signOut!()).rejects.toThrow();
     }, 60_000);
 
-    it("starts no native process while the shared sign-in is being removed, so none reads the old sign-in", async () => {
+    it("starts no native process of the account while its sign-in is being removed, so none reads the old sign-in", async () => {
       const fixture = nativeFixture(folder());
       const instanceId = "antigravity-native-gated";
       const instance = await create(instanceId, fixture, { FAKE_AGY_LOGOUT_MS: "1500" });
@@ -379,15 +337,14 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
       expect(await during).toMatchObject({ authenticated: false });
     }, 60_000);
 
-    it("leaves the native CLI's shared sign-in alone when an account on the pinned runtime signs out", async () => {
+    it("signs an account on the pinned runtime out of both runtimes' sign-ins in its profile, without starting the CLI", async () => {
       const fixture = nativeFixture(folder());
       const instanceId = "antigravity-native-pinned-signout";
       await loginAt(fixture, antigravityProfileDirectory(instanceId), "fixture-code");
-      installFakeManagedCli(DATA_DIR);
       const pinned = await create(instanceId, fixture, {}, pinnedRuntime());
       await pinned.signOut!();
       expect(fixture.methods()).not.toContain("logout");
-      expect(await sessionAcceptedAt(fixture, antigravityProfileDirectory(instanceId))).toBe(true);
+      expect(existsSync(credentials(instanceId))).toBe(false);
     }, 120_000);
 
     it("does not ask for a sign-in when the CLI's sign-in service is down, in a turn or background text", async () => {
@@ -404,11 +361,11 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
   });
 
   describe("which CLI an instance starts, with only the native CLI installed", () => {
-    it.each(["antigravity", "agy"])("starts the native CLI for the path %s and says its sign-in is shared", async (cli) => {
+    it.each(["antigravity", "agy"])("starts the native CLI for the path %s and says it runs it", async (cli) => {
       installFakeManagedCli(DATA_DIR);
       const asked = nativeFixture(folder());
       const native = await create(`antigravity-policy-${cli}`, asked, {}, cli);
-      expect(await native.snapshot()).toMatchObject({ state: "available", version: "1.5.14", authenticated: false, sharedSignIn: true });
+      expect(await native.snapshot()).toMatchObject({ state: "available", version: "1.5.14", authenticated: false, nativeCli: true });
       expect(asked.methods()).toContain("initialize");
     }, 120_000);
   });

@@ -44,23 +44,23 @@ async function show(instance: InstanceInfo) {
 }
 
 it.each([
-  ["the CLI it runs", google({ cli: "agy", snapshot: { state: "available", authenticated: true, sharedSignIn: true } }), "cli"],
+  ["the CLI it runs", google({ cli: "agy", snapshot: { state: "available", authenticated: true, nativeCli: true } }), "cli"],
   ["the path antigravity", google({ cli: "antigravity", snapshot: { state: "unavailable" } }), "cli"],
   ["the path Antigravity.exe", google({ cli: "Antigravity.exe", snapshot: { state: "unavailable" } }), "cli"],
   ["a new install with nothing yet", google({ snapshot: { state: "unavailable" } }), "cli"],
   ["the pinned runtime it runs", google({ snapshot: { state: "available", authenticated: true, version: "1.4.3" } }), "pinned"],
   ["the path that asks for the pinned runtime", google({ cli: "agy_acp_server", snapshot: { state: "unavailable" } }), "pinned"],
   ["a path of the person's own", google({ cli: "/opt/agy/agy_acp_server.par", snapshot: { state: "available", version: "1.4.3" } }), "custom"],
-  ["a native CLI at a path of the person's own", google({ cli: "/opt/tools/antigravity", snapshot: { state: "available", authenticated: true, sharedSignIn: true } }), "custom"],
+  ["a native CLI at a path of the person's own", google({ cli: "/opt/tools/antigravity", snapshot: { state: "available", authenticated: true, nativeCli: true } }), "custom"],
 ])("shows what an Antigravity account runs, from %s", async (_from, instance, shown) => {
   const select = await show(instance);
   expect(select?.value).toBe(shown);
 });
 
 it.each([
-  ["pinned", "agy_acp_server", google({ cli: "antigravity", snapshot: { state: "available", authenticated: true, sharedSignIn: true } })],
+  ["pinned", "agy_acp_server", google({ cli: "antigravity", snapshot: { state: "available", authenticated: true, nativeCli: true } })],
   ["cli", "antigravity", google({ snapshot: { state: "available", authenticated: true, version: "1.4.3" } })],
-  ["cli", "antigravity", google({ cli: "/opt/tools/antigravity", snapshot: { state: "available", authenticated: true, sharedSignIn: true } })],
+  ["cli", "antigravity", google({ cli: "/opt/tools/antigravity", snapshot: { state: "available", authenticated: true, nativeCli: true } })],
 ])("saves the path for %s when it is chosen", async (choice, path, instance) => {
   const select = await show(instance);
   await act(async () => {

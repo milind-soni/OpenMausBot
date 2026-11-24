@@ -1,6 +1,7 @@
-// The native CLI is opt-in (OMB_ANTIGRAVITY_NATIVE_CLI=1). Off, the default, Antigravity behaves as before the CLI: the
-// pinned 1.4.3 runtime is kept and run, Google's CLI channel is never asked, a CLI release is never started, the
-// signed-in check reads acp_token.json, and the updater offers nothing new. On, a computer with the pinned runtime moves.
+// Which runtime an Antigravity account runs. Its CLI path (Settings, Runs on) decides: `antigravity` the native CLI,
+// `agy_acp_server` the pinned (Classic) runtime. With neither, a computer that has the pinned runtime keeps it, nothing
+// is moved, removed or offered, and a new install takes the CLI. OMB_ANTIGRAVITY_NATIVE_CLI=1 gives such an account the
+// CLI even where the pinned runtime is installed; an account set to a runtime keeps it, and nothing is removed.
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -71,59 +72,51 @@ function recordingFetch() {
   return { asked, fetchImpl };
 }
 
-describe.skipIf(!pinned || WINDOWS)("with the native CLI off (the default), Antigravity behaves as before it", () => {
-  it("is off unless OMB_ANTIGRAVITY_NATIVE_CLI is exactly 1", async () => {
-    expect((await import("./antigravity-cli-install.ts")).ANTIGRAVITY_NATIVE_CLI).toBe(false);
+describe.skipIf(!pinned || WINDOWS)("by default, a computer that has the pinned runtime", () => {
+  it("is not switched by OMB_ANTIGRAVITY_NATIVE_CLI unless it is exactly 1", async () => {
+    expect((await import("./antigravity-cli-install.ts")).ANTIGRAVITY_CLI_FIRST).toBe(false);
     for (const value of ["0", "true", "yes", ""]) {
       vi.stubEnv("OMB_ANTIGRAVITY_NATIVE_CLI", value);
       vi.resetModules();
-      expect((await import("./antigravity-cli-install.ts")).ANTIGRAVITY_NATIVE_CLI, value).toBe(false);
+      expect((await import("./antigravity-cli-install.ts")).ANTIGRAVITY_CLI_FIRST, value).toBe(false);
     }
   });
 
-  it("keeps a computer on the pinned runtime, even beside a CLI release, never starts the CLI, and the updater offers nothing new", async () => {
+  it("keeps running it for an account that names no runtime, even beside a CLI release and a CLI sign-in, and the updater offers no move", async () => {
     const runtime = await import("./antigravity-runtime.ts");
     const { baseDir, pinnedDir, started } = computer({ cli: true, cliSignIn: true });
-    for (const cli of ["agy", undefined]) {
-      await expect(runtime.resolveAntigravityRuntime(cli, { PATH: "" }, baseDir)).resolves.toMatchObject({ version: pinned!.version, source: "managed" });
+    for (const cli of ["agy", undefined, "agy_acp_server"]) {
+      await expect(runtime.resolveAntigravityRuntime(cli, { PATH: "" }, baseDir), String(cli)).resolves.toMatchObject({ version: pinned!.version, source: "managed" });
     }
-    // `antigravity` is no alias for the CLI when off: a custom name looked up on PATH, as on main.
-    await expect(runtime.resolveAntigravityRuntime("antigravity", { PATH: "" }, baseDir)).rejects.toThrow("sibling is missing.");
     const latest = vi.fn(latestRelease);
-    expect(await runtime.antigravityCliUpdate({ baseDir, now: Date.now() + 1e9, latest })).toBeNull();
+    expect(await runtime.antigravityCliUpdate({ baseDir, now: Date.now() + 1e9, latest, configuredClis: ["agy"] })).toBeNull();
     expect(latest).not.toHaveBeenCalled();
-    // The updater's own question, as main asks it: is an older pinned release installed? No.
     expect(await runtime.antigravityOlderRuntime(baseDir)).toBeNull();
     expect(existsSync(pinnedDir)).toBe(true);
     expect(existsSync(started)).toBe(false);
   });
 
-  it("never asks Google's CLI channel: an install over the pinned runtime reuses it, and a fresh install downloads the pinned runtime", async () => {
+  it("runs the CLI for an account set to it, and updates the CLI for it", async () => {
+    const runtime = await import("./antigravity-runtime.ts");
+    const { baseDir, pinnedDir } = computer({ cli: true });
+    await expect(runtime.resolveAntigravityRuntime("antigravity", { PATH: "" }, baseDir)).resolves.toMatchObject({ version: "1.5.15", harnessPath: null });
+    const newer = async () => ({ ...(await latestRelease()), version: "1.5.16" });
+    expect(await runtime.antigravityCliUpdate({ baseDir, now: Date.now() + 2e9, latest: newer, configuredClis: ["antigravity"] })).toBe("1.5.15");
+    expect(existsSync(pinnedDir)).toBe(true);
+  });
+
+  it("is reused by an install for an account that names no runtime, and Google's CLI channel is not asked", async () => {
     const runtime = await import("./antigravity-runtime.ts");
     const existing = computer();
     const reuse = recordingFetch();
     await expect(runtime.installAntigravityRuntime({ baseDir: existing.baseDir, fetchImpl: reuse.fetchImpl })).resolves.toMatchObject({ version: pinned!.version });
     expect(reuse.asked).toEqual([]);
-    const fresh = recordingFetch();
-    await expect(runtime.installAntigravityRuntime({ baseDir: dataFolder(), fetchImpl: fresh.fetchImpl })).rejects.toThrow("Google download failed (404).");
-    expect(fresh.asked).toEqual([pinned!.url]);
-    expect(fresh.asked.some((url) => url.startsWith(CHANNEL))).toBe(false);
-    expect(runtime.isAntigravityNativeAlias("antigravity")).toBe(false);
   });
 
-  it("does not start a custom program named antigravity, and says what it said before", async () => {
-    const runtime = await import("./antigravity-runtime.ts");
-    const directory = dataFolder(), started = join(directory, "started"), program = join(directory, "antigravity");
-    writeFileSync(program, `#!/bin/sh\ntouch ${JSON.stringify(started)}\necho 1.5.15\n`, { mode: 0o755 });
-    await expect(runtime.resolveAntigravityRuntime(program, { PATH: "" }, dataFolder()))
-      .rejects.toThrow(/^The custom Antigravity ACP executable or its localharness_external sibling is missing\.$/u);
-    expect(existsSync(started)).toBe(false);
-  });
-
-  it("reads the signed-in state from acp_token.json and starts the runtime with the environment it had", async () => {
+  it("reads an account's sign-in from acp_token.json and starts the runtime with the environment it had", async () => {
     const acp = await import("./antigravity-acp.ts");
     const profile = await acp.prepareAntigravityProfile({
-      instanceId: "off", baseDir: dataFolder(), runtime: { executablePath: "/r/agy_acp_server.par", harnessPath: "/r/localharness_external", source: "managed", version: pinned!.version },
+      instanceId: "classic", baseDir: dataFolder(), runtime: { executablePath: "/r/agy_acp_server.par", harnessPath: "/r/localharness_external", source: "managed", version: pinned!.version },
       baseEnv: { PATH: "/usr/bin", SSH_CONNECTION: "203.0.113.9 52144 10.0.0.2 22" },
     });
     expect(profile.tokenPath).toBe(join(profile.directory, "antigravity-acp", "acp_token.json"));
@@ -136,10 +129,18 @@ describe.skipIf(!pinned || WINDOWS)("with the native CLI off (the default), Anti
     writeFileSync(profile.tokenPath, "{\"refresh_token\":\"r\"}");
     expect(await acp.antigravityProfileAuthenticated(profile)).toBe(true);
   });
+});
 
-  it("offers the pinned install card with its download size, as before", async () => {
-    const { AntigravityDriver } = await import("./antigravity.ts");
-    expect(AntigravityDriver.install?.managed).toEqual({ label: "Install official Antigravity", downloadBytes: pinned!.archiveBytes });
+describe.skipIf(!pinned || WINDOWS)("a new install", () => {
+  it("takes the CLI from Google's channel for an account that names no runtime, and the pinned runtime for one set to it", async () => {
+    const runtime = await import("./antigravity-runtime.ts");
+    const fresh = recordingFetch();
+    await expect(runtime.installAntigravityRuntime({ baseDir: dataFolder(), fetchImpl: fresh.fetchImpl })).rejects.toThrow();
+    expect(fresh.asked.some((url) => url.startsWith(CHANNEL))).toBe(true);
+    const classic = recordingFetch();
+    await expect(runtime.installAntigravityRuntime({ baseDir: dataFolder(), fetchImpl: classic.fetchImpl, nativeByDefault: false })).rejects.toThrow("Google download failed (404).");
+    expect(classic.asked).toEqual([pinned!.url]);
+    await expect(runtime.resolveAntigravityRuntime(undefined, { PATH: "" }, dataFolder())).rejects.toThrow("The Google Antigravity CLI is not installed yet.");
   });
 });
 
@@ -157,10 +158,13 @@ describe.skipIf(!pinned || WINDOWS)("with OMB_ANTIGRAVITY_NATIVE_CLI=1", () => {
     expect(await runtime.antigravityCliUpdate({ baseDir, now: Date.now() + 1e9, latest: latestRelease })).toBe(pinned!.version);
   });
 
-  it("runs the CLI once it is installed, and removes nothing", async () => {
+  it("runs the CLI once it is installed for an account that names no runtime, keeps an account set to the pinned runtime on it, and removes nothing", async () => {
     const runtime = await optedIn();
-    const before = computer({ cli: true, cliSignIn: true });
-    await expect(runtime.resolveAntigravityRuntime("agy", { PATH: "" }, before.baseDir)).resolves.toMatchObject({ version: "1.5.15", harnessPath: null });
-    expect(existsSync(before.pinnedDir)).toBe(true);
+    const { baseDir, pinnedDir } = computer({ cli: true, cliSignIn: true });
+    for (const cli of ["agy", undefined]) {
+      await expect(runtime.resolveAntigravityRuntime(cli, { PATH: "" }, baseDir), String(cli)).resolves.toMatchObject({ version: "1.5.15", harnessPath: null });
+    }
+    await expect(runtime.resolveAntigravityRuntime("agy_acp_server", { PATH: "" }, baseDir)).resolves.toMatchObject({ version: pinned!.version, source: "managed" });
+    expect(existsSync(pinnedDir)).toBe(true);
   });
 });

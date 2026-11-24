@@ -1,6 +1,6 @@
 // The native Antigravity CLI through the server's own instance routes, with a real registry and driver and a fake CLI
 // on disk: the sign-in, the status, a turn, the check and the sign-out the app offers, and removing the account.
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -143,9 +143,8 @@ describe.skipIf(WINDOWS)("the native Antigravity CLI through the instance routes
   }, 120_000);
 
   it("starts the CLI once for a signed-in account however often the engine list is read, until a turn is refused", async () => {
-    const keyring = folder();
-    const { fixture, cfg, registry } = await nativeSetup([], { FAKE_AGY_KEYRING: keyring, FAKE_AGY_KEYRING_SHARED: "1" });
-    await loginAt(fixture, antigravityProfileDirectory("antigravity"), "fixture-code", { FAKE_AGY_KEYRING: keyring, FAKE_AGY_KEYRING_SHARED: "1" });
+    const { fixture, cfg, registry } = await nativeSetup();
+    await loginAt(fixture, antigravityProfileDirectory("antigravity"), "fixture-code");
     let clock = Date.now();
     vi.spyOn(Date, "now").mockImplementation(() => clock);
     const { call } = await serve(registry, cfg, {
@@ -168,7 +167,7 @@ describe.skipIf(WINDOWS)("the native Antigravity CLI through the instance routes
     expect(started()).toBe(settled);
 
     // The sign-in is removed outside the app: the next turn is refused, and the status says so.
-    rmSync(join(keyring, "shared"));
+    rmSync(join(antigravityProfileDirectory("antigravity"), "antigravity-acp", "antigravity-oauth-token"));
     const recorder = recordEvents(instance.adapter);
     const { turnId } = await instance.adapter.sendTurn({ threadId: "refused", text: "hello", approvalMode: "ask", cwd: fixture.directory });
     expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId, 30_000)).toMatchObject({ ok: false, stopReason: "auth_required" });
@@ -176,7 +175,7 @@ describe.skipIf(WINDOWS)("the native Antigravity CLI through the instance routes
     expect(await listed("/api/instances?fresh=1")).toMatchObject({ authenticated: false });
   }, 180_000);
 
-  it("removes an added account and its profile without signing the CLI's shared sign-in out", async () => {
+  it("removes an added account with its profile, and so its own sign-in, without asking the CLI to log out", async () => {
     const { fixture, cfg, registry } = await nativeSetup(["antigravity-added"]);
     const { request, call } = await serve(registry, cfg);
     const flow = (await call("POST", "/api/instances/antigravity-added/auth/start", {})).auth;
@@ -188,12 +187,18 @@ describe.skipIf(WINDOWS)("the native Antigravity CLI through the instance routes
     expect(Object.keys(cfg.instances!)).not.toContain("antigravity-added");
   }, 180_000);
 
-  it("shares one keyring sign-in: an added account is signed in by it, keeps it when another is removed, and a sign-out ends it for all", async () => {
-    const { cfg, registry } = await nativeSetup(["antigravity-a", "antigravity-b"], { FAKE_AGY_KEYRING: folder(), FAKE_AGY_KEYRING_SHARED: "1" });
+  // 1.5.14 keeps one keyring entry per computer unless it runs over SSH; the app always starts it so, so every account
+  // keeps its own sign-in in its own profile, even where the CLI's keyring would be shared.
+  it("keeps each account's sign-in its own: another account is not signed in by it, and a sign-out or removal ends only its own", async () => {
+    const keyring = folder();
+    const { cfg, registry } = await nativeSetup(["antigravity-a", "antigravity-b"], { FAKE_AGY_KEYRING: keyring, FAKE_AGY_KEYRING_SHARED: "1" });
     const { request, call, status } = await serve(registry, cfg);
-    const flow = (await call("POST", "/api/instances/antigravity-a/auth/start", {})).auth;
-    await call("POST", "/api/instances/antigravity-a/auth/complete", { flowId: flow.flowId, callbackUrl: "fixture-code" });
-    expect(await status("antigravity-b")).toMatchObject({ authenticated: true });
+    for (const id of ["antigravity-a", "antigravity-b"]) {
+      const flow = (await call("POST", `/api/instances/${id}/auth/start`, {})).auth;
+      await call("POST", `/api/instances/${id}/auth/complete`, { flowId: flow.flowId, callbackUrl: "fixture-code" });
+    }
+    expect(await status("antigravity")).toMatchObject({ authenticated: false });
+    expect(readdirSync(keyring)).toEqual([]);
 
     expect((await request("DELETE", "/api/instances/antigravity-a")).status).toBe(200);
     await call("POST", "/api/instances/antigravity-b/check", {});
@@ -201,9 +206,9 @@ describe.skipIf(WINDOWS)("the native Antigravity CLI through the instance routes
 
     const waiting = (await call("POST", "/api/instances/antigravity/auth/start", {})).auth;
     expect((await request("POST", "/api/instances/antigravity-b/auth/sign-out", {})).status).toBe(200);
-    expect(await registry.get("antigravity")!.getAuthentication!(waiting.flowId)).toMatchObject({ phase: "cancelled" });
-    await call("POST", "/api/instances/antigravity/check", {});
-    expect(await status("antigravity")).toMatchObject({ authenticated: false });
+    expect(await registry.get("antigravity")!.getAuthentication!(waiting.flowId)).toMatchObject({ phase: "waiting" });
+    await call("POST", "/api/instances/antigravity-b/check", {});
+    expect(await status("antigravity-b")).toMatchObject({ authenticated: false });
   }, 180_000);
 
   it("ends a sign-in that waits for its code, with the CLI's process gone, when the person signs out", async () => {

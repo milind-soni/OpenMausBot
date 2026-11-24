@@ -205,17 +205,19 @@ describe("Settings → AI: Sign out on other CLI sign-ins", () => {
     expect(server.calls.some((call) => call.method === "PATCH")).toBe(false);
   });
 
-  it.each([["antigravity", true], ["/opt/tools/antigravity", true], ["agy", false], ["agy", true]] as const)("says, for an account on %s whose sign-in is shared: %s, whether signing out also signs out every account on the native CLI and the terminal CLI", async (cli, shared) => {
+  // The native CLI keeps each account's sign-in in its own profile (antigravity-acp.ts), so signing out ends that one alone.
+  it.each([["antigravity", true], ["agy", false]] as const)("asks the usual question before signing out an account on %s (native CLI: %s)", async (cli, native) => {
     server.all = [codex, {
       instanceId: "antigravity", driverKind: "antigravityAgent", displayName: "Antigravity", cli,
-      snapshot: { state: "available", authenticated: true, ...(shared ? { sharedSignIn: true as const } : {}) }, models: { default: "gemini", options: [] },
+      snapshot: { state: "available", authenticated: true, ...(native ? { nativeCli: true as const } : {}) }, models: { default: "gemini", options: [] },
       authentication: { method: "callback-url", signOut: true },
     }];
     fixture.state = { ...fixture.state, instances: [...server.all] };
     await render();
     await click(rowButton("antigravity"));
     await click([...container.querySelectorAll('[data-engine-card="antigravity"] button')].find((button) => button.textContent === "Sign out"));
-    expect(Boolean(document.body.querySelector("[data-sign-out-shared]"))).toBe(shared);
+    expect(document.body.textContent).toContain("Bots that use this account need it signed in again before their next task.");
+    expect(document.body.textContent).not.toContain("keeps one sign-in");
   });
 
   it("offers no Sign out to an engine an API key signs in", async () => {

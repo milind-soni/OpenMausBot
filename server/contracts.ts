@@ -393,9 +393,8 @@ export interface ProviderSnapshot {
   authenticated?: boolean;
   /** The CLI path runs another program: it answered --version as something other than this engine's own CLI. */
   notEngineCli?: true;
-  /** The engine keeps one sign-in for every account on this computer and its own CLI in a terminal (Antigravity's
-   * native CLI), so signing out here signs all of them out. */
-  sharedSignIn?: true;
+  /** The account runs Google's native Antigravity CLI, not the pinned (Classic) runtime. */
+  nativeCli?: true;
   /** Display identity from the provider CLI, never credentials; `method` is a personal login or the workspace API key. */
   account?: { email?: string; organization?: string; method?: "login" | "api-key" };
   version?: string | null;

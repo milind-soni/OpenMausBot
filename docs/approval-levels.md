@@ -341,12 +341,13 @@ and **Install Google Antigravity CLI**; to move back, choose **Classic runtime**
 path, or `agy`, runs the pinned runtime when it is installed, and the native CLI
 otherwise. The native CLI signs in through its own
 `acp --login`: the link opens Google, and the code or address the page ends on
-is pasted back into the sign-in card. The native CLI keeps one sign-in per
-computer (1.5.14 stores it in a single OS keyring entry, whatever folder it is
-given): every account that runs it and the Antigravity CLI in a terminal use the same
-Google account, an account added here signs in with whichever one is there,
-and signing out of any of them signs them all out. Removing an added account
-leaves that shared sign-in in place.
+is pasted back into the sign-in card. The app starts the native CLI as if over
+SSH, so each account keeps its own Google sign-in in its own folder, as on the
+pinned runtime, and the OS keyring and the Antigravity CLI in a terminal are
+never touched. Signing out or removing an account ends that account's sign-in
+alone. A server started with `OMB_ANTIGRAVITY_NATIVE_CLI=1` runs the native CLI
+for every account with no CLI path, or `agy`, even where the pinned runtime is
+installed; an account set under **Runs on** keeps its choice.
 
 A new Antigravity bot starts on Auto, the default. Old Antigravity
 `auto` / `autoApprove` settings still behave as Ask and are displayed as Ask;

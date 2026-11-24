@@ -886,7 +886,7 @@ describe("Antigravity driver over shared ACP", () => {
     expect(AntigravityDriver.defaultConfig()).toEqual({ cli: "agy", fullAuto: false, workspace: undefined });
     expect(AntigravityDriver.install?.docsUrl).toContain("antigravity-acp");
     // The native CLI is opt-in: by default the card offers the pinned runtime with its download size, as before it.
-    expect(AntigravityDriver.install?.managed).toEqual({ label: "Install official Antigravity", downloadBytes: resolveAntigravityReleaseAsset()?.archiveBytes ?? 0 });
+    expect(AntigravityDriver.install?.managed).toEqual({ label: "Install official Antigravity", downloadBytes: resolveAntigravityReleaseAsset()?.archiveBytes ?? 0, sizeUnknown: true });
     expect(antigravityPermissionMode(false)).toBe("default");
     expect(antigravityPermissionMode(false, "ask")).toBe("default");
     expect(antigravityPermissionMode(false, "auto")).toBe("default");

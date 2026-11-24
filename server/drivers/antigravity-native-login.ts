@@ -132,10 +132,12 @@ export class AntigravityCliLogin {
     const cancels = this.#cancels + 1;
     if (!(await this.cancel())) throw new Error(STILL_RUNNING);
     if (this.#cancels !== cancels) throw new Error(CANCELLED);
+    // Without a display it can only print the link, as it does with piped output: no browser opens on this machine.
+    const { DISPLAY: _display, WAYLAND_DISPLAY: _wayland, ...env } = profile.environment;
     const child = spawnCli(
       runtime.executablePath,
       antigravityLoginArgs(profile.directory),
-      { cwd: profile.directory, env: profile.environment, stdio: ["pipe", "pipe", "pipe"], box: { ro: [join(profile.directory, "omb-skills")] } },
+      { cwd: profile.directory, env, stdio: ["pipe", "pipe", "pipe"], box: { ro: [join(profile.directory, "omb-skills")] } },
       "bot",
     );
     child.stdin.on("error", () => {});

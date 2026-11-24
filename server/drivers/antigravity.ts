@@ -26,6 +26,7 @@ import {
   antigravityProfileDirectory,
   antigravitySessionSetup,
   antigravityTakesSystemPrompt,
+  antigravityCliTokenPath,
   antigravityTokenPath,
   authorizationUrlFromLine,
   noteAntigravitySignedIn,
@@ -134,32 +135,19 @@ const launched = new Map<string, { version: string | null; nativeCli: boolean }>
 
 const nativeSignIn = new NativeSignInCache();
 const loginProcesses = new Map<string, LoginProcesses>();
-/** Every live instance's sign-in and turns: a native sign-out ends those on the native CLI, which share its one sign-in. */
-interface LiveInstance {
-  login: AntigravityCliLogin;
-  stopAll: () => Promise<void>;
-  native: () => Promise<boolean>;
-  /** The native CLI this instance runs and its profile; null when it runs none. */
-  ownCli: () => Promise<{ runtime: AntigravityRuntime; profile: AntigravityProfile } | null>;
-}
-const liveInstances = new Map<string, LiveInstance>();
-/** While the native CLI's shared sign-in is being removed, no native process starts: it would hold the old sign-in. */
-let nativeSigningOut: Promise<void> | null = null;
-const nativeSignOutDone = async () => { while (nativeSigningOut) await nativeSigningOut.catch(() => {}); };
-/** Starting a sign-in and signing out never overlap, across instances: a sign-in begun while the shared one is being
- * removed would be removed with it, or put it back. */
-let exclusive: Promise<unknown> = Promise.resolve();
-function alone<T>(work: () => Promise<T>): Promise<T> {
-  const run = exclusive.then(work, work);
-  exclusive = run.catch(() => {});
-  return run;
-}
+/** While an account's native sign-in is being removed, no native process of that account starts: it would hold the old
+ * sign-in, and could write it back. Each account's is its own (antigravity-acp.ts starts the CLI so it keeps one per
+ * profile). */
+const nativeSigningOut = new Map<string, Promise<void>>();
+const nativeSignOutDone = async (instanceId: string) => {
+  for (let running = nativeSigningOut.get(instanceId); running; running = nativeSigningOut.get(instanceId)) await running.catch(() => {});
+};
 
-/** A native process that starts while the shared sign-in is being removed was let in before that began: it is ended at
- * once, before it can use or write back the old sign-in. */
+/** A native process of an account whose sign-in is being removed was let in before that began: it is ended at once,
+ * before it can use or write back the old sign-in. */
 function trackNative(instanceId: string, child: ChildProcess): void {
   runtimeProcesses.track(instanceId, child);
-  if (nativeSigningOut) void killCliTree(child).catch(() => false);
+  if (nativeSigningOut.has(instanceId)) void killCliTree(child).catch(() => false);
 }
 const tracked = (instanceId: string) => (child: ChildProcess) => trackNative(instanceId, child);
 
@@ -168,15 +156,14 @@ const nativeRuntimeKey = (runtime: AntigravityRuntime) => `${runtime.executableP
 /** Whether the native CLI accepts a session for this instance, as last learned. Throws when the CLI could not say: that
  * is not "signed out". */
 async function nativeSignedIn(instanceId: string, runtime: AntigravityRuntime, profile: AntigravityProfile): Promise<boolean> {
-  await nativeSignOutDone();
+  await nativeSignOutDone(instanceId);
   return await nativeSignIn.state(instanceId, nativeRuntimeKey(runtime), () => antigravityCliSignIn(runtime, profile, { onProcess: tracked(instanceId) })) === "in";
 }
 
-/** Model discovery's failure as the shared catalog classifies it: a refused session is "signedOut", a slow CLI "timedOut".
- * A refusal is every native instance's, since they share one sign-in. */
-function nativeDiscoveryError(error: unknown): unknown {
+/** Model discovery's failure as the shared catalog classifies it: a refused session is "signedOut", a slow CLI "timedOut". */
+function nativeDiscoveryError(instanceId: string, error: unknown): unknown {
   if (antigravityCliRefusedSession(error)) {
-    nativeSignIn.forgetAll();
+    nativeSignIn.forget(instanceId);
     const refusal = error as { code: unknown; message: unknown };
     return new AcpDiscoveryRpcError(refusal.code, typeof refusal.message === "string" ? refusal.message : "");
   }
@@ -225,7 +212,7 @@ const support: AcpSupport = {
 
   resolveCommand: async (env, config, instanceId) => {
     const runtime = await resolveAntigravityRuntime(config.cli, env);
-    if (runtime.harnessPath === null) await nativeSignOutDone();
+    if (runtime.harnessPath === null) await nativeSignOutDone(instanceId);
     launched.set(instanceId, { version: runtime.version, nativeCli: runtime.harnessPath === null });
     const profile = await prepareAntigravityProfile({ instanceId, runtime, baseEnv: env });
     if (profile.tempDirectory) scheduleAntigravityTempSweep(instanceId);
@@ -239,7 +226,7 @@ const support: AcpSupport = {
 
   resolveModels: async (env, config, instanceId) => {
     const runtime = await resolveAntigravityRuntime(config.cli, env);
-    if (runtime.harnessPath === null) await nativeSignOutDone();
+    if (runtime.harnessPath === null) await nativeSignOutDone(instanceId);
     const profile = await prepareAntigravityProfile({ instanceId, runtime, baseEnv: env });
     const native = runtime.harnessPath === null;
     if (!native && !(await antigravityProfileAuthenticated(profile))) throw new Error(support.loginNote);
@@ -249,7 +236,7 @@ const support: AcpSupport = {
       profile,
       fallbackDefault: currentEngineCatalog("antigravity").default,
       ...(native ? { onProcess: tracked(instanceId) } : {}),
-    }).catch((error: unknown) => { throw native ? nativeDiscoveryError(error) : error; });
+    }).catch((error: unknown) => { throw native ? nativeDiscoveryError(instanceId, error) : error; });
     accepted?.("in");
     for (const option of catalog.options) offeredModels.add(option.id);
     return catalog;
@@ -268,8 +255,7 @@ const support: AcpSupport = {
     stderrLine: (line) => authorizationUrlFromLine(line) !== null,
     rpcError: (error, instanceId) => launched.get(instanceId)?.nativeCli === true ? antigravityCliRefusedSession(error) : antigravitySignInError(error),
     required: (instanceId) => {
-      if (launched.get(instanceId)?.nativeCli === true) nativeSignIn.forgetAll();
-      else nativeSignIn.forget(instanceId);
+      nativeSignIn.forget(instanceId);
       noteAntigravitySignInRequired(antigravityTokenPath(instanceId));
     },
   },
@@ -305,7 +291,8 @@ const support: AcpSupport = {
       if (runtime.harnessPath === null) {
         // A CLI that could not answer leaves `authenticated` out, which no caller reads as signed out.
         const authenticated = await nativeSignedIn(instanceId, runtime, profile).catch(() => undefined);
-        return { state: "available", version: runtime.version, sharedSignIn: true, ...(authenticated === undefined ? {} : { authenticated }) };
+        const account = authenticated ? await antigravityAccount(antigravityCliTokenPath(instanceId)) : undefined;
+        return { state: "available", version: runtime.version, nativeCli: true, ...(authenticated === undefined ? {} : { authenticated }), ...(account ? { account } : {}) };
       }
       return {
         state: "available",
@@ -374,13 +361,13 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
     loginProcesses.set(input.instanceId, alive);
     const login = new AntigravityCliLogin({
       signedIn: () => {
-        nativeSignIn.forgetAll();
+        nativeSignIn.forget(input.instanceId);
         void base.refreshModels?.();
       },
       confirm: async () => {
-        await nativeSignOutDone();
+        await nativeSignOutDone(input.instanceId);
         const { runtime, profile } = await runtimeAndProfile();
-        return (await antigravityCliSignIn(runtime, profile, { onProcess: (child) => trackNative(input.instanceId, child) })) === "in";
+        return (await antigravityCliSignIn(runtime, profile, { onProcess: tracked(input.instanceId) })) === "in";
       },
     }, {}, alive);
     const runtimeAndProfileUnlessNativeFails = () => runtimeAndProfile().catch(async (error: unknown) => {
@@ -388,49 +375,29 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       return null;
     });
     let nativeFlow = false;
-    liveInstances.set(input.instanceId, {
-      login, stopAll: () => base.adapter.stopAll(),
-      native: async () => nativeFlow || (launched.get(input.instanceId)?.nativeCli === true && runtimeProcesses.count(input.instanceId) > 0)
-        || antigravityPathRunsNativeCli(input.config.cli, environmentNow()),
-      ownCli: async () => {
-        const own = await runtimeAndProfileUnlessNativeFails();
-        return own?.runtime.harnessPath === null ? own : null;
-      },
-    });
-    /** The native CLI keeps one sign-in for every instance run by it and for the Antigravity CLI in a terminal here
-     * (1.5.14: one OS keyring entry, whatever `--gemini-dir` says), so this signs all of them out. Throws, keeping the
-     * sign-in, when the CLI still accepts a session or cannot say. */
+    /** Starting a sign-in and signing out never overlap: a sign-in begun while the sign-in is being removed would be
+     * removed with it, or put it back. */
+    let exclusive: Promise<unknown> = Promise.resolve();
+    const alone = <T>(work: () => Promise<T>): Promise<T> => {
+      const run = exclusive.then(work, work);
+      exclusive = run.catch(() => {});
+      return run;
+    };
+    /** Signs this account out of the native CLI, which keeps its sign-in in this account's profile alone. Throws, keeping
+     * the sign-in, when the CLI still accepts a session or cannot say. */
     const signOutNative = async (runtime: AntigravityRuntime, profile: AntigravityProfile) => {
       let done!: () => void;
-      nativeSigningOut = new Promise<void>((resolveDone) => { done = resolveDone; });
+      nativeSigningOut.set(input.instanceId, new Promise<void>((resolveDone) => { done = resolveDone; }));
       try {
-        const affected: Array<[string, LiveInstance]> = [];
-        for (const entry of liveInstances) if (entry[0] === input.instanceId || await entry[1].native()) affected.push(entry);
-        for (const [, live] of liveInstances) {
-          if (!(await live.login.cancel())) throw new Error("An Antigravity sign-in in progress could not be stopped. Try again.");
-        }
-        for (const [, live] of affected) await live.stopAll();
         // A process still running keeps the account it started with, and may write it back when it refreshes it.
-        for (const instanceId of new Set([input.instanceId, ...affected.map(([instanceId]) => instanceId)])) {
-          if (!(await runtimeProcesses.stopped(instanceId)) || runtimeProcesses.count(instanceId)) throw new Error("Antigravity is still running and could not be stopped. Try again.");
+        if (!(await runtimeProcesses.stopped(input.instanceId)) || runtimeProcesses.count(input.instanceId)) {
+          throw new Error("Antigravity is still running and could not be stopped. Try again.");
         }
-        nativeSignIn.forgetAll();
-        const failures: unknown[] = [];
-        await signOutAntigravityCli(runtime, profile, { onProcess: (child) => runtimeProcesses.track(input.instanceId, child) }).catch((error: unknown) => failures.push(error));
-        // Without an OS keyring the CLI keeps each profile's sign-in in that profile's file (1.5.14), so each is removed too.
-        for (const [instanceId, live] of affected) {
-          if (instanceId === input.instanceId) continue;
-          try {
-            const own = await live.ownCli();
-            if (own) await signOutAntigravityCli(own.runtime, own.profile, { onProcess: (child) => runtimeProcesses.track(instanceId, child) }, "native");
-          } catch (error) {
-            failures.push(error);
-          }
-        }
-        nativeSignIn.forgetAll();
-        if (failures.length) throw failures[0];
+        nativeSignIn.forget(input.instanceId);
+        await signOutAntigravityCli(runtime, profile, { onProcess: (child) => runtimeProcesses.track(input.instanceId, child) });
       } finally {
-        nativeSigningOut = null;
+        nativeSignIn.forget(input.instanceId);
+        nativeSigningOut.delete(input.instanceId);
         done();
       }
     };
@@ -510,7 +477,6 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
           .catch((error) => console.warn(`antigravity: could not finish the sign-out: ${error instanceof Error ? error.message : String(error)}`));
       }),
       dispose: async () => {
-        if (liveInstances.get(input.instanceId)?.login === login) liveInstances.delete(input.instanceId);
         auth.cancel();
         await login.cancel();
         await base.dispose();

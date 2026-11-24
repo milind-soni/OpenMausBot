@@ -12,13 +12,10 @@ const stored = (expiry: string, accessToken = "native-access") => JSON.stringify
   auth_method: "consumer",
   id_token_email: "person@example.com",
 });
-const inKeychain = (text: string) => `go-keyring-base64:${Buffer.from(text).toString("base64")}`;
 const valid = stored("2026-11-23T13:36:53.008002+08:00");
 
 describe("the access token of the native CLI's stored sign-in", () => {
-  it("is read from the keychain's encoded item, its hex print, and the profile's plain file alike", () => {
-    expect(nativeAccessToken(inKeychain(valid), NOW)).toBe("native-access");
-    expect(nativeAccessToken(`${Buffer.from(inKeychain(valid)).toString("hex")}\n`, NOW)).toBe("native-access");
+  it("is read from the profile's plain file", () => {
     expect(nativeAccessToken(valid, NOW)).toBe("native-access");
   });
 
@@ -31,57 +28,36 @@ describe("the access token of the native CLI's stored sign-in", () => {
   it("is none for a sign-in without a token or an expiry, or that is not JSON", () => {
     expect(nativeAccessToken(null, NOW)).toBeNull();
     expect(nativeAccessToken("not json", NOW)).toBeNull();
-    expect(nativeAccessToken(inKeychain("{}"), NOW)).toBeNull();
+    expect(nativeAccessToken("{}", NOW)).toBeNull();
     expect(nativeAccessToken(JSON.stringify({ token: { access_token: "native-access" } }), NOW)).toBeNull();
     expect(nativeAccessToken(stored("2026-11-23T13:36:53Z", ""), NOW)).toBeNull();
   });
 });
 
+// The app starts the CLI as over SSH (antigravity-acp.ts), so each account's sign-in is its profile's file, on every
+// system: the OS keychain is never asked.
 describe("which stored sign-in's access token is used", () => {
-  const env = { HOME: "/Users/person" };
   const profileFile = `${antigravityProfileDirectory("native")}/antigravity-acp/antigravity-oauth-token`;
-  const store = (keychain: string | null | undefined, file: string | null) => {
-    const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
+  const store = (file: string | null) => {
     const readText = vi.fn(async (path: string) => path === profileFile ? file : null);
-    const value: NativeSignInStore = {
-      security: keychain === undefined ? null : async (args, callEnv) => {
-        calls.push({ args, env: callEnv });
-        return keychain === null ? { ok: false, stdout: "" } : { ok: true, stdout: keychain };
-      },
-      readText,
-    };
-    return { value, calls, readText };
+    const value: NativeSignInStore = { readText };
+    return { value, readText };
   };
   const live = (accessToken: string) => stored("2026-11-23T05:30:00Z", accessToken);
   const dead = (accessToken: string) => stored("2026-11-23T04:30:00Z", accessToken);
 
-  it("is the keychain's while it is live, asked with the CLI's own environment, and the file is not read", async () => {
-    const { value, calls, readText } = store(inKeychain(live("keychain-access")), live("file-access"));
-    expect(await readNativeAccessToken("native", env, NOW, value)).toBe("keychain-access");
-    expect(calls).toEqual([{ args: ["find-generic-password", "-s", "gemini", "-a", "antigravity", "-w"], env }]);
-    expect(readText).not.toHaveBeenCalled();
+  it("is the account's own profile file's, whatever the server's environment says", async () => {
+    for (const env of [{ HOME: "/Users/person" }, { HOME: "/Users/person", SSH_CONNECTION: "10.0.0.2 50000 10.0.0.1 22" }]) {
+      const { value, readText } = store(live("file-access"));
+      expect(await readNativeAccessToken("native", env, NOW, value)).toBe("file-access");
+      expect(readText).toHaveBeenCalledWith(profileFile);
+    }
+    expect(Object.keys(defaultNativeSignInStore())).toEqual(["readText"]);
   });
 
-  it("is the profile file's when the keychain holds none or only an expired one, as after a failed keychain write", async () => {
-    expect(await readNativeAccessToken("native", env, NOW, store(inKeychain(dead("keychain-access")), live("file-access")).value)).toBe("file-access");
-    expect(await readNativeAccessToken("native", env, NOW, store(null, live("file-access")).value)).toBe("file-access");
-  });
-
-  it("is the profile file's alone under SSH, where the CLI keeps its sign-in there and not in the keychain", async () => {
-    const { value, calls } = store(inKeychain(live("keychain-access")), live("file-access"));
-    expect(await readNativeAccessToken("native", { ...env, SSH_CONNECTION: "10.0.0.2 50000 10.0.0.1 22" }, NOW, value)).toBe("file-access");
-    expect(calls).toEqual([]);
-  });
-
-  it("is none when every stored token has expired, so a file the CLI stopped writing soon shows nothing", async () => {
-    expect(await readNativeAccessToken("native", env, NOW, store(inKeychain(dead("keychain-access")), dead("file-access")).value)).toBeNull();
-    expect(await readNativeAccessToken("native", env, NOW, store(null, null).value)).toBeNull();
-  });
-
-  it("is the profile file's alone off macOS, where no keychain is asked", async () => {
-    expect(defaultNativeSignInStore("linux").security).toBeNull();
-    expect(defaultNativeSignInStore("win32").security).toBeNull();
-    expect(await readNativeAccessToken("native", env, NOW, store(undefined, live("file-access")).value)).toBe("file-access");
+  it("is none when the stored token has expired or there is none, so a file the CLI stopped writing soon shows nothing", async () => {
+    expect(await readNativeAccessToken("native", {}, NOW, store(dead("file-access")).value)).toBeNull();
+    expect(await readNativeAccessToken("native", {}, NOW, store(null).value)).toBeNull();
   });
 });
 

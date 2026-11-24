@@ -122,10 +122,10 @@ it("says on the sign-in card of an account that runs the native CLI, whatever it
   vi.stubGlobal("ogb", { platform: "linux", remoteClient: { active: false } });
   const store = { state: { config: {} }, dispatch: vi.fn(), refreshInstances: vi.fn(async () => {}), refreshModels: vi.fn(async () => {}) } as unknown as ReturnType<typeof useStore>;
   const render = (instance: InstanceInfo) => flushSync(() => root.render(createElement(BotEditorStore, { value: store, children: createElement(EngineSetup, { instance }) })));
-  render({ ...antigravity, cli: "antigravity", snapshot: { ...antigravity.snapshot, sharedSignIn: true } });
+  render({ ...antigravity, cli: "antigravity", snapshot: { ...antigravity.snapshot, nativeCli: true } });
   expect(host.textContent).toContain("Antigravity CLI keeps one sign-in on this computer");
   expect(host.textContent).not.toContain("has its own Google account");
-  render({ ...antigravity, cli: "agy", snapshot: { ...antigravity.snapshot, sharedSignIn: true } });
+  render({ ...antigravity, cli: "agy", snapshot: { ...antigravity.snapshot, nativeCli: true } });
   expect(host.textContent).toContain("Antigravity CLI keeps one sign-in on this computer");
   render({ ...antigravity, cli: "agy" });
   expect(host.textContent).toContain("has its own Google account");

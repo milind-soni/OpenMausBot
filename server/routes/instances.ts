@@ -580,8 +580,8 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         if (providerInUse(instanceId)) {
           return json(res, 409, { error: "Choose another account for the bots and default model using this account before removing it." });
         }
-        // OpenMausBot keeps a ChatGPT account's sign-in in its own data folder: removing the account clears it. The native
-        // Antigravity CLI's sign-in is shared with every account on it and with the CLI in a terminal, so it stays.
+        // OpenMausBot keeps a ChatGPT account's sign-in in its own data folder: removing the account clears it. An added
+        // Antigravity account's sign-in, on either runtime, is in its profile, which is removed below.
         const live = addedChatgpt ? registry.get(instanceId) : undefined;
         if (live?.signOut) {
           try { await providerAuthSessions.signOut(live, auth.kind === "session" ? auth.session.id : "loopback"); }

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -66,13 +66,29 @@ describe("the native CLI's sign-in state, asked of the CLI", () => {
       expect(await antigravityCliSignIn(runtime, profile)).toBe("out");
     }, 60_000);
 
+    // The app starts the CLI as over SSH, so its sign-in is the profile's file; a CLI that kept it in its keyring all the
+    // same (here: started without SSH_CONNECTION) must not pass as signed out.
     it("fails when the CLI still accepts a session, even though logout was refused or ignored", async () => {
       for (const logout of ["refuse", "ignore"]) {
         const keyring = mkdtempSync(join(tmpdir(), "omb-antigravity-keyring-"));
         scratch.push(keyring);
         const { fixture, runtime, profile } = await setup({ FAKE_AGY_KEYRING: keyring, FAKE_AGY_LOGOUT: logout });
+        const { SSH_CONNECTION: _ssh, ...environment } = profile.environment;
         await loginAt(fixture, profile.directory, "fixture-code", { FAKE_AGY_KEYRING: keyring });
-        await expect(signOutAntigravityCli(runtime, profile)).rejects.toThrow("still reports a Google sign-in");
+        await expect(signOutAntigravityCli(runtime, { ...profile, environment })).rejects.toThrow("still reports a Google sign-in");
+      }
+    }, 60_000);
+
+    it("ends a sign-in the CLI keeps in the profile's file whatever logout answers, and never touches the keyring", async () => {
+      for (const logout of ["refuse", "ignore"]) {
+        const keyring = mkdtempSync(join(tmpdir(), "omb-antigravity-keyring-"));
+        scratch.push(keyring);
+        const { fixture, runtime, profile } = await setup({ FAKE_AGY_KEYRING: keyring, FAKE_AGY_LOGOUT: logout });
+        await loginAt(fixture, profile.directory, "fixture-code", { FAKE_AGY_KEYRING: keyring, SSH_CONNECTION: profile.environment.SSH_CONNECTION! });
+        expect(existsSync(antigravityNativeTokenPath(profile))).toBe(true);
+        await signOutAntigravityCli(runtime, profile);
+        expect(await antigravityCliSignIn(runtime, profile)).toBe("out");
+        expect(readdirSync(keyring)).toEqual([]);
       }
     }, 60_000);
 
@@ -119,10 +135,6 @@ describe("what was last read", () => {
     cache.forget("b");
     late("in");
     expect(cache.known("b", runtime)).toBeUndefined();
-    const stale = cache.seen("a", runtime);
-    cache.forgetAll();
-    stale("in");
-    expect(cache.known("a", runtime)).toBeUndefined();
   });
 
   it("is kept for each instance apart", async () => {

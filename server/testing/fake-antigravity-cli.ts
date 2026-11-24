@@ -19,7 +19,8 @@
 //   FAKE_AGY_KEYRING_SHARED with FAKE_AGY_KEYRING: one entry for every --gemini-dir, as the macOS keyring holds in 1.5.14
 //   FAKE_AGY_SESSION_ERROR  a message session/new fails with as -32000, signed in or not
 //   FAKE_AGY_KEYRING        a folder that stands for the OS keyring: the sign-in is kept there, one entry per --gemini-dir,
-//                           and only `logout` removes it
+//                           and only `logout` removes it; ignored while SSH_CONNECTION is set, as the real CLI ignores the
+//                           keyring then
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -43,7 +44,8 @@ if (argv[0] !== "acp") {
 const flag = (name: string) => argv.includes(name) ? argv[argv.indexOf(name) + 1] : undefined;
 const geminiDir = resolve(flag("--gemini-dir") ?? ".");
 const stateDir = join(geminiDir, flag("--app-data-dir") ?? "antigravity-acp");
-const credentialFile = process.env.FAKE_AGY_KEYRING
+// As 1.5.14 and 1.5.15 do: over SSH (SSH_CONNECTION set, as the app always starts it) the profile's file, never the keyring.
+const credentialFile = process.env.FAKE_AGY_KEYRING && !process.env.SSH_CONNECTION
   ? join(process.env.FAKE_AGY_KEYRING, process.env.FAKE_AGY_KEYRING_SHARED ? "shared" : createHash("sha256").update(geminiDir).digest("hex"))
   : join(stateDir, "antigravity-oauth-token");
 const accountModel = process.env.FAKE_AGY_ACCOUNT_MODEL ?? "fixture-account-model";

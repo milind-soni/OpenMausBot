@@ -275,7 +275,7 @@ export function EngineWarningNotice({
 /** An Antigravity account on Google's native CLI: the one it runs, or, while it runs none, the one its path names. */
 export function runsAntigravityCli(instance: InstanceInfo): boolean {
   if (instance.driverKind !== "antigravityAgent") return false;
-  if (instance.snapshot.state === "available") return instance.snapshot.sharedSignIn === true;
+  if (instance.snapshot.state === "available") return instance.snapshot.nativeCli === true;
   return /(?:^|[\\/])antigravity(?:\.exe)?$/iu.test(instance.cli?.trim() ?? "");
 }
 
@@ -634,7 +634,7 @@ export function EngineSetup({
       : pasteSignIn
       ? t("engineSetup.claude.description")
       : install?.managed
-      ? t(runsAntigravityCli(instance) ? "engineSetup.nativeSharedSignIn" : "engineSetup.managedSignIn")
+      ? t("engineSetup.managedSignIn")
       : t("engineSetup.terminalSignInCheck")
     : intent === "inject"
       ? t("engineSetup.injectDesc")
