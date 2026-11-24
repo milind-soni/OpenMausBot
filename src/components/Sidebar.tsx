@@ -48,14 +48,17 @@ import {
   PINNED_SECTION_ID,
   PINNED_THREADS_SECTION_ID,
   TOOLS_SECTION_ID,
-  activeBotsFirst,
+  UNREAD_SECTION_ID,
   partitionSidebarBots,
   partitionSidebarGroups,
   pinnedCircleThreadListVisible,
+  sectionsInUse,
+  sidebarBotRows,
   sidebarSectionLabel,
   userSectionId,
   userSectionName,
   withPrimaryTile,
+  withUnreadSection,
 } from "@/lib/sidebar-layout";
 import { stepKey, type BotDropPlace } from "@/lib/sidebar-bot-drop";
 import { BotDropLine, botRowDropClass, useSidebarBotDrag, type BotRowDrag } from "./SidebarBotDrag";
@@ -83,7 +86,7 @@ import { PHONE_TOP_BUTTON, SIMPLE_CORNER_BUTTON, SIMPLE_ROW_FOCUS, SIMPLE_TOP_BU
 import { isSidebarToggle } from "@/lib/keyboard-shortcuts";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { useBotUnread } from "./unread-notice";
+import { useBotUnread, useUnreadHold } from "./unread-notice";
 import { attentionHasRunningWork, attentionJumpAction, attentionUnpinAction, crossBotAttentionThreads, crossBotPinnedThreads, runningRoutineRun, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
 import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
 import { BotContextMenu } from "./SidebarBotMenu";
@@ -114,6 +117,7 @@ export const MAC_TRAFFIC_LIGHT_CENTER_Y = 23;
 
 const SECTION_LABEL_KEYS: Record<string, LocaleKey> = {
   [PINNED_SECTION_ID]: "sidebar.section.pinned",
+  [UNREAD_SECTION_ID]: "sidebar.section.unread",
   [CHANNELS_SECTION_ID]: "sidebar.section.channels",
   [BOT_CHATS_SECTION_ID]: "sidebar.section.botChats",
   [BOTS_SECTION_ID]: "sidebar.section.bots",
@@ -1095,22 +1099,16 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const viewerEmail = useViewerEmail();
   const parts = partitionSidebarBots(botDrag.preview(matchingBots), { universalPins, viewerEmail, welcoming: useWelcomingBot(), searching: Boolean(q) });
   const saved = simpleDesk ? withPrimaryTile(parts, myDefaultBot(state.bots, viewerEmail)?.id) : { ...parts, primary: null };
-  // Shown order only: a drag or Alt+Up/Down moves a bot among the rows as drawn and saves it into the saved order.
+  // Shown order only: a drag or Alt+Up/Down moves a bot among the rows as drawn and saves it into the saved order of the
+  // rows left in place; a row Unread lists is in neither.
   const floats = (bot: Bot) => { const { waiting, working } = sidebarBotStatus(bot, state.pendingQueued); return waiting || working; };
-  const { primary, unsectionedChief, pinnedBots, sectionChiefs, sectionedBots, unsectionedBots } = { ...saved, ...activeBotsFirst(saved, floats) };
+  const { primary, unsectionedChief } = saved;
+  const { pinnedBots, filed, unreadBots, unreadCount, sectionChiefs, sectionedBots, unsectionedBots, inPlace } = sidebarBotRows(saved, floats, !q,
+    useUnreadHold(state.activeView === "chat" ? state.selectedId : null, sideLists.bots, state.newChat?.botId));
   const { botChats, sectionedRooms, unsectionedRooms } = partitionSidebarGroups(visibleGroups);
 
-  const sectionNames: string[] = [...(state.sections ?? []).filter((name) => !q || name.toLowerCase().includes(q.toLowerCase())), ...botDrag.pending];
-  for (const bot of sectionedBots) {
-    if (!sectionNames.includes(bot.section!)) sectionNames.push(bot.section!);
-  }
-  for (const bot of sectionChiefs) {
-    if (!sectionNames.includes(bot.section!)) sectionNames.push(bot.section!);
-  }
-  for (const group of sectionedRooms) {
-    if (!sectionNames.includes(group.section!)) sectionNames.push(group.section!);
-  }
-  const drops = botDrag.arrange({ enabled: (sections.interactive || density === "icons") && !phone, withinList: density === "icons", main: saved.unsectionedBots, sectioned: saved.sectionedBots, departments: sectionNames, bots: state.bots, taken: departmentNames(state), floats });
+  const sectionNames = sectionsInUse([...(state.sections ?? []).filter((name) => !q || name.toLowerCase().includes(q.toLowerCase())), ...botDrag.pending], [...filed, ...sectionedRooms]);
+  const drops = botDrag.arrange({ enabled: (sections.interactive || density === "icons") && !phone, withinList: density === "icons", main: inPlace.unsectionedBots, sectioned: inPlace.sectionedBots, departments: sectionNames, bots: state.bots, taken: departmentNames(state), floats });
   const naturalSectionIds = [
     ...(pinnedBots.length > 0 && !universalPins && !simpleDesk ? [PINNED_SECTION_ID] : []),
     ...(unsectionedRooms.length > 0 ? [CHANNELS_SECTION_ID] : []),
@@ -1119,7 +1117,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
     ...sectionNames.map(userSectionId),
   ];
   const layout = sections.arrange(naturalSectionIds);
-  const sectionIds = layout.sectionIds;
+  const sectionIds = withUnreadSection(layout.sectionIds, unreadBots.length > 0);
   const showPinnedCircleThreads = !simpleDesk && pinnedCircleThreadListVisible(pinnedCircles, density, pinnedBots.length);
   const tiles = simpleDesk && (primary !== null || pinnedBots.length > 0);
   const { interactive: layoutInteractive, collapsed: sectionCollapsed, toggle: toggleSection } = sections;
@@ -1390,7 +1388,9 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
             const sectionBotItems =
               id === PINNED_SECTION_ID
                 ? pinnedBots
-                : id === BOTS_SECTION_ID
+                : id === UNREAD_SECTION_ID
+                  ? unreadBots
+                  : id === BOTS_SECTION_ID
                   ? unsectionedBots
                   : sectionName
                     ? sectionedBots.filter((bot) => bot.section === sectionName)
@@ -1434,7 +1434,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
                     collapsed={collapsed}
                     attention={attention}
                     onToggle={layoutInteractive ? () => toggleSection(id) : undefined}
-                    {...layout.header(id)} naming={drops.naming(sectionName)} dropInto={drops.into(sectionName)}
+                    {...layout.header(id)} {...(id === UNREAD_SECTION_ID && { ...(unreadCount > 0 && { count: unreadCount }), reorderable: false })} naming={drops.naming(sectionName)} dropInto={drops.into(sectionName)}
                     onDelete={!simple && !remoteClient && sectionName ? () => setDeletingTeam(sectionName) : undefined} onShare={!simple && !remoteClient && sectionName ? () => setShareTeam(sectionName) : undefined}
                   />
                 )}

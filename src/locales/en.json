@@ -2261,6 +2261,7 @@
   "sidebar.preview.signedOut": "{name} isn't signed in",
   "sidebar.preview.you": "You: {text}",
   "sidebar.section.pinned": "Pinned",
+  "sidebar.section.unread": "Unread",
   "sidebar.section.channels": "Group chats",
   "sidebar.section.botChats": "Bot threads",
   "sidebar.section.bots": "Bots",

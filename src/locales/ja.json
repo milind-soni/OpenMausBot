@@ -1865,6 +1865,7 @@
   "sidebar.preview.signedOut": "{name} にサインインしていません",
   "sidebar.preview.you": "あなた：{text}",
   "sidebar.section.pinned": "ピン留め",
+  "sidebar.section.unread": "未読",
   "sidebar.section.channels": "グループチャット",
   "sidebar.section.botChats": "ボット間のスレッド",
   "sidebar.section.bots": "ボット",

@@ -1220,6 +1220,7 @@
   "sidebar.preview.signedOut": "{name} chưa đăng nhập",
   "sidebar.preview.you": "Bạn: {text}",
   "sidebar.section.pinned": "Đã ghim",
+  "sidebar.section.unread": "Chưa đọc",
   "sidebar.section.channels": "Group chat",
   "sidebar.section.botChats": "Đoạn chat với bot",
   "sidebar.section.bots": "Bot",

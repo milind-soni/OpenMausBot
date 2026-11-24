@@ -1220,6 +1220,7 @@
   "sidebar.preview.signedOut": "{name} oturum açmamış",
   "sidebar.preview.you": "Siz: {text}",
   "sidebar.section.pinned": "Sabitlenenler",
+  "sidebar.section.unread": "Okunmamış",
   "sidebar.section.channels": "Grup sohbetleri",
   "sidebar.section.botChats": "Bot konuları",
   "sidebar.section.bots": "Botlar",

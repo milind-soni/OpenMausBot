@@ -819,6 +819,7 @@
   "sidebar.preview.signedOut": "{name} ist nicht angemeldet",
   "sidebar.preview.you": "Du: {text}",
   "sidebar.section.pinned": "Angeheftet",
+  "sidebar.section.unread": "Ungelesen",
   "sidebar.section.botChats": "Bot-Threads",
   "sidebar.section.bots": "Bots",
   "sidebar.section.moved": "{name} auf Position {position} von {count} verschoben",
