@@ -95,10 +95,16 @@ describe("importing a skill's whole folder", () => {
   it("sends the connected GitHub sign-in on every API request and keeps raw downloads anonymous", async () => {
     const github = fakeGitHub({ "a/b": PDF_SKILL });
     const recorded = recordingFetch(github.fetch);
-    const [skill] = ok(await fetchSkillFromSource("https://github.com/a/b/tree/main/skills/pdf", recorded.fetch, undefined, async () => SIGNED_IN));
+    let lookups = 0;
+    const [skill] = ok(await fetchSkillFromSource("https://github.com/a/b/tree/main/skills/pdf", recorded.fetch, undefined, async () => {
+      lookups += 1;
+      return SIGNED_IN;
+    }));
     expect(skill!.github?.commit).toBe(github.commitOf("a/b"));
     const api = apiCalls(recorded.calls);
     const raw = rawCalls(recorded.calls);
+    expect(api.length).toBeGreaterThan(1);
+    expect(lookups).toBe(1);
     expect(api.some((call) => call.url.includes("/commits/"))).toBe(true);
     expect(api.some((call) => call.url.includes("/contents/"))).toBe(true);
     expect(api.some((call) => call.url.includes("/git/trees/"))).toBe(true);
@@ -113,10 +119,16 @@ describe("importing a skill's whole folder", () => {
   it("stays anonymous when the sign-in getter has no token", async () => {
     const github = fakeGitHub({ "a/b": PDF_SKILL });
     const recorded = recordingFetch(github.fetch);
-    const [skill] = ok(await fetchSkillFromSource("https://github.com/a/b/tree/main/skills/pdf", recorded.fetch, undefined, async () => null));
+    let lookups = 0;
+    const [skill] = ok(await fetchSkillFromSource("https://github.com/a/b/tree/main/skills/pdf", recorded.fetch, undefined, async () => {
+      lookups += 1;
+      return null;
+    }));
     expect(skill!.files.length).toBeGreaterThan(0);
     const api = apiCalls(recorded.calls);
     const raw = rawCalls(recorded.calls);
+    expect(api.length).toBeGreaterThan(1);
+    expect(lookups).toBe(1);
     expect(api.length).toBeGreaterThan(0);
     expect(raw.length).toBeGreaterThan(0);
     expect(recorded.calls.every((call) => call.headers.get("authorization") === null)).toBe(true);
