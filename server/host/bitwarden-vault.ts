@@ -104,7 +104,8 @@ export function bitwardenServerUrl(raw: unknown): string | null {
   }
 }
 
-const sameText = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+const nameKey = (value: string) => value.trim().toLowerCase();
+const sameText = (a: string, b: string) => nameKey(a) === nameKey(b);
 const hostOf = (serverUrl: string) => { try { return new URL(serverUrl).host; } catch { return serverUrl; } };
 const credentialKey = (credentials: BitwardenCredentials) => `${credentials.serverUrl}\0${credentials.clientId}`;
 
@@ -166,9 +167,11 @@ export class BitwardenLogins implements VaultProvider {
   private signedInAs: string | null = null;
   private unlocking: { credentials: string; generation: number; promise: Promise<string> } | null = null;
   private connecting: number | null = null;
+  private disconnecting: Promise<void> | null = null;
   private account: string | undefined;
   private logins: LoginEntry[] = [];
   private entries = new Map<string, ItemEntry>();
+  private ambiguousNames = new Set<string>();
   private refreshedAt: number | null = null;
   private syncedAt: number | null = null;
   private emptySummary: BitwardenEmptySummary | undefined;
@@ -214,14 +217,23 @@ export class BitwardenLogins implements VaultProvider {
   }
 
   /** Signs the tool out and forgets its settings folder: the account's cached vault goes with it. */
-  async disconnect(): Promise<void> {
-    this.generation++;
+  disconnect(): Promise<void> {
+    if (this.disconnecting) return this.disconnecting;
+    const generation = ++this.generation;
     this.connecting = null;
     this.unlocking = null;
-    if (this.signedInAs !== null || this.session) await this.run(["logout"]).catch(() => null);
-    this.clear();
-    this.signedInAs = null;
-    this.forgetAppData();
+    const pending = (async () => {
+      if (this.signedInAs !== null || this.session) await this.run(["logout"]).catch(() => null);
+      if (this.generation === generation) {
+        this.clear();
+        this.signedInAs = null;
+        this.forgetAppData();
+      }
+    })().finally(() => {
+      if (this.disconnecting === pending) this.disconnecting = null;
+    });
+    this.disconnecting = pending;
+    return pending;
   }
 
   clear(): void {
@@ -233,6 +245,7 @@ export class BitwardenLogins implements VaultProvider {
     this.account = undefined;
     this.logins = [];
     this.entries = new Map();
+    this.ambiguousNames = new Set();
     this.refreshedAt = null;
     this.syncedAt = null;
     this.emptySummary = undefined;
@@ -241,10 +254,14 @@ export class BitwardenLogins implements VaultProvider {
   }
 
   private async load(candidate?: BitwardenCredentials): Promise<BitwardenStatus> {
-    const credentials = candidate ?? this.credentials();
-    if (!credentials) { this.clear(); return this.status(); }
+    if (this.disconnecting) {
+      if (candidate) throw new BitwardenProblem(UNREADABLE, "unavailable");
+      return this.status();
+    }
     // Keep saved-account polling off the single bw CLI profile while validating a candidate connection.
     if (!candidate && this.connecting !== null) return this.status();
+    const credentials = candidate ?? this.credentials();
+    if (!credentials) { this.clear(); return this.status(); }
     if (candidate) { this.generation++; this.refreshing = null; this.connecting = this.generation; }
     const generation = this.generation;
     const stale = () => {
@@ -260,8 +277,10 @@ export class BitwardenLogins implements VaultProvider {
       // Every value in this answer is dropped here and read again when a bot uses it.
       const listed = JSON.parse(await this.call(credentials, ["list", "items"], generation)) as unknown;
       if (stale()) return this.status();
-      if (!Array.isArray(listed)) throw new BitwardenProblem(UNREADABLE, "unreadable");
-      const active = (listed as BwItem[]).filter((item) => typeof item?.id === "string" && !item.deletedDate);
+      if (!Array.isArray(listed) || listed.some((item) => !item || typeof item !== "object" || Array.isArray(item) || typeof (item as Partial<BwItem>).id !== "string" || typeof (item as Partial<BwItem>).type !== "number")) {
+        throw new BitwardenProblem(UNREADABLE, "unreadable");
+      }
+      const active = (listed as BwItem[]).filter((item) => !item.deletedDate);
       let hiddenPasswords = 0;
       let noWebsite = 0;
       const usable: Array<{ item: BwItem; entry: ItemEntry; hosts: Set<string> }> = [];
@@ -281,6 +300,11 @@ export class BitwardenLogins implements VaultProvider {
         const bucket = hosts.size > 0 || listedAsSecret(entry) ? usable : other;
         bucket.push({ item, entry, hosts });
       }
+      const nameCounts = new Map<string, number>();
+      for (const { entry } of usable) nameCounts.set(nameKey(entry.name), (nameCounts.get(nameKey(entry.name)) ?? 0) + 1);
+      for (const { entry } of other) nameCounts.set(nameKey(entry.name), (nameCounts.get(nameKey(entry.name)) ?? 0) + 1);
+      const ambiguousNames = new Set<string>();
+      for (const [key, count] of nameCounts) if (count >= 2) ambiguousNames.add(key);
       const logins: LoginEntry[] = [];
       const entries = new Map<string, ItemEntry>();
       for (const { item, entry, hosts } of [...usable, ...other].slice(0, MAX_ITEMS)) {
@@ -294,6 +318,7 @@ export class BitwardenLogins implements VaultProvider {
       if (stale()) return this.status();
       this.logins = logins.sort((a, b) => a.site.localeCompare(b.site) || a.username.localeCompare(b.username));
       this.entries = entries;
+      this.ambiguousNames = ambiguousNames;
       if (this.session?.credentials === credentialKey(credentials) && this.session.hasAccount) this.account = this.session.account;
       const totalListed = this.logins.length + [...entries.values()].filter(listedAsSecret).length;
       this.emptySummary = totalListed === 0 ? { total: active.length, hiddenPasswords, noWebsite } : undefined;
@@ -301,7 +326,7 @@ export class BitwardenLogins implements VaultProvider {
       this.error = undefined;
       return this.status();
     } catch (error) {
-      if (candidate && this.session?.credentials === credentialKey(candidate)) this.session = null;
+      if (candidate && generation === this.generation && this.session?.credentials === credentialKey(candidate)) this.session = null;
       const problem = error instanceof BitwardenProblem ? error : new BitwardenProblem(error instanceof Error ? error.message : UNREADABLE, "unavailable");
       if (candidate) throw problem;
       if (generation === this.generation) this.error = problem;
@@ -405,7 +430,7 @@ export class BitwardenLogins implements VaultProvider {
   private async item(itemId: string): Promise<BwItem | null> {
     const credentials = this.credentials();
     if (!credentials) return null;
-    if (this.connecting !== null) throw new BitwardenProblem(UNREADABLE, "unavailable");
+    if (this.connecting !== null || this.disconnecting !== null) throw new BitwardenProblem(UNREADABLE, "unavailable");
     const generation = this.generation;
     await this.sync(credentials, false, generation);
     try { return JSON.parse(await this.call(credentials, ["get", "item", itemId], generation)) as BwItem; }
@@ -440,7 +465,7 @@ export class BitwardenLogins implements VaultProvider {
     if (!ref) return null;
     const all = [...this.entries.values()];
     const byId = all.filter((entry) => entry.itemId === ref.item);
-    const found = byId.length ? byId : all.filter((entry) => sameText(entry.name, ref.item));
+    const found = byId.length ? byId : (this.ambiguousNames.has(nameKey(ref.item)) ? [] : all.filter((entry) => sameText(entry.name, ref.item)));
     if (found.length !== 1) return null;
     const entry = found[0]!;
     const asked = ref.field ?? (entry.type === LOGIN ? "password" : "notes");

@@ -244,6 +244,8 @@ describe("Bitwarden through its command line tool", () => {
     await pending;
     expect(racing.items()).toEqual([]);
     expect(racing.status()).toEqual({ connected: false });
+    savedConn = CREDENTIALS;
+    expect(racing.items()).toEqual([]);
 
     let unlockCalls = 0;
     let statusUnlocked = false;
@@ -385,5 +387,121 @@ describe("Bitwarden through its command line tool", () => {
     await expect(failingCandidate).rejects.toThrow("Bitwarden could not be read");
     expect(isolated.status()).toEqual({ connected: true, server: "vault.bitwarden.com", account: "bot@acme.test", items: 3 });
     expect(await isolated.refresh()).toEqual({ connected: true, server: "vault.bitwarden.com", account: "bot@acme.test", items: 3 });
+  });
+
+  it("keeps first connect alive across concurrent !credentials refresh, rejects connects during disconnect, rejects malformed entries, preserves newer session on stale catch, and respects duplicate names past MAX_ITEMS", async () => {
+    // (a) Refresh with !credentials while first candidate connect is pending must not clear/invalidate it.
+    let savedFirst: typeof CREDENTIALS | null = null;
+    let releaseFirstList!: () => void;
+    let onFirstList!: () => void;
+    const firstListStarted = new Promise<void>((resolve) => { onFirstList = resolve; });
+    const firstListGate = new Promise<void>((resolve) => { releaseFirstList = resolve; });
+    const firstVault = new BitwardenLogins({
+      credentials: () => savedFirst,
+      run: async (args) => {
+        if (args[0] === "status") return { code: 0, stdout: JSON.stringify({ status: "unlocked", userEmail: "bot@acme.test" }), stderr: "", timedOut: false };
+        if (args[0] === "unlock") return { code: 0, stdout: "fake-first-session", stderr: "", timedOut: false };
+        if (args[0] === "sync") return { code: 0, stdout: "Syncing complete.", stderr: "", timedOut: false };
+        if (args[0] === "list") { onFirstList(); await firstListGate; return { code: 0, stdout: JSON.stringify(ITEMS), stderr: "", timedOut: false }; }
+        return { code: 0, stdout: "", stderr: "", timedOut: false };
+      },
+    });
+    const firstConnect = firstVault.refresh(CREDENTIALS);
+    await firstListStarted;
+    expect(await firstVault.refresh()).toEqual({ connected: false });
+    savedFirst = CREDENTIALS;
+    releaseFirstList();
+    expect(await firstConnect).toEqual({ connected: true, server: "vault.bitwarden.com", account: "bot@acme.test", items: 3 });
+
+    // (b) Candidate connect during pending disconnect rejects before running CLI work.
+    let releaseLogout!: () => void;
+    let onLogout!: () => void;
+    const logoutStarted = new Promise<void>((resolve) => { onLogout = resolve; });
+    const logoutGate = new Promise<void>((resolve) => { releaseLogout = resolve; });
+    const callsAfterLogout: string[] = [];
+    let gateLogout = false;
+    let loggedOut = false;
+    const discVault = new BitwardenLogins({
+      credentials: () => CREDENTIALS,
+      run: async (args) => {
+        if (loggedOut) callsAfterLogout.push(args[0]!);
+        if (args[0] === "logout") {
+          if (gateLogout) { loggedOut = true; onLogout(); await logoutGate; }
+          return { code: 0, stdout: "", stderr: "", timedOut: false };
+        }
+        if (args[0] === "status") return { code: 0, stdout: JSON.stringify({ status: "unlocked", userEmail: "bot@acme.test" }), stderr: "", timedOut: false };
+        if (args[0] === "unlock") return { code: 0, stdout: "fake-session", stderr: "", timedOut: false };
+        if (args[0] === "sync") return { code: 0, stdout: "Syncing complete.", stderr: "", timedOut: false };
+        if (args[0] === "list") return { code: 0, stdout: JSON.stringify(ITEMS), stderr: "", timedOut: false };
+        return { code: 0, stdout: "", stderr: "", timedOut: false };
+      },
+    });
+    await discVault.refresh(CREDENTIALS);
+    gateLogout = true;
+    const pendingDisc = discVault.disconnect();
+    await logoutStarted;
+    await expect(discVault.refresh(CREDENTIALS)).rejects.toThrow("Bitwarden could not be read");
+    expect(callsAfterLogout).toEqual([]);
+    releaseLogout();
+    await pendingDisc;
+
+    // (c) Stale failed reconnect does not clear newer valid session with identical credentials key.
+    let listNum = 0;
+    let unlocks = 0;
+    let releaseStaleFail!: () => void;
+    let onStaleList!: () => void;
+    const staleListStarted = new Promise<void>((resolve) => { onStaleList = resolve; });
+    const staleFailGate = new Promise<void>((resolve) => { releaseStaleFail = resolve; });
+    const staleCatchVault = new BitwardenLogins({
+      credentials: () => CREDENTIALS,
+      run: async (args) => {
+        if (args[0] === "logout") return { code: 0, stdout: "", stderr: "", timedOut: false };
+        if (args[0] === "status") return { code: 0, stdout: JSON.stringify({ status: "unlocked", userEmail: "bot@acme.test" }), stderr: "", timedOut: false };
+        if (args[0] === "unlock") { unlocks++; return { code: 0, stdout: `sess-${unlocks}`, stderr: "", timedOut: false }; }
+        if (args[0] === "sync") return { code: 0, stdout: "Syncing complete.", stderr: "", timedOut: false };
+        if (args[0] === "list") {
+          listNum++;
+          if (listNum === 1) { onStaleList(); await staleFailGate; return { code: 1, stdout: "", stderr: "transient fail", timedOut: false }; }
+          return { code: 0, stdout: JSON.stringify(ITEMS), stderr: "", timedOut: false };
+        }
+        return { code: 0, stdout: "", stderr: "", timedOut: false };
+      },
+    });
+    const staleAttempt = staleCatchVault.refresh(CREDENTIALS);
+    await staleListStarted;
+    expect(await staleCatchVault.refresh(CREDENTIALS)).toEqual({ connected: true, server: "vault.bitwarden.com", account: "bot@acme.test", items: 3 });
+    releaseStaleFail();
+    await expect(staleAttempt).rejects.toThrow("Bitwarden could not be read");
+    expect(await staleCatchVault.refresh()).toEqual({ connected: true, server: "vault.bitwarden.com", account: "bot@acme.test", items: 3 });
+    expect(unlocks).toBe(2);
+
+    // (d) Malformed array records like [null, {}] reject as unreadable instead of healthy-empty.
+    const malformed = new BitwardenLogins({
+      credentials: () => CREDENTIALS,
+      run: async (args) => {
+        if (args[0] === "status") return { code: 0, stdout: JSON.stringify({ status: "unlocked", userEmail: "bot@acme.test" }), stderr: "", timedOut: false };
+        if (args[0] === "unlock") return { code: 0, stdout: "fake-session", stderr: "", timedOut: false };
+        if (args[0] === "sync") return { code: 0, stdout: "Syncing complete.", stderr: "", timedOut: false };
+        if (args[0] === "list") return { code: 0, stdout: JSON.stringify([null, {}]), stderr: "", timedOut: false };
+        return { code: 0, stdout: "", stderr: "", timedOut: false };
+      },
+    });
+    await expect(malformed.refresh(CREDENTIALS)).rejects.toThrow("Bitwarden could not be read");
+    expect((await malformed.refresh()).error).toContain("Bitwarden could not be read");
+
+    // (e) Display cap ordering never retargets bw://<name> to the remaining item when an evicted duplicate exists.
+    const capFiller: FakeBwItem[] = Array.from({ length: 1005 }, (_, i) => ({
+      id: `i-cap-${i}`, name: `Cap ${i}`, type: 1 as const, login: { password: "fake-cap-password" },
+    }));
+    const dupItems: FakeBwItem[] = [
+      ...capFiller,
+      { id: "i-deploy-other", name: "Deploy", type: 1, login: { password: "other-deploy-password" } },
+      { id: "i-deploy-web", name: "Deploy", type: 1, login: { uris: [{ uri: "https://deploy.example.test" }], password: "web-deploy-password" } },
+    ];
+    const dupFake = fakeBw({ ...CREDENTIALS, email: "bot@acme.test", items: dupItems });
+    const dupVault = new BitwardenLogins({ credentials: () => CREDENTIALS, run: dupFake.run });
+    await dupVault.refresh(CREDENTIALS);
+    expect(findLinkedSecret([dupVault], "bw://Deploy/password", "pepper")).toBeNull();
+    expect(await readLinkedSecret(findLinkedSecret([dupVault], "bw://i-deploy-web/password", "pepper")!)).toBe("web-deploy-password");
   });
 });
