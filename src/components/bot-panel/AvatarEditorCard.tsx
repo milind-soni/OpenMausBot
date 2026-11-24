@@ -17,7 +17,6 @@ import { Segmented } from "./rows";
 import { MascotFaceColorPicker } from "../MascotFaceColorPicker";
 import { MascotMaterialPicker } from "../MascotMaterialPicker";
 import { MascotBodyColorSwatch } from "../MascotBodyColorSwatch";
-import { AvatarCredit } from "../AvatarCredit";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useBotsApartFromTurns } from "@/state/apart-from-turns";
 
@@ -146,7 +145,6 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
             <div className="grid grid-cols-5 gap-1.5">
               {EVERYDAY_BODY_IDS.map((id) => bodyButton(id, bodyName(id)))}
             </div>
-            <AvatarCredit />
             {!showsImage && othersToMatch.length > 0 && (
               <button
                 type="button"

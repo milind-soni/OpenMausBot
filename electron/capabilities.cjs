@@ -1,4 +1,4 @@
-const { PLUGIN_REQUIRED_MESSAGE, isHyprlandSession } = require("./cua-hyprland.cjs");
+const { PLUGIN_REQUIRED_MESSAGE, desktopNames, isHyprlandSession } = require("./cua-hyprland.cjs");
 
 const DESKTOP_PLATFORMS = new Set(["darwin", "linux", "win32"]);
 const UNAVAILABLE_LOCAL_STATUSES = new Set(["disabled", "checking", "starting", "error", "stopped", "unavailable"]);
@@ -25,6 +25,14 @@ function linuxSession(platform, env) {
   if (declared === "x11" || declared === "xorg") return "x11";
   if (env.DISPLAY) return "x11";
   return "headless";
+}
+
+/** Ubuntu names itself in the desktop variables ("ubuntu:GNOME"); its sign-in screen offers "Ubuntu on Xorg". Other
+ * Wayland desktops, such as Fedora's GNOME, may have no Xorg session at all. */
+function ubuntuDesktop(env) {
+  const names = desktopNames(env);
+  // Without either variable the desktop is unknown; keep the Ubuntu wording.
+  return names.length ? names.includes("ubuntu") : undefined;
 }
 
 /** `hyprlandPlugin` is what `probeCuaHyprlandPlugin` found: "active" or anything else. */
@@ -56,8 +64,10 @@ function linuxLocalControlSupport(platform, env, { hyprlandPlugin } = {}) {
       available: false,
       session,
       reasonCode: "linux-wayland-seat-safety-blocked",
-      message:
-        "Local control is not available on Wayland yet. Sign out and choose Ubuntu on Xorg to use This computer.",
+      message: ubuntuDesktop(env) !== false
+        ? "Local control is not available on Wayland yet. Sign out and choose Ubuntu on Xorg to use This computer."
+        : "Local control is not available on Wayland yet. Sign out and choose an Xorg session if your sign-in screen " +
+          "offers one; on a desktop without one, such as Fedora, use a cloud desktop instead.",
     });
   }
   return Object.freeze({
@@ -197,6 +207,10 @@ function desktopCapabilities({
       (hostPlatform === "darwin" || hostPlatform === "win32"
         ? driverBlocked(localConnection?.reason) ? "cua-driver-blocked" : "cua-driver-unavailable"
         : "unsupported-platform");
+  }
+  // The Wayland block names the way out: "Ubuntu on Xorg" on Ubuntu, a cloud desktop where there may be no Xorg.
+  if (!remote && localComputer.reasonCode === "linux-wayland-seat-safety-blocked") {
+    localComputer.ubuntuDesktop = ubuntuDesktop(env);
   }
 
   if (remote) {

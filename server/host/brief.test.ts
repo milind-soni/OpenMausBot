@@ -388,4 +388,16 @@ describe("the brief", () => {
     expect(records).toContain("[Records from Outlook.");
     expect(records).toContain("Outlook draft");
   });
+
+  it("opens an Outlook email in Outlook, never in Gmail", async () => {
+    const s = setup();
+    await s.brief.active("desktop", "UTC");
+    const webLink = "https://outlook.live.com/owa/?ItemID=o1&exvsurl=1&viewmodel=ReadMessageItem";
+    const linked: EmailHeader = { id: "o1", threadId: "conv-1", at: s.now() - 5 * MINUTE, from: "Bob <bob@outlook.test>", subject: "Invoice", preview: "Due Friday", app: "outlook", link: webLink };
+    const unlinked: EmailHeader = { id: "o2", threadId: "conv-2", at: s.now() - 5 * MINUTE, from: "Cy <cy@outlook.test>", subject: "Quote", preview: "Due Monday", app: "outlook" };
+    await s.brief.report({ routine: {} as never, at: s.now(), picked: [{ email: linked, why: "Due Friday.", needsReply: true }, { email: unlinked, why: "Due Monday.", needsReply: true }], trouble: [] });
+    const opens = widgetActions(s.card()!.widget!.root as WidgetRoot).filter((entry) => entry.action.type === "open_url").map((entry) => [entry.label, entry.action.payload]);
+    expect(opens).toEqual([["Open in Outlook", { url: webLink }]]);
+    expect(s.shown()).not.toContain("mail.google.com");
+  });
 });

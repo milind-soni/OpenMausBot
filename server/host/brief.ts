@@ -305,7 +305,8 @@ export function createBrief(deps: BriefDeps) {
       .map((meeting) => ({ title: meeting.title, start: meeting.start, ...(meeting.joinUrl ? { joinUrl: meeting.joinUrl } : {}) }));
     const emails = liveImportant(at).flatMap((row): BriefEmail[] => {
       const header = headers.get(row.messageId);
-      return header ? [{ messageId: row.messageId, threadId: row.threadId, from: header.from, subject: header.subject, needsReply: row.needsReply, ...(header.why ? { why: header.why, ...(header.whyText ? { whyText: header.whyText } : {}) } : {}) }] : [];
+      return header ? [{ messageId: row.messageId, threadId: row.threadId, from: header.from, subject: header.subject, needsReply: row.needsReply, ...(header.why ? { why: header.why, ...(header.whyText ? { whyText: header.whyText } : {}) } : {}),
+        ...(row.app === "outlook" ? { app: "outlook" as const, ...(header.link ? { link: header.link } : {}) } : {}) }] : [];
     });
     const dreamt = deps.ideas?.(chiefBot.id);
     const ideas = (dreamt?.ideas ?? []).map((idea): BriefRow => ({ text: idea, note: w.noticedAcross(dreamt!.conversations), said: { note: words("brief.row.noticedAcross", { count: String(dreamt!.conversations) }) } }));

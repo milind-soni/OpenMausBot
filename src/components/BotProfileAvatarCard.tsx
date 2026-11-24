@@ -18,7 +18,6 @@ import { AvatarFraming, OrganizationAvatarIcons, RESET_MASCOT_PATCH, useAvatarIm
 import { t } from "@/lib/i18n";
 import { bodyName, colorName, expressionName, festivalName } from "@/lib/mascot-names";
 import { MascotBodyColorSwatch } from "./MascotBodyColorSwatch";
-import { AvatarCredit } from "./AvatarCredit";
 import { MascotFaceColorPicker } from "./MascotFaceColorPicker";
 import { MascotMaterialPicker } from "./MascotMaterialPicker";
 
@@ -187,7 +186,6 @@ export function BotProfileAvatarCard({
                 <BodyButton key={id} id={id} name={bodyName(id)} bot={bot} busy={busy} onPatch={onPatch} />
               ))}
             </div>
-            <AvatarCredit />
             {FESTIVAL_IDS.map((festival) => (
               <div key={festival}>
                 <div className="mb-2 mt-4 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
