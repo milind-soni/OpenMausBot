@@ -10,7 +10,6 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
-import { APP_NAME } from "../shared/product.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLAUDE = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
@@ -26,7 +25,7 @@ const KEY_CHECK = {
 const EXTRACT_KEY_CHECK = {
   seam: "keyCheck",
   fields: { ok: { type: "boolean", description: "Is this a connection check?" } },
-  input: { text: `${APP_NAME} is checking that an extraction-model key works.` },
+  input: { text: "OpenMausBot is checking that an extraction-model key works." },
 };
 
 /** The relay's own check of an extraction body: the key check is the only extraction this test makes. */

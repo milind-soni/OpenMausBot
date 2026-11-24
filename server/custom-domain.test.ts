@@ -16,6 +16,7 @@ import {
   isPublicDomainAddress,
   normalizeCustomDomain,
 } from "./custom-domain.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const environmentId = "2cac4256-d238-49a4-bab5-227183911e55";
 const publicAddress: LookupAddress = { address: "8.8.8.8", family: 4 };
@@ -272,6 +273,6 @@ describe("HTTPS transport", () => {
   it("rejects HTML and malformed JSON without returning their contents", async () => {
     const verifier = createCustomDomainVerifier({ environmentId, lookup: async () => [publicAddress] });
     responder = () => ({ status: 200, body: "<html>private error page</html>" });
-    await expect(verifier.verify("bots.company.com")).rejects.toThrow("did not return OpenMausBot data");
+    await expect(verifier.verify("bots.company.com")).rejects.toThrow(`did not return ${APP_NAME} data`);
   });
 });

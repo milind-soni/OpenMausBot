@@ -38,7 +38,7 @@ import type { PublicSession } from "../sessions.ts";
 import type { BotRecord, Message, Store, StoreChange } from "../store.ts";
 import { droppedLine, fullLine, laterLine, notYetLine, refusedLine, sentLine } from "./devs-report-words.ts";
 import { clip } from "./text-clip.ts";
-import { APP_NAME, PRODUCT_NAME } from "../../shared/product.ts";
+import { APP_NAME } from "../../shared/product.ts";
 
 export const DEVS_REPORTS_FILE = "devs-reports.json";
 const TICK_MS = 2_000;
@@ -142,8 +142,8 @@ export const fixedLine = (version: string, language?: string) => serverLine(lang
 /** Rides on the bot's next turn in that chat, once, so an answer to the line above makes sense to it. */
 const fixedNote = (entry: Tracked, version: string) => `\n\n[From ${APP_NAME}, not the person: the problem they reported with @devs on ${new Date(entry.at).toISOString().slice(0, 10)}${
   entry.words ? ` ("${entry.words}")` : ""} is fixed in ${version}, which this app now runs. The chat told them so and asked whether they want to try again; if their message answers that, help them try it again.]`;
-/** A failure line names MausBot in every language: a bot reply that does has passed it on. */
-const FAILED_MARKER = `${PRODUCT_NAME}`;
+/** A failure line names the MausBot team in every language: a bot reply that does has passed it on. */
+const FAILED_MARKER = "MausBot";
 
 /** The person's own words: the text outside quotes and each quote's comment. Only a @devs there tags the message,
  * never one inside a message they quoted. */
