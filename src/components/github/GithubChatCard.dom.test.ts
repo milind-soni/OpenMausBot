@@ -84,3 +84,21 @@ it("shows nothing to someone whose sign-in it isn't, and nothing once set aside"
   await show([SIGNED_OUT], message("required", { dismissed: true }));
   expect(host.innerHTML).toBe("");
 });
+
+it("asks again before it says connected: a sign-in revoked since Apps last looked shows Connect again", async () => {
+  const answers: GithubSignInStatus[] = [{ state: "signed-in", login: "octo", source: "mausbot", scopes: [], checkedAt: 1 }];
+  const store = createGithubSignInStore({ api: async () => answers[0], timers: { set: () => null, clear: () => {} } });
+  const appsStillOpen = store.subscribe(() => {});
+  await act(async () => { await Promise.resolve(); });
+  expect(store.snapshot().status?.state).toBe("signed-in");
+  answers[0] = { state: "invalid", login: "octo", source: "mausbot", reason: "revoked" };
+  const { GithubChatCard } = await import("./GithubChatCard");
+  root = createRoot(host);
+  await act(async () => { root!.render(createElement(GithubChatCard, { botId: "chief", threadId: "t1", message: message(), store })); });
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  expect(host.querySelector("[data-ask-card='settled']")).toBeNull();
+  expect(button("Connect again")).toBeTruthy();
+  expect(host.textContent).toContain("GitHub sign-in stopped working.");
+  expect(sent.some((call) => call.path.includes("/status"))).toBe(false);
+  appsStillOpen();
+});

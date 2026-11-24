@@ -49,6 +49,8 @@ export interface GithubSignInCardDeps {
   threadVisible(auth: RequestAuth, threadId: string): boolean;
   /** GitHub got connected: a turn parked on this card, if any, carries on. */
   resume(threadId: string, resumeKey: string): void;
+  /** The card was set aside: a turn parked on it stops waiting. */
+  release(threadId: string, messageId: string): void;
 }
 
 type GithubCard = Message & { connector: ConnectorCardData };
@@ -99,6 +101,7 @@ export function createGithubSignInCards(deps: GithubSignInCardDeps) {
       if (!isGithubSignInCard(card) || !deps.threadVisible(at.auth, at.threadId)) return { status: 404, body: { error: "no such connection request" } };
       if (action === "dismiss" && method === "POST") {
         store.patchMessage(at.threadId, card.id, { connector: { ...card.connector, dismissed: true } });
+        deps.release(at.threadId, card.id);
         return { status: 200, body: { dismissed: true } };
       }
       if (action === "authorize" && method === "POST") return { status: 409, body: { error: serverLine(deps.language(at.threadId), "server.github.card.connectInApps") } };

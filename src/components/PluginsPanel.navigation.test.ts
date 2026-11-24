@@ -51,7 +51,7 @@ vi.mock("./McpServersPanel", async () => {
 vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
 vi.mock("./Avatar", () => ({ BotAvatar: ({ bot }: { bot: Bot }) => createElement("span", { "data-avatar": bot.id }) }));
 vi.mock("./github/GithubAppCard", () => ({ GITHUB_CARD_SEARCH: "github git", GITHUB_CARD_CATEGORIES: ["Developer tools"], GithubAppCard: () => null }));
-vi.mock("@/lib/github-sign-in", () => ({ useGithubConnected: () => null, useGithubShown: () => false }));
+vi.mock("@/lib/github-sign-in", () => ({ useGithubConnected: () => null, useGithubShown: () => true }));
 vi.mock("./XCard", () => ({
   X_CARD_SEARCH: "x twitter treg tweets posts",
   XCard: () => createElement("div", { "data-x-card": true }, "X (Twitter)"),

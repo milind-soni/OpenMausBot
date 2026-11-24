@@ -189,6 +189,17 @@ describe("the GitHub row in Apps", () => {
     for (const spy of logs) for (const args of spy.mock.calls) expect(JSON.stringify(args)).not.toContain(token);
   });
 
+  it("asks GitHub again when Apps' refresh is pressed, and reads again each time a card comes back into view", async () => {
+    const { calls, store } = await show({ "/api/github/sign-in": [SIGNED_OUT] });
+    expect(calls.map((call) => call.path)).toEqual(["/api/github/sign-in"]);
+    await act(async () => { root!.render(createElement(GithubAppCard, { store, refreshKey: 1 })); await Promise.resolve(); });
+    expect(calls.map((call) => call.path)).toEqual(["/api/github/sign-in", "/api/github/sign-in?check=1"]);
+    await act(async () => root!.unmount());
+    root = createRoot(host);
+    await act(async () => { root!.render(createElement(GithubAppCard, { store })); await Promise.resolve(); });
+    expect(calls).toHaveLength(3);
+  });
+
   it("shows nothing at all to a person this sign-in isn't for", async () => {
     await show({ "/api/github/sign-in": [new ApiError("Sign in to this team's Cloud to connect your own GitHub.", 403)] });
     expect(host.innerHTML).toBe("");

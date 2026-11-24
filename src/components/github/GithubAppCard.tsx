@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Check, Loader2 } from "lucide-react";
 
 import { githubSignIn, useGithubSignIn, type GithubSignInStore, type GithubSignInView } from "@/lib/github-sign-in";
@@ -43,8 +44,9 @@ export function GithubRowAction({ view, store, className = PILL }: { view: Githu
 
 /** GitHub in Apps: the server's own sign-in, which bots' git and pull requests use. Nothing shows for a person who may
  * not manage it. */
-export function GithubAppCard({ store = githubSignIn }: { store?: GithubSignInStore }) {
+export function GithubAppCard({ store = githubSignIn, refreshKey = 0 }: { store?: GithubSignInStore; refreshKey?: number }) {
   const view = useGithubSignIn(store);
+  useEffect(() => { if (refreshKey > 0) void store.refresh(true); }, [store, refreshKey]);
   if (view.phase === "hidden") return null;
   const state = view.status?.state ?? "loading";
   const signedIn = state === "signed-in";

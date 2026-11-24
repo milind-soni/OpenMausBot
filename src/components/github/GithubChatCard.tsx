@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import { githubSignIn, useGithubSignIn, type GithubSignInStore } from "@/lib/github-sign-in";
@@ -18,9 +18,17 @@ export function GithubChatCard({ botId, color, threadId, message, store = github
 }) {
   const connector = message.connector!;
   const view = useGithubSignIn(store);
-  const signedIn = view.status?.state === "signed-in" ? view.status : null;
+  // What another card or Apps read earlier may be out of date: this card asks again before it says connected.
+  const [checked, setChecked] = useState(false);
+  const signedIn = checked && view.status?.state === "signed-in" ? view.status : null;
   const endpoint = `/api/bots/${encodeURIComponent(botId)}/connector-cards/${encodeURIComponent(message.id)}`;
   const settling = useRef(false);
+  useEffect(() => {
+    if (connector.status === "connected" || connector.dismissed) return;
+    let live = true;
+    void store.refresh().finally(() => { if (live) setChecked(true); });
+    return () => { live = false; };
+  }, [store, connector.status, connector.dismissed]);
 
   useEffect(() => {
     if (!signedIn || connector.status === "connected" || connector.dismissed || settling.current) return;
@@ -39,7 +47,7 @@ export function GithubChatCard({ botId, color, threadId, message, store = github
     );
   }
 
-  const state = view.status?.state;
+  const state = checked ? view.status?.state : undefined;
   const dismiss = () => void api(`${endpoint}/dismiss`, { method: "POST", body: JSON.stringify({ threadId }) }).catch(() => {});
   const spinner = <Loader2 size={14} aria-hidden="true" className="animate-spin motion-reduce:animate-none" />;
   return (
@@ -47,7 +55,7 @@ export function GithubChatCard({ botId, color, threadId, message, store = github
       ariaLabel={connector.label}
       icon={<GithubMark className="size-4 rounded-[4px]" />}
       title={message.text}
-      explanation={view.phase === "ready" ? githubHeadline(view) : undefined}
+      explanation={checked && view.phase === "ready" ? githubHeadline(view) : undefined}
       onDismiss={dismiss}
       dismissLabel={t("connectors.card.notNow")}
       footer={
@@ -61,10 +69,10 @@ export function GithubChatCard({ botId, color, threadId, message, store = github
           <button type="button" data-github-connect disabled={view.busy !== null} onClick={() => void store.start()} {...askPrimary(color)}>
             {view.busy === "start" ? spinner : t(state === "invalid" ? "githubSignIn.connectAgain" : "githubSignIn.connectGithub")}
           </button>
-        ) : view.phase === "loading" ? spinner : null
+        ) : !checked || view.phase === "loading" ? spinner : null
       }
     >
-      {view.phase === "ready" && <GithubSignInDetails view={view} store={store} />}
+      {checked && view.phase === "ready" && <GithubSignInDetails view={view} store={store} />}
     </AskCard>
   );
 }

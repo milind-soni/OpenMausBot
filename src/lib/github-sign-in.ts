@@ -65,7 +65,6 @@ export function createGithubSignInStore(deps: { api?: Api; timers?: Timers } = {
   const api: Api = deps.api ?? storeApi;
   const timers: Timers = deps.timers ?? { set: (fn, ms) => setTimeout(fn, ms), clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>) };
   let view = INITIAL;
-  let loaded = false;
   let reads = 0;
   let timer: unknown = null;
   const listeners = new Set<() => void>();
@@ -113,7 +112,7 @@ export function createGithubSignInStore(deps: { api?: Api; timers?: Timers } = {
     try {
       const answer = await api(`${GITHUB_SIGN_IN_PATH}/${action}`, { method: "POST", ...(body === undefined ? {} : { body }) });
       if (!isStatus(answer)) throw new Error("unexpected GitHub sign-in status");
-      set({ phase: "ready", status: answer, busy: null, refused: answer.state === "signed-in" ? false : view.refused });
+      set({ phase: "ready", status: answer, busy: null, refused: action === "start" || answer.state === "signed-in" ? false : view.refused });
       return true;
     } catch (cause) {
       const status = statusOf(cause);
@@ -132,11 +131,10 @@ export function createGithubSignInStore(deps: { api?: Api; timers?: Timers } = {
 
   return {
     subscribe(listener: () => void): () => void {
+      // Each time a card comes into view after none was, the answer is asked for again: a sign-in can change elsewhere.
+      const first = listeners.size === 0;
       listeners.add(listener);
-      if (!loaded) {
-        loaded = true;
-        void read();
-      }
+      if (first) void read();
       schedule();
       return () => {
         listeners.delete(listener);

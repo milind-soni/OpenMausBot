@@ -26,6 +26,7 @@ function setup(options: { team?: boolean; status?: GithubSignInStatus; person?: 
   const asked: string[] = [];
   const reported: string[] = [];
   const resumed: string[] = [];
+  const released: string[] = [];
   const store = {
     messagesFor: () => messages,
     appendMessage: vi.fn((_threadId: string, message: Omit<Message, "id" | "at">) => { const row = { ...message, id: `m${messages.length + 1}`, at: 1 } as Message; messages.push(row); return row; }),
@@ -39,8 +40,9 @@ function setup(options: { team?: boolean; status?: GithubSignInStatus; person?: 
     language: () => undefined,
     threadVisible: () => true,
     resume: (threadId, resumeKey) => { resumed.push(`${threadId} ${resumeKey}`); },
+    release: (threadId, messageId) => { released.push(`${threadId} ${messageId}`); },
   });
-  return { cards, messages, store, asked, reported, resumed, set: (next: GithubSignInStatus) => { status = next; } };
+  return { cards, messages, store, asked, reported, resumed, released, set: (next: GithubSignInStatus) => { status = next; } };
 }
 const chief = { bot: { id: "chief", name: "Chief" }, threadId: "t1", from: { botId: "chief", name: "Chief", color: "blue" } } as const;
 
@@ -108,7 +110,7 @@ describe("the Connect GitHub card in a chat", () => {
   });
 
   it("settles when GitHub is connected, for its own person only; refuses an app authorize; can be set aside", async () => {
-    const { cards, messages, set, resumed } = setup({ team: true });
+    const { cards, messages, set, resumed, released } = setup({ team: true });
     await cards.raise(chief, { operation: "push", repo: "acme/site" });
     const at = (auth: RequestAuth) => ({ auth, threadId: "t1", message: messages[0]! });
     expect((await cards.route("authorize", "POST", at(member("ada@example.com")))).status).toBe(409);
@@ -125,6 +127,7 @@ describe("the Connect GitHub card in a chat", () => {
     expect(resumed).toHaveLength(1);
     expect((await cards.route("dismiss", "POST", at(member("ada@example.com")))).status).toBe(200);
     expect(messages[0]!.connector!.dismissed).toBe(true);
+    expect(released).toEqual(["t1 m1"]);
 
     const solo = setup();
     await solo.cards.raise(chief, { operation: "push", repo: "acme/site" });
