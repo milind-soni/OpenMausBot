@@ -189,6 +189,21 @@ describe("an ACP agent's own compaction of a live session", () => {
     expect(deletePromptSplitReceipt).toHaveBeenCalledWith("fixtureAgent", JSON.stringify(["thread", SESSION]));
   });
 
+  it("forgets the prompt-split receipt when the agent exits during the failure check after answering /compact", async () => {
+    const { deps, session } = setup(({ heard, reply }) => { heard({ sessionUpdate: "usage_update", used: 950 }); reply(RESULT); });
+    deps.promptOutcome = async () => () => { setImmediate(() => session.child.emit("exit", 1, null)); return new Promise(() => {}); };
+    vi.mocked(deletePromptSplitReceipt).mockClear();
+    expect(await acpCompactSession(deps)("thread", { session: SESSION })).toMatchObject({ ok: false, reason: "the agent exited during compaction" });
+    expect(deletePromptSplitReceipt).toHaveBeenCalledWith("fixtureAgent", JSON.stringify(["thread", SESSION]));
+  });
+
+  it("keeps the prompt-split receipt when /compact was never sent", async () => {
+    const { deps } = setup(({ reply }) => reply(RESULT), { compactCommand: undefined });
+    vi.mocked(deletePromptSplitReceipt).mockClear();
+    expect(await acpCompactSession(deps)("thread", { session: SESSION })).toMatchObject({ ok: false });
+    expect(deletePromptSplitReceipt).not.toHaveBeenCalled();
+  });
+
   it("keeps a reply's usage and lets no turn carry the session on when Stop cuts the failure check short", async () => {
     const { deps, active, sessions } = setup(({ heard, reply }) => {
       heard({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Nothing to compact" } });

@@ -83,7 +83,7 @@ export function acpCompactSession(deps: AcpCompactDeps) {
     const previousHeard = session.acp.onUpdate;
     session.acp.onUpdate = heard;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let keep = true;
+    let keep = true, sent = false;
     try {
       const checked = deps.promptOutcome ? deps.promptOutcome(deps.instanceId, options.session).catch(() => undefined) : Promise.resolve(undefined);
       const before = await Promise.race([checked.then((check) => ({ kind: "checked" as const, check })), ended]);
@@ -94,7 +94,7 @@ export function acpCompactSession(deps: AcpCompactDeps) {
       let timedOut = false;
       timer = setTimeout(() => { timedOut = true; interrupt("timeout"); end({ kind: "timeout" }); }, timeoutMs());
       timer.unref?.();
-      counted.open = true;
+      counted.open = true; sent = true;
       const answer = session.acp.request("session/prompt", { sessionId: options.session, prompt: [{ type: "text", text: `/${command}` }] },
         undefined, () => { counted.open = false; });
       answer.then((result) => end({ kind: "answered", result }), (error: Error) => end({ kind: "failed", reason: `compaction failed: ${error.message}` }));
@@ -103,7 +103,6 @@ export function acpCompactSession(deps: AcpCompactDeps) {
         return { ok: false, reason, ...(reported ? { usage: { input: reported.input, output: reported.output, cachedInput: reported.cachedInput ?? 0 }, model: session.lastModel ?? null } : {}),
           ...(counted.replied ? { sessionChanged: true as const } : {}) };
       };
-      const forgetReceipt = () => deletePromptSplitReceipt(deps.driverKind, JSON.stringify([threadId, options.session]));
       let ending = await ended;
       if (ending.kind === "stopped" || ending.kind === "timeout") {
         const after = await answerAfterCancel(session, options.session, answer, gone);
@@ -111,7 +110,6 @@ export function acpCompactSession(deps: AcpCompactDeps) {
         if (ending.kind === "stopped" && after !== null && !cancelled) ending = { kind: "answered", result: after };
         else {
           keep = ending.kind === "stopped" && cancelled && !counted.replied;
-          if (keep) forgetReceipt();
           if (after === null && !await deps.endUncancelled(threadId, session)) return failSent("the agent could not be stopped");
           return failSent(ending.kind === "stopped" ? "stopped" : "timed out", after);
         }
@@ -132,7 +130,6 @@ export function acpCompactSession(deps: AcpCompactDeps) {
       const reported = await Promise.race([Promise.resolve(check?.(result)).catch(() => undefined), interruptedAfter]).finally(() => clearTimeout(stopGrace));
       if (reported === "stopped" || reported === "gone" || reported === "timeout") {
         keep = reported === "stopped" && !counted.replied;
-        if (keep) forgetReceipt();
         return failSent(reported === "stopped" ? "stopped" : reported === "gone" ? "the agent exited during compaction" : "timed out", result);
       }
       const why = result?.stopReason !== "end_turn" ? `the compaction ended ${String(result?.stopReason ?? "without a stop reason")}`
@@ -144,10 +141,10 @@ export function acpCompactSession(deps: AcpCompactDeps) {
         keep = false;
         return failSent(why, result);
       }
-      forgetReceipt();
       return { ok: true, usage: { input: usage!.input, output: usage!.output, cachedInput: usage!.cachedInput ?? 0 }, model: session.lastModel ?? null };
     } finally {
       clearTimeout(timer);
+      if (sent) deletePromptSplitReceipt(deps.driverKind, JSON.stringify([threadId, options.session]));
       options.signal?.removeEventListener("abort", onAbort);
       for (const event of ["exit", "close", "error"]) session.child.removeListener(event, exited);
       if (session.acp.onUpdate === heard) session.acp.onUpdate = previousHeard;
