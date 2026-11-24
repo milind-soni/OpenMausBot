@@ -135,6 +135,8 @@ interface Provider {
   label: string;
   color: string;
   costUsd: number;
+  billedCostUsd: number;
+  planCostUsd: number;
   tokens: number;
   turns: number;
   models: string[];
@@ -144,15 +146,22 @@ export function providersOf(models: readonly InsightEntry[], metric: InsightMetr
   const found = new Map<string, Provider>();
   for (const entry of models) {
     const family = modelFamily(entry.key);
-    const provider = found.get(family.id) ?? { key: family.id, label: family.label, color: family.color, costUsd: 0, tokens: 0, turns: 0, models: [] };
+    const provider = found.get(family.id) ?? {
+      key: family.id, label: family.label, color: family.color, costUsd: 0, billedCostUsd: 0, planCostUsd: 0, tokens: 0, turns: 0, models: [],
+    };
+    const plan = entry.planCostUsd ?? 0;
+    const billed = entry.billedCostUsd !== undefined ? (entry.billedCostUsd ?? 0) : Math.max(0, (entry.costUsd ?? 0) - plan);
     provider.costUsd += entry.costUsd ?? 0;
+    provider.billedCostUsd += billed;
+    provider.planCostUsd += plan;
     provider.tokens += tokensOf(entry);
     provider.turns += entry.turns;
     provider.models.push(entry.key);
     found.set(family.id, provider);
   }
-  const size = (provider: Provider) => metric === "cost" ? provider.costUsd : provider.tokens;
-  return [...found.values()].sort((a, b) => size(b) - size(a) || b.tokens - a.tokens);
+  const size = (provider: Provider) => metric === "cost" ? provider.billedCostUsd : provider.tokens;
+  const tie = (provider: Provider) => metric === "cost" ? provider.planCostUsd : 0;
+  return [...found.values()].sort((a, b) => size(b) - size(a) || tie(b) - tie(a) || b.tokens - a.tokens);
 }
 
 function bucketValue(bucket: InsightBucket, metric: InsightMetric, models: readonly string[]): number {
@@ -288,12 +297,18 @@ function ProviderChart({ data, metric, providers }: { data: UsageInsights; metri
   );
 }
 
-function Overview({ data, metric }: { data: UsageInsights; metric: InsightMetric }) {
+export function Overview({ data, metric }: { data: UsageInsights; metric: InsightMetric }) {
   const providers = useMemo(() => providersOf(data.models, metric), [data.models, metric]);
-  const total = metric === "cost" ? data.totals.costUsd ?? 0 : tokensOf(data.totals);
-  const totalText = metric === "cost" ? formatCost(data.totals.costUsd) : formatTokens(total);
-  const before = metric === "cost" ? data.previous.costUsd ?? 0 : tokensOf(data.previous);
-  const size = (provider: Provider) => metric === "cost" ? provider.costUsd : provider.tokens;
+  const planTotal = data.totals.planCostUsd ?? 0;
+  const hasPlan = metric === "cost" && planTotal > 0;
+  const hadPlan = metric === "cost" && (planTotal > 0 || (data.previous.planCostUsd ?? 0) > 0);
+  const billedTotal = data.totals.billedCostUsd !== undefined ? data.totals.billedCostUsd : data.totals.costUsd;
+  const beforeBilled = data.previous.billedCostUsd !== undefined ? data.previous.billedCostUsd : data.previous.costUsd;
+  const heroCost = hasPlan ? billedTotal : data.totals.costUsd;
+  const total = metric === "cost" ? heroCost ?? 0 : tokensOf(data.totals);
+  const totalText = metric === "cost" ? formatCost(heroCost) : formatTokens(total);
+  const before = metric === "cost" ? (hadPlan ? beforeBilled ?? 0 : data.previous.costUsd ?? 0) : tokensOf(data.previous);
+  const size = (provider: Provider) => metric === "cost" ? (hasPlan ? provider.billedCostUsd : provider.costUsd) : provider.tokens;
   const whole = providers.reduce((sum, provider) => sum + size(provider), 0);
   return (
     <div className="grid gap-6 p-4 @min-[720px]/insights:grid-cols-[15rem_minmax(0,1fr)]">
@@ -301,25 +316,46 @@ function Overview({ data, metric }: { data: UsageInsights; metric: InsightMetric
         <div className="flex flex-col gap-1" data-testid="insight-hero">
           <span className="text-[12px] leading-4 text-ink-secondary">{t(metric === "cost" ? "insights.totalSpend" : "insights.totalTokens")}</span>
           <span className="text-[40px] font-semibold leading-[44px] tracking-[-0.02em] text-ink">{totalText}</span>
+          {hasPlan && (
+            <span className="text-[12px] leading-4 text-ink-secondary">
+              {t("insights.planValue", { cost: formatCost(planTotal) })}
+            </span>
+          )}
           <span className="text-[12px] leading-4 text-ink-secondary">
             {t("insights.heroSub", { turns: data.totals.turns.toLocaleString(locale()), days: String(data.totals.days) })}
           </span>
           <Delta now={total} before={before} />
         </div>
         <ul className="flex flex-col gap-3" aria-label={t("insights.providers")}>
-          {providers.map((provider) => (
-            <li key={provider.key} className="flex min-w-0 flex-col gap-0.5">
-              <span className="flex items-center gap-2 text-[13px] leading-5">
-                <span aria-hidden="true" className="size-2 shrink-0 rounded-full" style={{ backgroundColor: provider.color }} />
-                <span className="min-w-0 flex-1 truncate text-ink">{provider.label}</span>
-                <span className="font-medium tabular-nums text-ink">{metricText(metric, size(provider))}</span>
-              </span>
-              <span className="pl-4 text-[11px] leading-4 tabular-nums text-ink-tertiary">
-                {t(metric === "cost" ? "insights.shareOfSpend" : "insights.shareOfTokens", { share: whole > 0 ? percent(size(provider) / whole) : "0%" })}
-                {" · "}{metric === "cost" ? t("insights.tokensCount", { tokens: formatTokens(provider.tokens) }) : t("insights.turnsCount", { count: String(provider.turns) })}
-              </span>
-            </li>
-          ))}
+          {providers.map((provider) => {
+            const planOnly = metric === "cost" && provider.planCostUsd > 0 && provider.billedCostUsd === 0;
+            const mixedPlan = metric === "cost" && provider.planCostUsd > 0 && provider.billedCostUsd > 0;
+            const subtext = planOnly
+              ? t("insights.onPlanNotBilled")
+              : mixedPlan
+                ? `${t("insights.shareOfSpend", { share: whole > 0 ? percent(size(provider) / whole) : "0%" })} · ${t("insights.onPlanAmount", { cost: formatCost(provider.planCostUsd) })}`
+                : t(metric === "cost" ? "insights.shareOfSpend" : "insights.shareOfTokens", { share: whole > 0 ? percent(size(provider) / whole) : "0%" });
+            return (
+              <li key={provider.key} className="flex min-w-0 flex-col gap-0.5">
+                <span className="flex items-center gap-2 text-[13px] leading-5">
+                  <span aria-hidden="true" className="size-2 shrink-0 rounded-full" style={{ backgroundColor: provider.color }} />
+                  <span className="min-w-0 flex-1 truncate text-ink">{provider.label}</span>
+                  {planOnly && (
+                    <span className="shrink-0 rounded-md bg-ink/[0.06] px-1.5 py-0.5 text-[11px] font-medium leading-4 text-ink-secondary">
+                      {t("insights.onPlan")}
+                    </span>
+                  )}
+                  <span className={cn("font-medium tabular-nums", planOnly ? "text-ink-secondary" : "text-ink")}>
+                    {planOnly ? formatCost(provider.planCostUsd) : metricText(metric, size(provider))}
+                  </span>
+                </span>
+                <span className="pl-4 text-[11px] leading-4 tabular-nums text-ink-tertiary">
+                  {subtext}
+                  {" · "}{metric === "cost" ? t("insights.tokensCount", { tokens: formatTokens(provider.tokens) }) : t("insights.turnsCount", { count: String(provider.turns) })}
+                </span>
+              </li>
+            );
+          })}
         </ul>
       </div>
       <ProviderChart data={data} metric={metric} providers={providers} />

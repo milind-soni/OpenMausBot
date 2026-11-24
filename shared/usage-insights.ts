@@ -10,6 +10,10 @@ export interface InsightTokens {
 export interface InsightTotals extends InsightTokens {
   turns: number;
   costUsd: number | null;
+  /** Billed dollars only (excludes subscription-covered turns); null when no turn had a price. */
+  billedCostUsd?: number | null;
+  /** Estimated dollars from subscription-covered turns (not billed). */
+  planCostUsd?: number;
   /** Turns whose model has no price; they add tokens but no dollars. */
   unpriced: number;
   errors: number;
@@ -43,6 +47,8 @@ export interface InsightEntry extends InsightTokens {
   label: string;
   turns: number;
   costUsd: number | null;
+  billedCostUsd?: number | null;
+  planCostUsd?: number;
   errors: number;
   durationMs: number;
   timedTurns: number;

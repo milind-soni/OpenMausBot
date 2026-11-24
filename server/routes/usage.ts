@@ -5,6 +5,7 @@ import type { SpendState } from "../spend.ts";
 import type { UsageCapView } from "../host/usage-cap-gate.ts";
 import {
   flushUsageLedger,
+  isOnPlanRow,
   parseUsageRange,
   readUsage,
   summarizeUsage,
@@ -53,8 +54,7 @@ export function notBilledShare(rows: readonly UsageRow[], onPlan: (instanceId: s
   let usd = 0, turns = 0;
   for (const row of rows) {
     if (typeof row.costUsd !== "number" || !(row.costUsd > 0)) continue;
-    if (!plan.has(row.instanceId)) plan.set(row.instanceId, onPlan(row.instanceId));
-    if (!plan.get(row.instanceId)) continue;
+    if (!isOnPlanRow(row, onPlan, plan)) continue;
     usd += row.costUsd;
     turns += 1;
   }
@@ -96,7 +96,7 @@ export function createUsageRoutes(deps: UsageRouteDeps): RouteHandler {
       await flushUsageLedger(deps.dataDir);
       const rows = readUsage(deps.dataDir, insightReadRange(from, to)).map(deps.rowFor(auth));
       res.setHeader("cache-control", "no-store");
-      return json(res, 200, summarizeInsights(rows, { from, to }, timeZone));
+      return json(res, 200, summarizeInsights(rows, { from, to }, timeZone, deps.onPlan));
     }
     if (!(method === "GET" && (path === "/api/usage" || path === "/api/usage.csv"))) return PASS;
     const range = parseUsageRange(url.searchParams.get("from"), url.searchParams.get("to"));
