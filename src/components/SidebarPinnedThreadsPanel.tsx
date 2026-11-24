@@ -1,16 +1,18 @@
 import { ChevronDown, ChevronRight, Pin } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { PinnedThreadRows, type AttentionThread } from "./SidebarBotActivity";
+import { useRelativeNow } from "./SidebarThreadRow";
 
-export function SidebarPinnedThreadsPanel({ entries, now, onJump, onUnpin, collapsed, onToggle }: {
+type PanelProps = {
   entries: AttentionThread[];
-  now: number;
+  now?: number;
   onJump: (entry: AttentionThread) => void;
   onUnpin: (entry: AttentionThread) => void;
   collapsed: boolean;
   onToggle?: () => void;
-}) {
-  if (entries.length === 0) return null;
+};
+
+function PinnedThreadsBody({ entries, now, onJump, onUnpin, collapsed, onToggle }: PanelProps & { now: number }) {
   const Chevron = collapsed ? ChevronRight : ChevronDown;
   return (
     <section
@@ -40,4 +42,14 @@ export function SidebarPinnedThreadsPanel({ entries, now, onJump, onUnpin, colla
       )}
     </section>
   );
+}
+
+function LivePinnedThreadsPanel(props: Omit<PanelProps, "now">) {
+  return <PinnedThreadsBody {...props} now={useRelativeNow()} />;
+}
+
+export function SidebarPinnedThreadsPanel({ now, ...props }: PanelProps) {
+  if (props.entries.length === 0) return null;
+  if (now !== undefined) return PinnedThreadsBody({ ...props, now });
+  return <LivePinnedThreadsPanel {...props} />;
 }

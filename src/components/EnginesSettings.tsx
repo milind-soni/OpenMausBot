@@ -8,7 +8,7 @@ import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { ApiKeyEngineManage, EngineSetup, EngineUpdateNotice, EngineWarningNotice, isApiKeyEngine } from "./EngineSetup";
+import { ApiKeyEngineManage, EngineSetup, EngineUpdateNotice, EngineWarningNotice, isApiKeyEngine, runsAntigravityCli } from "./EngineSetup";
 import { AppCopyNotice } from "./EngineAppCopy";
 import { forgetAppCopySwitches } from "@/state/engine-install";
 import { AccountsCard, AddAccount, accountGroupOf, accountsReady, type AccountGroup } from "./EngineAccounts";
@@ -374,6 +374,46 @@ function EngineAccountAction({ instance, action, cli = false, removeBody = "acco
   </>;
 }
 
+const ANTIGRAVITY_RUNTIME_PATHS = { cli: "antigravity", pinned: "agy_acp_server" } as const;
+type AntigravityRuntime = keyof typeof ANTIGRAVITY_RUNTIME_PATHS | "custom";
+
+/** What an Antigravity account runs, or for one with no runtime yet, what its install takes: a new install the CLI. */
+function antigravityRuntimeOf(instance: InstanceInfo): AntigravityRuntime {
+  const cli = instance.cli?.trim() ?? "";
+  if (/^antigravity(?:\.exe)?$/iu.test(cli)) return "cli";
+  if (/^agy_acp_server$/iu.test(cli)) return "pinned";
+  if (cli !== "" && cli !== "agy") return "custom";
+  if (runsAntigravityCli(instance)) return "cli";
+  return instance.snapshot.state === "available" ? "pinned" : "cli";
+}
+
+function AntigravityRuntimeChoice({ instance }: { instance: InstanceInfo }) {
+  const showInstances = useShowInstances();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const current = antigravityRuntimeOf(instance);
+  const choose = (next: AntigravityRuntime) => {
+    if (next === "custom" || next === current || saving) return;
+    setSaving(true);
+    setError(null);
+    api(`/api/instances/${encodeURIComponent(instance.instanceId)}`, { method: "PATCH", body: JSON.stringify({ cli: ANTIGRAVITY_RUNTIME_PATHS[next] }) })
+      .then((answer) => showInstances(answer).catch(() => {}))
+      .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)))
+      .finally(() => setSaving(false));
+  };
+  return <div data-antigravity-runtime={current} className="mb-3">
+    <label className="flex items-center gap-3 text-[13px] text-ink">
+      <span className="shrink-0">{t("engines.antigravity.runtime")}</span>
+      <Select className="min-w-0 flex-1" value={current} disabled={saving} aria-busy={saving} onChange={(event) => choose(event.target.value as AntigravityRuntime)}>
+        <option value="cli">{t("engines.antigravity.runtimeCli")}</option>
+        <option value="pinned">{t("engines.antigravity.runtimePinned")}</option>
+        {current === "custom" && <option value="custom" disabled>{t("engines.antigravity.runtimeCustom")}</option>}
+      </Select>
+    </label>
+    {error && <p role="alert" className="mt-1 text-[12px] text-danger">{error}</p>}
+  </div>;
+}
+
 function AntigravityAddAccount({ source }: { source: InstanceInfo }) {
   const state = useStoreSelector((s) => ({ instances: s.instances }), sameFields);
   const [addedId, setAddedId] = useState<string | null>(null);
@@ -401,6 +441,7 @@ function EngineRow({ instance, bare = false }: { instance: InstanceInfo; bare?: 
   return (
     <EngineCard instance={instance} bare={bare}>
       {policyNote}
+      {instance.driverKind === "antigravityAgent" && <AntigravityRuntimeChoice instance={instance} />}
       {!engineReady(instance) && <EngineSetup instance={instance} intent={instance.access === "custom" ? "inject" : "cloud"} description={instance.codexEndpoint ? t("agentEndpoints.codexHint") : undefined} unframed />}
       {engineReady(instance) && <ApiKeyEngineManage instance={instance} className="mt-3" />}
       {engineReady(instance) && instance.serverKind === "ollama" && <OllamaModels instance={instance} className="mt-3" />}
@@ -424,7 +465,7 @@ function EngineRow({ instance, bare = false }: { instance: InstanceInfo; bare?: 
       {instance.freeUpSpace && <AntigravityFreeSpace instance={instance} />}
       {instance.driverKind === "antigravityAgent" && (
         <div className="mt-3 space-y-3">
-          {instance.snapshot.authenticated && <p className="break-words text-[12px] text-ink-secondary">{instance.snapshot.account?.email ?? t("engineSetup.antigravity.emailUnavailable")}</p>}
+          {instance.snapshot.authenticated && <p className="break-words text-[12px] text-ink-secondary">{instance.snapshot.account?.email ?? t("engineSetup.antigravity.signedInGoogle")}</p>}
           <AntigravityAddAccount source={instance} />
           {instance.snapshot.authenticated === true && instance.authentication?.signOut === true && <EngineAccountAction instance={instance} action="signOut" />}
           {instance.instanceId.startsWith("antigravity-") && <EngineAccountAction instance={instance} action="remove" />}

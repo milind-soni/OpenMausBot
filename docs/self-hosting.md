@@ -924,18 +924,23 @@ chats. A link copied elsewhere also works from the **Server** menu's **Add
 Server from Copied Pairing Link…** (on Windows and Linux, press Alt to show
 the menu bar).
 
-**Let your server use this computer.** When the desktop pairs with a code for
-everything (the server's owner), it asks once: **Let <server> use this
-computer?** with **Allow** or **Not now**. Allow lets the server's bots see and
-use the apps on this computer's screen, and run the MCP servers you keep for
-it, while the app is open. Folders and the terminal are added in **Settings →
-Servers**, where each server of yours has a **Share this computer** switch and
+**Let your server use this computer** (Windows x64, macOS 13 or later, Linux).
+When the desktop is paired with a code for everything (the server's owner), one
+switch, **Let <server>'s bots use this computer**, lets the server's bots see
+and use the apps on this computer's screen, and run the MCP servers you keep
+for it, while the app is open. It is in the add form (**Connect to a server**),
+on the server's row in **Settings → This app → Your computers**, on its card in
+**Settings → Devices**, and in the Screen panel on the server's own page (which
+asks once more in a native window, since that page comes from the server). On
+a Mac, macOS asks for Accessibility and Screen Recording the first time; on
+Windows there is nothing more. Folders and the terminal are added with
 **Choose what it can use**; the switch turns it off at once, and the menu bar's
-OpenMausBot item pauses it with your Clouds. The server needs nothing turned on:
+or tray's MausBot item pauses it with your Clouds. See
+`apps/docs/content/docs/computers/lend-to-your-server.mdx`. The server needs nothing turned on:
 it takes a computer from its owner's pairings only, and a phone code or another
 person's pairing is never asked. Set `features.sharedComputers` to `false` in the
 server's config to turn this off, or to `true` to let every paired session lend
-its computer. Nothing is shared without that Allow, unless you make the server
+its computer. Nothing is shared until you turn that switch on, unless you make the server
 your bots' home (below). In **Settings → Servers → Computer
 access**, choose read-only folders and optionally allow edits. Unrestricted
 terminal and screen/app control are separate opt-ins, confirmed in a native
@@ -1854,6 +1859,12 @@ routine's run row, or in the Chief's "Problems to look at" chat.
 | `OMB_STARTUP_ROUTINE_GAP_MS` | `1800000` (30 minutes) | On a server not started by the desktop app, how soon after the start that last ran them routines set to "Also run when OpenMausBot starts" may run again. A start within that time leaves one row per routine: "Not run at 4 starts because OpenMausBot started again soon after the start that last ran it". `0` runs them at every start. |
 | `OMB_ROUTINE_RESTART_STAGGER_MS` | `30000` (30 seconds) | The time between the runs a restart cut off as each starts again, so they do not all start at once. From `0`. |
 | `OMB_BURST_PART_MAX_RESTARTS` | `2` | The times a burst's part, or its merge, starts again after a restart cut it off. Past that the part fails with "Not started again: OpenMausBot restarted while this part ran 3 times.", and the parts are posted as they came instead of merged. From `0`. |
+| `OMB_ROUTINE_RUN_LIMIT_HOURS` | `3` | The hours of work a routine run may do when its routine sets no limit of its own. From `1` to `24`. |
+| `OMB_ROUTINE_GOAL_RUN_LIMIT_HOURS` | `12` | The same for a room goal's run, which stays running across every member's turn. From `1` to `24`. |
+
+A run stops when it has worked for its limit, and names it: "Stopped: this run
+ran longer than the 3-hour limit". A routine that sets a limit of its own keeps
+it, whatever the server's environment says.
 
 A routine every minute (`* * * * *`) is still accepted and is spaced out the
 same way. Identical failures are told to you and to the Chief once: two

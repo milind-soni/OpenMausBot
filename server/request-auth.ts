@@ -192,6 +192,12 @@ export function isProxied(req: IncomingMessage): boolean {
   return PROXY_HEADERS.some((name) => req.headers[name] !== undefined);
 }
 
+/** A paired phone's request. The companion marks everything it forwards and the mark only narrows, so this also
+ * covers the standalone companion, which has no desktop token and so never sets `companionDevice`. */
+export function fromPairedDevice(req: IncomingMessage, auth: RequestAuth): boolean {
+  return (auth.kind === "loopback" && auth.companionDevice !== undefined) || req.headers?.["x-openmausbot-companion"] === "1";
+}
+
 const LOOPBACK_PEER = /^(?:127\.|::1$|::ffff:127\.)/;
 
 /** A TCP peer other than this machine. */
@@ -352,6 +358,7 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/evidence(?:\.tar|\/[A-Za-z0-9-]{8,64}\/step-\d{6,12}\.jpg)?$/ },
   { methods: ["GET", "POST"], path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/file$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/job$/ },
+  { methods: ["POST"], path: /^\/api\/threads\/[\w-]+\/job\/[\w-]+\/stop$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/messages$/ },
   // Only says whether a line is a stop, so the Team map knows where an @everyone line goes (routes/stop-line.ts).
   { methods: ["POST"], path: /^\/api\/stop-line$/ },
@@ -509,6 +516,10 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/skill-burgers\/[^/]+\/paths$/ },
   { methods: ["POST"], path: /^\/api\/skill-burger-summary$/ },
   { methods: ["POST"], path: /^\/api\/slack\/team\/messages(?:\/[0-9a-f-]{36}\/stop)?$/ },
+  // GitHub sign-in: a Team Cloud member's own only; anywhere else the handler takes the owner or an admin alone and never
+  // answers with a token (routes/github-sign-in.ts)
+  { methods: ["GET"], path: /^\/api\/github\/sign-in$/ },
+  { methods: ["POST"], path: /^\/api\/github\/sign-in\/(?:start|cancel|token|sign-out)$/ },
 ];
 
 export function requiredScope(method: string, path: string, features: { sharedComputers?: boolean } = {}): Scope {

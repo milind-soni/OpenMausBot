@@ -225,7 +225,7 @@ export function reachThreads(input: {
       earlier: oldest > 0 ? page.at(-1)?.messageId ?? null : null,
     };
   }
-  const words = (input.query ?? "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((word) => word.length > 1);
+  const words = (input.query ?? "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((word) => word.length > 0);
   const found = others.flatMap((thread) => {
     const notes = notesOf(thread.threadId).text;
     const title = (thread.title ?? "").toLowerCase();

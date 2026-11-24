@@ -445,11 +445,11 @@ function shownConversations<T extends object>(bot: T, visible: VisibleSet): T {
   const record = bot as T & Record<string, unknown>;
   let out: Record<string, unknown> = record;
   const tasks = Array.isArray(record.tasks) ? record.tasks as unknown[] : [];
-  const isTask = (task: unknown): task is { threadId: string; unread?: boolean; routineRunId?: unknown } => Boolean(task) && typeof task === "object" && typeof (task as { threadId?: unknown }).threadId === "string";
+  const isTask = (task: unknown): task is { threadId: string; unread?: boolean; routineRunId?: unknown; archivedAt?: unknown } => Boolean(task) && typeof task === "object" && typeof (task as { threadId?: unknown }).threadId === "string";
   const kept = tasks.filter((task) => !isTask(task) || visible.thread(task.threadId)).map((task) => (isTask(task) ? visible.ownTask(task) : task));
   if (kept.length !== tasks.length || kept.some((task, index) => task !== tasks[index])) {
     out = { ...record, tasks: kept };
-    if (typeof record.unread === "boolean") out.unread = kept.some((task) => isTask(task) && task.unread === true && !task.routineRunId);
+    if (typeof record.unread === "boolean") out.unread = kept.some((task) => isTask(task) && task.unread === true && !task.routineRunId && task.archivedAt === undefined);
   }
   const main = typeof record.mainThreadId === "string" && visible.thread(record.mainThreadId) ? record.mainThreadId : teamConversation(kept);
   if (typeof record.mainThreadId === "string" && record.mainThreadId !== main) {

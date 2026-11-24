@@ -4,7 +4,8 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 
-import { messageFileTargets } from "../message-file.ts";
+import { closeUnfinishedCodeFence } from "../../shared/markdown-code-fence.ts";
+import { boundedDisplayName, messageFileTargets } from "../message-file.ts";
 import { EXIT, flag, HeadlessError, parseCount, parseSize, usageError } from "./args.ts";
 import { readJob, type HeadlessClient } from "./client.ts";
 import { resolveTarget, type VerbContext, type VerbOutcome } from "./context.ts";
@@ -32,7 +33,8 @@ const slug = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-").re
 /** One path segment; no trailing dot or space (Windows drops them) and never a Windows device name (con.md is the console there). */
 export function safeName(raw: string): string {
   // eslint-disable-next-line no-control-regex
-  const name = basename(raw.replace(/[\\/]/g, "_")).replace(/[\x00-\x1f<>:"|?*]/g, "_").trim().slice(0, 120).replace(/[. ]+$/, "");
+  const portable = basename(raw.replace(/[\\/]/g, "_")).replace(/[\x00-\x1f<>:"|?*]/g, "_").trim().replace(/[. ]+$/, "");
+  const name = boundedDisplayName(portable, 120).replace(/[. ]+$/, "");
   if (!name) return "file";
   return /^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i.test(name) ? `_${name}` : name;
 }
@@ -80,7 +82,7 @@ function markdownOf(title: string, messages: readonly Rec[], botName: string): s
     const who = message.role === "user"
       ? `${message.sender?.name ?? "User"}${message.via === "api" ? " (via the local API)" : ""}`
       : message.from?.name ?? botName;
-    if ((message.kind === "text" || message.kind === "widget" || message.kind === "app") && message.text) lines.push(`**${who}:**`, "", String(message.text), "");
+    if ((message.kind === "text" || message.kind === "widget" || message.kind === "app") && message.text) lines.push(`**${who}:**`, "", closeUnfinishedCodeFence(String(message.text)), "");
     else if (message.kind === "activity" && message.tool) lines.push(`> ${message.tool.name}`, "");
     else if (message.kind === "screen") lines.push("> [screen capture]", "");
     else if (message.kind === "options" && message.card) lines.push(`> ${message.card.title}${message.card.answered ? ` — answered: ${message.card.answered}` : ""}`, "");

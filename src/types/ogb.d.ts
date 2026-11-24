@@ -25,6 +25,11 @@ const __APP_VERSION__: string;
   type DesktopSharedFolder = import("../../electron/computer-sharing.mjs").SharedFolder;
   type DesktopComputerSharing = import("../../electron/computer-sharing.mjs").SharingState;
   type DesktopLendingActivity = import("../../electron/computer-sharing.mjs").LendingActivityEntry;
+  /** Lending this computer to one server, as the switch shows it (electron/server-lending.mjs view). `why`: what keeps it
+   * from being lent there. `screen`: why its apps and screen don't work yet while it is on (screen-status.mjs). */
+  type DesktopLendView =
+    | { name: string; lendable: true; on: boolean; connected: boolean; paused: boolean; screen?: "starting" | "permissions" | "blocked" | "off" | "not-running" | "unsupported" }
+    | { name: string; lendable: false; why: "team" | "cloud" | "not-owner" | "shared" | "old" | "unreachable" | "settings" };
 
   type DesktopCapabilities = {
     host: {
@@ -312,6 +317,17 @@ const __APP_VERSION__: string;
         /** Every Cloud and server of the person's own stops using this computer until resume(), as the icon's menu does. */
         pause?(): Promise<void>;
         resume?(): Promise<void>;
+      };
+      /** The one switch for lending this computer to a server of the person's own (electron/server-lending.mjs). On this
+       * app's own page `id` names the saved server; on a server's own page it is that server, whatever `id` says. */
+      lendComputer?: {
+        state(id: string | null): Promise<DesktopLendView>;
+        set(id: string | null, on: boolean): Promise<DesktopLendView>;
+        /** macOS: asks for Accessibility and Screen Recording, the one step the system itself requires. */
+        allowScreen(id: string | null): Promise<DesktopLendView>;
+        /** The add form's switch (this app's own page only): lend to the server about to be paired at `address` if it
+         * turns out to be the person's own. */
+        wish?(address: string, on: boolean): Promise<boolean>;
       };
       confirm(message: string): Promise<boolean>;
       getCapabilities(): Promise<DesktopCapabilities>;

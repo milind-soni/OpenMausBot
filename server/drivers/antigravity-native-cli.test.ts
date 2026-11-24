@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,9 +14,7 @@ import { removeTempDir } from "../testing/cleanup.ts";
 import { recordEvents } from "../testing/events.ts";
 import {
   antigravityCliSessionMode,
-  antigravityCliTokenPath,
   antigravityLaunchArgs,
-  antigravityTokenPath,
   isValidAntigravityInitializeResult,
   prepareAntigravityProfile,
   validateAntigravityRuntime,
@@ -24,7 +22,9 @@ import {
 import { activeAntigravityCli, isAntigravityCliName } from "./antigravity-cli-install.ts";
 import type { AntigravityCliReleaseAsset } from "./antigravity-cli-release.ts";
 import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
-import { antigravityCliUpdate, installAntigravityRuntime, resolveAntigravityRuntime, retirePinnedAntigravityRuntime } from "./antigravity-runtime.ts";
+import { antigravityCliUpdate, installAntigravityRuntime, resolveAntigravityRuntime } from "./antigravity-runtime.ts";
+import { antigravityManagedRuntime } from "../engine-updates-host.ts";
+import { createEngineUpdater } from "../engine-updates.ts";
 import { AntigravityDriver } from "./antigravity.ts";
 
 // The opt-in, before any module reads it: this file tests the native CLI switched on.
@@ -97,10 +97,12 @@ describe("installing the native CLI from Google's channel", () => {
     const root = join(antigravityRuntimesRoot(baseDir), `${process.platform}-${process.arch}`);
     expect(await activeAntigravityCli(root)).toEqual(installed);
     expect(readdirSync(join(root, "versions")).filter((name) => name.startsWith(".install-"))).toEqual([]);
+    // The first runtime on this computer: accounts that name none keep the CLI even once the pinned one is installed beside it.
+    expect(existsSync(join(root, "cli-first.json"))).toBe(true);
 
     await expect(resolveAntigravityRuntime("antigravity", { PATH: "" }, baseDir)).resolves.toEqual(installed);
-    await expect(resolveAntigravityRuntime("agy", { PATH: "" }, baseDir)).resolves.toEqual(installed);
-    await expect(resolveAntigravityRuntime(undefined, { PATH: "" }, baseDir)).resolves.toEqual(installed);
+    await expect(resolveAntigravityRuntime("agy", { PATH: "" }, baseDir, { nativeByDefault: true })).resolves.toEqual(installed);
+    await expect(resolveAntigravityRuntime(undefined, { PATH: "" }, baseDir, { nativeByDefault: true })).resolves.toEqual(installed);
 
     await installAntigravityRuntime({ baseDir, fetchImpl, validate, native: true, cliRelease: one.asset });
     expect(asked).toEqual([one.asset.url]);
@@ -112,7 +114,7 @@ describe("installing the native CLI from Google's channel", () => {
     const [older, newer] = [await release("1.5.6"), await release("1.5.8")];
     const { fetchImpl, asked } = serving([older, newer]);
     const first = await installAntigravityRuntime({ baseDir, fetchImpl, cliRelease: older.asset, native: true });
-    const second = await installAntigravityRuntime({ baseDir, fetchImpl, cliRelease: newer.asset });
+    const second = await installAntigravityRuntime({ baseDir, fetchImpl, cliRelease: newer.asset, native: true });
     expect(second.version).toBe("1.5.8");
     // Pruned once the newer one is active and nothing runs the older one (T3 Code 68ea2220c12).
     expect(existsSync(dirname(first.executablePath))).toBe(false);
@@ -122,7 +124,7 @@ describe("installing the native CLI from Google's channel", () => {
       expect(statSync(second.executablePath).mode & 0o777).toBe(0o555);
     }
     await expect(resolveAntigravityRuntime("antigravity", { PATH: "" }, baseDir)).resolves.toMatchObject({ version: "1.5.8" });
-    expect((await installAntigravityRuntime({ baseDir, fetchImpl, cliRelease: older.asset })).version).toBe("1.5.8");
+    expect((await installAntigravityRuntime({ baseDir, fetchImpl, cliRelease: older.asset, native: true })).version).toBe("1.5.8");
     expect(asked).toEqual([older.asset.url, newer.asset.url]);
   });
 
@@ -136,7 +138,7 @@ describe("installing the native CLI from Google's channel", () => {
       .rejects.toThrow("redirected away from Google's release folder");
     await expect(installAntigravityRuntime({ baseDir, fetchImpl: serving([]).fetchImpl, native: true, cliRelease: one.asset })).rejects.toThrow("Google download failed (404).");
     await expect(installAntigravityRuntime({ baseDir, native: true, cliRelease: null })).rejects.toThrow("Could not find a native Antigravity CLI release.");
-    await expect(resolveAntigravityRuntime("antigravity", { PATH: "" }, baseDir)).rejects.toThrow(/native CLI is not installed.*set the CLI path back to agy/u);
+    await expect(resolveAntigravityRuntime("antigravity", { PATH: "" }, baseDir)).rejects.toThrow(/Google Antigravity CLI is not installed yet.*choose Classic runtime under Runs on/u);
     const root = join(antigravityRuntimesRoot(baseDir), `${process.platform}-${process.arch}`);
     expect(existsSync(join(root, "active.json"))).toBe(false);
     expect(readdirSync(join(root, "versions"))).toEqual([]);
@@ -188,7 +190,7 @@ describe("installing the native CLI from Google's channel", () => {
     const one = await release("1.5.7");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { fetchImpl, asked } = serving([]);
-    await expect(installAntigravityRuntime({ baseDir, fetchImpl, cliRelease: one.asset })).rejects.toThrow("Google download failed (404).");
+    await expect(installAntigravityRuntime({ baseDir, fetchImpl, cliRelease: one.asset, nativeByDefault: true })).rejects.toThrow("Google download failed (404).");
     expect(asked).toEqual([one.asset.url, pinned.url]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("using the pinned runtime instead"));
     warn.mockRestore();
@@ -200,20 +202,20 @@ describe("installing the native CLI from Google's channel", () => {
     await installAntigravityRuntime({ baseDir, fetchImpl: serving([current]).fetchImpl, cliRelease: current.asset, native: true });
     const latest = vi.fn(async () => newer.asset);
     const hour = 60 * 60 * 1000, start = Date.now() + 10 * hour;
-    expect(await antigravityCliUpdate({ baseDir, now: start, latest, asset: null })).toBe("1.5.7");
+    expect(await antigravityCliUpdate({ baseDir, now: start, latest, asset: null, nativeByDefault: true })).toBe("1.5.7");
     // The engine was busy: the next look, minutes later, still finds the update without asking again.
-    expect(await antigravityCliUpdate({ baseDir, now: start + 5 * 60_000, latest, asset: null })).toBe("1.5.7");
-    expect(await antigravityCliUpdate({ baseDir, now: start + hour - 1, latest, asset: null })).toBe("1.5.7");
+    expect(await antigravityCliUpdate({ baseDir, now: start + 5 * 60_000, latest, asset: null, nativeByDefault: true })).toBe("1.5.7");
+    expect(await antigravityCliUpdate({ baseDir, now: start + hour - 1, latest, asset: null, nativeByDefault: true })).toBe("1.5.7");
     expect(latest).toHaveBeenCalledTimes(1);
-    expect(await antigravityCliUpdate({ baseDir, now: start + hour, latest: async () => current.asset, asset: null })).toBeNull();
+    expect(await antigravityCliUpdate({ baseDir, now: start + hour, latest: async () => current.asset, asset: null, nativeByDefault: true })).toBeNull();
     // A channel that did not answer is asked again on the next look.
     const silent = vi.fn(async () => null);
-    expect(await antigravityCliUpdate({ baseDir, now: start + 2 * hour, latest: silent, asset: null })).toBeNull();
-    expect(await antigravityCliUpdate({ baseDir, now: start + 2 * hour + 1, latest, asset: null })).toBe("1.5.7");
-    expect(await antigravityCliUpdate({ baseDir: folder(), now: start + 4 * hour, latest, asset: null })).toBeNull();
+    expect(await antigravityCliUpdate({ baseDir, now: start + 2 * hour, latest: silent, asset: null, nativeByDefault: true })).toBeNull();
+    expect(await antigravityCliUpdate({ baseDir, now: start + 2 * hour + 1, latest, asset: null, nativeByDefault: true })).toBe("1.5.7");
+    expect(await antigravityCliUpdate({ baseDir: folder(), now: start + 4 * hour, latest, asset: null, nativeByDefault: true })).toBeNull();
   });
 
-  it.skipIf(!resolveAntigravityReleaseAsset() || WINDOWS)("runs and updates the CLI where the pinned runtime is also installed, and removes the pinned one once an account signed in on the CLI", async () => {
+  it.skipIf(!resolveAntigravityReleaseAsset() || WINDOWS)("with the switch on, runs and updates the CLI where the pinned runtime is also installed, and leaves the pinned one for an account set to it", async () => {
     const pinned = resolveAntigravityReleaseAsset()!;
     const baseDir = folder();
     const [current, newer] = [await release("1.5.7"), await release("1.5.8")];
@@ -232,18 +234,9 @@ describe("installing the native CLI from Google's channel", () => {
     await expect(resolveAntigravityRuntime("antigravity", { PATH: "" }, baseDir)).resolves.toMatchObject({ version: "1.5.7" });
     const latest = async () => newer.asset, at = Date.now() + 100 * 60 * 60 * 1000;
     expect(await antigravityCliUpdate({ baseDir, now: at, latest })).toBe("1.5.7");
-    // Kept until an account here has signed in on the CLI, and while a process still runs it.
-    expect(await retirePinnedAntigravityRuntime({ baseDir, inUse: () => false })).toEqual([]);
-    const cliToken = antigravityCliTokenPath("moved", baseDir), pinnedToken = antigravityTokenPath("moved", baseDir);
-    mkdirSync(dirname(cliToken), { recursive: true });
-    writeFileSync(cliToken, "{}");
-    writeFileSync(pinnedToken, "{}");
-    expect(await retirePinnedAntigravityRuntime({ baseDir, inUse: () => true })).toEqual([]);
+    // Nothing removes the pinned runtime: an account set to the Classic runtime keeps running it.
     expect(existsSync(directory)).toBe(true);
-    expect(await retirePinnedAntigravityRuntime({ baseDir, inUse: () => false })).toEqual([pinned.sha256]);
-    expect(existsSync(directory)).toBe(false);
-    // The pinned runtime's sign-in stays for a rollback.
-    expect(existsSync(pinnedToken)).toBe(true);
+    await expect(resolveAntigravityRuntime("agy_acp_server", { PATH: "" }, baseDir)).resolves.toMatchObject({ version: pinned.version, harnessPath: expect.any(String) });
     await expect(resolveAntigravityRuntime("agy", { PATH: "" }, baseDir)).resolves.toMatchObject({ version: "1.5.7" });
   });
 
@@ -274,8 +267,8 @@ describe("installing the native CLI from Google's channel", () => {
     const baseDir = folder();
     const [current, newer] = [await release("1.5.7"), await release("1.5.8")];
     await installAntigravityRuntime({ baseDir, fetchImpl: serving([current]).fetchImpl, cliRelease: current.asset, native: true });
-    await expect(installAntigravityRuntime({ baseDir, fetchImpl: serving([]).fetchImpl, cliRelease: newer.asset })).rejects.toThrow("Google download failed (404).");
-    await expect(installAntigravityRuntime({ baseDir, cliRelease: null })).rejects.toThrow("Could not find a native Antigravity CLI release.");
+    await expect(installAntigravityRuntime({ baseDir, fetchImpl: serving([]).fetchImpl, cliRelease: newer.asset, native: true })).rejects.toThrow("Google download failed (404).");
+    await expect(installAntigravityRuntime({ baseDir, cliRelease: null, native: true })).rejects.toThrow("Could not find a native Antigravity CLI release.");
     await expect(resolveAntigravityRuntime("antigravity", { PATH: "" }, baseDir)).resolves.toMatchObject({ version: "1.5.7" });
   });
 
@@ -299,6 +292,82 @@ describe("installing the native CLI from Google's channel", () => {
     release404();
     await expect(pinnedInstall).rejects.toThrow("Google download failed (404).");
   });
+});
+
+describe("which CLI an instance that names none runs", () => {
+  it("is the native CLI when no pinned runtime is installed to go first, and with the default off only for the path that asks for it", async () => {
+    const baseDir = folder();
+    const one = await release("1.5.7");
+    const installed = await installAntigravityRuntime({ baseDir, fetchImpl: serving([one]).fetchImpl, native: true, cliRelease: one.asset });
+    for (const cli of ["agy", undefined]) {
+      await expect(resolveAntigravityRuntime(cli, { PATH: "" }, baseDir)).resolves.toEqual(installed);
+      await expect(resolveAntigravityRuntime(cli, { PATH: "" }, baseDir, { nativeByDefault: false })).rejects.toThrow();
+      await expect(resolveAntigravityRuntime(cli, { PATH: "" }, baseDir, { nativeByDefault: false })).rejects.not.toMatchObject({ message: expect.stringContaining("Antigravity CLI is not installed") });
+    }
+    await expect(resolveAntigravityRuntime("antigravity", { PATH: "" }, baseDir, { nativeByDefault: false })).resolves.toEqual(installed);
+    for (const pinned of ["agy_acp_server", "AGY_ACP_SERVER"]) {
+      await expect(resolveAntigravityRuntime(pinned, { PATH: "" }, baseDir)).rejects.not.toMatchObject({ message: expect.stringContaining("custom Antigravity ACP executable") });
+      await expect(resolveAntigravityRuntime(pinned, { PATH: "" }, baseDir)).rejects.toThrow();
+    }
+  });
+
+  it.skipIf(!resolveAntigravityReleaseAsset())("installs the native CLI on a new computer, and with the default off only the pinned runtime unless the path asks for the CLI", async () => {
+    const pinned = resolveAntigravityReleaseAsset()!;
+    const one = await release("1.5.7");
+    const fresh = serving([one]);
+    await installAntigravityRuntime({ baseDir: folder(), fetchImpl: fresh.fetchImpl, cliRelease: one.asset });
+    expect(fresh.asked).toEqual([one.asset.url]);
+    const off = serving([one]);
+    await expect(installAntigravityRuntime({ baseDir: folder(), fetchImpl: off.fetchImpl, cliRelease: one.asset, nativeByDefault: false })).rejects.toThrow("Google download failed (404).");
+    expect(off.asked).toEqual([pinned.url]);
+    const asked = serving([one]);
+    await installAntigravityRuntime({ baseDir: folder(), fetchImpl: asked.fetchImpl, cliRelease: one.asset, native: true, nativeByDefault: false });
+    expect(asked.asked).toEqual([one.asset.url]);
+  });
+
+  it("updates the native CLI where it is the default, and with the default off only for a path that asks for it", async () => {
+    const baseDir = folder();
+    const [current, newer] = [await release("1.5.7"), await release("1.5.8")];
+    await installAntigravityRuntime({ baseDir, fetchImpl: serving([current]).fetchImpl, cliRelease: current.asset, native: true });
+    const latest = async () => newer.asset, at = Date.now() + 100 * 60 * 60 * 1000;
+    expect(await antigravityCliUpdate({ baseDir, now: at, latest, asset: null, configuredClis: ["agy"] })).toBe("1.5.7");
+    expect(await antigravityCliUpdate({ baseDir, now: at, latest, asset: null, configuredClis: ["agy"], nativeByDefault: false })).toBeNull();
+    expect(await antigravityCliUpdate({ baseDir, now: at, latest, asset: null, nativeByDefault: false })).toBeNull();
+    expect(await antigravityCliUpdate({ baseDir, now: at, latest, asset: null, configuredClis: ["agy", "antigravity"], nativeByDefault: false })).toBe("1.5.7");
+  });
+
+});
+
+describe("the updater with an agy instance and an antigravity instance on one machine", () => {
+  it.skipIf(!resolveAntigravityReleaseAsset() || WINDOWS)("installs each runtime from its own channel and reports the version that really replaced the old one", async () => {
+    const pinned = resolveAntigravityReleaseAsset()!;
+    const baseDir = folder();
+    const [current, newer] = [await release("1.5.7"), await release("1.5.8")];
+    await installAntigravityRuntime({ baseDir, fetchImpl: serving([current]).fetchImpl, cliRelease: current.asset, native: true });
+    // A pinned release an earlier app version left (older than the pinned one), whole enough to count as installed.
+    const earlier = "f".repeat(64);
+    const directory = join(antigravityRuntimesRoot(baseDir), `${process.platform}-${process.arch}`, "versions", earlier);
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, ".install-complete.json"), JSON.stringify({ sha256: earlier, version: "1.1.1" }));
+
+    const { fetchImpl, asked } = serving([newer]);
+    const lines: string[] = [];
+    const managed = antigravityManagedRuntime(() => ["agy", "antigravity"], { baseDir, fetchImpl, cliRelease: newer.asset, latest: async () => newer.asset, validate: async () => {} });
+    const updater = createEngineUpdater({
+      plans: [{ driverKind: "antigravityAgent", name: "Antigravity", pin: { target: pinned.version, minimum: pinned.version }, managed }],
+      baseDir, statePath: join(folder(), "state.json"), turnRunning: () => false, log: (line) => lines.push(line), liveCommands: () => [],
+      steps: { sweep: async () => {}, npmVersion: () => null, standaloneVersion: () => null },
+    });
+    await updater.check();
+    // The native CLI moved on, and the pinned runtime was asked of its own channel, not of the CLI's.
+    expect(asked).toEqual([newer.asset.url, pinned.url]);
+    expect(lines[0]).toBe("Engine update: Antigravity 1.5.7 → 1.5.8");
+    // The fake channel serves no pinned archive, so that update fails on its own and is retried, the CLI's kept.
+    expect(lines[1]).toMatch(/^Engine update: Antigravity stays on 1\.1\.1; .+ could not be installed/u);
+    await expect(resolveAntigravityRuntime("antigravity", { PATH: "" }, baseDir)).resolves.toMatchObject({ version: "1.5.8" });
+    expect(updater.shown("antigravityAgent").autoUpdated?.version).toBe("1.5.8");
+  }, 60_000);
+
 });
 
 describe("starting the native CLI", () => {
@@ -344,10 +413,6 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
 
   async function create(instanceId: string, executable: string, environment: Record<string, string>) {
     ensureDirs();
-    // The CLI's own sign-in file: the pinned runtime's acp_token.json does not sign in the CLI.
-    const token = antigravityCliTokenPath(instanceId);
-    mkdirSync(dirname(token), { recursive: true });
-    writeFileSync(token, "{}", { mode: 0o600 });
     const instance = await AntigravityDriver.create({
       instanceId, displayName: "Antigravity", enabled: true, config: { cli: executable, fullAuto: false },
       environment: { FAKE_ACP_AUTH_METHOD: "oauth-personal", FAKE_ACP_MODELS: "gemini-3.8-flash", FAKE_ACP_AGENT_NAME: "Antigravity ACP Server", FAKE_ACP_VERSION: "1.5.7", ...environment },
@@ -368,6 +433,17 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
     chmodSync(legacy, 0o755);
     await expect(resolveAntigravityRuntime(legacy, { PATH: "" }, folder())).rejects.toThrow();
     expect(existsSync(started)).toBe(false);
+  });
+
+  it("is asked its version without the server's, the workspace's or a provider's credentials", async () => {
+    const directory = folder(), seen = join(directory, "env"), program = join(directory, "antigravity");
+    writeFileSync(program, `#!/bin/sh\n/usr/bin/env > ${JSON.stringify(seen)}\necho 1.5.7\n`);
+    chmodSync(program, 0o755);
+    await expect(resolveAntigravityRuntime(program, { PATH: "/usr/bin:/bin", ANTHROPIC_API_KEY: "provider-key", OMB_CLOUD_TOKEN: "control-plane", anthropic_api_key: "lower-provider", xai_api_key: "lower-workspace", KEEP_ME: "kept" }, folder()))
+      .resolves.toMatchObject({ harnessPath: null, version: "1.5.7" });
+    const env = readFileSync(seen, "utf8");
+    expect(env).toContain("KEEP_ME=kept");
+    expect(env).not.toMatch(/provider-key|control-plane|lower-provider|lower-workspace/u);
   });
 
   it("is not started for its version from a folder the bots can write", async () => {
@@ -427,8 +503,62 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
     expect(recorder.events.some((event) => event.type === "runtime.error" && /did not report its permission mode/u.test(event.message))).toBe(true);
   }, 90_000);
 
+  const RULES = "Rules. If the user sends /learn or asks you to save a procedure, use skill_manage.";
+  const MEMORY = " Memory: likes /plan mode.";
+
+  /** Turns on one thread, each returning the prompt the CLI received, with the thread's session/new and session/resume calls. */
+  async function systemThread(name: string, environment: Record<string, string>) {
+    const fake = cli();
+    const rpc = join(fake.directory, "rpc.jsonl");
+    const instance = await create(`antigravity-cli-${name}`, fake.executable, {
+      FAKE_ACP_MODES: "default,plan", FAKE_ACP_DUMP: fake.dump, FAKE_ACP_DUMP_PROMPT: "1", FAKE_ACP_RPC_APPEND_FILE: rpc, ...environment,
+    });
+    const recorder = recordEvents(instance.adapter);
+    let resumeCursor: string | undefined;
+    const send = async (text: string, stable: string, volatile: string) => {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId: name, text, cwd: fake.directory, system: stable + volatile, systemStable: stable, systemVolatile: volatile, resumeCursor,
+      });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: true });
+      resumeCursor ??= (recorder.events.find((event) => event.type === "session.started") as { sessionId: string }).sessionId;
+      return JSON.parse(readFileSync(`${fake.dump}.prompt.json`, "utf8")) as Array<{ type: string; text: string }>;
+    };
+    const setups = () => readFileSync(rpc, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { method: string; cwd: string; sessionId?: string; meta?: unknown })
+      .filter((call) => call.cwd === realpathSync(fake.directory) && (call.method === "session/new" || call.method === "session/resume"));
+    return { send, setups, sessionId: () => resumeCursor };
+  }
+
+  it("gives the session its system prompt where the CLI takes one, so no /word in it runs as a command", async () => {
+    const thread = await systemThread("system-prompt", { FAKE_ACP_CAPABILITIES_META: JSON.stringify({ antigravity: { systemPrompt: { append: true } } }) });
+    expect(await thread.send("/learn what we did", RULES, MEMORY)).toEqual([
+      { type: "text", text: "/learn what we did" },
+      { type: "text", text: expect.stringContaining(MEMORY.trim()) },
+    ]);
+    expect(thread.setups()).toEqual([expect.objectContaining({ method: "session/new", meta: { antigravity: { systemPrompt: { append: RULES } } } })]);
+
+    expect(await thread.send("again", RULES, MEMORY)).toEqual([{ type: "text", text: "again" }]);
+    expect(thread.setups()).toHaveLength(1);
+
+    const revised = RULES + " Reply in French.";
+    expect(await thread.send("third", revised, MEMORY)).toEqual([
+      { type: "text", text: "third" },
+      { type: "text", text: expect.stringContaining(MEMORY.trim()) },
+    ]);
+    expect(thread.setups().at(-1)).toEqual(expect.objectContaining({
+      method: "session/resume", sessionId: thread.sessionId(), meta: { antigravity: { systemPrompt: { append: revised } } },
+    }));
+  }, 90_000);
+
+  it("keeps the system prompt in the text for a CLI that does not say it takes one", async () => {
+    const thread = await systemThread("system-in-text", {});
+    const [first, ...rest] = await thread.send("hello", RULES, MEMORY);
+    expect(first.text).toBe(`${RULES}${MEMORY}\n\nhello`);
+    expect(rest).toEqual([]);
+    expect(thread.setups()).toEqual([expect.not.objectContaining({ meta: expect.anything() })]);
+  }, 90_000);
+
   /** One turn at `approvalMode` whose runtime asks about `toolCall`; a card that opens is denied. */
-  async function asked(name: string, approvalMode: "edits" | "full", toolCall: (directory: string) => object) {
+  async function asked(name: string, approvalMode: "edits" | "full", toolCall: (directory: string) => object, approvalNow?: "ask") {
     const fake = cli();
     const answer = join(fake.directory, "answer");
     const instance = await create(`antigravity-cli-${name}`, fake.executable, {
@@ -436,7 +566,7 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
       FAKE_ACP_PERMISSION_TOOL_CALL: JSON.stringify(toolCall(fake.directory)),
     });
     const recorder = recordEvents(instance.adapter);
-    const { turnId } = await instance.adapter.sendTurn({ threadId: name, text: "hello", approvalMode, cwd: fake.directory });
+    const { turnId } = await instance.adapter.sendTurn({ threadId: name, text: "hello", approvalMode, cwd: fake.directory, ...(approvalNow ? { approvalModeNow: () => approvalNow } : {}) });
     const first = await recorder.until((event) => event.turnId === turnId && (event.type === "request.opened" || event.type === "turn.completed"));
     if (first.type === "request.opened") await instance.adapter.respondToRequest(name, (first as { requestId: string }).requestId, { behavior: "deny" });
     await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
@@ -449,6 +579,11 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
       .toEqual({ card: false, commandLine: undefined, answer: "allow-once" });
     expect(await asked("edits-new-folder", "edits", (directory) => ({ kind: "edit", title: "Edit", locations: [{ path: join(directory, "new", "deep", "notes.md") }] })))
       .toMatchObject({ card: false, answer: "allow-once" });
+  }, 90_000);
+
+  it("asks about a file edit on a turn whose level was lowered to Ask after it began", async () => {
+    expect(await asked("edits-lowered", "edits", (directory) => ({ kind: "edit", title: "Edit notes.md", locations: [{ path: join(directory, "notes.md") }] }), "ask"))
+      .toMatchObject({ card: true, answer: "reject" });
   }, 90_000);
 
   it.each([

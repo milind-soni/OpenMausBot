@@ -229,6 +229,9 @@ export interface Coordinator {
   liveEdges(): LiveHandoffEdge[];
   /** The conversation stopped: its work and everything that work handed out end, and nothing resumes it. */
   stopAwaitingDirect(threadId: string, reason?: string): void;
+  /** The person stopped one hand-off, not the conversation that made it: that work and everything it handed on end as the
+   * person's stop, and its requester hears it was stopped and goes on. Undefined for no such hand-off. */
+  stopHandoff(id: string): "stopped" | "ended" | undefined;
   /** The next start goes on with this thread's turn, so a shutdown's "cut" line would be false. */
   continuesAfterRestart(threadId: string): boolean;
   note(id: string): string | undefined;
@@ -261,6 +264,8 @@ export interface CoordinatorOptions {
   legacyThreads?: LegacyThreadResolver;
   /** After every write to the assignment store, so a host that ticks only when work is due can tick again. */
   wrote?: () => void;
+  /** What a turn a restart cut ends with in place of starting again, or null (runtime/runtime.ts RuntimeOptions). */
+  restartCut?: (threadId: string, startedAt: number | undefined) => string | null;
 }
 
 export function createCoordinator(options: CoordinatorOptions): Coordinator {

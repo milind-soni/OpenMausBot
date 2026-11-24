@@ -4,6 +4,7 @@ import { pipeline } from "node:stream/promises";
 
 import type { BotsResponse, SearchResponse, WireBot, WireGroup } from "../../shared/wire.ts";
 import { NO_SUCH_BOT } from "../../shared/bot-read.ts";
+import { closeUnfinishedCodeFence } from "../../shared/markdown-code-fence.ts";
 import { KEPT_ORIGINALS_DIR, keptOriginal } from "../attachment-originals.ts";
 import {
   ATTACHMENTS_DIR, attachmentStorageUsage, clearAttachments, deleteAttachment, extensionForMime, FILE_MAX_BYTES, IMAGE_MAX_BYTES,
@@ -39,7 +40,8 @@ export interface ThreadRouteDeps {
   store: Pick<Store,
     | "activeLeaf" | "activePath" | "bot" | "botByThread" | "bots" | "groupByThread" | "groupTaskByThread" | "groups" | "messagesFor"
     | "onChange" | "sections" | "taskByThread" | "tasks">;
-  coordinator: Pick<Coordinator, "job">;
+  coordinator: Pick<Coordinator, "job" | "node" | "stopHandoff">;
+  stopRefusal?(auth: RequestAuth, threadId: string): string | null;
   groupThreadIsWorking(groupId: string, threadId: string): boolean;
   /** What people's lines are called in this conversation (replies.ts PersonName). */
   userName(threadId: string): PersonName;
@@ -96,7 +98,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
     const cursor = shown.tasks?.find((task) => task.threadId === threadId)?.lastReadMessageId;
     return { ...shown, ...(tail !== undefined && limit !== undefined && tail < limit ? heldTail((size) => messagePage(threadId, size), tail, limit, cursor) : messagePage(threadId, limit)) };
   };
-  const jobs = createJobRoutes({ store, coordinator: deps.coordinator, groupThreadIsWorking: deps.groupThreadIsWorking, viewerFor, visibleTo, sessions });
+  const jobs = createJobRoutes({ store, coordinator: deps.coordinator, groupThreadIsWorking: deps.groupThreadIsWorking, viewerFor, visibleTo, sessions, ...(deps.stopRefusal ? { stopRefusal: deps.stopRefusal } : {}) });
   const handle = async ({ req, res, url, path, method, auth, json, readBody }: RouteContext): Promise<unknown> => {
     let m: RegExpMatchArray | null = null;
     const member = auth.kind === "session" && auth.session.membershipAuthority === "team" ? auth.session.email : undefined;
@@ -591,7 +593,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         const who = msg.role === "user"
           ? msg.via === "api" ? `${sentBy} (via the local API)` : sentBy
           : (msg.from?.name ?? bot?.name ?? "Bot");
-        if ((msg.kind === "text" || msg.kind === "widget" || msg.kind === "app") && msg.text) lines.push(`**${who}:**`, "", msg.text, "");
+        if ((msg.kind === "text" || msg.kind === "widget" || msg.kind === "app") && msg.text) lines.push(`**${who}:**`, "", closeUnfinishedCodeFence(msg.text), "");
         else if (msg.kind === "activity" && msg.tool) lines.push(`> ${msg.tool.name}`, "");
         else if (msg.kind === "screen") lines.push("> [screen capture]", "");
         else if (msg.kind === "options" && msg.card) {

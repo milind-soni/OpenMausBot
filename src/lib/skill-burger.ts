@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { api } from "@/state/api";
+import type { DraftChoices, DraftView } from "../../shared/skill-burger/draft-view";
 import type { Workflow } from "../../shared/skill-burger/format";
 import type { SavedWorkflow } from "../../shared/skill-burger/saved";
 
-export type { SavedWorkflow };
+export type { DraftChoices, DraftView, SavedWorkflow };
 
 const CHANGED = "omb:skill-burgers-changed";
 /** A browser where someone switched the run list off starts each burger folded to its top bun. */
@@ -24,7 +25,7 @@ function changed(): void {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(CHANGED));
 }
 
-export async function saveBurger(input: { botId: string; threadId: string; summary?: string; name?: string }): Promise<SavedWorkflow> {
+export async function saveBurger(input: { botId: string; threadId: string; summary?: string; name?: string } & DraftChoices): Promise<SavedWorkflow> {
   const { skill } = await api<{ skill: SavedWorkflow }>("/api/skill-burgers", { method: "POST", body: JSON.stringify(input) });
   changed();
   return skill;
@@ -101,6 +102,48 @@ export async function fetchBurgerSummary(botId: string, threadId: string): Promi
   }
 }
 
+/** The finished run as the card explains it: goal, inputs, steps with who did what and what came back. */
+export async function fetchBurgerDraft(botId: string, threadId: string): Promise<DraftView | null> {
+  try {
+    const { draft } = await api<{ draft: DraftView | null }>("/api/skill-burger-draft", { method: "POST", body: JSON.stringify({ botId, threadId }) });
+    return draft;
+  } catch {
+    return null;
+  }
+}
+
+/** One recent run of a saved burger, as its card lists them. */
+export interface BurgerRunRecord {
+  run: string;
+  botId: string;
+  threadId: string;
+  at: number;
+  status: "ok" | "failed" | "waiting" | "cancelled";
+  steps: Array<{ id: string; label: string; state: string }>;
+  failed?: { step: string; label: string; error: string };
+  defaults?: string[];
+  fixedBy?: string;
+}
+
+export async function fetchBurgerRuns(name: string): Promise<BurgerRunRecord[]> {
+  try {
+    const { runs } = await api<{ runs: BurgerRunRecord[] }>(`/api/skill-burgers/${encodeURIComponent(name)}/runs`);
+    return runs;
+  } catch {
+    return [];
+  }
+}
+
+/** "Update the burger with this fix": the steps the bot took to get past a failed step replace that step. */
+export async function keepBurgerFix(input: { name: string; everyChat: boolean; runBotId: string; threadId: string; run: string; step: string }): Promise<{ skill: SavedWorkflow; undo: string }> {
+  const { name, everyChat, ...rest } = input;
+  const result = await api<{ skill: SavedWorkflow; undo: string }>(`/api/skill-burgers/${encodeURIComponent(name)}/fix`, {
+    method: "POST", body: JSON.stringify({ ...rest, ...(everyChat ? {} : { botId: input.runBotId }) }),
+  });
+  changed();
+  return result;
+}
+
 /** Runs saved in this window, by run: a card that comes back (another chat opened, then this one) shows the save. */
 const savedRuns = new Map<string, SavedWorkflow>();
 export const savedRun = (run: string) => savedRuns.get(run);
@@ -118,8 +161,12 @@ export async function fetchRunnable(name: string, botId: string): Promise<{ work
   }
 }
 
-/** What Run sends: the burger's own slash command, which the bot runs with its run_workflow tool. */
-export const runCommand = (name: string) => `/${name}`;
+/** What Run sends: the burger's own slash command, which the bot runs with its run_workflow tool, with the inputs the
+ * person gave on one line ("site: https://example.org"), so the run never reuses last time's values by surprise. */
+export const runCommand = (name: string, inputs: Record<string, string> = {}) => {
+  const given = Object.entries(inputs).filter(([, value]) => value.trim()).map(([key, value]) => `${key}: ${value.trim().replace(/\s+/g, " ")}`);
+  return given.length ? `/${name} ${given.join("; ")}` : `/${name}`;
+};
 
 /** One tap's "Add the path": the steps the bot did by judgement for a case nobody had saved become that case's steps. */
 export async function addBurgerPath(input: { name: string; everyChat: boolean; runBotId: string; threadId: string; run: string; decide: string; case: string }): Promise<{ skill: SavedWorkflow; undo: string }> {
@@ -155,7 +202,7 @@ export function useRunnable(name: string | null, botId: string): { workflow: Wor
 type RunDispatch = (action: { type: "select"; id: string } | { type: "send"; botId: string; text: string; threadId: string }) => void;
 
 /** Run: opens the bot's chat and sends the burger's slash command there, as a person would type it. */
-export function runBurgerIn(dispatch: RunDispatch, bot: { id: string; threadId: string }, name: string): void {
+export function runBurgerIn(dispatch: RunDispatch, bot: { id: string; threadId: string }, name: string, inputs: Record<string, string> = {}): void {
   dispatch({ type: "select", id: bot.id });
-  dispatch({ type: "send", botId: bot.id, text: runCommand(name), threadId: bot.threadId });
+  dispatch({ type: "send", botId: bot.id, text: runCommand(name, inputs), threadId: bot.threadId });
 }

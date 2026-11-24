@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Notification } from "../shared/notification.ts";
 import type { Message } from "./store.ts";
-import { cancelWaitFromCard, createWaitHost, waitContinuesHere, waitContinuationCheck, waitRunChat, waitTurnRunId, type WaitHostDeps } from "./wait-host.ts";
+import { cancelWaitFromCard, createWaitHost, waitContinuesHere, waitContinuationCheck, waitLineFields, waitRunChat, waitTurnRunId, type WaitHostDeps } from "./wait-host.ts";
 import type { WaitRecord } from "./waits.ts";
 
 const NOW = 1_700_000_000_000;
@@ -171,5 +171,14 @@ describe("the store side of waits", () => {
     ]) expect(waitContinuesHere({ ...run, ...patch }, "bot-1", "t-1", store, "run-1")).toBe(false);
     store.messages[0]!.wait!.status = "expired";
     expect(waitContinuesHere(run, "bot-1", "t-1", store, "run-1")).toBe(false);
+  });
+
+  it("names the wait a follow-up's line starts, only for the turn that wait's own run started", () => {
+    const run = { id: "run-1", eventSource: "wait" as const, triggerSource: "webhook" as const, webhookId: "wait:w1", deliveryId: "w1" };
+    expect(waitLineFields(run, "run-1")).toEqual({ waitId: "w1" });
+    expect(waitLineFields(run, undefined)).toEqual({});
+    expect(waitLineFields(null, "run-1")).toEqual({});
+    for (const patch of [{ id: "other" }, { eventSource: "app" as const }, { triggerSource: "schedule" as const }, { webhookId: "wait:w2" }, { deliveryId: undefined }])
+      expect(waitLineFields({ ...run, ...patch }, "run-1")).toEqual({});
   });
 });
