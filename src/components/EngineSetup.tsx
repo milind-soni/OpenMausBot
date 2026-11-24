@@ -493,7 +493,7 @@ function ManagedEngineSetup({ instance, signInOnly, autoStart = false, onDone }:
       )}
       {flow && !flow.pastedCode && (
         <>
-          <button type="button" onClick={() => void check()} className="w-full rounded-lg bg-control px-3 py-2 text-[12px] font-semibold text-ink hover:bg-raised-hover">
+          <button type="button" disabled={busy !== null} onClick={() => void check()} className="w-full rounded-lg bg-control px-3 py-2 text-[12px] font-semibold text-ink hover:bg-raised-hover disabled:opacity-50">
             {busy === "check" ? t("common.checking") : t("engineSetup.finishedSignIn")}
           </button>
           <div data-redirect-paste className="rounded-lg border border-hairline/50 bg-app px-2.5 py-2 text-[12px] text-ink-secondary">
@@ -517,7 +517,7 @@ function ManagedEngineSetup({ instance, signInOnly, autoStart = false, onDone }:
           </div>
         </>
       )}
-      {error && <p className="text-[12px] text-danger">{error}</p>}
+      {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
       {onDone && <button type="button" disabled={busy === "complete"} onClick={() => void cancel()} className="rounded-lg disabled:opacity-50 px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-control">{t("common.cancel")}</button>}
     </div>
   );

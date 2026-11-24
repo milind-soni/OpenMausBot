@@ -210,7 +210,7 @@ function AccountRow({ group, instance, several, signingIn, onSignIn, onSignInDon
   const [renaming, setRenaming] = useState(false);
   const signInButton = useRef<HTMLButtonElement>(null);
   const signInPanel = useRef<HTMLDivElement>(null);
-  const wasSigningIn = useRef(signingIn);
+  const wasSigningIn = useRef(false);
   const state = accountState(instance);
   const account = instance.snapshot.account;
   // This server cannot run the provider's sign-in (a remote browser for a local-only flow): say why, offer nothing.
@@ -228,7 +228,7 @@ function AccountRow({ group, instance, several, signingIn, onSignIn, onSignInDon
   useEffect(() => {
     const opened = signingIn && !wasSigningIn.current, closed = !signingIn && wasSigningIn.current;
     wasSigningIn.current = signingIn;
-    if (closed) signInButton.current?.focus();
+    if (closed && document.activeElement === document.body) signInButton.current?.focus();
     if (!opened) return;
     const frame = requestAnimationFrame(() => signInPanel.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus());
     return () => cancelAnimationFrame(frame);

@@ -86,6 +86,7 @@ async function pasteRedirect(instanceId: string) {
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
+const nextFrame = () => act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
 async function openSimpleCard() {
   await render("simple");
   await click(container.querySelector('[data-simple-engine="antigravity"] button') ?? undefined);
@@ -185,6 +186,35 @@ describe("Google Gemini (Antigravity) accounts share one card", () => {
     expect(document.activeElement).toBe(buttons(row("antigravity"), "Sign in")[0]);
   });
 
+  it("leaves focus where it is when another account's sign-in finishes", async () => {
+    fixture.state.instances = [google("antigravity", "Personal", { authenticated: false }), google("antigravity-work", "Work", { authenticated: false })];
+    await render();
+    await click(buttons(row("antigravity"), "Sign in")[0]);
+    await click(buttons(row("antigravity-work"), "Sign in")[0]);
+    await nextFrame();
+    const typing = row("antigravity-work").querySelector<HTMLInputElement>("[data-redirect-paste] input")!;
+    typing.focus();
+    await pasteRedirect("antigravity");
+    await act(async () => { buttons(row("antigravity"), "Send redirect")[0]!.click(); });
+    await nextFrame();
+    expect(row("antigravity").querySelector("[data-account-sign-in]")).toBeNull();
+    expect(document.activeElement).toBe(typing);
+  });
+
+  it("moves focus into the sign-in of an account just added", async () => {
+    await render();
+    await click(buttons(container, "Add Google account")[0]);
+    const input = container.querySelector<HTMLInputElement>("form[data-add-account] input")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Work");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await click(buttons(container, "Add and sign in")[0]);
+    await render();
+    await nextFrame();
+    expect(row("antigravity-work").querySelector("[data-account-sign-in]")?.contains(document.activeElement)).toBe(true);
+  });
+
   it("keeps the sign-in open and says why when the server could not cancel it", async () => {
     fixture.state.instances = [google("antigravity", "Personal", { authenticated: false })];
     fixture.cancelFails = true;
@@ -203,6 +233,7 @@ describe("Google Gemini (Antigravity) accounts share one card", () => {
     await pasteRedirect("antigravity");
     await click(buttons(row("antigravity"), "Send redirect")[0]);
     expect(buttons(row("antigravity"), "Cancel")[0]?.disabled).toBe(true);
+    expect(buttons(row("antigravity"), "I finished signing in")[0]?.disabled).toBe(true);
     await act(async () => { send(); await fixture.completeGate; });
   });
 
