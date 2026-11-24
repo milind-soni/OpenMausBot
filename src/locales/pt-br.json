@@ -3182,6 +3182,8 @@
   "task.namedList": "Conversas de {name}",
   "task.collapseNamed": "Recolher conversas: {name}",
   "task.expandNamed": "Expandir conversas: {name}",
+  "task.scrollBack": "Rolar para trás",
+  "task.scrollOn": "Rolar para a frente",
   "task.showAll": "Ver todas as {count} conversas",
   "task.showFewer": "Ver menos conversas",
   "task.pinned": "Fixada",

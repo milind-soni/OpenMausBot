@@ -49,7 +49,9 @@ where they belong instead of adding new places.
   look for at the top. With Thread tabs on, the bot's threads take the pill's
   place in the header as tabs, with the plus at their end. With it off, Simple
   mode's pill keeps to the bot's name; once the bot has two threads a chevron
-  beside it opens and folds them (the main thread first, starred), and the plus
+  beside it opens and folds them (the main thread first, starred; it stays open
+  while you move between them, scrolls the picked one into the middle, and
+  shows a small arrow at an end that hides more), and the plus
   stays at the header's end beside the computer button, as for a bot with one.
 - **No count badges and no "needs you" summaries** above the sidebar list or
   in the header. A status mark on the row it belongs to is fine.

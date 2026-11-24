@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
-import { ChevronDown, Pin, Star } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type WheelEvent as ReactWheelEvent } from "react";
+import { ChevronDown, ChevronLeft, ChevronRight, Pin, Star } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { localizedTaskTitle } from "@/lib/task-title";
@@ -7,13 +7,13 @@ import type { Bot } from "@/state/store";
 import { useStoreDispatch } from "@/state/store-select";
 import { BOT_PANEL_ID } from "./bot-panel/side-panel";
 import { ELEVATED_FLOAT } from "./elevated";
-import { edgeFade } from "./HeaderThreadTabs";
 import { reducedMotion } from "./MenuMotion";
 import { mainThreadFirst } from "./SidebarThreadRow";
 import { openTabId, type ThreadTab } from "./thread-tabs";
 
 const RESIZE_MS = 240;
 const LIST_FADE = 40;
+const NUDGE_WIDTH = 24;
 const CLEAR_OF_CONTROLS = 24;
 const WIDEST = 720;
 const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
@@ -22,6 +22,7 @@ const PART = "flex h-full min-w-0 items-center rounded-full outline-none transit
 const FACE = "flex h-full items-center rounded-full outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus";
 const NAME_HOVER = "transition-colors duration-[120ms] motion-reduce:transition-none has-[[data-chathead-pill]:hover]:bg-[color-mix(in_srgb,var(--color-composer),var(--color-ink)_7%)]";
 const ICON = "size-7 shrink-0 justify-center text-ink-secondary hover:text-ink";
+const NUDGE = "absolute inset-y-0 z-10 flex w-6 items-center justify-center rounded-full text-ink-tertiary outline-none transition-colors duration-[120ms] hover:text-ink motion-reduce:transition-none";
 const CHIP = "flex h-7 max-w-42 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] leading-[18px] outline-none transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
 
 /** The widest the open pill may be while staying centred in the header and clear of the controls on either side. */
@@ -35,6 +36,30 @@ function centredRoom(pill: HTMLElement): number {
     half = Math.min(half, box.left >= centre ? box.left - centre : centre - box.right);
   }
   return Math.max(0, Math.min(WIDEST, 2 * (half - CLEAR_OF_CONTROLS)));
+}
+
+/** Which ends of a sideways row hide threads, in reading order. */
+function hiddenEnds(row: HTMLElement): { back: boolean; on: boolean } {
+  const room = row.scrollWidth - row.clientWidth;
+  if (room <= 1) return { back: false, on: false };
+  const scrolled = Math.abs(row.scrollLeft);
+  return { back: scrolled > 1, on: room - scrolled > 1 };
+}
+
+/** Fades the row toward each end that hides threads, clear under that end's arrow so the arrow never sits on text. */
+function endsMask(ends: { back: boolean; on: boolean }, rtl: boolean): string | undefined {
+  if (!ends.back && !ends.on) return undefined;
+  const start = ends.back ? `transparent ${NUDGE_WIDTH}px, black ${NUDGE_WIDTH + LIST_FADE}px` : "black 0";
+  const end = ends.on ? `black calc(100% - ${NUDGE_WIDTH + LIST_FADE}px), transparent calc(100% - ${NUDGE_WIDTH}px)` : "black 100%";
+  return `linear-gradient(to ${rtl ? "left" : "right"}, ${start}, ${end})`;
+}
+
+/** Scrolls a chip to the middle of its row, so its neighbours show on both sides. */
+function centreChip(row: HTMLElement, chip: HTMLElement | null) {
+  if (!chip) return;
+  const rowBox = row.getBoundingClientRect(), chipBox = chip.getBoundingClientRect();
+  const by = chipBox.left + chipBox.width / 2 - (rowBox.left + rowBox.width / 2);
+  if (Math.abs(by) > 1) row.scrollBy?.({ left: by, behavior: reducedMotion() ? "auto" : "smooth" });
 }
 
 export const tabTitle = (tab: ThreadTab): string => (tab.draft ? t("task.newShort") : !tab.title || tab.title === "New thread" ? t("task.untitledChat") : localizedTaskTitle(tab.title));
@@ -64,19 +89,24 @@ function useGlidingWidth(key: unknown) {
 
 /**
  * Simple mode's pill for a bot with two threads or more: its face and name open the bot panel as ever, a chevron beside
- * them widens the pill in place into the bot's threads (its main thread first) and folds it back. A pick, Escape or a
- * click elsewhere folds it too. New thread stays at the header's end, as for any bot.
+ * them widens the pill in place into the bot's threads (its main thread first) and folds it back. It stays open while
+ * the person moves between threads, until the chevron or Escape folds it or they leave the bot. New thread stays at the
+ * header's end, as for any bot.
  */
 export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle }: {
   bot: Bot; tabs: ThreadTab[]; head: ReactNode; label: string; panelOpen: boolean; onToggle: () => void;
 }) {
   const dispatch = useStoreDispatch();
-  const [open, setOpen] = useState(false);
+  const [openFor, setOpenFor] = useState<string | null>(null);
+  const open = openFor === bot.id;
+  const setOpen = (value: boolean) => setOpenFor(value ? bot.id : null);
+  useEffect(() => setOpenFor((was) => (was === bot.id ? was : null)), [bot.id]);
   const [room, setRoom] = useState(WIDEST);
   const box = useGlidingWidth(open);
   const list = useRef<HTMLDivElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   const [fade, setFade] = useState<string | undefined>();
+  const [ends, setEnds] = useState({ back: false, on: false });
   const active = openTabId(bot);
   const main = bot.mainThreadId;
   const shown = useMemo(() => mainThreadFirst(tabs, main), [tabs, main]);
@@ -85,14 +115,19 @@ export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle
     setOpen(false);
     if (refocus) requestAnimationFrame(() => toggle.current?.focus());
   };
+  const measure = useCallback(() => {
+    const row = list.current;
+    if (!row) return;
+    const next = hiddenEnds(row);
+    setFade(endsMask(next, getComputedStyle(row).direction === "rtl"));
+    setEnds((was) => (was.back === next.back && was.on === next.on ? was : next));
+  }, []);
   useEffect(() => {
     if (!open) return;
-    const away = (event: PointerEvent) => { if (!box.current?.contains(event.target as Node)) setOpen(false); };
-    const resize = () => { if (box.current) setRoom(centredRoom(box.current)); };
-    document.addEventListener("pointerdown", away);
+    const resize = () => { if (box.current) setRoom(centredRoom(box.current)); measure(); };
     window.addEventListener("resize", resize);
-    return () => { document.removeEventListener("pointerdown", away); window.removeEventListener("resize", resize); };
-  }, [open]);
+    return () => window.removeEventListener("resize", resize);
+  }, [open, measure]);
   useLayoutEffect(() => {
     if (!open || !list.current) return;
     const row = list.current;
@@ -100,15 +135,32 @@ export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle
     const chip = row.querySelector<HTMLElement>('[aria-selected="true"]') ?? row.querySelector<HTMLElement>("[role=option]");
     chip?.focus({ preventScroll: true });
     const settle = window.setTimeout(() => {
-      chip?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-      setFade(edgeFade(row, LIST_FADE));
+      centreChip(row, chip);
+      measure();
     }, reducedMotion() ? 0 : RESIZE_MS);
     return () => window.clearTimeout(settle);
-  }, [open]);
+  }, [open, measure]);
+  const lastActive = useRef(active);
+  useEffect(() => {
+    if (lastActive.current === active) return;
+    lastActive.current = active;
+    const row = list.current;
+    if (open && row) centreChip(row, row.querySelector<HTMLElement>(`[data-thread-chip="${CSS.escape(active)}"]`));
+  }, [open, active]);
+  useLayoutEffect(() => { if (open) measure(); }, [open, shown, measure]);
 
   const pick = (tab: ThreadTab) => {
     if (tab.threadId !== active) dispatch({ type: "switchTask", botId: bot.id, threadId: tab.threadId });
-    close(true);
+  };
+  const nudge = (forward: boolean) => {
+    const row = list.current;
+    if (!row) return;
+    const rtl = getComputedStyle(row).direction === "rtl";
+    row.scrollBy?.({ left: (forward !== rtl ? 1 : -1) * row.clientWidth * 0.7, behavior: reducedMotion() ? "auto" : "smooth" });
+  };
+  const scrollSideways = (event: ReactWheelEvent<HTMLDivElement>) => {
+    if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+    event.currentTarget.scrollLeft += event.deltaY;
   };
   const onKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(true); return; }
@@ -139,8 +191,9 @@ export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle
           {head}
         </button>
         {open && (
+          <div className="relative flex min-w-0 items-center">
           <div ref={list} role="listbox" aria-label={t("task.namedList", { name: bot.name })} aria-orientation="horizontal"
-            onScroll={(event) => setFade(edgeFade(event.currentTarget, LIST_FADE))} style={{ maskImage: fade, WebkitMaskImage: fade }}
+            onScroll={measure} onWheel={scrollSideways} style={{ maskImage: fade, WebkitMaskImage: fade }}
             className="flex min-w-0 animate-fade-in items-center gap-1 overflow-x-auto [scrollbar-width:none] motion-reduce:animate-none [&::-webkit-scrollbar]:hidden">
             {shown.map((tab) => {
               const selected = tab.threadId === active;
@@ -156,6 +209,19 @@ export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle
                 </button>
               );
             })}
+          </div>
+          {ends.back && (
+            <button type="button" tabIndex={-1} data-chathead-nudge="back" aria-label={t("task.scrollBack")} title={t("task.scrollBack")}
+              onClick={() => nudge(false)} className={cn(NUDGE, "start-0")}>
+              <ChevronLeft size={14} aria-hidden="true" className="rtl:-scale-x-100" />
+            </button>
+          )}
+          {ends.on && (
+            <button type="button" tabIndex={-1} data-chathead-nudge="on" aria-label={t("task.scrollOn")} title={t("task.scrollOn")}
+              onClick={() => nudge(true)} className={cn(NUDGE, "end-0")}>
+              <ChevronRight size={14} aria-hidden="true" className="rtl:-scale-x-100" />
+            </button>
+          )}
           </div>
         )}
         <button ref={toggle} type="button" data-chathead-threads aria-haspopup="listbox" aria-expanded={open}

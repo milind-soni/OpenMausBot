@@ -82,12 +82,32 @@ describe("the pill's thread switcher", () => {
     expect(sent()).toEqual([]);
   });
 
-  it("switches to a picked thread and folds back", () => {
+  it("switches to a picked thread and stays open, even after a click elsewhere", () => {
     render(pepper(THREADS, "launch"));
     act(() => q("[data-chathead-threads]")!.click());
     act(() => chips()[2].click());
     expect(sent()).toEqual([{ type: "switchTask", botId: "pepper", threadId: "trip" }]);
+    act(() => root!.render(createElement(ChatHeadPill, { bot: pepper(THREADS, "trip"), avatar: {} as never, privacy: null, onToggle, switcher: true })));
+    act(() => { document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })); });
+    expect(q("[role=listbox]")).not.toBeNull();
+    expect(chips()[2].getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("folds when the person moves to another bot", () => {
+    render(pepper(THREADS, "launch"));
+    act(() => q("[data-chathead-threads]")!.click());
+    const other = { ...pepper(THREADS, "launch"), id: "rex", name: "Rex" } as Bot;
+    act(() => root!.render(createElement(ChatHeadPill, { bot: other, avatar: {} as never, privacy: null, onToggle, switcher: true })));
     expect(q("[role=listbox]")).toBeNull();
+  });
+
+  it("turns a vertical wheel into sideways scrolling", () => {
+    render(pepper(THREADS, "launch"));
+    act(() => q("[data-chathead-threads]")!.click());
+    const row = q("[role=listbox]")!;
+    row.scrollLeft = 0;
+    act(() => { row.dispatchEvent(new WheelEvent("wheel", { deltaY: 40, bubbles: true })); });
+    expect(row.scrollLeft).toBe(40);
   });
 
   it("moves between threads with the arrow keys, and folds back on Escape", () => {

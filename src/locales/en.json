@@ -3395,6 +3395,8 @@
   "task.namedList": "{name} threads",
   "task.collapseNamed": "Collapse {name} threads",
   "task.expandNamed": "Expand {name} threads",
+  "task.scrollBack": "Scroll back",
+  "task.scrollOn": "Scroll forward",
   "task.showAll": "Show all {count} threads",
   "task.showFewer": "Show fewer threads",
   "task.pinned": "Pinned",
