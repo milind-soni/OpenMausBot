@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-24T09:00:00Z",
+  "updatedAt": "2026-11-24T06:00:00Z",
   "engines": {
     "claude": {
       "default": "claude-sonnet-5",
