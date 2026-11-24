@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
-import { ChevronDown, Pin, Plus, Star } from "lucide-react";
+import { ChevronDown, Pin, Star } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { localizedTaskTitle } from "@/lib/task-title";
@@ -64,8 +64,8 @@ function useGlidingWidth(key: unknown) {
 
 /**
  * Simple mode's pill for a bot with two threads or more: its face and name open the bot panel as ever, a chevron beside
- * them widens the pill in place into the bot's threads (its main thread first) and folds it back, and a plus starts a
- * thread either way. A pick, Escape or a click elsewhere folds it too.
+ * them widens the pill in place into the bot's threads (its main thread first) and folds it back. A pick, Escape or a
+ * click elsewhere folds it too. New thread stays at the header's end, as for any bot.
  */
 export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle }: {
   bot: Bot; tabs: ThreadTab[]; head: ReactNode; label: string; panelOpen: boolean; onToggle: () => void;
@@ -80,7 +80,6 @@ export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle
   const active = openTabId(bot);
   const main = bot.mainThreadId;
   const shown = useMemo(() => mainThreadFirst(tabs, main), [tabs, main]);
-  const canWrite = bot.yourAccess !== "view";
 
   const close = (refocus: boolean) => {
     setOpen(false);
@@ -164,13 +163,6 @@ export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle
           className={cn(PART, ICON)}>
           <ChevronDown size={16} aria-hidden="true" className={cn("transition-transform duration-[120ms] motion-reduce:transition-none", open && "rotate-180")} />
         </button>
-        {canWrite && (
-          <button type="button" data-thread-chip-new aria-label={t("task.newShort")} title={t("task.newShort")} aria-keyshortcuts="Meta+T Control+T"
-            onClick={() => { dispatch({ type: "newTask", botId: bot.id }); close(false); }}
-            className={cn(PART, ICON)}>
-            <Plus size={16} aria-hidden="true" />
-          </button>
-        )}
       </div>
     </div>
   );

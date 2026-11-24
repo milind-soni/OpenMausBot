@@ -101,19 +101,10 @@ describe("the pill's thread switcher", () => {
     expect(sent()).toEqual([]);
   });
 
-  it("starts a new thread from its plus, folded or open", () => {
+  it("has no plus of its own, folded or open: New thread stays at the header's end", () => {
     render(pepper(THREADS, "launch"));
-    act(() => q("[data-thread-chip-new]")!.click());
-    expect(sent()).toEqual([{ type: "newTask", botId: "pepper" }]);
+    expect(q("[data-thread-chip-new]")).toBeNull();
     act(() => q("[data-chathead-threads]")!.click());
-    act(() => q("[data-thread-chip-new]")!.click());
-    expect(sent()).toHaveLength(2);
-    expect(q("[role=listbox]")).toBeNull();
-  });
-
-  it("has no plus for someone who can only view the bot", () => {
-    render({ ...pepper(THREADS, "launch"), yourAccess: "view" } as Bot);
-    expect(q("[data-chathead-threads]")).not.toBeNull();
     expect(q("[data-thread-chip-new]")).toBeNull();
   });
 
