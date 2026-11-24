@@ -128,7 +128,7 @@ describe("a new Cloud the person's own bots came to", () => {
     fh.tick();
     expect(s.texts()[0]).toMatch(/^Hi! Your 3 bots are here now and keep working while your computer is off\./u);
     const prompt = fh.prompt(s.chief.id, s.thread());
-    expect(prompt).toContain("Coder, Writer, Scout are here too");
+    expect(prompt).toMatch(/Their own bots (?:Coder|Writer|Scout), (?:Coder|Writer|Scout), (?:Coder|Writer|Scout) are here too/u);
     expect(prompt).toContain("If they bring up their email or calendar, you may offer to connect Gmail and Google Calendar then.");
     expect(prompt).not.toContain("COMPOSIO_MANAGE_CONNECTIONS");
     expect(prompt).not.toContain("morning brief is on");

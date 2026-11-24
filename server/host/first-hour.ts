@@ -270,7 +270,7 @@ export function createFirstHour(deps: FirstHourDeps) {
   /** The person's own bots here besides the Chief that greeted them: moved in from their computer, or made. */
   const others = (): BotRecord[] => {
     const chief = greeter();
-    return deps.store.bots.filter((bot) => bot.id !== chief && !bot.hidden && !bot.movedTo).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+    return deps.store.bots.filter((bot) => bot.id !== chief && !bot.hidden && !bot.movedTo).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0) || a.name.localeCompare(b.name));
   };
   /** Their names for the greeting, leaving out a MausBot that came along: "MausBot is here now… I'm MausBot" says nothing. */
   const arrivals = (): string[] => {
