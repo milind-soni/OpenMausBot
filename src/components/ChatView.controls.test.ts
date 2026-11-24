@@ -144,19 +144,18 @@ describe("the header's right side", () => {
 });
 
 describe("the Simple header", () => {
-  it("is one pill: the avatar and name, with a dot for another busy conversation and no title, role or way back", () => {
+  it("keeps the bot and thread switchers in one pill", () => {
     const busyElsewhere: Bot = { ...bot, title: "Research", mainThreadId: "other", tasks: [...bot.tasks!, { threadId: "other", title: "Other", createdAt: 0, busy: true, activity: "working" }] };
     fixture.advanced = false;
     try {
       const simple = renderToStaticMarkup(createElement(ChatView, { bot: busyElsewhere }));
       const identity = simple.slice(simple.indexOf("data-chathead-identity"), simple.indexOf("data-chathead-controls"));
-      const pill = identity.match(/<button[^>]*data-chathead-pill="true"[^>]*>([\s\S]*?)<\/button>/)!;
-      expect(identity.replace(pill[0], "").replace(/<span role="status"[^>]*>[^<]*<\/span>/, "")).not.toMatch(/<(button|a|span)[\s>]/);
-      expect(pill[1]).toContain(">Pepper</span>");
-      expect(pill[1]).toContain('data-chathead-elsewhere="true"');
-      expect(pill[0].match(/class="([^"]*)"/)![1]!.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "bg-composer", "ring-[0.5px]", "shadow-(--shadow-float)", "py-[5.5px]", "pl-[5.5px]", "pr-[13.5px]"]));
-      // Away from the bot's main conversation, the pill names the one on screen.
-      expect(pill[1]).toContain("data-chathead-conversation");
+      const [profile, switcher] = identity.match(/<button[^>]*>[\s\S]*?<\/button>/g)!;
+      expect(profile).toContain("Bots · Pepper");
+      expect(profile).toContain(">Pepper</span>");
+      expect(profile).toContain('data-chathead-elsewhere="true"');
+      expect(switcher).toContain('aria-label="All threads"');
+      expect(switcher).toContain("data-chathead-conversation");
       for (const gone of ["data-chathead-role", "data-background-activity", "data-chathead-back", 'data-testid="chat-more"']) {
         expect(simple, gone).not.toContain(gone);
       }
@@ -180,12 +179,12 @@ describe("the Simple header", () => {
     fixture.showThreads = true;
   });
 
-  it("opens the bot panel from the pill", () => {
+  it("opens bot selection from the bot name", () => {
     fixture.advanced = false;
     fixture.dispatch.mockClear();
     try {
       const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
-      expect(markup).toMatch(/<button[^>]*data-chathead-pill="true"[^>]*aria-label="Open Pepper&#x27;s profile"/);
+      expect(markup).toMatch(/<button[^>]*data-tour="bot-pill"[^>]*aria-label="Bots · Pepper"/);
     } finally {
       fixture.advanced = true;
     }
@@ -193,12 +192,12 @@ describe("the Simple header", () => {
 });
 
 describe("header name", () => {
-  it("renames only from the bot's settings in Simple mode: no pencil, and the whole pill opens them", () => {
+  it("keeps renaming in settings and the bot name in the picker trigger", () => {
     fixture.advanced = false;
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
     expect(markup).not.toContain('aria-label="Rename Pepper"');
-    const pill = markup.match(/<button[^>]*data-chathead-pill="true"[^>]*>([\s\S]*?)<\/button>/);
-    expect(pill?.[0]).toContain('aria-label="Open Pepper&#x27;s profile"');
+    const pill = markup.match(/<button[^>]*data-tour="bot-pill"[^>]*>([\s\S]*?)<\/button>/);
+    expect(pill?.[0]).toContain('aria-label="Bots · Pepper"');
     expect(pill?.[1]).toContain(">Pepper</span>");
     expect(pill?.[0]).toContain("rounded-full");
     fixture.advanced = true;

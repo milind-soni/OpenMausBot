@@ -521,6 +521,7 @@ export interface AppState {
   webhookAttempts: WebhookAttempt[];
   webhookIngress: WebhookIngressStatus | null;
   settingsOpen: boolean;
+  settingsPaneBotId?: string;
   pluginsOpen: boolean;
   pluginsSurface: "apps" | "mcp";
   botCreationPending: boolean;
@@ -696,7 +697,7 @@ export type Action =
       onError?: (message: string) => void;
     }
   | { type: "newTask"; botId: string; projectId?: string; cwd?: string; onCreated?: () => void; onError?: (message: string) => void; blankChat?: number }
-  | { type: "switchTask"; botId: string; threadId: string; whole?: true }
+  | { type: "switchTask"; botId: string; threadId: string; whole?: true; selectWhenReady?: true }
   | { type: "switchTaskFailed"; botId: string; threadId: string }
   | { type: "taskSwitched"; bot: Bot }
   | { type: "renameTask"; botId: string; threadId: string; title: string }
@@ -732,7 +733,7 @@ export type Action =
   | { type: "error"; message: string | null }
   | { type: "notice"; notice: AppState["notice"] }
   | { type: "revealThread"; threadId: string }
-  | { type: "toggleSettings"; open?: boolean; section?: BotSettingsSection; botId?: string }
+  | { type: "toggleSettings"; open?: boolean; section?: BotSettingsSection; botId?: string; fromPane?: boolean }
   | { type: "togglePlugins"; open?: boolean; surface?: "apps" | "mcp" }
   | { type: "toggleComputer"; open?: boolean; botId?: string }
   | { type: "openDataResult"; botId: string; cardId: string }
@@ -1358,7 +1359,7 @@ function reduceApp(state: AppState, action: Action): AppState {
       };
     case "toggleSettings": {
       if (action.botId !== undefined && !state.bots.some((bot) => bot.id === action.botId && !bot.hidden)) return state;
-      const selectedId = action.botId ?? state.selectedId;
+      const selectedId = action.fromPane ? state.selectedId : action.botId ?? state.selectedId;
       const open = action.open ?? (action.botId !== undefined || !state.settingsOpen);
       const freshOpen = open && !state.settingsOpen;
       const named = action.section !== undefined;
@@ -1366,6 +1367,8 @@ function reduceApp(state: AppState, action: Action): AppState {
         ...state,
         selectedId,
         settingsOpen: open,
+        settingsPaneBotId: action.fromPane && open ? action.botId
+          : open && state.settingsOpen && !action.botId ? state.settingsPaneBotId : undefined,
         activityOpen: open ? false : state.activityOpen,
         botSettingsSection: action.section ?? state.botSettingsSection,
         botSettingsExpandAccordion: open ? named || (freshOpen && state.botSettingsSectionStored) : false,
@@ -1667,6 +1670,9 @@ function reduceApp(state: AppState, action: Action): AppState {
       return action.cwd !== undefined ? state : { ...closeUnpinnedTray(state), selectedId: action.botId, activeView: "chat" };
     case "switchTask": {
       const { [action.threadId]: _old, ...backgroundThreadEvents } = state.backgroundThreadEvents;
+      if (action.selectWhenReady && action.botId !== state.selectedId) {
+        return updateBot({ ...state, backgroundThreadEvents }, action.botId, bot => ({ ...bot, switchingTo: action.threadId }));
+      }
       return updateBot({ ...closeTrayUnlessShown(state, action.botId, action.threadId), backgroundThreadEvents, selectedId: action.botId, forkPanel: null, activeView: "chat", revealThread: { threadId: action.threadId, nonce: (state.revealThread?.nonce ?? 0) + 1 } }, action.botId,
         (bot) => ({ ...bot, switchingTo: action.threadId }));
     }
@@ -2748,7 +2754,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const selectsAfterCreation = action.type === "newTask" && action.cwd !== undefined;
               if (selectsAfterCreation && selectionRevision.current !== selectedAtStart) return;
               dispatch({ type: "taskSwitched", bot: r.bot });
-              if (selectsAfterCreation) rawDispatch({ type: "select", id: action.botId });
+              if (selectsAfterCreation || (action.type === "switchTask" && action.selectWhenReady && selectionRevision.current === selectedAtStart)) {
+                rawDispatch({ type: "select", id: action.botId });
+              }
             })
             .catch((error) => {
               if (action.type === "switchTask" && navigation.get(action.botId) === revision) {

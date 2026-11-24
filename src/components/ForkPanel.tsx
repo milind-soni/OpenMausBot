@@ -40,8 +40,9 @@ export function PanelChat({ panel }: { panel: ForkPanelState }) {
   const bot = panel.kind === "bot" ? state.bots.find((candidate) => candidate.id === panel.ownerId) : undefined;
   const group = panel.kind === "group" ? state.groups.find((candidate) => candidate.id === panel.ownerId) : undefined;
   const botTask = bot?.tasks?.find((candidate) => candidate.threadId === panel.threadId);
-  const groupTask = group?.tasks?.find((candidate) => candidate.threadId === panel.threadId);
-  const openedBot = bot && botTask ? { ...currentTaskBot(bot, panel.threadId), messages: panel.messages, activeLeafId: panel.activeLeafId, hasMore: false } : null;
+  const groupTask = group?.tasks?.find((candidate) => candidate.threadId === panel.threadId)
+    ?? (group?.threadId === panel.threadId ? group : undefined);
+  const openedBot = bot && (botTask || bot.threadId === panel.threadId) ? { ...currentTaskBot(bot, panel.threadId), messages: panel.messages, activeLeafId: panel.activeLeafId, hasMore: false } : null;
   const openedGroup = group && groupTask ? { ...group, threadId: panel.threadId, messages: panel.messages, hasMore: false,
     working: groupTask.working ?? false, busyBotId: groupTask.busyBotId ?? null,
     turnStartedAt: null, pinnedCwd: groupTask.pinnedCwd, pinnedMessageId: groupTask.pinnedMessageId } : null;

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { removeTempDir } from "../../server/testing/cleanup.ts";
 import { openHeadlessChrome } from "./headless-chrome.ts";
 
-export async function verifyWorkspacePanes(previewUrl: string, finishGate: string, evidence: string, longActivity: boolean) {
+export async function verifyWorkspacePanes(previewUrl: string, finishGate: string, evidence: string, longActivity: boolean, createFork: () => Promise<string>) {
   const profile = mkdtempSync(join(tmpdir(), "omb-pane-browser-"));
   const page = await openHeadlessChrome(profile);
   const element = (selector: string) => `document.querySelector(${JSON.stringify(selector)})`;
@@ -60,6 +60,16 @@ export async function verifyWorkspacePanes(previewUrl: string, finishGate: strin
     await page.send("Input.insertText", { text });
     await page.until(`${composer(name)}?.value === ${JSON.stringify(text)}`);
     if (send) await key("Enter", 13);
+  };
+  const dialog = '[role="dialog"][aria-label]';
+  const pickBot = async (from: string, owner: string, target: string) => {
+    await click(element(pane(from) + ' [data-tour="bot-pill"]'));
+    await page.until(`document.activeElement === ${element(dialog + " input")}`);
+    await page.send("Input.insertText", { text: owner });
+    await key("Enter", 13);
+    await page.until(element(dialog + ` [aria-label="${owner} threads"]`));
+    await click(element(dialog + ` button[title="${target}"]`));
+    await page.until(`${element(pane(target))}?.hasAttribute("data-pane-focused")`);
   };
   const split = async (name: string, direction: string) => {
     await click(`${row(name)}?.querySelector('[data-thread-split-menu] button')`);
@@ -170,6 +180,33 @@ export async function verifyWorkspacePanes(previewUrl: string, finishGate: strin
     await page.until("document.activeElement?.dataset.menuKey?.startsWith('slot:')");
     await key("Enter", 13);
     await page.until(`document.activeElement === ${composer("Reading list")} && ${retainsWork}`);
+    const forkId = await createFork();
+    for (const from of [second, first]) {
+      await click(element(pane(from) + ' [aria-label="All threads"]'));
+      await page.until(element(dialog + ' [aria-label="Pepper threads"] button[aria-current="true"]'));
+      assert.equal(await page.evaluate(`${element(dialog)}.innerText.includes("Release notes")`), false);
+      await click(element(dialog + ` [data-thread-choice="${forkId}"]`));
+      const forkPane = element(`section[data-workspace-thread="${forkId}"]`);
+      await page.until(`${forkPane}?.hasAttribute("data-pane-focused")`);
+      const forkTitle = await page.evaluate(`${forkPane}.getAttribute("aria-label")`);
+      await click(element(pane(forkTitle) + ' [data-tour="bot-pill"]'));
+      await page.until(element(dialog + ' [aria-label="Bots"]'));
+      assert.equal(await page.evaluate(`${element(dialog)}.innerText.includes("Launch team")`), false);
+      await page.send("Input.insertText", { text: "Miso" });
+      await key("ArrowDown", 40);
+      await key("Enter", 13);
+      await page.until(element(dialog + ' [aria-label="Miso threads"]'));
+      assert.equal(await page.evaluate(`${element(dialog)}.querySelectorAll("[data-thread-choice]").length`), 1);
+      assert.equal(await page.evaluate(`${forkPane}.hasAttribute("data-pane-focused")`), true);
+      await key("ArrowLeft", 37);
+      await page.until(element(dialog + ' [aria-label="Bots"]'));
+      await key("Escape", 27);
+      await page.until(`!${element(dialog)} && document.activeElement === ${element(pane(forkTitle) + ' [data-tour="bot-pill"]')}`);
+      await pickBot(forkTitle, "Miso", "Release notes");
+      await pickBot("Release notes", "Pepper", from);
+    }
+    await pickBot(second, "Pepper", first);
+    await page.until(`document.querySelectorAll('[data-workspace-thread]').length === 4 && ${retainsWork}`);
     writeFileSync(finishGate, "");
     await page.until(reply(first, "Keep running through layout changes"));
     assert.equal(await page.evaluate(`${composer(second)}.value`), "Keep this draft while tiling");

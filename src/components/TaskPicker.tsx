@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, Check, ChevronDown, FolderInput, Pin, PinOff, Search, SquarePen, Trash2 } from "lucide-react";
+import { Activity, Check, ChevronDown, FolderInput, Pin, PinOff, SquarePen, Trash2 } from "lucide-react";
 import { useStore, type Bot, type BotProject, type Group, type Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { MENU_ITEM_SEPARATOR, MENU_SHEET } from "./menu-recipe";
@@ -15,6 +15,8 @@ import { FolderIcon, NewThreadButton } from "./BotProjects";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { attentionJumpAction, attentionOwnerName, AttentionThreadRows, crossBotAttentionThreads, threadsWhenTreeHidden, type AttentionThread } from "./SidebarBotActivity";
 import { formatUpdatedAt, orderedThreadList, threadByline, threadRecency, threadUpdatedLabel, useRelativeNow } from "./SidebarThreadRow";
+import { useSelectThreadPane } from "./OpenPaneActions";
+import { ThreadSearch } from "./ThreadSearch";
 import { Select } from "./Select";
 
 export const TASK_PICKER_DISMISS_MS = 500;
@@ -228,12 +230,14 @@ function ConversationTaskPicker({
         }}
         title={switchTitle}
         aria-label={t("task.switch")}
+        aria-expanded={open}
+        aria-haspopup="dialog"
         className={cn(
           "flex max-w-[220px] items-center gap-1.5 rounded-full border border-hairline/40 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink",
           COMPACT_BUBBLE,
         )}
       >
-        <span className="truncate @max-4xl/chathead:hidden">{t("task.switch")}</span>
+        <span className="truncate @max-4xl/chathead:hidden @max-3xs/tiled-room:hidden">{t("task.switch")}</span>
         <span className="shrink-0 tabular-nums opacity-60 @max-4xl/chathead:opacity-100">{tasks.length}</span>
         {workingElsewhere > 0 && (
           <span
@@ -248,40 +252,14 @@ function ConversationTaskPicker({
       </button>
 
       {motion.shown && (
-        <div className={cn("absolute right-0 top-full z-40 mt-1 w-[300px] overflow-hidden", MENU_SHEET, motion.className)} {...motion.exitProps}>
-          <div>
-            <div className="flex items-center gap-2 rounded-md bg-ink/[0.05] px-2 py-1.5 focus-within:ring-2 focus-within:ring-focus/60">
-              <Search size={14} className="shrink-0 text-ink-secondary" />
-              <input
-                autoFocus
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onClick={(e) => e.stopPropagation()}
-                onMouseDown={(e) => e.stopPropagation()}
-                onKeyDown={(e) => {
-                  if (imeComposing(e.nativeEvent)) { e.stopPropagation(); return; }
-                  if (e.key === "Escape") {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (looking) setQuery("");
-                    else closeMenu();
-                    return;
-                  }
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    const first = results[0];
-                    if (!first) return;
-                    if (first.kind === "attention") onAttentionJump?.(first.entry);
-                    else if (first.task.threadId !== threadId) onSwitch(first.task.threadId);
-                    closeMenu();
-                  }
-                }}
-                placeholder={t("task.search")}
-                aria-label={t("task.search")}
-                className="w-full bg-transparent text-[13px] text-ink placeholder:text-ink-tertiary focus:outline-none"
-              />
-            </div>
-          </div>
+        <div role="dialog" aria-label={t("task.switch")} className={cn("absolute end-0 top-full z-40 mt-1 w-[300px] overflow-hidden @max-sm/tiled-room:max-w-[100cqw]", MENU_SHEET, motion.className)} {...motion.exitProps}>
+          <ThreadSearch query={query} setQuery={setQuery} onClose={closeMenu} onEnter={() => {
+            const first = results[0];
+            if (!first) return;
+            if (first.kind === "attention") onAttentionJump?.(first.entry);
+            else if (first.task.threadId !== threadId) onSwitch(first.task.threadId);
+            closeMenu();
+          }} />
           <div className="max-h-[320px] overflow-y-auto" role="group" aria-label={looking ? t("task.matching", { count: results.length }) : t("task.list")}>
             {attentionRows.length > 0 && <div className="pb-1">
               <div className="flex items-center gap-1.5 px-2 pb-1 pt-1.5 text-[12px] font-medium text-ink-secondary"><Activity size={14} />{t("attention.title")}</div>
@@ -347,6 +325,7 @@ function ConversationTaskPicker({
                         startRename(task);
                       }}
                       className="min-w-0 flex-1 text-left"
+                      aria-current={active || undefined}
                       title={t("task.renameHint")}
                     >
                       <div dir="auto" className="truncate text-[14px] leading-[18px] text-ink">{localizedTaskTitle(task.title)}</div>
@@ -468,6 +447,7 @@ export function TaskPicker({ bot }: { bot: Bot }) {
 }
 
 export function GroupTaskPicker({ group }: { group: Group }) {
+  const selectPane = useSelectThreadPane();
   const { dispatch } = useStore();
   const tasks = useMemo(() => {
     return (group.tasks ?? []).map((task) => ({
@@ -482,7 +462,9 @@ export function GroupTaskPicker({ group }: { group: Group }) {
       busy={false}
       workingElsewhere={roomThreadsWorkingElsewhere(group)}
       onNew={() => dispatch({ type: "newGroupTask", groupId: group.id })}
-      onSwitch={(threadId) => dispatch({ type: "switchGroupTask", groupId: group.id, threadId })}
+      onSwitch={(threadId) => {
+        if (!selectPane(group.id, threadId)) dispatch({ type: "switchGroupTask", groupId: group.id, threadId });
+      }}
       onRename={(threadId, title) => dispatch({ type: "renameGroupTask", groupId: group.id, threadId, title })}
       onDelete={(threadId) => dispatch({ type: "deleteGroupTask", groupId: group.id, threadId })}
       onPin={(threadId, pinned) => {

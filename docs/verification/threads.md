@@ -36,6 +36,15 @@ preview has the same icon in the sidebar toolbar.
    panes by number. Dividers support dragging and arrow keys. To test Stop,
    send in two panes, then stop one while leaving a draft in another.
 
+In either pane, click the thread title beside **Pepper**. The list shows Pepper’s
+threads and forks, with the current conversation checked. Click **Pepper** to
+open **Bots**, search for **Miso**, and press Enter. Its **Release notes** thread
+appears in the same popover. Try Back or the Left Arrow, then Escape. The chat
+changes only after you choose a thread. Choosing a thread already visible
+focuses its pane. Open Pepper’s profile from the Bots menu. A tiled room’s
+**All threads** lists that room’s conversations, and its title opens room
+controls. Repeat while a reply runs and the neighboring composer holds a draft.
+
 To replay the scenario automatically, run
 `node --experimental-strip-types scripts/verify-threads.ts --check-panes`.
 Set `OMB_CDP_CHROME` to your Chrome or Chromium executable on Linux. This

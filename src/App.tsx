@@ -179,6 +179,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const group = state.groups.find((g) => g.id === state.selectedId);
   const chiefStep = useChiefStepOpen();
   const bot = group || chiefStep ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
+  const settingsBot = (state.workspacePanes && state.settingsPaneBotId && state.bots.find(b => b.id === state.settingsPaneBotId)) || bot;
   const chatBot = useMemo(() => bot && newChatBot(bot, state.newChat), [bot, state.newChat]);
   const { open: drawerOpen, show: openDrawer, hide: hideDrawer, noteAction: noteDrawerAction } = useBotListDrawer({ selectedId: state.selectedId, botThread: chatBot?.threadId, groupThread: group?.threadId,
     view: state.activeView, pluginsOpen: state.pluginsOpen, settingsOpen: state.settingsOpen });
@@ -187,7 +188,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const advanced = useAdvancedMode();
   const roomPanelOpen = useRoomPanelShown({ group, state, simple: !advanced && !remoteClient });
   const sidePanels: OpenSidePanels = {
-    simple: !advanced, remoteClient, bot: Boolean(bot) && state.settingsOpen, room: roomPanelOpen, inbox: inboxShown, inboxWide: inboxPanel.wide === true,
+    simple: !advanced, remoteClient, bot: Boolean(settingsBot) && state.settingsOpen, room: roomPanelOpen, inbox: inboxShown, inboxWide: inboxPanel.wide === true,
     notifications: notificationFeed && state.notificationsOpen,
     wide: (Boolean(bot) && (state.computerOpen || state.inspectorOpen || state.activityOpen)) || Boolean(state.forkPanel),
   };
@@ -472,10 +473,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         </main>
       )}
       {/* Sibling panels need distinct keys: two keyed `bot.id` collide in React's keyed reconciliation. */}
-      {state.settingsOpen && bot && (
+      {state.settingsOpen && settingsBot && (
         remoteClient
-          ? <RemoteAgentSettingsPanel bot={bot} overlay={state.computerOpen && !twoSidePanelsFit} />
-          : <BotSettingsDialog key={`settings:${bot.id}`} bot={bot} overlay={((state.inspectorOpen || state.computerOpen || (notificationFeed && state.notificationsOpen)) && !twoSidePanelsFit) || botPanelFloats(sidePanels, sidebarAndBotPanelFit)} />
+          ? <RemoteAgentSettingsPanel bot={settingsBot} overlay={state.computerOpen && !twoSidePanelsFit} />
+          : <BotSettingsDialog key={`settings:${settingsBot.id}`} bot={settingsBot} overlay={((state.inspectorOpen || state.computerOpen || (notificationFeed && state.notificationsOpen)) && !twoSidePanelsFit) || botPanelFloats(sidePanels, sidebarAndBotPanelFit)} />
       )}
       {state.computerOpen && bot && (
         remoteClient ? (

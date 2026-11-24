@@ -7,10 +7,10 @@ import { useOptionalStoreRef } from "@/state/store-ref";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import { MENU_ITEM } from "./menu-recipe";
 
-export function useSelectThreadPane(ownerId: string) {
+export function useSelectThreadPane() {
   const store = useOptionalStoreRef();
   const primary = useContext(WorkspaceChatContext);
-  return (threadId: string): boolean => {
+  return (ownerId: string, threadId: string): boolean => {
     const panes = store?.state().workspacePanes;
     if (!panes || !primary || !store) return false;
     const pane = document.querySelector<HTMLElement>(`[data-workspace-thread="${CSS.escape(threadId)}"]`);

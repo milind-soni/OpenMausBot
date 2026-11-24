@@ -298,7 +298,7 @@ const sameThreadRow = ({ task: previousTask, ...previous }: ThreadRowProps, { ta
   sameFields(previousTask, task) && sameFields(previous, next);
 
 export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, current: selected, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSnooze, onLink, onRefreshPermissions, onMemory, activityLabel: liveActivity, now, selectMode = false, checked = false, onToggleSelect, panel = false, preview, main = false }: ThreadRowProps) {
-  const selectPane = useSelectThreadPane(ownerId);
+  const selectPane = useSelectThreadPane();
   const canDrag = Boolean(useContext(WorkspaceChatContext));
   const focused = useContext(FocusedWorkspaceThread);
   const current = focused ? focused === task.threadId : selected;
@@ -334,7 +334,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
   const archived = isArchived(task);
   const snoozed = isSnoozed(task);
   const tickable = isTickable(task);
-  const choose = (event: React.MouseEvent) => { if (!selectMode) { if (!selectPane(task.threadId)) onSelect(task); } else if (tickable) onToggleSelect?.(task, event.shiftKey); };
+  const choose = (event: React.MouseEvent) => { if (!selectMode) { if (!selectPane(ownerId, task.threadId)) onSelect(task); } else if (tickable) onToggleSelect?.(task, event.shiftKey); };
   const contextMenu = (event: React.MouseEvent) => { event.preventDefault(); if (!selectMode) openMenu(event.clientX, event.clientY); };
   const openMenu = (x: number, y: number) => setMenu({ left: Math.max(8, Math.min(x, window.innerWidth - 228)), top: Math.max(8, Math.min(y, window.innerHeight - 230)) });
   const startRename = () => { if (task.sharedChat) return; finishing.current = false; setDraft(task.title); setRenaming(true); setMenu(null); };

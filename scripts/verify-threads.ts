@@ -22,7 +22,10 @@ try {
   const models = instances.find((instance: { instanceId: string }) => instance.instanceId === "claude").models.options;
   let gmailThread = pepper.threadId;
   const titles = ["Website ideas", "Triage Gmail", "Triage iCloud"];
-  if (process.argv.some(arg => arg === "--check-panes" || arg === "--try-panes")) titles.push("Reading list");
+  if (process.argv.some(arg => arg === "--check-panes" || arg === "--try-panes")) {
+    titles.push("Reading list");
+    await api("PATCH", `/api/bots/${miso.id}/tasks/${miso.threadId}`, { title: "Release notes" });
+  }
   for (const [index, title] of titles.entries()) {
     const threadId = index === 0 ? pepper.threadId : (await api("POST", `/api/bots/${pepper.id}/tasks`, { title, projectId: folder.id })).task.threadId;
     await api("PATCH", `/api/bots/${pepper.id}/tasks/${threadId}`, {
@@ -77,7 +80,10 @@ try {
   console.log(JSON.stringify({ ...fixture.info, previewUrl: ui.previewUrl, finishGate }));
   if (process.argv.includes("--check-panes")) {
     const { verifyWorkspacePanes } = await import("./testing/workspace-panes.ts");
-    await verifyWorkspacePanes(ui.previewUrl, finishGate, fixture.info.logPath + ".panes.png", longActivity);
+    await verifyWorkspacePanes(ui.previewUrl, finishGate, fixture.info.logPath + ".panes.png", longActivity, async () => {
+      const { task } = await api("POST", `/api/bots/${pepper.id}/tasks/${pepper.threadId}/forks`, { latest: true });
+      return task.threadId;
+    });
   } else await parkUntilSignal();
 } finally {
   await ui?.close();

@@ -6,6 +6,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "@/lib/i18n";
 import type { Bot, Group } from "@/state/store";
+import { StoreRefContext } from "@/state/store-ref-context";
+import { WorkspaceChatContext } from "@/state/workspace-chat-context";
+import { initialState } from "@/state/store";
 import { Select } from "./Select";
 
 const fixture = vi.hoisted(() => ({ showThreads: true, queued: {} as Record<string, unknown[]>, bots: [] as Bot[], dispatch: vi.fn() }));
@@ -73,6 +76,18 @@ describe("task picker IME keyboard handling", () => {
     flushSync(() => root.unmount());
     host.remove();
     delete document.documentElement.dataset.reducedMotion;
+  });
+
+  it("switches the focused group tile without changing the main conversation", () => {
+    const state = { ...initialState, groups: [group], workspacePanes: { layout: "current", focused: "current", panels: {} } };
+    flushSync(() => root.render(createElement(StoreRefContext, { value: { state: () => state, dispatch: fixture.dispatch } },
+      createElement(WorkspaceChatContext, { value: "pepper-thread" }, createElement(GroupTaskPicker, { group })))));
+    flushSync(() => host.querySelector<HTMLButtonElement>("button")!.click());
+    type(search()!, "Other");
+    press(search()!, "Enter");
+    expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({
+      type: "openForkPanel", kind: "group", ownerId: "team", threadId: "other", split: "replace",
+    });
   });
 
   it.each(composing)("does not select or close on a composing search Enter: %j", (init) => {

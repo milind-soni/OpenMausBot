@@ -3881,6 +3881,13 @@ button:disabled.bg-danger {
 @container workspace-pane (max-height: 36rem) {
   .burger-layers { max-height: clamp(3rem, 19cqh, 8rem); }
 }
+.tiled-room-controls > :has(> :is([role="menu"], [role="dialog"])) {
+  position: static;
+}
+.tiled-room-controls > * > :is([role="menu"], [role="dialog"]) {
+  inset-inline: 0 auto;
+  max-inline-size: 100%;
+}
 [data-pane-focused] :is([data-chathead-pill], [data-roomhead-identity]) {
   box-shadow: 0 0 0 1px var(--color-edge);
 }

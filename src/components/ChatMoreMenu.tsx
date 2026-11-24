@@ -34,7 +34,7 @@ import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-se
 export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: SidebarMenuItem[]; on: boolean } {
   const bot = useMemo(() => currentTaskBot(profile), [profile]);
   const messages = useMemo(() => visibleMessages(bot), [bot]);
-  const state = useStoreSelector((s) => ({ activityOpen: s.activityOpen, computerOpen: s.computerOpen, inspectorOpen: s.inspectorOpen, instances: s.instances }), sameFields), dispatch = useStoreDispatch();
+  const state = useStoreSelector((s) => ({ secondaryPane: Boolean(s.workspacePanes?.panels[bot.threadId]), activityOpen: s.activityOpen, computerOpen: s.computerOpen, inspectorOpen: s.inspectorOpen, instances: s.instances }), sameFields), dispatch = useStoreDispatch();
   const advanced = useAdvancedMode();
   const showThreads = useShowThreads();
   const findOpen = useChatFindOpen(bot.threadId);
@@ -66,7 +66,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
       key: "profile",
       label: t("chat.openProfile"),
       icon: <UserRound size={16} />,
-      onSelect: () => dispatch({ type: "toggleSettings", open: true }),
+      onSelect: () => dispatch({ type: "toggleSettings", open: true, ...(state.secondaryPane && { botId: bot.id, fromPane: true }) }),
     },
   ] : [];
   const phoneScreen: SidebarMenuItem[] = phoneHeader ? [

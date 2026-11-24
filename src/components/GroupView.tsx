@@ -1,4 +1,5 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useContext, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { TiledPaneTitle } from "@/state/workspace-chat-context";
 import { activeLocale, t } from "@/lib/i18n";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { Check, ChevronDown, FolderOpen, Loader2, Square } from "lucide-react";
@@ -710,7 +711,8 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
   const threadSpeaker = threadSpeakerId ? members.find((b) => b.id === threadSpeakerId) : undefined;
   const setupPending = !remoteClient && roomNeedsSetup(group);
   const advancedMode = useAdvancedMode();
-  const simpleHeader = simpleRoomHeader({ advanced: advancedMode, remoteClient, group, setupPending });
+  const paneTitle = useContext(TiledPaneTitle);
+  const simpleHeader = !paneTitle && simpleRoomHeader({ advanced: advancedMode, remoteClient, group, setupPending });
 
   const lastGroupMessage = group.messages.at(-1);
   const toolInFlight = lastGroupMessage?.kind === "activity" && lastGroupMessage.tool?.ok === undefined;
@@ -806,6 +808,7 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
       <RoomHeader
         group={group}
         members={members}
+        paneTitle={paneTitle}
         simple={simpleHeader}
         setupPending={setupPending}
         remoteClient={remoteClient}

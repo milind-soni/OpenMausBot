@@ -72,7 +72,7 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
   bot: Bot; selected: boolean; drafting?: boolean; rowThreadId: string; pendingQueued: AppState["pendingQueued"]; dispatch: Dispatch<Action>;
 }) {
   const unfolded = useThreadsUnfolded(bot.id) && canUnfold(bot);
-  const selectPane = useSelectThreadPane(bot.id);
+  const selectPane = useSelectThreadPane();
   const canDrag = Boolean(useContext(WorkspaceChatContext));
   const focused = useContext(FocusedWorkspaceThread);
   const current = focused ? focused : selected && !drafting ? bot.switchingTo ?? bot.threadId : undefined;
@@ -104,7 +104,7 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
 
   const items = () => Array.from(tree.current?.querySelectorAll<HTMLElement>("[role=treeitem]") ?? []);
   const focusItem = (index: number) => { setFocusAt(index); items()[index]?.focus(); };
-  const open = (threadId: string) => { if (!selectPane(threadId)) dispatch({ type: "switchTask", botId: bot.id, threadId }); };
+  const open = (threadId: string) => { if (!selectPane(bot.id, threadId)) dispatch({ type: "switchTask", botId: bot.id, threadId }); };
   const openPanel = () => {
     showAllConversations(bot.id);
     dispatch({ type: "toggleSettings", open: true, botId: bot.id });
