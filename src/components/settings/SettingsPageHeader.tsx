@@ -6,6 +6,7 @@ import { desktopAppVersion } from "@/lib/app-links";
 import { versionLine, type SettingsPlace } from "./settings-context";
 import type { SettingsContext, SettingsPage } from "./settings-index";
 import { AppIcon, PlaceBadge, YouAvatar, pageLabel } from "./SettingsNav";
+import { AdvancedSettingTag } from "./AdvancedSection";
 
 const INTRO: Partial<Record<SettingsPage["id"], Parameters<typeof t>[0]>> = {
   bots: "settings.bots.intro",
@@ -62,10 +63,17 @@ export function SettingsPageHeader({ page, ctx, place, narrow, missing }: {
     : !ctx.desktop ? ctx.advanced ? "settings.app.introBrowserAdvanced" : "settings.app.introBrowser"
     : ctx.advanced ? INTRO.app : "settings.app.introSimple";
   const title = page.id === "account" ? t("settings.page.account") : pageLabel(page, place, ctx.desktop);
+  const peek = !ctx.advanced && !page.when(ctx);
   return (
     // No fill and not sticky: on a glass skin any opaque fill reads as a white block over the sheet.
     <header data-settings-header="" className={cn("flex flex-col gap-1 pb-5", narrow ? "px-8 pt-1" : "pl-4 pt-4")}>
-      {!narrow && <h2 id="settings-page-title" className="truncate text-[17px] font-semibold leading-6 tracking-[-0.01em] text-ink">{title}</h2>}
+      {!narrow && (
+        <div className="flex min-w-0 items-center gap-2">
+          <h2 id="settings-page-title" className="truncate text-[17px] font-semibold leading-6 tracking-[-0.01em] text-ink">{title}</h2>
+          {peek && <AdvancedSettingTag />}
+        </div>
+      )}
+      {narrow && peek && <div className="flex"><AdvancedSettingTag /></div>}
       <ScopeLine page={page} ctx={ctx} place={place} />
       {intro && <p data-settings-intro={intro} className="text-[13px] leading-[18px] text-ink-secondary">{t(intro, { place: place.name, app: productName() })}</p>}
       {missing && <p role="status" className="text-[13px] leading-[18px] text-ink-secondary">{t("settings.missingHere", { page: missing, place: place.name })}</p>}

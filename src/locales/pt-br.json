@@ -1776,6 +1776,7 @@
   "settings.userBubbles.subtitle": "Em uma conversa individual, suas mensagens ficam com um degradê da cor do bot. Nos grupos, os balões continuam neutros.",
   "settings.userBubbles.aria": "Colorir minhas mensagens com a cor do bot",
   "settings.advancedMode.title": "Modo avançado",
+  "settings.advancedSetting": "Configuração avançada",
   "settings.advancedMode.subtitle": "Mostra todos os controles técnicos neste dispositivo: uso e tokens, o inspetor e outras ferramentas para quem cria. Desligue para ter um app mais simples. Nada é excluído em nenhum dos casos.",
   "settings.threadDisplay.title": "Conversas",
   "settings.threadDisplay.subtitle": "Mostra as listas e os controles de conversas só neste dispositivo. Ocultá-los mantém todo o histórico de conversas e o trabalho em andamento; os chats em grupo não mudam. Ligue de novo para acessar suas conversas novamente.",

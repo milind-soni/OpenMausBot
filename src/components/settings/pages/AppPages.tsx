@@ -30,6 +30,7 @@ import { versionLine } from "../settings-context";
 import { useSettingsShell } from "../settings-shell";
 import { PlaceBadge } from "../SettingsNav";
 import { InertRow, useSwitchToComputer } from "../inert";
+import { AdvancedSection } from "../AdvancedSection";
 import { useOtherPlaces } from "../settings-context";
 
 /** A row this page can't change because it lives on This computer: not on the app's own home page (main's home:page). */
@@ -176,16 +177,16 @@ export function AppearancePage() {
       </SettingsRows>
     </SettingsGroup>
     {/* Simple keeps the Look card and Tool calls; the window's layout is Advanced. */}
-    {ctx.advanced && <SettingsGroup label={t("settings.appearance.layout")} block="appearance">
+    <AdvancedSection anchor="appearance"><SettingsGroup label={t("settings.appearance.layout")} block="appearance">
       <SettingsRows>
         <ChromeRailRow />
         <WindowFrameRow />
-        {ctx.advanced && <ShowThreadsRow />}
-        {ctx.advanced && <SidebarToolsLayoutRow />}
-        {ctx.advanced && <PinnedCirclesRow />}
-        {ctx.advanced && <UniversalPinsRow />}
+        <ShowThreadsRow />
+        <SidebarToolsLayoutRow />
+        <PinnedCirclesRow />
+        <UniversalPinsRow />
       </SettingsRows>
-    </SettingsGroup>}
+    </SettingsGroup></AdvancedSection>
     {ctx.advanced && <PinnedPanelsSettings />}
   </>;
 }

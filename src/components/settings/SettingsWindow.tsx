@@ -73,8 +73,6 @@ export function SettingsWindow() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [anchor, target.page]);
-  // A link, a notice or a search result that asks for what only Advanced mode shows turns Advanced on and lands there.
-  useEffect(() => { if (target.advanced) setAdvancedMode(true); }, [target.advanced]);
   useEffect(() => window.ogb?.onOpenAppSettings?.(() => setQuery("")), []);
   useEffect(markOpened, []);
 
@@ -98,8 +96,14 @@ export function SettingsWindow() {
     if (entry.jump === "shortcuts") { close(); dispatch({ type: "toggleShortcuts", open: true }); return; }
     if (entry.jump === "bot") { close(); return; }
     if (hit.elsewhere) { computer.open?.(); return; }
-    if (hit.advanced || needsAdvanced({ page: entry.page, anchor: entry.anchor }, ctx)) setAdvancedMode(true);
     go(entry.page, entry.anchor);
+  };
+  /** Clearing the search puts away an Advanced setting it showed in Simple. */
+  const search = (next: string) => {
+    setQuery(next);
+    if (next.trim() || ctx.advanced) return;
+    if (!page.when(ctx)) dispatch({ type: "toggleAppSettings", open: true, section: "overview" });
+    else if (anchor && needsAdvanced({ page: target.page, anchor }, ctx)) setAnchor(null);
   };
   /** Turning Advanced off on a page Simple doesn't show lands on the place's Overview; anywhere else it stays put. */
   const setAdvanced = (on: boolean) => {
@@ -182,7 +186,7 @@ export function SettingsWindow() {
             <div className="flex min-h-0 flex-1">
               {(!narrow || showList) && (
                 <SettingsNav ctx={ctx} place={place} pages={pages} current={narrow ? null : target.page} query={query} hits={hits} narrow={narrow}
-                  onQuery={setQuery} onOpen={(next) => go(next)} onHit={openHit} keyHits={keyHits} onKey={openKey} onClose={close} onAdvanced={setAdvanced} />
+                  onQuery={search} onOpen={(next) => go(next)} onHit={openHit} keyHits={keyHits} onKey={openKey} onClose={close} onAdvanced={setAdvanced} />
               )}
               {(!narrow || !showList) && (
                 <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">

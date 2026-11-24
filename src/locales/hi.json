@@ -3608,6 +3608,7 @@
   "servers.localHint": "लोकल बॉट्स और बातचीत",
   "servers.switch": "बदलें",
   "settings.advancedMode.title": "एडवांस्ड मोड",
+  "settings.advancedSetting": "एडवांस्ड सेटिंग",
   "settings.deviceNotifications.show": "बॉट का काम पूरा होने पर मुझे बताएँ",
   "settings.deviceNotifications.title": "इस डिवाइस पर सूचनाएँ",
   "settings.domain.label": "आपका डोमेन",

@@ -4015,6 +4015,7 @@
   "servers.localHint": "Lokale Bots und Gespräche",
   "servers.switch": "Wechseln",
   "settings.advancedMode.title": "Erweiterter Modus",
+  "settings.advancedSetting": "Erweiterte Einstellung",
   "settings.deviceNotifications.show": "Benachrichtigen, wenn ein Bot fertig ist",
   "settings.deviceNotifications.title": "Mitteilungen auf diesem Gerät",
   "settings.domain.label": "Deine Domain",
