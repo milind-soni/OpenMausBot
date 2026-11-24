@@ -3532,7 +3532,7 @@
   "model.variant.clear": "Azzera la scelta della variante",
   "model.variant.use": "Usa {variant} per questo modello",
   "model.scope.label": "Applica le modifiche al modello a",
-  "model.scope.bot": "Conversazione + predefinito del bot",
+  "model.scope.bot": "Conversazione + predefinito bot",
   "model.scope.thread": "Solo questa conversazione",
   "model.scope.botHelp": "Il modello del bot: questa conversazione, i gruppi e ogni conversazione che usa il modello del bot.",
   "model.scope.threadHelp": "Solo questa conversazione. Tiene questo modello quando cambia quello del bot.",
