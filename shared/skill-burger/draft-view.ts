@@ -63,7 +63,7 @@ function refsIn(node: unknown, into = new Set<string>()): Set<string> {
   else if (node && typeof node === "object") {
     const record = node as Record<string, unknown>;
     if (typeof record.$step === "string") into.add(record.$step);
-    for (const [key, value] of Object.entries(record)) if (key !== "id") refsIn(value, into);
+    for (const value of Object.values(record)) refsIn(value, into);
   }
   return into;
 }
