@@ -1,4 +1,4 @@
-// "Use this computer as an always-on home" (Settings → Phone & devices): one switch for a spare computer, such as a Mac
+// "Use this computer as an always-on home" (Settings → Devices): one switch for a spare computer, such as a Mac
 // mini, that runs the person's bots all day. It turns on what the app already has (Open at login, the updater's quiet
 // install, the server supervisor's recovery) and adds one thing of its own: the computer stays awake while it is on
 // power. Turning it off undoes only what turning it on changed: a login item the person had set up stays.

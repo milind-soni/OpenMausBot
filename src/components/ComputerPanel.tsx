@@ -39,7 +39,7 @@ import { FullScreenButton } from "./FullScreenButton"; import { LocalScreenPrevi
 import { LinuxLocalControl } from "./LinuxLocalControl";
 import { MacLocalControl } from "./MacLocalControl"; import { WindowsLocalControl } from "./WindowsLocalControl";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
-import { busyBoatView, instanceSupportsLocalComputer, localComputerDisabledReason, localComputerSelectable, pageOnRemoteServer, persistedComputerSelectionMatches, isReadyBoatState, resolveBoatPanelAction, shouldPollCloudPreview } from "@/lib/local-computer";
+import { busyBoatView, instanceSupportsLocalComputer, localComputerDisabledReason, localComputerSelectable, pageOnRemoteServer, persistedComputerSelectionMatches, isReadyBoatState, resolveBoatPanelAction, shouldPollCloudPreview } from "@/lib/local-computer"; import { LendHere } from "./LendComputerSwitch";
 import { moveBetweenTabs, PANEL_TABS, panelTabProps, scrollTabsWithWheel, TAB_PANEL_FOCUS, tabPanelProps, useAndroidTabFallback } from "./computer-panel-tabs";
 import { releaseComputerPanelFocus, useComputerPanelEntry } from "@/lib/computer-panel-focus";
 import { PANEL_MIN_WIDTH, useComputerPanelResize } from "./computer-panel-resize";
@@ -1508,7 +1508,7 @@ export function ComputerPanel({
           )}
         </div>
 
-        {errorText && !cloudRefused && (
+        <LendHere appNeeded={phase === "local-unavailable"} />{errorText && !cloudRefused && (
           <div className="mt-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">
             {errorText}
           </div>

@@ -181,6 +181,19 @@ const tasks = new Set<Promise<void>>();
 let initialized = false;
 let closing = false;
 
+/** Clients on a newer protocol revision name it in _meta on every request; the upstream session
+ * negotiated its own and a strict server refuses a foreign one. server/discover reads that _meta
+ * as its input, so it is the one method forwarded whole. */
+const PROTOCOL_VERSION_META = "io.modelcontextprotocol/protocolVersion";
+function upstreamParams(method: string, params: unknown): unknown {
+  if (method === "server/discover" || !isRecord(params) || !isRecord(params._meta) || !Object.hasOwn(params._meta, PROTOCOL_VERSION_META)) return params;
+  const meta = { ...params._meta };
+  delete meta[PROTOCOL_VERSION_META];
+  const clean = { ...params };
+  if (Object.keys(meta).length) clean._meta = meta; else delete clean._meta;
+  return clean;
+}
+
 /** A tool only an MCP app's view may call is never listed to the engine, and a call to it is refused. */
 async function upstream(method: string, params: unknown, signal: AbortSignal): Promise<unknown> {
   if (method === "initialize") {
@@ -190,7 +203,7 @@ async function upstream(method: string, params: unknown, signal: AbortSignal): P
     return result;
   }
   if (method === "tools/call" && isRecord(params) && appOnly.has(params.name as string)) throw new Refusal(-32602, APP_ONLY_REFUSAL);
-  const result = await client.request(method, params, signal);
+  const result = await client.request(method, upstreamParams(method, params), signal);
   if (method === "tools/list" && isRecord(result) && Array.isArray(result.tools)) {
     observer?.listed(result);
     for (const tool of result.tools) {
@@ -315,7 +328,7 @@ async function handle(message: Json): Promise<void> {
   }
   if (!id) {
     if (message.method === "notifications/initialized" && initialized) return;
-    try { await client.notify(message.method, message.params, AbortSignal.timeout(30_000)); }
+    try { await client.notify(message.method, upstreamParams(message.method, message.params), AbortSignal.timeout(30_000)); }
     catch {}
     return;
   }
@@ -331,13 +344,17 @@ async function handle(message: Json): Promise<void> {
     send({ jsonrpc: "2.0", id: message.id, result: message.method === "tools/list" ? capToolListResult(fitToolListResult(result, SCHEMA_PROFILE, logFit), TOOL_LIMIT, logFit) : result });
   } catch (failure) {
     // Transport failures may carry URLs or header values: never relayed.
-    if (failure instanceof Refusal) error(message.id, failure.code, failure.message);
-    else if (failure instanceof McpRpcError) error(message.id, failure.code ?? -32603, remoteErrorText(failure.detail));
-    else if (failure instanceof McpHttpError && failure.status === 401) error(message.id, -32603, CREDENTIALS_REFUSED);
-    else if (failure instanceof McpHttpError && failure.kind === "status" && !signal.aborted) error(message.id, -32603, remoteStatusText(failure.status));
-    else if (failure instanceof McpHttpError && failure.kind === "network" && failure.message === "request failed" && !signal.aborted) error(message.id, -32603, "Could not reach this MCP server. Check its URL and that it is online.");
-    else if (failure instanceof McpHttpError && failure.kind === "protocol" && !signal.aborted) error(message.id, -32603, remoteErrorText(failure.message));
-    else error(message.id, signal.aborted ? -32800 : -32603, signal.aborted ? "MCP request cancelled" : "Remote MCP request failed");
+    let code = -32603;
+    let reason = "Remote MCP request failed";
+    if (failure instanceof Refusal) { code = failure.code; reason = failure.message; }
+    else if (failure instanceof McpRpcError) { code = failure.code ?? -32603; reason = remoteErrorText(failure.detail); }
+    else if (failure instanceof McpHttpError && failure.status === 401) reason = CREDENTIALS_REFUSED;
+    else if (failure instanceof McpHttpError && failure.kind === "status" && !signal.aborted) reason = remoteStatusText(failure.status);
+    else if (failure instanceof McpHttpError && failure.kind === "network" && failure.message === "request failed" && !signal.aborted) reason = "Could not reach this MCP server. Check its URL and that it is online.";
+    else if (failure instanceof McpHttpError && failure.kind === "protocol" && !signal.aborted) reason = remoteErrorText(failure.message);
+    else if (signal.aborted) { code = -32800; reason = "MCP request cancelled"; }
+    if (!(failure instanceof Refusal) && !signal.aborted) process.stderr.write(`mcp-remote-proxy: ${message.method} failed: ${reason}\n`);
+    error(message.id, code, reason);
   } finally { pending.delete(id); }
 }
 

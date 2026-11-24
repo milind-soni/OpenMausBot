@@ -201,10 +201,10 @@ describe("a Cloud home is personal: settling who its owner was (server/cloud-own
     settleCloudOwnership(options(w, undefined, {}, log));
     expect(w.unpinned).toEqual(["guest"]);
     expect(w.paused).toEqual(["theirs"]);
-    expect(log.filter((line) => line.includes("Phone & devices → Paired"))).toHaveLength(1);
+    expect(log.filter((line) => line.includes("Settings → Devices, and remove"))).toHaveLength(1);
     const again: string[] = [];
     settleCloudOwnership(options(w, undefined, {}, again));
-    expect(again.join("\n")).not.toContain("Phone & devices → Paired");
+    expect(again.join("\n")).not.toContain("Settings → Devices, and remove");
     expect(w.paused).toEqual(["theirs"]);
   });
 

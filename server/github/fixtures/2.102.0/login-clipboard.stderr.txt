@@ -1,0 +1,4 @@
+
+! One-time code (0DE6-7337) copied to clipboard
+Open this URL to continue in your web browser: https://github.com/login/device
+failed to authenticate via web browser: Post "https://github.com/login/oauth/access_token": read tcp 192.0.2.10:60511->192.0.2.20:443: read: can't assign requested address

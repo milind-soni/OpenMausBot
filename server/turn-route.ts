@@ -1,6 +1,6 @@
 import type { ModelCatalog, ModelSelection } from "./contracts.ts";
 import { isConversational, type ReplyStyle } from "../shared/reply-style.ts";
-import type { EffortLevel } from "../shared/wire.ts";
+import { offeredEffortLevels, type EffortLevel } from "../shared/wire.ts";
 
 export type TurnTier = "simple" | "complex";
 
@@ -125,7 +125,9 @@ export function routeDirectTurn(
     variant: bot.modelSelection.variant,
     catalog: instance.quickModelsUsable?.() === false ? undefined : instance.models,
     refused,
-    effortLevels: instance.adapter.capabilities.effortLevels,
+    effortLevels: instance.models
+      ? offeredEffortLevels({ models: instance.models, adapter: instance.adapter }, bot.modelSelection.model)
+      : instance.adapter.capabilities.effortLevels,
     contextTokens: task.usage?.context?.tokens,
   });
 }

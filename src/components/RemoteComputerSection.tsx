@@ -117,7 +117,7 @@ export function RemoteComputerSection({ hideWhenUnavailable = false, legacyOnly 
             {t("remote.client.mode")}
           </p>
           <p role="status" className="rounded-lg bg-inset px-3 py-2 text-[13px] leading-relaxed text-ink" data-legacy-client-notice="">
-            {t("remote.client.endsDec7")}
+            {t("remote.client.endsDec7Devices")}
           </p>
           <button
             type="button"
@@ -184,7 +184,7 @@ export function RemoteComputerSection({ hideWhenUnavailable = false, legacyOnly 
           ) : (
             <>
               <p className="text-[13px] leading-relaxed text-ink-secondary">
-                {t("remote.client.companion.hint")}
+                {t("remote.client.companion.hintDevices")}
               </p>
               <label className="flex flex-col gap-1.5 text-[12px] text-ink-secondary">
                 {t("remote.client.companion.address")}

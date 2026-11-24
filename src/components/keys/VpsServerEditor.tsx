@@ -1,11 +1,10 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { api, type ConfigStatus } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { cn } from "@/lib/cn";
 import { vpsAliasOfServerId } from "../../../shared/bot-computers";
 import { t } from "@/lib/i18n";
-import { SETTINGS_INLINE_INPUT } from "../SettingsPrimitives";
 import { KEY_FIELD } from "./KeyRow";
 
 type VpsStatus = ConfigStatus["vps"];
@@ -50,28 +49,24 @@ export function limitValue(text: string, range: Range): number | undefined | nul
 }
 const asText = (n: number | undefined) => (n === undefined ? "" : String(n));
 
-export function LimitInput({ label, unit, value, onChange, range, placeholder, disabled, onEnter }: {
-  label: string; unit: string; value: string; onChange: (value: string) => void; range: Range; placeholder: number; disabled: boolean; onEnter: () => void;
+/** A labelled field of the editor: its name above, the control under it. */
+export function Field({ id, label, wide = false, children }: { id: string; label: string; wide?: boolean; children: ReactNode }) {
+  return (
+    <div className={cn("flex min-w-0 flex-col gap-1", wide && "@min-[22rem]/vps:col-span-2")}>
+      <label htmlFor={id} className="text-[12px] leading-4 text-ink-secondary">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+export function LimitField({ id, value, onChange, range, placeholder, disabled, onEnter }: {
+  id: string; value: string; onChange: (value: string) => void; range: Range; placeholder: number; disabled: boolean; onEnter: () => void;
 }) {
   return (
-    <label className="flex shrink-0 items-center gap-1.5 text-[13px] leading-[18px] text-ink-secondary">
-      <input
-        type="number"
-        inputMode="numeric"
-        min={range.min}
-        max={range.max}
-        step={1}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && onEnter()}
-        disabled={disabled}
-        placeholder={String(placeholder)}
-        aria-label={label}
-        aria-invalid={limitValue(value, range) === null}
-        className={cn(SETTINGS_INLINE_INPUT, "w-14 placeholder:text-ink-tertiary")}
-      />
-      {unit}
-    </label>
+    <input id={id} type="number" inputMode="numeric" min={range.min} max={range.max} step={1} value={value}
+      onChange={(e) => onChange(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onEnter()} disabled={disabled}
+      placeholder={t("keys.vps.field.inherited", { value: placeholder })} aria-invalid={limitValue(value, range) === null}
+      className={cn(KEY_FIELD, "tabular-nums")} />
   );
 }
 
@@ -83,10 +78,13 @@ export function LimitInput({ label, unit, value, onChange, range, placeholder, d
  */
 export type VpsServerEditorProps = ({ alias: string; serverId?: never } | { serverId: string; alias?: never }) & {
   onRemoved?: (notice: string | null) => void;
+  /** The line under the fields saying what the limits are; a list that says it once for every server turns it off. */
+  hint?: boolean;
 };
 
 /** Takes the server's SSH alias, or its `vps:<alias>` device id from the computers list or the Devices page. */
-export function VpsServerEditor({ onRemoved, ...which }: VpsServerEditorProps) {
+export function VpsServerEditor({ onRemoved, hint = true, ...which }: VpsServerEditorProps) {
+  const fieldId = useId();
   const alias = which.alias ?? vpsAliasOfServerId(which.serverId ?? "") ?? "";
   const vps = useStoreSelector((s) => s.config?.vps);
   const named = vps?.servers ?? NO_SERVERS;
@@ -147,30 +145,39 @@ export function VpsServerEditor({ onRemoved, ...which }: VpsServerEditorProps) {
     work.then((removedNotice) => onRemoved?.(removedNotice), () => undefined);
   };
 
+  const ids = { name: `${fieldId}-name`, memory: `${fieldId}-memory`, cpus: `${fieldId}-cpus` };
   return (
-    <div data-vps-server={alias} className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex min-w-[min(100%,12rem)] flex-1 items-center gap-2">
+    <div data-vps-server={alias} role="group" aria-label={label} className="flex flex-col gap-3 @container/vps">
+      <div className="grid grid-cols-1 gap-3 @min-[22rem]/vps:grid-cols-2">
+        <Field id={ids.name} label={t(isDefault ? "keys.vps.field.sshSettingsName" : "keys.vps.field.name")} wide>
           <input
+            id={ids.name}
             type="text"
             value={name}
             onChange={(e) => { setError(null); setName(e.target.value); }}
             onKeyDown={(e) => e.key === "Enter" && submit()}
             disabled={busy}
             data-key-input={isDefault ? "" : undefined}
-            aria-label={isDefault ? t("keys.vps.aria") : t("keys.vps.servers.nameOf", { alias })}
             autoComplete="off"
             spellCheck={false}
-            className={cn(KEY_FIELD, "flex-1", isDefault && "font-mono")}
+            aria-describedby={isDefault ? undefined : `${fieldId}-ssh`}
+            className={cn(KEY_FIELD, isDefault && "font-mono")}
           />
-          {!isDefault && <span className="max-w-[40%] shrink-0 truncate font-mono text-[12px] leading-4 text-ink-secondary">{alias}</span>}
-        </div>
-        <LimitInput label={t("keys.vps.serverMemoryAria", { name: label })} unit={t("keys.vps.unitGb")} value={memory} onChange={setMemory} range={MEMORY_GB} placeholder={inherited.memoryGb} disabled={busy} onEnter={submit} />
-        <LimitInput label={t("keys.vps.serverCpusAria", { name: label })} unit={t("keys.vps.unitCores")} value={cpus} onChange={setCpus} range={CPUS} placeholder={inherited.cpus} disabled={busy} onEnter={submit} />
+          {!isDefault && <span id={`${fieldId}-ssh`} data-vps-ssh-name="" className="break-all text-[12px] leading-4 text-ink-secondary">{t("keys.vps.sshSettingsName", { alias })}</span>}
+        </Field>
+        <Field id={ids.memory} label={t("keys.vps.field.memory")}>
+          <LimitField id={ids.memory} value={memory} onChange={setMemory} range={MEMORY_GB} placeholder={inherited.memoryGb} disabled={busy} onEnter={submit} />
+        </Field>
+        <Field id={ids.cpus} label={t("keys.vps.field.cpus")}>
+          <LimitField id={ids.cpus} value={cpus} onChange={setCpus} range={CPUS} placeholder={inherited.cpus} disabled={busy} onEnter={submit} />
+        </Field>
+      </div>
+      {hint && <p data-vps-limits-line="" className="text-[12px] leading-4 text-ink-secondary">{t("keys.vps.limitsLine", { memory: inherited.memoryGb, cpus: inherited.cpus })}</p>}
+      <div className="flex flex-wrap items-center gap-2">
         <button type="button" onClick={submit} disabled={busy || !valid || !dirty} className="ui-button ui-button-primary shrink-0">
           {saving === alias && dirty ? <Loader2 size={13} className="animate-spin" aria-hidden="true" /> : t("common.save")}
         </button>
-        <button type="button" onClick={remove} disabled={busy} aria-label={t("keys.vps.servers.removeAria", { name: label })} className="ui-button shrink-0">
+        <button type="button" onClick={remove} disabled={busy} aria-label={t("keys.vps.servers.removeAria", { name: label })} data-danger="" className="ui-button ms-auto shrink-0 text-danger!">
           {saving === alias && !dirty ? <Loader2 size={13} className="animate-spin" aria-hidden="true" /> : t("keys.row.remove")}
         </button>
       </div>

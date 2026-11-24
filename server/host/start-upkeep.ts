@@ -4,6 +4,7 @@
 // The task workspaces' sweep is held off unless OMB_TASK_WORKSPACE_RETENTION is on: it deletes any node_modules and
 // any venv outright, without checking that a package manager made them, so a venv holding the person's own script or
 // a hand-written node_modules would go, and on a desktop a task workspace can be a project the person also works in.
+// The cache cap's sweeper (cache-sweep/) starts here too; it deletes nothing while a turn or an engine process is alive.
 import { cleanupStaleAttachmentPartials } from "../attachments.ts";
 import type { BotRecord } from "../store.ts";
 import { sweepTaskWorkspaceBuildFolders } from "../task-workspace-retention.ts";
@@ -23,6 +24,8 @@ export interface StartUpkeepDeps {
   busy: (botId: string, threadId: string) => boolean;
   openDirectHandoff: (threadId: string) => boolean;
   cleanupPartials?: () => number;
+  caches?: { start(busy: () => boolean): void };
+  enginesLive?: () => boolean;
   sweepLogs?: typeof sweepThreadEventLogs;
   sweepWorkspaces?: (candidates: Parameters<typeof sweepTaskWorkspaceBuildFolders>[0]) => string[] | Promise<string[]>;
   /** Whether the task workspaces' sweep runs; taskWorkspaceRetentionOn by default (off). */
@@ -90,4 +93,7 @@ export function startUpkeep(deps: StartUpkeepDeps): void {
     sweepAll();
   });
   setInterval(sweepAll, THREAD_LOG_RETENTION_SWEEP_MS).unref();
+  // Busy: a turn runs, or an engine process lives on between turns (a kept-warm engine, the MCP servers it started), which
+  // may run a program out of a cache entry.
+  deps.caches?.start(() => (deps.enginesLive?.() ?? false) || deps.bots().some((bot) => (bot.tasks ?? []).some((task) => deps.busy(bot.id, task.threadId))));
 }

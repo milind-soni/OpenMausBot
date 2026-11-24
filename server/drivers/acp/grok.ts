@@ -552,6 +552,10 @@ const support: AcpSupport = {
     ...(turn.effort ? ["--reasoning-effort", turn.effort] : []),
     "stdio",
   ],
+  oneShotModel: (model, env) => {
+    const resolved = ensureGrokInjectSlug(model, env);
+    return resolved !== "default" && SLUG.test(resolved) ? resolved : undefined;
+  },
   spawnContractArgs: (config, turn) => grokContractArgs(support.spawnArgs(config, turn), turn),
   loadReplayQuietMs: (turn) => narrowsNativeTools(turn.toolScope) ? undefined : GROK_LOAD_REPLAY_QUIET_MS,
   permissionRequest: grokPermissionRequest,

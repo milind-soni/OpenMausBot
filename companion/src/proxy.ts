@@ -59,6 +59,9 @@ export interface ProxyOptions {
   e2eDescriptor?: (deviceId: string | null) => E2EDescriptor | null;
   /** A phone paired through an encrypted session keyed by the pairing token: the session is now that device's. */
   e2ePaired?: (context: E2EContext, deviceId: string) => void;
+  /** The desktop app's own key save (encrypted store first). When set, a phone's `PUT /api/config` goes here and
+   * never to the harness, which would keep the key only in its config file. */
+  saveProviderKey?: (patch: unknown) => Promise<{ status: number; body: unknown }>;
 }
 
 /** Which listener a request reached. Only `lan` (port 8810, plain HTTP) refuses a device that has gone end-to-end;
@@ -69,6 +72,9 @@ export type ProxyListener = "lan" | "origin";
 const UPDATE_APP = { error: "update_app" } as const;
 
 const PAIRING_SESSION_PATHS = new Set(["POST /api/pair", "GET /api/health"]);
+
+/** Requests whose body carries a provider key. */
+const KEY_CARRYING = new Set(["PUT /api/config", "POST /api/keys/test"]);
 
 const RELEASE_VERSION = /^[0-9]{1,9}\.[0-9]{1,9}\.[0-9]{1,9}(-[0-9A-Za-z.-]{1,64})?(\+[0-9A-Za-z.-]{1,64})?$/;
 
@@ -438,6 +444,11 @@ export function createProxyHandler(options: ProxyOptions) {
     });
     if (denial) return sendJson(res, denial.status, { error: denial.error });
 
+    // A provider key never crosses the LAN in the clear: on the plain listener it must arrive inside an encrypted session.
+    if (!e2e && listener === "lan" && KEY_CARRYING.has(`${method} ${path}`)) {
+      return sendJson(res, 403, { error: "API keys can only be sent over an encrypted connection. Update the app and try again." });
+    }
+
     // Pairing grants the ordinary companion surface, not a computer's browser
     // session; the owner enables this per device, off by default.
     if (isCloudDesktopAccess(method, path) && !device?.cloudDesktopAccess) {
@@ -501,6 +512,15 @@ export function createProxyHandler(options: ProxyOptions) {
     // checks, never sent to the harness.
     if (method === "GET" && path === "/api/companion/endpoints") {
       return sendJson(res, 200, endpointsFor(device?.id ?? null));
+    }
+
+    const { saveProviderKey } = options;
+    if (device && saveProviderKey && method === "PUT" && path === "/api/config") {
+      readJson(req, 8 * 1024).then(
+        (body) => saveProviderKey(body).then((reply) => sendJson(res, reply.status, scrub(reply.body))),
+        (error: Error) => sendJson(res, 400, { error: error.message }),
+      ).catch(() => sendJson(res, 502, { error: "the key could not be saved on this computer" }));
+      return;
     }
 
     const mutationToken = device ? options.mutationToken?.() : undefined;

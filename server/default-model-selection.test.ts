@@ -72,6 +72,24 @@ describe("new bot default model selection", () => {
     expect(preferred.effort).toBe("high");
   });
 
+  it("drops a saved effort level unsupported by that specific model even when the engine advertises it", () => {
+    const preferred = { instanceId: "codex", model: "gpt-6-luna", effort: "ultra" as const };
+    const modelScopedCodex = {
+      ...codex,
+      models: {
+        default: "gpt-6.2-sol",
+        options: [
+          { id: "gpt-6.2-sol", label: "GPT-6.2-Sol", effortLevels: ["low", "medium", "high", "xhigh", "max", "ultra"] as const },
+          { id: "gpt-6-luna", label: "GPT-6-Luna", effortLevels: ["low", "medium", "high", "xhigh", "max"] as const },
+        ],
+      },
+      capabilities: { effortLevels: ["low", "medium", "high", "xhigh", "max", "ultra"] as const },
+    };
+    expect(selectDefaultModelSelection([modelScopedCodex], preferred)).toEqual({ instanceId: "codex", model: "gpt-6-luna" });
+    expect(selectDefaultModelSelection([modelScopedCodex], { instanceId: "codex", model: "gpt-6.2-sol", effort: "ultra" }))
+      .toEqual({ instanceId: "codex", model: "gpt-6.2-sol", effort: "ultra" });
+  });
+
   it("accepts the provider default even when it is not repeated in its options", () => {
     expect(selectDefaultModelSelection(
       [{ ...codex, models: { default: "codex-default", options: [] } }],

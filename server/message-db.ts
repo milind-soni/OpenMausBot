@@ -25,7 +25,7 @@ const CARD_KINDS = "kind IN ('secret', 'signin', 'connector')";
 const FAILED_CALL = "kind = 'activity' AND instr(json, '\"ok\":false') > 0";
 /** The rows that order the thread list and the time each one counts at. SQLite uses messages_thread_order only for a
  * statement whose WHERE and MAX repeat these texts exactly. */
-const ORDERING_ROW = "((role = 'user' AND json_extract(json, '$.peerAsk') IS NULL) OR (role = 'bot' AND kind = 'text' AND (json_extract(json, '$.turnTerminal') = 1 OR json_extract(json, '$.turnId') IS NULL)))";
+export const ORDERING_ROW = "((role = 'user' AND json_extract(json, '$.peerAsk') IS NULL) OR (role = 'bot' AND kind = 'text' AND (json_extract(json, '$.turnTerminal') = 1 OR json_extract(json, '$.turnId') IS NULL)))";
 const ORDERING_AT = "COALESCE(json_extract(json, '$.turnCompletedAt'), at)";
 
 let handle: DatabaseSync | null = null;

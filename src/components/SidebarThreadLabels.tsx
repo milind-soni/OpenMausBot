@@ -1,6 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { createPortal } from "react-dom";
-import { ChevronRight, Clock3, Loader2, Plus, X } from "lucide-react";
+import { useLayoutEffect, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { ChevronRight, Clock3, Loader2, Pin, Plus, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { nextRename } from "@/lib/rename";
@@ -8,10 +7,12 @@ import { localizedTaskTitle } from "@/lib/task-title";
 import { setThreadsUnfolded, useThreadsUnfolded } from "@/lib/thread-fold-preferences";
 import type { Action, AppState, Bot } from "@/state/store";
 import { botOpensTo } from "@/state/thread-navigation";
-import { canUnfold, threadLabels, type LabelRow } from "./sidebar-thread-labels";
+import { canUnfold, openThreadPinned, threadLabels, type LabelRow } from "./sidebar-thread-labels";
 import { isWorking } from "./SidebarThreadRow";
 import { showAllConversations } from "./bot-panel/Conversations";
 import { reducedMotion } from "./MenuMotion";
+import { UndoToast, useUndoToast } from "./UndoToast";
+import { MainThreadMark } from "./SidebarRowMarkers";
 
 const SLOT = "pointer-events-none absolute end-[30px] top-1.5 flex size-6 items-center justify-center rounded-lg text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:hidden touch:pointer-events-auto touch:opacity-70 motion-reduce:transition-none";
 const ROW = "group/label relative flex h-8 w-full min-w-0 items-center gap-2 rounded-lg ps-2.5 pe-2 text-start text-[13px] leading-[18px] outline-none transition-colors duration-[120ms] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none";
@@ -25,6 +26,7 @@ const STAGGER_STEPS = 3;
 const YIELDS = "group-hover/label:[mask-image:linear-gradient(to_left,transparent_20px,black_36px)] rtl:group-hover/label:[mask-image:linear-gradient(to_right,transparent_20px,black_36px)]";
 
 type FoldBot = Pick<Bot, "id" | "name" | "tasks">;
+type FillBot = FoldBot & Pick<Bot, "threadId" | "switchingTo">;
 
 export const threadLabelsId = (botId: string) => `thread-labels-${botId}`;
 
@@ -45,10 +47,10 @@ export function ThreadFoldChevron({ bot, dispatch }: { bot: FoldBot; dispatch: D
   );
 }
 
-/** Whether one of the bot's unfolded rows carries the selected fill instead of its row: not while its blank New thread
- * chat (`drafting`) is open, which has no row of its own yet. */
-export function useRowUnfolded(bot: FoldBot, drafting = false): boolean {
-  return useThreadsUnfolded(bot.id) && canUnfold(bot) && !drafting;
+/** Whether one of the rows under the bot carries the selected fill instead of its row (it is unfolded, or the open thread
+ * is pinned): not while its blank New thread chat (`drafting`) is open, which has no row of its own yet. */
+export function useFillOnLabel(bot: FillBot, drafting = false): boolean {
+  return ((useThreadsUnfolded(bot.id) && canUnfold(bot)) || openThreadPinned(bot)) && !drafting;
 }
 
 function StatusMark({ row }: { row: LabelRow }) {
@@ -62,8 +64,6 @@ function StatusMark({ row }: { row: LabelRow }) {
   }
 }
 
-type Toast = { text: string; undo: () => void };
-
 /** The rows under a bot in Simple mode's sidebar: what is going on while folded, the bot's active threads unfolded. */
 export function SidebarThreadLabels({ bot, selected, drafting = false, rowThreadId, pendingQueued, dispatch }: {
   bot: Bot; selected: boolean; drafting?: boolean; rowThreadId: string; pendingQueued: AppState["pendingQueued"]; dispatch: Dispatch<Action>;
@@ -73,27 +73,26 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
   const { rows, more, runningMore } = threadLabels(bot, pendingQueued, { unfolded, current, rowThreadId, now: Date.now() });
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const [toast, setToast] = useState<Toast | null>(null);
+  const [toast, setToast] = useUndoToast();
   const [focusAt, setFocusAt] = useState<number | null>(null);
   const finishing = useRef(false);
   const tree = useRef<HTMLDivElement>(null);
-  // Folding plays the unfold backwards: the rows that go fade out in place before the list shortens.
+  // Folding plays the unfold backwards: the rows that go fade out in place before the list shortens. So does a row
+  // that leaves because it was unpinned.
   const shown = useRef({ unfolded, rows, more });
   const [leaving, setLeaving] = useState<{ rows: LabelRow[]; gone: ReadonlySet<string>; more: number } | null>(null);
+  const pins = rows.filter((row) => row.pinned).map((row) => row.task.threadId).join("\n");
   useLayoutEffect(() => {
     const was = shown.current;
-    if (!was.unfolded || unfolded || reducedMotion()) { setLeaving(null); return; }
     const kept = new Set(rows.map((row) => row.task.threadId));
-    setLeaving({ rows: was.rows, gone: new Set(was.rows.filter((row) => !kept.has(row.task.threadId)).map((row) => row.task.threadId)), more: was.more });
+    const folding = was.unfolded && !unfolded;
+    const gone = was.rows.filter((row) => !kept.has(row.task.threadId) && (folding || row.pinned));
+    if (!gone.length || reducedMotion()) { setLeaving(null); return; }
+    setLeaving({ rows: was.rows, gone: new Set(gone.map((row) => row.task.threadId)), more: was.more });
     const timer = window.setTimeout(() => setLeaving(null), FOLD_MS);
     return () => window.clearTimeout(timer);
-  }, [unfolded]);
+  }, [unfolded, pins]);
   useLayoutEffect(() => { shown.current = { unfolded, rows, more }; });
-  useEffect(() => {
-    if (!toast) return;
-    const timer = window.setTimeout(() => setToast(null), 6000);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
   if (!rows.length && !more && !runningMore && !toast && !leaving) return null;
 
   const items = () => Array.from(tree.current?.querySelectorAll<HTMLElement>("[role=treeitem]") ?? []);
@@ -174,8 +173,14 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
                 }}
                 className="-ms-1.5 h-7 min-w-0 flex-1 rounded-md border border-focus bg-transparent px-1.5 text-[13px] text-ink outline-none" />
             ) : <>
-              <span dir="auto" className={cn("min-w-0 flex-1 truncate", hideable(row) && YIELDS)}>{title}</span>
-              <span className={cn("flex shrink-0 items-center", hideable(row) && "transition-opacity duration-[120ms] group-hover/label:opacity-0 motion-reduce:transition-none")}><StatusMark row={row} /></span>
+              <span className={cn("flex min-w-0 flex-1 items-center gap-1.5", hideable(row) && YIELDS)}>
+                <span dir="auto" className="min-w-0 truncate">{title}</span>
+                {row.pinned && <Pin size={10} role="img" aria-label={t("task.pinned")} className="shrink-0 text-ink-tertiary" />}
+              </span>
+              {row.task.threadId === bot.mainThreadId && <MainThreadMark />}
+              <span className={cn("flex shrink-0 items-center", hideable(row) && "transition-opacity duration-[120ms] group-hover/label:opacity-0 motion-reduce:transition-none")}>
+                <StatusMark row={row} />
+              </span>
               {hideable(row) && (
                 <button type="button" tabIndex={-1} aria-label={t("sidebar.threads.hide", { title })} title={t("sidebar.threads.hideShort")}
                   onClick={(event) => { event.stopPropagation(); hide(row); }}
@@ -204,12 +209,6 @@ export function SidebarThreadLabels({ bot, selected, drafting = false, rowThread
         </div>
       )}
     </div>
-    {toast && createPortal(
-      <div role="status" className="fixed bottom-4 start-[calc(var(--rail-beside,0px)_+_1rem)] z-[60] flex max-w-[340px] items-center gap-3 rounded-xl border border-hairline/50 bg-card px-3.5 py-2.5 text-[13px] text-ink shadow-xl animate-fade-in motion-reduce:animate-none">
-        <span className="min-w-0 line-clamp-2">{toast.text}</span>
-        <button type="button" onClick={() => { toast.undo(); setToast(null); }} className="shrink-0 rounded-md px-1.5 py-0.5 font-medium text-accent-text hover:bg-ink/[0.06]">{t("common.undo")}</button>
-      </div>,
-      document.body,
-    )}
+    <UndoToast toast={toast} onDone={() => setToast(null)} />
   </>;
 }

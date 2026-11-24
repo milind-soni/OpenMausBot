@@ -135,6 +135,14 @@ describe("each screen of the sheet says one thing and offers one next step", () 
     for (const gone of ["Personal", "$29", "Your plan"]) expect(text(theirs)).not.toContain(gone);
   });
 
+  it("Choose tells someone with bots on this computer that a bot lives in one place, under the lede, and nobody else", () => {
+    const shown = (botsHere: boolean) => renderToStaticMarkup(createElement(ChooseScreen, { offer: TRIAL, now: NOW, busy: false, signedOut: false, notice: null, botsHere, onStart: vi.fn(), onSignIn: vi.fn() }));
+    inOrder(text(shown(true)), ["Runs your bots 24/7 in the cloud, even when this computer is off.", "Each bot lives in one place: this computer or My Cloud. Bots on My Cloud keep working while this computer is off.", "Starter"]);
+    expect(shown(false)).not.toContain("data-cloud-one-place");
+    expect(text(panel({ kind: "offer", offer: TRIAL, signedOut: false, notice: null }, { botsHere: true }).html)).toContain("Each bot lives in one place");
+    expect(panel({ kind: "offer", offer: TRIAL, signedOut: false, notice: null }).html).not.toContain("data-cloud-one-place");
+  });
+
   it("Choose from an Admin that still sells Personal: no Personal card, Pro is Most popular, and every card keeps the same rows", () => {
     const wire = ({ tier, label, amount, allowances }: (typeof PLANS)[number]) => ({ tier, label, price: { currency: "USD", amount, interval: "month" }, allowances });
     const personal = { ...PLANS[0]!, tier: "personal", label: "Personal", amount: 2900 };

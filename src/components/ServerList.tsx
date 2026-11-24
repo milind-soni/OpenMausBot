@@ -9,7 +9,8 @@ import { useCopyFeedback } from "@/lib/copy-text";
 import { byHand } from "@/lib/saved-servers";
 import { t } from "@/lib/i18n";
 import { OwnServerLink, RailSheet } from "./PlaceAddSheet";
-import { SettingsLinkRow, SettingsRows, Switch } from "./SettingsPrimitives";
+import { SettingsLinkRow, SettingsRows } from "./SettingsPrimitives";
+import { LendComputerSwitch } from "./LendComputerSwitch";
 import { PlaceBadge } from "./settings/SettingsNav";
 
 type Saved = Awaited<ReturnType<NonNullable<NonNullable<Window["ogb"]>["environments"]>["state"]>>;
@@ -63,22 +64,9 @@ function StatusLine({ status, onTryNow, onPairAgain, onEdit }: { status: ServerS
   </div>;
 }
 
-/** "Share this computer" for a server of the person's own: the same switch and words wherever lending is shown. */
-function ShareRow({ name, share, busy, onShare, onOpen }: { name: string; share: OwnServerSharing; busy: boolean; onShare: (on: boolean) => void; onOpen: () => void }) {
-  const line = !share.enabled ? "servers.share.off" : share.paused ? "servers.share.paused" : "servers.share.on";
-  return <div data-server-share={share.id} className="mt-2 flex items-center gap-3 rounded-lg bg-inset px-3 py-2">
-    <div className="min-w-0 flex-1">
-      <div className="text-[12px] font-medium text-ink">{t("servers.share.title")}</div>
-      <div className="text-[12px] text-ink-secondary">{t(line, { name })}</div>
-    </div>
-    {share.enabled && <button type="button" disabled={busy} onClick={onOpen} className="shrink-0 text-[12px] font-medium text-accent-text hover:underline disabled:opacity-50">{t("servers.share.choose")}</button>}
-    <Switch checked={share.enabled} disabled={busy} aria-label={t("servers.share.for", { name })} onClick={() => onShare(!share.enabled)} />
-  </div>;
-}
-
-export function ServerList({ saved, busy, sharingOffered, ownServers = [], appVersion, onSwitch, onForget, onComputerAccess, onShare = () => {} }: {
+export function ServerList({ saved, busy, sharingOffered, ownServers = [], appVersion, onSwitch, onForget, onComputerAccess }: {
   saved: Saved; busy: boolean; sharingOffered: boolean; ownServers?: OwnServerSharing[]; appVersion: string | null;
-  onSwitch: (id: string) => void; onForget: (id: string) => void; onComputerAccess: (id: string) => void; onShare?: (id: string, on: boolean) => void;
+  onSwitch: (id: string) => void; onForget: (id: string) => void; onComputerAccess: (id: string) => void;
 }) {
   const bridge = window.ogb?.environments;
   const [statuses, setStatuses] = useState<ServerStatus[]>([]);
@@ -94,7 +82,7 @@ export function ServerList({ saved, busy, sharingOffered, ownServers = [], appVe
   }, [bridge, saved]);
   const statusOf = (id: string) => statuses.find((status) => status.id === id);
   const pairAgain = (entry: Entry) => setSheet({ address: entry.origin!, locked: true, title: t("servers.pairAgainTitle", { name: entry.name }) });
-  const editAddress = (entry: Entry) => setSheet({ address: entry.origin!.replace(/^http:/, "https:"), locked: false, title: t("connect.title") });
+  const editAddress = (entry: Entry) => setSheet({ address: entry.origin!.replace(/^http:/, "https:"), locked: false, title: t("connect.otherTitle") });
   const rows: Entry[] = [{ id: "local", name: t("place.local"), kind: "local" }, ...saved.environments.filter((entry) => entry.kind !== "local")];
   return <>
     <SettingsRows icons>
@@ -108,7 +96,7 @@ export function ServerList({ saved, busy, sharingOffered, ownServers = [], appVe
         const showUpdate = status?.behind === true && appVersion !== null && !hidden.includes(`${entry.id}:${status.version}`);
         return <div key={entry.id} data-server-row={entry.id} className="flex flex-col px-4 py-3">
           <div className="flex min-h-10 items-center gap-3">
-            {/* A place shows the same mark as on the rail, in the nav and on Phone & devices: its 24 px badge. */}
+            {/* A place shows the same mark as on the rail, in the nav and on Devices: its 24 px badge. */}
             {entry.id === "local"
               ? <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Laptop size={18} aria-hidden="true" /></span>
               : <span className="flex size-8 shrink-0 items-center justify-center"><PlaceBadge place={{ kind: entry.home || entry.cloud ? "cloud" : "server", name: entry.name, color: entry.color ?? null, named: true }} size={24} /></span>}
@@ -125,12 +113,13 @@ export function ServerList({ saved, busy, sharingOffered, ownServers = [], appVe
             {entry.id !== "local" && !entry.home && <button type="button" disabled={busy} data-danger="" aria-label={t("servers.removeName", { name: entry.name })} title={t("servers.removeName", { name: entry.name })}
               onClick={() => onForget(entry.id)} className="settings-quiet shrink-0 cursor-pointer">{t("remote.devices.removeShort")}</button>}
           </div>
-          {share && <div className="pl-11"><ShareRow name={entry.name} share={share} busy={busy} onShare={(on) => onShare(entry.id, on)} onOpen={() => onComputerAccess(entry.id)} /></div>}
+          {/* "Let its bots use this computer": the same switch as its card, the add form and its Screen panel. */}
+          {byHand(entry) && <LendComputerSwitch id={entry.id} className="ms-11 mt-2" onChoose={() => onComputerAccess(entry.id)} />}
           {showUpdate && <div className="pl-11"><UpdateNote name={entry.name} status={status!} appVersion={appVersion!} onHide={() => setHidden((list) => [...list, `${entry.id}:${status!.version}`])} /></div>}
         </div>;
       })}
-      <SettingsLinkRow title={t("connect.title")} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Plus size={18} aria-hidden="true" /></span>}
-        onClick={() => { if (!busy) setSheet({ address: "", locked: false, title: t("connect.title") }); }} data={{ "data-server-connect": "" }} />
+      <SettingsLinkRow title={t("connect.otherTitle")} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Plus size={18} aria-hidden="true" /></span>}
+        onClick={() => { if (!busy) setSheet({ address: "", locked: false, title: t("connect.otherTitle") }); }} data={{ "data-server-connect": "" }} />
     </SettingsRows>
     {sheet && <RailSheet focusKey={sheet.locked ? "pair-again" : "connect"} onClose={() => setSheet(null)}>
       <OwnServerLink onBack={null} onConnected={() => setSheet(null)} start={sheet} />

@@ -200,6 +200,9 @@ export const CLOUD_ENGINES_HERE = " The AIs bots run on (Claude, Codex, Cursor a
 /** My Cloud's disk is its owner's: what a task already has in its folder is used again, not fetched a second time. */
 export const CLOUD_REUSE_INSTALLS = " Reuse, and update if needed, what is already installed or cloned in your working folder instead of installing or cloning it again, unless the person asks for a fresh copy.";
 
+/** Work on a Cloud disk lives only there: code with a remote goes up as a branch, never over anyone's main line. */
+export const CLOUD_PUSH_CODE_WORK = " When a project in your working folder has a git remote the person works in and you can push to it, commit your work and push it to one branch of your own, reusing that branch, instead of leaving it only on this disk: never force-push, never push to the default branch, and never commit secrets, .env files or installed packages such as node_modules.";
+
 /** `asks`: the person's own Cloud, whose bots ask them to turn on what their computer doesn't give now (ask_for_computer). */
 export function cloudHomePrompt(sharedComputerTools: boolean, synced: ReadonlyArray<{ computerName: string; pcPath: string; cloudPath: string }> = [],
   lent: ReadonlyArray<{ name: string; platform: "darwin" | "win32" | "linux" | null; online?: boolean; lent?: boolean; lastSeenAt?: number; typing?: boolean }> = [], asks = false): string {
@@ -216,6 +219,7 @@ export function cloudHomePrompt(sharedComputerTools: boolean, synced: ReadonlyAr
     + " the built-in browser and their cloud computer, a desktop in the cloud. Call it their cloud computer, as the app does. Never ask them to set up this computer or a Local VM; neither exists here."
     + CLOUD_ENGINES_HERE
     + CLOUD_REUSE_INSTALLS
+    + CLOUD_PUSH_CODE_WORK
     + syncedFoldersPrompt(synced);
 }
 

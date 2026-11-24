@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -186,10 +189,30 @@ describe("sidebar top row", () => {
     expect(advanced.indexOf("data-traffic-light-space")).toBeLessThan(advanced.indexOf("data-rail-toggle"));
     fixture.advanced = false;
     const simple = topRow(render());
-    expect(simple, "Simple keeps its own top row, not the frame's corner").toMatch(/^data-sidebar-top-row="true"/);
+    expect(simple, "Simple keeps its own top row, not the frame's corner").toMatch(/^data-sidebar-top-row="simple"/);
     expect(simple.indexOf("data-traffic-light-space")).toBeLessThan(simple.indexOf("data-rail-toggle"));
     fixture.density = "icons";
     expect(classesOf(render(), "data-traffic-light-space"), "the column of avatars keeps a strip above for them").toEqual(["h-5", "w-full"]);
+  });
+
+  it("steps Simple's round buttons down to the thread tabs band's 32px, on the same 30px centre line", () => {
+    fixture.windowChrome = "mac-inset";
+    fixture.windowFrame = false;
+    fixture.rail = { available: true, hidden: false };
+    fixture.advanced = false;
+    desktop();
+    const html = render();
+    const row = html.slice(html.indexOf("data-sidebar-top-row"), html.indexOf(">", html.indexOf('aria-label="New or share"')));
+    expect(row).toMatch(/^data-sidebar-top-row="simple"/);
+    expect(classesOf(row, "data-sidebar-top-row")).toEqual(expect.arrayContaining(["h-[60px]", "items-start", "pt-3"]));
+    const round = [...row.matchAll(/<button[^>]*class="([^"]*)"/g)].map((match) => match[1].split(" "));
+    expect(round.length, "the rail's button, search and +").toBe(3);
+    for (const classes of round) expect(classes).toContain("size-9");
+    expect(row).toMatch(/data-rail-toggle/);
+    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "styles.css"), "utf8").replace(/\r\n/g, "\n");
+    const beside = ':root:has([data-chathead-tabs="simple"]) [data-sidebar-top-row="simple"]';
+    expect(css).toContain(`${beside} { padding-top: 14px; }`);
+    expect(css).toContain(`${beside} :is([data-rail-toggle], [data-sidebar-top-buttons] button.size-9) { width: 32px; height: 32px; }`);
   });
 
   it("with the frame turned off on Windows, its own title bar is back: nothing makes room and nothing drags", () => {

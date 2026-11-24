@@ -187,3 +187,9 @@ On the other server it is an ordinary Bot API call: confined, at Ask and with no
 tools (see [What a call may do](#what-a-call-may-do)), unless its owner marks
 the key **Acts as me**. Its limits hold too: ten calls a minute for the key, and
 no Bot API on a Cloud's Starter plan.
+
+## Apps built on it
+
+- [MausBot Notch](https://github.com/jgonzalez007/mausbot-notch) (community,
+  macOS): a notch app that talks to your bots through the Bot API. **Option+Space**
+  opens and closes the notch. It is maintained outside this repository.

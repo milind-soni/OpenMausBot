@@ -9766,6 +9766,9 @@ describe("harness HTTP API", () => {
         expect((await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: 1 } })).status).toBe(200);
         expect((await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).status).toBe(200);
         const holder = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Hold the slot" })).body.task;
+        // The bot's main thread is never at capacity, and it stays on the first conversation: make the holder main so the
+        // greeting's thread waits for the slot.
+        expect((await api("PATCH", `/api/bots/${bot.id}`, { mainThreadChoice: holder.threadId })).status).toBe(200);
         rmSync(fakeClaudeDump, { force: true });
         expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "hold the one slot", threadId: holder.threadId })).status).toBe(202);
         await readJsonFileWhenReady<Seen>(fakeClaudeDump, 15_000);
@@ -9967,7 +9970,7 @@ describe("harness HTTP API", () => {
   it("keeps skill authoring on by default and persists an explicit opt-out", async () => {
     const before = await api("GET", "/api/config");
     expect(before.status).toBe(200);
-    expect(before.body.features).toEqual({ browser: false, skillAuthoring: true, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", usbPhoneTakeover: false });
+    expect(before.body.features).toEqual({ browser: false, skillAuthoring: true, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", skillBurger: true, threadTabs: false, roomFeed: false, usbPhoneTakeover: false });
     const untouched = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     expect(untouched.features?.skillAuthoring).toBeUndefined();
     expect(untouched.features?.skillReview).toBeUndefined();
@@ -9977,15 +9980,20 @@ describe("harness HTTP API", () => {
       features: { skillAuthoring: false },
     });
     expect(saved.status).toBe(200);
-    expect(saved.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", usbPhoneTakeover: false });
+    expect(saved.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", skillBurger: true, threadTabs: false, roomFeed: false, usbPhoneTakeover: false });
 
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     // Earlier browser coverage may have persisted its own toggle: opting out must preserve sibling settings.
     expect(disk.features).toEqual({ ...untouched.features, skillAuthoring: false });
 
+    const burger = await api("PATCH", "/api/config", { features: { skillBurger: false, threadTabs: true, roomFeed: true } });
+    expect(burger.body.features).toMatchObject({ skillBurger: false, threadTabs: true, roomFeed: true });
+    expect(JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8")).features).toMatchObject({ skillBurger: false, threadTabs: true, roomFeed: true });
+    await api("PATCH", "/api/config", { features: { skillBurger: true, threadTabs: false, roomFeed: false } });
+
     const tools = await api("PATCH", "/api/config", { features: { showToolCalls: true } });
     expect(tools.status).toBe(200);
-    expect(tools.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: true, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", usbPhoneTakeover: false });
+    expect(tools.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: true, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", skillBurger: true, threadTabs: false, roomFeed: false, usbPhoneTakeover: false });
 
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {
@@ -14787,8 +14795,10 @@ describe("message pages", () => {
 });
 
 describe("resumable event stream", () => {
+  // A bot-level field: one numbered frame per change. A conversation's change (an unread mark is one) also sends the
+  // thread's own frame, which would number two.
   const nudge = async (botId: string) => {
-    const res = await api("PATCH", `/api/bots/${botId}`, { unread: true });
+    const res = await api("PATCH", `/api/bots/${botId}`, { mascotExpression: "happy" });
     expect(res.status).toBe(200);
   };
 

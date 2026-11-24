@@ -2385,7 +2385,7 @@ calls `POST /api/cloud/desktop/pairing` (same device token) and expects
 `{"cloudContractVersion":1,"origin":…,"code":…,"expiresAt":…}` for the same
 origin, with `expiresAt` at most ten minutes away. It then adds or selects the
 **My Cloud** server entry and opens `<origin>/pair#code=<code>`, the same
-pairing-link flow as Connect to a server. The code stays in main-process
+pairing-link flow as Connect to another computer. The code stays in main-process
 memory for that one navigation: never on disk, never in a renderer. A
 malformed session summary or grant is treated as none.
 
@@ -2584,7 +2584,9 @@ actions, the tip, the dialog's views and checkouts opened, with no content.
 
 Once the Cloud is ready (and the Admin's `moves` switch lets this account
 move), the desktop app moves everything from this computer to it, once, by
-itself, and from then on opens the Cloud as its only home
+itself when this computer has one bot (with more, it first asks which go:
+**Move everything**, or a choice that leaves the rest working here, as a bot's
+own **Move to My Cloud** does), and after a whole move opens the Cloud as its only home
 (`electron/one-home.mjs`, `electron/home-window.mjs`). The move carries each
 thing by id over one owner session (`electron/cloud-send.mjs`), checks that it
 all arrived, and freezes this computer's copy so nothing runs in two places
@@ -2593,6 +2595,18 @@ all arrived, and freezes this computer's copy so nothing runs in two places
 (`server/cloud-move-http.ts`); a backup file still restores from Settings →
 Import & export. [docs/verification/cloud-send.md](verification/cloud-send.md) has the
 tests.
+
+A bot lives in one place. Before a chosen bot moves, the confirm (and the
+chooser, for the bots ticked) says what changes for it, read from its own setup
+(`server/move-changes.ts`, `shared/move-changes.ts`): teammates it handed work to
+that stay here, its working folder, a model engine on this computer or its
+network (the Cloud can't reach one; it gets the Cloud's model), command MCP
+servers that need this computer and commands, and skills that read places no
+lent folder reaches, such as `~/.claude` (`electron/personal-secrets.mjs`).
+A working folder not yet lent with editing (one outside the home folder, say) gets
+a switch, on by default as moves always lent it; turned off, the move doesn't lend
+it. Only when the person turns it on and confirms in main's own dialog may their
+Clouds run commands here; a grant that fails is said on the move's line.
 
 The move's journal names the Cloud by its address and, once the session lists
 it, by its id (the person's own Cloud in `clouds[]` at My Cloud's address).

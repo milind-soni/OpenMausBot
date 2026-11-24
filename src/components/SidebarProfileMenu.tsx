@@ -61,7 +61,7 @@ import { pageIsThisComputer } from "@/lib/companion-bridge";
 import { cloudPlanLabel } from "@/lib/cloud-plan";
 import { shortcutLabel } from "./ShortcutHint";
 import { useAnnouncements } from "./announcements/use-announcements";
-import { useOtherServerName } from "@/lib/other-server";
+import { useOtherServerName } from "@/lib/other-server"; import { useFeature } from "@/lib/use-feature";
 import { isOwnerOrAdmin, profileForSession, readSessionState, type SessionState } from "@/lib/session";
 import {
   cloudPhoneDestination,
@@ -255,7 +255,7 @@ export function useServerUpdateItem(enabled: boolean): UpdateEntry | null {
         if (phase === "available" && check?.releaseUrl) return void openExternalLink(check.releaseUrl);
         if (phase === "reload") return window.location.reload();
         setPhase("checking");
-        void api<ServerUpdateCheck>("/api/updates/check", { timeoutMs: 20_000 })
+        void api<ServerUpdateCheck>("/api/updates/check?fresh=1", { timeoutMs: 20_000 })
           .then((next) => {
             setCheck(next);
             setPhase(serverCheckPhase(next));
@@ -287,7 +287,7 @@ export function selectPhoneDestination(destination: PhoneDestination, { bridge, 
   void bridge.connectHomeForPhone().catch(() => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" }));
 }
 
-/** The menu row's line under Phone & devices: where a phone goes and how it is doing there, in a few words. */
+/** The menu row's line under Devices: where a phone goes and how it is doing there, in a few words. */
 export function phoneDevicesSubtitle(state: PhonePlaceState, place: string): string {
   switch (state.kind) {
     case "paired": return t("sidebar.menu.phoneDevices.paired", { count: state.count, place });
@@ -303,7 +303,7 @@ export function phoneDevicesItem(state: PhonePlaceState, place: string, onSelect
   const dot = state.kind === "paired" && state.connected ? "bg-success" : state.kind === "attention" ? "bg-warning" : null;
   return {
     key: "phone-devices",
-    label: t("settings.section.phoneDevices"),
+    label: t("settings.page.devices"),
     subtitle: phoneDevicesSubtitle(state, place),
     icon: <Smartphone size={16} />,
     trailing: dot ? <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", dot)} /> : undefined,
@@ -437,7 +437,7 @@ export interface AccountHeader {
   onOpen: () => void;
 }
 
-/** One menu for Simple, Advanced and phone width: your account, Phone & devices and Settings, Simple's own places to go,
+/** One menu for Simple, Advanced and phone width: your account, Devices and Settings, Simple's own places to go,
  * then Plan & billing and Help, with any other accounts and Sign out last. A ready update is raised to the top. */
 export function profileMenuItems({
   phone,
@@ -542,7 +542,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
   const { state, dispatch } = useStore();
   const simple = account !== undefined;
   const [menuOpen, setMenuOpen] = useState(false);
-  const advancedMode = useAdvancedMode();
+  const advancedMode = useAdvancedMode(), skillBurger = useFeature("skillBurger");
   const automationsNeedYou = useAutomationsNeedYou();
   const planSnapshot = useCloudPlanSnapshot(usageBridge(state.config?.cloudHome === true) ?? (window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudPlan));
   const cloudUsage = cloudUsageSummary(planSnapshot);
@@ -612,7 +612,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
         onTeamMap: () => dispatch({ type: "showTeamMap" }),
         onFiles: filesReady ? () => dispatch({ type: "showFiles" }) : undefined,
         onPublishedApps: () => dispatch({ type: "showPublishedApps" }),
-        onSkillBurgers: () => dispatch({ type: "showSkillBurgers" }),
+        onSkillBurgers: skillBurger ? () => dispatch({ type: "showSkillBurgers" }) : undefined,
         onTeamFiles: state.config?.team ? () => dispatch({ type: "showTeamFiles" }) : undefined,
         archived: account?.archived,
       }),

@@ -12,6 +12,7 @@ import { DemoteDefaultBotItem, HideDefaultBotItem } from "./DefaultBotControls";
 import { navigateThreadMenu } from "./BotProjects";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { userBotMenu } from "@/lib/own-team-bot";
+import { botShowsUnread } from "@/lib/bot-unread";
 import { botUnreadThreadIds, markBotRead } from "@/lib/folder-read";
 import { ownerMenuLabel, pickOwnerOf } from "./TeamOwner";
 import { mayChangeOwner, mayRename, useTeamPeople } from "@/state/team-people";
@@ -265,7 +266,7 @@ export function BotContextMenu({
     });
     const owner = team && mayChangeOwner(bot, team) ? item(<Users size={16} className="text-ink-secondary" />, ownerMenuLabel(bot, team), () => pickOwnerOf(bot, team, shown)) : null;
     const deleteAll = !member && allThreadRows(bot).length >= 2 ? [divider("more-threads"), item(<Trash2 size={16} />, t("task.deleteAllConversations"), () => clearThreads.ask(bot.id), { danger: true })] : [];
-    const readState = readingBotId === bot.id || botUnreadThreadIds(bot).length > 0
+    const readState = readingBotId === bot.id || botShowsUnread(bot)
       ? item(
         readingBotId === bot.id ? <Loader2 size={16} className="animate-spin text-ink-secondary" /> : <CheckCheck size={16} className="text-ink-secondary" />,
         readingBotId === bot.id ? t("sidebar.bot.markingAllRead") : t("sidebar.bot.simple.markRead"),

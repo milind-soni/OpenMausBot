@@ -2,6 +2,7 @@
 // (/data, Dockerfile), and the data folder (OMB_DATA_DIR, /data/.openmausbot) sits inside it; a path is read as segments
 // relative to one of the two. Privacy invariant: nothing here returns a name taken from the disk except a bot id (which the
 // report shows only for bots the store knows) and a name from OTHER_NAMES.
+import { TOOL_CACHES, TOOL_CACHE_DIR } from "../bot-box/tool-caches.ts";
 
 /** `precious`: losing it loses something only this home holds. `work`: what bots and people made or may still read,
  * which only doing the work again would bring back. `rebuildable`: the code named next to it makes it again when it is
@@ -66,12 +67,12 @@ const DATA_FOLDERS: Readonly<Record<string, StorageCategory>> = {
   // (themes/store.ts), org-library (org-library.ts), share (share.ts), usage (usage-ledger.ts), decisions and
   // admin-activity (decision-log.ts, admin-activity.ts: the audit log readDecisions reads), prompt-split (drivers/prompt-split.ts),
   // codex-instructions (drivers/codex-instructions.ts), local-vm-stops, skill-switch, hook-tokens (drivers/claude.ts),
-  // claude-user-skills (turn-settings.ts), box (bot-box/boot.ts).
+  // claude-user-skills (turn-settings.ts), box (bot-box/boot.ts), github (github/sign-in.ts).
   providers: "settings", people: "settings", "people-connections": "settings", caddy: "settings", ssh: "settings",
   skills: "settings", "skills-library": "settings", "imported-skills": "settings", "skill-state": "settings", "skill-switch": "settings",
   themes: "settings", "org-library": "settings", share: "settings", usage: "settings", decisions: "settings", "admin-activity": "settings",
   "prompt-split": "settings", "codex-instructions": "settings", "local-vm-stops": "settings", "hook-tokens": "settings",
-  "claude-user-skills": "settings", box: "settings",
+  "claude-user-skills": "settings", box: "settings", github: "settings",
   // engine-homes/layout.ts (a Team Cloud's per-audience engine homes); drivers/pi-session.ts.
   "engine-homes": "engine_state", "pi-sessions": "engine_state",
   // host/team-files.ts (container-computer.ts's vm-home and vm-homes are placed in dataPlacement).
@@ -197,6 +198,9 @@ function dataPlacement(segments: readonly string[], directory: boolean): Placeme
     if (second === undefined) return at("engine_state", false);
     // engine-homes/layout.ts HELD_DIR: state from before the split, deleted after HELD_DAYS.
     if (second === ".held") return at("trash");
+    // An audience's own tool cache folder (bot-box/tool-caches.ts, OMB_CACHE_ROOT); the rest of its home is engine state.
+    if (third === undefined) return at("engine_state", false);
+    if (third === TOOL_CACHE_DIR) return toolCachePlacement(segments.slice(3));
     return at("engine_state");
   }
   if (first === "org-library") {
@@ -242,6 +246,23 @@ const HOME_CACHES: Readonly<Record<string, StorageCategory>> = {
   opencode: "caches",
 };
 
+/** The tool cache folder's own folders (bot-box/tool-caches.ts TOOL_CACHES), each a download cache; any other name in it
+ * (what a bot put in ~/cache before, a token) is `other`. By name only, like `~/.cache/<name>` above: a person's own
+ * `~/cache/npm` in a folder the server did not make (no CACHEDIR.TAG) is labelled a cache too. Only the storage report
+ * reads this; nothing deletes by it (the cache cap checks the mark itself, server/cache-sweep). */
+const TOOL_CACHE_FOLDERS = TOOL_CACHES.map((cache) => cache.folder.split("/"));
+function toolCachePlacement(rest: readonly string[]): Placement {
+  if (rest.length === 0) return at("caches", false);
+  let partial = false;
+  for (const parts of TOOL_CACHE_FOLDERS) {
+    const shared = Math.min(parts.length, rest.length);
+    if (!parts.slice(0, shared).every((part, index) => rest[index] === part)) continue;
+    if (rest.length >= parts.length) return at("caches");
+    partial = true;
+  }
+  return partial ? at("other", false) : at("other");
+}
+
 function homePlacement(segments: readonly string[], directory: boolean): Placement {
   const [first, second, third] = segments;
   if (first === undefined) return at("other", false);
@@ -250,6 +271,8 @@ function homePlacement(segments: readonly string[], directory: boolean): Placeme
     if (known) return at(known);
     return OTHER_NAMES.has(first) ? { category: "other", otherName: first, final: true } : at("other");
   }
+  // The tools' cache folder with OMB_CACHE_ROOT on (bot-box/tool-caches.ts TOOL_CACHE_DIR).
+  if (first === TOOL_CACHE_DIR) return toolCachePlacement(segments.slice(1));
   if (first === ".cache") return second === undefined ? at("caches", false) : at(HOME_CACHES[second] ?? "other");
   if (first === ".local") {
     if (second === undefined) return at("other", false);

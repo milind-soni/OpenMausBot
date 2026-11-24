@@ -70,7 +70,7 @@ function FilePane({ preview }: { preview: FilePreview }) {
       </header>
       {/* An HTML file's frame swallows the pointer, so the resize drag would stop the moment it crossed the page. */}
       <div className={cn("ms-1.5 flex min-h-0 flex-1 flex-col overflow-auto px-3 pb-3", dragging && "pointer-events-none")}>
-        <FilePreviewContent kind={preview.kind} path={preview.path} name={preview.name} message={preview.message} original={preview.original} fill />
+        <FilePreviewContent kind={preview.kind} path={preview.path} shownPath={preview.shownPath} name={preview.name} message={preview.message} original={preview.original} fill />
       </div>
     </aside>
   );

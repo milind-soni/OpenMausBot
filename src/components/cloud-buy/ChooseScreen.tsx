@@ -67,11 +67,13 @@ function PlanCard({ card, shown, details, compare, busy, onStart }: {
   </li>;
 }
 
-export function ChooseScreen({ offer, current = null, own = null, now, busy, signedOut, notice, onStart, onSignIn }: {
+export function ChooseScreen({ offer, current = null, own = null, now, busy, signedOut, notice, botsHere = false, onStart, onSignIn }: {
   offer: CloudOffer;
   /** The person's own plan tier, and that plan when it is no longer on sale: its card says Your plan instead of a button. */
   current?: string | null; own?: CloudOfferPlan | null;
   now: number; busy: boolean; signedOut: boolean; notice: string | null;
+  /** This computer has bots of its own: the offer says where a bot lives. */
+  botsHere?: boolean;
   onStart: (tier: string) => void; onSignIn: () => void;
 }) {
   const [compare, setCompare] = useState(false);
@@ -93,6 +95,7 @@ export function ChooseScreen({ offer, current = null, own = null, now, busy, sig
         </button>
       </NightCard>
     </div>
+    {botsHere && <p data-cloud-one-place="" className="text-[13px] leading-[18px] text-ink-secondary [text-wrap:pretty]">{t("cloudBuy.onePlace")}</p>}
     {notice && <p role="status" className="rounded-[12px] bg-ink/[0.04] px-4 py-3 text-[13px] leading-[18px] text-ink">{notice}</p>}
     <section aria-labelledby="cloud-add-plans">
       <h3 id="cloud-add-plans" className="sr-only">{t("cloudBuy.choose")}</h3>

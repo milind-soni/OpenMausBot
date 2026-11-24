@@ -343,7 +343,7 @@ test("Make … my home: only on a server connected by hand that main offers it f
   offered.add("vps");
   r.w.lists = false;
   assert.deepEqual(await r.call("workspaces:home-offers"), ["vps"], "this computer's own page reads the rail's offers");
-  assert.deepEqual(await r.call("workspaces:make-home", "vps"), { started: true }, "this computer's own page (Settings → Phone & devices)");
+  assert.deepEqual(await r.call("workspaces:make-home", "vps"), { started: true }, "this computer's own page (Settings → Devices)");
   r.w.trusted = false;
   assert.throws(() => r.call("workspaces:make-home", "vps"), /only available/, "any other page: refused");
   assert.throws(() => r.call("workspaces:home-offers"), /only available/, "nor are the offers listed there");

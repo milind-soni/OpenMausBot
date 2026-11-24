@@ -9,6 +9,7 @@ import { useMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { ApiKeyEngineManage, EngineSetup, EngineUpdateNotice, EngineWarningNotice, isApiKeyEngine } from "./EngineSetup";
+import { AntigravitySwitchCli } from "./AntigravitySwitchCli";
 import { AppCopyNotice } from "./EngineAppCopy";
 import { forgetAppCopySwitches } from "@/state/engine-install";
 import { AccountsCard, AddAccount, accountGroupOf, accountsReady, type AccountGroup } from "./EngineAccounts";
@@ -409,6 +410,7 @@ function EngineRow({ instance, bare = false }: { instance: InstanceInfo; bare?: 
       {/* The setup panel that first said so is gone once the engine is Ready. */}
       {engineReady(instance) && <AppCopyNotice instance={instance} className="mt-3" />}
       {instance.snapshot.update && <EngineUpdateNotice update={instance.snapshot.update} instance={instance} className="mt-3" quiet />}
+      <AntigravitySwitchCli instance={instance} />
       {instance.snapshot.warning && <EngineWarningNotice warning={instance.snapshot.warning} className="mt-3" />}
       {engineReady(instance) && instance.snapshot.authenticated === true && (
         instance.authentication?.method === "device-code"
@@ -424,7 +426,7 @@ function EngineRow({ instance, bare = false }: { instance: InstanceInfo; bare?: 
       {instance.freeUpSpace && <AntigravityFreeSpace instance={instance} />}
       {instance.driverKind === "antigravityAgent" && (
         <div className="mt-3 space-y-3">
-          {instance.snapshot.authenticated && <p className="break-words text-[12px] text-ink-secondary">{instance.snapshot.account?.email ?? t("engineSetup.antigravity.emailUnavailable")}</p>}
+          {instance.snapshot.authenticated && <p className="break-words text-[12px] text-ink-secondary">{instance.snapshot.account?.email ?? t("engineSetup.antigravity.signedInGoogle")}</p>}
           <AntigravityAddAccount source={instance} />
           {instance.snapshot.authenticated === true && instance.authentication?.signOut === true && <EngineAccountAction instance={instance} action="signOut" />}
           {instance.instanceId.startsWith("antigravity-") && <EngineAccountAction instance={instance} action="remove" />}

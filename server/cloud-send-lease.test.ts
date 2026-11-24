@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createMoveLeases, LEASE_MS, moveLeaseRoute } from "./cloud-send-lease.ts";
+import { createMoveLeases, LEASE_MS, MOVE_QUIET_MS, moveInRunning, moveLeaseRoute } from "./cloud-send-lease.ts";
 
 function cloud(owner = true) {
   let clock = 1_000;
@@ -17,6 +17,29 @@ function cloud(owner = true) {
 }
 
 describe("POST /api/cloud-send/lease", () => {
+  it("tells the rest of this server a move is running while its lease is held, and not once it is let go or runs out", async () => {
+    const { ask, advance } = cloud();
+    expect(moveInRunning()).toBe(false);
+    await ask({ v: 1, holder: "computer-mac", label: "Mac" });
+    expect(moveInRunning()).toBe(true);
+    await ask({ v: 1, holder: "computer-mac", release: true });
+    expect(moveInRunning()).toBe(false);
+    await ask({ v: 1, holder: "computer-mac", label: "Mac" });
+    advance(LEASE_MS + 1);
+    expect(moveInRunning()).toBe(false);
+  });
+
+  it("counts the owner's computer asking about a move as one about to run, for a while", () => {
+    const { leases, advance } = cloud();
+    expect(moveInRunning()).toBe(false);
+    leases.touched();
+    expect(moveInRunning()).toBe(true);
+    advance(MOVE_QUIET_MS - 1);
+    expect(moveInRunning()).toBe(true);
+    advance(1);
+    expect(moveInRunning()).toBe(false);
+  });
+
   it("lets one computer at a time move in: the other hears who moves now, and goes once that one lets go", async () => {
     const { ask } = cloud();
     expect(await ask({ v: 1, holder: "computer-mac", label: "Mac" })).toEqual({ status: 200, body: { v: 1, held: true, until: 1_000 + LEASE_MS } });

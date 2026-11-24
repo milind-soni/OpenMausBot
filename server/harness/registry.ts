@@ -48,6 +48,20 @@ function withServerInstall(install: AnyProviderDriver["install"], npmPresent: bo
   return { ...clientInstall(install), platform, ...(server ? { server } : {}), ...(appCopy ? { signInCommand: undefined, appCopy: true } : {}) };
 }
 
+/** How Settings signs this engine in, when the app can: what its provider card shows, and what list_models tells a bot. */
+export function signInOf(inst: ProviderInstance) {
+  return inst.startAuthentication
+    ? {
+        method: inst.authenticationMethod ?? (inst.getAuthentication && inst.completeAuthentication
+          ? "paste-code" as const // a link to open, then a code pasted back (Claude)
+          : inst.getAuthentication
+            ? "device-code" as const // a code to enter at the provider's page (Codex)
+            : "callback-url" as const), // a link and a callback URL (managed engines)
+        signOut: inst.signOut !== undefined,
+      }
+    : undefined;
+}
+
 type InstallStandalone = (release: StandaloneRelease, options: { baseDir?: string }) => Promise<StandaloneInstalled>;
 
 /** Installed; `useCli` when the copy this engine's CLI finds does not start and it should run the app's own copy instead. */
@@ -311,6 +325,13 @@ export class ProviderRegistry {
     return this.byId.get(instanceId)?.live ? this.lastSnapshots.get(instanceId) : undefined;
   }
 
+  /** How this engine is installed and signed in, from what its provider card is built from; no status read. */
+  connection(instanceId: InstanceId) {
+    const entry = this.byId.get(instanceId);
+    const driver = entry && this.driversByKind.get(entry.shadow?.driverKind ?? entry.live!.driverKind);
+    return { install: clientInstall(driver?.install), signIn: entry?.live && signInOf(entry.live), account: driver?.metadata.signInAccount };
+  }
+
   access(instanceId: InstanceId): EngineAccess | undefined {
     const entry = this.byId.get(instanceId);
     return entry ? this.driversByKind.get(entry.shadow?.driverKind ?? entry.live!.driverKind)?.metadata.access ?? "subscription" : undefined;
@@ -558,16 +579,7 @@ export class ProviderRegistry {
           },
           access: driver?.metadata.access ?? "subscription",
           install: withServerInstall(driver?.install, npmPresent, this.appStandaloneCopy(driver, cli ?? cliDefaultOf(driver))),
-          authentication: inst.startAuthentication
-            ? {
-                method: inst.authenticationMethod ?? (inst.getAuthentication && inst.completeAuthentication
-                  ? "paste-code" as const // a link to open, then a code pasted back (Claude)
-                  : inst.getAuthentication
-                    ? "device-code" as const // a code to enter at the provider's page (Codex)
-                    : "callback-url" as const), // a link and a callback URL (managed engines)
-                signOut: inst.signOut !== undefined,
-              }
-            : undefined,
+          authentication: signInOf(inst),
           cli,
           cliDefault: cliDefaultOf(driver),
           cliCandidates: candidatesFor(driver),

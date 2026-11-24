@@ -32,7 +32,7 @@ async function serve() {
       { id: "s3", kind: "app", app: "gmail", tool: "GMAIL_SEND_EMAIL", label: "Send email", args: { to: { $arg: "to" }, body: { $step: "s2" } } },
     ],
   });
-  saveWorkflowSkill({ workflow, place: { botId: bot }, botIds: [bot], root });
+  saveWorkflowSkill({ workflow, origin: bot, botIds: [bot], root });
   const runs = createSkillBurgerRuns({
     dataDir: root, root,
     executors: () => ({
@@ -40,7 +40,8 @@ async function serve() {
       shell: async () => ({ ok: true, output: "" }), browser: async () => ({ ok: true, output: "" }), file: async () => ({ ok: true, output: "" }),
     }),
   });
-  const turnFor = (botId: string): BurgerTurn => ({ botId, threadId: "t1", cwd: root, mayEditEveryChat: false, internal: async () => ({ ok: false, body: {} }), publish: (event) => events.push(event) });
+  let mayEdit = true;
+  const turnFor = (botId: string): BurgerTurn => ({ botId, threadId: "t1", cwd: root, mayEditBurgers: mayEdit, internal: async () => ({ ok: false, body: {} }), publish: (event) => events.push(event) });
   let as = bot;
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -50,7 +51,7 @@ async function serve() {
   await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const post = async (path: string, body: unknown) => (await fetch(`${base}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).json() as Promise<Record<string, any>>;
-  return { post, events, calls, bot, actAs: (id: string) => { as = id; } };
+  return { post, events, calls, bot, actAs: (id: string) => { as = id; }, teamCloud: () => { mayEdit = false; } };
 }
 
 it("runs a bot's Skill Burger, hands its AI step back, and goes on once the bot resumes it", async () => {
@@ -81,4 +82,14 @@ it("changes the steps when asked, with an undo, and refuses a burger that isn't 
   expect(undone).toHaveProperty("skill");
   expect(await h.post("/api/internal/skill-burgers/undo", { undo: changed.undo })).toHaveProperty("error");
   expect(await h.post("/api/internal/skill-burgers/run", { name: "nope" })).toHaveProperty("error");
+});
+
+it("runs a burger saved from one bot from any other bot, and on a Team Cloud a bot can't change one", async () => {
+  const h = await serve();
+  h.actAs("a-different-bot");
+  const paused = await h.post("/api/internal/skill-burgers/run", { name: "email-the-sheet" });
+  expect(paused).toMatchObject({ ok: true, status: "needs_input", requiresInput: { type: "ai_step", step: "s2" } });
+  expect(await h.post("/api/internal/skill-burgers/resume", { run: paused.run, response: "Fine." })).toMatchObject({ ok: true, status: "ok" });
+  h.teamCloud();
+  expect((await h.post("/api/internal/skill-burgers/edit", { name: "email-the-sheet", action: "set_when", step: "s3", when: { $step: "s1", op: "exists" } })).error).toMatch(/whoever saved it/);
 });

@@ -98,7 +98,8 @@ posixOnly("usage attribution e2e", () => {
           acpHappy: { driver: "grokAgent", config: { cli: FAKE_ACP, fullAuto: true } },
           codexRace: {
             driver: "codex",
-            environment: { FAKE_CODEX_MODE: "question", FAKE_CODEX_ASK_HOLD: "1", FAKE_CODEX_STEER_ERROR_FILE: codexSteerGate },
+            // held mid-command, with no card: a question card waiting would take a typed line as its answer
+            environment: { FAKE_CODEX_COMMAND_GATE: join(home, "codex-hold.never"), FAKE_CODEX_STEER_ERROR_FILE: codexSteerGate },
             config: { cli: FAKE_CODEX },
           },
         },
@@ -229,7 +230,13 @@ posixOnly("usage attribution e2e", () => {
     const model = (await api("GET", "/api/instances")).body.instances.find((i: any) => i.instanceId === "codexRace").models.default;
     const bot = await newBot("codexRace", model);
     expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "owner's codex turn" })).status).toBe(202);
-    await waitFor(async () => (await getBot(bot.id)).messages.some((m: any) => m.card), "the question card");
+    await waitFor(() => {
+      try {
+        return readFileSync(join(home, ".openmausbot", "native", `${bot.threadId}.ndjson`), "utf8").includes('"method":"item/started"');
+      } catch {
+        return false;
+      }
+    }, "the held command");
     const asPaired = await asPerson();
     const queued = await asPaired("POST", `/api/bots/${bot.id}/messages`, { text: "steer these words" });
     expect(queued.body.queued).toBe(true);

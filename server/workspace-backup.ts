@@ -48,6 +48,9 @@ const EXCLUDED = new Set([
   "box",
   // The processes this machine's servers started (engine-records.ts), stopped by its next start.
   "engine-runs",
+  // Deleted and idle conversations' dependency trees on their way out, what the orphan sweep has seen on this disk and
+  // what the idle reclaim shed (host/conversation-folder-cleanup.ts, host/orphan-sweep.ts, host/idle-reclaim.ts).
+  ".removing", "orphan-sweep.json", "idle-reclaim.json",
   // A Team Cloud's engine homes (engine-homes/layout.ts): CLI login homes, each audience's own transcripts and the held
   // folder, which no admin reads.
   "engine-homes",

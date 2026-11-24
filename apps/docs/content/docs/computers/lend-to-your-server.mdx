@@ -1,0 +1,76 @@
+---
+title: Let bots on your own server use this computer
+description: Run MausBot on a VPS or home server and let its bots use the apps on your Windows PC or Mac.
+icon: Laptop
+---
+
+When MausBot runs on a server of your own (a Linux VPS, a home server, a Mac mini), its bots have no screen of their own
+there. The MausBot app on your PC or Mac can lend them yours: they then see and use the apps on your screen, while the
+app is open on that computer. It is one switch, and you can turn it off at any time.
+
+## What you need
+
+- A server of your own: one that only you sign in to, as its owner. That is a server started with
+  `npx openmausbot serve` (or the Docker or Podman install) with no members and at most one admin address. A team's
+  server, a server other people sign in to, and a MausBot Cloud are not "your own" for this: a Cloud lends by its own
+  rules, from the MausBot icon's menu.
+- The MausBot desktop app on the computer you want to lend: Windows on an x64 PC, or macOS 13 or later.
+- The app paired with the server as its owner: on the server, run `npx openmausbot pair --label "My PC"` and use the code
+  it prints (a `--phone` code can't lend a computer).
+
+## Turn it on
+
+### Windows
+
+1. Open MausBot on your PC.
+2. Open **Settings → This app → Your computers**, choose **Connect to another computer**, and enter the server's address and code.
+3. Before you press Connect, turn on **Let its bots use this computer** in the same form. If the server is your own, it
+   can use this PC as soon as it is paired.
+4. Already connected? The server's row in **Your computers** (and its card on **Settings → Devices**, and the Screen
+   panel when you are on that server) has the switch **Let &lt;server&gt;'s bots use this computer**. One tap turns it on.
+
+Nothing else is needed on Windows. If Windows Security or Smart App Control blocks MausBot's computer-control helper
+(`cua-driver.exe`), the line under the switch says so; restart MausBot after allowing it.
+
+### macOS
+
+The steps are the same as on Windows. The first time, macOS has to allow MausBot to see and control the screen: the line
+under the switch says **One more step: macOS has to allow MausBot to see and control your screen**, with **Open System
+Settings**. Allow MausBot under **Privacy & Security → Accessibility** and **Screen Recording**. The line goes away by
+itself once macOS allows it; restart MausBot if macOS asks you to.
+
+### From the server's own page
+
+When the app shows the server (choose its circle at the window's left edge), the Screen panel has the same switch.
+Because that page comes from the server, turning it on from there asks you once more in a MausBot window of its own
+(**Allow** or **Not now**); turning it off is one tap.
+
+## What a bot can do
+
+Once it is on, every bot on that server can:
+
+- see what is on your screen and use your apps: open apps and web pages, click, type, read windows;
+- run the MCP servers you keep for it on this computer.
+
+Folders and a terminal are not lent unless you choose them: in Advanced mode, **Choose what it can use** next to the
+switch adds folders (read-only unless you allow edits) and the terminal. Only a conversation you started yourself can
+use your computer; one a routine, a webhook or another bot started is told why it can't, and says so.
+
+A bot does not need its **Works on** set to anything for this: it reaches your computer through its shared-computer
+tools, whatever its Works on is. Ask it in plain words: "open Notepad on my PC".
+
+## Turn it off
+
+- Turn the switch off, in any of the places above. It stops at once.
+- Or pause it, with your Clouds, from the MausBot icon's menu (the menu bar on a Mac, the tray on Windows).
+- Closing the app stops it until you open the app again.
+
+Both the app and the server need MausBot 0.1.179 or later for the switch; with an older one on either side, update it.
+
+## Limits
+
+- The app has to be open, and you signed in to your computer. While the screen is locked, the bot is told so and
+  can't use it.
+- Windows on x64 only for now. Windows on Arm and 32-bit Windows have no computer-control helper yet.
+- A bot uses your real screen, with the same control you have. Lend it only to a server you trust, and turn the switch off when you don't need it.
+- To turn lending off for a server entirely, set `features.sharedComputers` to `false` in that server's config.

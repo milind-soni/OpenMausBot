@@ -4,7 +4,7 @@
 // the person's inbox, which has the card itself. At Full access a teammate's question goes to its requester instead: its
 // card says who decides and what was picked, and blocks nothing. A card whose work ended, or that a newer question
 // replaced, closes, so nothing stale waits on the person.
-import { formatQuestionAnswers, isPersistentQuestionCard } from "../../shared/ask-question.ts";
+import { formatQuestionAnswers, isPersistentQuestionCard, shouldSettleRequestCard } from "../../shared/ask-question.ts";
 import { liveCardKind } from "../../shared/live-approval.ts";
 import { allowsTool, type ToolIdentity } from "../../shared/tool-scope.ts";
 import type { PersonWait } from "../../shared/person-wait.ts";
@@ -24,6 +24,12 @@ import { settledWaitingChip } from "../waiting-on-person.ts";
 const OPEN_QUESTION = "needs-input-";
 const DAY_MS = 24 * 60 * 60_000;
 const NEEDS_INPUT_LINE = /^needs input:/i;
+const hasAttachment = (text: string): boolean => text.includes("<attached-image") || text.includes("<attached-file");
+/** How long a send that answered a card keeps it from touching another, while its line is not yet written. */
+const SPENT_SEND_MS = 60_000;
+/** A card younger than this opened while the person was still typing: their line is not its answer. */
+export const CARD_SETTLE_MS = 1_500;
+type Typed = { status: number; message?: Message; error?: string } | null;
 
 export interface AskCardsDeps {
   store: Pick<Store, "bot" | "messagesFor" | "activePath" | "appendMessage" | "patchMessage" | "taskByThread" | "patchTask" | "group"
@@ -66,6 +72,20 @@ const typedAnswer = (card: OptionCardData, text: string): string => {
   const questions = card.questionRequest?.questions;
   return questions ? formatQuestionAnswers(questions, [[text]]) : text;
 };
+
+type Resolved = Extract<RuntimeEvent, { type: "request.resolved" }>;
+type CardStore = Pick<Store, "messagesFor" | "patchMessage">;
+
+export function resolvedCard(card: OptionCardData, resolved: Resolved): OptionCardData {
+  const persistent = isPersistentQuestionCard(card);
+  return { ...card, answered: resolved.behavior, dismissed: persistent ? false : resolved.source !== "user", ...(resolved.source === "timeout" && !persistent ? { expired: true } : {}) };
+}
+
+/** Settles a card as its request resolved, the moment it resolves. */
+export function settleRequestCard(store: CardStore, resolved: Resolved, messageId: string): void {
+  const card = store.messagesFor(resolved.threadId).find((message) => message.id === messageId)?.card;
+  if (card && !card.answered && shouldSettleRequestCard(card, resolved.source)) store.patchMessage(resolved.threadId, messageId, { card: resolvedCard(card, resolved) });
+}
 
 /** The reply up to its NEEDS INPUT line; empty when the line is the whole reply. */
 function beforeQuestion(text: string): string {
@@ -299,24 +319,60 @@ export function createAskCards(deps: AskCardsDeps) {
     return true;
   }
 
-  /** A person's line answers an inbox copy it replies to, or, in work a teammate handed on, the question card the bot's
-   * turn waits on, as a tap would; null leaves the line to be sent (steered or queued) as usual. */
-  async function typed(auth: RequestAuth, threadId: string, text: string, target: Message | undefined,
-    line: { sendId?: string; sender?: Message["sender"] }): Promise<{ status: number; message?: Message; error?: string } | null> {
+  /** A person's line answers an inbox copy it replies to, or the question card the bot's turn waits on, as a tap would.
+   * In the bot's own chat that is the one question card a turn waits on there, when it takes words and was already
+   * showing as the person typed. A card that only takes a tap is left to be tapped: the line never closes it. Null leaves
+   * the line to be sent (steered or queued) as usual. Tries of one send run one after another, and one that answered a
+   * card touches no other. */
+  const typing = new Map<string, Promise<Typed>>();
+  const spent = new Map<string, number>();
+  function typed(auth: RequestAuth, threadId: string, text: string, target: Message | undefined,
+    line: { sendId?: string; sender?: Message["sender"] }): Promise<Typed> {
+    if (!line.sendId) return typedOnce(auth, threadId, text, target, line);
+    const key = `${threadId}:${line.sendId}`;
+    const run = (typing.get(key) ?? Promise.resolve(null)).catch(() => null).then(() => typedOnce(auth, threadId, text, target, line));
+    typing.set(key, run);
+    void run.catch(() => null).finally(() => { if (typing.get(key) === run) typing.delete(key); });
+    return run;
+  }
+
+  async function typedOnce(auth: RequestAuth, threadId: string, text: string, target: Message | undefined,
+    line: { sendId?: string; sender?: Message["sender"] }): Promise<Typed> {
     if (store.groupByThread(threadId) || isStopCommand(text)) return null;
+    const thread = store.messagesFor(threadId);
+    // A send tried again touches no card: the same line that answered one is its receipt; anything else goes on to the
+    // usual send, which matches the line it wrote or refuses other words under the same id.
+    const again = line.sendId ? thread.find((message) => message.sendId === line.sendId) : undefined;
+    const key = line.sendId ? `${threadId}:${line.sendId}` : "";
+    for (const [send, at] of spent) if ((again && send === key) || now() - at > SPENT_SEND_MS) spent.delete(send);
+    if (spent.has(key)) return null;
+    if (again) {
+      const answeredCard = again.text === text && (!target || target.id === again.replyToId)
+        && thread.some((message) => message.id === again.replyToId && message.card?.requestId);
+      return answeredCard ? { status: 202, message: again } : null;
+    }
     const delegator = delegatorOf(threadId);
     const handedOn = Boolean(delegator && delegator.threadId !== threadId);
+    const waiting = thread.filter((message) => !message.inbox && liveCardKind(message.card) === "question" && deps.live(threadId, message.card!.requestId!));
+    const only = waiting.length === 1 ? waiting[0]! : undefined;
+    // A reply to the card means it whatever its age; otherwise a card that opened while the line was typed is not its question.
+    const ownChat = !handedOn && !hasAttachment(text) && only !== undefined && answerableInWords(only.card)
+      && (target ? target.id === only.id : now() - only.at >= CARD_SETTLE_MS);
     const asked = target
       ? answerableInWords(target.card) ? target : undefined
-      : handedOn ? store.messagesFor(threadId).findLast((message) => answerableInWords(message.card) && deps.live(threadId, message.card!.requestId!)) : undefined;
+      : ownChat ? only
+        : handedOn ? thread.findLast((message) => answerableInWords(message.card) && deps.live(threadId, message.card!.requestId!)) : undefined;
     if (!asked?.card?.requestId) return null;
     const requestId = asked.card.requestId;
     const origin = deps.answeredIn(threadId, requestId);
-    if (origin === threadId && !(handedOn && deps.live(threadId, requestId))) return null;
-    const again = line.sendId ? store.messagesFor(threadId).find((message) => message.sendId === line.sendId) : undefined;
-    if (again) return { status: 202, message: again };
+    if (origin === threadId && !((handedOn || ownChat) && deps.live(threadId, requestId))) return null;
+    if (key) spent.set(key, now());
     const answered = await deps.answerCard({ auth, threadId, requestId, behavior: "answer", message: typedAnswer(asked.card, text) });
-    if (!answered.ok) return { status: answered.status, error: answered.error };
+    if (!answered.ok) {
+      spent.delete(key);
+      // In the bot's own chat the line was never meant only for the card: one that could not answer it is sent as usual.
+      return ownChat ? null : { status: answered.status, error: answered.error };
+    }
     const posted = store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId: asked.id,
       ...(line.sendId ? { sendId: line.sendId } : {}), ...(line.sender ? { sender: line.sender } : {}) });
     return { status: 202, message: posted };

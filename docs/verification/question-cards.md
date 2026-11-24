@@ -75,6 +75,32 @@ Staff, hands Mira work. Expected:
   When a webhook starts Clive's turn, the question is not listed either. The person can still change Clive's
   answer on the card, and Mira gets a new turn with it.
 
+## A line typed in the bot's own chat while its card waits
+
+```sh
+pnpm exec vitest run server/question-card-typed-line.e2e.test.ts
+```
+
+One server of the person's own, no teammate handing work on, exactly one question card live in that chat. Expected:
+
+- With the scripted fake engine, a bot's `ask_user` card waits; a line the person types in that chat answers the card
+  (no steer): the line stays in the chat under the card (`replyToId`), the card reads as answered with the typed words,
+  and the bot's turn goes on with them. The engine reads exactly those words as the card's answer
+  (`room-plan.json.evidence.jsonl`), as if they were typed in the card's own text field.
+- The same POST sent again (same `sendId`, same text) returns 202 with the first line and touches no card; the same
+  `sendId` with other words is refused with 409, as a normal send is.
+- With the fake Claude CLI holding a turn, Claude's own `AskUserQuestion` of two questions waits. That card takes taps,
+  not one line, so the typed line never touches it: the line is steered into the turn, the waiting tool gets no reply,
+  and the card stays open to be tapped.
+
+A card that only takes a tap (set options, or several questions) is never answered or closed by a typed line. A card
+that opened less than 1.5 seconds before the line arrived opened while the person was typing, so the line goes on as
+a message unless it replies to that card. Two or more question cards live in the chat, Stop, a line with a file or
+image, a reply to another line, rooms and work handed on keep their own paths. If the card cannot take the line (a tap
+or the timeout won, or the person may not answer it), the line is sent as usual instead of being refused. Two tries of
+one send that arrive together answer one card, even when another opens before the line is written. That holds for 60
+seconds after the first try took effect. These cases are unit tests in `server/host/ask-cards.test.ts`.
+
 Unit tests for the relay's rules (which thread, which sender, sign-ins, work handed out this turn, an engine that cannot
 take a message mid-turn) are in `server/host/question-routing.test.ts`.
 
