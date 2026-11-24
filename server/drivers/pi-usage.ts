@@ -5,6 +5,29 @@ export type TurnUsage = { input: number; output: number; cachedInput?: number };
 const usageCount = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 
+export interface PiMessageUsage {
+  input: number;
+  output: number;
+  cachedInput?: number;
+  contextTokens: number;
+}
+
+/** One assistant message, not the run total: `input` counts cache reads, and `contextTokens` is that call's whole prompt. */
+export function piMessageUsage(usage: PiUsage | undefined): PiMessageUsage | undefined {
+  if (!usage) return undefined;
+  const fresh = usageCount(usage.input);
+  const cacheRead = usageCount(usage.cacheRead);
+  const cacheWrite = usageCount(usage.cacheWrite);
+  const output = usageCount(usage.output);
+  if (fresh === undefined && cacheRead === undefined && cacheWrite === undefined && output === undefined) return undefined;
+  return {
+    input: (fresh ?? 0) + (cacheRead ?? 0),
+    output: output ?? 0,
+    ...(cacheRead === undefined ? {} : { cachedInput: cacheRead }),
+    contextTokens: (fresh ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0),
+  };
+}
+
 /** One pi run's tokens and priced cost, in the app's shape where input includes cached tokens like the other drivers. */
 export class PiRunUsage {
   usage: TurnUsage | undefined;

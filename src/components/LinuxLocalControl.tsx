@@ -31,6 +31,8 @@ export function LinuxLocalControl() {
   const busy = pending !== null || local.status === "checking" || local.status === "starting";
   const ready = local.available;
   const waylandSafetyBlocked = local.reasonCode === "linux-wayland-seat-safety-blocked";
+  // Fedora's GNOME and other desktops that aren't Ubuntu may offer no Xorg session to switch to.
+  const otherWaylandDesktop = waylandSafetyBlocked && local.ubuntuDesktop === false;
   const pluginRequired = local.reasonCode === "linux-hyprland-plugin-required";
   const hyprland = local.compositor === "hyprland";
   const wayland = capabilities.host.session === "wayland";
@@ -100,11 +102,15 @@ export function LinuxLocalControl() {
         <div className="mt-3 rounded-lg border border-danger/20 bg-danger/5 p-3">
           <div className="flex gap-2 text-[12px] leading-relaxed text-ink-secondary">
             <AlertTriangle size={15} className="mt-0.5 shrink-0 text-danger" />
-            <span>
-              {t("computer.linux.waylandBefore")}{" "}
-              <strong className="font-medium text-ink">{t("computer.linux.waylandXorg")}</strong>
-              {" "}{t("computer.linux.waylandAfter")}
-            </span>
+            {otherWaylandDesktop ? (
+              <span>{t("computer.linux.waylandOtherDesktop")}</span>
+            ) : (
+              <span>
+                {t("computer.linux.waylandBefore")}{" "}
+                <strong className="font-medium text-ink">{t("computer.linux.waylandXorg")}</strong>
+                {" "}{t("computer.linux.waylandAfter")}
+              </span>
+            )}
           </div>
         </div>
       ) : pluginRequired ? (

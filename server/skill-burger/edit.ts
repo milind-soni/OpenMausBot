@@ -97,6 +97,31 @@ export function applyEdit(workflow: Workflow, edit: WorkflowEdit): Workflow | { 
   return { ...workflow, steps };
 }
 
+/** The workflow with `fix` (the steps the bot took to get past step `id` when it failed) put just before that step. The
+ * step stays: going on from it ran it again, and it worked once the fix was in. The fix steps take ids of their own. */
+export function insertFix(workflow: Workflow, id: string, fix: readonly WorkflowStep[]): Workflow | { error: string } {
+  const at = workflow.steps.findIndex((step) => step.id === id);
+  if (at < 0) return { error: `there is no step ${id}` };
+  if (!fix.length) return { error: "there is no fix to keep" };
+  if (workflow.steps.length + fix.length > 40) return { error: "the Skill Burger would have more than 40 steps" };
+  const renamed = new Map<string, string>();
+  const taken = new Set(workflow.steps.map((step) => step.id));
+  for (const step of fix) {
+    let n = 1;
+    while (taken.has(`${id}_fix${n}`)) n += 1;
+    renamed.set(step.id, `${id}_fix${n}`);
+    taken.add(`${id}_fix${n}`);
+  }
+  const fixed = workflow.steps[at]!;
+  const added: WorkflowStep[] = [];
+  for (const step of fix) {
+    const checked = workflowStepSchema.safeParse({ ...(rewriteRefs(step, renamed) as object), id: renamed.get(step.id), ...(fixed.when ? { when: fixed.when } : {}) });
+    if (!checked.success) return { error: `a fix step isn't one a Skill Burger can run: ${checked.error.issues[0]?.message ?? "invalid"}` };
+    added.push(checked.data);
+  }
+  return { ...workflow, steps: [...workflow.steps.slice(0, at), ...added, ...workflow.steps.slice(at)] };
+}
+
 /** What each change replaced, by id, so its Undo can put it back. Kept a day. */
 export function createEditUndo(now: () => number = Date.now) {
   const kept = new Map<string, { name: string; previous: Workflow; sha256: string; at: number }>();

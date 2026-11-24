@@ -733,6 +733,7 @@
   "brief.card.join": "加入",
   "brief.card.open": "打开",
   "brief.card.openGmail": "在 Gmail 中打开",
+  "brief.card.openOutlook": "在 Outlook 中打开",
   "brief.card.openPage": "打开页面",
   "brief.card.draftReply": "起草给 {who} 的回复",
   "brief.card.dismissEmail": "忽略 {who} 的邮件",

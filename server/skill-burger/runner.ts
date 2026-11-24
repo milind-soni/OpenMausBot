@@ -6,8 +6,9 @@
 // tries a step with side effects twice; each step has a time limit and an output cap.
 import { randomUUID } from "node:crypto";
 
-import { caseOf, type Workflow, type WorkflowRef, type WorkflowStep } from "../../shared/skill-burger/format.ts";
+import { caseOf, teammateNames, type Workflow, type WorkflowRef, type WorkflowStep } from "../../shared/skill-burger/format.ts";
 import { redactSecretsInText } from "../../shared/redact.ts";
+import { collect, matchTeammates, missingPrompt, readReassignment, readReview, repliesText, reviewPrompt, sendRound, type DelegateExecutors, type DelegationState } from "./delegate-step.ts";
 
 export const STEP_TIMEOUT_MS = 60_000;
 export const RUN_TIMEOUT_MS = 15 * 60_000;
@@ -23,6 +24,16 @@ export interface StepResult {
   /** A decide step's chosen case. */
   case?: string;
   error?: string;
+  /** What the card shows of it: each teammate's reply, a check's verdict. Small and bounded. */
+  detail?: StepDetail;
+}
+
+/** What a step's row on the run card can open to: the replies of a delegation and its rounds, a check's verdict. */
+export interface StepDetail {
+  replies?: Array<{ name: string; ok: boolean; text: string }>;
+  rounds?: number;
+  waitingOn?: string[];
+  check?: { passed: boolean; says: string; why?: string };
 }
 
 /** A paused run: everything a resume needs, kept on the server and found by its id. */
@@ -37,10 +48,13 @@ export interface RunState {
   results: Record<string, StepResult>;
   /** The step the bot was handed, and where the run goes on from. */
   waiting: { step: string; type: HandedType };
+  /** A delegate step under way: who does each part, the hand-offs out, the replies so far. */
+  delegation?: DelegationState & { step: string };
   createdAt: number;
 }
 
-export type HandedType = "ai_step" | "decide" | "missing_case";
+/** What the run waits on: the bot's own step or answer, teammates' replies, or the bot fixing a failed step. */
+export type HandedType = "ai_step" | "decide" | "missing_case" | "teammates" | "review" | "missing_bot" | "check" | "failed";
 
 /** The run's answer, in the statuses of the workflow tools agents already know: ok, needs_input or cancelled; a failed
  * step is ok:false with the step named. */
@@ -52,6 +66,8 @@ export interface RunEnvelope {
   /** Each step's state, in order, for the bot and the card. */
   steps: Array<{ id: string; label: string; state: StepResult["state"]; case?: string }>;
   output?: unknown;
+  /** Inputs the request didn't give, so the run used the values the burger was saved with. */
+  defaults?: Array<{ name: string; value: unknown }>;
   requiresInput?: {
     type: HandedType;
     step: string;
@@ -62,12 +78,12 @@ export interface RunEnvelope {
     cases?: string[];
     resumeToken: string;
   };
-  error?: { type: "step_failed" | "timeout" | "output_too_large" | "runtime_error"; message: string; step?: string };
+  error?: { type: "step_failed" | "timeout" | "output_too_large" | "runtime_error"; message: string; step?: string; resumeToken?: string };
 }
 
 export type ExecResult = { ok: true; output: unknown } | { ok: false; error: string; tooLarge?: true };
 
-export interface StepExecutors {
+export interface StepExecutors extends Partial<DelegateExecutors> {
   shell(input: { command: string; cwd?: string; env: Record<string, string>; stdin?: string; where: "bot" | "vm"; tool: string; signal: AbortSignal; maxBytes: number }): Promise<ExecResult>;
   app(input: { app: string; tool: string; args: Record<string, unknown>; account?: string; signal: AbortSignal; maxBytes: number }): Promise<ExecResult>;
   browser(input: { url: string; signal: AbortSignal }): Promise<ExecResult>;
@@ -167,6 +183,19 @@ async function timed(ms: number, outer: AbortSignal | undefined, run: (signal: A
   }
 }
 
+/** A check's rule on a step's own output, or null when only the bot can tell. */
+function checkRule(step: WorkflowStep): { says: string; rule?: { path?: string; op: string; value?: unknown } } | null {
+  if (!step.check) return null;
+  return step.check === true ? { says: "the result looks right for what the request asked" } : step.check;
+}
+
+const TEAMMATES_PROMPT = (names: string, token: string) => `${names} have the work now. End your turn: their replies resume you. Then call run_workflow with resume ${JSON.stringify(token)} and response "back".`;
+
+/** A prompt's {input} names as this run's values: the request a judgement step was saved with, as asked this time. */
+export function fillPrompt(prompt: string, args: Record<string, unknown>): string {
+  return prompt.replace(/\{([a-z][a-z0-9_]{0,39})\}/g, (whole, name: string) => (Object.hasOwn(args, name) ? asText(args[name]) : whole));
+}
+
 function handedPrompt(step: WorkflowStep, type: HandedType, missing?: { decide: string; case: string }): string {
   if (type === "missing_case") return `The run reached the "${missing!.case}" case of "${step.label}", which has no saved steps yet. Do that part yourself, by judgement, then resume the run with a one-line note of what you did.`;
   if (step.kind === "decide") return `${step.prompt ?? `Decide: ${step.label}`} Answer with exactly one of: ${step.cases.map((one) => JSON.stringify(one)).join(", ")}.`;
@@ -189,21 +218,45 @@ export async function runFrom(state: Omit<RunState, "waiting" | "createdAt"> & {
     results[step.id] = result;
     deps.events.ended(id, name, step, result);
   };
-  const hand = (step: WorkflowStep, type: HandedType, missing?: { decide: string; case: string }): RunEnvelope => {
-    results[step.id] = { state: "handed", ...(missing ? { case: missing.case, output: { case: missing.case } } : {}) };
+  const hand = (step: WorkflowStep, type: HandedType, missing?: { decide: string; case: string }, extra: { prompt?: string; input?: string; delegation?: RunState["delegation"] } = {}): RunEnvelope => {
+    if (type !== "teammates" && type !== "review") results[step.id] = { state: "handed", ...(missing ? { case: missing.case, output: { case: missing.case } } : {}) };
     if (type !== "missing_case") deps.events.started(id, name, step);
-    deps.save({ ...state, results, waiting: { step: step.id, type }, createdAt: now() });
+    const { delegation: _old, ...rest } = state as typeof state & { delegation?: unknown };
+    deps.save({ ...rest, results, waiting: { step: step.id, type }, ...(extra.delegation ? { delegation: extra.delegation } : {}), createdAt: now() });
     const input = step.kind === "ai" || step.kind === "decide" ? step.input : undefined;
-    const value = input ? resolve(input, args, results) : undefined;
+    const value = extra.input ?? (input ? resolve(input, args, results) : undefined);
     return envelope({
       status: "needs_input",
       requiresInput: {
-        type, step: step.id, label: step.label, prompt: handedPrompt(step, type, missing), resumeToken: id,
+        type, step: step.id, label: step.label, prompt: fillPrompt(extra.prompt ?? handedPrompt(step, type, missing), args), resumeToken: id,
         ...(value !== undefined ? { input: clip(redactSecretsInText(asText(value)), HANDED_INPUT_MAX) } : {}),
         ...(step.kind === "ai" && step.example ? { example: step.example } : {}),
         ...(step.kind === "decide" && type === "decide" ? { cases: step.cases } : {}),
       },
     });
+  };
+  /** A failed step stops the run, and the run can go on from it once the bot has fixed the cause. Nothing is retried by itself. */
+  const fail = (step: WorkflowStep, type: NonNullable<RunEnvelope["error"]>["type"], message: string, detail?: StepDetail): RunEnvelope => {
+    end(step, { state: "failed", error: message, ...(detail ? { detail } : {}) });
+    deps.save({ ...state, results, waiting: { step: step.id, type: "failed" }, createdAt: now() });
+    return envelope({ ok: false, error: { type, message: type === "timeout" ? message : `"${step.label}" failed: ${message}`, step: step.id, resumeToken: id } });
+  };
+
+  /** Sends a delegate step's first round, or hands the bot the parts whose teammate is gone. */
+  const startDelegation = async (step: Extract<WorkflowStep, { kind: "delegate" }>, chosen: DelegationState["who"]): Promise<RunEnvelope> => {
+    const exec = deps.exec;
+    if (!exec.teammates || !exec.delegate || !exec.assignment) return fail(step, "step_failed", "this bot can't hand work to teammates here");
+    const signal = deps.signal ?? new AbortController().signal;
+    const roster = await exec.teammates(signal).catch(() => []);
+    const { who, missing } = matchTeammates(step, roster, chosen);
+    const delegation: NonNullable<RunState["delegation"]> = { step: step.id, round: 1, who, requests: [], replies: {} };
+    if (missing.length) return hand(step, "missing_bot", undefined, { prompt: missingPrompt(missing), delegation });
+    const sent = await sendRound(step, delegation, (ref) => resolve(ref, args, results), exec as DelegateExecutors, signal);
+    if (!sent.ok) return fail(step, "step_failed", clip(redactSecretsInText(sent.error), ERROR_MAX));
+    delegation.requests = sent.requests;
+    const names = [...new Set(sent.requests.map((request) => request.name))];
+    results[step.id] = { state: "handed", detail: { waitingOn: names, rounds: 1 } };
+    return hand(step, "teammates", undefined, { prompt: TEAMMATES_PROMPT(teammateNames(names.map((one) => ({ bot: { name: one } })), false), id), delegation });
   };
 
   for (let index = state.from; index < workflow.steps.length; index += 1) {
@@ -224,20 +277,22 @@ export async function runFrom(state: Omit<RunState, "waiting" | "createdAt"> & {
       continue;
     }
     if (step.kind === "ai" || step.where === "yourComputer") return hand(step, "ai_step");
+    if (step.kind === "delegate") return startDelegation(step, state.delegation?.step === step.id ? state.delegation.who : {});
 
     deps.events.started(id, name, step);
     const limit = step.timeoutMs ?? STEP_TIMEOUT_MS;
     const outcome = await timed(limit, deps.signal, (signal) => execute(step, args, results, deps.exec, signal));
-    if (outcome === "timeout") {
-      end(step, { state: "failed", error: "timed out" });
-      return envelope({ ok: false, error: { type: "timeout", message: `"${step.label}" took longer than ${Math.round(limit / 1000)} s and was stopped.`, step: step.id } });
+    if (outcome === "timeout") return fail(step, "timeout", `"${step.label}" took longer than ${Math.round(limit / 1000)} s and was stopped.`);
+    if (!outcome.ok) return fail(step, outcome.tooLarge ? "output_too_large" : "step_failed", clip(redactSecretsInText(outcome.error), ERROR_MAX));
+    const output = parsed(outcome.output);
+    const check = checkRule(step);
+    if (check?.rule) {
+      if (!compare(valueAt(output, check.rule.path), check.rule.op, check.rule.value)) return fail(step, "step_failed", `its check didn't hold: ${check.says}`, { check: { passed: false, says: check.says } });
+    } else if (check) {
+      results[step.id] = { state: "done", output };
+      return hand(step, "check", undefined, { prompt: `Check this step's result against: "${check.says}". Resume with "pass", or "fail: <why>".`, input: asText(output) });
     }
-    if (!outcome.ok) {
-      const message = clip(redactSecretsInText(outcome.error), ERROR_MAX);
-      end(step, { state: "failed", error: message });
-      return envelope({ ok: false, error: { type: outcome.tooLarge ? "output_too_large" : "step_failed", message: `"${step.label}" failed: ${message}`, step: step.id } });
-    }
-    end(step, { state: "done", output: parsed(outcome.output) });
+    end(step, { state: "done", output, ...(check?.rule ? { detail: { check: { passed: true, says: check.says } } } : {}) });
   }
   const last = [...workflow.steps].reverse().find((step) => results[step.id]?.state === "done" && results[step.id]?.output !== undefined);
   return envelope({ status: "ok", ...(last ? { output: results[last.id]!.output } : {}) });
@@ -269,23 +324,101 @@ async function execute(step: WorkflowStep, args: Record<string, unknown>, result
   }
 }
 
-/** A new run of `workflow`, from its first step. */
-export function startRun(input: { name: string; botId: string; threadId: string; sha256: string; workflow: Workflow; args?: Record<string, unknown> }, deps: RunDeps): Promise<RunEnvelope> {
-  return runFrom({ id: randomUUID(), name: input.name, botId: input.botId, threadId: input.threadId, sha256: input.sha256, workflow: input.workflow, args: runArgs(input.workflow, input.args), results: {}, from: 0 }, deps);
+/** A new run of `workflow`, from its first step. The envelope names the inputs the request didn't give, so the bot can
+ * say which saved values it used instead of reusing them silently. */
+export async function startRun(input: { name: string; botId: string; threadId: string; sha256: string; workflow: Workflow; args?: Record<string, unknown> }, deps: RunDeps): Promise<RunEnvelope> {
+  const given = input.args ?? {};
+  const defaults = Object.entries(input.workflow.args).filter(([name, arg]) => !Object.hasOwn(given, name) && arg.default !== undefined).map(([name, arg]) => ({ name, value: arg.default }));
+  const envelope = await runFrom({ id: randomUUID(), name: input.name, botId: input.botId, threadId: input.threadId, sha256: input.sha256, workflow: input.workflow, args: runArgs(input.workflow, input.args), results: {}, from: 0 }, deps);
+  return defaults.length ? { ...envelope, defaults } : envelope;
 }
 
-/** Goes on with a paused run once the bot has done the step it was handed: `response` is what it wrote, or the case it
- * chose. A decide step's answer must be one of its cases. */
-export function resumeRun(state: RunState, response: string, deps: RunDeps): Promise<RunEnvelope> | RunEnvelope {
+const refused = (state: RunState, message: string, step?: string): RunEnvelope => ({ protocolVersion: 1, ok: false, run: state.id, steps: [], error: { type: "runtime_error", message, ...(step ? { step } : {}) } });
+
+/** Goes on with a paused run once the bot has done the step it was handed: `response` is what it wrote, the case it
+ * chose, its review of teammates' replies, or anything once it fixed what made a step fail. A decide step's answer must
+ * be one of its cases. */
+export async function resumeRun(state: RunState, response: string, deps: RunDeps): Promise<RunEnvelope> {
   const { workflow, results, waiting } = state;
   const index = workflow.steps.findIndex((step) => step.id === waiting.step);
   const step = workflow.steps[index];
-  if (!step) return { protocolVersion: 1, ok: false, run: state.id, steps: [], error: { type: "runtime_error", message: "This run's saved steps changed; start it again." } };
+  if (!step) return refused(state, "This run's saved steps changed; start it again.");
+  const goOn = (from: number) => runFrom({ ...state, results, from }, deps);
+  const ask = (type: HandedType, prompt: string, extra: Partial<RunState> = {}, input?: string): RunEnvelope => {
+    deps.save({ ...state, results, ...extra, waiting: { step: step.id, type }, createdAt: Date.now() });
+    return { protocolVersion: 1, ok: true, status: "needs_input", run: state.id, steps: [], requiresInput: { type, step: step.id, label: step.label, prompt, resumeToken: state.id, ...(input ? { input: clip(redactSecretsInText(input), HANDED_INPUT_MAX) } : {}) } };
+  };
+  if (waiting.type === "failed") {
+    // The bot fixed what made this step fail: the run goes on from that step, the steps before it are not run again.
+    return goOn(index);
+  }
+  if (waiting.type === "check") {
+    const verdict = response.trim();
+    if (/^pass\b/i.test(verdict)) {
+      results[step.id] = { ...results[step.id], state: "done", detail: { check: { passed: true, says: checkRule(step)?.says ?? "" } } };
+      deps.events.ended(state.id, state.name, step, results[step.id]!);
+      return goOn(index + 1);
+    }
+    const why = verdict.replace(/^fail[:\s-]*/i, "").slice(0, ERROR_MAX) || "it didn't meet its check";
+    results[step.id] = { state: "failed", error: why, detail: { check: { passed: false, says: checkRule(step)?.says ?? "", why } } };
+    deps.events.ended(state.id, state.name, step, results[step.id]!);
+    deps.save({ ...state, results, waiting: { step: step.id, type: "failed" }, createdAt: Date.now() });
+    return { protocolVersion: 1, ok: false, run: state.id, steps: [], error: { type: "step_failed", message: `"${step.label}" didn't pass its check: ${why}`, step: step.id, resumeToken: state.id } };
+  }
+  if (step.kind === "delegate" && (waiting.type === "teammates" || waiting.type === "review" || waiting.type === "missing_bot")) {
+    const delegation = state.delegation;
+    const exec = deps.exec as DelegateExecutors;
+    const signal = deps.signal ?? new AbortController().signal;
+    if (!delegation || delegation.step !== step.id || !exec.assignment) return refused(state, "This run lost track of its teammates; start it again.", step.id);
+    const fill = (ref: WorkflowRef) => resolve(ref, state.args, results);
+    if (waiting.type === "missing_bot") {
+      const roster = await exec.teammates(signal).catch(() => []);
+      const { missing } = matchTeammates(step, roster, delegation.who);
+      const picked = readReassignment(response, missing, roster);
+      if ("error" in picked) return ask("missing_bot", `${picked.error} ${missingPrompt(missing)}`, { delegation });
+      return runFrom({ ...state, results, from: index, delegation: { ...delegation, who: { ...delegation.who, ...picked } } }, deps);
+    }
+    const finish = (unmet: string[] = []) => {
+      const replies = Object.values(delegation.replies);
+      results[step.id] = {
+        state: "done",
+        output: { replies: Object.fromEntries(replies.map((reply) => [reply.name, reply.text])), text: repliesText(delegation.replies), rounds: delegation.round, ...(unmet.length ? { unmet } : {}) },
+        detail: { rounds: delegation.round, replies: replies.map((reply) => ({ name: reply.name, ok: reply.ok, text: reply.text.slice(0, 600) })) },
+      };
+      deps.events.ended(state.id, state.name, step, results[step.id]!);
+      const { delegation: _done, ...rest } = state;
+      return runFrom({ ...rest, results, from: index + 1 }, deps);
+    };
+    if (waiting.type === "teammates") {
+      const got = await collect(delegation, exec, signal);
+      if ("waiting" in got) return ask("teammates", `Still waiting on ${got.waiting.join(", ")}. End your turn; their replies resume you. Then call run_workflow with resume ${JSON.stringify(state.id)} again.`, { delegation });
+      delegation.replies = got.replies;
+      const roundsLeft = (step.review?.rounds ?? 0) - (delegation.round - 1);
+      if (roundsLeft > 0) return ask("review", reviewPrompt(step, delegation), { delegation }, repliesText(delegation.replies));
+      return finish();
+    }
+    const redo = readReview(response, delegation);
+    if (!redo) return ask("review", `Answer with JSON only. ${reviewPrompt(step, delegation)}`, { delegation }, repliesText(delegation.replies));
+    const parts = Object.keys(redo);
+    if (!parts.length) return finish();
+    if (delegation.round - 1 >= (step.review?.rounds ?? 0)) return finish(parts);
+    const sent = await sendRound(step, delegation, fill, exec, signal, redo);
+    if (!sent.ok) {
+      results[step.id] = { state: "failed", error: clip(sent.error, ERROR_MAX) };
+      deps.events.ended(state.id, state.name, step, results[step.id]!);
+      deps.save({ ...state, results, waiting: { step: step.id, type: "failed" }, createdAt: Date.now() });
+      return { protocolVersion: 1, ok: false, run: state.id, steps: [], error: { type: "step_failed", message: `"${step.label}" couldn't send the work back: ${clip(sent.error, ERROR_MAX)}`, step: step.id, resumeToken: state.id } };
+    }
+    const next = { ...delegation, round: delegation.round + 1, requests: sent.requests };
+    const names = [...new Set(sent.requests.map((request) => request.name))];
+    results[step.id] = { state: "handed", detail: { waitingOn: names, rounds: next.round } };
+    return ask("teammates", TEAMMATES_PROMPT(names.join(", "), state.id), { delegation: next });
+  }
   if (waiting.type === "decide" && step.kind === "decide") {
     const chosen = step.cases.find((one) => one.toLowerCase() === response.trim().replace(/^["']|["']$/g, "").toLowerCase());
     if (!chosen) {
       deps.save(state);
-      return { protocolVersion: 1, ok: false, run: state.id, steps: [], error: { type: "runtime_error", message: `Answer with one of: ${step.cases.map((one) => JSON.stringify(one)).join(", ")}.`, step: step.id } };
+      return refused(state, `Answer with one of: ${step.cases.map((one) => JSON.stringify(one)).join(", ")}.`, step.id);
     }
     results[step.id] = { state: "done", case: chosen, output: { case: chosen } };
     deps.events.ended(state.id, state.name, step, results[step.id]!);
@@ -304,5 +437,5 @@ export function resumeRun(state: RunState, response: string, deps: RunDeps): Pro
     results[step.id] = { state: "done", output: parsed(response) };
     deps.events.ended(state.id, state.name, step, results[step.id]!);
   }
-  return runFrom({ ...state, results, from: index + 1 }, deps);
+  return goOn(index + 1);
 }
