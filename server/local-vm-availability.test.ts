@@ -53,4 +53,17 @@ describe("whether this server can give a bot a Local VM", () => {
     await flush();
     expect(availability.available()).toBe(true);
   });
+
+  it("holds its first read until the caller starts it (the desktop window in use), reading as usable meanwhile", async () => {
+    let probes = 0;
+    let start: (() => void) | null = null;
+    const availability = createLocalVmAvailability(async () => { probes += 1; return { available: [] }; }, Date.now, (first) => { start = first; });
+    await flush();
+    expect(probes).toBe(0);
+    expect(availability.available()).toBe(true);
+    start!();
+    await flush();
+    expect(probes).toBe(1);
+    expect(availability.available()).toBe(false);
+  });
 });

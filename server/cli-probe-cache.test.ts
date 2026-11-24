@@ -1,0 +1,135 @@
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { createCliProbeCache, probeCacheFile, probedProgram } from "./cli-probe-cache.ts";
+
+const roots: string[] = [];
+afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+
+function place() {
+  const root = mkdtempSync(join(tmpdir(), "omb-probe-cache-"));
+  roots.push(root);
+  const bin = join(root, "bin");
+  mkdirSync(bin);
+  return { root, bin, file: join(root, "user-data", "engine-probes.json") };
+}
+
+function program(bin: string, name: string, body = "#!/usr/bin/env node\nconsole.log('1.0.0');\n"): string {
+  const path = join(bin, name);
+  writeFileSync(path, body);
+  chmodSync(path, 0o755);
+  return path;
+}
+
+/** A stand-in for execCli that counts its runs and answers what `answer` says. */
+function runner(answer: (args: string[]) => { err?: Error; stdout: string; stderr?: string } = () => ({ stdout: "1.0.0\n" })) {
+  const calls: string[][] = [];
+  const run = ((_cli: string, args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr?: string) => void) => {
+    calls.push(args);
+    const { err, stdout, stderr } = answer(args);
+    queueMicrotask(() => cb(err ?? null, stdout, stderr ?? ""));
+  }) as Parameters<typeof createCliProbeCache>[0]["run"];
+  return { run, calls };
+}
+
+const ask = (exec: ReturnType<typeof createCliProbeCache>["exec"], cli: string, args: string[], path: string) =>
+  new Promise<{ err: Error | null; stdout: string; stderr?: string }>((resolve) => exec(cli, args, { env: { PATH: path } }, (err, stdout, stderr) => resolve({ err, stdout, stderr })));
+
+describe("engine probe answers kept between desktop starts", () => {
+  it("is kept only under the desktop app, in its own folder", () => {
+    expect(probeCacheFile({})).toBeNull();
+    expect(probeCacheFile({ OMB_USER_DATA: "/tmp/u" })).toBeNull();
+    expect(probeCacheFile({ OMB_DESKTOP_PARENT: "1" })).toBeNull();
+    expect(probeCacheFile({ OMB_DESKTOP_PARENT: "1", OMB_USER_DATA: "relative" })).toBeNull();
+    expect(probeCacheFile({ OMB_DESKTOP_PARENT: "1", OMB_USER_DATA: join(tmpdir(), "u") })).toBe(join(tmpdir(), "u", "engine-probes.json"));
+  });
+
+  it("answers an unchanged program's --version and --help from the kept copy, also in the next start", async () => {
+    const { bin, file } = place();
+    program(bin, "engine");
+    const first = runner((args) => ({ stdout: args[0] === "--help" ? "usage: engine --autocompact\n" : "1.0.0\n" }));
+    const cache = createCliProbeCache({ file, appVersion: "0.1.180", run: first.run });
+    expect(await ask(cache.exec, "engine", ["--version"], bin)).toEqual({ err: null, stdout: "1.0.0\n", stderr: "" });
+    expect(await ask(cache.exec, "engine", ["--version"], bin)).toEqual({ err: null, stdout: "1.0.0\n", stderr: "" });
+    expect(await ask(cache.exec, "engine", ["--help"], bin)).toMatchObject({ stdout: "usage: engine --autocompact\n" });
+    expect(await ask(cache.exec, "engine", ["--help"], bin)).toMatchObject({ stdout: "usage: engine --autocompact\n" });
+    expect(first.calls).toEqual([["--version"], ["--help"]]);
+
+    const next = runner();
+    const restarted = createCliProbeCache({ file, appVersion: "0.1.180", run: next.run });
+    expect(await ask(restarted.exec, "engine", ["--version"], bin)).toMatchObject({ stdout: "1.0.0\n" });
+    expect(next.calls).toEqual([]);
+  });
+
+  it("asks again once the program file changes, or the app is another version", async () => {
+    const { bin, file } = place();
+    const npmTime = new Date("1985-10-26T08:15:00Z");
+    const path = program(bin, "engine");
+    utimesSync(path, npmTime, npmTime);
+    const counted = runner();
+    const cache = createCliProbeCache({ file, appVersion: "0.1.180", run: counted.run });
+    await ask(cache.exec, "engine", ["--version"], bin);
+    // Same size and modification time npm gives every file, but a new file: still asked again.
+    rmSync(path);
+    utimesSync(program(bin, "engine"), npmTime, npmTime);
+    await ask(cache.exec, "engine", ["--version"], bin);
+    expect(counted.calls).toHaveLength(2);
+    program(bin, "engine", "#!/usr/bin/env node\nconsole.log('2.0.0');\n");
+    await ask(cache.exec, "engine", ["--version"], bin);
+    expect(counted.calls).toHaveLength(3);
+    const upgraded = createCliProbeCache({ file, appVersion: "0.1.181", run: counted.run });
+    await ask(upgraded.exec, "engine", ["--version"], bin);
+    expect(counted.calls).toHaveLength(4);
+  });
+
+  it("never keeps a failure, an empty answer, a sign-in check, or a program that is not on the PATH", async () => {
+    const { bin, file } = place();
+    program(bin, "engine");
+    let answer: { err?: Error; stdout: string } = { err: new Error("exit 1"), stdout: "" };
+    const counted = runner(() => answer);
+    const cache = createCliProbeCache({ file, appVersion: "1", run: counted.run });
+    expect((await ask(cache.exec, "engine", ["--version"], bin)).err?.message).toBe("exit 1");
+    answer = { stdout: "  \n" };
+    await ask(cache.exec, "engine", ["--version"], bin);
+    answer = { stdout: "Logged in\n" };
+    await ask(cache.exec, "engine", ["auth", "status"], bin);
+    await ask(cache.exec, "engine", ["auth", "status"], bin);
+    await ask(cache.exec, "missing", ["--version"], bin);
+    await ask(cache.exec, "missing", ["--version"], bin);
+    await ask(cache.exec, "engine", ["--version"], bin);
+    await ask(cache.exec, "engine", ["--version"], bin);
+    expect(counted.calls).toHaveLength(7);
+  });
+
+  it("does not keep a shell script or a version manager's shim, whose file stays while the version it runs changes", () => {
+    const { root, bin } = place();
+    program(bin, "viaShell", "#!/bin/bash\nexec real-engine \"$@\"\n");
+    program(bin, "viaEnvShell", "#!/usr/bin/env -S bash -e\nexec real-engine \"$@\"\n");
+    const manager = program(join(root), "mise", "\u007fELF");
+    symlinkSync(manager, join(bin, "engine"));
+    const shims = join(root, "shims");
+    mkdirSync(shims);
+    program(shims, "other");
+    program(bin, "native", "\u007fELF binary");
+    program(bin, "node-cli");
+    expect(probedProgram("viaShell", bin)).toBeNull();
+    expect(probedProgram("viaEnvShell", bin)).toBeNull();
+    expect(probedProgram("engine", bin)).toBeNull();
+    expect(probedProgram("other", shims)).toBeNull();
+    expect(probedProgram("engine --flag", bin)).toBeNull();
+    expect(probedProgram("native", bin)).toMatch(/native$/);
+    expect(probedProgram("node-cli", bin)).toMatch(/node-cli$/);
+  });
+
+  it("runs every probe where nothing may be kept", async () => {
+    const { bin } = place();
+    program(bin, "engine");
+    const counted = runner();
+    const cache = createCliProbeCache({ file: null, appVersion: "1", run: counted.run });
+    await ask(cache.exec, "engine", ["--version"], bin);
+    await ask(cache.exec, "engine", ["--version"], bin);
+    expect(counted.calls).toHaveLength(2);
+  });
+});
