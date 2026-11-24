@@ -50,7 +50,7 @@ ipcRenderer.on("desktop-notifications:open", (_event, target) => {
 
 // Only fixed actions are retained, never a destination supplied by a renderer.
 const FIXED_SETTINGS_ACTIONS = new Set(["organization", "cloud", "cloud-settings", "cloud-add", "cloud-add-howto",
-  "overview", "devices", "phone", "ai", "bots", "desktops", "vault", "usage", "transfer", "data", "people", "installations", "account", "plan", "app", "general", "appearance"]);
+  "overview", "devices", "phone", "ai", "bots", "desktops", "vault", "usage", "transfer", "storage", "data", "people", "installations", "account", "plan", "app", "general", "appearance"]);
 let pendingSettingsAction = null;
 const appSettingsListeners = new Set();
 ipcRenderer.on("app:open-settings", (_event, section) => {
@@ -90,7 +90,7 @@ function railKeepsItsSize() {
 if (typeof window !== "undefined") {
   for (const type of ["resize", "DOMContentLoaded"]) window.addEventListener(type, () => { leaveRailRoom(); railKeepsItsSize(); });
 }
-const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "placesTogether", "accountSheet", "desktopNotices", "desktopNotifications", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame", "softwareRendering", "appUpdate"]);
+const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "placesTogether", "accountSheet", "desktopNotices", "desktopNotifications", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame", "softwareRendering", "appUpdate", "lendComputer"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
 const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
 function updaterOffered() {
@@ -727,6 +727,16 @@ const bridge = {
     allow: id => ipcRenderer.invoke("sharing:allow", id),
     pause: () => ipcRenderer.invoke("sharing:pause"),
     resume: () => ipcRenderer.invoke("sharing:resume"),
+  },
+  // The one switch for lending this computer to a server of the person's own (server-lending.mjs). On a server's own page
+  // it is about that server only (main ignores the id), and a change needs the person's own click.
+  lendComputer: {
+    state: id => ipcRenderer.invoke("lend:state", isLocalPage ? id : null),
+    set: (id, on) => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("lend:set", isLocalPage ? id : null, on === true) : Promise.reject(new Error("Use the switch to change this.")),
+    allowScreen: id => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("lend:allow-screen", isLocalPage ? id : null) : Promise.reject(new Error("Use the button to allow this.")),
+    wish: isLocalPage ? (address, on) => ipcRenderer.invoke("lend:wish", String(address ?? ""), on === true) : undefined,
   },
   confirm: message => ipcRenderer.invoke("dialog:confirm", message),
   /** The window onto My Cloud once it is the person's home: this computer's screen while My Cloud can't be opened, and

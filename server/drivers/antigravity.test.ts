@@ -543,10 +543,12 @@ describe("official Antigravity runtime", () => {
     expect(runtime).toMatchObject({ executablePath: officialExecutable, source: "path" });
   });
 
-  it("explains the official setup when a legacy CLI has no replacement installed", async () => {
+  it("explains the setup when a legacy CLI has no replacement installed: the Google Antigravity CLI a new install takes, or the pinned runtime alone", async () => {
     if (!resolveAntigravityReleaseAsset()) return;
     const fake = fakeRuntime();
     await expect(resolveAntigravityRuntime("/old/bin/agy", { PATH: "" }, fake.directory))
+      .rejects.toThrow(/Google Antigravity CLI is not installed yet/);
+    await expect(resolveAntigravityRuntime("/old/bin/agy", { PATH: "" }, fake.directory, { nativeByDefault: false }))
       .rejects.toThrow(/Install official Antigravity, then Sign in with Google/);
   });
 
@@ -884,7 +886,7 @@ describe("Antigravity driver over shared ACP", () => {
     expect(AntigravityDriver.defaultConfig()).toEqual({ cli: "agy", fullAuto: false, workspace: undefined });
     expect(AntigravityDriver.install?.docsUrl).toContain("antigravity-acp");
     // The native CLI is opt-in: by default the card offers the pinned runtime with its download size, as before it.
-    expect(AntigravityDriver.install?.managed).toEqual({ label: "Install official Antigravity", downloadBytes: resolveAntigravityReleaseAsset()?.archiveBytes ?? 0 });
+    expect(AntigravityDriver.install?.managed).toEqual({ label: "Install official Antigravity", downloadBytes: resolveAntigravityReleaseAsset()?.archiveBytes ?? 0, sizeUnknown: true });
     expect(antigravityPermissionMode(false)).toBe("default");
     expect(antigravityPermissionMode(false, "ask")).toBe("default");
     expect(antigravityPermissionMode(false, "auto")).toBe("default");

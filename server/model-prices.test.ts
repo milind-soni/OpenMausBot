@@ -74,11 +74,14 @@ describe("what the ledger books for a settled turn", () => {
     expect(ledgerCost({ driverKind: "acp", model: "fake-model", input: 1_000_000, output: 0, costUsd: null }, operator)).toEqual({ costUsd: 10, costSource: "estimated" });
   });
 
-  it("prices a Codex Fast row as its base model", () => {
+  it("prices a Codex Fast or Ultrafast row as its base model", () => {
     const fast = { ...codex, model: "gpt-5.5+priority", costUsd: null };
+    const ultrafast = { ...codex, model: "gpt-5.5+ultrafast", costUsd: null };
     expect(ledgerCost(fast, null)).toEqual(ledgerCost({ ...codex, costUsd: null }, null));
+    expect(ledgerCost(ultrafast, null)).toEqual(ledgerCost({ ...codex, costUsd: null }, null));
     const operator: PriceList = { "codex/gpt-5.5": { inputPerMillion: 1, outputPerMillion: 2 }, default: { inputPerMillion: 10, outputPerMillion: 10 } };
     expect(ledgerCost(fast, operator).costUsd).toBeCloseTo(1 * 1 + 0.1 * 2, 9);
+    expect(ledgerCost(ultrafast, operator).costUsd).toBeCloseTo(1 * 1 + 0.1 * 2, 9);
     expect(estimatePriceFor({ driverKind: "codex", model: "gpt-5.5+priority" }, { "codex/gpt-5.5+priority": { inputPerMillion: 7, outputPerMillion: 7 } })?.inputPerMillion).toBe(7);
     expect(estimatePriceFor({ driverKind: "acp", model: "gpt-5.5+priority" }, null)).toBeNull();
     // A provider-qualified custom model keeps its `+`: it is not a Fast row, so another model's price must not apply.

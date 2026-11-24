@@ -156,6 +156,19 @@ describe("automation reports", () => {
     expect(f.store.messagesFor(f.main).some((message) => message.kind === "routine.run")).toBe(false);
   });
 
+  it("ends the person's own unread mark on the chat with a report, and keeps it through a run with nothing new", () => {
+    const f = fixture();
+    const held = () => f.store.taskByThread(f.bot.id, f.main)?.heldUnread;
+    f.store.patchTask(f.bot.id, f.main, { unread: true, heldUnread: f.store.activePath(f.main).at(-1)!.id });
+    const quiet = f.finished("NOTHING NEW");
+    f.reports.runSettled(quiet, `turn-${quiet.id}`);
+    expect(held(), "nothing was written").toBeDefined();
+    const run = f.finished("Acme replied about the order.");
+    f.reports.runSettled(run, `turn-${run.id}`);
+    expect(f.store.taskByThread(f.bot.id, f.main)).toMatchObject({ unread: true });
+    expect(held(), "a report the person has not read yet is news").toBeUndefined();
+  });
+
   it("writes nothing, marks nothing and notifies nobody for a run with nothing new", () => {
     const f = fixture();
     const run = f.finished("Checked 14 emails.\nNOTHING NEW");

@@ -176,6 +176,16 @@ jobs:
       - run: pnpm check:electron
       - name: production UI build
         run: pnpm exec vite build
+      - name: The bots' browsers' kernel memory limit, on a real kernel, as root
+        # A Cloud home's root supervisor puts the bots' Chrome under a cgroup v2 memory limit (server/browser/memory-cgroup.ts):
+        # here a memory-hungry child started through the real launcher must be killed by the kernel while the unprivileged
+        # "server" beside it keeps answering. Root without CAP_SYS_ADMIN, as the supervisor runs after its setpriv drop;
+        # OMB_CGROUP_TEST=require fails rather than skips.
+        run: |
+          scratch="$(mktemp -d)"
+          sudo setpriv --inh-caps=-sys_admin,-setpcap --bounding-set=-sys_admin,-setpcap -- \
+            env "PATH=$PATH" HOME="$scratch" OMB_DATA_DIR="$scratch/data" TMPDIR="$scratch" OMB_CGROUP_TEST=require \
+            "$(command -v pnpm)" exec vitest run server/browser/memory-cgroup.linux.test.ts --reporter=verbose --silent=false
 
   vitest:
     # Admit the expensive runner fan-out only after the quick checks pass.

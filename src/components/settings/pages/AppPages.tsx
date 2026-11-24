@@ -13,6 +13,7 @@ import {
 } from "../../AppSettingsRows";
 import { ChromeRailRow } from "../../ChromeRailToggle";
 import { ConnectedWorkspacesSettings } from "../../ConnectedWorkspacesSettings";
+import { LendComputerSwitch } from "../../LendComputerSwitch";
 import { CustomThemesSettings } from "../../CustomThemesSettings";
 import { DiagnosticsRow } from "../../DiagnosticsRow";
 import { NotificationRows } from "../../NotificationSettingsRows";
@@ -63,8 +64,8 @@ export function AppPage() {
         </SettingsRows>
       </SettingsGroup>
     )}
-    {/* Your computers is Advanced: in Simple the rail switches places, and the page stays one window tall. */}
-    {ctx.desktop && ctx.advanced && (window.ogb?.environments
+    {/* Your computers, in Simple too: where a server is added, and where "Let its bots use this computer" is switched. */}
+    {ctx.desktop && (window.ogb?.environments
       ? <ConnectedWorkspacesSettings label={t("settings.app.computers")} description={t("settings.app.computersLine")} />
       : !ctx.client && <PlacesFromHere />)}
     {ctx.desktop && ctx.advanced && <RemoteComputerSection hideWhenUnavailable legacyOnly />}
@@ -89,7 +90,7 @@ export function AppPage() {
 /** A Cloud's page in the desktop window: the places list reads the rail through the workspaces bridge, which works on
  * every page; only the environments on this computer need This computer's own page. */
 function PlacesFromHere() {
-  const { place } = useSettingsShell();
+  const { place, ctx } = useSettingsShell();
   const others = useOtherPlaces("app");
   const workspaces = window.ogb?.workspaces;
   if (!workspaces) return null;
@@ -99,6 +100,8 @@ function PlacesFromHere() {
         <SettingRow title={place.name} leading={<PlaceBadge place={place} size={24} />} subtitle={t("servers.managed")}>
           <span className="text-[13px] leading-5 text-ink-secondary">{t("servers.current")}</span>
         </SettingRow>
+        {/* On a server's own page: the same switch its row has on This computer's page. */}
+        {window.ogb?.lendComputer && <LendComputerSwitch id={null} className="mx-4 mb-3 ms-[60px]" />}
         {others.map((other) => (
           <SettingRow key={other.key} title={other.name} leading={<PlaceBadge place={{ kind: other.kind === "computer" ? "computer" : "cloud", name: other.name, color: other.color }} size={24} />}
             subtitle={other.kind === "computer" ? t("servers.localHint") : undefined}>
@@ -109,9 +112,9 @@ function PlacesFromHere() {
           onClick={() => void workspaces.add?.("address")} data={{ "data-server-connect": "" }} />}
       </SettingsRows>
     </SettingsGroup>
-    <SettingsGroup label={t("connectedWorkspaces.localTitle")} block="environments">
+    {ctx.advanced && <SettingsGroup label={t("connectedWorkspaces.localTitle")} block="environments">
       <SettingsRows><InertRow title={t("connectedWorkspaces.newEnvironment")} /></SettingsRows>
-    </SettingsGroup>
+    </SettingsGroup>}
   </>;
 }
 

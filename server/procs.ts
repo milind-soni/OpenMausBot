@@ -28,6 +28,7 @@ import { spawnBotWork } from "./oom-score.ts";
 import { noticeFailure } from "./chat-notices.ts";
 import { processBudget } from "./process-room.ts";
 import { shortageCode } from "./process-shortage.ts";
+import { unboxedGitCredential } from "./github/git-credential.ts";
 
 export function resolveCli(cli: string, args: string[] = [], env?: NodeJS.ProcessEnv): ResolvedSpawn {
   return resolveCliSpawn(cli, args, env);
@@ -418,6 +419,9 @@ export function spawnCli(
     : homed ? { ...opts, env } : opts;
   const boxed = boxedSpawn(resolved, options, owner, homed);
   const { box: _box, engineHome: _engineHome, botWork, ...spawnOpts } = boxed ? options : outsideBoxOptions(resolved.command, options);
+  // An unboxed bot's git gets this server's GitHub sign-in after the person's own credentials (git-credential.ts).
+  const github = !boxed && owner === "bot" ? unboxedGitCredential(spawnOpts.env ?? process.env) : null;
+  if (github) spawnOpts.env = github.env as NodeJS.ProcessEnv;
   // The box's extra descriptors (its seccomp filter) follow stdio; only a plain three-entry stdio can take them.
   const stdio = boxed?.extraFds.length && Array.isArray(spawnOpts.stdio) && spawnOpts.stdio.length === 3 ? [...spawnOpts.stdio, ...boxed.extraFds] : spawnOpts.stdio;
   // A server that restarts in place stops what an earlier one left by this tag (engine-records.ts).
@@ -436,6 +440,7 @@ export function spawnCli(
   } catch (error) {
     // Node throws some refusals (ENOMEM) at once rather than reporting them on the child.
     if (shortageCode(error)) refused((error as NodeJS.ErrnoException).code);
+    github?.release();
     throw error;
   } finally {
     for (const fd of boxed?.extraFds ?? []) try { closeSync(fd); } catch {}
@@ -445,6 +450,7 @@ export function spawnCli(
   child.once("error", (error: NodeJS.ErrnoException) => { if (!child.pid) refused(error.code); });
   // The broker token minted for this process dies with it.
   if (boxed?.token) child.once("exit", boxed.release);
+  if (github) { child.once("exit", github.release); child.once("error", () => { if (!child.pid) github.release(); }); }
   if (process.platform !== "win32") cliGroups.add(child);
   if ((process.platform === "linux" || process.platform === "darwin") && child.pid) {
     const tree = new Map<number, string>();

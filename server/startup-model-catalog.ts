@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { isEffortLevel } from "../shared/wire.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import type { ModelCatalog } from "./contracts.ts";
@@ -54,11 +55,13 @@ function catalogFrom(value: unknown): ModelCatalog | null {
       loaded?: unknown;
       provider?: unknown;
       contextWindow?: unknown;
+      effortLevels?: unknown;
       variants?: unknown;
       orgBlocked?: unknown;
       needsCliUpdate?: unknown;
     };
     if (typeof option.id !== "string" || typeof option.label !== "string") return null;
+    const effortLevels = Array.isArray(option.effortLevels) ? option.effortLevels.filter(isEffortLevel) : undefined;
     const variants = variantList(option.variants);
     options.push({
       id: option.id,
@@ -69,6 +72,7 @@ function catalogFrom(value: unknown): ModelCatalog | null {
       ...(typeof option.contextWindow === "number" && Number.isFinite(option.contextWindow)
         ? { contextWindow: option.contextWindow }
         : {}),
+      ...(effortLevels?.length ? { effortLevels } : {}),
       ...(variants ? { variants } : {}),
       ...(option.orgBlocked === true ? { orgBlocked: true as const } : {}),
       ...(typeof option.needsCliUpdate === "string" ? { needsCliUpdate: option.needsCliUpdate } : {}),

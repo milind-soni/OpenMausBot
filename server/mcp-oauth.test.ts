@@ -832,6 +832,20 @@ describe("McpOAuthManager sign-in from a browser on another computer", () => {
     expect(oauth.counts.register).toBe(0);
   });
 
+  it("returns a configured app to its configured https address, on any browser, with no loopback listener", async () => {
+    await setup({ noRegistration: true, preRegistered: { corp: null } });
+    registered = { clientId: "corp", redirectUri: "https://cloud.example/mcp-oauth/callback" };
+    const started = await manager.start("docs", mcp.url, undefined, "alice", elsewhere);
+    expect(new URL(started.authorizationUrl!).searchParams.get("redirect_uri")).toBe("https://cloud.example/mcp-oauth/callback");
+    expect(started.pasteBack).toBeUndefined();
+    expect(oauth.counts.register).toBe(0);
+    expect(await portFree(Number(new URL(mcpOAuthRedirectUri(mcp.url)).port))).toBe(true);
+    const callback = await returnAddress(started);
+    expect((await manager.publicCallback("cloud.example", callback.search)).status).toBe(200);
+    expect(manager.status("docs", started.flowId, "alice")?.phase).toBe("succeeded");
+    expect(oauth.isValid(`Bearer ${await manager.accessToken("docs", mcp.url)}`)).toBe(true);
+  });
+
   it("asks a browser on this machine to paste nothing", async () => {
     await setup();
     const started = await manager.start("docs", mcp.url, undefined, "loopback", { remote: false, origin: "https://cloud.example" });
