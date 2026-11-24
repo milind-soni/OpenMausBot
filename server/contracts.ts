@@ -350,13 +350,15 @@ export interface ProviderAdapter {
    * still on that session takes it: otherwise `ok` is false and nothing was sent to the engine. `usage` is null when the
    * engine reports none for the compaction. */
   compactSession?(threadId: ThreadId, options: { botId?: string; session: string; model?: string | null; selectionNow?: () => { instanceId: string; model: string | null } | undefined; signal?: AbortSignal }): Promise<EngineCompactResult>;
-  /** Starting a thread's engine before its first message, so that message finds it running. `start` launches the process
-   * exactly as a turn with this input would and sends it nothing; it resolves true once the process is launched. The next
-   * sendTurn on the thread takes that process when its launch would have been the same and it has started up (`ready`),
-   * and replaces it otherwise. `held`: one is launching or waiting. `drop` stops one that no turn took; a taken one is
-   * the turn's own. */
+  /** Starting a thread's engine before its next message, so that message finds it running. `start` launches the process
+   * exactly as a turn with this input would and sends it nothing; it resolves true once the process is launched, and the
+   * process closes by itself after `waitMs` (a driver default when absent) with no turn. The next sendTurn on the thread
+   * takes that process when its launch would have been the same, it resumes the same engine session (or none, for a
+   * process started without one), it has started up (`ready`) and it is not older than its wait by the wall clock (it
+   * waited through a sleep); it is replaced otherwise. `held`: one is launching or waiting. `drop` stops one that no turn
+   * took; a taken one is the turn's own. */
   prestart?: {
-    start(input: SendTurnInput): Promise<boolean>;
+    start(input: SendTurnInput, waitMs?: number): Promise<boolean>;
     held(threadId: ThreadId): boolean;
     ready(threadId: ThreadId): boolean;
     drop(threadId: ThreadId): void;

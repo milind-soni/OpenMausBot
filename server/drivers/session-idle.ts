@@ -16,7 +16,7 @@
 // closes as another goes idle, and its conversation's next turn resumes its session by id.
 import { availableMemory, boxMemory, type BoxMemory } from "../box-memory.ts";
 import { stoppedForBotMemory } from "../bot-memory-cap.ts";
-import { ENGINE_MAX_BYTES, engineMemory, type EngineMemory } from "../engine-memory.ts";
+import { ENGINE_MAX_BYTES, engineMemory, memoryFloor, type EngineMemory } from "../engine-memory.ts";
 import { onThreadSeen, seenWithin } from "../thread-presence.ts";
 
 export type IdleScope = "per-chat" | "per-bot" | "shared";
@@ -233,13 +233,22 @@ export const UNWATCHED_IDLE_MS = 30_000;
 /** An engine started before any message (a person just made a conversation) waits this long for the first one: the time
  * an engine nobody is looking at is already kept, and longer than writing a first line usually takes. */
 export const PRESTART_IDLE_MS = UNWATCHED_IDLE_MS;
+/** An engine started because a person opened a conversation or began typing in it waits this long for their message:
+ * reading the conversation and writing a reply can take a few minutes. */
+export const OPENED_PRESTART_IDLE_MS = 3 * 60_000;
 /** Each waiting engine holds 250 to 450 MB, so only this many wait at once. */
 export const PRESTART_MOST = 2;
+/** What one waiting engine and its MCP servers take at most. */
+export const PRESTART_ENGINE_BYTES = 450 * 1024 ** 2;
 
-/** Engines start ahead of a message only where memory is not rationed: never on a small box, and never where turns wait
- * for room (a Cloud home, a self-hosted server), whose admission counts the engines a turn starts. */
-export function prestartAllowed(box: Pick<BoxMemory, "bytes"> = boxMemory(), memory: Pick<EngineMemory, "enabled"> = engineMemory): boolean {
-  return !memory.enabled && box.bytes > SMALL_BOX_BYTES;
+/** Engines start ahead of a message only where memory is not rationed: never on a small box, never where turns wait for
+ * room (a Cloud home, a self-hosted server), whose admission counts the engines a turn starts, and never while free memory
+ * would sink below the floor admission keeps (engine-memory.ts) with one more waiting engine. OMB_ENGINE_PRESTART=0 turns
+ * it off; `unmetered` leaves out the free-memory reading only, for tests on machines whose free memory varies. */
+export function prestartAllowed(box: Pick<BoxMemory, "bytes"> = boxMemory(), memory: Pick<EngineMemory, "enabled"> = engineMemory,
+  available: () => number = availableMemory, setting: string | undefined = process.env.OMB_ENGINE_PRESTART): boolean {
+  if (setting === "0" || memory.enabled || box.bytes <= SMALL_BOX_BYTES) return false;
+  return setting === "unmetered" || available() - memoryFloor(box.bytes) >= PRESTART_ENGINE_BYTES;
 }
 
 /**

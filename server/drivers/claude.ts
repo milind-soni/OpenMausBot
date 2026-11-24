@@ -812,8 +812,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       closing: boolean;
       unconfirmedStopWarned?: boolean;
       /** Started before any message was sent (the adapter's `prestart`) and not yet taken by a turn: it says nothing in the chat.
-       * `take` makes the turn that takes it the one its launch is counted as. */
-      spare?: boolean;
+       * `take` makes the turn that takes it the one its launch is counted as. It waits `spareMs` from `spareAt` (wall clock), on the session it `resumed`. */
+      spare?: boolean; spareMs?: number; spareAt?: number; resumed?: string;
       take?: (turnId: string) => void;
       tools?: ClaudePrestartTools;
       /** The engine could not start the `agents` MCP server: retired after this turn so the next one reconnects. */
@@ -862,7 +862,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const s = sessions.get(threadId);
       if (!s || s.closing) return;
       s.closing = true;
-      forks.closed(threadId, why, s.sessionId);
+      if (!s.spare) forks.closed(threadId, why, s.sessionId);
       stopIdleClose(`${instanceId}\0${threadId}`, s.idleTimer);
       // Close the broker before a replacement binds the same socket; a late close must not unlink it.
       const broker = s.broker;
@@ -882,12 +882,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (!s) return;
       if (s.idleTimer) clearTimeout(s.idleTimer);
       const held = (warmHolds.get(threadId) ?? 0) - Date.now();
-      s.idleTimer = armIdleClose(`${instanceId}\0${threadId}`, s.spare ? PRESTART_IDLE_MS : Math.min(2_147_483_647, Math.max(engineIdleMs(threadId, sessionIdle), held)), { close: () => closeSession(threadId, s.spare ? "never used" : "idle"), threadId, policy: sessionIdle, spare: () => s.spare === true, // per-chat
+      s.idleTimer = armIdleClose(`${instanceId}\0${threadId}`, s.spare ? s.spareMs ?? PRESTART_IDLE_MS : Math.min(2_147_483_647, Math.max(engineIdleMs(threadId, sessionIdle), held)), { close: () => closeSession(threadId, s.spare ? "never used" : "idle"), threadId, policy: sessionIdle, spare: () => s.spare === true, // per-chat
         idle: () => sessions.get(threadId) === s && !s.closing && !s.turn && !active.has(threadId), held: () => (warmHolds.get(threadId) ?? 0) > Date.now() });
     };
     // Keep-warm pings and warm summaries fork a thread's session with its live launch contract (claude-warm-summary.ts).
     const forks = claudeForks({ cli: config.cli, contracts: warmContracts, holds: warmHolds, armIdle, supports: (flag) => cliVersion === null || claudeCliSupports(cliVersion, flag),
-      live: (threadId) => { const s = sessions.get(threadId); return s && !s.closing && s.child.exitCode === null ? { sessionId: s.sessionId, turn: Boolean(s.turn), busy: Boolean(s.turn) || active.has(threadId) } : null; },
+      live: (threadId) => { const s = sessions.get(threadId); return s && !s.spare && !s.closing && s.child.exitCode === null ? { sessionId: s.sessionId, turn: Boolean(s.turn), busy: Boolean(s.turn) || active.has(threadId) } : null; },
       summarized: (threadId, run) => { const cost = claudeCostSnapshot(run.costTotal, run.modelUsage); if (cost) recordCostState(run.session, cost); closeSession(threadId, "summarized while idle"); } });
     const writeUser = (s: Session, threadId: string, promptMsg: ClaudeUserMessage): Promise<boolean> => {
       if (!s.child.stdin.writable || s.child.stdin.destroyed) return Promise.resolve(false);
@@ -927,7 +927,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     const retryState = new Map<string, { attempt: number; cancelled: boolean; rebuilt?: boolean }>();
 
     /** `spare`: launch the thread's process as this turn would and stop there: nothing is written to it and no turn starts. */
-    const sendTurn = async (turn: SendTurnInput, logicalTurnId?: string, spare = false) => {
+    const sendTurn = async (turn: SendTurnInput, logicalTurnId?: string, spare = false, spareMs?: number) => {
       if (startupModelRefresh) await startupModelRefresh;
       turn = { ...turn, toolScope: assertToolScopeSupported(DRIVER_KIND, turn.toolScope) };
       if (config.managedModels && (!turn.model || !config.managedModels.includes(turn.model))) throw new Error("This model is not assigned to this workspace.");
@@ -1159,11 +1159,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
       // A process started ahead is taken once it has started up and has listed again the tools the harness serves only during a turn.
       const ahead = sessions.get(threadId);
-      if (!spare && ahead?.spare && !ahead.closing && ahead.argsKey === argsKey && !(ahead.tools?.ready && await ahead.tools.relist(Object.keys(mcpServers)))) closeSession(threadId, "never used");
+      if (!spare && ahead?.spare && !ahead.closing && (Date.now() - (ahead.spareAt ?? 0) > (ahead.spareMs ?? PRESTART_IDLE_MS) + 5_000 || (ahead.argsKey === argsKey && !(ahead.tools?.ready && await ahead.tools.relist(Object.keys(mcpServers)))))) closeSession(threadId, "never used");
       const live = sessions.get(threadId);
-      if (!turn.sessionReset && live && !live.turn && !live.closing && live.child.exitCode === null && live.argsKey === argsKey && (!sessionId || sessionId === live.sessionId)) {
+      if (!turn.sessionReset && live && !live.turn && !live.closing && live.child.exitCode === null && live.argsKey === argsKey && (sessionId ? sessionId === live.sessionId : !live.resumed)) {
         stopIdleClose(`${instanceId}\0${threadId}`, live.idleTimer); // busy again: no longer idle
-        if (live.spare) { live.spare = false; live.take?.(turnId); appendNative(threadId, { dir: "out", source: "claude.session", msg: { took: "prestarted" } }); }
+        if (live.spare) { live.spare = false; live.resumed = undefined; live.take?.(turnId); appendNative(threadId, { dir: "out", source: "claude.session", msg: { took: "prestarted" } }); }
         live.turn = { turnId, input: turn, retryAbort, settled: false, sawStreamDelta: false, awaitingInit: true, pendingSteers: new Set(), deferred: null, continuationGrace: null, continuationSilence: null };
         active.set(threadId, { stop: () => {
           if (live.turn) live.turn.stopRequested = true;
@@ -1324,7 +1324,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         replaysUserMessages,
         turn: spare ? null : { turnId, input: turn, retryAbort, settled: false, sawStreamDelta: false, pendingSteers: new Set(), deferred: null, continuationGrace: null, continuationSilence: null },
         idleTimer: null,
-        closing: false, spare, take: (taker) => { turnId = taker; }, ...(spare ? { tools: spareTools.forProcess((frame) => writeControlFrame(child.stdin, frame)) } : {}),
+        closing: false, spare, take: (taker) => { turnId = taker; }, ...(spare ? { tools: spareTools.forProcess((frame) => writeControlFrame(child.stdin, frame)), spareMs, spareAt: Date.now(), ...(sessionId ? { resumed: sessionId } : {}) } : {}),
         stderr: "",
         costTotal: undefined,
       };
@@ -1975,9 +1975,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         enginePid: (threadId) => (active.has(threadId) ? sessions.get(threadId)?.child.pid : undefined),
         cacheKeepWarm: forks.adapter,
         prestart: {
-          start: (turn) => {
+          start: (turn, waitMs) => {
             if (!spareTools.usable) return Promise.resolve(false);
-            const launch = sendTurn(turn, undefined, true).then(() => sessions.get(turn.threadId)?.spare === true, () => false).finally(() => { if (spares.get(turn.threadId) === launch) spares.delete(turn.threadId); });
+            const launch = sendTurn(turn, undefined, true, waitMs).then(() => sessions.get(turn.threadId)?.spare === true, () => false).finally(() => { if (spares.get(turn.threadId) === launch) spares.delete(turn.threadId); });
             spares.set(turn.threadId, launch);
             return launch;
           },
