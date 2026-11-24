@@ -2205,6 +2205,7 @@
   "attach.retryAria": "Reintentar la carga de {name}",
   "attach.imageUnavailable": "Imagen no disponible",
   "attach.imageOutsideWorkspace": "Esta imagen está fuera de la carpeta de trabajo de este chat, así que no se puede mostrar aquí",
+  "attach.previewOutsideWorkspace": "Este archivo está fuera de la carpeta de trabajo de este chat, así que no se puede abrir aquí. Pide al bot que lo guardó que adjunte una copia.",
   "attach.previewImageAria": "Vista previa de la imagen adjunta {name}",
   "attach.externalHidden": "Imagen externa oculta por privacidad",
   "attach.savedTo": "Guardado en {path}",

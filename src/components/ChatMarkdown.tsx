@@ -363,7 +363,7 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
 // source: the original a delivered copy came from, offered on right-click (Show in Finder) like in the gallery.
 function LocalFileLink({ filePath, shownPath, shownName, name, source, children, message }: { filePath: string; shownPath: string; shownName: string; name?: string; source?: string; children?: ReactNode; message?: MessageAttachmentContext }) {
   const save = useLocalFileSave(filePath, name, message);
-  const preview = useHtmlPreview(filePath, shownName, message);
+  const preview = useHtmlPreview(filePath, shownName, message, shownPath);
   const revealMenu = useRevealOriginalMenu();
   const fileOutsideWorkspace = useMessageFileOutsideWorkspace(filePath, message);
   const revealHere = typeof window !== "undefined" && Boolean(window.ogb?.revealInFolder) && !window.ogb?.remoteClient?.active;
@@ -402,7 +402,7 @@ function LocalFileLink({ filePath, shownPath, shownName, name, source, children,
       {revealMenu.menu}
       {preview.opens
         ? <SaveIconButton name={shownName} save={save} retryable={save.retryable} />
-        : <FilePreviewButton path={filePath} name={shownName} message={message} />}
+        : <FilePreviewButton path={filePath} shownPath={shownPath} name={shownName} message={message} />}
       <button
         type="button"
         onClick={(event) => void pathAction(event)}
