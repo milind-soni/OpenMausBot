@@ -24,11 +24,11 @@ export interface BurgerHostDeps {
 export function burgerTurn(host: BurgerHostDeps, turn: CallingTurn, authorization: string | undefined): BurgerTurn {
   const post = async (path: string, token: string, body: unknown, signal: AbortSignal) => {
     try {
-      const res = await fetch(`http://127.0.0.1:${host.port}${path}`, {
-        method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: JSON.stringify(body), signal,
-      });
+      const res = await fetch(`http://127.0.0.1:${host.port}${path}`, body === undefined
+        ? { method: "GET", headers: { authorization: `Bearer ${token}` }, signal }
+        : { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: JSON.stringify(body), signal });
       const parsed = await res.json().catch(() => ({})) as Record<string, unknown>;
-      return { ok: res.ok && !parsed.error, body: parsed };
+      return { ok: res.ok && !parsed.error, body: parsed, status: res.status };
     } catch (error) {
       return { ok: false, body: { error: error instanceof Error ? error.message : String(error) } };
     }

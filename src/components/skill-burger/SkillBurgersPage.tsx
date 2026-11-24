@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { CirclePlay, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
@@ -9,6 +9,7 @@ import { BotAvatar } from "../Avatar";
 import { SidebarPopoverMenu } from "../SidebarPopoverMenu";
 import { TOOL_PAGE_TITLE, ToolPage, ToolPageHeader } from "../ToolPageShell";
 import { MiniBurger } from "./MiniBurger";
+import { RunWithInputs } from "./RunInputs";
 import { useBurgerRemoval } from "./SavedWorkflowsCard";
 
 function BurgerCard({ skill, onRemove }: { skill: SavedWorkflow; onRemove: () => void }) {
@@ -87,10 +88,7 @@ function BurgerCard({ skill, onRemove }: { skill: SavedWorkflow; onRemove: () =>
           <span className="shrink-0">{skill.layers.length === 1 ? t("skillBurger.layersOne") : t("skillBurger.layersMany", { count: skill.layers.length })}</span>
         </p>
         {runner && (
-          <button type="button" className="ui-button ui-button-md self-start" onClick={() => runBurgerIn(dispatch, runner, skill.name)}
-            aria-label={t("skillBurger.runName", { name: skill.summary })} data-run-burger={skill.name}>
-            <CirclePlay size={14} aria-hidden="true" />{t("skillBurger.run.button")}
-          </button>
+          <RunWithInputs skill={skill} onRun={(inputs) => runBurgerIn(dispatch, runner, skill.name, inputs)} className="ui-button ui-button-md self-start" />
         )}
         {problem && <p role="alert" className="text-[12px] text-danger">{problem}</p>}
       </div>
