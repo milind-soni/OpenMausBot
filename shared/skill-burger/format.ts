@@ -30,6 +30,8 @@ const common = {
   check: z.boolean().optional(),
   /** Where it ran, so a replay runs it in the same place: an app, the browser, the bot's computer, a cloud computer (VM), the person's computer. */
   where: z.enum(["app", "browser", "bot", "vm", "yourComputer"]).optional(),
+  /** The teammate whose step this was when the run was saved: shown only, never needed to run it. */
+  from: z.object({ name: z.string().min(1).max(80) }).strict().optional(),
 };
 
 /** A case's name: a few plain words, as the person or the bot would say them ("support", "a refund"). */
@@ -43,11 +45,13 @@ const PLACE: Record<string, string> = { vm: "on the cloud computer", yourCompute
 export const workflowStepSchema = z.discriminatedUnion("kind", [
   z.object({ ...common, kind: z.literal("shell"), run: z.string().min(1).max(20_000), cwd: z.string().max(1_000).optional(), stdin: ref.optional() }).strict(),
   z.object({ ...common, kind: z.literal("app"), app: z.string().min(1).max(64), tool: z.string().min(1).max(200), args: z.record(z.string(), z.unknown()), account: z.string().max(200).optional() }).strict(),
-  z.object({ ...common, kind: z.literal("browser"), action: z.literal("open"), url: z.union([z.string().url(), ref]) }).strict(),
+  z.object({ ...common, kind: z.literal("browser"), action: z.literal("open"), url: z.union([z.string().url(), ref]), note: z.string().max(200).optional() }).strict(),
   z.object({ ...common, kind: z.literal("file"), path: z.string().min(1).max(1_000), content: z.union([z.string(), ref]) }).strict(),
   z.object({
     ...common, kind: z.literal("ai"), deterministic: z.literal(false), prompt: z.string().min(1).max(4_000),
     input: ref.optional(), example: z.string().max(4_000).optional(),
+    /** The exact words this part was given when a teammate did it, and the earlier steps it read. */
+    brief: z.string().max(4_000).optional(), uses: z.array(ref).max(12).optional(),
   }).strict(),
   // A fork: rules on an earlier step's output pick a case, or the AI picks one by judgement. Steps for a case carry
   // `when: {"$step": <decide id>, "path": "case", "op": "eq", "value": <case>}`; the run takes only that case's steps.
@@ -108,7 +112,8 @@ function stepLine(step: WorkflowStep, args: Workflow["args"]): string {
   const what = step.kind === "shell" ? ` \`${step.run.split("\n", 1)[0]!.slice(0, 120)}\`` : step.kind === "app" ? ` (${step.tool})` : "";
   const place = step.where && PLACE[step.where] && !(step.kind === "browser" && step.where === "browser") ? ` ${PLACE[step.where]}` : "";
   const fork = caseOf(step);
-  return `${fork ? `[only when ${fork.decide} is "${fork.case}"] ` : ""}${where}${place}: ${step.label}${what}${detail.length ? ` (${detail.join("; ")})` : ""}${step.kind === "ai" ? " (your judgement)" : ""}`;
+  const brief = step.kind === "ai" && step.brief ? ` Brief: ${yamlScalar(step.brief.slice(0, 600))}` : "";
+  return `${fork ? `[only when ${fork.decide} is "${fork.case}"] ` : ""}${where}${place}: ${step.label}${what}${detail.length ? ` (${detail.join("; ")})` : ""}${step.kind === "ai" ? " (your judgement)" : ""}${brief}`;
 }
 
 /** SKILL.md for a saved burger: the steps in words, so a bot can follow them even where nothing replays workflow.json. */

@@ -8101,5 +8101,11 @@
   "skillBurger.run.pathUndone": "手順を削除しました",
   "skillBurger.run.addPathFailed": "できませんでした。もう一度お試しください。",
   "activity.tool.team.runWorkflow": "Skill Burger を実行",
-  "activity.tool.team.workflowEdit": "Skill Burger を変更"
+  "activity.tool.team.workflowEdit": "Skill Burger を変更",
+  "skillBurger.detail.lookingFor": "探しているもの",
+  "skillBurger.detail.brief": "指示",
+  "skillBurger.detail.reads": "読むもの",
+  "skillBurger.detail.lastTime": "前回",
+  "skillBurger.detail.call": "呼び出し",
+  "skillBurger.detail.learnedFrom": "{name} から学習"
 }

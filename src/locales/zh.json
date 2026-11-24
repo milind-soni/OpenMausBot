@@ -10290,5 +10290,11 @@
   "skillBurger.run.pathUndone": "已移除路径",
   "skillBurger.run.addPathFailed": "无法完成，请重试。",
   "activity.tool.team.runWorkflow": "运行 Skill Burger",
-  "activity.tool.team.workflowEdit": "更改 Skill Burger"
+  "activity.tool.team.workflowEdit": "更改 Skill Burger",
+  "skillBurger.detail.lookingFor": "要找的",
+  "skillBurger.detail.brief": "指示",
+  "skillBurger.detail.reads": "读取",
+  "skillBurger.detail.lastTime": "上次",
+  "skillBurger.detail.call": "调用",
+  "skillBurger.detail.learnedFrom": "向 {name} 学来的"
 }

@@ -4295,5 +4295,11 @@
   "skillBurger.run.pathUndone": "Weg entfernt",
   "skillBurger.run.addPathFailed": "Das hat nicht geklappt. Versuch es noch einmal.",
   "activity.tool.team.runWorkflow": "Skill Burger ausführen",
-  "activity.tool.team.workflowEdit": "Skill Burger ändern"
+  "activity.tool.team.workflowEdit": "Skill Burger ändern",
+  "skillBurger.detail.lookingFor": "Sucht nach",
+  "skillBurger.detail.brief": "Auftrag",
+  "skillBurger.detail.reads": "Liest",
+  "skillBurger.detail.lastTime": "Letztes Mal",
+  "skillBurger.detail.call": "Aufruf",
+  "skillBurger.detail.learnedFrom": "gelernt von {name}"
 }

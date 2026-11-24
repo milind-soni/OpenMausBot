@@ -20,6 +20,24 @@ export interface RunRow {
   chosen?: string;
   state: RowState;
   error?: string;
+  /** What the step keeps beyond its line: shown when someone taps it. */
+  detail?: { note?: string; brief?: string; reads?: string[]; example?: string; from?: string; args?: Record<string, unknown> };
+}
+
+/** A saved step's details: a teammate's brief, the steps it reads, its answer last time, and the call it makes. */
+function detailOf(step: Workflow["steps"][number], steps: Workflow["steps"]): RunRow["detail"] {
+  const reads = step.kind === "ai" ? (step.uses ?? []).flatMap((ref) => ("$step" in ref ? steps.filter((one) => one.id === ref.$step).map((one) => one.label) : [])) : [];
+  const args = step.kind === "app" ? step.args : step.kind === "shell" ? { run: step.run, ...(step.cwd ? { cwd: step.cwd } : {}) }
+    : step.kind === "browser" ? { url: step.url } : step.kind === "file" ? { path: step.path } : undefined;
+  const detail = {
+    ...(step.kind === "browser" && step.note ? { note: step.note } : {}),
+    ...(step.kind === "ai" && step.brief ? { brief: step.brief } : {}),
+    ...(reads.length ? { reads } : {}),
+    ...(step.kind === "ai" && step.example ? { example: step.example } : {}),
+    ...(step.from ? { from: step.from.name } : {}),
+    ...(args ? { args } : {}),
+  };
+  return Object.keys(detail).length ? detail : undefined;
 }
 
 export interface RunView {
@@ -80,6 +98,7 @@ export function runView(workflow: Workflow, seen: ReturnType<typeof latestRun>, 
       ...(step.kind === "decide" ? { cases: step.cases, ...(got?.case ? { chosen: got.case } : {}) } : {}),
       state: got?.state ?? "waiting",
       ...(got?.error ? { error: got.error } : {}),
+      ...((): { detail?: RunRow["detail"] } => { const detail = detailOf(step, workflow.steps); return detail ? { detail } : {}; })(),
     };
   });
   const missing = workflow.steps.flatMap((step) => {

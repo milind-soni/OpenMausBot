@@ -11757,5 +11757,11 @@
   "skillBurger.run.pathUndone": "Path removed",
   "skillBurger.run.addPathFailed": "Couldn't do that. Try again.",
   "activity.tool.team.runWorkflow": "Run workflow",
-  "activity.tool.team.workflowEdit": "Workflow edit"
+  "activity.tool.team.workflowEdit": "Workflow edit",
+  "skillBurger.detail.lookingFor": "Looking for",
+  "skillBurger.detail.brief": "Brief",
+  "skillBurger.detail.reads": "Reads",
+  "skillBurger.detail.lastTime": "Last time",
+  "skillBurger.detail.call": "Call",
+  "skillBurger.detail.learnedFrom": "learned from {name}"
 }

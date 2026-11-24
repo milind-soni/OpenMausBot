@@ -7263,5 +7263,11 @@
   "skillBurger.run.pathUndone": "Usunięto ścieżkę",
   "skillBurger.run.addPathFailed": "Nie udało się. Spróbuj ponownie.",
   "activity.tool.team.runWorkflow": "Uruchom Skill Burger",
-  "activity.tool.team.workflowEdit": "Zmień Skill Burger"
+  "activity.tool.team.workflowEdit": "Zmień Skill Burger",
+  "skillBurger.detail.lookingFor": "Szuka",
+  "skillBurger.detail.brief": "Zlecenie",
+  "skillBurger.detail.reads": "Czyta",
+  "skillBurger.detail.lastTime": "Ostatnio",
+  "skillBurger.detail.call": "Wywołanie",
+  "skillBurger.detail.learnedFrom": "nauczone od {name}"
 }

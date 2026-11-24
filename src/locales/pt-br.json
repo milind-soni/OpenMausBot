@@ -11757,5 +11757,11 @@
   "skillBurger.run.pathUndone": "Caminho removido",
   "skillBurger.run.addPathFailed": "Não foi possível. Tente de novo.",
   "activity.tool.team.runWorkflow": "Executar Skill Burger",
-  "activity.tool.team.workflowEdit": "Alterar Skill Burger"
+  "activity.tool.team.workflowEdit": "Alterar Skill Burger",
+  "skillBurger.detail.lookingFor": "Procura",
+  "skillBurger.detail.brief": "Instrução",
+  "skillBurger.detail.reads": "Lê",
+  "skillBurger.detail.lastTime": "Da última vez",
+  "skillBurger.detail.call": "Chamada",
+  "skillBurger.detail.learnedFrom": "aprendido com {name}"
 }

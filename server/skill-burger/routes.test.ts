@@ -116,3 +116,36 @@ it("lets a Team member save and remove a burger on a bot they can edit, and keep
   access = "edit";
   expect((await api(`/api/skill-burgers/${name}?botId=${bot}`, { method: "DELETE" })).status).toBe(200);
 });
+
+it("shows and saves a run that handed work on with each teammate's steps, only those a Team member may see", async () => {
+  const handed: RunMessage[] = [
+    { id: "h0", role: "user", kind: "text", text: "Prepare the launch brief" },
+    { id: "h1", role: "bot", kind: "activity", tool: { name: "mcp__agents__coordinate_bots", ok: true, input: JSON.stringify({ bot_ids: ["Kiwi"], message: "Stage the announcement." }) } },
+    { id: "h2", role: "bot", kind: "activity", tool: { name: "Sent to Kiwi", ok: true }, threadRef: { botId: "kiwi", threadId: "tk", title: "@Kiwi · work" } },
+    { id: "h3", role: "bot", kind: "activity", tool: { name: "mcp__agents__coordinate_bots", ok: true, input: JSON.stringify({ bot_ids: ["Rio"], message: "Read the private inbox and sum it up." }) } },
+    { id: "h4", role: "bot", kind: "activity", tool: { name: "Sent to Rio", ok: true }, threadRef: { botId: "rio", threadId: "tr", title: "@Rio · work" } },
+    { id: "h5", role: "bot", kind: "activity", roomRequest: { id: "k1", phase: "result" }, tool: { name: "Kiwi replied", ok: true, output: "Staged." }, threadRef: { botId: "kiwi", threadId: "tk", title: "@Kiwi · work" } },
+    { id: "h6", role: "bot", kind: "activity", roomRequest: { id: "r1", phase: "result" }, tool: { name: "Rio replied", ok: true, output: "Three emails about billing." }, threadRef: { botId: "rio", threadId: "tr", title: "@Rio · work" } },
+    { id: "h7", role: "bot", kind: "activity", tool: { name: "Resumed with Kiwi, Rio results, reviewing", ok: true } },
+  ];
+  const threads: Record<string, RunMessage[]> = {
+    t1: handed,
+    tk: [{ id: "k0", role: "bot", kind: "text", roomRequest: { id: "k1", phase: "request" }, text: "@Kiwi Stage the announcement." },
+      { id: "k1", role: "bot", kind: "activity", tool: { name: "Write", ok: true, input: JSON.stringify({ file_path: "announcement.md", content: "# Hi\n" }) } },
+      { id: "k2", role: "bot", kind: "activity", tool: { name: "Bash", ok: true, input: JSON.stringify({ command: "git add announcement.md" }) } }],
+    tr: [{ id: "r0", role: "bot", kind: "text", roomRequest: { id: "r1", phase: "request" }, text: "@Rio Read the private inbox and sum it up." },
+      { id: "r1", role: "bot", kind: "activity", tool: { name: "mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL", ok: true, input: JSON.stringify({ tools: [{ tool_slug: "GMAIL_FETCH_EMAILS", arguments: { query: "from:ceo" } }] }) } }],
+  };
+  const level = (botId: string) => (botId === "rio" ? "none" : "edit") as "none" | "edit";
+  const { api, bot } = await serve({ messages: (threadId) => threads[threadId] ?? [], botName: (botId) => ({ kiwi: "Kiwi", rio: "Rio" })[botId] ?? null, levelOf: (_auth, botId) => level(botId) }, ["client"]);
+  const shown = (await api("/api/skill-burger-summary", send("POST", { botId: bot, threadId: "t1" }))).body;
+  expect(shown.layers.map((layer: { kind: string; words: string }) => `${layer.kind}:${layer.words}`)).toEqual(["file:announcement.md", "shell:git add announcement.md", "ai:Read the private inbox and sum it up"]);
+  const saved = await api("/api/skill-burgers", send("POST", { botId: bot, threadId: "t1", summary: "Prepare the launch brief" }));
+  expect(saved.status).toBe(201);
+  const { workflow } = (await api(`/api/skill-burgers/${saved.body.skill.name}?botId=${bot}`)).body;
+  expect(workflow.steps.map((step: { kind: string; label: string; from?: { name: string } }) => [step.kind, step.label, step.from?.name])).toEqual([
+    ["file", "Write announcement.md", "Kiwi"], ["shell", "Run git add announcement.md", "Kiwi"], ["ai", "Read the private inbox and sum it up", "Rio"],
+  ]);
+  expect(workflow.steps[2]).toMatchObject({ brief: "Read the private inbox and sum it up.", example: "Three emails about billing." });
+  expect(JSON.stringify(workflow)).not.toMatch(/from:ceo|Sent to|replied|Resumed/);
+});

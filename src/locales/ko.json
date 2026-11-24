@@ -7791,5 +7791,11 @@
   "skillBurger.run.pathUndone": "경로를 제거했습니다",
   "skillBurger.run.addPathFailed": "하지 못했습니다. 다시 시도하세요.",
   "activity.tool.team.runWorkflow": "Skill Burger 실행",
-  "activity.tool.team.workflowEdit": "Skill Burger 변경"
+  "activity.tool.team.workflowEdit": "Skill Burger 변경",
+  "skillBurger.detail.lookingFor": "찾는 것",
+  "skillBurger.detail.brief": "지시",
+  "skillBurger.detail.reads": "읽는 것",
+  "skillBurger.detail.lastTime": "지난번",
+  "skillBurger.detail.call": "호출",
+  "skillBurger.detail.learnedFrom": "{name}에게서 배움"
 }

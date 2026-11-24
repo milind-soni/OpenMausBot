@@ -5,7 +5,9 @@
 import { z } from "zod";
 
 import { draftFromLayers, draftWorkflow } from "../../shared/skill-burger/draft.ts";
-import { askOf, burgerLayers, BURGER_MIN_LAYERS, type RunMessage } from "../../shared/skill-burger/layers.ts";
+import { askOf, burgerLayers, BURGER_MIN_LAYERS, type BurgerLayer, type RunMessage } from "../../shared/skill-burger/layers.ts";
+import { flattenRun, handoffsIn, teamLayers, type TeammateSource } from "../../shared/skill-burger/teammates.ts";
+import { redactSecretsInText } from "../../shared/redact.ts";
 import { cleanSummary, summaryPrompt } from "../../shared/skill-burger/summary.ts";
 import { caseName, type Workflow } from "../../shared/skill-burger/format.ts";
 import { applyDecisions, decisionsPrompt, parseDecisions, type Decisions } from "../../shared/skill-burger/decisions.ts";
@@ -29,6 +31,10 @@ export interface SkillBurgerRouteDeps {
   summarize?(botId: string, prompt: string): Promise<string | null | undefined>;
   /** What this person may do with a bot: a Team Cloud member edits a bot's own burgers only where they can edit the bot. */
   levelOf?(auth: RequestAuth, botId: string): "none" | "view" | "chat" | "edit";
+  /** A teammate bot's name, or null once it's gone: a run that handed work on brings that teammate's steps in. */
+  botName?(botId: string): string | null;
+  /** The teammate's folder for a thread, so a path in it is kept relative. */
+  folderOf?(botId: string, threadId: string): string | undefined;
   root?: string;
 }
 
@@ -52,14 +58,22 @@ const patchBody = z.union([
 /** One tap's "Add the path": the steps the bot did by judgement for a case nobody had saved, after the run handed it over. */
 const pathBody = z.object({ botId: id.optional(), runBotId: id, threadId: z.string().min(1).max(200), run: z.string().min(1).max(64), decide: z.string().min(1).max(40), case: caseName }).strict();
 
-/** The tool rows of the bot's own steps between the run handing over `run` and the run going on: what it did by judgement. */
-export function judgementLayers(messages: readonly RunMessage[], run: string) {
+/** The tool rows of the bot's own steps between the run handing over `run` and the run going on: what it did by judgement,
+ * with any teammate's work it handed on brought in. */
+export function judgementLayers(messages: readonly RunMessage[], run: string, team?: TeammateSource) {
   const isRunCall = (message: RunMessage) => message.kind === "activity" && /(?:^|__)run_workflow$/.test(message.tool?.name ?? "");
   const handed = messages.findIndex((message) => isRunCall(message) && (message.tool?.output ?? "").includes(run));
   if (handed < 0) return [];
   const after = messages.slice(handed + 1);
   const resumed = after.findIndex(isRunCall);
-  return burgerLayers(resumed < 0 ? after : after.slice(0, resumed)).filter((layer) => layer.status === "done");
+  const rows = resumed < 0 ? after : after.slice(0, resumed);
+  return (team ? flattenRun(rows, team) : burgerLayers(rows)).filter((layer) => layer.status === "done");
+}
+
+/** A layer as the card shows it before a save: no output, and args only as the saved file would keep them. */
+export function shownLayer(layer: BurgerLayer): BurgerLayer {
+  const { output: _output, args, ...rest } = layer;
+  return { ...rest, ...(args ? { args: JSON.parse(redactSecretsInText(JSON.stringify(args))) as Record<string, unknown> } : {}) };
 }
 
 /** What the bot said in the run, in its own replies since the person's last ask. */
@@ -96,6 +110,17 @@ export function createSkillBurgerRoutes(deps: SkillBurgerRouteDeps): RouteHandle
   /** Null when this person may change the burger at `botId` (a bot's own) or in every chat (no botId); else the refusal. */
   const refusal = (auth: RequestAuth, botId: string | null | undefined): string | null =>
     botId ? (level(auth, botId) === "edit" ? null : NOT_YOURS) : admin(auth) ? null : EVERY_CHAT_ADMIN_ONLY;
+  /** Where this person reads teammates' work from: only bots they may at least see. */
+  const team = (auth: RequestAuth): TeammateSource | undefined => (deps.botName ? {
+    messages: (threadId) => { const rows = deps.messages(threadId); return rows.length ? rows : null; },
+    bot: (botId) => { const name = deps.botName!(botId); return name ? { name } : null; },
+    mayRead: (botId) => level(auth, botId) !== "none",
+    ...(deps.folderOf ? { folder: deps.folderOf } : {}),
+  } : undefined);
+  const layersOf = (auth: RequestAuth, messages: readonly RunMessage[]) => {
+    const source = team(auth);
+    return source && handoffsIn(messages).length ? teamLayers(messages, source) : burgerLayers(messages);
+  };
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     if (path === SKILL_BURGER_SUMMARY_PATH) {
       if (method !== "POST") return json(res, 405, { error: "Use POST." });
@@ -104,10 +129,13 @@ export function createSkillBurgerRoutes(deps: SkillBurgerRouteDeps): RouteHandle
       const { botId, threadId } = body.data;
       if (!deps.owns(botId, threadId) || !deps.sees(auth, threadId)) return json(res, 404, { error: "No such conversation." });
       const messages = deps.messages(threadId);
-      const layers = burgerLayers(messages).filter((layer) => layer.status === "done");
+      const all = layersOf(auth, messages);
+      const layers = all.filter((layer) => layer.status === "done");
       const ask = askOf(messages);
-      if (layers.length < BURGER_MIN_LAYERS || !ask || !deps.summarize) return json(res, 200, { summary: null });
-      const draft = draftWorkflow(messages);
+      // A run that handed work on shows the steps a save would keep, which the card can't read from this chat alone.
+      const shown = handoffsIn(messages).length ? { layers: all.map(shownLayer) } : {};
+      if (layers.length < BURGER_MIN_LAYERS || !ask || !deps.summarize) return json(res, 200, { summary: null, ...shown });
+      const draft = draftWorkflow(messages, { layers: all });
       const words = botWords(messages);
       const [reply, decided] = await Promise.all([
         deps.summarize(botId, summaryPrompt(ask, layers)).catch(() => null),
@@ -115,7 +143,7 @@ export function createSkillBurgerRoutes(deps: SkillBurgerRouteDeps): RouteHandle
       ]);
       const decisions = parseDecisions(decided);
       if (draft && decisions) decisionsFor.remember(threadId, draft.workflow, decisions);
-      return json(res, 200, { summary: cleanSummary(reply) });
+      return json(res, 200, { summary: cleanSummary(reply), ...shown });
     }
     if (path !== SKILL_BURGERS_PATH && !path.startsWith(`${SKILL_BURGERS_PATH}/`)) return PASS;
     const botIds = deps.botIds();
@@ -139,7 +167,8 @@ export function createSkillBurgerRoutes(deps: SkillBurgerRouteDeps): RouteHandle
         if (!deps.owns(botId, threadId) || !deps.sees(auth, threadId)) return json(res, 404, { error: "No such conversation." });
         const refused = refusal(auth, botId);
         if (refused) return json(res, 403, { error: refused });
-        const draft = draftWorkflow(deps.messages(threadId), { summary });
+        const messages = deps.messages(threadId);
+        const draft = draftWorkflow(messages, { summary, layers: layersOf(auth, messages) });
         if (!draft) return json(res, 422, { error: "This run has nothing to save yet." });
         const workflow = applyDecisions(draft.workflow, decisionsFor.find(threadId, draft.workflow));
         saved = saveWorkflowSkill({ workflow, name, place: { botId }, botIds, root: deps.root });
@@ -160,7 +189,7 @@ export function createSkillBurgerRoutes(deps: SkillBurgerRouteDeps): RouteHandle
       const found = readWorkflowSkill(placeOf(botId), burger, deps.root);
       const sha256 = listWorkflowSkills(botId ? [botId] : [], deps.root).find((skill) => skill.name === burger && skill.everyChat === !botId)?.sha256;
       if (!found || !sha256) return json(res, 404, { error: "No such skill." });
-      const layers = judgementLayers(deps.messages(threadId), run);
+      const layers = judgementLayers(deps.messages(threadId), run, team(auth));
       if (!layers.length) return json(res, 422, { error: "The bot did nothing for this case that could be saved." });
       const steps = draftFromLayers(layers, askOf(deps.messages(threadId)) ?? "", found.workflow.summary).steps;
       const next = applyEdit(found.workflow, { action: "add_case", decide: { id: decide }, case: chosen, steps });

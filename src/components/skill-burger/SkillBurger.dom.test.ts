@@ -103,3 +103,35 @@ it("names what a finished run did on its top bun, keeping the ask until then", a
   expect(fixture.api).toHaveBeenCalledWith("/api/skill-burger-summary", { method: "POST", body: JSON.stringify({ botId: "scout", threadId: "t1" }) });
   expect(button("Emails the sales sheet to Priya")).toBeDefined();
 });
+
+it("shows a run that handed work on with the teammates' steps from the server, and opens a step's details on a tap", async () => {
+  const sent = (id: string, bot: string): RunMessage => ({ id, role: "bot", kind: "activity", tool: { name: `Sent to ${bot}`, ok: true }, threadRef: { botId: bot, threadId: `t-${bot}` } });
+  const back = (id: string, bot: string): RunMessage => ({ id, role: "bot", kind: "activity", roomRequest: { id: `r-${bot}`, phase: "result" }, tool: { name: `${bot} replied`, ok: true, output: "ok" }, threadRef: { botId: bot, threadId: `t-${bot}` } });
+  const layers = [
+    { id: "s1/k1", messageId: "s1", kind: "browser", tool: "browser_navigate", words: "example.com", status: "done", read: false, where: "browser", replay: "exact", args: { url: "https://example.com/pricing" }, note: "Check the Pro plan price", from: { name: "Kiwi" } },
+    { id: "s2/r1", messageId: "s2", kind: "app", app: "gmail", tool: "GMAIL_FETCH_EMAILS", words: "fetch emails", status: "done", read: true, where: "app", replay: "exact", args: { query: "launch" }, from: { name: "Rio" } },
+    { id: "s2/judgement", messageId: "s2", kind: "ai", tool: "teammate", words: "Sum up what people ask", status: "done", read: false, where: "bot", replay: "ai", brief: "Sum up what people ask.", uses: ["s2/r1"], example: "Mostly pricing.", from: { name: "Rio" } },
+  ];
+  fixture.api.mockImplementation(async (path: string) => (path === "/api/skill-burger-summary" ? { summary: "Prepares the launch brief", layers } : {}));
+  // One hand-off alone still asks: its teammate's work can be several steps.
+  await render([ask, sent("s1", "Kiwi"), back("b1", "Kiwi")]);
+  await act(async () => { await Promise.resolve(); });
+  expect(fixture.api).toHaveBeenCalledWith("/api/skill-burger-summary", expect.anything());
+  await render([ask, sent("s1", "Kiwi"), sent("s2", "Rio"), back("b1", "Kiwi"), back("b2", "Rio"), { id: "x", role: "bot", kind: "activity", tool: { name: "Resumed with Kiwi, Rio results, reviewing", ok: true } }]);
+  await act(async () => { await Promise.resolve(); });
+  const rows = () => [...host.querySelectorAll("[data-burger-layer]")];
+  expect(rows().map((row) => row.querySelector("button span[title]")?.textContent)).toEqual(["Open example.com", "Fetch emails", "Sum up what people ask"]);
+  expect(host.textContent).not.toMatch(/Sent to|replied|Resumed/);
+  const part = rows()[2]!.querySelector("button")!;
+  expect(part.getAttribute("aria-expanded")).toBe("false");
+  expect(host.querySelector<HTMLElement>(`#${part.getAttribute("aria-controls")}`)?.hidden).toBe(true);
+  await act(async () => part.click());
+  const details = host.querySelector<HTMLElement>(`#${part.getAttribute("aria-controls")}`)!;
+  expect(details.hidden).toBe(false);
+  expect(details.textContent).toContain("Sum up what people ask.");
+  expect(details.textContent).toContain("Fetch emails");
+  expect(details.textContent).toContain("Mostly pricing.");
+  expect(details.textContent).toContain("learned from Rio");
+  // Simple mode keeps a step's raw call out of its details.
+  expect(details.textContent).not.toContain("launch");
+});

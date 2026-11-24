@@ -6062,5 +6062,11 @@
   "skillBurger.run.pathUndone": "Yol kaldırıldı",
   "skillBurger.run.addPathFailed": "Yapılamadı. Tekrar deneyin.",
   "activity.tool.team.runWorkflow": "Skill Burger çalıştır",
-  "activity.tool.team.workflowEdit": "Skill Burger değiştir"
+  "activity.tool.team.workflowEdit": "Skill Burger değiştir",
+  "skillBurger.detail.lookingFor": "Aradığı",
+  "skillBurger.detail.brief": "Talimat",
+  "skillBurger.detail.reads": "Okuduğu",
+  "skillBurger.detail.lastTime": "Geçen sefer",
+  "skillBurger.detail.call": "Çağrı",
+  "skillBurger.detail.learnedFrom": "{name} botundan öğrenildi"
 }

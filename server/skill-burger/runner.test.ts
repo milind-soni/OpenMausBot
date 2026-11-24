@@ -112,6 +112,36 @@ describe("running a Skill Burger", () => {
   });
 });
 
+describe("teammates' parts and connections", () => {
+  it("hands a teammate's part to the bot with its brief, what it read and last time's answer", async () => {
+    const h = harness({ app: async () => ({ ok: true, output: { messages: [{ subject: "Is Pro monthly?" }] } }) });
+    const workflow = wf([
+      app("s1", "GMAIL_FETCH_EMAILS", { query: "launch pricing" }, { from: { name: "Rio" } }),
+      { id: "s2", kind: "ai", deterministic: false, label: "Sum up what people ask", prompt: "Do this part again, as its brief says.", brief: "Sum up what people ask about pricing.", uses: [{ $step: "s1" }], example: "People ask about billing.", from: { name: "Rio" } },
+    ]);
+    const result = await h.start(workflow);
+    expect(result.requiresInput).toMatchObject({ type: "ai_step", step: "s2", brief: "Sum up what people ask about pricing.", example: "People ask about billing." });
+    expect(result.requiresInput!.input).toBe('GMAIL_FETCH_EMAILS:\n{"messages":[{"subject":"Is Pro monthly?"}]}');
+    expect(result.requiresInput!.prompt).toContain('"Sum up what people ask about pricing."');
+  });
+
+  it("asks for an app the bot isn't connected to before any step runs", async () => {
+    const h = harness();
+    h.deps.exec.connected = async () => ["slack"];
+    const workflow = wf([{ id: "s1", kind: "shell", label: "Stage", run: "git add a.md" }, app("s2", "GMAIL_SEND_EMAIL", { to: "a@example.com" }), app("s3", "SLACK_SEND_MESSAGE", { text: "hi" })]);
+    const result = await h.start(workflow);
+    expect(result).toMatchObject({ ok: false, error: { type: "needs_connection", apps: ["gmail"] } });
+    expect(result.error!.message).toContain("Gmail");
+    expect(h.calls).toEqual([]);
+    expect(h.events).toEqual([]);
+    // Connected, or not known: it runs.
+    h.deps.exec.connected = async () => ["gmail", "slack"];
+    expect((await h.start(workflow)).status).toBe("ok");
+    h.deps.exec.connected = async () => null;
+    expect((await h.start(workflow)).status).toBe("ok");
+  });
+});
+
 describe("cases", () => {
   const forked = (rules = true) => wf([
     app("s1", "GMAIL_FETCH_EMAILS", {}),

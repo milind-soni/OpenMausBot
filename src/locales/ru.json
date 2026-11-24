@@ -7317,5 +7317,11 @@
   "skillBurger.run.pathUndone": "Путь удалён",
   "skillBurger.run.addPathFailed": "Не получилось. Попробуйте ещё раз.",
   "activity.tool.team.runWorkflow": "Запустить Skill Burger",
-  "activity.tool.team.workflowEdit": "Изменить Skill Burger"
+  "activity.tool.team.workflowEdit": "Изменить Skill Burger",
+  "skillBurger.detail.lookingFor": "Ищет",
+  "skillBurger.detail.brief": "Задание",
+  "skillBurger.detail.reads": "Читает",
+  "skillBurger.detail.lastTime": "В прошлый раз",
+  "skillBurger.detail.call": "Вызов",
+  "skillBurger.detail.learnedFrom": "перенято у {name}"
 }

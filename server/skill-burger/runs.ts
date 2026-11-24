@@ -29,7 +29,7 @@ export interface StepEvent {
   output?: string;
 }
 
-export interface BurgerTurn extends Pick<ExecutorContext, "internal"> {
+export interface BurgerTurn extends Pick<ExecutorContext, "internal" | "connected"> {
   botId: string;
   threadId: string;
   cwd: string;
@@ -68,7 +68,7 @@ export function createSkillBurgerRuns(deps: { dataDir: string; root?: string; ho
   const states = createRunStates(join(deps.dataDir, "skill-burger-runs"));
   const open = new Map<string, Set<string>>();
   const runDeps = (turn: BurgerTurn): RunDeps => ({
-    exec: deps.executors?.(turn) ?? createExecutors({ botId: turn.botId, cwd: turn.cwd, internal: turn.internal }),
+    exec: deps.executors?.(turn) ?? createExecutors({ botId: turn.botId, cwd: turn.cwd, internal: turn.internal, ...(turn.connected ? { connected: turn.connected } : {}) }),
     events: stepEvents(turn, open),
     save: (state) => states.save(state),
   });

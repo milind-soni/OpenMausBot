@@ -4244,5 +4244,11 @@
   "skillBurger.run.pathUndone": "Шлях вилучено",
   "skillBurger.run.addPathFailed": "Не вдалося. Спробуйте ще раз.",
   "activity.tool.team.runWorkflow": "Запустити Skill Burger",
-  "activity.tool.team.workflowEdit": "Змінити Skill Burger"
+  "activity.tool.team.workflowEdit": "Змінити Skill Burger",
+  "skillBurger.detail.lookingFor": "Шукає",
+  "skillBurger.detail.brief": "Завдання",
+  "skillBurger.detail.reads": "Читає",
+  "skillBurger.detail.lastTime": "Минулого разу",
+  "skillBurger.detail.call": "Виклик",
+  "skillBurger.detail.learnedFrom": "перейнято в {name}"
 }

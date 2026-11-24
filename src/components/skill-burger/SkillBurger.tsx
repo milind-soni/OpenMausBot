@@ -9,6 +9,7 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { burgerStartsFolded, rememberSavedRun, removeBurger, saveBurger, savedRun, type SavedWorkflow } from "@/lib/skill-burger";
 import { ServiceIcon } from "../ServiceIcon";
 import { EveryChatToggle } from "./EveryChatToggle";
+import { hasDetail, StepDetails, type StepDetail } from "./StepDetails";
 
 /** One layer's icon: the app's own mark, or a plain icon for a command, a file, a page or the AI. */
 export function LayerIcon({ kind, app }: { kind: BurgerLayer["kind"]; app?: string }) {
@@ -43,6 +44,48 @@ function Cooking({ text }: { text: string }) {
       {text}
       <span aria-hidden="true" className="thinking-sheen"><span data-text={text} /></span>
     </span>
+  );
+}
+
+/** One layer: its line, and, where it keeps more (a teammate's brief, what it read, last time's answer), a tap opens that. */
+function LayerRow({ layer, layers, advanced }: { layer: BurgerLayer; layers: readonly BurgerLayer[]; advanced: boolean }) {
+  const [open, setOpen] = useState(false);
+  const line = layerLine(layer);
+  const detail: StepDetail = {
+    ...(layer.note ? { note: layer.note } : {}), ...(layer.brief ? { brief: layer.brief } : {}), ...(layer.example ? { example: layer.example } : {}),
+    ...(layer.uses?.length ? { reads: layer.uses.flatMap((id) => { const read = layers.find((one) => one.id === id); return read ? [layerLine(read)] : []; }) } : {}),
+    ...(layer.from?.name ? { from: layer.from.name } : {}), ...(layer.args ? { args: layer.args } : {}),
+  };
+  const opens = layer.status !== "running" && hasDetail(detail, advanced);
+  const detailsId = `burger-step-${layer.id.replace(/[^\w-]/g, "-")}`;
+  const content = (
+    <>
+      <LayerIcon kind={layer.kind} app={layer.app} />
+      {layer.status === "running" ? <Cooking text={line} /> : (
+        <span className={cn("min-w-0 flex-1 truncate text-start", layer.kind === "ai" && "text-ink-secondary")} title={line}>{line}</span>
+      )}
+      {layer.kind === "ai" && <span className="ms-auto shrink-0 text-[11px] text-ink-tertiary">{t("skillBurger.aiTag")}</span>}
+      {layer.status === "failed" && <XCircle size={14} aria-label={t("skillBurger.failed")} className="ms-auto shrink-0" />}
+    </>
+  );
+  return (
+    <li
+      data-burger-layer={layer.kind}
+      data-status={layer.status}
+      className={cn(
+        "burger-layer flex min-h-9 min-w-0 shrink-0 flex-col justify-center rounded-[8px] bg-card px-3 text-[13px] shadow-sm",
+        layer.status === "failed" && "text-danger",
+        open && "py-1.5",
+      )}
+    >
+      {opens ? (
+        <button type="button" aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen((value) => !value)}
+          className="-mx-1 flex min-h-9 min-w-0 items-center gap-2.5 rounded-md px-1 text-start outline-none transition-colors hover:text-ink-secondary focus-visible:ring-2 focus-visible:ring-accent/60 motion-reduce:transition-none">
+          {content}
+        </button>
+      ) : <span className="flex min-h-9 min-w-0 items-center gap-2.5">{content}</span>}
+      {opens && <StepDetails id={detailsId} detail={detail} advanced={advanced} open={open} />}
+    </li>
   );
 }
 
@@ -180,27 +223,7 @@ export function SkillBurger({ run, layers, summary: initialSummary, canSave, bot
 
       <div className="burger-fold" data-folded={folded ? "true" : "false"} inert={folded} aria-hidden={folded || undefined}>
       <ol aria-label={t("skillBurger.layers")} className="burger-layers flex max-h-60 min-h-0 flex-col gap-[3px] overflow-y-auto">
-        {layers.map((layer) => {
-          const line = layerLine(layer);
-          return (
-            <li
-              key={layer.id}
-              data-burger-layer={layer.kind}
-              data-status={layer.status}
-              className={cn(
-                "burger-layer flex min-h-9 min-w-0 items-center gap-2.5 rounded-[8px] bg-card px-3 text-[13px] shadow-sm",
-                layer.status === "failed" && "text-danger",
-              )}
-            >
-              <LayerIcon kind={layer.kind} app={layer.app} />
-              {layer.status === "running" ? <Cooking text={line} /> : (
-                <span className={cn("min-w-0 flex-1 truncate", layer.kind === "ai" && "text-ink-secondary")} title={line}>{line}</span>
-              )}
-              {layer.kind === "ai" && <span className="ms-auto shrink-0 text-[11px] text-ink-tertiary">{t("skillBurger.aiTag")}</span>}
-              {layer.status === "failed" && <XCircle size={14} aria-label={t("skillBurger.failed")} className="ms-auto shrink-0" />}
-            </li>
-          );
-        })}
+        {layers.map((layer) => <LayerRow key={layer.id} layer={layer} layers={layers} advanced={advanced} />)}
       </ol>
       </div>
 

@@ -4,8 +4,10 @@ import { useEffect, useState, type CSSProperties } from "react";
 import type { RunRow, RunView } from "../../../shared/skill-burger/run-view";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import { addBurgerPath, undoBurgerEdit } from "@/lib/skill-burger";
 import { LayerIcon } from "./SkillBurger";
+import { hasDetail, StepDetails } from "./StepDetails";
 
 const SHEEN_PERIOD_MS = 2000;
 
@@ -24,15 +26,29 @@ const ICON_BUTTON =
   "flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-secondary outline-none transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/60 motion-reduce:transition-none";
 const QUIET = "shrink-0 text-[11px] text-ink-tertiary";
 
-function Row({ row }: { row: RunRow }) {
+function Row({ row, advanced }: { row: RunRow; advanced: boolean }) {
+  const [open, setOpen] = useState(false);
   const passed = row.state === "skipped" || row.state === "not_taken";
   const label = row.kind === "decide" ? t("skillBurger.run.decide", { question: row.label }) : row.label;
+  const opens = row.state !== "running" && Boolean(row.detail && hasDetail(row.detail, advanced));
+  const detailsId = `burger-run-step-${row.id}`;
+  const line = (
+    <>
+      <LayerIcon kind={row.kind} app={row.app} />
+      {row.state === "running" ? <Cooking text={label} /> : <span className="min-w-0 flex-1 truncate text-start" title={label}>{label}</span>}
+      {row.kind === "ai" && row.state !== "running" && <span className={QUIET}>{t("skillBurger.aiTag")}</span>}
+      {row.state === "skipped" && <span className={QUIET}>{t("skillBurger.run.skipped")}</span>}
+      {row.state === "not_taken" && <span className={QUIET}>{t("skillBurger.run.notThisTime")}</span>}
+      {row.state === "done" && row.kind !== "decide" && <Check size={14} aria-label={t("skillBurger.run.done")} className="shrink-0 text-success" />}
+      {row.state === "failed" && <XCircle size={14} aria-label={t("skillBurger.failed")} className="shrink-0" />}
+    </>
+  );
   return (
     <li
       data-burger-layer={row.kind}
       data-status={row.state}
       className={cn(
-        "burger-layer flex min-h-9 min-w-0 flex-col justify-center rounded-[8px] bg-card px-3 py-1.5 text-[13px] shadow-sm",
+        "burger-layer flex min-h-9 min-w-0 shrink-0 flex-col justify-center rounded-[8px] bg-card px-3 py-1.5 text-[13px] shadow-sm",
         row.depth === 1 && "ms-5",
         passed && "opacity-50",
         row.state === "waiting" && "text-ink-secondary",
@@ -40,15 +56,12 @@ function Row({ row }: { row: RunRow }) {
       )}
     >
       {row.caseHeading && <span className="mb-0.5 text-[11px] font-medium text-ink-tertiary">{t("skillBurger.run.ifCase", { case: row.caseHeading })}</span>}
-      <span className="flex min-w-0 items-center gap-2.5">
-        <LayerIcon kind={row.kind} app={row.app} />
-        {row.state === "running" ? <Cooking text={label} /> : <span className="min-w-0 flex-1 truncate" title={label}>{label}</span>}
-        {row.kind === "ai" && row.state !== "running" && <span className={QUIET}>{t("skillBurger.aiTag")}</span>}
-        {row.state === "skipped" && <span className={QUIET}>{t("skillBurger.run.skipped")}</span>}
-        {row.state === "not_taken" && <span className={QUIET}>{t("skillBurger.run.notThisTime")}</span>}
-        {row.state === "done" && row.kind !== "decide" && <Check size={14} aria-label={t("skillBurger.run.done")} className="shrink-0 text-success" />}
-        {row.state === "failed" && <XCircle size={14} aria-label={t("skillBurger.failed")} className="shrink-0" />}
-      </span>
+      {opens ? (
+        <button type="button" aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen((value) => !value)}
+          className="-mx-1 flex min-w-0 items-center gap-2.5 rounded-md px-1 text-start outline-none transition-colors hover:text-ink-secondary focus-visible:ring-2 focus-visible:ring-accent/60 motion-reduce:transition-none">
+          {line}
+        </button>
+      ) : <span className="flex min-w-0 items-center gap-2.5">{line}</span>}
       {row.cases && (
         <span className="mt-1 flex flex-wrap gap-1 ps-[26px]">
           {row.cases.map((one) => (
@@ -60,6 +73,7 @@ function Row({ row }: { row: RunRow }) {
         </span>
       )}
       {row.error && <span className="mt-0.5 truncate ps-[26px] text-[12px]" title={row.error}>{row.error}</span>}
+      {opens && <StepDetails id={detailsId} detail={row.detail!} advanced={advanced} open={open} />}
     </li>
   );
 }
@@ -80,6 +94,7 @@ export function RunBurger({ view, summary, everyChat, botId, threadId, busy, onD
   edited?: { undo: string };
 }) {
   const [folded, setFolded] = useState(false);
+  const advanced = useAdvancedMode();
   const [offer, setOffer] = useState<Offer>({ state: "idle" });
   const [editUndone, setEditUndone] = useState(false);
   const live = view.rows.some((row) => row.state === "running");
@@ -137,7 +152,7 @@ export function RunBurger({ view, summary, everyChat, botId, threadId, busy, onD
 
       <div className="burger-fold" data-folded={folded ? "true" : "false"} inert={folded} aria-hidden={folded || undefined}>
         <ol aria-label={t("skillBurger.layers")} className="burger-layers flex max-h-72 min-h-0 flex-col gap-[3px] overflow-y-auto">
-          {view.rows.map((row) => <Row key={row.id} row={row} />)}
+          {view.rows.map((row) => <Row key={row.id} row={row} advanced={advanced} />)}
         </ol>
       </div>
 

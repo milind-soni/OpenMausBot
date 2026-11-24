@@ -3824,5 +3824,11 @@
   "skillBurger.run.pathUndone": "रास्ता हटाया गया",
   "skillBurger.run.addPathFailed": "यह नहीं हो सका। फिर कोशिश करें।",
   "activity.tool.team.runWorkflow": "Skill Burger चलाएँ",
-  "activity.tool.team.workflowEdit": "Skill Burger बदलें"
+  "activity.tool.team.workflowEdit": "Skill Burger बदलें",
+  "skillBurger.detail.lookingFor": "क्या ढूँढ रहा है",
+  "skillBurger.detail.brief": "निर्देश",
+  "skillBurger.detail.reads": "पढ़ता है",
+  "skillBurger.detail.lastTime": "पिछली बार",
+  "skillBurger.detail.call": "कॉल",
+  "skillBurger.detail.learnedFrom": "{name} से सीखा"
 }

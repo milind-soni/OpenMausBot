@@ -11,6 +11,8 @@ const PIPE_MIN = 6;
 const ARG_MIN = 3;
 const COMPOSED_MIN = 200;
 const EXAMPLE_MAX = 2_000;
+/** A teammate's answer kept as an AI step's example. */
+const PART_EXAMPLE_MAX = 1_500;
 const CONTEXT_MAX = 1_500;
 const SEARCH_BUDGET = 5_000;
 const MASKED = /••••••|«redacted \d+ chars»/;
@@ -72,9 +74,24 @@ class Drafter {
   private readonly ask: string;
   private readonly summary: string;
 
-  constructor(ask: string, summary: string) {
+  /** Each layer's step id, so a part that read earlier steps names them. */
+  private readonly stepOf: ReadonlyMap<string, string>;
+
+  constructor(ask: string, summary: string, stepOf: ReadonlyMap<string, string> = new Map()) {
     this.ask = ask.toLowerCase();
     this.summary = summary;
+    this.stepOf = stepOf;
+  }
+
+  /** A teammate's part done by judgement: its brief, what it read, and its answer last time. */
+  private part(id: string, layer: BurgerLayer, label: string): WorkflowStep {
+    const uses = (layer.uses ?? []).flatMap((ref) => { const step = this.stepOf.get(ref); return step ? [{ $step: step }] : []; }).slice(0, 12);
+    return {
+      id, kind: "ai", deterministic: false, label,
+      prompt: `Do this part of "${this.summary}" again, as its brief says${uses.length ? ", from what the steps it read found" : ""}.`.slice(0, 4_000),
+      ...(layer.brief ? { brief: layer.brief.slice(0, 4_000) } : {}), ...(uses.length ? { uses } : {}),
+      ...(layer.example ? { example: layer.example.slice(0, PART_EXAMPLE_MAX) } : {}),
+    };
   }
 
   private inAsk(value: string): boolean {
@@ -166,9 +183,12 @@ class Drafter {
 
   add(layer: BurgerLayer, index: number): void {
     const id = `s${index + 1}`;
+    const before = this.steps.length;
     const label = layerLabel(layer).slice(0, 120);
     const raw = layer.args === undefined ? "" : JSON.stringify(layer.args);
-    if (raw && (MASKED.test(raw) || redactSecretsInText(raw) !== raw)) {
+    if (layer.kind === "ai" && layer.brief !== undefined) {
+      this.steps.push(this.part(id, layer, label));
+    } else if (raw && (MASKED.test(raw) || redactSecretsInText(raw) !== raw)) {
       // A secret was part of the call: the step is saved without it, for the AI to do again with the person's own key.
       this.steps.push({ id, kind: "ai", deterministic: false, label, prompt: `Do this step again: ${label}. It used a secret, so it isn't saved here.` });
     } else if (layer.replay !== "exact" || !layer.args) {
@@ -180,15 +200,17 @@ class Drafter {
       this.steps.push({ id, kind: "shell", label, run: this.shell(String(layer.args.command)), ...(cwd ? { cwd } : {}) });
     } else if (layer.kind === "file") {
       const content = String(layer.args.content ?? "");
-      this.steps.push({ id, kind: "file", label, path: String(layer.args.path), content: (this.value(id, content, "content") as string | WorkflowRef) });
+      this.steps.push({ id, kind: "file", label, path: String(layer.args.path), content: (this.value(id, content, `${String(layer.args.path).split(/[\\/]/).pop()} content`) as string | WorkflowRef) });
     } else if (layer.kind === "browser") {
       const url = String(layer.args.url);
-      this.steps.push({ id, kind: "browser", label, action: "open", url: this.inAsk(url) ? this.askArg(url, "url") : url });
+      this.steps.push({ id, kind: "browser", label, action: "open", url: this.inAsk(url) ? this.askArg(url, "url") : url, ...(layer.note ? { note: layer.note.slice(0, 200) } : {}) });
     } else {
       this.steps.push(this.ai(id, layer, label));
     }
     const step = this.steps[this.steps.length - 1];
     if (step && step.id === id) step.where = layer.where;
+    // A teammate's step, and any step written for it, says whose it was.
+    if (layer.from?.name) for (const added of this.steps.slice(before)) added.from = { name: layer.from.name.slice(0, 80) };
     this.recorded.push({ id, output: parsedOutput(layer), read: layer.read });
   }
 }
@@ -204,9 +226,10 @@ function scrubbed(step: WorkflowStep, layer: BurgerLayer | undefined, drafter: {
 
 export interface WorkflowDraft { workflow: Workflow; layers: BurgerLayer[] }
 
-/** The run since the person's last ask as a workflow, or null when it has fewer than two finished steps. */
-export function draftWorkflow(messages: readonly RunMessage[], options: { summary?: string } = {}): WorkflowDraft | null {
-  const layers = burgerLayers(messages).filter((layer) => layer.status === "done");
+/** The run since the person's last ask as a workflow, or null when it has fewer than two finished steps. `layers`: the
+ * run's layers already read, with teammates' work brought in. */
+export function draftWorkflow(messages: readonly RunMessage[], options: { summary?: string; layers?: readonly BurgerLayer[] } = {}): WorkflowDraft | null {
+  const layers = (options.layers ?? burgerLayers(messages)).filter((layer) => layer.status === "done");
   if (layers.length < 2) return null;
   const ask = askOf(messages) ?? "";
   const summary = (options.summary?.trim() || ask || layers.map(layerLabel).join(", ")).replace(/\s+/g, " ").slice(0, 160);
@@ -215,7 +238,7 @@ export function draftWorkflow(messages: readonly RunMessage[], options: { summar
 
 /** Finished layers as a workflow's steps and args, with the same pipes, args, AI steps and scrubbing as a whole run. */
 export function draftFromLayers(layers: readonly BurgerLayer[], ask: string, summary: string): Workflow {
-  const drafter = new Drafter(ask, summary);
+  const drafter = new Drafter(ask, summary, new Map(layers.map((layer, index) => [layer.id, `s${index + 1}`])));
   layers.forEach((layer, index) => drafter.add(layer, index));
   const byId = new Map(layers.map((layer, index) => [`s${index + 1}`, layer]));
   const steps = drafter.steps.map((step) => scrubbed(step, byId.get(step.id), {

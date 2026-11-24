@@ -19,7 +19,16 @@ export interface RunMessage {
   role: string;
   kind?: string;
   text?: string;
-  tool?: { name: string; ok?: boolean; summary?: string; input?: string; output?: string } | null;
+  at?: number;
+  from?: { botId: string; name?: string } | null;
+  /** `itemId`: the engine's own id for the call, which only a driver's tool row has. `nameCode`/`summaryCode`: the
+   * app's own fixed words, which only a row the app wrote has. */
+  tool?: { name: string; ok?: boolean; summary?: string; input?: string; output?: string; itemId?: string; nameCode?: string; summaryCode?: string } | null;
+  /** Hand-off rows: work sent to a teammate's own thread, or into a room, and the result coming back. */
+  threadRef?: { botId: string; threadId: string; title?: string } | null;
+  comm?: { groupId: string; threadId?: string; withBotId: string; withName?: string } | null;
+  sentDirectly?: unknown;
+  roomRequest?: { id: string; phase: string } | null;
 }
 
 export interface BurgerLayer {
@@ -44,6 +53,16 @@ export interface BurgerLayer {
   args?: Record<string, unknown>;
   account?: string;
   output?: string;
+  /** A teammate's step brought in as this bot's own: whose it was (shown only, never needed to run). */
+  from?: { name: string };
+  /** A teammate's part done by judgement: the exact words it was given. */
+  brief?: string;
+  /** Ids of the earlier layers that part read. */
+  uses?: string[];
+  /** What it answered last time, for the shape of the next answer. */
+  example?: string;
+  /** A page opened: what it was looking for. */
+  note?: string;
 }
 
 const MULTI_EXECUTE = "COMPOSIO_MULTI_EXECUTE_TOOL";
@@ -129,11 +148,25 @@ function whereOf(layer: Omit<BurgerLayer, "where"> & { where?: LayerWhere }, ser
 
 type RawLayer = Omit<BurgerLayer, "where"> & { where?: LayerWhere };
 
+/** A row about handing work to a teammate or its coming back: "Sent to Kiwi", "Kiwi replied". Known by its fields,
+ * never its words, which are in the conversation's language. */
+export const isHandoffRow = (message: RunMessage): boolean =>
+  message.kind === "activity" && Boolean(message.threadRef || message.comm || message.sentDirectly || message.roomRequest);
+
+/** A hand-off going out (not its result): the teammate's thread it went to. */
+export function sentTo(message: RunMessage): { botId: string; threadId: string; room?: string; name?: string } | null {
+  if (message.kind !== "activity" || message.roomRequest) return null;
+  if (message.threadRef) return { botId: message.threadRef.botId, threadId: message.threadRef.threadId };
+  if (message.comm?.threadId) return { botId: message.comm.withBotId, threadId: message.comm.threadId, room: message.comm.groupId, ...(message.comm.withName ? { name: message.comm.withName } : {}) };
+  return null;
+}
+
 function layersIn(message: RunMessage, live: ReadonlySet<string>): RawLayer[] {
   const tool = message.tool;
   if (message.kind !== "activity" || !tool?.name) return [];
-  // The app's own status rows ("recovery: …", "notice: …") ride in activity messages too; they are not steps.
-  if (STATUS_ROW.test(tool.name)) return [];
+  // The app's own rows are never steps: its status rows ("recovery: …"), its notices (fixed words in any language),
+  // and hand-offs to teammates, whose own steps a save brings in instead.
+  if (STATUS_ROW.test(tool.name) || tool.nameCode || tool.summaryCode || isHandoffRow(message)) return [];
   // A saved run's own steps are the burger already, not new steps to save.
   if (isRunStep(tool.input)) return [];
   const status: LayerStatus = tool.ok === false ? "failed" : tool.ok === undefined && live.has(message.id) ? "running" : "done";
@@ -203,10 +236,14 @@ function layersIn(message: RunMessage, live: ReadonlySet<string>): RawLayer[] {
     if (!path) return [{ ...base, id: message.id, kind: "ai", tool: bare, words: "edit files", read: false, replay: "ai" }];
     const content = typeof input?.content === "string" ? input.content : undefined;
     const exact = FILE_WRITE.has(bare) && content !== undefined && !clipped;
-    return [{ ...base, id: message.id, kind: exact ? "file" : "ai", tool: bare, words: baseName(path), read: false, replay: exact ? "exact" : "ai", args: exact ? { path, content } : { path } }];
+    return [{ ...base, id: message.id, kind: exact ? "file" : "ai", tool: bare, words: exact ? baseName(path) : `write ${baseName(path)}`, read: false, replay: exact ? "exact" : "ai", args: exact ? { path, content } : { path } }];
   }
-  const command = text(tool.summary) ?? text(input?.command) ?? (nameIsCommand(tool.name) ? tool.name : undefined);
-  if (command && (bare === "Bash" || bare === "shell" || bare === "vm_exec" || /^(?:exec_command|run_shell_command|bash|terminal)$/i.test(bare) || nameIsCommand(tool.name) || text(input?.command))) {
+  // A command needs real evidence: its input's command, a shell tool, or an engine's own row titled with the command
+  // line. A line the app wrote (a resumed note, a teammate's reply) has spaces too, but no engine id and no command.
+  const shellTool = bare === "Bash" || bare === "shell" || bare === "vm_exec" || /^(?:exec_command|run_shell_command|bash|terminal)$/i.test(bare);
+  const titled = nameIsCommand(tool.name) && Boolean(tool.itemId);
+  const command = text(input?.command) ?? ((shellTool || titled) ? text(tool.summary) ?? (titled ? tool.name : undefined) : undefined);
+  if (command && (shellTool || titled || text(input?.command))) {
     const parsed = parseRunCommand(command);
     if (!parsed) return [];
     const full = text(input?.command) ?? command;
@@ -254,10 +291,17 @@ function joinDesktop(layers: BurgerLayer[]): BurgerLayer[] {
   return out;
 }
 
+/** Layers in the order they ran, less failed tries a later one of the same step replaced, desktop actions joined. */
+export function stackLayers(layers: readonly BurgerLayer[]): BurgerLayer[] {
+  return joinDesktop(layers.filter((layer, index) => layer.status !== "failed" || !layers.slice(index + 1).some((later) => later.status !== "failed" && sameStep(layer, later))));
+}
+
+/** The messages since the person's last ask. */
+export const sinceAsk = (messages: readonly RunMessage[]): readonly RunMessage[] => messages.slice(askIndex(messages) + 1);
+
 /** The run since the person's last ask, as layers. */
 export function burgerLayers(messages: readonly RunMessage[], live: ReadonlySet<string> = new Set()): BurgerLayer[] {
-  const layers = messages.slice(askIndex(messages) + 1).flatMap((message) => layersOf(message, live));
-  return joinDesktop(layers.filter((layer, index) => layer.status !== "failed" || !layers.slice(index + 1).some((later) => later.status !== "failed" && sameStep(layer, later))));
+  return stackLayers(sinceAsk(messages).flatMap((message) => layersOf(message, live)));
 }
 
 /** A burger shows for a run of two real steps or more. */

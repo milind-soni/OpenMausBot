@@ -19,6 +19,8 @@ export interface ExecutorContext {
   cwd: string;
   /** Posts a JSON body to one of the server's internal routes as this turn, with a capability of `kind`. */
   internal(kind: "agents" | "connectors" | "computer" | "browser", path: string, body: unknown, signal: AbortSignal): Promise<{ ok: boolean; body: Record<string, unknown> }>;
+  /** The apps this bot is connected to, or null when that can't be told. */
+  connected?: () => Promise<readonly string[] | null>;
   /** The shell a command runs in on this computer. */
   shell?: { command: string; args: (script: string) => string[] };
 }
@@ -130,6 +132,7 @@ export function appFrame(tool: string, args: Record<string, unknown>, account: s
 
 export function createExecutors(context: ExecutorContext): StepExecutors {
   return {
+    ...(context.connected ? { connected: context.connected } : {}),
     shell: (input) => (input.where === "vm" ? runOnVm(context, input) : runInBox(context, input)),
     async app(input) {
       const { slug, frame } = appFrame(input.tool, input.args, input.account, rpcId());
@@ -144,7 +147,7 @@ export function createExecutors(context: ExecutorContext): StepExecutors {
       }
     },
     async browser(input) {
-      const answer = await context.internal("browser", "/api/internal/browser/mcp", { jsonrpc: "2.0", id: rpcId(), method: "tools/call", params: { name: "browser_navigate", arguments: { url: input.url } } }, input.signal);
+      const answer = await context.internal("browser", "/api/internal/browser/mcp", { jsonrpc: "2.0", id: rpcId(), method: "tools/call", params: { name: "agent_browser_open", arguments: { url: input.url } } }, input.signal);
       return answer.ok ? callText(answer.body) : { ok: false, error: String(answer.body.error ?? "the browser isn't available") };
     },
     async file(input) {

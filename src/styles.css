@@ -3870,7 +3870,7 @@ button:disabled.bg-danger {
 @keyframes burger-drop {
   0% { opacity: 0; min-height: 0; max-height: 0; transform: translateY(-12px) scale(0.96); filter: blur(4px); }
   45% { opacity: 1; min-height: 2.25rem; max-height: 3rem; filter: blur(0); }
-  100% { opacity: 1; min-height: 2.25rem; max-height: 3rem; transform: none; filter: none; }
+  100% { opacity: 1; min-height: 2.25rem; max-height: none; transform: none; filter: none; }
 }
 @keyframes burger-land {
   from { background-color: color-mix(in srgb, var(--color-accent) 14%, var(--color-card)); }

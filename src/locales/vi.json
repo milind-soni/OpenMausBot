@@ -6062,5 +6062,11 @@
   "skillBurger.run.pathUndone": "Đã xóa nhánh",
   "skillBurger.run.addPathFailed": "Không làm được. Hãy thử lại.",
   "activity.tool.team.runWorkflow": "Chạy Skill Burger",
-  "activity.tool.team.workflowEdit": "Đổi Skill Burger"
+  "activity.tool.team.workflowEdit": "Đổi Skill Burger",
+  "skillBurger.detail.lookingFor": "Đang tìm",
+  "skillBurger.detail.brief": "Yêu cầu",
+  "skillBurger.detail.reads": "Đọc",
+  "skillBurger.detail.lastTime": "Lần trước",
+  "skillBurger.detail.call": "Lệnh gọi",
+  "skillBurger.detail.learnedFrom": "học từ {name}"
 }

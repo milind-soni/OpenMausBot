@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { api } from "@/state/api";
 import type { Workflow } from "../../shared/skill-burger/format";
+import type { BurgerLayer } from "../../shared/skill-burger/layers";
 import type { SavedWorkflow } from "../../shared/skill-burger/saved";
 
 export type { SavedWorkflow };
@@ -92,12 +93,14 @@ export async function restoreBurger(skill: Pick<SavedWorkflow, "name" | "everyCh
 }
 
 /** The top bun's one line for a finished run, from the bot's small text model; null when there is none. */
-export async function fetchBurgerSummary(botId: string, threadId: string): Promise<string | null> {
+/** The run's name from the small model, and, for a run that handed work to teammates, the steps a save keeps (their
+ * work brought in as this bot's own), which this chat alone doesn't show. */
+export async function fetchBurgerSummary(botId: string, threadId: string): Promise<{ summary: string | null; layers?: BurgerLayer[] }> {
   try {
-    const { summary } = await api<{ summary: string | null }>("/api/skill-burger-summary", { method: "POST", body: JSON.stringify({ botId, threadId }) });
-    return typeof summary === "string" && summary ? summary : null;
+    const { summary, layers } = await api<{ summary: string | null; layers?: BurgerLayer[] }>("/api/skill-burger-summary", { method: "POST", body: JSON.stringify({ botId, threadId }) });
+    return { summary: typeof summary === "string" && summary ? summary : null, ...(Array.isArray(layers) ? { layers } : {}) };
   } catch {
-    return null;
+    return { summary: null };
   }
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { askOf, burgerLayers, BURGER_MIN_LAYERS, type RunMessage } from "../../../shared/skill-burger/layers";
+import { askOf, burgerLayers, BURGER_MIN_LAYERS, sinceAsk, type BurgerLayer, type RunMessage } from "../../../shared/skill-burger/layers";
+import { handoffsIn } from "../../../shared/skill-burger/teammates";
 import { latestRun, runView } from "../../../shared/skill-burger/run-view";
 import { fetchBurgerSummary, useRunnable } from "@/lib/skill-burger";
 import { RunBurger } from "./RunBurger";
@@ -34,18 +35,25 @@ export function SkillBurgerSlot({ botId, threadId, busy, canWrite, messages, liv
   const seen = useMemo(() => latestRun(messages, liveTools), [messages, liveTools]);
   const edit = useMemo(() => (seen ? null : editIn(messages)), [seen, messages]);
   const runnable = useRunnable(seen?.name ?? edit?.name ?? null, botId);
-  const layers = useMemo(() => burgerLayers(messages, liveTools), [messages, liveTools]);
+  const own = useMemo(() => burgerLayers(messages, liveTools), [messages, liveTools]);
+  // Work handed to teammates: their steps come from the server once the run is done (this chat doesn't hold them).
+  const handoffs = useMemo(() => handoffsIn(messages), [messages]);
+  // Each teammate's result coming back can change what the server reads, so it asks again.
+  const returned = useMemo(() => sinceAsk(messages).filter((message) => message.roomRequest?.phase === "result").length, [messages]);
   const [closed, setClosed] = useState<ReadonlyMap<string, string>>(() => new Map());
-  const [named, setNamed] = useState<ReadonlyMap<string, string>>(() => new Map());
-  const run = layers[0]?.messageId;
-  const finished = !seen && Boolean(run) && layers.length >= BURGER_MIN_LAYERS && !busy && layers.every((layer) => layer.status !== "running");
-  const runKey = run ? `${transcriptKey}:${run}:${layers.length}` : "";
+  const [named, setNamed] = useState<ReadonlyMap<string, { summary: string | null; layers?: BurgerLayer[] }>>(() => new Map());
+  const run = own[0]?.messageId ?? handoffs[0]?.id;
+  // One hand-off can be several steps once its teammate's work is read, so any hand-off asks the server.
+  const finished = !seen && Boolean(run) && (handoffs.length > 0 || own.length >= BURGER_MIN_LAYERS) && !busy && own.every((layer) => layer.status !== "running");
+  const runKey = run ? `${transcriptKey}:${run}:${own.length}:${handoffs.length}:${returned}` : "";
+  const fetched = named.get(runKey);
+  const layers = handoffs.length && fetched?.layers ? fetched.layers : own;
 
   useEffect(() => {
     if (!finished || !runKey || named.has(runKey)) return;
     let current = true;
-    void fetchBurgerSummary(botId, threadId).then((summary) => {
-      if (current && summary) setNamed((map) => new Map(map).set(runKey, summary));
+    void fetchBurgerSummary(botId, threadId).then((answer) => {
+      if (current && (answer.summary || answer.layers)) setNamed((map) => new Map(map).set(runKey, answer));
     });
     return () => { current = false; };
   }, [finished, runKey, botId, threadId, named]);
@@ -63,7 +71,7 @@ export function SkillBurgerSlot({ botId, threadId, busy, canWrite, messages, liv
     );
   }
   if (!run || layers.length < BURGER_MIN_LAYERS || closed.get(transcriptKey) === run) return null;
-  const summary = named.get(runKey) ?? askOf(messages) ?? layers.map(layerLine).join(", ");
+  const summary = fetched?.summary ?? askOf(messages) ?? layers.map(layerLine).join(", ");
   return (
     <div className="flex justify-end px-4 pb-2">
       <SkillBurger
