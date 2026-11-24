@@ -9935,7 +9935,6 @@
   "devicesPage.kind.server": "你自己的伺服器",
   "devicesPage.kind.cloud": "Cloud",
   "devicesPage.kind.phone": "手機",
-  "devicesPage.kind.vm": "機器人的電腦",
   "devicesPage.group.computers": "電腦",
   "devicesPage.group.servers": "Cloud 和你自己的伺服器",
   "devicesPage.group.phones": "手機",

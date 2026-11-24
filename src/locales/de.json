@@ -3707,7 +3707,6 @@
   "devicesPage.kind.server": "Dein eigener Server",
   "devicesPage.kind.cloud": "Cloud",
   "devicesPage.kind.phone": "Telefon",
-  "devicesPage.kind.vm": "Computer des Bots",
   "devicesPage.group.computers": "Computer",
   "devicesPage.group.servers": "Clouds und eigene Server",
   "devicesPage.group.phones": "Telefone",

@@ -7372,7 +7372,6 @@
   "devicesPage.kind.server": "내 서버",
   "devicesPage.kind.cloud": "클라우드",
   "devicesPage.kind.phone": "휴대폰",
-  "devicesPage.kind.vm": "봇의 컴퓨터",
   "devicesPage.group.computers": "컴퓨터",
   "devicesPage.group.servers": "클라우드 및 내 서버",
   "devicesPage.group.phones": "휴대폰",

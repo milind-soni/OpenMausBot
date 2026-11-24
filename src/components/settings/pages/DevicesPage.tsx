@@ -9,14 +9,13 @@ import type { CompanionState } from "@/lib/companion-types";
 import { api } from "@/state/api";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { AddDeviceDialog, type AddKind } from "../../devices/AddDeviceDialog";
-import { DeviceCard, DeviceList } from "../../devices/DeviceList";
-import { DeviceMap, HereNode, type NetworkAction } from "../../devices/DeviceMap";
+import { DeviceMap, type NetworkAction } from "../../devices/DeviceMap";
+import { DevicePanel } from "../../devices/DevicePanel";
 import { networkLine } from "../../devices/device-words";
 import { PairDeviceDialog } from "../../PhoneDevicesSection";
 import { usePhoneSetupController } from "../../PhoneSetupFlow";
 import { OwnServerLink, RailSheet } from "../../PlaceAddSheet";
 import { updateCommand } from "../../ServerList";
-import { SettingRow, SettingsGroup, SettingsRows } from "../../SettingsPrimitives";
 import { PlaceBadge } from "../SettingsNav";
 import { useSettingsShell } from "../settings-shell";
 
@@ -48,14 +47,15 @@ export function DevicesPage() {
   const { ctx, place, go } = useSettingsShell();
   const dispatch = useStoreDispatch();
   const config = useStoreSelector((state) => state.config);
-  const { devices, companion, loaded, refresh } = useDevices({ here: ctx.here, client: ctx.client, name: place.name, kind: place.kind });
+  const { devices, companion, refresh } = useDevices({ here: ctx.here, client: ctx.client, name: place.name, kind: place.kind });
   const c = usePhoneSetupController(config?.profile?.email);
-  const [selected, setSelected] = useState<{ id: string; from: "map" | "list" } | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
   const [adding, setAdding] = useState<AddKind | null | false>(false);
   const [pairingPhone, setPairingPhone] = useState(false);
   const [sheet, setSheet] = useState<Sheet>(null);
   const [problem, setProblem] = useState<CompanionState["tailscaleProblem"] | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const asked = useRef(0);
   const blocked = config?.managedPolicy?.remoteAccess === false ? t("policy.managedBy", { organization: config.managedPolicy.organizationName }) : null;
   const network = ctx.here ? privateNetwork(companion, problem) : null;
@@ -101,7 +101,7 @@ export function DevicesPage() {
           else if (source.type === "phone") await c.act((bridge) => bridge.revoke(source.id));
           else if (source.type === "phone-app") await api(phoneRemovePath(source.id), { method: "DELETE" });
           else if (source.type === "session") await api(`/api/auth/sessions/${encodeURIComponent(source.id)}`, { method: "DELETE" });
-          if (selected?.id === device.id) setSelected(null);
+          if (selected === device.id) setSelected(null);
           break;
         }
       }
@@ -111,33 +111,27 @@ export function DevicesPage() {
     refresh();
   };
 
-  const here = devices[0]!;
-  const workspaces = ctx.here ? window.ogb?.workspaces : undefined;
   const mark = place.kind === "computer" ? <Laptop size={20} aria-hidden="true" /> : <PlaceBadge place={place} size={24} />;
-  const others = devices.length > 1;
-  const pick = (id: string) => setSelected((now) => (now?.id === id && now.from === "map" ? null : { id, from: "map" }));
-  const chosen = selected?.from === "map" ? devices.find((device) => device.id === selected.id) : undefined;
+  const workspaces = ctx.here ? window.ogb?.workspaces : undefined;
+  const chosen = selected ? devices.find((device) => device.id === selected) : undefined;
+  const close = () => {
+    const id = selected;
+    setSelected(null);
+    if (id) window.requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-device-node="${CSS.escape(id)}"]`)?.focus());
+  };
+  const shared = network?.state === "ready" && network.shared;
+  const secondary = network && (networkAction?.href
+    ? <button type="button" className="settings-quiet cursor-pointer" disabled={c.busy} onClick={() => void check()}>{c.busy ? t("common.checking") : t("remote.checkAgain")}</button>
+    : shared ? <button type="button" className="settings-quiet cursor-pointer" onClick={() => go("phone", "computers")}>{t("devicesPage.action.manage")}</button> : null);
 
   return <>
-    <DeviceMap devices={devices} network={network} networkAction={networkAction} selected={selected?.from === "map" ? selected.id : null} onSelect={pick}
-      onAdd={() => setAdding(null)} here={<HereNode device={here} mark={mark} selected={chosen?.id === here.id} onSelect={pick} />} />
-    {chosen && <DeviceCard device={chosen} onAction={(device, action) => void act(device, action)} onClose={() => setSelected(null)} />}
+    <DeviceMap devices={devices} mark={mark} selected={chosen ? chosen.id : null} onSelect={(id) => { setNotice(null); setSelected((now) => (now === id ? null : id)); }}
+      onAction={(device, action) => void act(device, action)} onAdd={() => setAdding(null)}
+      network={network && { network, line: blocked ?? networkLine(network), action: networkAction, secondary }}
+      panel={(caret) => chosen && <DevicePanel device={chosen} caret={caret} onAction={(device, action) => void act(device, action)} onClose={close}
+        onRemoved={(text) => { setSelected(null); setNotice(text); refresh(); }} />} />
     {failure && <p role="alert" className="px-4 text-[12px] leading-4 text-danger">{failure}</p>}
-    {network && (
-      <SettingsGroup label={t("devicesPage.network.title")} block="network">
-        <SettingsRows>
-          <SettingRow title="Tailscale" subtitle={<span data-network-line={network.state} aria-live="polite">{blocked ?? networkLine(network)}</span>}>
-            {networkAction?.href && <>
-              <button type="button" className="settings-quiet cursor-pointer" disabled={c.busy} onClick={() => void check()}>{c.busy ? t("common.checking") : t("remote.checkAgain")}</button>
-              <a href={networkAction.href} target="_blank" rel="noreferrer" className="ui-button">{networkAction.label}</a>
-            </>}
-            {networkAction?.run && !(network.state === "ready" && network.shared) && <button type="button" className="ui-button" disabled={networkAction.busy} onClick={networkAction.run}>{networkAction.label}</button>}
-            {network.state === "ready" && network.shared && <button type="button" className="ui-button" onClick={() => go("phone", "computers")}>{t("devicesPage.action.manage")}</button>}
-          </SettingRow>
-        </SettingsRows>
-      </SettingsGroup>
-    )}
-    {loaded && others && <DeviceList devices={devices} selected={selected?.from === "list" ? selected.id : null} onSelect={(id) => setSelected(id ? { id, from: "list" } : null)} onAction={(device, action) => void act(device, action)} />}
+    {notice && <p role="status" className="px-4 text-[12px] leading-4 text-ink-secondary">{notice}</p>}
     {adding !== false && (
       <AddDeviceDialog here={ctx.here} cloud={ctx.cloud} network={network} networkAction={networkAction} tailnetAddress={companion?.tailnetShare?.origin ?? null} places={places} start={adding}
         onClose={() => { setAdding(false); refresh(); }} onConnected={refresh}
