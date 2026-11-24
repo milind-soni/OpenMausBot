@@ -1,0 +1,5 @@
+github.com
+  ✓ Logged in to github.com as octo-fixture (/tmp/x.FIXTURE/config/hosts.yml)
+  ✓ Git operations for github.com configured to use https protocol.
+  ✓ Token: gho_************************************
+  ✓ Token scopes: gist, read:org, repo

@@ -486,6 +486,14 @@ it("holds requests at the edge while the server starts only when the Admin asked
   expect(edgeHold(" 045s ")).toBe("45s");
 });
 
+it("hands the server the tool cache switch, and moves no cache of the server's own", () => {
+  const config = cloudHomeConfiguration(withGateway())!;
+  const server = cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_CACHE_ROOT: "on" }, "/data").server;
+  expect(server).toMatchObject({ OMB_CACHE_ROOT: "on", HOME: "/data", NODE_COMPILE_CACHE: "/data/.openmausbot/cache/node-compile" });
+  // Only the bot box adds the tools' variables (bot-box/tool-caches.ts), for each box's own HOME.
+  for (const name of ["npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR", "HF_HUB_CACHE", "XDG_CACHE_HOME"]) expect(server).not.toHaveProperty(name);
+});
+
 it("hands the server the Admin's export-only switch, so an ended Cloud started for its owner's export runs frozen", () => {
   // Seen on a real staging test Cloud on Oct 22: the Admin booted the held Cloud with OMB_CLOUD_EXPORT_ONLY=1, the log said
   // "not passed to the server: … OMB_CLOUD_EXPORT_ONLY …", and it ran its routines every 5 minutes for the whole export

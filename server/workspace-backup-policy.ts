@@ -48,6 +48,8 @@ export function excludedWorkspaceAuthPath(path: string): boolean {
   if (/^team-policy\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
   // A Team Cloud member's own installation, keys and sign-ins: theirs, never in the team's backup.
   if (/^people-connections(?:\/|$)/.test(path)) return true;
+  // GitHub sign-ins (github/sign-in.ts): each holds its token in plain text for GitHub CLI, and stays on this server.
+  if (/^github(?:\/|$)/.test(path)) return true;
   // A dated copy of the settings file, and the copy of one that could not be understood: they hold the credentials
   // the settings file holds, so they never leave the computer they were taken on.
   if (/^config\.json\.(?:bak\.\d{8}-\d{6}(?:-\d+)?|unreadable-[0-9a-f]{12})(?:\.\d+\.[0-9a-f-]+\.tmp)?$/.test(path)) return true;
