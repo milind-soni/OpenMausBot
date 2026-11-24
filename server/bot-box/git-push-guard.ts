@@ -1,14 +1,18 @@
 // The push guard of the broker's github grant (broker-github.ts): reads the command list at the head of a smart-HTTP
 // receive-pack request (git's pkt-lines, before the pack) and decides before any byte reaches GitHub. A bot may create
-// and update its own branches; it may not delete a ref or update the repository's default branch. It is a boundary
-// against the bot, not only against git, so anything it cannot read (a signed push, an unknown line, a list too long)
-// is refused. Force pushes to other branches are not looked at here.
+// and update branches other than the default one and create tags; it may not delete a ref, move a tag, update the
+// repository's default branch or touch anything outside refs/heads/ and refs/tags/ (refs/pull/, refs/notes/). It is a
+// boundary against the bot, not only against git, so anything it cannot read (a signed push, an unknown line, a list
+// too long) is refused. A force push to another branch is not detected: the command list names the old and new ids,
+// and whether one descends from the other needs the objects, which the broker does not have.
 
-/** A command list longer than this is refused rather than buffered. */
+/** A command list longer than this, or with more commands than MAX_COMMANDS, is refused rather than buffered. */
 export const MAX_COMMAND_BYTES = 1024 * 1024;
+export const MAX_COMMANDS = 5_000;
 const ZERO = /^0+$/;
 const COMMAND = /^([0-9a-f]{40}|[0-9a-f]{64}) ([0-9a-f]{40}|[0-9a-f]{64}) (refs\/[^\0\s]+)$/;
 const SHALLOW = /^shallow [0-9a-f]{40,64}$/;
+const NOT_GIT = "the push is not in git's format";
 
 export interface PushCommand { old: string; new: string; ref: string }
 
@@ -17,36 +21,66 @@ export type CommandList =
   | { state: "done"; commands: PushCommand[]; capabilities: string[] }
   | { state: "bad"; reason: string };
 
-/** The commands at the head of `head` (the bytes received so far; `ended`: the body has no more). */
-export function readCommandList(head: Buffer, ended: boolean): CommandList {
-  const commands: PushCommand[] = [];
-  let capabilities: string[] = [];
-  let at = 0;
-  for (;;) {
-    if (head.length - at < 4) break;
-    const size = head.subarray(at, at + 4).toString("latin1");
-    if (!/^[0-9a-f]{4}$/.test(size)) return { state: "bad", reason: "the push is not in git's format" };
-    const length = parseInt(size, 16);
-    if (length === 0) return { state: "done", commands, capabilities };
-    if (length < 5) return { state: "bad", reason: "the push is not in git's format" };
-    if (head.length - at < length) break;
-    let line = head.subarray(at + 4, at + length).toString("utf8");
-    at += length;
-    if (line.endsWith("\n")) line = line.slice(0, -1);
+/** Reads a command list as its bytes arrive: each pkt-line is read once, when it is whole, so a long list sent in small
+ * pieces costs no more than one sent at once. Only the part of a line not yet complete is kept between pieces. */
+export class CommandListReader {
+  private pending: Buffer = Buffer.alloc(0);
+  private seen = 0;
+  private readonly commands: PushCommand[] = [];
+  private capabilities: string[] = [];
+  private result: CommandList = { state: "more" };
+
+  /** The verdict after `chunk` (and with `ended`, after the body ended); once decided it no longer changes. */
+  feed(chunk: Buffer, ended = false): CommandList {
+    if (this.result.state !== "more") return this.result;
+    this.seen += chunk.length;
+    const buffer = this.pending.length ? Buffer.concat([this.pending, chunk]) : chunk;
+    let at = 0;
+    for (;;) {
+      if (buffer.length - at < 4) break;
+      const size = buffer.subarray(at, at + 4).toString("latin1");
+      if (!/^[0-9a-f]{4}$/.test(size)) return this.decide({ state: "bad", reason: NOT_GIT });
+      const length = parseInt(size, 16);
+      if (length === 0) return this.decide({ state: "done", commands: this.commands, capabilities: this.capabilities });
+      if (length < 5) return this.decide({ state: "bad", reason: NOT_GIT });
+      if (buffer.length - at < length) break;
+      const refused = this.line(buffer.subarray(at + 4, at + length).toString("utf8"));
+      if (refused) return this.decide({ state: "bad", reason: refused });
+      at += length;
+    }
+    this.pending = Buffer.from(buffer.subarray(at));
+    if (this.seen > MAX_COMMAND_BYTES) return this.decide({ state: "bad", reason: "the push updates too many refs at once" });
+    return ended ? this.decide({ state: "bad", reason: "the push ended early" }) : this.result;
+  }
+
+  /** Why one whole pkt-line is refused, or null. */
+  private line(text: string): string | null {
+    let line = text.endsWith("\n") ? text.slice(0, -1) : text;
     const nul = line.indexOf("\0");
     if (nul >= 0) {
-      if (commands.length) return { state: "bad", reason: "the push is not in git's format" };
-      capabilities = line.slice(nul + 1).split(" ").filter(Boolean);
+      if (this.commands.length) return NOT_GIT;
+      this.capabilities = line.slice(nul + 1).split(" ").filter(Boolean);
       line = line.slice(0, nul);
     }
-    if (line === "push-cert") return { state: "bad", reason: "signed pushes are not taken here" };
-    if (SHALLOW.test(line) && !commands.length) continue;
+    if (line === "push-cert") return "signed pushes are not taken here";
+    if (SHALLOW.test(line) && !this.commands.length) return null;
     const match = COMMAND.exec(line);
-    if (!match) return { state: "bad", reason: "the push is not in git's format" };
-    commands.push({ old: match[1]!, new: match[2]!, ref: match[3]! });
+    if (!match) return NOT_GIT;
+    if (this.commands.length >= MAX_COMMANDS) return "the push updates too many refs at once";
+    this.commands.push({ old: match[1]!, new: match[2]!, ref: match[3]! });
+    return null;
   }
-  if (head.length > MAX_COMMAND_BYTES) return { state: "bad", reason: "the push updates too many refs at once" };
-  return ended ? { state: "bad", reason: "the push ended early" } : { state: "more" };
+
+  private decide(result: CommandList): CommandList {
+    this.pending = Buffer.alloc(0);
+    this.result = result;
+    return result;
+  }
+}
+
+/** The commands at the head of `head` (the bytes received so far; `ended`: the body has no more). */
+export function readCommandList(head: Buffer, ended: boolean): CommandList {
+  return new CommandListReader().feed(head, ended);
 }
 
 /** The ref names a push may not update: the default branch, or main and master when it is unknown. */
@@ -54,13 +88,19 @@ export function protectedRefs(defaultBranch: string | null): string[] {
   return defaultBranch ? [defaultBranch] : ["refs/heads/main", "refs/heads/master"];
 }
 
+/** Why one command is refused, or null. */
+function refusal(command: PushCommand, kept: ReadonlySet<string>): string | null {
+  if (ZERO.test(command.new)) return "deleting a ref is not allowed here; push to a new branch";
+  if (command.ref.startsWith("refs/tags/")) return ZERO.test(command.old) ? null : "moving a tag is not allowed here; push a new tag";
+  if (!command.ref.startsWith("refs/heads/")) return "only branches and new tags may be pushed here; push to a new branch";
+  return kept.has(command.ref) ? "the default branch is protected here; push to a new branch" : null;
+}
+
 /** Empty when the push may go; else every command with why, since a push with one refused update goes nowhere. */
 export function refusedCommands(commands: readonly PushCommand[], defaultBranch: string | null): Array<{ ref: string; reason: string }> {
   const kept = new Set(protectedRefs(defaultBranch));
-  const why = (command: PushCommand) => ZERO.test(command.new) ? "deleting a ref is not allowed here; push to a new branch"
-    : kept.has(command.ref) ? "the default branch is protected here; push to a new branch" : null;
-  if (!commands.some((command) => why(command) !== null)) return [];
-  return commands.map((command) => ({ ref: command.ref, reason: why(command) ?? "not applied: another update in this push was refused" }));
+  if (!commands.some((command) => refusal(command, kept) !== null)) return [];
+  return commands.map((command) => ({ ref: command.ref, reason: refusal(command, kept) ?? "not applied: another update in this push was refused" }));
 }
 
 /** The default branch from an upload-pack v0 ref advertisement (`symref=HEAD:refs/heads/x` on its first ref line):
@@ -110,5 +150,5 @@ export function refusalBody(input: { capabilities: readonly string[]; refused: R
 export function refusalMessage(refused: ReadonlyArray<{ ref: string; reason: string }>, defaultBranch: string | null): string {
   const branch = defaultBranch ? defaultBranch.replace(/^refs\/heads\//, "") : "main or master";
   if (!refused.length) return "This push was refused: push your work to a new branch, for example git push origin HEAD:refs/heads/<new-branch-name>.";
-  return `This push was refused: bots may not push to the default branch (${branch}) or delete a branch or tag here. Push your work to a new branch instead, for example git push origin HEAD:refs/heads/<new-branch-name>, and nothing in this push was applied.`;
+  return `This push was refused: bots may not push to the default branch (${branch}), delete a branch or tag, move a tag, or push anything but branches and new tags here. Push your work to a new branch instead, for example git push origin HEAD:refs/heads/<new-branch-name>, and nothing in this push was applied.`;
 }

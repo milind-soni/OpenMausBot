@@ -56,12 +56,18 @@ describe("a boxed bot's git", () => {
     expect(Object.keys(process.grants)).toEqual(["github"]);
     expect(process.grants.github!.upstream).toBe("https://github.com");
     expect(process.grants.github!.headers).toEqual({});
-    const base = `http://127.0.0.1:${BOX_BROKER_PORT}/b/${process.token}/github`;
+    const origin = `http://127.0.0.1:${BOX_BROKER_PORT}`;
     // The server's own git settings never pass the allow-list; only ours are there.
-    expect(wrapped.env.GIT_CONFIG_PARAMETERS).toBe(boxGitEnv(base).GIT_CONFIG_PARAMETERS);
+    expect(wrapped.env.GIT_CONFIG_PARAMETERS).toBe(boxGitEnv({ port: BOX_BROKER_PORT, token: process.token }).GIT_CONFIG_PARAMETERS);
     expect(wrapped.env.GIT_CONFIG_COUNT).toBeUndefined();
-    for (const form of GITHUB_REMOTE_FORMS) expect(wrapped.env.GIT_CONFIG_PARAMETERS).toContain(shellQuote(`url.${base}/.insteadof=${form}`));
-    expect(wrapped.env.GIT_CONFIG_PARAMETERS).toContain("'credential.helper='");
+    // The remote's address carries no token: git writes that address down (merge messages, FETCH_HEAD, errors).
+    for (const form of GITHUB_REMOTE_FORMS) expect(wrapped.env.GIT_CONFIG_PARAMETERS).toContain(shellQuote(`url.${origin}/g/github/.insteadof=${form}`));
+    expect(wrapped.env.GIT_CONFIG_PARAMETERS).not.toMatch(/insteadof=[^']*omb_t0_/);
+    expect(wrapped.env.GIT_CONFIG_PARAMETERS).not.toContain(`/b/${process.token}`);
+    // The token goes in a header git sends only to the broker's address, and no helper is asked for that address alone.
+    expect(wrapped.env.GIT_CONFIG_PARAMETERS).toContain(shellQuote(`http.${origin}/.extraheader=x-omb-broker: ${process.token}`));
+    expect(wrapped.env.GIT_CONFIG_PARAMETERS).toContain(shellQuote(`credential.${origin}.helper=`));
+    expect(wrapped.env.GIT_CONFIG_PARAMETERS).not.toContain("'credential.helper=");
     expect(wrapped.env.GIT_TERMINAL_PROMPT).toBe("0");
     // git reaches the broker's loopback port directly, not through the box's network gate.
     expect(wrapped.env.HTTPS_PROXY).toBe(`http://127.0.0.1:${BOX_EGRESS_PORT}`);
@@ -70,7 +76,7 @@ describe("a boxed bot's git", () => {
   });
 
   it("survives each engine's shell: no name holds KEY, SECRET or TOKEN, which Codex's default shell policy drops", () => {
-    for (const name of Object.keys(boxGitEnv("http://127.0.0.1:18080/b/t/github"))) expect(name).not.toMatch(/KEY|SECRET|TOKEN/i);
+    for (const name of Object.keys(boxGitEnv({ port: 18080, token: `omb_t0_${"a".repeat(48)}` }))) expect(name).not.toMatch(/KEY|SECRET|TOKEN/i);
   });
 
   it("with no sign-in: nothing changes, no token is minted for git and no git setting is added", () => {
@@ -93,7 +99,7 @@ describe("a boxed bot's git", () => {
     const process = minted.at(-1)!;
     expect(Object.keys(process.grants).sort()).toEqual(["anthropic", "github"]);
     expect(wrapped.env.ANTHROPIC_API_KEY).toBe(process.token);
-    expect(wrapped.env.GIT_CONFIG_PARAMETERS).toContain(`/b/${process.token}/github/`);
+    expect(wrapped.env.GIT_CONFIG_PARAMETERS).toContain(`x-omb-broker: ${process.token}`);
   });
 
   it("on a Team Cloud: the member's own conversation gets that member's sign-in; a room's, the team's and a shared process get none", () => {

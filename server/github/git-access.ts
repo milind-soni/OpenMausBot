@@ -5,6 +5,7 @@
 import { GITHUB_GRANT, githubGrant } from "../bot-box/broker-github.ts";
 import type { BrokerGrant } from "../bot-box/broker.ts";
 import { boxGitEnv } from "./git-env.ts";
+import { conversationRepos } from "./git-repos.ts";
 import { githubSignedIn, githubToken, reportGithubAuthFailure } from "./token.ts";
 
 let memberOf: ((threadId: string) => string | null) | null = null;
@@ -25,13 +26,17 @@ export function gitAudience(threadId: string | null): string | null {
   }
 }
 
+let processes = 0;
+
 /** The github grant and git env for one boxed spawn, or null when its audience has no sign-in. The audience is asked
- * again on every request, so a conversation shared later stops getting the member's token at once. */
-export function boxGithubGit(threadId: string | null): { grant: BrokerGrant; env(brokerBase: string): Record<string, string> } | null {
+ * again on every request, so a conversation shared later stops getting the member's token at once. `folders`: where the
+ * spawn works (its conversation's folder, a project folder), whose clones it may push to. */
+export function boxGithubGit(threadId: string | null, folders: readonly string[]): { grant: BrokerGrant; env(input: { port: number; token: string }): Record<string, string> } | null {
   const audience = gitAudience(threadId);
   if (!audience || !githubSignedIn(audience)) return null;
+  const repos = conversationRepos(threadId ? `thread:${threadId}` : `process:${++processes}`, folders);
   return {
-    grant: githubGrant({ audience: () => gitAudience(threadId), token: (who) => githubToken(who), reportAuthFailure: (who) => reportGithubAuthFailure(who) }),
+    grant: githubGrant({ audience: () => gitAudience(threadId), token: (who) => githubToken(who), reportAuthFailure: (who) => reportGithubAuthFailure(who), mayPush: repos.mayPush, fetched: repos.fetched }),
     env: boxGitEnv,
   };
 }

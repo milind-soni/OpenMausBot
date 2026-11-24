@@ -75,14 +75,16 @@ describe("the unboxed credential helper", () => {
     expect((await ask({ [GIT_CREDENTIAL_HEADER]: secret })).status).toBe(403);
   });
 
-  it("never answers a session or a signed-out server", async () => {
+  it("never answers a session or a shared server's bot shells, and nothing for a signed-out server", async () => {
     provideGithubSignIn({ token: async () => null, reportAuthFailure: () => {}, signedIn: () => true });
     const route = createGitCredentialRoutes({ port: 1, enabled: () => true });
     const added = unboxedGitCredential({})!;
     const secret = /x-omb-git-credential: ([A-Za-z0-9_-]+)/.exec(added.env.GIT_CONFIG_PARAMETERS!)![1]!;
-    ({ server } = await serve(route, { kind: "session", scopes: ["admin"] } as unknown as RequestAuth));
-    expect((await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}${GIT_CREDENTIAL_PATH}`, { headers: { [GIT_CREDENTIAL_HEADER]: secret } })).status).toBe(403);
-    await new Promise<void>((done) => server!.close(() => done()));
+    for (const auth of [{ kind: "session", scopes: ["admin"] }, { kind: "loopback", scopes: [], trust: "service" }]) {
+      ({ server } = await serve(route, auth as unknown as RequestAuth));
+      expect((await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}${GIT_CREDENTIAL_PATH}`, { headers: { [GIT_CREDENTIAL_HEADER]: secret } })).status).toBe(403);
+      await new Promise<void>((done) => server!.close(() => done()));
+    }
     ({ server } = await serve(route));
     expect((await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}${GIT_CREDENTIAL_PATH}`, { headers: { [GIT_CREDENTIAL_HEADER]: secret } })).status).toBe(204);
   });

@@ -44,7 +44,7 @@ const known = (presented: string, now: number): boolean => {
   return false;
 };
 
-/** The route git's helper asks: the loopback only, with a live spawn's secret; the answer is git's credential lines. */
+/** The route git's helper asks: the owner-trust loopback only (never a shared server's bot shells), with a live spawn's secret; the answer is git's credential lines. */
 export function createGitCredentialRoutes(deps: { port: number; enabled(): boolean; now?(): number }): RouteHandler {
   const now = deps.now ?? Date.now;
   served = { port: deps.port, enabled: deps.enabled, now };
@@ -52,7 +52,7 @@ export function createGitCredentialRoutes(deps: { port: number; enabled(): boole
     if (path !== GIT_CREDENTIAL_PATH) return PASS;
     res.setHeader("cache-control", "no-store");
     const presented = req.headers[GIT_CREDENTIAL_HEADER];
-    if (method !== "GET" || auth.kind !== "loopback" || !deps.enabled() || typeof presented !== "string" || !known(presented, now())) {
+    if (method !== "GET" || auth.kind !== "loopback" || auth.trust === "service" || !deps.enabled() || typeof presented !== "string" || !known(presented, now())) {
       res.writeHead(403, { "content-type": "text/plain" }).end("forbidden\n");
       return;
     }

@@ -12,7 +12,7 @@ import { SERVER_ROOT, resolveProxy } from "../proxy-paths.ts";
 import { bridgedCommand, type BridgeTools } from "./bridge.ts";
 import { GITHUB_GRANT, boxGithubGit } from "../github/git-access.ts";
 import { brokerRewrite } from "./broker-env.ts";
-import { brokerUrl, openCredentialBroker, type BrokerGrant, type CredentialBroker } from "./broker.ts";
+import { openCredentialBroker, type BrokerGrant, type CredentialBroker } from "./broker.ts";
 import { detectBox, type BoxDetection, type BoxKind } from "./detect.ts";
 import { openBoxEgressGate, type BoxEgressGate } from "./egress-gate.ts";
 import { boxEnvironment } from "./env.ts";
@@ -176,11 +176,11 @@ export class BoxRunner {
     const minted = broker.mintForProcess({ botId: plan.botId, threadId, grants: {} });
     const rewrite = brokerRewrite(env, minted.token, broker.port);
     broker.revoke(minted.token);
-    const github = boxGithubGit(request.botThreads ? null : this.conversation(request).threadId);
+    const github = boxGithubGit(request.botThreads ? null : this.conversation(request).threadId, [request.cwd, request.conversationFolder].filter((folder): folder is string => Boolean(folder)));
     if (!Object.keys(rewrite.grants).length && !github) return { env, token: null, release: () => {}, unbrokered: rewrite.unbrokered };
     const granted = broker.mintForProcess({ botId: plan.botId, threadId, grants: { ...rewrite.grants, ...(github ? { [GITHUB_GRANT]: github.grant } : {}) } });
     const again = brokerRewrite(env, granted.token, broker.port);
-    const out = github ? { ...again.env, ...github.env(brokerUrl(broker.port, granted.token, GITHUB_GRANT)) } : again.env;
+    const out = github ? { ...again.env, ...github.env({ port: broker.port, token: granted.token }) } : again.env;
     return { env: out, token: granted.token, release: () => broker.revoke(granted.token), unbrokered: again.unbrokered };
   }
 }

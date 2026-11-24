@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { openCredentialBroker, type CredentialBroker } from "./broker.ts";
-import { GITHUB_TOKEN_REUSE_MS, brokeredLocation, gitRequest, githubGrant, type GithubGrantDeps } from "./broker-github.ts";
+import { BROKER_TOKEN_HEADER, openCredentialBroker, type CredentialBroker } from "./broker.ts";
+import { DEFAULT_BRANCH_REUSE_MS, GITHUB_TOKEN_REUSE_MS, brokeredLocation, gitRequest, githubGrant, type GithubGrantDeps } from "./broker-github.ts";
 
 const TOKEN = "ghp_unitFakeToken0123456789abcdefABCDEF";
 const basic = (token: string) => `Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
@@ -100,6 +100,21 @@ unixSocket("the github grant in the broker", () => {
     expect(seen[0]!.headers["git-protocol"]).toBe("version=2");
     expect(seen[0]!.headers.host).toBe(`127.0.0.1:${(upstream.address() as AddressInfo).port}`);
     for (const name of ["cookie", "x-api-key", "proxy-authorization"]) expect(seen[0]!.headers[name]).toBeUndefined();
+  });
+
+  it("takes the token from its header at /g/, which never reaches GitHub, and refuses /g/ without a good one", async () => {
+    const token = await start();
+    const res = await call("GET", "/g/github/acme/widgets.git/info/refs?service=git-upload-pack", { [BROKER_TOKEN_HEADER]: token });
+    expect(res.status).toBe(200);
+    expect(seen[0]!.url).toBe("/acme/widgets.git/info/refs?service=git-upload-pack");
+    expect(seen[0]!.headers[BROKER_TOKEN_HEADER]).toBeUndefined();
+    expect(JSON.stringify(seen[0]!.headers)).not.toContain(token);
+    expect((await call("GET", "/g/github/acme/widgets.git/info/refs?service=git-upload-pack")).status).toBe(401);
+    expect((await call("GET", "/g/github/acme/widgets.git/info/refs?service=git-upload-pack", { [BROKER_TOKEN_HEADER]: `omb_t0_${"0".repeat(48)}` })).status).toBe(401);
+    // A Location on the upstream comes back under /g/, where the header still goes.
+    answer = (_url, res) => res.writeHead(301, { location: `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/acme/new.git/info/refs?service=git-upload-pack` }).end();
+    expect((await call("GET", "/g/github/acme/old.git/info/refs?service=git-upload-pack", { [BROKER_TOKEN_HEADER]: token })).headers.location).toBe("/g/github/acme/new.git/info/refs?service=git-upload-pack");
+    expect(seen).toHaveLength(2);
   });
 
   it("refuses any other path before it reaches GitHub, and a token for another grant or none", async () => {
@@ -236,11 +251,56 @@ unixSocket("the github grant in the broker", () => {
       expect(seen.find((request) => request.url.includes("service=git-upload-pack"))!.headers["git-protocol"]).toBeUndefined();
     });
 
-    it("protects main and master when the default branch cannot be learned", async () => {
+    it("protects main and master for a repository that names no default branch (an empty one)", async () => {
       const token = await start();
-      answer = (url, res, body) => url.includes("service=git-upload-pack") ? res.writeHead(404).end() : res.writeHead(200).end(`forwarded ${body.length}`);
+      answer = (url, res, body) => url.includes("service=git-upload-pack")
+        ? res.writeHead(200, { "content-type": "application/x-git-upload-pack-advertisement" }).end(`001e# service=git-upload-pack\n0000${pkt(`${"0".repeat(40)} capabilities^{}\u0000multi_ack\n`)}0000`)
+        : res.writeHead(200).end(`forwarded ${body.length}`);
       for (const ref of ["refs/heads/main", "refs/heads/master"]) expect((await push(token, ref)).body.toString("latin1")).toContain(`ng ${ref} the default branch is protected here`);
       expect((await push(token, "refs/heads/trunk")).body.toString()).toMatch(/^forwarded/);
+    });
+
+    it("refuses the push outright, with words to push again, when the default branch cannot be read: an error or no answer in time", async () => {
+      let token = await start();
+      answer = (url, res, body) => url.includes("service=git-upload-pack") ? res.writeHead(503).end() : res.writeHead(200).end(`forwarded ${body.length}`);
+      const failed = (await push(token, "refs/heads/feature")).body.toString("latin1");
+      expect(failed).toContain("ng refs/heads/feature the default branch could not be read; push again");
+      expect(failed).toContain("could not be read (GitHub answered 503). Nothing was applied; push again in a moment.");
+      expect(seen.filter((request) => request.url.endsWith("/git-receive-pack"))).toEqual([]);
+      await broker.close();
+      await new Promise<void>((done) => { upstream.closeAllConnections(); upstream.close(() => done()); });
+      rmSync(dir, { recursive: true, force: true });
+      token = await start({ defaultBranchTimeoutMs: 1_000 });
+      answer = (url, res, body) => { if (!url.includes("service=git-upload-pack")) res.writeHead(200).end(`forwarded ${body.length}`); };
+      expect((await push(token, "refs/heads/feature")).body.toString("latin1")).toContain("GitHub did not answer in time");
+    });
+
+    it("reads the default branch again after a few minutes, not once for the process", async () => {
+      const token = await start();
+      answer = advertise("dev");
+      await push(token, "refs/heads/a");
+      await push(token, "refs/heads/b");
+      const asked = () => seen.filter((request) => request.url.includes("service=git-upload-pack")).length;
+      expect(asked()).toBe(1);
+      clock += DEFAULT_BRANCH_REUSE_MS;
+      answer = advertise("main");
+      expect((await push(token, "refs/heads/main")).body.toString("latin1")).toContain("ng refs/heads/main the default branch is protected here");
+      expect(asked()).toBe(2);
+    });
+
+    it("refuses a push to a repository the conversation may not push to, and counts a clone's ref list as fetched", async () => {
+      const fetched: string[] = [];
+      const token = await start({ mayPush: async (repo) => fetched.includes(repo), fetched: (repo) => fetched.push(repo) });
+      answer = advertise("main");
+      const refused = (await push(token, "refs/heads/bot/x")).body.toString("latin1");
+      expect(refused).toContain("acme/w is not a repository this conversation has cloned or fetched");
+      expect(seen).toEqual([]);
+      // A push's own ref list is not a fetch; a clone's or fetch's is.
+      await call("GET", `/b/${token}/github/acme/W.git/info/refs?service=git-receive-pack`);
+      expect(fetched).toEqual([]);
+      await call("GET", `/b/${token}/github/acme/W.git/info/refs?service=git-upload-pack`);
+      expect(fetched).toEqual(["acme/w"]);
+      expect((await push(token, "refs/heads/bot/x")).body.toString()).toMatch(/^forwarded/);
     });
 
     it("refuses a compressed or unreadable push without forwarding it", async () => {

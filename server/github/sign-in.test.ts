@@ -455,9 +455,18 @@ describe("the accessor for server-side callers", () => {
     own.vault.saved.set("owner", { token: TOKEN, login: "octo" });
     expect(own.signIn.signedIn()).toBe(true);
     own.vault.saved.clear();
+    // A gh on PATH is not a sign-in: only one whose hosts file lists a github.com account.
+    const ghConfig = join(dataDir, "personal-gh");
+    mkdirSync(ghConfig);
+    vi.stubEnv("GH_CONFIG_DIR", ghConfig);
     own.set.personal = "/usr/local/bin/gh";
+    expect(own.signIn.signedIn("owner")).toBe(false);
+    writeFileSync(join(ghConfig, "hosts.yml"), "github.com:\n    git_protocol: https\n    users:\n        octo:\n    user: octo\n");
     expect(own.signIn.signedIn("owner")).toBe(true);
     expect(own.signIn.signedIn(MEMBER)).toBe(false);
+    own.set.personal = null;
+    expect(own.signIn.signedIn("owner")).toBe(false);
+    vi.unstubAllEnvs();
   });
 });
 

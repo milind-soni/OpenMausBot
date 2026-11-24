@@ -2,6 +2,7 @@
 // They go in GIT_CONFIG_PARAMETERS, the variable `git -c` itself hands to the gits it starts. GIT_CONFIG_COUNT with
 // GIT_CONFIG_KEY_<n> would not survive: Codex's shell drops every variable whose name holds KEY, and a count whose keys
 // are gone makes every git command fail. Each entry is written `'name=value'`, which every git since 2.0 reads.
+import { BROKER_TOKEN_HEADER, brokerHeaderUrl } from "../bot-box/broker.ts";
 
 /** git's own shell quoting of one word (quote.c sq_quote). */
 export function shellQuote(word: string): string {
@@ -20,12 +21,20 @@ export function gitConfigParameters(entries: ReadonlyArray<readonly [string, str
 /** The forms of a github.com remote the box sends through the broker: HTTPS, and the SSH ones, which then go over HTTPS. */
 export const GITHUB_REMOTE_FORMS = ["https://github.com/", "git@github.com:", "ssh://git@github.com/"] as const;
 
-/** A boxed bot's git: every GitHub remote through `brokerBase` (http://127.0.0.1:<port>/b/<token>/github), no
- * credential helper of any layer (the broker adds the credential), and no prompt. */
-export function boxGitEnv(brokerBase: string): Record<string, string> {
-  const url = `url.${brokerBase.replace(/\/+$/, "")}/.insteadof`;
+/** A boxed bot's git: every GitHub remote through the broker's github grant at http://127.0.0.1:<port>/g/github/,
+ * with the broker token in a header git sends only to that address. The token is never in the address, so it never
+ * reaches what git writes down (merge messages, FETCH_HEAD, `git remote -v`, error text). No credential helper is asked
+ * for that address (the broker adds the credential), and git never prompts; credential helpers for other hosts stay. */
+export function boxGitEnv(input: { port: number; token: string }): Record<string, string> {
+  if (!/^omb_t0_[a-f0-9]{48}$/.test(input.token)) throw new Error("Not a broker token.");
+  const origin = `http://127.0.0.1:${input.port}`;
+  const url = `url.${brokerHeaderUrl(input.port, "github")}/.insteadof`;
   return {
-    GIT_CONFIG_PARAMETERS: gitConfigParameters([...GITHUB_REMOTE_FORMS.map((form) => [url, form] as const), ["credential.helper", ""]]),
+    GIT_CONFIG_PARAMETERS: gitConfigParameters([
+      ...GITHUB_REMOTE_FORMS.map((form) => [url, form] as const),
+      [`http.${origin}/.extraheader`, `${BROKER_TOKEN_HEADER}: ${input.token}`],
+      [`credential.${origin}.helper`, ""],
+    ]),
     GIT_TERMINAL_PROMPT: "0",
   };
 }

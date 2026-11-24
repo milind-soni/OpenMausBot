@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { MAX_COMMAND_BYTES, advertisedDefaultBranch, readCommandList, refusalBody, refusalMessage, refusedCommands } from "./git-push-guard.ts";
+import { CommandListReader, MAX_COMMANDS, MAX_COMMAND_BYTES, advertisedDefaultBranch, readCommandList, refusalBody, refusalMessage, refusedCommands } from "./git-push-guard.ts";
 
 // The command lists git 2.50.1 sent at the head of its receive-pack POST (recorded through git's own http-backend):
 // `git push <url> HEAD:refs/heads/bot/new`, `HEAD:main` and `--delete old`. The pack, when there is one, follows the flush.
@@ -45,6 +45,34 @@ describe("the push guard's command list", () => {
     }
   });
 
+  it("reads a list fed in pieces once each: a 1 MiB list in 100-byte pieces costs about what it costs at once", () => {
+    const a = "a".repeat(40), b = "b".repeat(40);
+    let body = pkt(`${a} ${b} refs/heads/x0\u0000report-status\n`);
+    for (let i = 1; Buffer.byteLength(body) < 1000 * 1024 && i < MAX_COMMANDS; i++) body += pkt(`${a} ${b} refs/heads/x${i}\n`);
+    const whole = Buffer.from(`${body}0000`, "latin1");
+    const started = performance.now();
+    const reader = new CommandListReader();
+    let verdict = reader.feed(Buffer.alloc(0));
+    for (let at = 0; at < whole.length; at += 100) verdict = reader.feed(whole.subarray(at, at + 100));
+    // Re-reading everything on each piece took about 15 s here; one pass over the pieces takes well under a second.
+    expect(performance.now() - started).toBeLessThan(3_000);
+    expect(verdict).toMatchObject({ state: "done" });
+    expect((verdict as { commands: unknown[] }).commands.length).toBe(readCommandList(whole, true).state === "done" ? (readCommandList(whole, true) as { commands: unknown[] }).commands.length : -1);
+  });
+
+  it("refuses more commands than it takes, and a list longer than it takes without its end", () => {
+    const many = Buffer.from(`${Array.from({ length: MAX_COMMANDS + 1 }, (_, i) => pkt(`${A} ${B} refs/heads/b${i}`)).join("")}0000`, "latin1");
+    expect(readCommandList(many, true)).toEqual({ state: "bad", reason: "the push updates too many refs at once" });
+    const reader = new CommandListReader();
+    let verdict = reader.feed(Buffer.from(pkt(`${A} ${B} refs/heads/x\u0000report-status`), "latin1"));
+    // Lines too long for MAX_COMMANDS to be reached first.
+    const piece = Buffer.from(pkt(`${A} ${B} refs/heads/${"y".repeat(4000)}`).repeat(10), "latin1");
+    let sent = 0;
+    while (verdict.state === "more" && sent < 2 * MAX_COMMAND_BYTES) { verdict = reader.feed(piece); sent += piece.length; }
+    expect(verdict).toEqual({ state: "bad", reason: "the push updates too many refs at once" });
+    expect(sent).toBeGreaterThan(MAX_COMMAND_BYTES);
+  });
+
   it("takes git's flush-only probe as a push of nothing, and shallow lines before the commands", () => {
     expect(readCommandList(bytes("0000"), true)).toEqual({ state: "done", commands: [], capabilities: [] });
     const shallow = `${pkt(`shallow ${A}`)}${pkt(`${A} ${B} refs/heads/x\u0000report-status`)}0000`;
@@ -77,6 +105,15 @@ describe("what the push guard refuses", () => {
     expect(refusedCommands([{ old: A, new: B, ref: "refs/heads/trunk" }], "refs/heads/trunk")).toHaveLength(1);
     for (const ref of ["refs/heads/main", "refs/heads/master"]) expect(refusedCommands([{ old: A, new: B, ref }], null)).toHaveLength(1);
     expect(refusedCommands([{ old: A, new: B, ref: "refs/heads/feature" }], null)).toEqual([]);
+  });
+
+  it("lets a new tag through but refuses moving or deleting one, and anything outside branches and tags", () => {
+    expect(refusedCommands([{ old: Z, new: B, ref: "refs/tags/v2" }], "refs/heads/main")).toEqual([]);
+    expect(refusedCommands([{ old: A, new: B, ref: "refs/tags/v1" }], "refs/heads/main")).toEqual([{ ref: "refs/tags/v1", reason: "moving a tag is not allowed here; push a new tag" }]);
+    expect(refusedCommands([{ old: A, new: Z, ref: "refs/tags/v1" }], "refs/heads/main")[0]!.reason).toContain("deleting a ref");
+    for (const ref of ["refs/pull/1/head", "refs/notes/commits", "refs/remotes/origin/x", "refs/heads"]) {
+      expect(refusedCommands([{ old: Z, new: B, ref }], "refs/heads/main"), ref).toEqual([{ ref, reason: "only branches and new tags may be pushed here; push to a new branch" }]);
+    }
   });
 
   it("refuses every update of a push in which one is refused", () => {

@@ -18,6 +18,7 @@ import type { GithubSignInLast, GithubSignInSource, GithubSignInStatus } from ".
 import type { VaultStore } from "../vault-store.ts";
 import { GH_SIGN_IN_FLOOR, loginArgs, ownGhEnv, personalGhEnv, type GhChild, type GhTools } from "./gh-cli.ts";
 import { hostsFileLogin, hostsFileToken, loginFailure, parseDeviceCode, parseScopes, parseStatusJson, parseStatusText, plain, tokenFrom, versionAtLeast, type GhAccount } from "./gh-output.ts";
+import { personalGhLogin } from "./personal-hosts.ts";
 
 /** GitHub's device codes last 15 minutes (its `expires_in`, 900 s); gh does not print it. */
 export const DEVICE_CODE_TTL_MS = 15 * 60_000;
@@ -483,7 +484,7 @@ export function createGithubSignIn(deps: GithubSignInDeps): GithubSignIn {
       const audience = resolve(audienceIn);
       if (!audience) return false;
       try {
-        return ownSignedIn(audience) || deps.vault.githubToken(audience) !== null || (!deps.team && deps.tools.personal() !== null);
+        return ownSignedIn(audience) || deps.vault.githubToken(audience) !== null || (!deps.team && deps.tools.personal() !== null && personalGhLogin() !== null);
       } catch {
         return false;
       }

@@ -55,7 +55,10 @@ export interface BrokerToken {
 interface Stored { hash: Buffer; botId: string | null; threadId: string | null; expiresAt: number; grants: Record<string, BrokerGrant>; bound: "process" | "thread" }
 
 /** Credential headers a client may send; the broker never forwards them. */
-const CREDENTIAL_HEADERS = new Set(["authorization", "x-api-key", "x-goog-api-key", "proxy-authorization", "cookie"]);
+/** The header a client sends its token in at `/g/<grant>`, where the token is kept out of the address (git writes the
+ * address it fetched from into its own records: merge messages, FETCH_HEAD, error text). */
+export const BROKER_TOKEN_HEADER = "x-omb-broker";
+const CREDENTIAL_HEADERS = new Set(["authorization", "x-api-key", "x-goog-api-key", "proxy-authorization", "cookie", BROKER_TOKEN_HEADER]);
 const HOP_BY_HOP = new Set(["connection", "keep-alive", "transfer-encoding", "te", "trailer", "upgrade", "proxy-connection", "host"]);
 const TOKEN = /^omb_t0_[a-f0-9]{48}$/;
 const GRANT = /^[a-z][a-z0-9_-]{0,63}$/;
@@ -99,6 +102,11 @@ export interface CredentialBroker {
 
 export function brokerUrl(port: number, token: string, grant: string): string {
   return `http://127.0.0.1:${port}/b/${token}/${grant}`;
+}
+
+/** The address of `grant` with the token in BROKER_TOKEN_HEADER instead of the address. */
+export function brokerHeaderUrl(port: number, grant: string): string {
+  return `http://127.0.0.1:${port}/g/${grant}`;
 }
 
 /** Where a request for `/b/<token>/<grant><path><query>` goes: the grant's upstream exactly as it was given when the
@@ -147,14 +155,17 @@ export function openCredentialBroker(options: CredentialBrokerOptions): Promise<
 
   const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {
     const refuse = (status: number, error: string) => { res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }).end(JSON.stringify({ error })); req.resume(); };
-    const match = /^\/b\/([^/]+)\/([^/?]+)(\/[^?]*)?(\?.*)?$/.exec(req.url ?? "");
-    if (!match) return refuse(404, "not_found");
-    const [, token = "", grant = "", path = "", query = ""] = match;
+    const inPath = /^\/b\/([^/]+)\/([^/?]+)(\/[^?]*)?(\?.*)?$/.exec(req.url ?? "");
+    const inHeader = inPath ? null : /^\/g\/([^/?]+)(\/[^?]*)?(\?.*)?$/.exec(req.url ?? "");
+    if (!inPath && !inHeader) return refuse(404, "not_found");
+    const presented = req.headers[BROKER_TOKEN_HEADER];
+    const [, token = "", grant = "", path = "", query = ""] = inPath ?? [inHeader![0], typeof presented === "string" ? presented.trim() : "", ...inHeader!.slice(1)];
+    const prefix = inPath ? `/b/${token}/${grant}` : `/g/${grant}`;
     const verdict = lookup(token, grant);
     if (!verdict.ok) return refuse(verdict.status, verdict.error);
     if (verdict.grant.serve) {
       stats.forwarded += 1;
-      return verdict.grant.serve({ req, res, path, query, prefix: `/b/${token}/${grant}`, ...(requestFn ? { request: requestFn } : {}) });
+      return verdict.grant.serve({ req, res, path, query, prefix, ...(requestFn ? { request: requestFn } : {}) });
     }
     const upstream = upstreamUrl(verdict.grant.upstream, path, query);
     if (!upstream) return refuse(502, "bad_upstream");
