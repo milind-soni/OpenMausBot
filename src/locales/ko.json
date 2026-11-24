@@ -1491,6 +1491,7 @@
   "settings.userBubbles.subtitle": "일대일 채팅에서 내 메시지를 그 봇 색상의 그라데이션으로 채워요. 대화방은 중립 말풍선을 유지해요.",
   "settings.userBubbles.aria": "내 메시지에 봇 색상 입히기",
   "settings.advancedMode.title": "고급 모드",
+  "settings.advancedSetting": "고급 설정",
   "settings.advancedMode.subtitle": "이 기기에서 모든 기술적 컨트롤을 보여 줘요: 사용량과 토큰, 인스펙터, 그 밖의 개발자용 도구. 끄면 앱이 더 단순해져요. 어느 쪽이든 삭제되는 것은 없어요.",
   "settings.threadDisplay.title": "스레드",
   "settings.threadDisplay.subtitle": "이 기기에서만 스레드 목록과 컨트롤을 보여 줘요. 숨겨도 모든 대화 기록과 실행 중인 작업은 유지되고, 채널은 바뀌지 않아요. 다시 켜면 스레드에 다시 접근할 수 있어요.",

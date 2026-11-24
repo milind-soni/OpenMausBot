@@ -50,6 +50,8 @@ const SERVER_ENV_NAMES = new Set([
   "OMB_BOT_BOX",
   // Tool caches into one folder in each bot box's HOME (server/bot-box/tool-caches.ts): off unless the Admin turns it on.
   "OMB_CACHE_ROOT",
+  // Their cap (server/cache-sweep/limits.ts): the sweeper's switch, off unless the Admin turns it on, and the caps' overrides.
+  "OMB_CACHE_SWEEP", "OMB_CACHE_CAP_TOOLS", "OMB_CACHE_CAP_APP",
   // The image's own engine CLIs before older copies in the data folder (server/image-engines.ts), for one test Cloud first.
   "OMB_IMAGE_ENGINES",
   // The conversation logs' cap and age limit (server/host/thread-log-sweep.ts), off unless the Admin sets it.
