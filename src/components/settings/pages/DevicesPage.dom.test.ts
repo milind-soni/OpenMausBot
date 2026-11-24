@@ -1300,8 +1300,9 @@ describe("Add a phone's ways in", () => {
 describe("the map above the list", () => {
   afterEach(() => overrideDeviceMap(null));
 
-  it("is off unless asked for", async () => {
-    expect(SHOW_DEVICE_MAP).toBe(false);
+  it("can be turned off", async () => {
+    expect(SHOW_DEVICE_MAP).toBe(true);
+    overrideDeviceMap(false);
     await render();
     expect($("[data-settings-block=map]")).toBeNull();
     expect($("[data-settings-block=here] h3")?.textContent).toBe("You’re here");

@@ -8,8 +8,8 @@ import { networkMark } from "./DeviceRows";
 import { BotFaces, botsLabel, markOf, routeOf, StatusMark, useBotsOn } from "./device-parts";
 import { kindLabel, networkShort, statusText } from "./device-words";
 
-/** The picture of this place's devices above the list. Flip to true to ship the page with it. */
-export const SHOW_DEVICE_MAP = false;
+/** The picture of this place's devices above the list. Flip to false to ship the page without it. */
+export const SHOW_DEVICE_MAP = true;
 
 let shownOverride: boolean | null = null;
 /** For the preview and tests, which show both variants: null goes back to `SHOW_DEVICE_MAP`. */
