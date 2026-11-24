@@ -53,6 +53,18 @@ describe("the brief's cards", () => {
     }
   });
 
+  it("disambiguate two emails from the same sender so the widget check still takes the card", () => {
+    const sameSender: BriefFacts = { ...facts, emails: [
+      { messageId: "m1", threadId: "t1", from: "Ada <ada@x.test>", subject: "Q3 numbers", needsReply: true, why: "deadline" },
+      { messageId: "m2", threadId: "t2", from: "Ada <ada@x.test>", subject: "Lunch tomorrow", needsReply: true },
+    ] };
+    const parsed = parseWidgetInput(briefCard(sameSender).card);
+    expect(parsed.ok).toBe(true);
+    const labels = JSON.stringify(parsed.ok ? parsed.value : null).match(/"label":"Draft a reply to Ada[^"]*"/g) ?? [];
+    expect(labels).toHaveLength(2);
+    expect(new Set(labels).size).toBe(2);
+  });
+
   it("name a routine's Open page button", () => {
     const card = briefCard({ ...facts, routines: [{ text: "Digest", note: "Done", page: "https://pages.example.com/p/1" }] }).card;
     const json = JSON.stringify(card);
