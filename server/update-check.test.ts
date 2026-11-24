@@ -164,6 +164,23 @@ describe("server update check", () => {
     expect(await check()).toMatchObject({ available: false, latest: "0.1.177" });
   });
 
+  it("keeps presses of Check for updates to one lookup per five minutes after a failed one too", async () => {
+    let now = 0;
+    const fetch = vi.fn(async () => release("v0.1.177"));
+    const check = createUpdateChecker({ current: "0.1.177", install: "docker", channel: "newest", fetch, now: () => now });
+    await check();
+    fetch.mockImplementation(async () => ({ ok: false, status: 403, json: async () => ({}) }) as Response);
+    now = 10 * 60_000;
+    await expect(check({ fresh: true })).rejects.toThrow("GitHub answered 403");
+    now += 4 * 60_000;
+    await expect(check({ fresh: true })).rejects.toThrow("GitHub answered 403");
+    expect(fetch).toHaveBeenCalledTimes(2);
+    now += 2 * 60_000;
+    fetch.mockImplementation(async () => release("v0.1.178"));
+    expect(await check({ fresh: true })).toMatchObject({ available: true, latest: "0.1.178" });
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
   it("does not look anything up for a desktop or hosted server", async () => {
     const fetch = vi.fn();
     for (const install of ["desktop", "managed"] as const) {
