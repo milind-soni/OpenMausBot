@@ -184,15 +184,41 @@ export function useRevealedThreadRow(reveal: AppState["revealThread"], currentTh
   }, [reveal, currentThreadId]);
 }
 
+type RelativeClock = {
+  win: Window & typeof globalThis;
+  doc: Document;
+  timer: number;
+  sync: () => void;
+  listeners: Set<(now: number) => void>;
+};
+let sharedRelativeClock: RelativeClock | null = null;
+
 export function useRelativeNow(): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const sync = () => { if (document.visibilityState === "visible") setNow(Date.now()); };
-    const timer = window.setInterval(sync, 30_000);
-    document.addEventListener("visibilitychange", sync);
+    if (sharedRelativeClock && (sharedRelativeClock.win !== window || sharedRelativeClock.doc !== document)) {
+      sharedRelativeClock = null;
+    }
+    if (!sharedRelativeClock) {
+      const listeners = new Set<(next: number) => void>();
+      const win = window, doc = document;
+      const sync = () => {
+        if (doc.visibilityState !== "visible") return;
+        const next = Date.now();
+        for (const notify of listeners) notify(next);
+      };
+      sharedRelativeClock = { win, doc, timer: win.setInterval(sync, 30_000), sync, listeners };
+      doc.addEventListener("visibilitychange", sync);
+    }
+    const clock = sharedRelativeClock;
+    clock.listeners.add(setNow);
     return () => {
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", sync);
+      clock.listeners.delete(setNow);
+      if (clock.listeners.size === 0) {
+        clock.win.clearInterval(clock.timer);
+        clock.doc.removeEventListener("visibilitychange", clock.sync);
+        if (sharedRelativeClock === clock) sharedRelativeClock = null;
+      }
     };
   }, []);
   return now;
