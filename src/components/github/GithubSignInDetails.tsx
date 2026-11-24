@@ -181,8 +181,8 @@ function TokenForm({ view, store }: { view: GithubSignInView; store: GithubSignI
             <a href={GITHUB_NEW_TOKEN_URL} target="_blank" rel="noopener noreferrer"
               className="rounded-sm font-medium text-accent-text hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
               onClick={(event) => { if (window.ogb) { event.preventDefault(); void openExternalLink(GITHUB_NEW_TOKEN_URL); } }}>
-              {t("githubSignIn.tokenCreate")}
-              <ExternalLink size={11} aria-hidden="true" className="ms-1 inline-block align-[-1px]" />
+              {t("githubSignIn.tokenCreate")}{"\u00a0"}
+              <ExternalLink size={11} aria-hidden="true" className="inline-block align-[-1px]" />
             </a>
           </p>
         </form>
