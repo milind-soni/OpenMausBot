@@ -3211,6 +3211,7 @@
   "task.bulk.retitleResult": "Nomeadas pelo conteúdo: {count}.",
   "task.bulk.retitleFailed": "Não foi possível nomear {count}: {message}",
   "task.archivedList": "Arquivadas ({count})",
+  "task.endedList": "Encerradas ({count})",
   "task.empty": "Nenhuma conversa ainda",
   "task.newIn": "Nova conversa em {name}",
   "task.actions": "Ações de {title}",

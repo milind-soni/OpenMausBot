@@ -361,4 +361,31 @@ describe("a bot's conversations in its panel", () => {
     click(unarchive);
     expect(fixture.dispatch.mock.calls).toEqual([[{ type: "updateTask", botId: "research", threadId: "deck", patch: { archivedAt: null } }]]);
   });
+  it("moves ended conversations out of the list into Ended (N), folded under the active ones", () => {
+    const lead = { botId: "lead", name: "Lead", at: now };
+    const endedTasks = tasks.map((task) => task.threadId === "launch" || task.threadId === "pricing" ? { ...task, busy: false, activity: undefined, closedBy: lead } : task);
+    render(research({ tasks: endedTasks }));
+    expect(listed()).toEqual(["hiring", "who", "deck"]);
+    const toggle = host.querySelector("[data-conversations-ended]")!;
+    expect(toggle.textContent).toBe("Ended (2)");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(host.querySelector("[data-conversations-more]")!.textContent).toBe("Show 5 more");
+    click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(listed()).toEqual(["hiring", "who", "deck", "launch", "pricing"]);
+    click(toggle);
+    expect(listed()).toEqual(["hiring", "who", "deck"]);
+  });
+
+  it("keeps an ended conversation in the list while it is open or the main one, and finds ended ones in search", () => {
+    const lead = { botId: "lead", name: "Lead", at: now };
+    const endedTasks = tasks.map((task) => ["who", "gift", "deck"].includes(task.threadId) ? { ...task, closedBy: lead } : task);
+    render(research({ mainThreadId: "gift", tasks: endedTasks }));
+    expect(listed()).toEqual(["gift", "hiring", "launch", "who"]);
+    expect(host.querySelector("[data-conversations-ended]")!.textContent).toBe("Ended (1)");
+    click(host.querySelector("[data-conversations-search]"));
+    type(host.querySelector<HTMLInputElement>("[data-conversations-query]")!, "board");
+    expect(listed()).toEqual(["deck"]);
+    expect(host.querySelector("[data-conversations-ended]")).toBeNull();
+  });
 });

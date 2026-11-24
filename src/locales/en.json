@@ -3424,6 +3424,7 @@
   "task.bulk.retitleResult": "Named by content: {count}.",
   "task.bulk.retitleFailed": "Couldn't name {count}: {message}",
   "task.archivedList": "Archived ({count})",
+  "task.endedList": "Ended ({count})",
   "task.empty": "No threads yet",
   "task.newIn": "New thread in {name}",
   "task.actions": "Actions for {title}",
