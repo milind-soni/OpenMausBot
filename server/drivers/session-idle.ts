@@ -124,9 +124,10 @@ export function idleEngineCap(env: Record<string, string | undefined> = process.
  * person opens or reads its conversation. */
 const warmEngines = new Map<string, WarmEngine>();
 
-/** An engine went idle: when the box allows fewer idle engines than are up, the ones idle longest close now (an engine
- * started ahead of a first message before them); past the cap on idle engines, the least recently used close now (one
- * whose conversation no person has had in front of them before them). Never one with a turn running, nor one held. */
+/** An engine went idle: when the box allows fewer idle engines than are up, the ones idle longest close now; past the cap
+ * on idle engines, the least recently used close now (one whose conversation no person has had in front of them before
+ * them). Engines started ahead of a message close before any a turn has used, and one of them never makes a used engine
+ * close: past either limit it closes itself instead. Never one with a turn running, nor one held. */
 export function keepWarm(key: string, engine: WarmEngine, box: Pick<BoxMemory, "bytes"> = boxMemory(),
   available: () => number = availableMemory, fits: () => number = () => engineMemory.idleEnginesAllowed(),
   cap: () => number = () => idleEngineCap(process.env, box.bytes)): void {
@@ -135,9 +136,12 @@ export function keepWarm(key: string, engine: WarmEngine, box: Pick<BoxMemory, "
   for (const [other, warm] of warmEngines) if (other !== key && (!warm.idle() || warm.held?.())) warmEngines.delete(other);
   const most = fits();
   const roomAllows = box.bytes > SMALL_BOX_BYTES && most === Infinity ? Infinity : idleEnginesAllowed(box, available(), most);
-  const idleBefore = () => [...warmEngines].filter(([other]) => other !== key);
-  closeKept(sparesFirst(idleBefore()).slice(0, Math.max(0, warmEngines.size - roomAllows)));
-  closeKept(unwatchedFirst(idleBefore()).slice(0, Math.max(0, warmEngines.size - Math.max(1, cap()))));
+  const closable = (order: (engines: Array<[string, WarmEngine]>) => Array<[string, WarmEngine]>): Array<[string, WarmEngine]> => {
+    const others = [...warmEngines].filter(([other]) => other !== key);
+    return engine.spare?.() ? [...others.filter(([, warm]) => warm.spare?.()), [key, engine]] : sparesFirst(order(others));
+  };
+  closeKept(closable((engines) => engines).slice(0, Math.max(0, warmEngines.size - roomAllows)));
+  closeKept(closable(unwatchedFirst).slice(0, Math.max(0, warmEngines.size - Math.max(1, cap()))));
 }
 
 function closeKept(engines: Array<[string, WarmEngine]>): void {

@@ -18,17 +18,17 @@ function host(overrides: Partial<EnginePrestartDeps> = {}) {
   const started: SendTurnInput[] = [], dropped: string[] = [], waits: Array<number | undefined> = [];
   const held = new Set<string>();
   const state = { allowed: true, blank: true, busy: false, refused: false, shape: "sonnet/full" as string | null, up: true, folder: `/work/bot/${NEXT}` as string | null,
-    bot: "bot" as string | null, cursors: { [FIRST]: "session-1", [NEXT]: "session-2" } as Record<string, string | undefined>, clock: 1_000_000 };
+    bot: "bot" as string | null, desktop: true, running: new Set<string>(), folders: 0, cursors: { [FIRST]: "session-1", [NEXT]: "session-2" } as Record<string, string | undefined>, clock: 1_000_000 };
   const prestart = createEnginePrestart({
     adapter: (id) => (id === "claude" ? { prestart: {
       start: async (input, waitMs) => { started.push(input); waits.push(waitMs); if (state.up) held.add(input.threadId); return state.up; },
-      held: (threadId) => held.has(threadId), ready: (threadId) => held.has(threadId),
+      held: (threadId) => held.has(threadId), ready: (threadId) => held.has(threadId), running: (threadId) => held.has(threadId) || state.running.has(threadId),
       drop: (threadId) => { dropped.push(threadId); held.delete(threadId); },
     } } : undefined),
     credentials,
     allowed: () => state.allowed, blank: () => state.blank, busy: () => state.busy, refused: () => state.refused,
-    shape: () => state.shape, approval: () => "full", folder: () => state.folder,
-    botOf: () => state.bot, cursor: (_bot, threadId, instanceId) => (instanceId === "claude" ? state.cursors[threadId] : undefined), now: () => state.clock,
+    shape: () => state.shape, approval: () => "full", folder: () => { state.folders += 1; return state.folder; },
+    desktop: () => state.desktop, botOf: () => state.bot, cursor: (_bot, threadId, instanceId) => (instanceId === "claude" ? state.cursors[threadId] : undefined), now: () => state.clock,
     ...overrides,
   });
   return { prestart, credentials, started, dropped, held, state, waits };
@@ -197,7 +197,7 @@ describe("starting a new conversation's engine from the bot's last launch", () =
     const { prestart, credentials } = host({
       adapter: () => ({ prestart: {
         start: () => new Promise<boolean>((resolve, reject) => pending.push({ resolve, reject })),
-        held: () => true, ready: () => false, drop,
+        held: () => true, ready: () => false, running: () => false, drop,
       } }),
     });
     prestart.note("claude", firstTurn(), true);
@@ -295,6 +295,47 @@ describe("starting the engine of a conversation a person opens or types in", () 
     opened(setup, NEXT);
     expect(setup.started).toEqual([]);
     expect(setup.prestart.waiting()).toEqual([]);
+  });
+
+  it("starts nothing, and closes no other waiting engine, for a conversation whose engine is already up; again and again", () => {
+    const setup = afterATurn({ folder: (_bot, threadId) => { setup.state.folders += 1; return `/work/bot/${threadId}`; } });
+    opened(setup, "t-1");
+    opened(setup, "t-2");
+    setup.state.running.add("t-answered");
+    const folders = setup.state.folders;
+    for (let ping = 0; ping < 3; ping++) {
+      setup.prestart.threadSeen("t-answered");
+      vi.advanceTimersByTime(OPENED_SETTLE_MS);
+      setup.prestart.threadSeen("t-1");
+      vi.advanceTimersByTime(OPENED_SETTLE_MS);
+    }
+    expect(setup.started.map((launch) => launch.threadId)).toEqual(["t-1", "t-2"]);
+    expect(setup.dropped).toEqual([]);
+    expect(setup.state.folders, "no folder or skills work for it").toBe(folders);
+    expect(setup.prestart.waiting()).toEqual(["t-1", "t-2"]);
+  });
+
+  it("closes no waiting engine for a conversation whose folder is not where the launch would be, and does not redo that work", () => {
+    const setup = afterATurn({ folder: (_bot, threadId) => { setup.state.folders += 1; return threadId === "t-moved" ? "/elsewhere" : `/work/bot/${threadId}`; } });
+    opened(setup, "t-1");
+    opened(setup, "t-2");
+    opened(setup, "t-moved");
+    const folders = setup.state.folders;
+    expect(setup.dropped).toEqual([]);
+    expect(setup.prestart.waiting()).toEqual(["t-1", "t-2"]);
+    opened(setup, "t-1");
+    opened(setup, "t-moved");
+    expect(setup.state.folders).toBe(folders);
+  });
+
+  it("starts nothing for an opened conversation unless this server runs under the desktop app, while a new one still starts", () => {
+    const setup = afterATurn();
+    setup.state.desktop = false;
+    opened(setup, NEXT);
+    expect(setup.started).toEqual([]);
+    setup.state.blank = true;
+    setup.prestart.threadMade("bot", NEXT);
+    expect(setup.started.map((launch) => launch.threadId)).toEqual([NEXT]);
   });
 
   it("starts nothing for a bot with no launch to go by", () => {

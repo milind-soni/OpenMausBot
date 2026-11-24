@@ -355,11 +355,13 @@ export interface ProviderAdapter {
    * process closes by itself after `waitMs` (a driver default when absent) with no turn. The next sendTurn on the thread
    * takes that process when its launch would have been the same, it resumes the same engine session (or none, for a
    * process started without one), it has started up (`ready`) and it is not older than its wait by the wall clock (it
-   * waited through a sleep); it is replaced otherwise. `held`: one is launching or waiting. `drop` stops one that no turn
-   * took; a taken one is the turn's own. */
+   * waited through a sleep); it is replaced otherwise. `held`: one is launching or waiting. `running`: the thread has a
+   * process up of any kind (one waiting, or one a turn used and kept), so there is nothing to start. `drop` stops one that
+   * no turn took; a taken one is the turn's own. */
   prestart?: {
     start(input: SendTurnInput, waitMs?: number): Promise<boolean>;
     held(threadId: ThreadId): boolean;
+    running(threadId: ThreadId): boolean;
     ready(threadId: ThreadId): boolean;
     drop(threadId: ThreadId): void;
   };

@@ -325,6 +325,18 @@ describe("ClaudeDriver: a process started before the first message (fake CLI)", 
     expect(recorder.events).toEqual([]);
   });
 
+  it("says a conversation's engine is up while one waits or a turn kept one, and not once it is gone", async () => {
+    expect(instance.adapter.prestart!.running("t-up")).toBe(false);
+    expect(await started("t-up", 1)).toBe(true);
+    expect(instance.adapter.prestart!.running("t-up")).toBe(true);
+    await instance.adapter.sendTurn(turn("t-up"));
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(instance.adapter.prestart!.held("t-up")).toBe(false);
+    expect(instance.adapter.prestart!.running("t-up")).toBe(true);
+    await instance.adapter.stopAll();
+    expect(instance.adapter.prestart!.running("t-up")).toBe(false);
+  });
+
   it("says nothing when it cannot start", async () => {
     await instance.adapter.prestart!.start(turn("t-nowhere", { text: "", cwd: join(scratch, "no-such-folder") }));
     await until(() => !instance.adapter.prestart!.held("t-nowhere"), "the driver to forget it");

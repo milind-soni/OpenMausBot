@@ -53,6 +53,9 @@ export interface EnginePrestartDeps {
   refused(botId: string, threadId: string): boolean;
   /** How long a started engine waits; the bearers made for it are retired a little after. */
   idleMs?: number;
+  /** This server runs under the desktop app, for the person at that computer: only there does opening a conversation
+   * start its engine. */
+  desktop(): boolean;
   /** The bot whose conversation this is; null for anything else (a room). */
   botOf(threadId: string): string | null;
   /** The engine session this conversation's next turn on `instanceId` would resume, if it would resume one. */
@@ -137,12 +140,15 @@ export function createEnginePrestart(deps: EnginePrestartDeps) {
   const start = (botId: string, threadId: string, opened: boolean): void => {
     const from = launches.get(botId);
     const adapter = from && deps.adapter(from.instanceId)?.prestart;
-    if (!from || !adapter || reserved.has(threadId) || !deps.allowed() || deps.busy(botId, threadId)
+    if (!from || !adapter || reserved.has(threadId) || adapter.running(threadId) || !deps.allowed() || deps.busy(botId, threadId)
       || deps.shape(botId, threadId) !== from.shape || deps.refused(botId, threadId)) return;
-    if (!room(opened)) return;
     let input = from.input.replaceAll(from.threadId, threadId);
     const cwd = (JSON.parse(input) as SendTurnInput).cwd;
-    if (!cwd || deps.folder(botId, threadId) !== cwd) return;
+    if (!cwd || deps.folder(botId, threadId) !== cwd) {
+      if (opened) unused.set(threadId, now());
+      return;
+    }
+    if (!room(opened)) return;
     for (const bearer of from.bearers) input = input.replaceAll(bearer.token, bearerFor(botId, threadId, bearer.slot, bearer.grants));
     const cursor = opened ? deps.cursor(botId, threadId, from.instanceId) : undefined;
     const launch = { ...(JSON.parse(input) as SendTurnInput), text: "", ...(cursor ? { resumeCursor: cursor } : {}) };
@@ -195,7 +201,7 @@ export function createEnginePrestart(deps: EnginePrestartDeps) {
       if (settling?.threadId === threadId) return;
       if (settling) clearTimeout(settling.timer);
       settling = null;
-      const botId = deps.botOf(threadId);
+      const botId = deps.desktop() ? deps.botOf(threadId) : null;
       if (!botId || reserved.has(threadId) || now() - (unused.get(threadId) ?? -Infinity) < OPENED_AGAIN_AFTER_MS) return;
       const timer = setTimeout(() => {
         if (settling?.timer === timer) settling = null;

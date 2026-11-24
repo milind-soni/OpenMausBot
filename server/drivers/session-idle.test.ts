@@ -288,12 +288,28 @@ describe("the cap on idle engines", () => {
     expect(warmEngineKeys()).toEqual(["theirs", "routine"]);
   });
 
-  it("keeps an engine started ahead of a first message as the most recent, and never closes a held one", () => {
+  it("never lets an engine started ahead of a message close a used one, nor closes a held one: past the cap it closes itself", () => {
     const [used, held, spare] = [engine("used"), engine("held"), engine("spare")];
     capped(1)("held", { ...held.warm, held: () => true });
     capped(1)("used", used.warm);
     capped(1)("spare", { ...spare.warm, spare: () => true });
-    expect([used.state.closed, held.state.closed, spare.state.closed]).toEqual([1, 0, 0]);
+    expect([used.state.closed, held.state.closed, spare.state.closed]).toEqual([0, 0, 1]);
+    expect(warmEngineKeys()).toEqual(["used"]);
+  });
+
+  it("closes engines started ahead of a message first, even one in front of the person, when a used engine goes idle past the cap", () => {
+    const [unwatched, spare, older, next] = [engine("unwatched"), engine("spare"), engine("older-spare"), engine("next")];
+    sawThread("spare");
+    capped(3)("unwatched", unwatched.warm);
+    capped(3)("older-spare", { ...older.warm, spare: () => true });
+    capped(3)("spare", { ...spare.warm, spare: () => true });
+    capped(3)("next", next.warm);
+    expect([unwatched.state.closed, older.state.closed, spare.state.closed, next.state.closed]).toEqual([0, 1, 0, 0]);
+    // A waiting engine past the cap closes an older waiting one before itself, and never a used one.
+    const another = engine("another-spare");
+    capped(3)("another-spare", { ...another.warm, spare: () => true });
+    expect([unwatched.state.closed, spare.state.closed, next.state.closed, another.state.closed]).toEqual([0, 1, 0, 0]);
+    expect(warmEngineKeys()).toEqual(["unwatched", "next", "another-spare"]);
   });
 });
 

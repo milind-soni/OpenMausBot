@@ -1981,7 +1981,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             spares.set(turn.threadId, launch);
             return launch;
           },
-          held: (threadId) => spares.has(threadId) || sessions.get(threadId)?.spare === true, ready: (threadId) => sessions.get(threadId)?.spare === true && sessions.get(threadId)?.tools?.ready === true,
+          held: (threadId) => spares.has(threadId) || sessions.get(threadId)?.spare === true, running: (threadId) => spares.has(threadId) || (sessions.get(threadId)?.closing === false && sessions.get(threadId)?.child.exitCode === null), ready: (threadId) => sessions.get(threadId)?.spare === true && sessions.get(threadId)?.tools?.ready === true,
           drop: (threadId) => {
             const close = () => { const s = sessions.get(threadId); if (s?.spare) { closeSession(threadId, "never used"); stopSession(s); } };
             close();

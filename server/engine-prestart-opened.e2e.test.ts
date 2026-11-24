@@ -1,9 +1,10 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { closeSync, existsSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
-import { launchVerificationServer, runControlOmb, verificationServerEnvironment } from "../scripts/control-omb.ts";
+import { launchVerificationServer, runControlOmb, verificationServerArgs, verificationServerEnvironment } from "../scripts/control-omb.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 
 const alive = (pid: number): boolean => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -30,18 +31,19 @@ it("opening a conversation whose engine has closed starts it from the bot's last
   };
   const jsonLines = (file: string): any[] => existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
   const launches = () => (jsonLines(launchesFile) as Array<{ pid: number; argv: string[] }>).filter((launch) => launch.argv.includes("--input-format"));
+  // Run as the desktop app runs its server (only there does opening a conversation start its engine): every request
+  // carries the app's owner capability.
+  const owner = randomBytes(32).toString("base64url");
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (input, init = {}) => realFetch(input, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "x-openmausbot-desktop-owner": owner } });
   try {
-    // Restarted with an idle time short enough to see the engine close, without the free-memory reading so the runner's
-    // free memory does not decide the outcome, and with turns not waiting for room (a Linux runner can count as a server
-    // whose engines do, where nothing starts ahead).
+    // Restarted with an idle time short enough to see the engine close, and without the free-memory reading so the
+    // runner's free memory does not decide the outcome.
     await waitForExit(fixture.child, { signal: "SIGTERM" });
     const log = openSync(logPath, "a", 0o600);
-    server = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("./index.ts", import.meta.url))], {
-      cwd: fileURLToPath(new URL("..", import.meta.url)),
-      env: { ...verificationServerEnvironment({}, dataDir, Number(new URL(url).port)), OMB_SESSION_IDLE_MS: "10000", OMB_ENGINE_PRESTART: "unmetered", OMB_TURNS_MAX_RUNNING: "off",
-        FAKE_CLAUDE_LAUNCHES: launchesFile, FAKE_CLAUDE_PROMPTS: promptsFile, FAKE_CLAUDE_MCP_RECONNECT: join(dataDir, "relists.jsonl") },
-      stdio: ["ignore", log, log],
-    });
+    const env = { ...verificationServerEnvironment({ OMB_TEST_DESKTOP_OWNER_TOKEN: owner }, dataDir, Number(new URL(url).port)), OMB_SESSION_IDLE_MS: "10000",
+      OMB_ENGINE_PRESTART: "unmetered", FAKE_CLAUDE_LAUNCHES: launchesFile, FAKE_CLAUDE_PROMPTS: promptsFile, FAKE_CLAUDE_MCP_RECONNECT: join(dataDir, "relists.jsonl") };
+    server = spawn(process.execPath, verificationServerArgs(env), { cwd: fileURLToPath(new URL("..", import.meta.url)), env, stdio: ["ignore", log, log] });
     closeSync(log);
     await expect.poll(async () => {
       try { return (await fetch(url + "/api/health", { signal: AbortSignal.timeout(1_000) })).ok; } catch { return false; }
@@ -89,6 +91,7 @@ it("opening a conversation whose engine has closed starts it from the bot's last
     expect(launches(), "an archived conversation starts nothing").toHaveLength(launched + 1);
     evidence.push({ launches: launches(), first: await messages(first) });
   } finally {
+    globalThis.fetch = realFetch;
     writeFileSync(`${logPath}.prestart-opened.json`, JSON.stringify(evidence, null, 2));
     await waitForExit(server, { signal: "SIGTERM" });
     await fixture.close();
