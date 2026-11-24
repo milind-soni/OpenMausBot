@@ -16,6 +16,12 @@ export interface ForkPanelState {
   focusComposer?: boolean;
 }
 
+export type PaneTarget = Pick<ForkPanelState, "kind" | "ownerId" | "threadId">;
+
+export function loadingPanel({ kind, ownerId, threadId, focusComposer }: PaneTarget & { focusComposer?: boolean }, loadId: string): ForkPanelState {
+  return { kind, ownerId, threadId, focusComposer, loadId, messages: [], activeLeafId: null, loading: true, loadFailed: false };
+}
+
 export interface WorkspacePanes {
   layout: PaneLayout;
   focused: string;
@@ -45,6 +51,7 @@ export function updatePanel(state: AppState, panel: ForkPanelState): AppState {
 }
 
 export type ForkPanelAction =
+  | { type: "restorePaneLayout"; panes: WorkspacePanes }
   | { type: "presetPanes"; preset: PanePreset }
   | { type: "movePane"; source: string; target: string; edge: PaneEdge | "fill" }
   | { type: "focusPane"; id: string }
@@ -71,6 +78,7 @@ function workspacePanels(state: AppState): WorkspacePanes["panels"] {
 export function reduceForkPanel(state: AppState, action: ForkPanelAction): AppState {
   switch (action.type) {
     case "forkMessage": return state;
+    case "restorePaneLayout": return { ...state, forkPanel: null, workspacePanes: action.panes };
     case "presetPanes": {
       const layout = presetLayout(workspaceLayout(state), action.preset);
       if (!layout) return state;
@@ -106,8 +114,7 @@ export function reduceForkPanel(state: AppState, action: ForkPanelAction): AppSt
       return { ...state, workspacePanes: { layout, panels, focused } };
     }
     case "openForkPanel": {
-      const panel: ForkPanelState = { kind: action.kind, ownerId: action.ownerId, threadId: action.threadId, messages: [],
-        activeLeafId: null, loading: true, loadId: action.loadId ?? "", loadFailed: false, focusComposer: action.focusComposer };
+      const panel = loadingPanel(action, action.loadId ?? "");
       const closed = { ...state, settingsOpen: false, computerOpen: false, inspectorOpen: false, activityOpen: false };
       if (!action.split && !action.edge && !state.workspacePanes) return { ...closed, forkPanel: panel, workspacePanes: null };
       const panes = state.workspacePanes;

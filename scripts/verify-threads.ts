@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
 import { fixtureApi, mountPreview, parkUntilSignal, type MountedPreview } from "./testing/preview-fixture.ts";
 
+const checkResize = process.argv.includes("--check-pane-resize");
 const longActivity = process.argv.includes("--long-activity");
 const fixture = await launchVerificationServer();
 let ui: MountedPreview | undefined;
@@ -24,7 +25,7 @@ try {
   const models = instances.find((instance: { instanceId: string }) => instance.instanceId === "claude").models.options;
   let gmailThread = pepper.threadId;
   const titles = ["Website ideas", "Triage Gmail", "Triage iCloud"];
-  if (process.argv.some(arg => arg === "--check-panes" || arg === "--try-panes")) {
+  if (checkResize || process.argv.some(arg => arg === "--check-panes" || arg === "--try-panes")) {
     titles.push("Reading list");
     await api("PATCH", `/api/bots/${miso.id}/tasks/${miso.threadId}`, { title: "Release notes" });
   }
@@ -38,8 +39,10 @@ try {
     if (index === 1) gmailThread = threadId;
   }
   const { group } = await api("POST", "/api/groups", { name: "Launch team", memberIds: [pepper.id, miso.id] });
-  await api("POST", `/api/groups/${group.id}/tasks`, { title: "Launch planning" });
+  if (checkResize) await api("PATCH", `/api/groups/${group.id}/setup`, { action: "skip" });
+  const { task: planning } = await api("POST", `/api/groups/${group.id}/tasks`, { title: "Launch planning" });
   await api("POST", `/api/groups/${group.id}/tasks`, { title: "Weekly review" });
+  if (checkResize) await api("POST", `/api/groups/${group.id}/tasks/${planning.threadId}`, {});
   await api("POST", `/api/bots/${pepper.id}/tasks/${gmailThread}`, {});
 
   const fakeCli = fileURLToPath(new URL("../server/testing/fake-claude-cli.ts", import.meta.url));
@@ -80,12 +83,12 @@ try {
     entry: "/scripts/testing/threads-preview.tsx", route: "/__threads.html", title: "Isolated OpenMaus Threads",
   });
   console.log(JSON.stringify({ ...fixture.info, previewUrl: ui.previewUrl, finishGate }));
-  if (process.argv.includes("--check-panes")) {
+  if (checkResize || process.argv.includes("--check-panes")) {
     const { verifyWorkspacePanes } = await import("./testing/workspace-panes.ts");
     await verifyWorkspacePanes(ui.previewUrl, finishGate, fixture.info.logPath + ".panes.png", longActivity, async () => {
       const { task } = await api("POST", `/api/bots/${pepper.id}/tasks/${pepper.threadId}/forks`, { latest: true });
       return task.threadId;
-    });
+    }, checkResize ? async id => { await api("DELETE", `/api/bots/${pepper.id}/tasks/${id}`); } : undefined);
   } else if (process.argv.includes("--check-pane-close")) {
     const { default: electron } = await import("electron");
     const script = fileURLToPath(new URL("./testing/workspace-pane-close.cjs", import.meta.url));

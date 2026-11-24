@@ -52,6 +52,12 @@ check also verifies step sizing and independent list scrolling when run with
 `--long-activity`. It controls when the fake replies finish and saves screenshots of the drop
 preview, the three-pane Stop scenario and the filled grid beside the server log.
 
+Run `node --experimental-strip-types scripts/verify-threads.ts --check-pane-resize`
+to resize the framed grid from 1366 to 700 pixels and back. The check covers
+room and bot drafts, a gated reply, an adjusted divider, an empty slot, and
+selecting a different thread from the narrow drawer. It also deletes a thread
+in the disposable fixture while narrow and checks its restored slot is empty.
+
 ### Close a split pane in Electron
 
 On Linux with Xvfb, xauth and xdotool installed, run:

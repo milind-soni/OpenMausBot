@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { removeTempDir } from "../../server/testing/cleanup.ts";
 import { openHeadlessChrome } from "./headless-chrome.ts";
 
-export async function verifyWorkspacePanes(previewUrl: string, finishGate: string, evidence: string, longActivity: boolean, createFork: () => Promise<string>) {
+export async function verifyWorkspacePanes(previewUrl: string, finishGate: string, evidence: string, longActivity: boolean, createFork: () => Promise<string>, deleteDuringResize?: (id: string) => Promise<void>) {
   const profile = mkdtempSync(join(tmpdir(), "omb-pane-browser-"));
   const page = await openHeadlessChrome(profile);
   const element = (selector: string) => `document.querySelector(${JSON.stringify(selector)})`;
@@ -19,7 +19,7 @@ export async function verifyWorkspacePanes(previewUrl: string, finishGate: strin
   const row = (name: string) => element(`[data-thread-label][title="${name}"]`);
   const pane = (name: string) => `section[aria-label="${name}"]`;
   const stop = (name: string) => element(pane(name) + ' [aria-label="Stop this turn"]');
-  const composer = (name: string) => element(pane(name) + " textarea");
+  const composer = (name: string) => element(pane(name) + ' [data-tour="composer"] textarea');
   const botRow = (name: string) => `[...document.querySelectorAll("[data-sidebar-bot-row]")].find(e => e.innerText.startsWith(${JSON.stringify(name)}))`;
   const drag = async (source: string, target: string, across: number, down: number, highlight?: string) => {
     await page.until(source);
@@ -80,13 +80,99 @@ export async function verifyWorkspacePanes(previewUrl: string, finishGate: strin
   const first = "Triage Gmail", second = "Triage iCloud", third = "Website ideas", draft = "Keep this website idea";
   try {
     await page.send("Emulation.setDeviceMetricsOverride", { width: 1536, height: 960, deviceScaleFactor: 1, mobile: false });
-    await page.send("Page.navigate", { url: previewUrl });
+    await page.send("Page.navigate", { url: deleteDuringResize ? previewUrl + "?frame=1" : previewUrl });
     await click(button("Not now"));
     await click(element('[aria-label="Expand Pepper threads"]'));
     await click(row(first));
     await page.until(composer(first));
     const reading = "Reading list";
     await preset("Four-pane grid");
+    if (deleteDuringResize) {
+      const width = (width: number) => page.send("Emulation.setDeviceMetricsOverride", { width, height: 960, deviceScaleFactor: 1, mobile: false });
+      const layout = () => page.evaluate(`[...document.querySelectorAll("section[data-pane-id]")].map(e => [e.ariaLabel, e.style.cssText])`);
+      const narrow = async (name: string) => {
+        await width(700);
+        await page.until(`document.querySelectorAll("section[data-pane-id]").length === 1 && ${composer(name)}`);
+        await page.until(`document.querySelectorAll('[data-tour="composer"] textarea').length === 1 && !document.querySelector('.workspace-divider,.workspace-pane-close')`);
+      };
+      const openList = async () => {
+        const toggle = element('[aria-label="Open bot list"]');
+        if (await page.evaluate(`${toggle}.ariaExpanded === "false"`)) {
+          await page.until(`(() => { const button = ${toggle}, r = button.getBoundingClientRect();
+            return button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)); })()`);
+          await click(toggle);
+        }
+        await page.until(`${toggle}.ariaExpanded === "true"`);
+      };
+      await width(1366);
+      await drag(row(reading), element('[data-pane-id="slot:1"]'), 0.5, 0.5, "fill");
+      await drag(row(third), element('[data-pane-id="slot:2"]'), 0.5, 0.5, "fill");
+      await click(element('[data-empty-pane] button'));
+      const partial = await layout();
+      await narrow(first);
+      await width(1366);
+      await page.until(element('[data-empty-pane][data-pane-focused]'));
+      assert.deepEqual(await layout(), partial);
+      await click(element('[aria-label="Expand Launch team threads"]'));
+      const weekly = "Weekly review";
+      const roomThread = element('[data-sidebar-thread-row][title^="Weekly review"]');
+      await page.until(roomThread);
+      await page.evaluate(`${roomThread}.scrollIntoView({block:"nearest"})`);
+      await drag(roomThread, element('[data-empty-pane]'), 0.5, 0.5, "fill");
+      await page.until(composer(weekly));
+      const divider = element('.workspace-divider[aria-orientation=vertical]');
+      await page.evaluate(`${divider}.focus()`);
+      await key("ArrowRight", 39);
+      await page.until(`${divider}.getAttribute('aria-valuenow') === '55'`);
+      await type(first, "Finish while narrow");
+      await page.until(stop(first));
+      await type(third, draft, false);
+      await type(weekly, "Room draft", false);
+      await type(reading, "Read", false);
+      const full = await layout();
+      await narrow(reading);
+      await click(composer(reading));
+      await page.send("Input.insertText", { text: " later" });
+      writeFileSync(finishGate, "");
+      await width(1366);
+      await page.until(`document.activeElement === ${composer(reading)} && ${composer(reading)}?.value === "Read later" && ${reply(first, "Finish while narrow")}`);
+      assert.deepEqual(await layout(), full);
+      await page.until(`${composer(weekly)}?.value === "Room draft" && ${composer(third)}?.value === ${JSON.stringify(draft)}`);
+      await click(composer(weekly));
+      const network = { offline: false, downloadThroughput: -1, uploadThroughput: -1 };
+      await page.send("Network.enable");
+      await page.send("Network.emulateNetworkConditions", { ...network, latency: 600 });
+      await width(700);
+      await page.until(`document.querySelectorAll("[data-pane-id]").length === 1 && ${composer("Launch planning")}`);
+      await width(1366);
+      await page.until(`document.querySelectorAll("[data-workspace-thread]").length === 4 && document.activeElement === ${composer(weekly)} && ${composer(weekly)}?.value === "Room draft"`);
+      assert.deepEqual(await layout(), full);
+      await page.send("Network.emulateNetworkConditions", { ...network, latency: 0 });
+      await narrow(weekly);
+      await openList();
+      await page.evaluate(`${row(third)}.focus()`);
+      await key("Enter", 13);
+      await page.until(`${composer(third)}?.value === ${JSON.stringify(draft)}`);
+      await width(1366);
+      await page.until(`document.activeElement === ${composer(third)} && ${composer(weekly)}?.value === "Room draft"`);
+      assert.deepEqual(await layout(), full);
+      const readingId = await page.evaluate(`${element(pane(reading))}.dataset.workspaceThread`);
+      await narrow(third);
+      await deleteDuringResize(readingId);
+      await page.until(`!${row(reading)}`);
+      await openList();
+      await page.evaluate(`${row(second)}.focus()`);
+      await key("Enter", 13);
+      await page.until(composer(second));
+      await type(second, "New selection", false);
+      await width(1366);
+      await page.until(`document.activeElement === ${composer(second)} && ${composer(second)}?.value === "New selection" && ${composer(weekly)}?.value === "Room draft"`);
+      assert.equal(await page.evaluate('document.querySelectorAll("[data-empty-pane]").length'), 1);
+      assert.equal(await page.evaluate('document.querySelectorAll("[data-workspace-thread]").length'), 3);
+      assert.equal(await page.evaluate(`Boolean(${composer(reading)} || ${composer(third)})`), false);
+      console.log("Framed workspace resize passed");
+      return;
+    }
     await drag(row(reading), element('[data-pane-id="slot:1"]'), 0.5, 0.5, "fill");
     await drag(row(second), element('[data-pane-id="slot:3"]'), 0.5, 0.5, "fill");
     await type(reading, "Read", false);

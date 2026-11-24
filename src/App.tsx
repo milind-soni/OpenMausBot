@@ -25,6 +25,7 @@ import { ChatView } from "@/components/ChatView";
 import { HandoffExchangeHost } from "@/components/HandoffExchange";
 import { GroupView } from "@/components/GroupView";
 import { WorkspaceLayoutContext, FocusedWorkspaceThread, WorkspaceChatContext } from "@/state/workspace-chat-context";
+import { useResponsiveWorkspace } from "@/hooks/use-responsive-workspace";
 import { WorkspacePanes } from "@/components/WorkspacePanes";
 import { ForkPanel } from "@/components/ForkPanel";
 import { PHONE_LAYOUT, SIDEBAR_AND_BOT_PANEL_FIT, SIDEBAR_AND_NARROW_PANEL_FIT, SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQuery } from "@/lib/use-media-query";
@@ -399,11 +400,11 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const primary = group ?? chatBot ?? bot;
   const paneChat = sidebarInline && primary && state.activeView === "chat" && !firstRun && !teamWelcomeOn && !chiefStep && !localVmWorkspaceBotId ? primary.threadId : null;
   const focusedThread = state.workspacePanes && paneChat ? (state.workspacePanes.focused === MAIN_PANE ? paneChat : state.workspacePanes.focused) : null;
+  useResponsiveWorkspace(state, dispatch, sidebarInline, primary && state.activeView === "chat"
+    ? { kind: group ? "group" : "bot", ownerId: primary.id, threadId: primary.threadId } : undefined);
   useEffect(() => {
-    if (!state.workspacePanes) return;
-    if (!sidebarInline) dispatch({ type: "closeWorkspacePanes" });
-    else if (paneChat && state.workspacePanes.panels[paneChat]) dispatch({ type: "closePane", id: paneChat });
-  }, [dispatch, paneChat, sidebarInline, state.workspacePanes]);
+    if (paneChat && state.workspacePanes?.panels[paneChat]) dispatch({ type: "closePane", id: paneChat });
+  }, [dispatch, paneChat, state.workspacePanes]);
 
   return (
     <WorkspaceLayoutContext value={workspaceLayout(state)}><WorkspaceChatContext value={paneChat}><FocusedWorkspaceThread value={focusedThread}>

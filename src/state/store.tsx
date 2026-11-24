@@ -648,7 +648,7 @@ export type Action =
   | { type: "deleteGroup"; groupId: string }
   | { type: "newGroupTask"; groupId: string }
   | ForkPanelAction | MakeNewChatAction
-  | { type: "switchGroupTask"; groupId: string; threadId: string }
+  | { type: "switchGroupTask"; groupId: string; threadId: string; onSettled?: () => void }
   | { type: "renameGroupTask"; groupId: string; threadId: string; title: string }
   | { type: "pinGroupTask"; groupId: string; threadId: string; pinned: boolean; title: string }
   | { type: "archiveGroupTask"; groupId: string; threadId: string; archivedAt: number | null }
@@ -936,7 +936,7 @@ function reduceApp(state: AppState, action: Action): AppState {
       };
     case "showChat":
       return state.activeView === "chat" ? state : { ...state, activeView: "chat" };
-    case "presetPanes": case "movePane": case "focusPane": case "resizePane": case "closePane": case "closeWorkspacePanes":
+    case "restorePaneLayout": case "presetPanes": case "movePane": case "focusPane": case "resizePane": case "closePane": case "closeWorkspacePanes":
     case "forkMessage": case "openForkPanel": case "forkPanelLoaded": case "forkPanelLoadFailed":
     case "forkPanelMessage": case "forkPanelActive": case "closeForkPanel":
       return reduceForkPanel(state, action);
@@ -2735,6 +2735,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             });
           break;
         }
+        case "restorePaneLayout":
+          for (const panel of Object.values(action.panes.panels)) runForkEffect({ type: "openForkPanel", ...panel }, dispatch, rawDispatch, showError);
+          break;
         case "forkMessage": case "openForkPanel": {
           if (action.type === "openForkPanel" && threadPanel(store.getState(), action.threadId)?.loadId !== action.loadId) break;
           runForkEffect(action, dispatch, rawDispatch, showError);
@@ -2764,7 +2767,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "switchGroupTask":
           api<{ group?: Partial<Group> & { id: string } }>(`/api/groups/${action.groupId}/tasks/${action.threadId}?messages=${SWITCH_MESSAGE_COUNT}`, { method: "POST" })
             .then(roomAnswer(action.groupId, true))
-            .catch(showError);
+            .catch(showError).finally(action.onSettled);
           break;
         case "renameGroupTask":
         case "pinGroupTask":
