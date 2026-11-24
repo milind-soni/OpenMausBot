@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, AtSign, Bell, CheckCircle2, CircleHelp, HandHelping, Info, KeyRound, LogIn, Newspaper, Pin, RotateCcw, Trash2, Wallet, X, type LucideIcon } from "lucide-react";
 import { api, useStore, openThread, type Action } from "@/state/store";
+import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { setNotificationTrayPinned, useNotificationAutoClear } from "@/lib/notification-preferences";
@@ -120,7 +121,7 @@ export async function postNotificationRead(path: string, dispatch: (action: Acti
 export const NOTIFICATION_AUTO_CLEAR_AGE_MS = 24 * 60 * 60 * 1000;
 
 export function useNotificationAutoClearing(): void {
-  const { state, dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const enabled = useNotificationAutoClear();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -129,7 +130,7 @@ export function useNotificationAutoClearing(): void {
     return () => clearInterval(timer);
   }, [enabled]);
   const before = now - NOTIFICATION_AUTO_CLEAR_AGE_MS;
-  const stale = enabled && state.notifications.some((entry) => entry.at < before);
+  const stale = useStoreSelector((state) => enabled && state.notifications.some((entry) => entry.at < before));
   const sent = useRef(0);
   useEffect(() => {
     if (!stale) return;
