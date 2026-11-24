@@ -129,7 +129,8 @@ export function rememberStorageSeen(scope: string, seen: StorageBand | null): vo
   for (const listener of seenListeners) listener(scope, seen === "ok" ? null : seen);
 }
 
-/** Forget the shared answer and what this launch showed, as a new launch would (tests; a page that changed servers). */
+/** Forget the shared answer and what this launch showed, as a new launch would. Tests use it; the app needs no call: a switch
+ * to another Cloud loads a new page, and the seen mark is kept per server either way. */
 export function forgetStorageReport(): void {
   stateOrigin = pageOrigin();
   loading = null;

@@ -138,12 +138,13 @@ export const BOTS_SHOWN = 5;
 export interface StorageBotRow { key: string; name: string | null; bytes: number; kind: "bot" | "private" | "gone" | "rest" }
 
 /** The names Storage may show: on a Team Cloud never another person's own MausBot (the server keeps it from an admin too;
- * this holds should one still reach the list), which then reads as a private bot. */
+ * this holds should one still reach the list), which then reads as a private bot. While who this person is isn't known yet
+ * (`me` null) the server's list is taken as it is, so their own MausBot never reads as private. */
 export function storageBotNames(bots: ReadonlyArray<{ id: string; name: string; defaultBot?: { person?: string } }>, team: { me: string | null } | null): Map<string, string> {
   const me = team?.me?.trim().toLowerCase() ?? "";
   return new Map(bots.filter((bot) => {
     const person = bot.defaultBot?.person?.trim().toLowerCase();
-    return !team || !person || person === me;
+    return !team || !person || !me || person === me;
   }).map((bot) => [bot.id, bot.name]));
 }
 

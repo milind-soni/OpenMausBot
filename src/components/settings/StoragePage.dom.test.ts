@@ -45,8 +45,8 @@ afterEach(() => {
 });
 
 /** Settings opened on `section`, with the server answering `storage` (a status code for a refusal) to the storage route. */
-async function openSettings({ storage, sessionAnswer = ADMIN, config = CONFIG, section = "overview" }: {
-  storage: unknown; sessionAnswer?: object; config?: object; section?: string;
+async function openSettings({ storage, sessionAnswer = ADMIN, config = CONFIG, section = "overview", bots = [{ id: "chief", name: "Chief", threadId: "t1" }] }: {
+  storage: unknown; sessionAnswer?: object; config?: object; section?: string; bots?: object[];
 }) {
   vi.resetModules();
   requests.length = 0;
@@ -54,7 +54,7 @@ async function openSettings({ storage, sessionAnswer = ADMIN, config = CONFIG, s
   const answers: Record<string, unknown> = {
     "/api/instances": { instances: [] }, "/api/config": config, "/api/auth/session": sessionAnswer,
     "/api/auth/sessions": { sessions: [{ id: "s1" }], current: "s1" }, "/api/routines": { routines: [], runs: [] },
-    "/api/webhooks": { webhooks: [], attempts: [] }, "/api/bots": { bots: [{ id: "chief", name: "Chief", threadId: "t1" }], groups: [] },
+    "/api/webhooks": { webhooks: [], attempts: [] }, "/api/bots": { bots, groups: [] },
   };
   vi.stubGlobal("EventSource", FixtureEventSource);
   vi.stubGlobal("fetch", (input: string | URL | Request, init?: RequestInit) => {
@@ -94,6 +94,19 @@ describe("who gets Settings → Storage", () => {
     // Seeing it here is what keeps the sidebar's line for this band away.
     expect(localStorage.getItem("openmausbot.storageNotice.seen.v1:server:env-a")).toBe("near");
     expect(localStorage.getItem("openmausbot.storageNotice.seen.v1")).toBeNull();
+  });
+
+  it("opening Storage reads the report and never starts a measurement", async () => {
+    await openSettings({ storage: REPORT, section: "storage" });
+    expect(storageReads()).toBeGreaterThan(0);
+    expect(requests.filter((request) => request.startsWith("POST /api/diagnostics/storage"))).toEqual([]);
+  });
+
+  it("a Team Cloud's admin: their own MausBot keeps its name, and a bot the app isn't shown reads as a private bot", async () => {
+    const answers = { ...REPORT, storage: storageReport({ bots: [{ id: "mine", bytes: 7 * GB, files: 1 }, { id: "theirs", bytes: 3 * GB, files: 1 }] }) };
+    await openSettings({ storage: answers, section: "storage", config: { ...CONFIG, team: { id: "team-1", name: "Studio" } },
+      bots: [{ id: "mine", name: "MausBot", threadId: "t1", defaultBot: { person: "ada@example.com" } }] });
+    expect([...document.querySelectorAll("[data-storage-bot]")].map((row) => row.textContent)).toEqual(["MausBot7 GB", "Private bot3 GB", "Deleted bots1.5 GB", "Other bots512 MB"]);
   });
 
   it("a team member who is not an admin: no Storage page, and the route is never asked", async () => {

@@ -100,6 +100,7 @@ describe("on a Team Cloud", () => {
       { id: "theirs", name: "Bo's MausBot", defaultBot: { person: "bo@example.com" } },
     ], { me: "ada@example.com" });
     expect([...names]).toEqual([["chief", "Chief"], ["research", "Research"]]);
+    expect([...storageBotNames([{ id: "mine", name: "MausBot", defaultBot: { person: "ada@example.com" } }], { me: null })]).toEqual([["mine", "MausBot"]]);
     expect(storageBots(storageReport(), (id) => names.get(id), undefined, true).map((row) => [row.key, row.kind, row.name])).toEqual([
       ["chief", "bot", "Chief"], ["research", "bot", "Research"], ["gone", "gone", null], ["rest", "rest", null],
     ]);
