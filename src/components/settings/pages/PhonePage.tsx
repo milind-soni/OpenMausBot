@@ -61,11 +61,11 @@ function OtherPlaces() {
 }
 
 export function PhonePage() {
-  const { ctx, place } = useSettingsShell();
+  const { ctx, place, anchor } = useSettingsShell();
   const focus = useStoreSelector((state) => state.appSettingsPhonePairing), config = useStoreSelector((state) => state.config);
   return <>
     {ctx.here
-      ? <PhoneDevicesSection profileEmail={config?.profile?.email} focusRequest={focus} simple={!ctx.advanced} placeName={place.name} top={<PairWithCloud />} />
+      ? <PhoneDevicesSection profileEmail={config?.profile?.email} focusRequest={focus} simple={!ctx.advanced} moreWaysAsked={anchor === "more-ways"} placeName={place.name} top={<PairWithCloud />} />
       : <ServerPairingCard cloudHome={ctx.cloud} focusRequest={focus} team={config?.team?.name} placeName={place.name} simple={!ctx.advanced}
         teamPhoneBlocked={config?.managedPolicy?.remoteAccess === false ? t("policy.teamRemoteBlocked", { organization: config.managedPolicy.organizationName }) : null} />}
     <OtherPlaces />

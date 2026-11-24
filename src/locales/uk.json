@@ -4042,6 +4042,7 @@
   "servers.localHint": "Локальні боти й розмови",
   "servers.switch": "Перейти",
   "settings.advancedMode.title": "Розширений режим",
+  "settings.advancedSetting": "Розширене налаштування",
   "settings.deviceNotifications.show": "Повідомляти, коли бот закінчив",
   "settings.deviceNotifications.title": "Сповіщення на цьому пристрої",
   "settings.experimental.skillAuthoring": "Боти можуть писати власні навички",

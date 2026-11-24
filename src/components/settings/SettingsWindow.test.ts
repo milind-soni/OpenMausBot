@@ -102,10 +102,15 @@ describe("the Settings window", () => {
     expect(render("app")).not.toContain('data-settings-block="typing"');
   });
 
-  it("turns Advanced on for a link to a page Simple doesn't show, and lands there", () => {
+  it("lands a link to a page Simple doesn't list there, marked as an Advanced setting, and stays in Simple", () => {
     fixture.advanced = false;
-    expect(render("general")).toMatch(/data-settings-page-open="general"/);
+    const general = render("general");
+    expect(general).toMatch(/data-settings-page-open="general"/);
+    expect(general).toMatch(/data-settings-header[\s\S]*?Advanced setting/);
+    expect(general).not.toContain("data-settings-advanced=");
     expect(render("activity")).toMatch(/data-settings-page-open="data"/);
+    expect(render("appearance")).not.toContain("Advanced setting");
+    expect(fixture.setAdvancedMode).not.toHaveBeenCalled();
   });
 
   const order = (html: string, marks: string[]) => marks.map((mark) => html.indexOf(mark));

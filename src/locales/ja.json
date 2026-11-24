@@ -1574,6 +1574,7 @@
   "settings.userBubbles.subtitle": "1対1のチャットでは、自分のメッセージがそのボットのカラーのグラデーションで表示されます。ルームでは、ニュートラルな吹き出しのままです。",
   "settings.userBubbles.aria": "自分のメッセージにボットの色を付ける",
   "settings.advancedMode.title": "詳細モード",
+  "settings.advancedSetting": "詳細設定",
   "settings.advancedMode.subtitle": "使用量とトークン、インスペクターなど、開発者向けのすべての操作機能をこのデバイスで表示します。オフにするとアプリの表示がシンプルになります。どちらでもデータは削除されません。",
   "settings.threadDisplay.title": "スレッド",
   "settings.threadDisplay.subtitle": "このデバイスだけでスレッド一覧と操作機能を表示します。隠しても会話履歴と実行中の作業はすべて保持され、グループチャットは変わりません。オンに戻すとスレッドを再び開けます。",

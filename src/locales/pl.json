@@ -1422,6 +1422,7 @@
   "settings.userBubbles.subtitle": "W czacie jeden na jeden twoje wiadomości mają tło z gradientu w kolorze tego bota. Pokoje zachowują neutralny dymek.",
   "settings.userBubbles.aria": "Koloruj moje wiadomości kolorem bota",
   "settings.advancedMode.title": "Tryb zaawansowany",
+  "settings.advancedSetting": "Ustawienie zaawansowane",
   "settings.advancedMode.subtitle": "Pokazuj wszystkie techniczne elementy sterujące na tym urządzeniu: wykorzystanie i tokeny, inspektor oraz inne narzędzia dla twórców. Wyłącz, aby uzyskać prostszą aplikację. Nic nie zostanie usunięte w żadnym wariancie.",
   "settings.threadDisplay.title": "Wątki",
   "settings.threadDisplay.subtitle": "Pokazuj listy wątków i elementy sterujące tylko na tym urządzeniu. Ukrycie ich zachowuje całą historię rozmów i trwającą pracę; kanały pozostają bez zmian. Włącz ponownie, aby uzyskać dostęp do swoich wątków.",

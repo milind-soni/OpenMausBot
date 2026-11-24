@@ -71,6 +71,13 @@ describe("Phone & devices", () => {
     expect(html).toMatch(/data-settings-disclosure="more-ways"[\s\S]*?aria-expanded="false"/);
   });
 
+  it("in Simple, opens More ways in, marked as an Advanced setting, only when search or a link asks for it", () => {
+    const asked = renderToStaticMarkup(createElement(PhoneDevicesSection, { simple: true, moreWaysAsked: true }));
+    expect(asked).toMatch(/data-settings-block="more-ways"[\s\S]*?aria-expanded="true"[\s\S]*?Advanced setting[\s\S]*?data-route-row="tailscale"/);
+    expect(page(true)).not.toContain("more-ways");
+    expect(page(false)).not.toContain("Advanced setting");
+  });
+
   it("shows each route on since its date as a switch, and lists paired phones with Pair a phone beside the list", () => {
     f.state = state({ routes: routes({ wifi: true, tailscale: true }) });
     let html = page(true);
