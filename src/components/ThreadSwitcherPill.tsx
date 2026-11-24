@@ -150,9 +150,9 @@ export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle
                 <button key={tab.threadId} type="button" role="option" aria-selected={selected} tabIndex={selected ? 0 : -1} title={title}
                   data-thread-chip={tab.threadId} onClick={() => pick(tab)}
                   className={cn(CHIP, selected ? "bg-ink/[0.1] text-ink" : "text-ink-secondary hover:bg-ink/[0.06] hover:text-ink")}>
+                  {tab.threadId === main && <Star size={12} role="img" aria-label={t("sidebar.threads.main")} data-thread-chip-main className="shrink-0 fill-current text-ink-tertiary" />}
                   {tab.working ? <span role="img" aria-label={t("chat.activity.working")} className="size-1.5 shrink-0 animate-pulse rounded-full bg-success motion-reduce:animate-none" />
-                    : tab.threadId === main ? <Star size={12} role="img" aria-label={t("sidebar.threads.main")} data-thread-chip-main className="shrink-0 fill-current text-ink-tertiary" />
-                    : tab.pinned ? <Pin size={12} role="img" aria-label={t("task.pinned")} className="shrink-0 text-ink-tertiary" /> : null}
+                    : tab.pinned && tab.threadId !== main ? <Pin size={12} role="img" aria-label={t("task.pinned")} className="shrink-0 text-ink-tertiary" /> : null}
                   <span dir="auto" className="min-w-0 truncate">{title}</span>
                 </button>
               );

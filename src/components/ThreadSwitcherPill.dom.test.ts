@@ -47,6 +47,7 @@ describe("the pill's thread switcher", () => {
     expect(chips().map((chip) => chip.textContent)).toEqual(["Weekly sales", "Launch plan", "Berlin trip"]);
     expect(chips()[1].getAttribute("aria-selected")).toBe("true");
     expect(chips()[0].querySelector('[aria-label="Working"]')).not.toBeNull();
+    expect(chips()[0].querySelector('[aria-label="Main"]')).not.toBeNull();
     expect(chips()[1].querySelector('[aria-label="Pinned"]')).not.toBeNull();
   });
 
@@ -56,6 +57,15 @@ describe("the pill's thread switcher", () => {
     expect(chips()[0].textContent).toBe("Weekly sales");
     expect(chips()[0].querySelector('[aria-label="Main"]')).not.toBeNull();
     expect(chips()[1].querySelector('[aria-label="Main"]')).toBeNull();
+  });
+
+  it("keeps the main thread's star beside its working dot, and a pinned main thread shows the star alone", () => {
+    render(pepper([task("sales", "Weekly sales", 1, { busy: true, pinned: true }), task("trip", "Berlin trip", 3)], "trip"));
+    act(() => q("[data-chathead-threads]")!.click());
+    const [main] = chips();
+    expect(main.querySelector('[aria-label="Main"]')).not.toBeNull();
+    expect(main.querySelector('[aria-label="Working"]')).not.toBeNull();
+    expect(main.querySelector('[aria-label="Pinned"]')).toBeNull();
   });
 
   it("folds back from the same chevron, which says what it will do", () => {
