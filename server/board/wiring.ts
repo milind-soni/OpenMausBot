@@ -41,14 +41,14 @@ export interface TeamBoardDeps {
   askPerson(botId: string, threadId: string, to: { name?: string; key?: string }, question: string, title: string): { status: number; text: string; person?: string };
   /** A card in this thread waits on a person (person-waits.ts), which owns the thread's waiting state while it does. */
   cardWaiting(threadId: string): boolean;
-  /** Multiplies the dispatcher's waits and a later's minute; only tests set it (OMB_BOARD_TIME_SCALE). */
+  /** Multiplies the dispatcher's waits and a later's minute; only tests set it (OMB_BOARD_TIME_SCALE, up to 1,000). */
   timeScale?: number;
 }
 
 export function createTeamBoard(deps: TeamBoardDeps) {
   const { store } = deps;
   const on = () => deps.team && deps.enabled();
-  const scale = deps.timeScale && deps.timeScale > 0 && deps.timeScale <= 1 ? deps.timeScale : 1;
+  const scale = deps.timeScale && deps.timeScale > 0 && deps.timeScale <= 1_000 ? deps.timeScale : 1;
   const memberBots = (groupId: string) => {
     const room = store.group(groupId);
     return room && !room.dm ? room.memberIds : null;
