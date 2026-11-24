@@ -122,8 +122,8 @@ const BUDGET_BASELINE: Record<string, number> = {
   "skills+shared+voice+x+team+images+hosting": 74525,
   "default+hosting": 63372,
   "default+tools-off": 57192,
-  "skills+shared+voice+x+team+board": 73041,
-  "default+room+board": 59183,
+  "skills+shared+voice+x+team+board": 73047,
+  "default+room+board": 59189,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';
