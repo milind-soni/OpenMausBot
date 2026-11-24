@@ -548,12 +548,13 @@ describe("Hermes advertised ACP edit modes", () => {
     await runTurn("ask");
     expect(modeCalls()).toEqual(["accept_edits", "default"]);
 
+    // Full access keeps Hermes' default mode, so every request still reaches the app and its safety floor.
     await runTurn("full");
-    expect(modeCalls()).toEqual(["accept_edits", "default", "dont_ask"]);
+    expect(modeCalls()).toEqual(["accept_edits", "default"]);
 
     // Engines without a native auto reviewer stay in ask/default rather than escalating.
     await runTurn("auto");
-    expect(modeCalls()).toEqual(["accept_edits", "default", "dont_ask", "default"]);
+    expect(modeCalls()).toEqual(["accept_edits", "default"]);
 
     expect(Number(readFileSync(launches, "utf8"))).toBe(1);
   });
@@ -682,7 +683,7 @@ describe("Hermes advertised ACP edit modes", () => {
       approvalMode: "full",
     });
     expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === fullTurn.turnId)).toMatchObject({ ok: true });
-    expect(modeCalls()).toEqual(["dont_ask"]);
+    expect(modeCalls()).toEqual([]);
 
     const editsTurn = await instance.adapter.sendTurn({
       threadId: "t-hermes-unmatched",
@@ -693,9 +694,9 @@ describe("Hermes advertised ACP edit modes", () => {
     const failed = await recorder.until((event) => event.type === "turn.completed" && event.turnId === editsTurn.turnId);
     expect(failed).toMatchObject({ ok: false, stopReason: "rpc_error" });
     expect(recorder.events.some((event) => event.type === "runtime.error" && event.message.includes("did not advertise an ACP mode"))).toBe(true);
-    expect(modeCalls()).toEqual(["dont_ask"]);
+    expect(modeCalls()).toEqual([]);
 
-    // Pooled process must have been retired so the next turn starts a fresh session rather than reusing dont_ask.
+    // Pooled process must have been retired so the next turn starts a fresh session.
     const askTurn = await instance.adapter.sendTurn({
       threadId: "t-hermes-unmatched",
       text: "back to ask",
@@ -717,13 +718,13 @@ describe("Hermes advertised ACP edit modes", () => {
       FAKE_ACP_RPC_APPEND_FILE: rpcLog,
     });
 
-    const fullTurn = await instance.adapter.sendTurn({
+    const editsTurn = await instance.adapter.sendTurn({
       threadId: "t-hermes-same-chunk",
-      text: "turn-full",
+      text: "turn-edits",
       cwd: scratch,
-      approvalMode: "full",
+      approvalMode: "edits",
     });
-    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === fullTurn.turnId)).toMatchObject({ ok: true });
+    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === editsTurn.turnId)).toMatchObject({ ok: true });
     expect(promptCount()).toBe(1);
 
     const askDriftTurn = await instance.adapter.sendTurn({
@@ -744,7 +745,7 @@ describe("Hermes advertised ACP edit modes", () => {
     });
     expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === askRecoveredTurn.turnId)).toMatchObject({ ok: true });
     expect(promptCount()).toBe(2);
-    expect(modeCalls()).toEqual(["dont_ask", "default", "default"]);
+    expect(modeCalls()).toEqual(["accept_edits", "default", "default"]);
   });
 
   it("rechecks currentModeId after configureSession before dispatching session/prompt when mode drifts during set_model", async () => {

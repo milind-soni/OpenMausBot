@@ -55,12 +55,12 @@ describe("selectAdvertisedMode", () => {
     expect(selectAdvertisedMode(hermesModes, "ask", false)).toBe("default");
     expect(selectAdvertisedMode(hermesModes, "edits", false)).toBe("accept_edits");
     expect(selectAdvertisedMode(hermesModes, "auto", false)).toBe("default");
-    expect(selectAdvertisedMode(hermesModes, "full", false)).toBe("dont_ask");
+    expect(selectAdvertisedMode(hermesModes, "full", false)).toBe("default");
     expect(selectAdvertisedMode(hermesModes, undefined, false)).toBe("default");
-    expect(selectAdvertisedMode(hermesModes, undefined, true)).toBe("dont_ask");
+    expect(selectAdvertisedMode(hermesModes, undefined, true)).toBe("default");
   });
 
-  it("supports unrestricted and case-variant mode ids and returns null when unadvertised", () => {
+  it("never picks a don't-ask mode for full access, matches case variants, and returns null when unadvertised", () => {
     expect(selectAdvertisedMode(
       [{ id: "Default" }, { id: "acceptEdits" }, { id: "Unrestricted" }],
       "edits",
@@ -70,7 +70,8 @@ describe("selectAdvertisedMode", () => {
       [{ id: "default" }, { id: "accept_edits" }, { id: "unrestricted" }],
       "full",
       false,
-    )).toBe("unrestricted");
+    )).toBe("default");
+    expect(selectAdvertisedMode([{ id: "accept_edits" }, { id: "unrestricted" }], "full", false)).toBeNull();
     expect(selectAdvertisedMode([], "edits", false)).toBeNull();
     expect(selectAdvertisedMode([{ id: "plan" }], "edits", false)).toBeNull();
   });
