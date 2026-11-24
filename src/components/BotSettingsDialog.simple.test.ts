@@ -128,6 +128,7 @@ const { DetailsTab } = await import("./bot-panel/DetailsTab");
 const { BotConversations } = await import("./bot-panel/Conversations");
 const { SettingsPage } = await import("./bot-panel/SettingsPage");
 const { LibraryTab } = await import("./bot-panel/LibraryTab");
+const { BotKeeps } = await import("./bot-panel/Keeps");
 const { ApprovalChip } = await import("./ComposerPlusMenu");
 const { callMode, setCallMode } = await import("@/lib/call-mode");
 const { CloudBackendPicker } = await import("./CloudBackendPicker");
@@ -206,7 +207,8 @@ const dialog = (bot: Bot) => capture(() => BotSettingsDialog({ bot }));
 const botTab = (bot: Bot) => capture(() => DetailsTab({ bot, derived: derived(), onOpen }));
 const settingsPage = (bot: Bot, editingInstructions = false) =>
   capture(() => SettingsPage({ bot, derived: derived(), onOpen, editingInstructions, onEditInstructions }));
-const library = (bot: Bot) => capture(() => LibraryTab({ bot, onOpen }));
+const library = (bot: Bot) => capture(() => LibraryTab({ bot }));
+const keeps = (bot: Bot) => capture(() => BotKeeps({ bot, onOpen }));
 const computer = (bot: Bot) => capture(() => ComputerTab({ bot, derived: derived(), onOpen }));
 const find = (rendered: { nodes: Node[] }, attr: string, value: unknown = true) => {
   const found = rendered.nodes.find((node) => node.props[attr] === value);
@@ -341,9 +343,8 @@ describe("the bot panel in Simple mode", () => {
     (ofType(page, PageHeader)!.props.onBack as () => void)();
     expect(shown(panel(bot))).toEqual({ tab: "details", page: undefined });
 
-    click(find(panel(bot), "data-panel-tab", "library"));
-    (ofType(panel(bot), LibraryTab)!.props.onOpen as (page: string) => void)("memory");
-    expect(ofType(panel(bot), PageHeader)!.props).toMatchObject({ back: "Library", title: "What it remembers" });
+    (ofType(panel(bot), DetailsTab)!.props.onOpen as (page: string) => void)("memory");
+    expect(ofType(panel(bot), PageHeader)!.props).toMatchObject({ back: "Details", title: "What it remembers" });
     (ofType(panel(bot), PageHeader)!.props.onBack as () => void)();
 
     click(find(panel(bot), "data-panel-tab", "computer"));
@@ -386,7 +387,7 @@ describe("the bot panel in Simple mode", () => {
 
   it.each([
     ["overview", "details", undefined], ["identity", "details", undefined], ["slack", "details", undefined],
-    ["soul", "details", "settings"], ["skills", "library", "skills"], ["memory", "library", "memory"],
+    ["soul", "details", "settings"], ["skills", "details", "skills"], ["memory", "details", "memory"],
     ["routines", "details", "routines"], ["access", "computer", undefined], ["model", "details", undefined],
     ["permissions", "details", "settings"], ["voice", "details", undefined], ["visibility", "details", undefined],
     ["history", "details", undefined], ["usage", "details", undefined],
@@ -665,16 +666,16 @@ describe("the avatar editor", () => {
 
 
 describe("the Details tab", () => {
-  it("holds the model, the conversations, this conversation's rows and routines, in that order, with no switch or Thinking row", () => {
+  it("holds the model, what the bot keeps, the conversations, this conversation's rows and routines, in that order, with no switch or Thinking row", () => {
     const rendered = botTab(makeBot());
     expect(ofType(rendered, ModelPicker)!.props).toMatchObject({ bot: expect.objectContaining({ id: "scout" }), threadId: "thread-scout", contained: true });
     expect(ofType(rendered, BotConversations)!.props.bot).toMatchObject({ id: "scout" });
-    const order = ['data-panel-row="model"', 'data-panel-card="conversations"', 'data-panel-item="find"', 'data-panel-item="activity"', 'data-panel-empty="routines"']
+    const order = ['data-panel-row="model"', 'data-panel-page="memory"', 'data-panel-page="skills"', 'data-panel-page="folder"', 'data-panel-card="conversations"', 'data-panel-item="find"', 'data-panel-item="activity"', 'data-panel-empty="routines"']
       .map((marker) => rendered.html.indexOf(marker));
     expect(order.every((index) => index > -1)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     for (const gone of ['data-panel-row="thinking"', 'data-panel-edit="soul"', 'data-panel-row="approval"', 'data-panel-row="goal"', 'data-panel-row="call-mode"',
-      'data-panel-page="apps"', 'data-panel-page="memory"', 'data-panel-page="skills"', 'data-panel-page="folder"']) {
+      'data-panel-page="apps"']) {
       expect(rendered.html, gone).not.toContain(gone);
     }
     expect(rendered.html).not.toContain(">Settings<");
@@ -1054,45 +1055,45 @@ describe("the Bot settings page", () => {
 });
 
 describe("the Library tab", () => {
-  it("says what it will hold while the bot has made nothing, then what it remembers, its skills and its folder", () => {
+  it("says what it will hold while the bot has made nothing, and holds nothing else", () => {
     const rendered = library(makeBot());
     expect(rendered.html).toContain('data-panel-empty="library"');
-    const order = ['data-panel-empty="library"', 'data-panel-page="memory"', 'data-panel-page="skills"', 'data-panel-page="folder"'].map((marker) => rendered.html.indexOf(marker));
-    expect(order.every((index) => index > -1)).toBe(true);
-    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(rendered.html).not.toContain("data-panel-page");
   });
+});
 
+describe("what the bot keeps, on the Details tab", () => {
   it("shows no count on What it remembers, only Nothing yet when it is empty or Off, and opens the memory page", () => {
-    expect(rowValue(library(makeBot()), "memory")).toBeUndefined();
+    expect(rowValue(keeps(makeBot()), "memory")).toBeUndefined();
     fixture.memory.docs = [memoryDoc("# Notes\n- Likes short replies\n- Uses Resolve\n- Works nights\n")];
-    const rendered = library(makeBot());
+    const rendered = keeps(makeBot());
     expect(rowValue(rendered, "memory")).toBeUndefined();
     click(find(rendered, "data-panel-page", "memory"));
     expect(onOpen).toHaveBeenLastCalledWith("memory");
     fixture.memory.docs = [memoryDoc("# Empty\n")];
-    expect(rowValue(library(makeBot()), "memory")).toBe("Nothing yet");
+    expect(rowValue(keeps(makeBot()), "memory")).toBe("Nothing yet");
     fixture.memory.thread = { ...memoryDoc("- Acme NDA: two years\n"), path: "memory/threads/t1.md", scoped: true };
-    expect(rowValue(library(makeBot()), "memory")).toBeUndefined();
-    expect(rowValue(library(makeBot({ memoryEnabled: false })), "memory")).toBe("Off");
+    expect(rowValue(keeps(makeBot()), "memory")).toBeUndefined();
+    expect(rowValue(keeps(makeBot({ memoryEnabled: false })), "memory")).toBe("Off");
   });
 
   it("values Skills by how many are on, and opens the skills page", () => {
-    expect(rowValue(library(makeBot()), "skills")).toBe("None");
+    expect(rowValue(keeps(makeBot()), "skills")).toBe("None");
     fixture.skills.skills = [skill("triage", true), skill("summarise", false), skill("deploy", true)];
-    const rendered = library(makeBot());
+    const rendered = keeps(makeBot());
     expect(rowValue(rendered, "skills")).toBe(2);
     click(find(rendered, "data-panel-page", "skills"));
     expect(onOpen).toHaveBeenLastCalledWith("skills");
     fixture.skills.loading = true;
-    expect(rowValue(library(makeBot()), "skills")).toBeUndefined();
+    expect(rowValue(keeps(makeBot()), "skills")).toBeUndefined();
   });
 
   it("values Working folder as Private or the folder's short name, and opens the folder page", () => {
-    const rendered = library(makeBot());
+    const rendered = keeps(makeBot());
     expect(rowValue(rendered, "folder")).toBe("Private");
     click(find(rendered, "data-panel-page", "folder"));
     expect(onOpen).toHaveBeenLastCalledWith("folder");
-    expect(rowValue(library(makeBot({ cwd: "/Users/omkar/Projects/site" })), "folder")).toBe("/Users/omkar/Projects/site");
+    expect(rowValue(keeps(makeBot({ cwd: "/Users/omkar/Projects/site" })), "folder")).toBe("/Users/omkar/Projects/site");
   });
 });
 

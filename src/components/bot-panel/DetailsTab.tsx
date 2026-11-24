@@ -8,6 +8,7 @@ import { EffortRow, ModelPicker } from "../ModelPicker";
 import type { SidebarMenuItem } from "../SidebarPopoverMenu";
 import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
 import { BotConversations } from "./Conversations";
+import { BotKeeps } from "./Keeps";
 import type { SimplePageId } from "./page-registry";
 import { Card, CardLabel, LabelAction, panelActionCls, NavRow, RowIcon, rowCls, RowText } from "./rows";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
@@ -88,6 +89,8 @@ export function DetailsTab({ bot, derived, onOpen }: {
           label={<span className="flex shrink-0 items-center gap-2.5"><RowIcon icon={Sparkles} /><RowText title={t("model.simple.reasoning")} /></span>}
         />
       </section>
+
+      <BotKeeps bot={bot} onOpen={onOpen} />
 
       <BotConversations bot={bot} />
 
