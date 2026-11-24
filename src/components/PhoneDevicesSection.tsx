@@ -53,6 +53,8 @@ export function deriveTailscalePairingStatus(
   if (state.tailscaleProblem === "needs-permission") return { kind: "signed-out", title: t("remote.tailscale.needsPermission", { app: productName() }), detail: "" };
   if (state.tailscaleProblem === "needs-approval") return { kind: "signed-out", title: t("remote.tailscale.needsApproval"), detail: "" };
   if (state.tailscaleProblem === "signed-out") return { kind: "signed-out", title: t("remote.tailscale.signIn"), detail: "" };
+  if (state.tailscaleProblem === "custom-name") return { kind: "magicdns", title: t("remote.tailscale.customName"), detail: t("remote.tailscale.customNameDetail") };
+  if (state.tailscaleProblem === "magicdns") return { kind: "magicdns", title: t("remote.tailscale.magicDns"), detail: t("remote.tailscale.magicDnsDetail") };
   if (state.error) return { kind: "error", title: t("remote.status.attention"), detail: state.error };
   const route = state.routes?.tailscale;
   if (!route?.on) return { kind: "off", title: t("remote.status.off"), detail: "" };
