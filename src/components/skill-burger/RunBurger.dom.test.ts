@@ -107,3 +107,22 @@ it("shows a burger the turn changed, with that change's Undo", async () => {
   expect(fixture.api).toHaveBeenCalledWith("/api/skill-burgers/files-new-support-email", { method: "PATCH", body: JSON.stringify({ undo: "0f0e0d0c-0b0a-4908-8706-050403020100", botId: "scout" }) });
   expect(host.textContent).toContain("Change undone");
 });
+
+it("asks for a burger's inputs in one form, filled with the saved values, and runs with what the person gave", async () => {
+  const { RunWithInputs } = await import("./RunInputs");
+  const ran: Array<Record<string, string>> = [];
+  fixture.api.mockImplementation(async () => ({ workflow: { version: 1, summary: "QA", args: { site: { default: "https://mausbot.com" } }, steps: [] } }));
+  const skill = { name: "qa", summary: "QA a site", sha256: "x", savedAt: "", layers: [], args: ["site"], everyChat: false, botId: "lead" };
+  await act(async () => root.render(createElement(RunWithInputs, { skill, onRun: (inputs: Record<string, string>) => ran.push(inputs), className: "", panelAction: "run-skill-burger:qa" })));
+  const run = host.querySelector<HTMLButtonElement>('button[data-panel-action="run-skill-burger:qa"]')!;
+  await act(async () => run.click());
+  const field = host.querySelector<HTMLInputElement>("[data-burger-run-inputs] input")!;
+  expect(field.value).toBe("https://mausbot.com");
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, "https://example.org");
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => host.querySelector<HTMLFormElement>("[data-burger-run-inputs]")!.requestSubmit());
+  expect(ran).toEqual([{ site: "https://example.org" }]);
+  expect(host.querySelector("[data-burger-run-inputs]")).toBeNull();
+});

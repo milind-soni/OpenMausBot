@@ -24,6 +24,7 @@ import { useEditSources } from "@/lib/use-edit-sources";
 
 export interface GalleryFile extends TranscriptFileAttachment {
   linked?: boolean;
+  shownPath?: string;
 }
 
 type MarkdownNode = {
@@ -66,7 +67,7 @@ export function linkedFiles(hrefs: ReadonlyArray<string | undefined>, existingPa
     if (seen.has(identity)) return [];
     seen.add(identity);
     // Security: send the authored spelling; the server owns the one decode at its authorization boundary.
-    return [{ path: href, name: safeDownloadFilename(attachmentBasename(identity)), linked: true }];
+    return [{ path: href, shownPath: identity, name: safeDownloadFilename(attachmentBasename(identity)), linked: true }];
   });
 }
 
@@ -478,7 +479,8 @@ export function AttachmentGallery({ images = [], files = [], originals, message,
       if (seen.has(key)) continue;
       seen.add(key);
       const trusted = Boolean(message && (file.private || file.linked));
-      result.push({ key, source: originalOf(originals, file.path), kind: trusted && isVideoAttachment(file.path) ? "video" : trusted && isAudioAttachment(file.path) ? "audio" : "file", file });
+      const source = originalOf(originals, file.path) ?? (message && file.linked ? key : undefined);
+      result.push({ key, source, kind: trusted && isVideoAttachment(file.path) ? "video" : trusted && isAudioAttachment(file.path) ? "audio" : "file", file });
     }
     return result;
   }, [images, files, originals, message]);

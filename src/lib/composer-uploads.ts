@@ -1,5 +1,5 @@
 import { appendDraftAttachments, replaceDraftAttachment } from "./drafts";
-import { handoffAttachmentImagePreview, imageAttachmentFromFile, optimisticImageAttachment, releaseAttachmentImagePreview, type Attachment } from "./composer-attachments";
+import { discardUnsentUpload, handoffAttachmentImagePreview, imageAttachmentFromFile, optimisticImageAttachment, releaseAttachmentImagePreview, type Attachment } from "./composer-attachments";
 
 export async function uploadDraftImage(draftId: string, file: File): Promise<Attachment | null> {
   const optimistic = optimisticImageAttachment(file);
@@ -15,6 +15,7 @@ export async function uploadDraftImage(draftId: string, file: File): Promise<Att
     handoffAttachmentImagePreview(completed.path, completed.previewUrl);
     if (!replaceDraftAttachment(draftId, optimistic.id, completed)) {
       releaseAttachmentImagePreview(completed);
+      discardUnsentUpload(completed);
     }
     return null;
   } catch (error) {

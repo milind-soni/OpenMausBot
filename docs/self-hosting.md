@@ -1859,6 +1859,12 @@ routine's run row, or in the Chief's "Problems to look at" chat.
 | `OMB_STARTUP_ROUTINE_GAP_MS` | `1800000` (30 minutes) | On a server not started by the desktop app, how soon after the start that last ran them routines set to "Also run when OpenMausBot starts" may run again. A start within that time leaves one row per routine: "Not run at 4 starts because OpenMausBot started again soon after the start that last ran it". `0` runs them at every start. |
 | `OMB_ROUTINE_RESTART_STAGGER_MS` | `30000` (30 seconds) | The time between the runs a restart cut off as each starts again, so they do not all start at once. From `0`. |
 | `OMB_BURST_PART_MAX_RESTARTS` | `2` | The times a burst's part, or its merge, starts again after a restart cut it off. Past that the part fails with "Not started again: OpenMausBot restarted while this part ran 3 times.", and the parts are posted as they came instead of merged. From `0`. |
+| `OMB_ROUTINE_RUN_LIMIT_HOURS` | `3` | The hours of work a routine run may do when its routine sets no limit of its own. From `1` to `24`. |
+| `OMB_ROUTINE_GOAL_RUN_LIMIT_HOURS` | `12` | The same for a room goal's run, which stays running across every member's turn. From `1` to `24`. |
+
+A run stops when it has worked for its limit, and names it: "Stopped: this run
+ran longer than the 3-hour limit". A routine that sets a limit of its own keeps
+it, whatever the server's environment says.
 
 A routine every minute (`* * * * *`) is still accepted and is spaced out the
 same way. Identical failures are told to you and to the Chief once: two
