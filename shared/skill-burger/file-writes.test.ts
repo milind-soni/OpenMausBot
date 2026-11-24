@@ -56,6 +56,32 @@ describe("file writes in a saved workflow", () => {
     expect(draft!.workflow.steps.map((step) => step.kind === "shell" && step.run)).toEqual(commands);
   });
 
+  it("keeps a write consumed by a later command before the next rewrite", () => {
+    const commands = [
+      "printf north > report.csv", "cp report.csv north.csv",
+      "printf south > report.csv", "cp report.csv south.csv",
+    ];
+    const draft = draftWorkflow([ask, ...commands.map((command) => shell(command))]);
+    expect(draft!.workflow.steps.map((step) => step.kind === "shell" && step.run)).toEqual(commands);
+  });
+
+  it("keeps a write read between rewrites even when the read is not a layer", () => {
+    const layers = burgerLayers([
+      ask,
+      write("report.csv", "Draft"),
+      tool("Read", { file_path: "report.csv" }),
+      write("report.csv", "Finished"),
+    ]);
+    expect(layers.map((layer) => layer.args?.content)).toEqual(["Draft", "Finished"]);
+  });
+
+  it.each(["printf first > first.csv > report.csv", "printf first >first.csv>report.csv"])("keeps every output of %s", (command) => {
+    const commands = [command, "printf second > first.csv", "cp report.csv backup.csv"];
+    const draft = draftWorkflow([ask, ...commands.map((one) => shell(one))]);
+    expect(draft!.workflow.steps.map((step) => step.kind === "shell" && step.run)).toEqual(commands);
+    expect(redirectTarget(command)).toBe("first.csv");
+  });
+
   it("keeps an output written on different computers", () => {
     const command = "python make_report.py > report.csv";
     const layers = burgerLayers([
@@ -85,12 +111,13 @@ describe("file writes in a saved workflow", () => {
     const layers = burgerLayers([
       ask,
       write("/reports/summary.md", "Draft"),
+      write("/reports/summary.md", "Revised"),
       write("/reports/summary.md", "Finished"),
       shell("printf draft > report.csv", "/reports"),
       shell("printf finished > report.csv", "/reports"),
     ]);
     expect(layers.map((layer) => [layer.args, layer.tries])).toEqual([
-      [{ path: "/reports/summary.md", content: "Finished" }, 1],
+      [{ path: "/reports/summary.md", content: "Finished" }, 2],
       [{ command: "printf finished > report.csv", cwd: "/reports" }, 1],
     ]);
   });

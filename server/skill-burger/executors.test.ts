@@ -48,15 +48,31 @@ describe("where a Skill Burger's steps run", () => {
     expect(shellQuote(value)).toBe(`'it'\\''s $(rm -rf /) \`x\`'`);
   });
 
-  it.skipIf(process.platform === "win32")("replays a recorded CSV workflow with its header and every appended row", async () => {
+  it.skipIf(process.platform === "win32").each([
+    {
+      name: "the CSV header and every appended row",
+      commands: [
+        "printf 'name,score\\n' > report.csv", "printf 'Ada,10\\n' >> report.csv",
+        "printf 'Bob,20\\n' >> report.csv", "cp report.csv backup.csv",
+      ],
+      expected: { "report.csv": "name,score\nAda,10\nBob,20\n", "backup.csv": "name,score\nAda,10\nBob,20\n" },
+    },
+    {
+      name: "each snapshot before a later rewrite",
+      commands: [
+        "printf north > report.csv", "cp report.csv north.csv",
+        "printf south > report.csv", "cp report.csv south.csv",
+      ],
+      expected: { "north.csv": "north", "south.csv": "south" },
+    },
+    {
+      name: "all files in a command with multiple redirects",
+      commands: ["printf first > first.csv > report.csv", "printf second > first.csv", "cp report.csv backup.csv"],
+      expected: { "first.csv": "second", "report.csv": "first", "backup.csv": "first" },
+    },
+  ])("replays $name", async ({ commands, expected }) => {
     const cwd = folder();
     try {
-      const commands = [
-        "printf 'name,score\\n' > report.csv",
-        "printf 'Ada,10\\n' >> report.csv",
-        "printf 'Bob,20\\n' >> report.csv",
-        "cp report.csv backup.csv",
-      ];
       const messages: RunMessage[] = [
         { id: "ask", role: "user", kind: "text", text: "Prepare the reports" },
         ...commands.map((command, index) => ({
@@ -69,8 +85,8 @@ describe("where a Skill Burger's steps run", () => {
         events: { started() {}, ended() {} }, save() {},
       });
       expect(result).toMatchObject({ ok: true, status: "ok" });
-      for (const name of ["report.csv", "backup.csv"]) {
-        expect(readFileSync(join(cwd, name), "utf8")).toBe("name,score\nAda,10\nBob,20\n");
+      for (const [name, content] of Object.entries(expected)) {
+        expect(readFileSync(join(cwd, name), "utf8")).toBe(content);
       }
     } finally {
       rmSync(cwd, { recursive: true, force: true });

@@ -106,7 +106,8 @@ export function isServerRow(message: RunMessage): boolean {
   return Boolean(message.threadRef || message.comm || message.roomRequest || message.handoff || message.doneWhen || tool.setup || (!tool.input && !tool.summary));
 }
 
-function outputRedirect(command: string): { target: string; append: boolean } | null {
+function outputRedirects(command: string): Array<{ target: string; append: boolean }> {
+  const redirects: Array<{ target: string; append: boolean }> = [];
   let quote: string | null = null;
   for (let i = 0; i < command.length; i += 1) {
     const char = command[i]!;
@@ -120,17 +121,17 @@ function outputRedirect(command: string): { target: string; append: boolean } | 
     if (append) j += 1;
     if (command[j] === "&" || command[j] === "(") continue;
     while (command[j] === " ") j += 1;
-    const match = /^(?:"([^"]+)"|'([^']+)'|([^\s"';|&]+))/.exec(command.slice(j));
+    const match = /^(?:"([^"]+)"|'([^']+)'|([^\s"'<>;|&]+))/.exec(command.slice(j));
     const target = match?.[1] ?? match?.[2] ?? match?.[3];
-    if (target && !target.startsWith("/dev/")) return { target, append };
+    if (target && !target.startsWith("/dev/")) redirects.push({ target, append });
   }
-  return null;
+  return redirects;
 }
 
 /** The unquoted output redirect of a command (`> notes.md`, `>> log.txt`, `cat > a.md <<EOF`), other than to /dev/…:
  * it writes a file, whatever program it runs. */
 export function redirectTarget(command: string): string | null {
-  return outputRedirect(command)?.target ?? null;
+  return outputRedirects(command)[0]?.target ?? null;
 }
 
 /** A fetch from the web (curl or wget to an http address) with nothing sent: a read, but one a workflow needs again. */
@@ -395,8 +396,8 @@ function writesTo(layer: BurgerLayer): string | null {
   if (layer.kind === "file" && typeof layer.args?.path === "string") path = layer.args.path;
   if (layer.kind === "shell" && typeof layer.args?.command === "string") {
     if (/[;&|\r\n]/.test(layer.args.command)) return null;
-    const redirect = outputRedirect(layer.args.command);
-    if (redirect && !redirect.append) path = redirect.target;
+    const redirects = outputRedirects(layer.args.command);
+    if (redirects.length === 1 && !redirects[0]!.append) path = redirects[0]!.target;
   }
   return path ? JSON.stringify([layer.where, layer.args?.cwd ?? null, path]) : null;
 }
@@ -412,6 +413,7 @@ function looked(message: RunMessage): boolean {
 /** The run since the person's last ask, as layers. */
 export function burgerLayers(messages: readonly RunMessage[], live: ReadonlySet<string> = new Set()): BurgerLayer[] {
   const run = messages.slice(askIndex(messages) + 1);
+  const messageIndexes = new Map(run.map((message, index) => [message.id, index]));
   const layers: BurgerLayer[] = [];
   let read = false;
   let repliesSeen = 0;
@@ -428,11 +430,16 @@ export function burgerLayers(messages: readonly RunMessage[], live: ReadonlySet<
     if (found.some((layer) => layer.read)) read = true;
   }
   const kept: BurgerLayer[] = [];
-  const replaced = (layer: BurgerLayer, later: BurgerLayer) => (later.status !== "failed" && sameStep(layer, later) && layer.status === "failed") || (writesTo(layer) !== null && writesTo(layer) === writesTo(later) && later.status !== "failed");
+  const writes = layers.map(writesTo);
+  const tries = layers.map(() => 0);
   layers.forEach((layer, index) => {
-    if (layers.slice(index + 1).some((later) => replaced(layer, later))) return;
-    const tries = layers.slice(0, index).filter((earlier) => replaced(earlier, layer)).length;
-    kept.push(tries && layer.status !== "failed" ? { ...layer, tries } : layer);
+    const replacement = layers.findIndex((later, next) => next > index && later.status !== "failed" && (
+      (sameStep(layer, later) && layer.status === "failed") ||
+      (later.status === "done" && next === index + 1 && writes[index] !== null && writes[index] === writes[next] &&
+        messageIndexes.get(later.messageId) === messageIndexes.get(layer.messageId)! + 1)
+    ));
+    if (replacement >= 0) { tries[replacement]! += tries[index]! + 1; return; }
+    kept.push(tries[index] && layer.status !== "failed" ? { ...layer, tries: tries[index] } : layer);
   });
   return withReview(joinDelegations(joinDesktop(kept), round, repliesIn(run)), run);
 }
