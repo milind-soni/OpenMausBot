@@ -70,3 +70,30 @@ export function useTabMotion<T extends MotionTab>(tabs: readonly T[], scroller: 
 
   return { shown: withLeaving(tabs, leaving), entering };
 }
+
+export type IndicatorBox = { left: number; width: number };
+
+/**
+ * Where the open tab's ground sits under the open tab, kept in step as tabs resize or move. It only glides once it has
+ * been placed, so the strip's first paint has it in place.
+ */
+export function useSlidingIndicator(scroller: RefObject<HTMLElement | null>, activeId: string): { box: IndicatorBox | null; glide: boolean } {
+  const [box, setBox] = useState<IndicatorBox | null>(null);
+  const placed = useRef(false);
+  useLayoutEffect(() => {
+    const root = scroller.current;
+    if (!root) return;
+    const place = () => {
+      const tab = root.querySelector<HTMLElement>(`[data-tab-id="${CSS.escape(activeId)}"]:not([data-leaving])`);
+      const next = tab ? { left: tab.offsetLeft, width: tab.offsetWidth } : null;
+      setBox((current) => (current?.left === next?.left && current?.width === next?.width ? current : next));
+    };
+    place();
+    if (typeof ResizeObserver !== "function") return;
+    const observer = new ResizeObserver(place);
+    for (const tab of root.querySelectorAll("[data-tab-id]")) observer.observe(tab);
+    return () => observer.disconnect();
+  });
+  useEffect(() => { if (box) placed.current = true; }, [box]);
+  return { box, glide: placed.current && !reducedMotion() };
+}

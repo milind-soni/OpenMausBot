@@ -48,7 +48,7 @@ describe("thread tab strip", () => {
 
   it("lists pinned threads first, then by recent use, with the open one selected", () => {
     render(kiwi(FIVE, "launch"));
-    expect(tabs().map((element) => element.textContent)).toEqual(["Launch plan", "Weekly sales", "Invoice for Acme", "Berlin trip", "Call notes"]);
+    expect(tabs().map((element) => element.querySelector("[data-tab-label] > span")?.textContent)).toEqual(["Launch plan", "Weekly sales", "Invoice for Acme", "Berlin trip", "Call notes"]);
     expect(tab("Launch plan").getAttribute("aria-selected")).toBe("true");
     expect(tab("Weekly sales").querySelector('[aria-label="Working"]')).not.toBeNull();
     expect(tab("Launch plan").querySelector('[aria-label="Pinned"]')).not.toBeNull();
@@ -84,6 +84,14 @@ describe("thread tab strip", () => {
     render(kiwi(FIVE, "launch"));
     act(() => { tab("Call notes").dispatchEvent(new MouseEvent("auxclick", { bubbles: true, button: 1 })); });
     expect(sent()).toEqual([expect.objectContaining({ type: "updateTask", threadId: "notes", patch: { archivedAt: expect.any(Number) } })]);
+  });
+
+  it("leads with the bot's avatar and name, which open its panel", () => {
+    render(kiwi(FIVE, "launch"));
+    const chip = document.querySelector<HTMLButtonElement>("[data-thread-tabs-bot]")!;
+    expect(chip.textContent).toBe("Kiwi");
+    act(() => chip.click());
+    expect(sent()).toEqual([{ type: "toggleSettings", open: true }]);
   });
 
   it("opens a tab on click and makes a new thread with +", () => {
