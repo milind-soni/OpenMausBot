@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import type { WireGroup } from "../../shared/wire.ts";
 import { writeFileAtomic } from "../atomic.ts";
+import { isReply } from "../held-unread.ts";
 import { personKey } from "../person-key.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { GroupRecord } from "../store.ts";
@@ -13,8 +14,6 @@ const fileSchema = z.object({ version: z.literal(1), reads: z.record(z.string(),
 
 type PathMessage = { id: string; role: string; kind?: string; at?: number };
 
-const NOT_A_REPLY = new Set(["activity", "screen", "digest", "compaction"]);
-const isReply = (message: PathMessage) => message.role === "bot" && !NOT_A_REPLY.has(message.kind ?? "text");
 
 /** Unread for a person: a bot replied after where they read up to; with no line yet, the room's own mark. A line no
  * longer on the path (an edit or a retry moved it) reads up to the last message at or before it; `atOf` gives its time. */
@@ -27,6 +26,21 @@ export function roomUnreadFor(path: readonly PathMessage[], readUpTo: string | u
     from = path.findLastIndex((message) => (message.at ?? 0) <= readAt) + 1;
   }
   return path.slice(from).some(isReply);
+}
+
+/** The message a mark holds from: of those on the path, the one written last, whatever its clock says; "" for an empty
+ * conversation. `written` is the conversation's messages in the order they were written. */
+export function heldFrom(path: readonly PathMessage[], written: readonly PathMessage[] = path): string {
+  const onPath = new Set(path.map((message) => message.id));
+  return written.findLast((message) => onPath.has(message.id))?.id ?? "";
+}
+
+/** A conversation marked unread with `held` from {@link heldFrom} stays held until a reply written after it reaches the
+ * path, at any place on it and with any clock. A message no longer on the path (an edit or a retry moved it) ends the mark. */
+export function stillHeldUnread(path: readonly PathMessage[], held: string | undefined, written: readonly PathMessage[] = path): boolean {
+  if (held === undefined || (held !== "" && !path.some((message) => message.id === held))) return false;
+  const order = new Map(written.map((message, index) => [message.id, index])), heldAt = held === "" ? -1 : order.get(held) ?? -1;
+  return !path.some((message) => isReply(message) && (order.get(message.id) ?? Infinity) > heldAt);
 }
 
 /** `alsoForget`: a person's other marks of their own (their bots' order, their notification reads), which go with
@@ -83,6 +97,8 @@ export type RoomReads = ReturnType<typeof createRoomReads>;
 
 /** A bot's shared conversation's key in `room-reads.json`, apart from every room's id. */
 export const threadReadKey = (threadId: string) => `thread:${threadId}`;
+/** A person's "marked unread with it open" on a bot's shared conversation: the newest message then. */
+const threadHoldKey = (threadId: string) => `held:${threadId}`;
 
 /** One stream frame's `group` payload as a person's own room, built once per person for that frame; null: theirs is the
  * room as it is. */
@@ -127,13 +143,14 @@ export function createPersonRooms(deps: PersonRoomsDeps) {
   }
   /** A bot's shared conversation's unread mark and read line as this person read it, on a Team Cloud; the task as it is
    * anywhere else and for a private chat. Nobody's read line but their own goes out. */
-  function taskForPerson<T extends { threadId: string; unread?: boolean; lastReadMessageId?: string }>(task: T, person: string): T {
+  function taskForPerson<T extends { threadId: string; unread?: boolean; lastReadMessageId?: string; heldUnread?: string }>(task: T, person: string): T {
     if (!reads || !deps.shared(task.threadId)) return task;
-    const readUpTo = reads.readUpTo(threadReadKey(task.threadId), person);
-    const unread = roomUnreadFor(deps.store().activePath(task.threadId), readUpTo, task.unread === true, atOf(task.threadId));
-    if (unread === (task.unread === true) && readUpTo === task.lastReadMessageId) return task;
-    const { lastReadMessageId: _shared, ...rest } = task;
-    return { ...rest, unread, ...(readUpTo ? { lastReadMessageId: readUpTo } : {}) } as T;
+    const path = deps.store().activePath(task.threadId), readUpTo = reads.readUpTo(threadReadKey(task.threadId), person);
+    const held = reads.readUpTo(threadHoldKey(task.threadId), person), heldUnread = stillHeldUnread(path, held, deps.store().messagesFor(task.threadId)) ? held : undefined;
+    const unread = heldUnread !== undefined || roomUnreadFor(path, readUpTo, task.unread === true, atOf(task.threadId));
+    if (unread === (task.unread === true) && readUpTo === task.lastReadMessageId && heldUnread === task.heldUnread) return task;
+    const { lastReadMessageId: _shared, heldUnread: _held, ...rest } = task;
+    return { ...rest, unread, ...(readUpTo ? { lastReadMessageId: readUpTo } : {}), ...(heldUnread !== undefined ? { heldUnread } : {}) } as T;
   }
   return {
     reads,
@@ -142,7 +159,7 @@ export function createPersonRooms(deps: PersonRoomsDeps) {
     /** A deleted room's or conversation's read lines go with it. */
     forgetDeleted(change: { type: string; groupId?: string; threadId?: string }): void {
       if (change.type === "group.deleted" && change.groupId) reads?.forgetRoom(change.groupId);
-      else if (change.type === "thread.deleted" && change.threadId) reads?.forgetRoom(threadReadKey(change.threadId));
+      else if (change.type === "thread.deleted" && change.threadId) for (const key of [threadReadKey, threadHoldKey]) reads?.forgetRoom(key(change.threadId));
     },
     groupForAuth: (auth: RequestAuth, group: WireGroup): WireGroup => groupForPerson(group, auth.kind === "session" ? personKey(auth.session) : null),
     /** A `group` frame as `person`'s own room (`frameOf` writes the stream's frame for a payload), kept in `ownGroups` for
@@ -175,18 +192,25 @@ export function createPersonRooms(deps: PersonRoomsDeps) {
      * a private chat, which keeps its one mark. Unread reads up to just before the conversation's newest reply. */
     personMarkThread: (auth: RequestAuth, threadId: string, unread: boolean): boolean => {
       if (auth.kind !== "session" || !deps.shared(threadId)) return false;
-      const person = personKey(auth.session), key = threadReadKey(threadId);
+      const person = personKey(auth.session), key = threadReadKey(threadId), newest = deps.newestMessageId(threadId);
       if (unread) {
         const path = deps.store().activePath(threadId), reply = path.findLastIndex(isReply);
         if (reply > 0) reads.read(key, person, path[reply - 1]!.id);
         else reads.forget(key, person);
+        reads.read(threadHoldKey(threadId), person, heldFrom(path, deps.store().messagesFor(threadId)));
       } else {
-        const newest = deps.newestMessageId(threadId);
+        reads.forget(threadHoldKey(threadId), person);
         if (newest) reads.read(key, person, newest);
       }
       const bot = deps.store().botByThread(threadId), frame = bot ? deps.wireBot(bot.id) : null;
       if (frame) deps.broadcast({ kind: "bot", bot: frame }, { person });
       return true;
+    },
+    /** Whether this person's mark on a bot's shared conversation still holds; null for a private chat, which keeps the
+     * conversation's own mark. */
+    personHeldUnread: (auth: RequestAuth, threadId: string): boolean | null => {
+      if (auth.kind !== "session" || !deps.shared(threadId)) return null;
+      return stillHeldUnread(deps.store().activePath(threadId), reads.readUpTo(threadHoldKey(threadId), personKey(auth.session)), deps.store().messagesFor(threadId));
     } } : {}),
   };
 }

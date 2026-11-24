@@ -40,6 +40,29 @@ describe("modelMenu", () => {
     }] });
   });
 
+  it("scopes engine efforts in the menu to listed models' per-model effortLevels", () => {
+    const noUltra = engine("codex", [], {
+      models: { default: "gpt-5.3", options: [{ id: "gpt-5.3", label: "GPT-5.3", effortLevels: ["low", "medium", "high", "xhigh", "max"] }] },
+      adapter: { capabilities: { effortLevels: ["low", "medium", "high", "xhigh", "max", "ultra"] } },
+    });
+    expect(modelMenu({ engines: [noUltra], current, pinned: [], refusal: opens }).engines[0]).toMatchObject({
+      efforts: ["low", "medium", "high", "xhigh", "max"],
+    });
+    const withUltra = engine("codex", [], {
+      models: {
+        default: "gpt-5.4",
+        options: [
+          { id: "gpt-5.4", label: "GPT-5.4", effortLevels: ["low", "medium", "high", "xhigh", "max", "ultra"] },
+          { id: "gpt-5.3", label: "GPT-5.3", effortLevels: ["low", "medium", "high", "xhigh", "max"] },
+        ],
+      },
+      adapter: { capabilities: { effortLevels: ["low", "medium", "high", "xhigh", "max", "ultra"] } },
+    });
+    expect(modelMenu({ engines: [withUltra], current, pinned: [], refusal: opens }).engines[0]).toMatchObject({
+      efforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
+    });
+  });
+
   it("names a model the installed CLI is too old for, with the version it needs, instead of dropping it (Fable 5.2 'gone' after an update)", () => {
     const claude = engine("claude", [], {
       models: { default: "claude-sonnet-5", options: [

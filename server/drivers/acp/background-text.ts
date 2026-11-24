@@ -61,6 +61,8 @@ export interface AcpOneShotInput {
   pickAuthMethod: (methods: Array<{ id?: string }>) => string | null;
   authRequired: boolean | "if-requested";
   loginNote: string;
+  /** Whether a session/new refusal asks for a sign-in; it then fails with `loginNote`. */
+  signInRefused?: (error: unknown) => boolean;
   clientCapabilitiesMeta?: Record<string, unknown>;
   configure?: (ctx: { request: (method: string, params: unknown, timeoutMs?: number) => Promise<any>; sessionId: string; session: any }) => Promise<void>;
   options?: TextGenerationOptions;
@@ -127,7 +129,7 @@ export function runAcpOneShot(input: AcpOneShotInput): Promise<string> {
         const waiter = pending.get(msg.id);
         pending.delete(msg.id);
         if (!waiter) return;
-        if (msg.error) waiter.reject(new Error(`${name} background ${typeof msg.error?.message === "string" ? msg.error.message.slice(0, 200) : "request failed"}`));
+        if (msg.error) waiter.reject(Object.assign(new Error(`${name} background ${typeof msg.error?.message === "string" ? msg.error.message.slice(0, 200) : "request failed"}`), { code: msg.error?.code, data: msg.error?.data }));
         else waiter.resolve(msg.result);
         return;
       }
@@ -201,7 +203,7 @@ export function runAcpOneShot(input: AcpOneShotInput): Promise<string> {
       } else if (input.authRequired === true) {
         throw new Error(input.loginNote);
       }
-      const session = await request("session/new", { cwd: input.cwd, mcpServers: [] });
+      const session = await request("session/new", { cwd: input.cwd, mcpServers: [] }).catch((error: unknown) => { throw input.signInRefused?.(error) ? new Error(input.loginNote) : error; });
       if (typeof session?.sessionId !== "string") throw new Error(`${name} background session/new returned no sessionId`);
       sessionId = session.sessionId;
       model = typeof session?.models?.currentModelId === "string" ? session.models.currentModelId
