@@ -61,6 +61,8 @@ export interface StorageReport {
   resumes: number;
   /** The last pass failed; the figures are from the one before, if any. */
   failed: boolean;
+  /** What the cache cap removed (cache-sweep/sweeper.ts): every clear, and the emergency passes; absent before it ran. */
+  caches?: { cacheCleared: { count: number; bytes: number; entries: number; at: number | null; reason: string | null }; emergency: { count: number; bytes: number; at: number | null } };
 }
 
 export interface CompletedPass { at: number; tookMs: number; totals: WalkTotals; volume: VolumeBytes | null }
