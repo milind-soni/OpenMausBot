@@ -43,7 +43,7 @@ export async function callWorkflowTool(name: string, args: Json, context: ToolCa
   if (name === RUN_WORKFLOW_TOOL) {
     const resume = typeof args.resume === "string" ? args.resume.trim() : "";
     const { ok, body } = resume
-      ? await apiResponse("/api/internal/skill-burgers/resume", { method: "POST", body: JSON.stringify({ run: resume, response: String(args.response ?? "") }) })
+      ? await apiResponse("/api/internal/skill-burgers/resume", { method: "POST", body: JSON.stringify({ run: resume, response: typeof args.response === "string" ? args.response : args.response === undefined || args.response === null ? "" : JSON.stringify(args.response) }) })
       : await apiResponse("/api/internal/skill-burgers/run", { method: "POST", body: JSON.stringify({ name: String(args.name ?? ""), ...(args.args && typeof args.args === "object" ? { args: args.args } : {}) }) });
     if (!ok || body.error && !body.protocolVersion) return { text: String(body.error ?? "The Skill Burger couldn't run."), isError: true };
     return { text: runText(body), ...(body.ok === false ? { isError: true } : {}) };

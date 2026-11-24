@@ -5,6 +5,7 @@ import type { RunRow, RunView } from "../../../shared/skill-burger/run-view";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { addBurgerPath, undoBurgerEdit } from "@/lib/skill-burger";
+import { RowExtra, RunHistory } from "./RunExtras";
 import { LayerIcon } from "./SkillBurger";
 
 const SHEEN_PERIOD_MS = 2000;
@@ -26,7 +27,9 @@ const QUIET = "shrink-0 text-[11px] text-ink-tertiary";
 
 function Row({ row }: { row: RunRow }) {
   const passed = row.state === "skipped" || row.state === "not_taken";
-  const label = row.kind === "decide" ? t("skillBurger.run.decide", { question: row.label }) : row.label;
+  const label = row.kind === "decide" ? t("skillBurger.run.decide", { question: row.label })
+    : row.kind === "delegate" && row.who?.length ? t("skillBurger.layer.ask", { who: row.who.length > 1 ? t("skillBurger.draft.names", { some: row.who.slice(0, -1).join(", "), last: row.who[row.who.length - 1]! }) : row.who[0]! })
+    : row.label;
   return (
     <li
       data-burger-layer={row.kind}
@@ -60,6 +63,7 @@ function Row({ row }: { row: RunRow }) {
         </span>
       )}
       {row.error && <span className="mt-0.5 truncate ps-[26px] text-[12px]" title={row.error}>{row.error}</span>}
+      {row.detail && <RowExtra detail={row.detail} label={label} />}
     </li>
   );
 }
@@ -139,6 +143,7 @@ export function RunBurger({ view, summary, everyChat, botId, threadId, busy, onD
         <ol aria-label={t("skillBurger.layers")} className="burger-layers flex max-h-72 min-h-0 flex-col gap-[3px] overflow-y-auto">
           {view.rows.map((row) => <Row key={row.id} row={row} />)}
         </ol>
+        {view.name && !live && <div className="mt-[3px]"><RunHistory name={view.name} everyChat={everyChat} botId={botId} threadId={threadId} refreshKey={`${view.run}:${failed}:${busy}`} /></div>}
       </div>
 
       {(edited || (missing && !busy && !live)) && (

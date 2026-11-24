@@ -150,7 +150,7 @@ function stepLine(step: WorkflowStep, args: Workflow["args"]): string {
   if (step.kind === "delegate") {
     const done = [...new Set(step.tasks.map((task) => task.doneWhen).filter(Boolean))];
     return [
-      `Teammates: ${step.label}. Ask ${teammateNames(step.tasks)} at once with coordinate_bots and wait for every reply${argsUsed(step, args)}`,
+      `Teammates: ${teammateNames(step.tasks)} each get their part at once (coordinate_bots); wait for every reply${argsUsed(step, args)}`,
       ...step.tasks.map((task) => `   - ${task.bot.name}: ${textLine(task.message).replace(/\s+/g, " ").slice(0, 300)}`),
       ...(done.length ? [`   Done when: ${done.join(" / ")}`] : []),
       ...(step.review ? [`   A reply that falls short goes back, up to ${step.review.rounds} more round${step.review.rounds > 1 ? "s" : ""}${step.review.example ? `; last time: ${step.review.example.replace(/\s+/g, " ").slice(0, 200)}` : ""}`] : []),

@@ -69,7 +69,7 @@ describe("a delegation run", () => {
     // The replies are this run's results: shown on the card, never written into the workflow.
     expect(JSON.stringify(draft.workflow)).not.toContain("Scope:** I checked the homepage");
     const md = renderWorkflowSkillMd("qa-test", draft.workflow);
-    expect(md).toContain("Teammates: Ask Kiwi, Rio and Miso. Ask Kiwi (Accessibility tester), Rio (Performance tester) and Miso (Content and links tester) at once");
+    expect(md).toContain("Teammates: Kiwi (Accessibility tester), Rio (Performance tester) and Miso (Content and links tester) each get their part at once");
     expect(md).toContain("Done when: 3 findings");
   });
 

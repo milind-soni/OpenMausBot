@@ -139,6 +139,12 @@ export function createSkillBurgerRuns(deps: { dataDir: string; root?: string; ho
       ? internalRoutes(burgerTurn(deps.host, calling, authorization))(ctx)
       : Promise.resolve(PASS);
 
-  return { internalRoutes, routesFor, history };
+  /** For a turn the teammates' replies resume: the line that sends it back into the run it paused for them. */
+  const waitingNote = (threadId: string): string | null => {
+    const waiting = states.waitingIn(threadId);
+    return waiting ? `These replies are for the Skill Burger "${waiting.name}": first call run_workflow with resume ${JSON.stringify(waiting.id)} and response "back", then do what it says.` : null;
+  };
+
+  return { internalRoutes, routesFor, history, waitingNote };
 }
 export type SkillBurgerRuns = ReturnType<typeof createSkillBurgerRuns>;

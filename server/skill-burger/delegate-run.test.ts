@@ -28,7 +28,7 @@ const qa = (rounds = 1) => wf([
 ], { site: { default: "https://mausbot.com", label: "site" } });
 
 /** A coordinator: hands out request ids, and settles each when the test says so. */
-function team(roster = [{ id: "kiwi", name: "Kiwi", title: "Accessibility tester" }, { id: "rio", name: "Rio", title: "Performance tester" }, { id: "miso", name: "Miso", title: "Content tester" }]) {
+function team(roster: Array<{ id: string; name: string; title?: string }> = [{ id: "kiwi", name: "Kiwi", title: "Accessibility tester" }, { id: "rio", name: "Rio", title: "Performance tester" }, { id: "miso", name: "Miso", title: "Content tester" }]) {
   const sent: Array<{ botIds: string[]; message: string; doneWhen?: string; rework?: boolean }> = [];
   const status = new Map<string, { status: string; result: string; bot: string }>();
   let n = 0;

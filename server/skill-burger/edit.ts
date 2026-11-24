@@ -97,6 +97,32 @@ export function applyEdit(workflow: Workflow, edit: WorkflowEdit): Workflow | { 
   return { ...workflow, steps };
 }
 
+/** The workflow with step `id` replaced by `fix` (the steps the bot took to get past it, drafted from its run): they
+ * take ids of their own, and a later step that used the replaced step's output uses the last fix step's instead. */
+export function replaceStep(workflow: Workflow, id: string, fix: readonly WorkflowStep[]): Workflow | { error: string } {
+  const at = workflow.steps.findIndex((step) => step.id === id);
+  if (at < 0) return { error: `there is no step ${id}` };
+  if (!fix.length) return { error: "there is no fix to keep" };
+  const renamed = new Map<string, string>();
+  const taken = new Set(workflow.steps.map((step) => step.id));
+  for (const step of fix) {
+    let n = 1;
+    while (taken.has(`${id}_fix${n}`)) n += 1;
+    renamed.set(step.id, `${id}_fix${n}`);
+    taken.add(`${id}_fix${n}`);
+  }
+  const replaced = workflow.steps[at]!;
+  const added: WorkflowStep[] = [];
+  for (const step of fix) {
+    const checked = workflowStepSchema.safeParse({ ...(rewriteRefs(step, renamed) as object), id: renamed.get(step.id), ...(replaced.when ? { when: replaced.when } : {}) });
+    if (!checked.success) return { error: `a fix step isn't one a Skill Burger can run: ${checked.error.issues[0]?.message ?? "invalid"}` };
+    added.push(checked.data);
+  }
+  const last = new Map([[id, added[added.length - 1]!.id]]);
+  const after = workflow.steps.slice(at + 1).map((step) => rewriteRefs(step, last) as WorkflowStep);
+  return { ...workflow, steps: [...workflow.steps.slice(0, at), ...added, ...after].slice(0, 40) };
+}
+
 /** What each change replaced, by id, so its Undo can put it back. Kept a day. */
 export function createEditUndo(now: () => number = Date.now) {
   const kept = new Map<string, { name: string; previous: Workflow; sha256: string; at: number }>();

@@ -1,4 +1,3 @@
-import { CirclePlay } from "lucide-react";
 import { useState } from "react";
 
 import { t } from "@/lib/i18n";
@@ -9,6 +8,7 @@ import { useStoreDispatch } from "@/state/store-select";
 import { Card, NoteRow, TrashButton } from "../bot-panel/rows";
 import { EveryChatToggle } from "./EveryChatToggle";
 import { MiniBurger } from "./MiniBurger";
+import { RunWithInputs } from "./RunInputs";
 import { LayerIcon } from "./SkillBurger";
 
 /** A burger this bot uses: its own, and every one used in every chat. */
@@ -78,11 +78,10 @@ export function SavedWorkflowsCard({ botId, threadId }: { botId: string; threadI
                 </button>
                 <EveryChatToggle compact skill={skill} />
               </div>
-              <button type="button" data-panel-action={`run-skill-burger:${skill.name}`} onClick={() => runBurgerIn(dispatch, { id: botId, threadId }, skill.name)}
-                aria-label={t("skillBurger.runName", { name: skill.summary })} title={t("skillBurger.run.button")}
-                className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-ink/[0.05] hover:text-ink">
-                <CirclePlay size={14} aria-hidden="true" />
-              </button>
+              <span data-panel-action={`run-skill-burger:${skill.name}`} className="contents">
+                <RunWithInputs skill={skill} iconOnly onRun={(inputs) => runBurgerIn(dispatch, { id: botId, threadId }, skill.name, inputs)}
+                  className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-ink/[0.05] hover:text-ink" />
+              </span>
               <TrashButton data-panel-action={`remove-skill-burger:${skill.name}`} label={t("skillBurger.list.remove", { name: skill.name })} onClick={() => void remove(skill)} />
             </div>
             <ol id={listId} hidden={!expanded} aria-label={t("skillBurger.layers")} className="flex flex-col gap-1 px-3.5 pb-3">

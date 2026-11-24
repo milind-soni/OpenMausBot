@@ -131,10 +131,10 @@ export function repliesText(replies: DelegationState["replies"]): string {
 }
 
 export function reviewPrompt(step: DelegateStep, state: DelegationState): string {
-  const done = step.tasks.map((task) => (task.doneWhen ? `${task.bot.name}: ${task.doneWhen}` : "")).filter(Boolean);
+  const done = step.tasks.map((task) => (task.doneWhen ? `${task.bot.name}: ${task.doneWhen.replace(/[.\s]+$/, "")}` : "")).filter(Boolean);
   const left = (step.review?.rounds ?? 0) - (state.round - 1);
   return [
-    `Check each teammate's reply${done.length ? " against what done means:\n" + done.join("\n") : " for whether it does what was asked"}.`,
+    `Check each teammate's reply${done.length ? ` against what done means:\n${done.join("\n")}` : " for whether it does what was asked"}`,
     step.review?.example ? `When this workflow was saved, the extra round asked: ${step.review.example.replace(/\s+/g, " ").slice(0, 600)}` : "",
     `Answer with JSON only: {"redo": {"<teammate>": "what to fix or check again"}} for replies that fall short, or {"redo": {}} when all are done. ${left} more round${left === 1 ? "" : "s"} allowed.`,
   ].filter(Boolean).join("\n");

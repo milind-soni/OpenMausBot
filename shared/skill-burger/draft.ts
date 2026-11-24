@@ -5,7 +5,7 @@
 // guessed. Work handed to teammates is one delegate step: who, what each was asked, what done means, and how many
 // rounds of fixes the run took; the review that closed the run is an AI step. No secret is written down.
 import { redactSecretsInText } from "../redact.ts";
-import { DELEGATE_MAX_ROUNDS, type Workflow, type WorkflowRef, type WorkflowStep, type WorkflowTeammate, type WorkflowText } from "./format.ts";
+import { DELEGATE_MAX_ROUNDS, textLine, type Workflow, type WorkflowRef, type WorkflowStep, type WorkflowTeammate, type WorkflowText } from "./format.ts";
 import { appMeta, BARE_READ } from "./apps.ts";
 import { askOf, askTextOf, burgerLayers, type BurgerLayer, type RunMessage } from "./layers.ts";
 
@@ -280,7 +280,8 @@ class Drafter {
     const [first = [], ...later] = layer.delegation!.rounds;
     const tasks = first.flatMap((call) => call.bots.map((bot) => ({ bot: this.teammate(bot), message: this.text(call.message), ...(call.doneWhen ? { doneWhen: call.doneWhen.slice(0, 1_000) } : {}) })));
     const unique = tasks.filter((task, index) => tasks.findIndex((other) => other.bot.name === task.bot.name) === index).slice(0, 8);
-    const example = later.flat().map((call) => `${namesLine(call.bots.map((bot) => this.teammate(bot).name))}: ${call.message}`).join("\n").slice(0, EXAMPLE_MAX);
+    // What an extra round asked, with this run's inputs shown as their names, so a later run doesn't copy its values.
+    const example = later.flat().map((call) => `${namesLine(call.bots.map((bot) => this.teammate(bot).name))}: ${textLine(this.text(call.message))}`).join("\n").slice(0, EXAMPLE_MAX);
     const rounds = Math.min(DELEGATE_MAX_ROUNDS, Math.max(later.length, unique.some((task) => task.doneWhen) ? 1 : 0));
     return {
       id, kind: "delegate", label, tasks: unique,

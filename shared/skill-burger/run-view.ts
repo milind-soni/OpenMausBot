@@ -6,6 +6,13 @@ import { RUN_STEP_MARK, type LayerKind, type RunMessage } from "./layers.ts";
 
 export type RowState = "waiting" | "running" | "done" | "failed" | "skipped" | "not_taken";
 
+/** What a step's row can open to: each teammate's reply and the rounds it took, a check's verdict. */
+export interface RowDetail {
+  replies?: Array<{ name: string; ok: boolean; text: string }>;
+  rounds?: number;
+  check?: { passed: boolean; says: string; why?: string };
+}
+
 export interface RunRow {
   id: string;
   kind: LayerKind;
@@ -20,6 +27,9 @@ export interface RunRow {
   chosen?: string;
   state: RowState;
   error?: string;
+  /** Who a delegate step goes to. */
+  who?: string[];
+  detail?: RowDetail;
 }
 
 export interface RunView {
@@ -30,7 +40,7 @@ export interface RunView {
   missing?: { decide: string; case: string };
 }
 
-interface StepSeen { state: RowState; case?: string; error?: string }
+interface StepSeen { state: RowState; case?: string; error?: string; detail?: RowDetail }
 
 function parse(text: string | undefined): Record<string, unknown> | null {
   if (!text) return null;
@@ -56,7 +66,8 @@ export function latestRun(messages: readonly RunMessage[], live: ReadonlySet<str
     const ended = typeof output?.state === "string" ? output.state as string : undefined;
     const state: RowState = ended === "done" || ended === "failed" || ended === "skipped" || ended === "not_taken" ? ended
       : message.tool?.ok === false ? "failed" : live.has(message.id) || message.tool?.ok === undefined ? "running" : "done";
-    found.steps.set(input.step, { state, ...(typeof output?.case === "string" ? { case: output.case } : {}), ...(typeof output?.error === "string" ? { error: output.error } : {}) });
+    const detail = output?.detail && typeof output.detail === "object" && !Array.isArray(output.detail) ? output.detail as RowDetail : undefined;
+    found.steps.set(input.step, { state, ...(typeof output?.case === "string" ? { case: output.case } : {}), ...(typeof output?.error === "string" ? { error: output.error } : {}), ...(detail ? { detail } : {}) });
   }
   return found;
 }
@@ -80,6 +91,8 @@ export function runView(workflow: Workflow, seen: ReturnType<typeof latestRun>, 
       ...(step.kind === "decide" ? { cases: step.cases, ...(got?.case ? { chosen: got.case } : {}) } : {}),
       state: got?.state ?? "waiting",
       ...(got?.error ? { error: got.error } : {}),
+      ...(step.kind === "delegate" ? { who: step.tasks.map((task) => task.bot.name) } : {}),
+      ...(got?.detail ? { detail: got.detail } : {}),
     };
   });
   const missing = workflow.steps.flatMap((step) => {
