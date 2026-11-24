@@ -44,6 +44,19 @@ describe("findMediaPaths", () => {
     expect(await findMediaPaths(`- not${join("inbox", "bot-a", "task one", "handed clip.mp4")}`, scratch)).toEqual([]);
   });
 
+  it("prefers a named absolute path over an inbox/... file inside it, and never reads outside the inbox", async () => {
+    const turn = join(scratch, "turn");
+    const absolute = join(scratch, "archive", "a inbox", "bot-b", "clip.mp4");
+    const local = join(turn, "inbox", "bot-b", "clip.mp4");
+    for (const file of [absolute, local]) {
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, Buffer.alloc(100));
+    }
+    expect((await findMediaPaths(`see ${absolute}`, turn)).map((file) => file.path)).toEqual([absolute]);
+    writeFileSync(join(scratch, "secret.pdf"), Buffer.alloc(100));
+    expect(await findMediaPaths(`- ${join("inbox", "..", "..", "secret.pdf")}`, turn)).toEqual([]);
+  });
+
   it("ignores text without media", async () => {
     expect(await findMediaPaths("see notes.md and https://example.com/a.png")).toEqual([]);
   });

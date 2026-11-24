@@ -6,7 +6,7 @@ import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { productName } from "../../brand.ts";
-import { INBOX_FOLDER } from "../../host/handoff-inbox.ts";
+import { INBOX_FOLDER, withinPath } from "../../host/handoff-inbox.ts";
 
 export interface AcpResourceLink {
   type: "resource_link";
@@ -50,11 +50,9 @@ export async function findMediaPaths(text: string, cwd?: string): Promise<Array<
   for (const match of text.matchAll(MEDIA_END)) {
     const end = match.index + match[0].length;
     const line = text.slice(text.lastIndexOf("\n", match.index) + 1, end);
-    const inbox = cwd === undefined ? [] : [...line.matchAll(INBOX_START)].map((start) => start.index);
-    const starts = [...line.matchAll(PATH_START)].map((start) => start.index).concat(inbox).sort((a, b) => b - a);
-    for (const start of starts) {
-      const named = line.slice(start).trim();
-      const path = cwd !== undefined && inbox.includes(start) ? resolve(cwd, named) : named;
+    // Absolute names first, so an absolute path with an `inbox/` folder inside it is never read from `cwd` instead.
+    const absolute = [...line.matchAll(PATH_START)].reverse().map((start) => line.slice(start.index).trim());
+    for (const path of absolute.concat(inboxPaths(line, cwd))) {
       const info = await stat(path, { bigint: true }).catch(() => null);
       if (!info?.isFile()) continue;
       const key = `${info.dev}:${info.ino}`;
@@ -66,6 +64,16 @@ export async function findMediaPaths(text: string, cwd?: string): Promise<Array<
     }
   }
   return found;
+}
+
+/** The `inbox/...` names on `line`, nearest first, read from `cwd` and kept only when they stay inside its inbox. */
+function inboxPaths(line: string, cwd: string | undefined): string[] {
+  if (cwd === undefined) return [];
+  const root = resolve(cwd, INBOX_FOLDER);
+  return [...line.matchAll(INBOX_START)]
+    .reverse()
+    .map((start) => resolve(cwd, line.slice(start.index).trim()))
+    .filter((path) => withinPath(path, root));
 }
 
 /** Prompt blocks for the media named in `text`, within one prompt's budget, and a note saying what was and was
