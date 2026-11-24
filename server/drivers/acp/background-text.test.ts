@@ -68,6 +68,17 @@ describe("ACP memory one-shot (generateMemoryText)", () => {
     expect(argv.slice(0, 2)).toEqual(["--permission-mode", "default"]);
   });
 
+  it("runs Grok one-shots on the requested model, starting the CLI with -m and booking usage there", async () => {
+    process.env.FAKE_ACP_TEXT_REPLY = "[]";
+    process.env.FAKE_ACP_DUMP = join(scratch, "dump.json");
+    const engine = await create(GrokAgentDriver);
+    const usage: TextGenerationUsage[] = [];
+    await engine.generateMemoryText!("prompt", { fallback: { model: "grok-custom", refused: new Set(), onRefused: () => {} }, onUsage: (row) => usage.push(row) });
+    const { argv } = JSON.parse(readFileSync(process.env.FAKE_ACP_DUMP, "utf8"));
+    expect(argv).toEqual(expect.arrayContaining(["-m", "grok-custom"]));
+    expect(usage).toEqual([expect.objectContaining({ model: "grok-custom" })]);
+  });
+
   it("fails closed when the agent reaches for a tool", async () => {
     const engine = await create(GrokAgentDriver);
     // the default fake turn streams text and then a tool call

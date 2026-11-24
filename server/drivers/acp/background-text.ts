@@ -17,14 +17,17 @@ export function applyOneShotEnv(
   options: TextGenerationOptions,
   models: ModelCatalog,
   ctx: { fullAuto: false; cwd: string; threadId: string; mcpServers: [] },
-): AcpOneShotInput["model"] {
+): { sessionModel?: AcpOneShotInput["model"]; turnModel?: string } {
   const selection = support.selectModel;
-  const requestedModel = selection ? options.model ?? options.fallback?.model : undefined;
+  const requestedModel = (options.model ?? options.fallback?.model)?.trim();
   const model = requestedModel && requestedModel !== selection?.agentDefault
     ? resolveOneShotModel(support, requestedModel, env, models)
     : undefined;
   support.applyTurnEnv?.(env, { ...(model ? { model, requestedModel } : {}), ...ctx });
-  return model && selection ? { configId: selection.configId, id: model } : undefined;
+  return {
+    ...(model && selection ? { sessionModel: { configId: selection.configId, id: model } } : {}),
+    ...(model ? { turnModel: model } : {}),
+  };
 }
 
 /** A model the engine can no longer route (e.g. a deleted Qwen provider entry) leaves the session's default to run, as an
@@ -217,7 +220,17 @@ export function runAcpOneShot(input: AcpOneShotInput): Promise<string> {
         }
         model = wanted.id;
       }
-      await input.configure?.({ request: (method, params) => request(method, params), sessionId: session.sessionId, session });
+      await input.configure?.({
+        request: async (method, params) => {
+          const reply = await request(method, params);
+          if (method === "session/set_model" && params && typeof params === "object" && "modelId" in params && typeof (params as any).modelId === "string") {
+            model = (params as any).modelId;
+          }
+          return reply;
+        },
+        sessionId: session.sessionId,
+        session,
+      });
       const result = await request("session/prompt", { sessionId, prompt: [{ type: "text", text: input.prompt }] });
       const reported = result?.usage ?? result?._meta ?? {};
       const count = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined);
