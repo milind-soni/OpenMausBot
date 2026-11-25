@@ -176,6 +176,8 @@ describe("what a limited turn's engine is given", () => {
       const [method, path] = refused.split(" ") as [string, string];
       expect(linkRouteRefused(method, path), refused).toBe(true);
     }
+    // skill_manage stages every skill change here, one with all_bots (a skill on all of the person's bots) included.
+    expect(linkRouteRefused("POST", "/api/internal/skills/stage"), "skill_manage, all_bots included").toBe(true);
     for (const memory of ["POST /api/internal/memory", "POST /api/internal/memory/log", "POST /api/internal/team-memory"]) {
       const [method, path] = memory.split(" ") as [string, string];
       expect(linkRouteRefused(method, path), memory).toBe(true);
