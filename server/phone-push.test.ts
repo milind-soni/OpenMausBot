@@ -3,13 +3,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { PUSH_KINDS, phonePushCollapseId } from "../shared/phone-push.ts";
+import { PUSH_KINDS, PUSH_RELAY_ERRORS, phonePushCollapseId } from "../shared/phone-push.ts";
 import {
   MAX_PUSH_DEVICES,
   PHONE_PUSH_DESKTOP_MESSAGE,
   PHONE_PUSH_FILE,
   PUSH_COALESCE_MS,
+  PUSH_DEVICE_LOW_MAX,
   PUSH_DEVICE_WINDOW_MAX,
+  PUSH_DEVICE_WINDOW_MS,
   PUSH_MAX_AGE_MS,
   PUSH_RETRY_MS,
   PhonePush,
@@ -109,12 +111,69 @@ const notification = (overrides: Record<string, unknown> = {}) => ({
 const everyone = () => true;
 
 describe("phone push switch", () => {
-  it("is off unless config or OMB_PHONE_PUSH turns it on, and the variable wins", () => {
-    expect(phonePushEnabled({}, {})).toBe(false);
+  it("is on unless config or OMB_PHONE_PUSH turns it off, and the variable wins both ways", () => {
+    expect(phonePushEnabled({}, {})).toBe(true);
+    expect(phonePushEnabled({ features: {} }, {})).toBe(true);
     expect(phonePushEnabled({ features: { phonePush: true } }, {})).toBe(true);
+    expect(phonePushEnabled({ features: { phonePush: false } }, {})).toBe(false);
+    expect(phonePushEnabled({}, { OMB_PHONE_PUSH: "0" })).toBe(false);
     expect(phonePushEnabled({ features: { phonePush: true } }, { OMB_PHONE_PUSH: "0" })).toBe(false);
-    expect(phonePushEnabled({}, { OMB_PHONE_PUSH: "1" })).toBe(true);
+    expect(phonePushEnabled({ features: { phonePush: false } }, { OMB_PHONE_PUSH: "1" })).toBe(true);
+    // Only an exact 0 or 1 is the variable's word; anything else leaves config.json's.
     expect(phonePushEnabled({ features: { phonePush: false } }, { OMB_PHONE_PUSH: "yes" })).toBe(false);
+    expect(phonePushEnabled({}, { OMB_PHONE_PUSH: "off" })).toBe(true);
+  });
+
+  it("with no paired phone, makes no relay call, sets no timer and reads no access, however many alerts go by", async () => {
+    let accessReads = 0;
+    const { push, relay } = harness({ access: () => { accessReads += 1; return ACCESS; } });
+    expect(push.status()).toBe("on");
+    accessReads = 0;
+    for (const kind of PUSH_KINDS) push.offer({ notification: notification({ kind }), seq: 1 }, everyone);
+    await advance(push, 60 * 60_000);
+    expect(relay.calls).toEqual([]);
+    expect(timers).toEqual([]);
+    expect(accessReads).toBe(0);
+    expect(push.pending()).toBe(0);
+    expect(() => readFileSync(join(dataDir, PHONE_PUSH_FILE))).toThrow();
+  });
+
+  it("with no account to push as, keeps a phone's registration and queues nothing, then pushes once there is one", async () => {
+    let access: typeof ACCESS | null = null;
+    const { push, relay } = harness({ access: () => access });
+    expect(await push.register(PHONE, { platform: "apns", token: APNS })).toMatchObject({ push: "no-account", relay: "off", device: { platform: "apns" } });
+    push.offer({ notification: notification(), seq: 1 }, everyone);
+    await advance(push, 5 * 60_000);
+    expect(relay.calls).toEqual([]);
+    expect(timers).toEqual([]);
+    expect(push.pending()).toBe(0);
+    // The person signs in ("Anywhere, through MausBot", or `openmausbot account login`): the kept phone is registered with
+    // the relay at its first push, which the relay did not know yet.
+    access = ACCESS;
+    relay.answers.push({ status: 404, error: PUSH_RELAY_ERRORS.unknownDevice });
+    push.offer({ notification: notification({ threadId: "th_2" }), seq: 2 }, everyone);
+    await push.flush();
+    expect(relay.calls.map((call) => call.path.split("/").at(-1))).toEqual(["send", "register", "send"]);
+    expect(relay.calls[1]!.body).toEqual({ v: 1, platform: "apns", token: APNS, environment: "production" });
+  });
+
+  it("a phone that registered while push was off is kept and used once an update turns it on by default", async () => {
+    const { push, relay, setEnabled } = harness();
+    setEnabled(false);
+    expect(await push.register(PHONE, { platform: "fcm", token: FCM, pairing: "pair-tag-0001" })).toEqual({ push: "off", device: null, relay: "off" });
+    // The update: a new process on the same data folder, with no switch in config.json.
+    const relayAfter = fakeRelay();
+    const upgraded = new PhonePush({ dataDir, access: () => ACCESS, enabled: () => phonePushEnabled({}, {}), live: () => false, room: () => undefined, fetchImpl: relayAfter.fetchImpl, now: () => clock, log: () => {} });
+    expect(upgraded.answer(PHONE)).toEqual({ push: "on", device: null });
+    // The phone app registers again at its next connect, because the last answer was off.
+    expect(await upgraded.register(PHONE, { platform: "fcm", token: FCM, pairing: "pair-tag-0001" })).toMatchObject({ push: "on", relay: "registered", device: { platform: "fcm" } });
+    const restarted = new PhonePush({ dataDir, access: () => ACCESS, enabled: () => phonePushEnabled({}, {}), live: () => false, room: () => undefined, fetchImpl: relayAfter.fetchImpl, now: () => clock, log: () => {} });
+    restarted.offer({ notification: notification({ kind: "done" }), seq: 4 }, everyone);
+    await restarted.flush();
+    expect(relayAfter.sends().map((call) => call.body)).toEqual([
+      { v: 1, token: FCM, pairing: "pair-tag-0001", collapseId: "openmaus.th_1.4", notification: { kind: "done", title: "Scout finished", botId: "bot_1", botName: "Scout", threadId: "th_1" } },
+    ]);
+    expect(relay.calls).toEqual([]);
   });
 
   it("switched off, keeps nothing, sends nothing and says so", async () => {
@@ -221,7 +280,7 @@ describe("offering a notify frame", () => {
     ]);
   });
 
-  it("names the room, and leaves a frame alone that is not a notification", async () => {
+  it("names the room beside the push but never in the lock screen's title, and leaves a frame alone that is not a notification", async () => {
     const { push, relay } = harness({ room: () => ({ id: "grp_1", name: "Launch\nteam" }) });
     await push.register(PHONE, { platform: "apns", token: APNS });
     push.offer({ notification: notification(), seq: 1 }, everyone);
@@ -230,7 +289,7 @@ describe("offering a notify frame", () => {
     push.offer({ notification: notification({ botId: "bad id" }), seq: 4 }, everyone);
     await push.flush();
     expect(relay.sends().map((call) => call.body.notification)).toEqual([
-      { kind: "approval", title: "Scout in Launch team needs approval", botId: "bot_1", botName: "Scout", threadId: "th_1", roomId: "grp_1", roomName: "Launch team" },
+      { kind: "approval", title: "Scout needs approval", botId: "bot_1", botName: "Scout", threadId: "th_1", roomId: "grp_1", roomName: "Launch team" },
     ]);
   });
 
@@ -248,12 +307,41 @@ describe("offering a notify frame", () => {
     expect(relay.sends().map((call) => call.body.collapseId)).toEqual(["openmaus.th_1.1", "openmaus.th_1.3", "openmaus.th_1.4"]);
   });
 
-  it("stops a looping bot buzzing a pocket", async () => {
+  it("stops a looping bot buzzing a pocket: 60 an hour, as the relay allows a phone", async () => {
+    expect([PUSH_DEVICE_WINDOW_MAX, PUSH_DEVICE_WINDOW_MS]).toEqual([60, 60 * 60_000]);
     const { push, relay } = harness();
     await push.register(PHONE, { platform: "apns", token: APNS });
     for (let seq = 0; seq < PUSH_DEVICE_WINDOW_MAX + 5; seq += 1) push.offer({ notification: notification({ threadId: `th_${seq}` }), seq }, everyone);
     await push.flush();
     expect(relay.sends()).toHaveLength(PUSH_DEVICE_WINDOW_MAX);
+    await advance(push, PUSH_DEVICE_WINDOW_MS);
+    push.offer({ notification: notification({ threadId: "th_later" }), seq: 99 }, everyone);
+    await push.flush();
+    expect(relay.sends()).toHaveLength(PUSH_DEVICE_WINDOW_MAX + 1);
+  });
+
+  it("near the cap, a finished reply gives way so approvals, questions and sign-ins still get through", async () => {
+    const { push, relay } = harness();
+    await push.register(PHONE, { platform: "apns", token: APNS });
+    for (let seq = 0; seq < PUSH_DEVICE_WINDOW_MAX; seq += 1) push.offer({ notification: notification({ kind: "done", threadId: `th_${seq}` }), seq }, everyone);
+    await push.flush();
+    expect(relay.sends()).toHaveLength(PUSH_DEVICE_LOW_MAX);
+    const asks = ["approval", "question", "sign-in"] as const;
+    for (let seq = 0; seq < PUSH_DEVICE_WINDOW_MAX; seq += 1) push.offer({ notification: notification({ kind: asks[seq % 3], threadId: `ask_${seq}` }), seq: 100 + seq }, everyone);
+    await push.flush();
+    expect(relay.sends()).toHaveLength(PUSH_DEVICE_WINDOW_MAX);
+    expect(relay.sends().slice(PUSH_DEVICE_LOW_MAX).every((call) => (call.body.notification as { kind: string }).kind !== "done")).toBe(true);
+  });
+
+  it("a Live Activity change counts against the same hour, at the lower priority", async () => {
+    const { push, relay } = harness();
+    await push.register(PHONE, { platform: "apns", token: APNS });
+    for (let index = 0; index < PUSH_DEVICE_LOW_MAX; index += 1) expect(await push.callFor(PHONE, "/v1/installations/self/push/activity", { v: 1 })).toMatchObject({ status: 200 });
+    expect(await push.callFor(PHONE, "/v1/installations/self/push/activity", { v: 1 })).toBe("capped");
+    push.offer({ notification: notification({ kind: "done" }), seq: 1 }, everyone);
+    push.offer({ notification: notification({ kind: "approval", threadId: "th_2" }), seq: 2 }, everyone);
+    await push.flush();
+    expect(relay.sends().map((call) => (call.body.notification as { kind: string }).kind)).toEqual(["approval"]);
   });
 });
 
@@ -317,15 +405,25 @@ describe("the outbox", () => {
     expect(relay.sends()).toHaveLength(1);
     await advance(push, 1);
     expect(relay.sends()).toHaveLength(1);
+  });
 
+  it("over a limit, leaves only that phone alone for the relay's wait, and keeps every other phone's pushes", async () => {
+    const { push, relay } = harness();
+    await push.register(PHONE, { platform: "apns", token: APNS });
+    await push.register(OTHER, { platform: "fcm", token: FCM });
     relay.answers.push({ status: 429, error: "rate_limited", retryAfter: 120 });
+    // The first send (PHONE's) is refused; OTHER's, waiting behind it, still goes.
     push.offer({ notification: notification({ threadId: "th_3" }), seq: 3 }, everyone);
     await push.flush();
+    expect(relay.sends().map((call) => call.body.token)).toEqual([APNS, FCM]);
     push.offer({ notification: notification({ threadId: "th_4" }), seq: 4 }, everyone);
-    await advance(push, 119_000);
-    expect(relay.sends()).toHaveLength(2);
-    await advance(push, 1_000);
-    expect(relay.sends().at(-1)!.body.collapseId).toBe("openmaus.th_4.4");
+    await push.flush();
+    expect(relay.sends().map((call) => call.body.token)).toEqual([APNS, FCM, FCM]);
+    expect(push.pending()).toBe(0);
+    await advance(push, 120_000);
+    push.offer({ notification: notification({ threadId: "th_5" }), seq: 5 }, everyone);
+    await push.flush();
+    expect(relay.sends().slice(3).map((call) => [call.body.token, call.body.collapseId])).toEqual([[APNS, "openmaus.th_5.5"], [FCM, "openmaus.th_5.5"]]);
   });
 
   it("never throws into the server", async () => {
