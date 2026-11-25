@@ -11994,6 +11994,8 @@
   "room.feed.empty": "No threads yet. Write below to start one.",
   "room.feed.loadFailed": "Couldn't load this room's threads.",
   "room.feed.startFailed": "Couldn't start a thread. Check your connection and try again.",
+  "room.feed.showArchived": "Show archived threads",
+  "room.feed.hideArchived": "Hide archived threads",
   "room.thread.panel": "Thread",
   "room.thread.close": "Close thread",
   "room.thread.resize": "Resize thread",

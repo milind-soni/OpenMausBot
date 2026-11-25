@@ -11,9 +11,9 @@ export interface FeedThread {
 }
 
 /** The room's threads that have a first line, oldest first, so the newest sits at the foot of the feed and a thread
- * stays in its place when a reply comes in. */
-export function feedThreads(tasks: readonly GroupTask[], summaries: readonly RoomThreadSummary[]): FeedThread[] {
-  const byThread = new Map(tasks.filter((task) => task.archivedAt === undefined).map((task) => [task.threadId, task]));
+ * stays in its place when a reply comes in. Archived ones only when asked for. */
+export function feedThreads(tasks: readonly GroupTask[], summaries: readonly RoomThreadSummary[], archived = false): FeedThread[] {
+  const byThread = new Map(tasks.filter((task) => archived || task.archivedAt === undefined).map((task) => [task.threadId, task]));
   return summaries.flatMap((summary) => {
     const task = byThread.get(summary.threadId);
     return task && summary.first ? [{ task, summary: summary as FeedThread["summary"] }] : [];
@@ -25,8 +25,8 @@ const stamps = (tasks: readonly GroupTask[] | undefined) =>
 
 /** The room's thread summaries, asked again whenever one of its threads moves; the last answer stays on screen while
  * the next is on its way, and an answer for an older ask is dropped. */
-export function useRoomThreads(group: Pick<Group, "id" | "tasks">) {
-  const [answer, setAnswer] = useState<{ groupId: string; threads: RoomThreadSummary[] } | null>(null);
+export function useRoomThreads(group: Pick<Group, "id" | "tasks">, archived = false) {
+  const [answer, setAnswer] = useState<{ groupId: string; archived: boolean; threads: RoomThreadSummary[] } | null>(null);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const signature = stamps(group.tasks);
@@ -36,12 +36,12 @@ export function useRoomThreads(group: Pick<Group, "id" | "tasks">) {
   useEffect(() => {
     let current = true;
     const timer = setTimeout(() => {
-      api<RoomThreadSummariesResponse>(`/api/groups/${group.id}/threads/summary`)
-        .then((response) => { if (current) { setAnswer({ groupId: group.id, threads: response.threads }); setFailed(false); } })
+      api<RoomThreadSummariesResponse>(`/api/groups/${group.id}/threads/summary${archived ? "?archived=1" : ""}`)
+        .then((response) => { if (current) { setAnswer({ groupId: group.id, archived, threads: response.threads }); setFailed(false); } })
         .catch(() => { if (current) setFailed(true); });
     }, settled.current ? SETTLE_MS : 0);
     return () => { current = false; clearTimeout(timer); };
-  }, [group.id, signature, attempt]);
-  const threads = useMemo(() => (loaded ? feedThreads(group.tasks ?? [], answer.threads) : null), [loaded, group.tasks, answer]);
+  }, [group.id, signature, attempt, archived]);
+  const threads = useMemo(() => (loaded ? feedThreads(group.tasks ?? [], answer.threads, archived && answer.archived) : null), [loaded, group.tasks, answer, archived]);
   return { threads, failed: failed && !loaded, retry: () => setAttempt((count) => count + 1) };
 }

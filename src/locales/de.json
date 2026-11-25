@@ -4390,6 +4390,8 @@
   "room.feed.empty": "Noch keine Threads. Schreib unten, um einen zu beginnen.",
   "room.feed.loadFailed": "Die Threads dieses Raums konnten nicht geladen werden.",
   "room.feed.startFailed": "Der Thread konnte nicht begonnen werden. Prüfe deine Verbindung und versuche es erneut.",
+  "room.feed.showArchived": "Archivierte Threads anzeigen",
+  "room.feed.hideArchived": "Archivierte Threads ausblenden",
   "room.thread.panel": "Thread",
   "room.thread.close": "Thread schließen",
   "room.thread.resize": "Thread-Breite ändern",

@@ -25,6 +25,15 @@ export function roomThreadSpeakerId(group: RoomThreads, threadId: string): strin
   return threadId === group.threadId ? group.busyBotId ?? null : null;
 }
 
+/** Waiting when the thread, or the bot speaking in it, waits on the person. A server that marks no thread unread marks
+ * the room, which stands for its current thread. */
+export function roomThreadAttention(group: RoomThreads & Pick<Group, "unread">, task: Pick<GroupTask, "threadId" | "unread" | "activity">,
+  bots: readonly Pick<Bot, "id" | "activity">[]): { waiting: boolean; unread: boolean | undefined } {
+  const speakerId = roomThreadSpeakerId(group, task.threadId);
+  const speakerWaits = Boolean(speakerId) && bots.find((bot) => bot.id === speakerId)?.activity === "waiting-on-you";
+  return { waiting: speakerWaits || task.activity === "waiting-on-you", unread: task.unread ?? (task.threadId === group.threadId && group.unread) };
+}
+
 export function roomSpeakerIds(group: RoomThreads): string[] {
   const ids = [group.busyBotId, ...(group.tasks ?? []).map((task) => task.busyBotId)]
     .filter((id): id is string => typeof id === "string" && id.length > 0);
