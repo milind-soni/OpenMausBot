@@ -16,10 +16,9 @@ const READY = new Set(["idle", "ready", "running"]);
 const TERMINAL = new Set(["error", "cancelled"]);
 /** The sandbox's owner key: its name is `ogb-<this installation>-browser-<hash>`, so operators tell it from a bot's computer. */
 export const BROWSER_SANDBOX_OWNER = "browser";
-/** The provider's smallest size that runs Chrome well: 2 vCPU, 4 GB. A heavy page measured 0.8–0.87 GB per Chrome. */
-export const BROWSER_SANDBOX_TYPE = "small";
-/** Chromes at once in one sandbox (one per bot browsing); past this a bot's browser opens in the home. One heavy page
- * measured 954 MB on `small` (4 GB), so two; the Admin's launch also refuses a Chrome when under 1 GiB is free. */
+/** Chromes at once in one sandbox (one per bot browsing) until the relay says how many this Cloud's size takes (two on
+ * `small`, where one heavy page measured 954 MB of 4 GB; three on `default`); past it a bot's browser opens in the home. The
+ * Admin's launch also refuses a Chrome when under 1 GiB is free. */
 export const BROWSER_SANDBOX_CHROMES = 2;
 /** The port the sandbox's small door listens on, on its loopback only; the provider's relay reaches it there. */
 export const COMPUTER_DOOR_PORT = 39231;
@@ -30,7 +29,7 @@ export const profileKey = (botId: string): string => createHash("sha256").update
 /** What the relay says before anything is started: whether a browser sandbox may start now, and until when it may not. */
 export type Availability =
   | { kind: "old-relay" }
-  | { kind: "available"; boxId: string | null }
+  | { kind: "available"; boxId: string | null; chromes: number | null }
   | { kind: "unavailable"; reason: string; resetsAt: string | null };
 
 /** What the browser needs from the relay; tests pass their own. */
@@ -71,8 +70,9 @@ async function json(cfg: AppConfig, path: string, init: RequestInit = {}) {
   return { ok: res.ok && body?.ok !== false, status: res.status, body };
 }
 
-/** `purpose` tells the Admin's relay this is the Cloud's browser sandbox, outside the plan's computers and hours. */
-export const browserSandboxCreateBody = () => ({ noEnv: true, type: BROWSER_SANDBOX_TYPE, purpose: "browser" });
+/** `purpose` tells the Admin's relay this is the Cloud's browser sandbox, outside the plan's computers and hours. Its size
+ * is the Admin's to choose by the Cloud's plan (small, or default on the bigger plans), so none is asked for here. */
+export const browserSandboxCreateBody = () => ({ noEnv: true, purpose: "browser" });
 
 /** The Cloud's relay does not know the browser sandbox (an Admin from before it): nothing is created. */
 export class OldRelay extends Error {}
@@ -135,7 +135,8 @@ export function providerOps(cfg: () => AppConfig): ComputerOps {
       const answer = await json(cfg(), "/browser-sandbox");
       if (answer.status === 404) return { kind: "old-relay" };
       if (!answer.ok || typeof answer.body?.available !== "boolean") throw boatRefusal(answer.status, "asking about the browser sandbox", answer.body, true);
-      if (answer.body.available) return { kind: "available", boxId: typeof answer.body.boxId === "string" ? answer.body.boxId : null };
+      const chromes = Number.isInteger(answer.body.chromes) && answer.body.chromes >= 1 && answer.body.chromes <= 4 ? answer.body.chromes as number : null;
+      if (answer.body.available) return { kind: "available", boxId: typeof answer.body.boxId === "string" ? answer.body.boxId : null, chromes };
       return { kind: "unavailable", reason: typeof answer.body.reason === "string" ? answer.body.reason : "unknown", resetsAt: typeof answer.body.resetsAt === "string" ? answer.body.resetsAt : null };
     },
     async find() {

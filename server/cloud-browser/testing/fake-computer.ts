@@ -29,6 +29,8 @@ export interface FakeComputer {
   hostRoute: boolean;
   unprotected: boolean;
   chromeStarts: boolean;
+  /** How many Chromes the probe says this Cloud's sandbox takes (by its plan's size). */
+  chromes: number;
   /** A resume during `archiving` finds the machine already gone. */
   takeBackFails: boolean;
   /** Whether the launch could write the Chrome policy (sudo in the sandbox). */
@@ -67,7 +69,7 @@ export async function startFakeComputer(): Promise<FakeComputer> {
   let retired = true;
   const fake = {
     base: "", state: "ready", exists: true, startStatus: 200, startBody: { ok: true }, oldRelay: false, available: true, unavailableReason: "fleet_starts",
-    unavailableUntil: null, hostRoute: true, unprotected: false, chromeStarts: true, policy: true, takeBackFails: false, requests: [], upgrades: [], frames: [], boxId: "bx_23456789",
+    unavailableUntil: null, hostRoute: true, unprotected: false, chromeStarts: true, policy: true, takeBackFails: false, chromes: 2, requests: [], upgrades: [], frames: [], boxId: "bx_23456789",
     files: new Map(), cookies: new Map(), commands: [], failing: new Set(),
   } as unknown as FakeComputer;
   const watchers = new Map<string, Set<import("ws").WebSocket>>();
@@ -100,7 +102,7 @@ export async function startFakeComputer(): Promise<FakeComputer> {
       const rest = url.pathname.replace(/^\/api\/v1/, "");
       if (rest === "/browser-sandbox") {
         if (fake.oldRelay) return send(404, { ok: false, code: "not_found" });
-        return send(200, { ok: true, type: "browser.sandbox", available: fake.available, boxId: fake.exists ? boxId : null,
+        return send(200, { ok: true, type: "browser.sandbox", available: fake.available, boxId: fake.exists ? boxId : null, sandboxType: fake.chromes > 2 ? "default" : "small", chromes: fake.chromes,
           ...(fake.available ? {} : { reason: fake.unavailableReason, ...(fake.unavailableUntil ? { resetsAt: fake.unavailableUntil } : {}) }) });
       }
       if (rest === "/sandboxes" && req.method === "GET") return send(200, { ok: true, sandboxes: fake.exists ? [row] : [], pageInfo: { nextCursor: null } });

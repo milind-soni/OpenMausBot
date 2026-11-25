@@ -98,6 +98,8 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
   let awake = false;
   let leverCleanupAt = -Infinity;
   let ttlRefreshedAt = 0;
+  /** How many bots' Chromes this Cloud's sandbox takes at once, as the relay last said (by its size). */
+  let chromesAllowed = BROWSER_SANDBOX_CHROMES;
 
   const home = (request: OpenRequest, reason: HomeReason): Opened => {
     rails.home(reason);
@@ -135,6 +137,7 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
     const said = await ops.probe();
     if (said.kind === "old-relay") throw new OldRelay();
     if (said.kind === "unavailable") throw new Unavailable(said.reason, said.resetsAt);
+    if (said.chromes !== null) chromesAllowed = said.chromes;
   }
 
   async function wake(ops: ComputerOps): Promise<{ id: string; started: boolean }> {
@@ -257,7 +260,7 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
     if (held) return home(request, held);
     // One Chrome per bot's profile: a second session of the same bot (another audience's) stays in the home.
     if (bots().has(request.botId)) return home(request, "busy");
-    if (bots().size >= BROWSER_SANDBOX_CHROMES) return home(request, "sandbox-full");
+    if (bots().size >= chromesAllowed) return home(request, "sandbox-full");
     // The home's copy Chrome refused before, unchanged since: not worth a wake.
     const known = deps.signIns?.load(request.session);
     const bad = rails.carryBad(profileKey(request.botId));

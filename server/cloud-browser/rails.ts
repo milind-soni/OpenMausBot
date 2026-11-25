@@ -7,9 +7,9 @@ import { dirname, join } from "node:path";
 import type { CloudLimit } from "../../shared/place-view.ts";
 
 /** Resumes a Cloud may spend on its bots' browsers in one UTC day; past it, every browser opens in the home. */
-export const CLOUD_BROWSER_DAILY_RESUMES = 30;
+export const CLOUD_BROWSER_DAILY_RESUMES = 100;
 /** Minutes the Cloud's browser sandbox may be awake in one UTC day; past it, every browser opens in the home. */
-export const CLOUD_BROWSER_DAILY_AWAKE_MINUTES = 240;
+export const CLOUD_BROWSER_DAILY_AWAKE_MINUTES = 1_080;
 /** Failed starts in a row before the back-off. */
 export const CLOUD_BROWSER_FAILURES_IN_ROW = 2;
 export const CLOUD_BROWSER_BACKOFF_MS = 15 * 60_000;

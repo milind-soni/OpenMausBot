@@ -139,8 +139,9 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     const create = fake.requests.findIndex((one) => one.method === "POST" && one.path === "/api/v1/sandboxes");
     expect(probe).toBeGreaterThan(-1);
     expect(probe).toBeLessThan(create);
-    expect(fake.requests[create]?.body).toEqual({ noEnv: true, type: "small", purpose: "browser" });
-    expect(browserSandboxCreateBody()).toEqual({ noEnv: true, type: "small", purpose: "browser" });
+    // No size asked for: the Admin picks it by the Cloud's plan (small, or default on the bigger plans).
+    expect(fake.requests[create]?.body).toEqual({ noEnv: true, purpose: "browser" });
+    expect(browserSandboxCreateBody()).toEqual({ noEnv: true, purpose: "browser" });
     expect(fake.requests.find((one) => one.method === "PATCH")?.body?.name).toMatch(/^ogb-[a-f0-9]{12}-browser-[a-f0-9]{6}$/);
     expect(cloud.report().resumes).toBe(1);
   });
@@ -164,7 +165,7 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     fake.exists = false;
     // The probe answers, but the create comes back unmarked (an Admin rolled back between the two).
     const realProbe = providerOps(() => ({}) as AppConfig);
-    const ops = { ...realProbe, probe: async () => { fake.oldRelay = true; return { kind: "available" as const, boxId: null }; } };
+    const ops = { ...realProbe, probe: async () => { fake.oldRelay = true; return { kind: "available" as const, boxId: null, chromes: null }; } };
     const guarded = browser({ ops: () => ops });
     expect(await guarded.open(request())).toEqual({ home: "old-relay" });
     expect(fake.creates()).toBe(1);
@@ -348,6 +349,15 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     expect(new Set(fake.profiles())).toEqual(new Set(bots.slice(0, 2).map(profileKey)));
     expect(profileKey("scout")).toMatch(/^[a-f0-9]{16}$/);
     expect(await cloud.open(request("chief"))).toEqual({ home: "sandbox-full" });
+  });
+
+  it("carries as many bots' Chromes as the relay says this Cloud's sandbox takes", async () => {
+    fake.state = "archived";
+    fake.chromes = 3;
+    const cloud = browser();
+    // The relay says it at the wake, so from the first open on.
+    for (const bot of ["scout", "writer", "chief"]) urlOf(await cloud.open(request(bot)));
+    expect(await cloud.open(request("fourth"))).toEqual({ home: "sandbox-full" });
   });
 
   it("reuses a bot's profile after the sandbox slept", async () => {
