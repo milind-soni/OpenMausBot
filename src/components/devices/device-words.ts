@@ -54,7 +54,7 @@ const DESKTOP: Record<NonNullable<Device["desktop"]>, LocaleKey> = {
 const NETWORK_SHORT: Record<PrivateNetworkState, LocaleKey> = {
   unknown: "devicesPage.network.short.unknown", "not-installed": "devicesPage.network.short.notInstalled", "no-cli": "devicesPage.network.short.noCli",
   "signed-out": "devicesPage.network.short.signedOut", "not-running": "devicesPage.network.short.notRunning", "needs-approval": "devicesPage.network.short.needsApproval",
-  "needs-permission": "devicesPage.network.short.needsPermission", magicdns: "devicesPage.network.short.magicdns", ready: "devicesPage.network.short.ready",
+  "needs-permission": "devicesPage.network.short.needsPermission", magicdns: "devicesPage.network.short.magicdns", "custom-name": "devicesPage.network.short.customName", ready: "devicesPage.network.short.ready",
 };
 /** Two or three words for the map. */
 export const networkShort = (network: PrivateNetwork): string => (network.state === "ready" && !network.shared ? t("devicesPage.network.short.computersOff") : t(NETWORK_SHORT[network.state]));
@@ -77,6 +77,7 @@ export function networkLine(network: PrivateNetwork): string {
     case "needs-approval": return t("devicesPage.network.line.needsApproval");
     case "needs-permission": return t("remote.tailscale.needsPermission", { app: productName() });
     case "magicdns": return t("devicesPage.network.line.magicdns");
+    case "custom-name": return `${t("remote.tailscale.customName")} ${t("remote.tailscale.customNameDetail")}`;
     case "ready": return t(network.shared ? "devicesPage.network.line.readyAs" : "devicesPage.network.line.onFor", { name: shortName(network.name) });
   }
 }
