@@ -17,6 +17,8 @@ vi.mock("./ModelPicker", () => ({ ModelPicker: () => null }));
 const { ChatView } = await import("./ChatView");
 const { BotEditorStore, initialState } = await import("@/state/store");
 const { t } = await import("@/lib/i18n");
+const { reducer } = await import("@/state/store");
+const { citationAttachment, createCitationTextSelector, serializeCitation } = await import("@/lib/citations");
 
 const at = new Date(2026, 10, 25, 9, 0).getTime();
 const check = (id: string, parentId: string, name: string, round?: number): Message => ({
@@ -93,6 +95,45 @@ describe("Check before done rounds in the chat", () => {
       flushSync(() => less!.click());
       expect(folded()).not.toBeNull();
     } finally {
+      root.unmount();
+      container.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+  it("opens a folded answer and selects the cited words when its citation's Go to source is clicked", async () => {
+    vi.stubGlobal("fetch", () => new Promise(() => {}));
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const first = "First summary, it says dusk.";
+    const citation = citationAttachment(
+      { ownerType: "bot", ownerId: "pepper", threadId: "pepper-thread", messageId: "first" },
+      createCitationTextSelector(first, first.indexOf("dusk"), first.indexOf("dusk") + 4)!,
+    );
+    const cited: Bot = {
+      ...bot,
+      messages: [...messages, { id: "why", parentId: "passed", at, role: "user", kind: "text", text: `${serializeCitation(citation)}\nWhy did it say this?` }],
+      activeLeafId: "why",
+    };
+    let current: AppState = { ...state, bots: [cited] };
+    let live = true;
+    const view = () => createElement(BotEditorStore, { value: { state: current, dispatch, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} }, children: createElement(ChatView, { bot: cited }) });
+    // The real store re-renders after an action; effects dispatch too, so render on a later task instead of mid-commit.
+    function dispatch(action: Parameters<typeof reducer>[1]) { current = reducer(current, action); queueMicrotask(() => { if (live) root.render(view()); }); }
+    try {
+      flushSync(() => root.render(view()));
+      const folded = () => container.querySelector<HTMLButtonElement>("[data-testid=earlier-answer]");
+      expect(folded()).not.toBeNull();
+      flushSync(() => container.querySelector<HTMLButtonElement>(`[aria-label="${t("chat.citation.open", { quote: "dusk" })}"]`)!.click());
+      const goTo = [...document.querySelectorAll<HTMLButtonElement>("[role=dialog] button")].find((button) => button.textContent === t("chat.citation.goToSource"));
+      goTo!.click();
+      await vi.waitFor(() => expect(window.getSelection()?.toString()).toBe("dusk"));
+      expect(folded()).toBeNull();
+      expect(window.getSelection()?.anchorNode?.parentElement?.closest("[data-citation-source=first]")).not.toBeNull();
+      expect(document.body.textContent).not.toContain(t("chat.citation.unavailable"));
+    } finally {
+      live = false;
+      window.getSelection()?.removeAllRanges();
       root.unmount();
       container.remove();
       vi.unstubAllGlobals();
