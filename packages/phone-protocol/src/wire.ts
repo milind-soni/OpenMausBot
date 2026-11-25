@@ -255,14 +255,21 @@ export const CONNECTOR_SLUG_PATTERN = /^(?!__proto__$)[a-z0-9_][a-z0-9_-]{0,80}$
 /** Composio tool names are upper-snake, e.g. `GMAIL_SEND_EMAIL`, or `_1PASSWORD_GET_ITEM` for a `_`-led toolkit. */
 export const CONNECTOR_TOOL_NAME_PATTERN = /^(?:[A-Z][A-Z0-9_]{0,127}|_[A-Z0-9][A-Z0-9_]{0,126})$/;
 
+export const UI_INTERFACE_LAYOUTS = ["dashboard", "cheat-sheet", "custom"] as const;
+export type UiInterfaceLayout = (typeof UI_INTERFACE_LAYOUTS)[number];
+
+export function isUiInterfaceLayout(value: unknown): value is UiInterfaceLayout {
+  return typeof value === "string" && UI_INTERFACE_LAYOUTS.includes(value as UiInterfaceLayout);
+}
+
 /** Fails closed: only an absent switch or a strict true allows the helper model; a hand-edited "false" or 0 reads as never. */
 export const helperModelAllowed = (bot: { helperModel?: unknown }): boolean => bot.helperModel === undefined || bot.helperModel === true;
 
 /** A bot as a client may see it. avatarUrl is always present (null when the
  * bot has none). */
 export interface WireBot extends DefaultBotFields, BotAccessFields {
-  /** Whether the bot offers its native UI page. Defaults to false. */
-  uiInterfaceEnabled?: boolean;
+  /** The bot's selected native UI layout. An absent layout leaves the UI page disabled. */
+  uiInterfaceLayout?: UiInterfaceLayout;
   waitingForTeammates?: boolean;
   id: string;
   /** The task selected in the UI; running turns keep their own thread id. */

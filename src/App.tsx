@@ -433,7 +433,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         open={drawerOpen}
         onClose={closeDrawer}
       />}
-      {state.activeView === "ui-interface" && bot?.uiInterfaceEnabled ? (
+      {state.activeView === "ui-interface" && bot?.uiInterfaceLayout ? (
         <BotInterfaceView bot={bot} />
       ) : state.activeView === "team-map" ? (
         <TeamMapPage />

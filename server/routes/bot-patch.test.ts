@@ -87,18 +87,20 @@ function fixture(extra: Partial<BotPatchRouteDeps> = {}) {
   return { store, bot, activeVpsThreads, privateThreads, patch };
 }
 
-it("persists the native interface setting for only the chosen bot", async () => {
+it("persists one native interface layout for only the chosen bot", async () => {
   const { store, bot, patch } = fixture();
   const other = store.createBot({ name: "Pepper" });
-  for (const enabled of [true, false]) {
-    expect(await patch(bot.id, { uiInterfaceEnabled: enabled })).toMatchObject({
-      status: 200, body: { bot: { uiInterfaceEnabled: enabled } },
+  for (const layout of ["dashboard", "cheat-sheet", "custom"]) {
+    expect(await patch(bot.id, { uiInterfaceLayout: layout })).toMatchObject({
+      status: 200, body: { bot: { uiInterfaceLayout: layout } },
     });
-    expect((await patch(bot.id, { uiInterfaceEnabled: "true" })).status).toBe(400);
+    expect((await patch(bot.id, { uiInterfaceLayout: "unknown" })).status).toBe(400);
     const reloaded = new Store(() => sonnet);
-    expect(reloaded.bot(bot.id)?.uiInterfaceEnabled).toBe(enabled);
-    expect(reloaded.bot(other.id)?.uiInterfaceEnabled).toBeUndefined();
+    expect(reloaded.bot(bot.id)?.uiInterfaceLayout).toBe(layout);
+    expect(reloaded.bot(other.id)?.uiInterfaceLayout).toBeUndefined();
   }
+  expect(await patch(bot.id, { uiInterfaceLayout: null })).toMatchObject({ status: 200 });
+  expect(new Store(() => sonnet).bot(bot.id)?.uiInterfaceLayout).toBeUndefined();
 });
 
 describe("PATCH /api/bots/:id memory model", () => {

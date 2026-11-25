@@ -9,7 +9,6 @@ export type BotUpdatePatch = Partial<
     | "description"
     | "soul"
     | "notifications"
-    | "uiInterfaceEnabled"
     | "cloudBackend"
     | "autoStartVps"
     | "color"
@@ -53,6 +52,7 @@ export type BotUpdatePatch = Partial<
     | "modelSelection"
   >
 > & {
+  uiInterfaceLayout?: Bot["uiInterfaceLayout"] | null;
   computer?: Bot["computer"] | null;
   connectorTools?: Bot["connectorTools"] | null;
   connectorScopes?: Bot["connectorScopes"] | null;
@@ -71,8 +71,9 @@ export type BotUpdatePatch = Partial<
 
 export type BotStatePatch = Omit<
   BotUpdatePatch,
-  "computer" | "connectorTools" | "connectorScopes" | "phoneApps" | "defaultBot" | "acknowledgeLocalAuto" | "applyToAllThreads" | "keepThreadModels" | "threadId" | "mainThreadChoice"
+  "computer" | "uiInterfaceLayout" | "connectorTools" | "connectorScopes" | "phoneApps" | "defaultBot" | "acknowledgeLocalAuto" | "applyToAllThreads" | "keepThreadModels" | "threadId" | "mainThreadChoice"
 > & {
+  uiInterfaceLayout?: Bot["uiInterfaceLayout"];
   mainThreadId?: string;
   computer?: Bot["computer"];
   connectorTools?: Bot["connectorTools"];
@@ -134,6 +135,7 @@ const stateOverlay = (patch: BotUpdatePatch): BotStatePatch => {
     threadId: _threadId,
     mainThreadChoice,
     computer,
+    uiInterfaceLayout,
     connectorTools,
     connectorScopes,
     phoneApps,
@@ -141,6 +143,8 @@ const stateOverlay = (patch: BotUpdatePatch): BotStatePatch => {
     ...fields
   } = patch;
   const normalized: BotStatePatch = { ...fields };
+  if (uiInterfaceLayout === null) normalized.uiInterfaceLayout = undefined;
+  else if (uiInterfaceLayout !== undefined) normalized.uiInterfaceLayout = uiInterfaceLayout;
   if (computer === null) normalized.computer = undefined;
   else if (computer !== undefined) normalized.computer = computer;
   if (defaultBot === null) normalized.defaultBot = undefined;

@@ -8,7 +8,7 @@ import { normalizePhoneApps } from "../../shared/phone-apps.ts";
 import { parseToolScope, toolScopeWidens } from "../../shared/tool-scope.ts";
 import type { MemoryModelSelection } from "../../shared/memory-model.ts";
 import { parseToolsOff, TOOL_GROUPS } from "../../shared/tool-groups.ts";
-import { isMausColor, MAUS_COLOR_NAMES, type BotUpdateResponse, type WireBot, type WireGroup } from "../../shared/wire.ts";
+import { isMausColor, isUiInterfaceLayout, MAUS_COLOR_NAMES, type BotUpdateResponse, type WireBot, type WireGroup } from "../../shared/wire.ts";
 import { dropRemovedGrants, MAX_ALWAYS_ALLOW } from "../always-allow.ts";
 import { checkBrowserProfileChange, settleBrowserChange } from "../bot-browser-profile.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
@@ -198,9 +198,11 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       }
       const patch: Record<string, unknown> = {};
       Object.assign(patch, profile.patch);
-      if (body.uiInterfaceEnabled !== undefined) {
-        if (typeof body.uiInterfaceEnabled !== "boolean") return json(res, 400, { error: "uiInterfaceEnabled must be true or false" });
-        patch.uiInterfaceEnabled = body.uiInterfaceEnabled;
+      if (body.uiInterfaceLayout !== undefined) {
+        if (body.uiInterfaceLayout !== null && !isUiInterfaceLayout(body.uiInterfaceLayout)) {
+          return json(res, 400, { error: "uiInterfaceLayout must be a supported layout or null" });
+        }
+        patch.uiInterfaceLayout = body.uiInterfaceLayout ?? undefined;
       }
       let section: string | undefined | null;
       if (body.section !== undefined) {

@@ -34,7 +34,7 @@ import type {
   TaskClosedBy, TaskOpenedBy, TaskUsage, WireBot, WireGroup,
   WireMessage, WireTask, BotProject as BotProjectRecord,
 } from "../shared/wire.ts";
-import { movesThreadToTop, nextOpenThread } from "../shared/wire.ts";
+import { isUiInterfaceLayout, movesThreadToTop, nextOpenThread } from "../shared/wire.ts";
 import { parseConnectorTools } from "./connector-tools.ts"; import { recoverThreadGrantsOnce, rewriteGrantLists, type GrantRewrite } from "./always-allow.ts";
 import { sameModelSelection } from "../shared/thread-model.ts";
 import { initialGreetingMessage } from "./initial-greeting.ts"; import { createDefaultBot, defaultBotRefusal, type DefaultBotIntro } from "./default-bot.ts";
@@ -313,6 +313,10 @@ export class Store {
     const chiefSectionsSeen = new Set<string>();
     let groupsMigrated = false;
     for (const b of this.bots) {
+      if (b.uiInterfaceLayout !== undefined && !isUiInterfaceLayout(b.uiInterfaceLayout)) {
+        delete b.uiInterfaceLayout;
+        botsMigrated = true;
+      }
       if (b.busy || (b.activity !== undefined && b.activity !== "idle")) botsMigrated = true;
       b.busy = false;
       b.activity = "idle"; if (dropRetiredApps(b)) botsMigrated = true; if (grantScopedApps(b)) botsMigrated = true; if (trimOutboundPolicy(b)) botsMigrated = true;

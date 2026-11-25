@@ -274,7 +274,7 @@ export interface TaskUsage {
   context?: { tokens: number; window?: number };
 }
 
-export interface Bot extends DefaultBotFields, Pick<WireBot, "uiInterfaceEnabled" | "mascotFaceColor" | "mascotBodyColor" | "mascotMaterial" | "access" | "yourAccess" | "onlyPeopleAdded"> {
+export interface Bot extends DefaultBotFields, Pick<WireBot, "uiInterfaceLayout" | "mascotFaceColor" | "mascotBodyColor" | "mascotMaterial" | "access" | "yourAccess" | "onlyPeopleAdded"> {
   toolScope?: ToolScope;
   waitingForTeammates?: boolean;
   id: string;
@@ -865,7 +865,7 @@ export function reducer(state: AppState, action: Action): AppState {
   if (olderThanHeld(state, action)) return state;
   const next = capHeldInBackground(reduceApp(state, action), action);
   if (next.activeView === "ui-interface" && (next.selectedId !== state.selectedId ||
-    !next.bots.some((bot) => bot.id === next.selectedId && bot.uiInterfaceEnabled))) {
+    !next.bots.some((bot) => bot.id === next.selectedId && bot.uiInterfaceLayout))) {
     return { ...next, activeView: "chat" };
   }
   return next;
@@ -951,7 +951,7 @@ function reduceApp(state: AppState, action: Action): AppState {
         pluginsOpen: false,
       };
     case "showBotInterface":
-      if (state.selectedId !== action.botId || !state.bots.find((bot) => bot.id === action.botId)?.uiInterfaceEnabled) return state;
+      if (state.selectedId !== action.botId || !state.bots.find((bot) => bot.id === action.botId)?.uiInterfaceLayout) return state;
       return { ...state, activeView: "ui-interface", settingsOpen: false, computerOpen: false, inspectorOpen: false, activityOpen: false, forkPanel: null };
     case "showChat":
       return state.activeView === "chat" ? state : { ...state, activeView: "chat" };
@@ -1549,6 +1549,7 @@ function reduceApp(state: AppState, action: Action): AppState {
         applyToAllThreads: _allThreads,
         keepThreadModels: _keepThreadModels, threadId: _threadId, mainThreadChoice,
         computer,
+        uiInterfaceLayout,
         connectorTools,
         connectorScopes, phoneApps,
         defaultBot,
@@ -1556,6 +1557,8 @@ function reduceApp(state: AppState, action: Action): AppState {
       } = action.patch;
       const next = action.patch.chiefOfStaff ? { ...animated, bots: withOneChief(animated.bots, { ...target, ...rest, id: action.botId }) } : animated;
       const botPatch: Partial<Bot> = { ...rest, ...(phoneApps !== undefined && { phoneApps: phoneApps ?? undefined }), ...(typeof mainThreadChoice === "string" && { mainThreadId: mainThreadChoice }) };
+      if (uiInterfaceLayout === null) botPatch.uiInterfaceLayout = undefined;
+      else if (uiInterfaceLayout !== undefined) botPatch.uiInterfaceLayout = uiInterfaceLayout;
       if (computer === null) botPatch.computer = undefined;
       else if (computer !== undefined) botPatch.computer = computer;
       if (defaultBot === null) botPatch.defaultBot = undefined;
