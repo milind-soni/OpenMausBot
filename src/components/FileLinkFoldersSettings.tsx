@@ -4,7 +4,8 @@ import { Trash2 } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { REVEALABLE_PATH } from "@/lib/reveal-host-path";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
-import { api, StoreContext, useStore, type ConfigStatus } from "@/state/store";
+import { api, StoreContext, type ConfigStatus } from "@/state/store";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { SETTINGS_INLINE_INPUT, SettingRow, SettingsGroup, SettingsRows } from "./SettingsPrimitives";
 
 function parentFolderPath(filePath: string): string {
@@ -61,7 +62,8 @@ export function AllowFileLinkFolderButton({ filePath }: { filePath: string }) {
 
 /** Self-hosted owner setting for extra read-only host folders bots can link in chat messages. */
 export function FileLinkFoldersSettings() {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields),
+    dispatch = useStoreDispatch();
   const extraRoots = state.config?.fileLinks?.extraRoots ?? [];
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
