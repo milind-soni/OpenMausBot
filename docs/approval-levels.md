@@ -403,6 +403,7 @@ multi-question card renders its structured form on current apps instead.
 | Cline | `--auto-approve false`, you review | not offered | Ask (no reviewer) | Approve individual ACP permission requests, never task questions |
 | Droid | Session mode `normal` (reads only) | not offered | Ask (no reviewer) | Session mode `auto-high`, plus automatic approval of remaining ACP permission requests |
 | Hermes | Its `default` session mode | Its `accept_edits` session mode, where Hermes advertises it | Ask (no reviewer) | Its `default` session mode; approve individual ACP permission requests, never task questions |
+| Mistral Vibe | Its `ask` session mode, sent on every session (Vibe otherwise runs the `default_agent` of its config.toml, which writes files without asking) | not offered | Ask (no reviewer) | Its `ask` session mode; approve individual ACP permission requests, never task questions |
 | Kimi, custom ACP agents | The agent's own default | not offered | Ask (no reviewer) | Approve individual ACP permission requests, never task questions |
 | Pi | Pi's own tools run; computer control and custom MCP tools ask | not offered | Ask (no reviewer) | Custom MCP tools run without asking; computer-control confirms are approved |
 | API engines (OpenAI-compatible, Grok API, MiniMax, Mistral, Cerebras, Groq, Greenference, ModelGo, Meta) | OMB's tool gate asks | not offered | Ask (no reviewer) | OMB's tool gate approves each call |

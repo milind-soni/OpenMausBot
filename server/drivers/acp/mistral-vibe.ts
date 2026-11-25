@@ -26,6 +26,7 @@ import { createAcpDriver, type AcpConfig, type AcpSupport } from "./core.ts";
 import { discoverAcpModels } from "./custom-model-catalog.ts";
 import { acpModelOption } from "./config-options.ts";
 import { MISTRAL_VIBE_STANDALONE } from "./mistral-vibe-release.ts";
+import { selectAdvertisedMode } from "./session-modes.ts";
 
 /** The stock chat-capable models mistral.ai lists for Vibe (only some ship per version; a signed-in
  * session's own list replaces these on Refresh). The `mistral-medium-3.5` id is the CLI's current default. */
@@ -198,6 +199,22 @@ export const mistralVibeSupport: AcpSupport = {
   pickAuthMethod: (methods, env) => (!vibeSignedIn(env) && methods.some((method) => method.id === "browser-auth") ? "browser-auth" : null),
   authFailure: "continue",
   isAuthenticated: (env) => vibeSignedIn(env),
+
+  // vibe-acp 3.1.2 opens every session in config.toml's `default_agent`: "accept-edits" unless set, which writes files
+  // without a permission request; "auto-approve" also runs shell commands without one. Every level OMB offers for
+  // Vibe maps to "ask"; OMB answers the requests itself.
+  async configureSession({ request, sessionId, config, turn, sessionModes }) {
+    const modeId = sessionModes ? selectAdvertisedMode(sessionModes.availableModes, turn.approvalMode, config.fullAuto) : "ask";
+    // vibe-acp 3.1.2 answers session/set_mode for a mode it does not offer (`disabled_agents`) with success and keeps its own.
+    if (!modeId) throw new Error(`Mistral Vibe does not offer its "ask" mode; enable the "ask" agent in Vibe's config.toml`);
+    try {
+      await request("session/set_mode", { sessionId, modeId });
+    } catch (error) {
+      // Only a Vibe without session/set_mode keeps its own mode; any other rejection fails the turn before the prompt.
+      if ((error as { code?: unknown }).code === -32601) return;
+      throw new Error(`Mistral Vibe rejected mode "${modeId}" via session/set_mode: ${(error as Error).message}`);
+    }
+  },
 
   // House convention for ACP harnesses: the persona rides in the prompt text.
   buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
