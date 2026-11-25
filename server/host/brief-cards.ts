@@ -208,22 +208,20 @@ function emailTagger(emails: BriefEmail[], w: BriefWords): (email: BriefEmail) =
     const key = `${sender(email, BRIEF_TEXT.label, w)}\n${emailTag(email, w)}`;
     const count = (ordinals.get(key) ?? 0) + 1;
     ordinals.set(key, count);
-    seen.set(email, count > 1 ? ` (${count})` : "");
+    seen.set(email, ` – ${emailTag(email, w)}${count > 1 ? ` (${count})` : ""}`);
   }
   return (email) => seen.get(email) ?? "";
 }
 function emailRow(email: BriefEmail, w: BriefWords, tag: string): Node {
-  const subject = emailTag(email, w);
-  const suffix = ` – ${subject}${tag}`;
   const who = sender(email, BRIEF_TEXT.label, w);
   const note = email.needsReply ? (email.why ? `${w.waitingOnReply} · ${email.why}` : w.waitingOnReply) : email.why ?? w.important;
   const whoWords = senderName(email.from).trim() ? who : words("brief.part.noSender");
   const line = words("brief.card.emailLine", { sender: senderName(email.from).trim() ? sender(email, BRIEF_TEXT.sender, w) : words("brief.part.noSender"), subject: email.subject || words("brief.part.noSubject") });
   const noteWords = inboxNoteWords(email.why, email.whyText, email.needsReply) ?? (email.needsReply ? (email.why ? words("brief.card.waitingReplyWhy", { why: email.why }) : words("brief.card.waitingReply")) : email.why ? undefined : words("brief.card.important"));
   return rowUnder(`${sender(email, BRIEF_TEXT.sender, w)}: ${email.subject || w.noSubject}`, note, [
-    button(`${w.draftReply(who)}${suffix}`, { type: DRAFT_ACTION, payload: { messageId: email.messageId } }, true, words("brief.card.draftReply", { who: whoWords, subject: suffix })),
+    button(`${w.draftReply(who)}${tag}`, { type: DRAFT_ACTION, payload: { messageId: email.messageId } }, true, words("brief.card.draftReply", { who: whoWords, subject: tag })),
     ...openEmailButton(email, w),
-    button(`${w.dismiss(who)}${suffix}`, { type: DISMISS_ACTION, payload: { messageId: email.messageId } }, false, words("brief.card.dismissEmail", { who: whoWords, subject: suffix })),
+    button(`${w.dismiss(who)}${tag}`, { type: DISMISS_ACTION, payload: { messageId: email.messageId } }, false, words("brief.card.dismissEmail", { who: whoWords, subject: tag })),
   ], { text: line, ...(noteWords ? { note: noteWords } : {}) });
 }
 
