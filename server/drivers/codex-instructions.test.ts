@@ -25,10 +25,10 @@ describe("Codex effective developer instructions", () => {
       `Bot rules.\n\n${CODEX_LINUX_SANDBOX_NOTE}\n\nNative rules.`,
     );
     expect(codexDeveloperInstructions(config, "", CODEX_LINUX_SANDBOX_NOTE)).toBe(
-      `No OpenMausBot bot-specific instructions remain.\n\n${CODEX_LINUX_SANDBOX_NOTE}\n\nNative rules.`,
+      `No ${APP_NAME} bot-specific instructions remain.\n\n${CODEX_LINUX_SANDBOX_NOTE}\n\nNative rules.`,
     );
     expect(codexDeveloperInstructions({}, "", CODEX_LINUX_SANDBOX_NOTE)).toBe(
-      `No OpenMausBot bot-specific instructions remain.\n\n${CODEX_LINUX_SANDBOX_NOTE}`,
+      `No ${APP_NAME} bot-specific instructions remain.\n\n${CODEX_LINUX_SANDBOX_NOTE}`,
     );
     expect(codexDeveloperInstructions({}, "Bot rules.", "")).toBe("Bot rules.");
   });

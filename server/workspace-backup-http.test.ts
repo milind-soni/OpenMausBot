@@ -10,6 +10,7 @@ import { resolveRequestAuth } from "./request-auth.ts";
 import { SessionRegistry } from "./sessions.ts";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
 import { userError, userErrorThrown } from "./user-errors.ts";
+import { APP_NAME } from "../shared/product.ts";
 
 const archive = vi.hoisted(() => ({ create: vi.fn(), stage: vi.fn(), commit: vi.fn(), remove: vi.fn() }));
 vi.mock("./workspace-backup.ts", async (original) => ({
@@ -147,7 +148,7 @@ it("finds the original export after a lost response and allows only its own sess
     expect((await post("/api/workspace-backup/export", { password: PASSWORD })).status).toBe(409);
     expect(maintenance.active).toBe(true);
   } finally { release(); }
-  const ready = { state: "ready", id: artifact.id, filename: "OpenMausBot-2026-09-11.ombbackup" };
+  const ready = { state: "ready", id: artifact.id, filename: `${APP_NAME}-2026-09-11.ombbackup` };
   await expect.poll(async () => (await get(path)).json()).toMatchObject(ready);
   expect(await (await post(path, { password: PASSWORD })).json()).toMatchObject(ready);
   expect(archive.create).toHaveBeenCalledOnce();

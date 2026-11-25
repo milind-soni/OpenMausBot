@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import type { RunMessage } from "../../../shared/skill-burger/layers";
+import { RUN_CARD_KEY } from "@/lib/skill-burger";
 
 const fixture = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("@/state/api", () => ({ api: (...args: unknown[]) => fixture.api(...args) }));
@@ -36,6 +37,7 @@ beforeEach(() => {
   root = createRoot(host);
 });
 afterEach(() => {
+  localStorage.removeItem(RUN_CARD_KEY);
   act(() => root.unmount());
   host.remove();
 });
@@ -85,6 +87,7 @@ it("edits the summary in place: Escape puts it back, Enter keeps it", async () =
 });
 
 it("folds and closes from the top bun", async () => {
+  localStorage.setItem(RUN_CARD_KEY, "1");
   await render([ask, app("m1", "GOOGLESHEETS_BATCH_GET"), app("m2", "GMAIL_SEND_EMAIL")]);
   await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Hide steps"]')!.click());
   expect(host.querySelector(".burger-fold")?.getAttribute("data-folded")).toBe("true");

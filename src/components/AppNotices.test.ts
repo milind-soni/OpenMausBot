@@ -1298,7 +1298,7 @@ describe("bots in two places", () => {
     const asking = await settle();
     expect(asking).toContain("Move this computer&#x27;s bots to My Cloud?");
     expect(asking, "My Cloud names the way back").toContain("Keep this computer&#x27;s bots on this computer");
-    expect(asking, "the move keeps this computer in use, unless lending is paused").toContain("Bots on My Cloud still use this computer when you type on it, unless you pause that in the OpenMausBot icon&#x27;s menu.");
+    expect(asking, "the move keeps this computer in use, unless lending is paused").toContain("Bots on My Cloud still use this computer when you type on it, unless you pause that in the MausBot icon&#x27;s menu.");
     press("Cancel");
     const after = await settle();
     expect(accepted).toEqual([]);
