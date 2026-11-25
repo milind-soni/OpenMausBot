@@ -46,6 +46,7 @@ export function TeamLibraryPanel({
 }) {
   const { dispatch } = useStore();
   const dialogRef = useRef<HTMLDivElement>(null);
+  const galleryErrorRef = useRef<HTMLDivElement>(null);
   const [catalog, setCatalog] = useState<TeamCatalog | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState("");
@@ -76,6 +77,11 @@ export function TeamLibraryPanel({
   useEffect(() => {
     void loadCatalog();
   }, [loadCatalog]);
+
+  // A failed Add shows its message above the cards, out of view when the card was further down.
+  useEffect(() => {
+    if (error) galleryErrorRef.current?.scrollIntoView({ block: "nearest" });
+  }, [error]);
 
   const loadOrgLibrary = useCallback(async () => {
     try {
@@ -348,7 +354,7 @@ export function TeamLibraryPanel({
               <div className="mb-3 text-[12px] font-medium text-ink-tertiary">
                 {search ? t("templates.searchResults") : t("templates.communityTemplates")}
               </div>
-              {error && <div ref={(node) => node?.scrollIntoView({ block: "nearest" })} role="alert" className="mb-3 rounded-lg bg-danger/10 px-3 py-2 text-[13px] text-danger">{error}</div>}
+              {error && <div ref={galleryErrorRef} role="alert" className="mb-3 rounded-lg bg-danger/10 px-3 py-2 text-[13px] text-danger">{error}</div>}
               {catalogLoading && (
                 <div className="flex items-center justify-center gap-2 py-24 text-[13px] text-ink-secondary">
                   <Loader2 size={16} className="animate-spin" /> {t("templates.loading")}

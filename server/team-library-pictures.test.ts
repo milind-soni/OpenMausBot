@@ -28,8 +28,8 @@ describe("the gallery's pictures", () => {
     expect(fake!.picture).toBeUndefined();
     expect(gone!.picture).toBeUndefined();
     expect(fetcher).toHaveBeenCalledTimes(3);
-    // Read once: a second catalog load reuses what was read.
-    await withCatalogPictures(catalogWith(["teams/studio/avatars/real.png"]), fetcher);
-    expect(fetcher).toHaveBeenCalledTimes(3);
+    // A picture read is kept; one that failed is tried again on the next load.
+    await withCatalogPictures(catalogWith(["teams/studio/avatars/real.png", "teams/studio/avatars/gone.png"]), fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(4);
   });
 });

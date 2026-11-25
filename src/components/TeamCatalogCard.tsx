@@ -21,7 +21,7 @@ export function TeamCatalogCard({ entry, busy, disabled, onAdd }: {
   return (
     <article data-catalog-template={entry.slug} className="flex flex-col rounded-2xl border border-hairline/40 bg-card p-4">
       <div className="flex items-center justify-between gap-3">
-        <TemplateFaces avatars={catalogFaces(entry)} size={36} />
+        <TemplateFaces avatars={catalogFaces(entry)} size={36} on="card" />
         <button
           type="button"
           onClick={onAdd}

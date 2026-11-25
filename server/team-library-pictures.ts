@@ -1,7 +1,7 @@
 // The community gallery's pictures. The catalog names each bot's picture by its path in the templates repository; the
 // renderer never fetches from GitHub itself, so the catalog route reads each picture here (https to
 // raw.githubusercontent.com only, no redirects, 64 KB at most, checked to be the picture its name says) and hands it on
-// as a data: URL. A picture that can't be read is left out, and the card draws that bot's mascot instead.
+// as a data: URL. A picture that can't be read is left out this time, and the card draws that bot's mascot instead.
 import { TEAM_LIBRARY_RAW_ROOT, type TeamCatalog } from "./team-library.ts";
 
 type Fetcher = typeof fetch;
@@ -18,8 +18,8 @@ const looksLike = (kind: keyof typeof TYPES, bytes: Uint8Array) => {
   return bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
 };
 
-/** Pictures already read, by path: a data: URL, or null when it couldn't be. */
-const cache = new Map<string, string | null>();
+/** Pictures already read, by path. One that couldn't be read is tried again on the next catalog load. */
+const cache = new Map<string, string>();
 
 async function readPicture(path: string, fetcher: Fetcher): Promise<string | null> {
   const kind = path.slice(path.lastIndexOf(".") + 1) as keyof typeof TYPES;
@@ -43,6 +43,7 @@ export async function withCatalogPictures(catalog: TeamCatalog, fetcher: Fetcher
     .slice(0, MAX_PICTURES);
   await Promise.all(paths.filter((path) => !cache.has(path)).map(async (path) => {
     const picture = await readPicture(path, fetcher);
+    if (!picture) return;
     if (cache.size >= MAX_CACHED) cache.delete(cache.keys().next().value!);
     cache.set(path, picture);
   }));
