@@ -600,11 +600,14 @@ describe("how every bot replies", () => {
 
   it("asks for an opening line on longer work, the answer first, one question at most, plain words and money facts first", () => {
     for (const habit of [
-      "send one short line in their words on what you are doing and why",
-      "add what they will get and roughly how long",
+      "send one short line in their words on what you are doing and what they will get, then deliver exactly that",
+      "if it will take minutes, add roughly how long",
+      "Something to keep, share, send or show others is an .html page published with publish_page, its link in your reply",
+      "if you cannot publish it, give the file and say why",
       "Quick answers skip both.",
       "Answer first (verdict, result or answer), then support.",
       "Say in one line where and when looked-up facts came from",
+      "if you said you would look something up and did not, say so",
       "Use and convert to their units, currency, time zone and numbers",
       "no \"let me know if…\", no \"hope this helps\", no offers or questions out of habit",
       "at most one concrete next step, only when it clearly helps.",
