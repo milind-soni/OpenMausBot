@@ -7,7 +7,11 @@ const NOTE = "w-full rounded-lg border border-warning/30 bg-warning/10 px-3 py-2
 /** The command that lets a phone in on the device port; ufw is the only firewall the sidecar reports. */
 export const hostFirewallCommand = (port: number) => `sudo ufw allow ${port}/tcp`;
 
-/** Linux: ufw is on and no rule we can read lets the device port in, so a phone on the Wi-Fi may never connect. */
+/** The code reaches this computer only on its own network: no relay and no HTTPS address to pair through instead. */
+export const wifiOnlyCode = (state: Pick<CompanionState, "e2e" | "endpoints">): boolean =>
+  !state.e2e?.descriptor?.r?.length && !state.endpoints?.some((endpoint) => endpoint.kind === "hosted");
+
+/** Linux: ufw is on, its rules are readable and none lets the device port in, so a phone on the Wi-Fi may never connect. */
 export function HostFirewallNote({ state, className = "mt-3" }: { state: Pick<CompanionState, "hostFirewall" | "port">; className?: string }) {
   if (state.hostFirewall !== "ufw" || !Number.isSafeInteger(state.port)) return null;
   return (

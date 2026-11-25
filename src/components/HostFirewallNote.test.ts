@@ -84,6 +84,7 @@ describe("the pairing panel when ufw likely drops the phone", () => {
 
   it("says nothing when the relay carries the pairing, ufw lets it in, the QR is hosted or the code expired", () => {
     expect(renderE2E({ state: e2e(true) })).not.toContain("data-host-firewall");
+    expect(renderE2E({ state: { ...e2e(false), endpoints: [{ url: "https://c-ada.example.com", kind: "hosted", priority: 0 }] } })).not.toContain("data-host-firewall");
     for (const over of [{ state: { ...state, hostFirewall: undefined } }, { localFallback: false }, { pairingExpired: true }]) {
       expect(render(over)).not.toContain("data-host-firewall");
     }

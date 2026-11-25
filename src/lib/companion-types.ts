@@ -55,7 +55,7 @@ export interface CompanionState {
   discovery?: { advertising: boolean; name: string };
   /** Windows has that network down as Public, where its firewall drops a phone's connection. */
   publicNetwork?: string;
-  /** Linux, while pairing: ufw is on and no rule the sidecar can read lets the device port in. */
+  /** Linux, while pairing: ufw is on, its rules are readable, and none lets the device port in. */
   hostFirewall?: "ufw";
   /** The end-to-end connection; absent or `enabled: false` until this computer serves it. */
   e2e?: {

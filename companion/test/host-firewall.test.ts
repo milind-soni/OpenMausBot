@@ -70,12 +70,17 @@ describe("ufw's files", () => {
     expect(ufwAllowsPort(rule("deny tcp 8810 0.0.0.0/0 any 0.0.0.0/0 in"), 8810)).toBe(false);
     expect(ufwAllowsPort(rule("allow tcp 8810 0.0.0.0/0 any 0.0.0.0/0 out"), 8810)).toBe(false);
     expect(ufwAllowsPort(rule("allow tcp 8811 0.0.0.0/0 any 0.0.0.0/0 in"), 8810)).toBe(false);
+    // Older lines with no direction (6 fields, or 8 with application names): ufw reads them as incoming.
+    expect(ufwAllowsPort(rule("allow tcp 8810 0.0.0.0/0 any 0.0.0.0/0"), 8810)).toBe(true);
+    expect(ufwAllowsPort(rule("allow tcp 8810 0.0.0.0/0 any 0.0.0.0/0 MausBot -"), 8810)).toBe(true);
+    expect(ufwAllowsPort(rule("allow udp 8810 0.0.0.0/0 any 0.0.0.0/0"), 8810)).toBe(false);
+    expect(ufwAllowsPort(rule("allow tcp 8810 0.0.0.0/0 any"), 8810)).toBe(false);
   });
 
   it("blocks only when ufw is on, drops by default, and no readable rule allows the port", () => {
     expect(ufwBlocksPort(8810, files())).toBe(true);
-    // user.rules is root-only on some distributions: can't tell, so the hint shows.
-    expect(ufwBlocksPort(8810, files({ "/etc/ufw/user.rules": null }))).toBe(true);
+    // user.rules is root-only (0640) where ufw's own installer set it up: can't tell, so nothing is said.
+    expect(ufwBlocksPort(8810, files({ "/etc/ufw/user.rules": null }))).toBe(false);
     expect(ufwBlocksPort(8810, files({ "/etc/ufw/ufw.conf": "ENABLED=no\n" }))).toBe(false);
     expect(ufwBlocksPort(8810, files({ "/etc/ufw/ufw.conf": null }))).toBe(false);
     expect(ufwBlocksPort(8810, files({ "/etc/default/ufw": 'DEFAULT_INPUT_POLICY="ACCEPT"\n' }))).toBe(false);

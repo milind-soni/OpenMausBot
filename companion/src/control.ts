@@ -220,7 +220,7 @@ export function companionState(options: Omit<ControlOptions, "controlToken">) {
     lan: lead?.address ?? null,
     // Windows has this network as Public, so its firewall likely drops a phone.
     ...(publicNetwork ? { publicNetwork } : {}),
-    // ufw is on and nothing we can read lets the device port in.
+    // ufw is on, its rules are readable, and none lets the device port in.
     ...(firewall ? { hostFirewall: firewall } : {}),
     hosts: hostCandidates(addresses, name),
     endpoints: companionEndpointCandidates(

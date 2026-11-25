@@ -413,7 +413,7 @@ setup`, install the distribution's FUSE 3 package (`fuse3` on Ubuntu, Debian and
 On Same Wi-Fi the phone connects to this computer on TCP port 8810. A host firewall that drops incoming connections
 stops it, and the phone can only say it couldn't reach the computer. Omarchy turns on ufw with "deny incoming" by
 default; stock Ubuntu ships ufw turned off. While a pairing code is open, the pairing panel says when ufw is on and
-no rule it can read allows the port. Either turn on **Anywhere, through MausBot** (it needs no open port), or allow
+its rules, where they are readable without root, allow nothing on that port. Either turn on **Anywhere, through MausBot** (it needs no open port), or allow
 the port:
 
 ```sh

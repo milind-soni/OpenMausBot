@@ -7,7 +7,8 @@ export type HostFirewall = "ufw";
 
 const UFW_CONF = "/etc/ufw/ufw.conf";
 const UFW_DEFAULTS = "/etc/default/ufw";
-/** World-readable on some distributions, 0640 root on others: unreadable means "can't tell". */
+/** World-readable on some distributions (Arch), 0640 root on others (ufw's own installer): unreadable means "can't
+ * tell", and then nothing is shown, since the person may well have allowed the port already. */
 const UFW_USER_RULES = "/etc/ufw/user.rules";
 
 /** `ENABLED=yes`: ufw starts at boot (`ufw enable` writes it). */
@@ -30,8 +31,9 @@ const portListed = (ports: string, port: number): boolean =>
 
 /**
  * Whether a rule in user.rules lets TCP in on `port`, from its `### tuple ###` lines: action, protocol, destination
- * port, destination, source port, source, [two application names,] and the direction last (`in`, `in_wlan0`). A rule
- * limited to some sources still counts: this only decides whether to show a hint. Null when the rules can't be read.
+ * port, destination, source port, source, [two application names,] and the direction last (`in`, `in_wlan0`). The
+ * older 6- and 8-field lines have no direction, and ufw reads them as incoming. A rule limited to some sources still
+ * counts: this only decides whether to show a hint. Null when the rules can't be read.
  */
 export function ufwAllowsPort(rules: string | null, port: number): boolean | null {
   if (rules === null) return null;
@@ -39,9 +41,9 @@ export function ufwAllowsPort(rules: string | null, port: number): boolean | nul
     const tuple = /^### tuple ###\s*(.*)$/.exec(line)?.[1]?.split(" comment=")[0]?.trim();
     if (!tuple) return false;
     const fields = tuple.split(/\s+/);
-    if (fields.length !== 7 && fields.length !== 9) return false;
+    if (fields.length < 6 || fields.length > 9) return false;
     const [action, protocol, ports] = fields;
-    const direction = fields[fields.length - 1];
+    const direction = fields.length % 2 === 0 ? "in" : fields[fields.length - 1];
     return /^(allow|limit)(_log(-all)?)?$/.test(action) &&
       (protocol === "tcp" || protocol === "any") &&
       (direction === "in" || direction.startsWith("in_")) &&
@@ -59,10 +61,10 @@ const readText: ReadText = (path) => {
   }
 };
 
-/** "ufw" when ufw is on, drops what it wasn't told to let in, and no rule it lets us read allows `port`. */
+/** "ufw" when ufw is on, drops what it wasn't told to let in, and its rules are readable and none allows `port`. */
 export function ufwBlocksPort(port: number, read: ReadText = readText): boolean {
   if (!ufwEnabled(read(UFW_CONF)) || !ufwDropsIncoming(read(UFW_DEFAULTS))) return false;
-  return ufwAllowsPort(read(UFW_USER_RULES), port) !== true;
+  return ufwAllowsPort(read(UFW_USER_RULES), port) === false;
 }
 
 /** How old an answer may be: someone who runs the allow command sees the hint go within this long. */
