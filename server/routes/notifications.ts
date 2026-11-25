@@ -1,5 +1,5 @@
 import { userError } from "../user-errors.ts";
-import { markNotificationLogRead, recentNotificationLog } from "../message-db.ts";
+import { clearNotificationLog, markNotificationLogRead, recentNotificationLog } from "../message-db.ts";
 import type { NotificationLogEntry } from "../../shared/notification.ts";
 import { ownerOrAdmin, type RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -42,13 +42,19 @@ export function notificationListedFor(shown: (auth: RequestAuth) => (threadId: s
 
 export type NotificationListed = ReturnType<typeof notificationListedFor>;
 
-export function createNotificationRoutes(deps: { recent(reader?: string): NotificationLogEntry[]; markRead(ids: readonly string[], reader?: string): void } = {
+export function createNotificationRoutes(deps: {
+  recent(reader?: string): NotificationLogEntry[];
+  markRead(ids: readonly string[], reader?: string): void;
+  clear(ids: readonly string[], reader?: string): void;
+} = {
   recent: (reader) => recentNotificationLog(undefined, reader),
   markRead: markNotificationLogRead,
+  clear: clearNotificationLog,
 }, listed: NotificationListed = notificationListedFor()): RouteHandler {
   const visible = (listing: NotificationListing) => deps.recent(listing.reader).filter(listing);
   const markRead = (ids: string[], reader: string | undefined) => (reader === undefined ? deps.markRead(ids) : deps.markRead(ids, reader));
-  return async ({ res, path, method, auth, json }) => {
+  const clear = (ids: string[], reader: string | undefined) => (reader === undefined ? deps.clear(ids) : deps.clear(ids, reader));
+  return async ({ res, url, path, method, auth, json }) => {
     if (method === "GET" && path === "/api/notifications") {
       return json(res, 200, { notifications: visible(listed(auth)) });
     }
@@ -57,6 +63,14 @@ export function createNotificationRoutes(deps: { recent(reader?: string): Notifi
     if (path === "/api/notifications/read-all") {
       const unread = visible(listing).filter((entry) => !entry.read).map((entry) => entry.id);
       if (unread.length) markRead(unread, listing.reader);
+      return json(res, 200, { ok: true });
+    }
+    if (path === "/api/notifications/clear") {
+      const raw = url.searchParams.get("before");
+      const before = raw === null ? Infinity : Number(raw);
+      if (raw !== null && !Number.isFinite(before)) return json(res, 400, { error: "before must be a time in milliseconds" });
+      const ids = visible(listing).filter((entry) => entry.at < before).map((entry) => entry.id);
+      if (ids.length) clear(ids, listing.reader);
       return json(res, 200, { ok: true });
     }
     const m = path.match(/^\/api\/notifications\/([\w-]+)\/read$/);

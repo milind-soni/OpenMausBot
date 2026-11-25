@@ -312,6 +312,7 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/auth\/session$/ },
   { methods: ["GET"], path: /^\/api\/notifications$/ },
   { methods: ["POST"], path: /^\/api\/notifications\/read-all$/ },
+  { methods: ["POST"], path: /^\/api\/notifications\/clear$/ },
   { methods: ["POST"], path: /^\/api\/notifications\/[\w-]+\/read$/ },
   // the update check only reads a version
   { methods: ["GET"], path: /^\/api\/updates\/check$/ },

@@ -1292,6 +1292,8 @@
   "notifications.railUnread": "Notificaciones, {count} sin leer",
   "notifications.unread": "{count} sin leer",
   "notifications.markAllRead": "Marcar todo como leído",
+  "notifications.clearAll": "Borrar todo",
+  "notifications.cleared": "Notificaciones borradas",
   "notifications.pin": "Fijar el panel de notificaciones",
   "notifications.unpin": "Dejar de fijar el panel de notificaciones",
   "notifications.close": "Cerrar el panel de notificaciones",

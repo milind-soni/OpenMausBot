@@ -1623,6 +1623,8 @@
   "notifications.railUnread": "通知、未読{count}件",
   "notifications.unread": "未読{count}件",
   "notifications.markAllRead": "すべて既読にする",
+  "notifications.clearAll": "すべて消去",
+  "notifications.cleared": "通知を消去しました",
   "notifications.pin": "通知を開いたままにする",
   "notifications.unpin": "通知の固定を解除",
   "notifications.close": "通知を閉じる",
