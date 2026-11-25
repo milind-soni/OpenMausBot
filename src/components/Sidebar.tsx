@@ -1093,7 +1093,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
         b.projects?.some((folder) => folder.name.toLowerCase().includes(q)),
     );
   const visibleGroups = sideLists.groups.filter((g) => !q || g.name.toLowerCase().includes(q) || g.tasks?.some((task) => task.title.toLowerCase().includes(q)));
-  const viewerEmail = useViewerEmail(), placed = useOtherPlaceBots(q, sidebarRef), placeHere = useOneListHere();
+  const viewerEmail = useViewerEmail(), placed = useOtherPlaceBots(q), placeHere = useOneListHere();
   const parts = partitionSidebarBots(botDrag.preview(matchingBots), { universalPins, viewerEmail, welcoming: useWelcomingBot(), searching: Boolean(q) });
   const saved = withOtherPlace(simpleDesk ? withPrimaryTile(parts, myDefaultBot(state.bots, viewerEmail)?.id) : { ...parts, primary: null }, placed);
   // Rows keep their place while the app is in use: unread, work and a wait on the person show as marks on the row, never

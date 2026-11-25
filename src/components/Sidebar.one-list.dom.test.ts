@@ -246,37 +246,19 @@ describe("switch on: one list", () => {
     expect(cloudPage).not.toContain("data-other-place");
   });
 
-  it("rows of the other place never push rows under the pointer: they come in plain at the end, and show their marks once the list is quiet", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-    try {
-      window.ogb = { placesTogether: page } as never;
-      let release!: (value: PlacesTogetherState) => void;
-      answer = () => new Promise((resolve) => { release = resolve; });
-      await render();
-      const aside = q("aside")!;
-      aside.dispatchEvent(new Event("pointerenter"));
-      const local = ids();
-      await act(async () => release(said({ other: { home: "cloud", state: "ready", bots: [row("tech", { unread: true, lastAt: 9_000 }), row("scout", { working: true })] } })));
-      // The pointer is over the list: this computer's rows stay where they were, the new rows wait at the end, plain.
-      expect(ids().slice(0, local.length)).toEqual(local);
-      expect(ids('[data-sidebar-section-id="builtin:bots"]')).toEqual(["git", "ledger", "cloud:tech", "cloud:scout"]);
-      expect(q('[data-sidebar-section-id="builtin:unread"]')).toBeNull();
-      expect(q('[data-sidebar-bot-row="cloud:scout"] [data-testid="working-dot"]')).toBeNull();
-      await act(async () => { vi.advanceTimersByTime(10_000); });
-      expect(q('[data-sidebar-section-id="builtin:unread"]')).toBeNull();
-      // Gone from the list, then a click on it within the quiet time: still waiting.
-      aside.dispatchEvent(new Event("pointerleave"));
-      aside.dispatchEvent(new Event("pointerdown"));
-      await act(async () => { vi.advanceTimersByTime(1_500); });
-      expect(q('[data-sidebar-section-id="builtin:unread"]')).toBeNull();
-      await act(async () => { vi.advanceTimersByTime(600); });
-      // Quiet: the rows stay where they are and now show what they say (Scout is working).
-      expect(q('[data-sidebar-section-id="builtin:unread"]')).toBeNull();
-      expect(ids('[data-sidebar-section-id="builtin:bots"]')).toEqual(["git", "ledger", "cloud:tech", "cloud:scout"]);
-      expect(q('[data-sidebar-bot-row="cloud:scout"] [data-testid="working-dot"]')).not.toBeNull();
-    } finally {
-      vi.useRealTimers();
-    }
+  it("rows of the other place come in at the end and show their marks at once, with the pointer on the list, moving no row", async () => {
+    window.ogb = { placesTogether: page } as never;
+    let release!: (value: PlacesTogetherState) => void;
+    answer = () => new Promise((resolve) => { release = resolve; });
+    await render();
+    q("aside")!.dispatchEvent(new Event("pointerenter"));
+    const local = ids();
+    await act(async () => release(said({ other: { home: "cloud", state: "ready", bots: [row("tech", { unread: true, lastAt: 9_000 }), row("scout", { working: true })] } })));
+    expect(ids().slice(0, local.length)).toEqual(local);
+    expect(ids('[data-sidebar-section-id="builtin:bots"]')).toEqual(["git", "ledger", "cloud:tech", "cloud:scout"]);
+    expect(q('[data-sidebar-section-id="builtin:unread"]')).toBeNull();
+    // No wait for the list to go quiet: Scout's working mark shows now, in its place.
+    expect(q('[data-sidebar-bot-row="cloud:scout"] [data-testid="working-dot"]')).not.toBeNull();
   });
 
   it("an answer that changes nothing moves nothing: the same rows stay, the same elements", async () => {
