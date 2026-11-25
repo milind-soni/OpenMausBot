@@ -6452,7 +6452,7 @@ bus.subscribe((event: RuntimeEvent) => {
       const providerTool = permission && asker && event.requestId && !event.requiresExplicitApproval && !guestDriven && !linkHeld && event.approvalScope !== "local-computer"
         ? providerMcpTool(event.tool)
         : null;
-      const configuredMcp = providerTool && asker ? providerToolConfig(providerTool.server, engineMcpServers(asker)) : undefined;
+      const configuredMcp = providerTool && asker ? providerToolConfig(providerTool.server, engineMcpServers(asker), event.provider) : undefined;
       const toolAllowKey = configuredMcp === undefined
         ? null
         : providerToolAllowKey(providerInstanceId, event.tool, configuredMcp);
