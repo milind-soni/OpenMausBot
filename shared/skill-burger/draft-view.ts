@@ -3,7 +3,7 @@
 // step repeats exactly or is the bot's to redo with judgement. Built on the server from the same draft a save writes,
 // so the step ids the person unticks are the ids that are saved. The person's choices (steps left out, inputs renamed
 // or given another value) are applied here too, the same way the save applies them.
-import { textLine, type Workflow, type WorkflowStep } from "./format.ts";
+import { textLine, workflowSchema, type Workflow, type WorkflowStep } from "./format.ts";
 import { askOf, type BurgerLayer, type LayerKind, type RunMessage } from "./layers.ts";
 
 const ASKED_MAX = 1_200;
@@ -167,5 +167,15 @@ export function applyChoices(workflow: Workflow, choices: DraftChoices | undefin
     if (!used(to)) continue;
     args[to] = { ...arg, ...(choice?.value !== undefined ? { default: choice.value } : {}) };
   }
-  return { ...workflow, args, steps };
+  const chosen = { ...workflow, args, steps };
+  const renamed = [...names].filter(([from, to]) => from !== to);
+  if (renamed.length) {
+    const parsed = workflowSchema.safeParse(chosen);
+    const limit = !parsed.success && parsed.error.issues.find((issue) => issue.code === "too_big" && issue.origin === "string" && issue.path[0] === "steps");
+    if (limit && limit.code === "too_big") {
+      const inputs = renamed.map(([from, to]) => `"${from}" to "${to}"`).join(", ");
+      return { error: `Renaming input names (${inputs}) makes "${steps[Number(limit.path[1])]!.label}" exceed its ${limit.maximum}-character limit.` };
+    }
+  }
+  return chosen;
 }
