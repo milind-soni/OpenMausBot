@@ -58,7 +58,7 @@ import {
 import { ANTIGRAVITY_NATIVE_CLI } from "./antigravity-cli-install.ts";
 import { acpFileEditWithin } from "./permission-command.ts";
 import { agentsToolBridged, BRIDGE_CLI_ENV } from "./agents-bridge.ts";
-import { rememberUnbridgeable } from "./antigravity-bridge-memory.ts";
+import { releaseOf, rememberUnbridgeable } from "./antigravity-bridge-memory.ts";
 import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
 import { AntigravityProcesses } from "./antigravity-processes.ts";
 import { VERIFICATION_TEMP_KEY, scheduleAntigravityTempSweep } from "./antigravity-temp.ts";
@@ -221,12 +221,13 @@ const support: AcpSupport = {
   // gets a new process, which keeps the names the approval path recognises.
   restartsOnMcpServersChange: (instanceId) => launched.get(instanceId)?.nativeCli === true,
   bridgeSpellingRefused: (_instanceId, version) => {
-    if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/u.test(version)) return " The tool bridge stays on: this CLI did not say its version.";
+    const release = releaseOf(version);
+    if (!release) return " The tool bridge stays on: this CLI did not say its version.";
     try {
-      rememberUnbridgeable(version);
-      return ` From the next message Antigravity CLI ${version} lists the agents tools directly; send the message again.`;
+      rememberUnbridgeable(release);
+      return ` From the next message Antigravity CLI ${release} lists the agents tools directly; send the message again.`;
     } catch {
-      return ` The tool bridge stays on for Antigravity CLI ${version}: its record could not be saved.`;
+      return ` The tool bridge stays on for Antigravity CLI ${release}: its record could not be saved.`;
     }
   },
   launchRefusal: (turn, launch) => agentsToolBridged(turn.integrations?.agents) && turn.integrations?.agents?.env?.[BRIDGE_CLI_ENV] !== launch.command

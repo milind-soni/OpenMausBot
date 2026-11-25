@@ -96,6 +96,13 @@ describe("bridging a native Antigravity account's turn", () => {
     expect(decided({ ...engine, nativeCli: { executablePath: CLI, version: "1.5.16" } }, host)).toBeNull();
   });
 
+  it("matches a recorded release by its major.minor.patch, however the install record spells it", () => {
+    const { engine, host } = setup({ nativeCli: { executablePath: CLI, version: "1.5.17 " } });
+    rememberUnbridgeable("1.5.17", host.unbridgeableFile);
+    expect(decided(engine, host)).toMatch(/form this version does not know/u);
+    expect(decided({ ...engine, nativeCli: { executablePath: CLI, version: "agy_acp_server_1.5.17" } }, host)).toMatch(/form this version does not know/u);
+  });
+
   it("takes a damaged record for none", () => {
     const { engine, host } = setup();
     write(host.unbridgeableFile!, "{not json");
@@ -103,7 +110,7 @@ describe("bridging a native Antigravity account's turn", () => {
   });
 
   it("is off when another of the turn's servers is named like the agents server, and on beside other names", () => {
-    for (const name of ["agents", "Agents", "agents_x", "AGENTS_tools"]) {
+    for (const name of ["agents", "Agents", "agents_x", "AGENTS_tools", "agents-2026", "agents.x"]) {
       const { engine, host } = setup({ customMcpServers: ["notes", name] });
       expect(decided(engine, host), name).toBe("another MCP server's name starts like the agents server's");
     }

@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 
 import { antigravityProfileDirectory } from "./drivers/antigravity-acp.ts";
 import { isAntigravityNativeAlias, resolveAntigravityRuntime } from "./drivers/antigravity-runtime.ts";
-import { unbridgeableFile, unbridgeableVersions } from "./drivers/antigravity-bridge-memory.ts";
+import { releaseOf, unbridgeableFile, unbridgeableVersions } from "./drivers/antigravity-bridge-memory.ts";
 import { parseVersionTriple, versionAtLeast } from "./drivers/acp/version-probe.ts";
 
 
@@ -157,11 +157,11 @@ export function antigravityRefusal(engine: AntigravityBridgeEngine, host: Antigr
   if (!isAntigravityNativeAlias(cliOf(engine.config))) return "the account does not name the native Antigravity CLI";
   if (!engine.nativeCli) return "the native Antigravity CLI is not installed";
   if (!bridgedRelease(engine.nativeCli.version)) return `native Antigravity CLI ${engine.nativeCli.version} is outside the releases the bridge is used with`;
-  if (unbridgeableVersions(host.unbridgeableFile ?? unbridgeableFile()).includes(engine.nativeCli.version)) {
+  if (unbridgeableVersions(host.unbridgeableFile ?? unbridgeableFile()).includes(releaseOf(engine.nativeCli.version) ?? "")) {
     return `native Antigravity CLI ${engine.nativeCli.version} asked for a bridged tool in a form this version does not know`;
   }
   if (engine.customMcpServers === undefined) return "the turn's MCP servers are not known";
-  if (engine.customMcpServers.some((name) => /^agents(?:_|$)/iu.test(name))) return "another MCP server's name starts like the agents server's";
+  if (engine.customMcpServers.some((name) => /^agents(?:[._:/-]|$)/iu.test(name))) return "another MCP server's name starts like the agents server's";
   const workspace = (engine.config as { workspace?: unknown } | undefined)?.workspace;
   const folder = engine.cwd ?? (typeof workspace === "string" && workspace ? workspace : host.home);
   try {

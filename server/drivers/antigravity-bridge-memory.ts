@@ -5,6 +5,13 @@ import { join } from "node:path";
 
 import { writeFileAtomic } from "../atomic.ts";
 import { DATA_DIR } from "../config.ts";
+import { parseVersionTriple } from "./acp/version-probe.ts";
+
+/** A release as recorded and looked up: its major.minor.patch, whatever else the CLI or the install record adds. */
+export function releaseOf(version: unknown): string | null {
+  const triple = typeof version === "string" ? parseVersionTriple(version) : null;
+  return triple ? triple.join(".") : null;
+}
 
 const FILE = "antigravity-bridge.json";
 
@@ -22,8 +29,8 @@ export function unbridgeableVersions(file = unbridgeableFile()): string[] {
   }
 }
 
-export function rememberUnbridgeable(version: string, file = unbridgeableFile()): void {
+export function rememberUnbridgeable(release: string, file = unbridgeableFile()): void {
   const known = unbridgeableVersions(file);
-  if (known.includes(version)) return;
-  writeFileAtomic(file, `${JSON.stringify({ unbridgeable: [...known, version] }, null, 2)}\n`, { mode: 0o600 });
+  if (known.includes(release)) return;
+  writeFileAtomic(file, `${JSON.stringify({ unbridgeable: [...known, release] }, null, 2)}\n`, { mode: 0o600 });
 }

@@ -10,10 +10,13 @@ type ToolCall = { name?: unknown; title?: unknown; kind?: unknown; rawInput?: un
 export type BridgedPermission =
   | { kind: "ordinary" }
   | { kind: "refuse" }
+  | { kind: "reject" }
   | { kind: "find" }
   | { kind: "use"; toolCall: ToolCall };
 
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
+/** A name with every run of separators as one underscore, in lower case. */
+const plain = (text: string) => text.toLowerCase().replace(/[._:/-]+/gu, "_");
 
 /** Recorded on native Antigravity 1.5.14 and 1.5.16: `name` mcp_agents_<tool>, `title` Run mcp_agents_<tool>. */
 const RECORDED = /^mcp_agents_([\w.-]+)$/u;
@@ -41,13 +44,13 @@ export function otherMcpServers(integrations: { custom?: Record<string, unknown>
 export function bridgedPermission(toolCall: ToolCall, bridged: boolean, catalog: ReadonlySet<string>, others: readonly string[] = []): BridgedPermission {
   if (!bridged) return { kind: "ordinary" };
   const names = namesOf(toolCall);
+  // A mounted server's own tool, mcp_<server>_<tool> with any separator: neither its name nor its input is the agents server's.
+  if (names.length > 0 && names.every((name) => others.some((server) => plain(name).startsWith(`mcp_${plain(server)}_`)))) return { kind: "ordinary" };
   const recorded = names.map((name) => RECORDED.exec(name)?.[1]);
   const byName = names.some((name) => BRIDGE_SPELLING.test(name));
   if (!byName) {
     const direct = names.length > 0 && recorded.every((tool) => tool !== undefined && catalog.has(tool));
-    // A mounted server's own tool, by the CLI's mcp_<server>_<tool>: its input says nothing about the agents server.
-    const elsewhere = names.length > 0 && names.every((name) => others.some((server) => name.startsWith(`mcp_${server}_`)));
-    if (direct || elsewhere) return { kind: "ordinary" };
+    if (direct) return { kind: "ordinary" };
     const input = record(toolCall.rawInput) ? toolCall.rawInput : {};
     const shaped = typeof input.name === "string" && catalog.has(input.name) && (input.arguments == null || record(input.arguments));
     return shaped ? { kind: "refuse" } : { kind: "ordinary" };
@@ -58,7 +61,7 @@ export function bridgedPermission(toolCall: ToolCall, bridged: boolean, catalog:
   if (tool === FIND_TOOL) return { kind: "find" };
   const input = record(toolCall.rawInput) ? toolCall.rawInput : {};
   const inner = typeof input.name === "string" && input.name.trim() ? input.name : undefined;
-  if (!inner) return { kind: "refuse" };
+  if (!inner) return { kind: "reject" };
   return {
     kind: "use",
     toolCall: {
@@ -69,12 +72,14 @@ export function bridgedPermission(toolCall: ToolCall, bridged: boolean, catalog:
   };
 }
 
-/** How the driver answers a bridged request itself, with no card: find_tool allowed once, a refused spelling rejected,
- * and a use_tool that offers no allow_once cancelled, since no answer to its card could allow it.
+/** How the driver answers a bridged request itself, with no card: find_tool allowed once, a refused spelling rejected
+ * with a note (the release then falls back), a recorded-spelling use_tool that names no tool rejected alone, and a
+ * use_tool that offers no allow_once cancelled, since no answer to its card could allow it.
  * `end` ends the turn: after a refusal, or when the agent offered no option to answer with. */
 export function bridgedAlone(permission: BridgedPermission, optionFor: (want: "allow" | "reject") => string | null, agent: string):
   { optionId: string | null; missing?: "allow" | "reject"; note?: string; end: boolean } | undefined {
   if (permission.kind === "use") return optionFor("allow") ? undefined : { optionId: null, missing: "allow", end: true };
+  if (permission.kind === "reject") { const optionId = optionFor("reject"); return { optionId, ...(optionId ? {} : { missing: "reject" as const }), end: !optionId }; }
   if (permission.kind !== "refuse" && permission.kind !== "find") return undefined;
   const want = permission.kind === "find" ? "allow" : "reject";
   const optionId = optionFor(want);

@@ -131,7 +131,6 @@ describe.skipIf(WINDOWS)("an Antigravity permission request on a turn whose agen
     ["Claude's spelling", { toolCallId: "call_1", title: "mcp__agents__use_tool", kind: "other", rawInput: { name: "list_threads" } }],
     ["a server the turn did not mount, carrying use_tool's input", { toolCallId: "call_1", name: "mcp_ghost_run", title: "Run mcp_ghost_run", kind: "other", rawInput: { name: "vm_exec", arguments: { command: "ls" } } }],
     ["a later release's dotted find_tool", { toolCallId: "call_1", name: "mcp.agents.find_tool", title: "Run mcp.agents.find_tool", kind: "other", rawInput: { query: "threads" } }],
-    ["a use_tool that names no tool", native("use_tool", {})],
     ["an unknown name carrying use_tool's input with null arguments", { toolCallId: "call_1", name: "agents/use_tool", title: "agents/use_tool", kind: "other", rawInput: { name: "list_threads", arguments: null } }],
     ["an unknown name carrying use_tool's input", { toolCallId: "call_1", name: "agents/use_tool", title: "agents/use_tool", kind: "other", rawInput: { name: "vm_exec", arguments: { command: "ls" } } }],
   ])("refuses %s on full access and ends the turn", async (label, toolCall) => {
@@ -139,6 +138,18 @@ describe.skipIf(WINDOWS)("an Antigravity permission request on a turn whose agen
     expect(result).toMatchObject({ card: false, answer: "deny", completed: true });
     expect(result.errors.some((message) => message.includes("tool bridge") && message.includes("From the next message Antigravity CLI 1.5.16 lists the agents tools directly"))).toBe(true);
     expect(unbridgeableVersions()).toEqual(["1.5.16"]);
+  }, 90_000);
+
+  it("rejects a use_tool in the recorded spelling that names no tool, and leaves its release bridged", async () => {
+    const result = await asked("use-no-name", { approvalMode: "auto", version: "1.5.19", toolCall: native("use_tool", {}) });
+    expect(result).toMatchObject({ answer: "deny", card: false });
+    expect(result.errors.some((message) => message.includes("tool bridge"))).toBe(false);
+    expect(unbridgeableVersions()).not.toContain("1.5.19");
+  }, 90_000);
+
+  it("leaves a mounted server's call in another separator alone", async () => {
+    const sql = { toolCallId: "call_1", name: "mcp.data.data_sql", title: "Run mcp.data.data_sql", kind: "other", rawInput: { sql: "SELECT 1", name: "list_threads" } };
+    expect(await asked("data-sql-dotted", { approvalMode: "auto", toolCall: sql, mountData: true })).toMatchObject({ card: false, answer: "allow", errors: [] });
   }, 90_000);
 
   it("still refuses and ends the turn when the record cannot be saved, and says the bridge stays on", async () => {
