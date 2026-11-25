@@ -1,6 +1,6 @@
 // The fake Claude CLI's sign-in is its own files (FAKE_CLAUDE_HOME_FILES, FAKE_CLAUDE_AUTH=file), written here as a
 // terminal's `claude auth login` would.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -16,6 +16,7 @@ async function withSignedOutClaude(check: (fixture: {
   /** How many prompts the fake CLI was given that carry `text`. */
   promptsWith: (text: string) => number;
   signIn: () => Promise<void>;
+  signOut: () => Promise<void>;
   /** The conversation as it reads now: its active branch, from the root to the active leaf. */
   activePath: (threadId: string) => Promise<Row[]>;
   all: (threadId: string) => Promise<Row[]>;
@@ -52,6 +53,10 @@ async function withSignedOutClaude(check: (fixture: {
         writeFileSync(join(claudeHome, ".credentials.json"), JSON.stringify({ claudeAiOauth: { accessToken: "fixture-token-not-a-credential" } }));
         writeFileSync(join(claudeHome, "fake-auth.json"), JSON.stringify({ email: "fixture@example.com" }));
         await expect.poll(signedIn, { timeout: 20_000 }).toBe(true);
+      },
+      signOut: async () => {
+        for (const file of [".credentials.json", "fake-auth.json"]) rmSync(join(claudeHome, file), { force: true });
+        await expect.poll(signedIn, { timeout: 20_000 }).toBe(false);
       },
       activePath: async (threadId) => {
         const { messages, activeLeafId } = await page(threadId);
@@ -128,5 +133,26 @@ it("a conversation moved to another model meanwhile is not run again, and its no
     ]);
     expect(setupRows(now).map((row) => row.tool!.name)).toEqual(["error: Not logged in · Please run /login"]);
     expect(promptsWith("Draft the launch plan")).toBe(1);
+  });
+}, hostTimeout(240_000));
+
+it("a message refused between two sign-ins a few seconds apart runs again after the second, and its notice says so", async () => {
+  await withSignedOutClaude(async ({ control, promptsWith, signIn, signOut, activePath, all, evidence }) => {
+    const kai = (await control("new-bot", "--name", "Kai")).bot;
+    const started = Date.now();
+    await signIn();
+    await signOut();
+    await control("send", "--bot", kai.id, "--task", kai.activeTaskId, "--text", "Draft the launch plan");
+    expect((await control("wait", "--bot", kai.id, "--task", kai.activeTaskId, "--timeout", "30")).status).toBe("failed");
+    expect(promptsWith("Draft the launch plan")).toBe(1);
+    await signIn();
+    evidence.push({ secondsBetweenSignIns: (Date.now() - started) / 1000 });
+    expect(Date.now() - started, "both sign-ins within a minute").toBeLessThan(60_000);
+    await expect.poll(() => promptsWith("Draft the launch plan"), { timeout: 30_000 }).toBe(2);
+    expect((await control("wait", "--bot", kai.id, "--task", kai.activeTaskId, "--timeout", "30")).status).toBe("settled");
+    await expect.poll(async () => (await all(kai.activeTaskId)).some((row) => row.tool?.nameCode === "chat.notice.signedInAgain"), { timeout: 30_000 }).toBe(true);
+    const now = await activePath(kai.activeTaskId);
+    evidence.push({ now });
+    expect(now.filter((row) => row.tool?.setup)).toEqual([]);
   });
 }, hostTimeout(240_000));
