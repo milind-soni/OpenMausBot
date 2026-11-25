@@ -1004,6 +1004,8 @@
   "notifications.railUnread": "Thông báo, {count} chưa đọc",
   "notifications.unread": "{count} chưa đọc",
   "notifications.markAllRead": "Đánh dấu tất cả là đã đọc",
+  "notifications.clearAll": "Xóa hết",
+  "notifications.cleared": "Đã xóa thông báo",
   "notifications.pin": "Ghim để luôn mở Thông báo",
   "notifications.unpin": "Bỏ ghim Thông báo",
   "notifications.close": "Đóng Thông báo",

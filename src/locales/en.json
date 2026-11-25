@@ -2004,6 +2004,8 @@
   "notifications.railUnread": "Notifications, {count} unread",
   "notifications.unread": "{count} unread",
   "notifications.markAllRead": "Mark all read",
+  "notifications.clearAll": "Clear all",
+  "notifications.cleared": "Notifications cleared",
   "notifications.pin": "Pin Notifications open",
   "notifications.unpin": "Unpin Notifications",
   "notifications.close": "Close Notifications",
