@@ -103,6 +103,7 @@ import {
 } from "@/lib/composer-commands";
 import { useSlashSkills } from "@/lib/use-slash-skills";
 import { randomUuid } from "@/lib/random-uuid";
+import { useComposerThreadCommand } from "./use-composer-thread-command";
 
 const supportsAgents = (instances: InstanceInfo[], candidate?: Bot) =>
   Boolean(candidate && instances.find((instance) => instance.instanceId === candidate.modelSelection.instanceId)?.capabilities?.agentsMcp);
@@ -304,6 +305,12 @@ export function Composer({
   };
   const typedGoalText = !group?.dm ? goalTextFromComposer(text) : null;
   const effectiveText = typedGoalText ?? text;
+  // A room's threads are managed from the room, and a blank New thread has no conversation to act on yet.
+  const threadCommandAvailable = !group && Boolean(composerTask);
+  const { command: threadCommand, run: runThreadCommand, dialog: threadCommandDialog } = useComposerThreadCommand({
+    text: threadCommandAvailable ? text : "", botId: threadCommandAvailable ? bot?.id : undefined, threadId, mainThreadId: profile?.mainThreadId, threads: profile?.tasks,
+    title: composerTask?.title, busy, dispatch, returnFocusRef: inputRef, onCleared: () => { editText(""); setAttachments([]); picks.clear(); setCaret(0); setDismissedSlashAt(null); onConsumeReply?.(); setChannelMode("chat"); },
+  });
   const effectiveChannelMode = typedGoalText !== null ? "goal" : channelMode;
   const engineSupportsImages = imageTargetsSupport(effectiveText, effectiveChannelMode);
 
@@ -337,9 +344,11 @@ export function Composer({
       description: t("composer.command.setupDesc"),
     }, { kind: "command", id: "burst", label: "/burst", description: t("composer.command.burstDesc") });
     if (builtIns && forkOwnerId) available.push({ kind: "command", id: "fork", label: "/fork", description: t("composer.command.forkDesc") });
+    if (builtIns && !group && bot && composerTask) available.push({ kind: "command", id: "archive", label: "/archive", description: t("composer.command.archiveDesc") },
+      { kind: "command", id: "delete", label: "/delete", description: t("composer.command.deleteDesc") });
     available.push(...skillSlashCommands(slashSkills).filter((command) => !(builtIns && forkOwnerId && command.id === "fork")));
     return available.filter((command) => slashCommandMatches(command, slash.query));
-  }, [slash, dismissedSlashAt, group, bot, canLearn, state.instances, locale, slashSkills, forkOwnerId]);
+  }, [slash, dismissedSlashAt, group, bot, composerTask, canLearn, state.instances, locale, slashSkills, forkOwnerId]);
   const commandPickerOpen = commandCandidates.length > 0;
 
   const mention = mentionQueryAt(text, caret); const teammates = useTeammates(); const viewer = useViewerEmail();
@@ -567,6 +576,7 @@ export function Composer({
   };
   const send = (followUp: FollowUp | undefined = followUpFor(false)) => {
     if (locked || attachmentPending) return;
+    if (threadCommand) { setDismissedSlashAt(slash?.start ?? 0); runThreadCommand(); return; }
     if (fork.command) {
       setDismissedSlashAt(slash?.start ?? 0);
       fork.submit();
@@ -833,7 +843,9 @@ export function Composer({
             // An input method's confirming Enter and arrows pick its own candidates, not a mention or command.
             if (imeComposing(e.nativeEvent)) return;
             const submitsFork = fork.command && commandCandidates[highlight]?.id === "fork" && sendsMessage(e.nativeEvent, sendKey);
-            if (commandPickerOpen && !submitsFork) {
+            // A complete /archive or /delete is its own action: Enter runs it instead of only completing the word.
+            const submitsThreadCommand = Boolean(threadCommand) && commandCandidates[highlight]?.id === threadCommand && sendsMessage(e.nativeEvent, sendKey);
+            if (commandPickerOpen && !submitsFork && !submitsThreadCommand) {
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                 e.preventDefault();
                 const delta = e.key === "ArrowDown" ? 1 : -1;
@@ -979,6 +991,7 @@ export function Composer({
       <div className="pointer-events-auto">
       {approvalDialogs}
       </div>
+      {threadCommandDialog}
     </div>
   );
 }
