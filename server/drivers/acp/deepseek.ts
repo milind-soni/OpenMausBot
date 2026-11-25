@@ -27,11 +27,12 @@
 // Picker ids are `<provider>/<model>` so bot settings, badges and config.json
 // stay readable; resolveTurnModel turns them into dsh's wire pair just before
 // the core selects the model.
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parse as parseYaml, stringify } from "yaml";
 
+import { writeFileAtomicIfChanged } from "../../atomic.ts";
 import { cliVersionProbe } from "../../cli-version-probe.ts";
 import { DATA_DIR } from "../../config.ts";
 import type { ModelCatalog } from "../../contracts.ts";
@@ -323,8 +324,8 @@ const sandboxPatch = join(approvalDir, "approval-sandbox.patch.yml");
 function approvalPatch(review: boolean): string {
   const patch = review ? reviewPatch : sandboxPatch;
   mkdirSync(approvalDir, { recursive: true });
-  writeFileSync(approvalPlugin, DSH_APPROVAL_PLUGIN);
-  writeFileSync(patch, stringify([{ insert: [
+  writeFileAtomicIfChanged(approvalPlugin, DSH_APPROVAL_PLUGIN);
+  writeFileAtomicIfChanged(patch, stringify([{ insert: [
     { id: "openmausbot-approval-preset", name: approvalPlugin, config: { review, dataDir: DATA_DIR } },
   ] }]));
   return patch;

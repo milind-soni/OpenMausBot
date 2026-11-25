@@ -119,7 +119,7 @@ describe("dsh approval plugin", () => {
     expect(f.next).toHaveBeenCalledTimes(2);
   });
 
-  it("uses the session route, the last matching call and the three most recent user instructions verbatim", async () => {
+  it("uses the session route, the last matching call and every user instruction verbatim in session order", async () => {
     const long = "keep the entire text ".repeat(3000);
     const f = fixture({ events: [
       call("call-1", "old-tool", "{}"), instruction("user", textBlock("Older instruction")),
@@ -142,7 +142,7 @@ describe("dsh approval plugin", () => {
     const { cwd } = f.session.header;
     expect(f.environment()).toEqual({ cwd, sandbox: "workspace-write", writableRoots: [cwd, f.memory, "/tmp"], omb_data_dir: f.dataDir });
     expect(messages.slice(1).map(m => JSON.parse(m.content[0].text))).toEqual([
-      ...[" first\nhalf ", long, "Third"].map(text => ({ role: "user-instruction", text })),
+      ...["Older instruction", " first\nhalf ", long, "Third"].map(text => ({ role: "user-instruction", text })),
       { kind: "pending-escalation", tool: "bash", arguments: pending.data.arguments, requested_mode: "danger-full-access", justification },
     ]);
   });

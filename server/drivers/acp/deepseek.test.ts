@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -203,6 +203,13 @@ describe("DeepSeek approval patch", () => {
   const resolveCommand = (version: string, config: { cli: string; fullAuto: boolean }) =>
     deepseekSupport.resolveCommand!({ PATH: [bin, process.env.PATH].join(delimiter), SystemRoot: process.env.SystemRoot, FAKE_ACP_VERSION: version }, config, "deepseek");
 
+  function expectApprovalFiles(patch: string, review: boolean) {
+    expect(readFileSync(plugin, "utf8")).toBe(DSH_APPROVAL_PLUGIN);
+    expect(parse(readFileSync(patch, "utf8"))).toEqual([{ insert: [
+      { id: "openmausbot-approval-preset", name: plugin, config: { review, dataDir: DATA_DIR } },
+    ] }]);
+  }
+
   it.each([
     ["0.2.2-rc.2", "auto"], ["0.2.2-rc.5", "auto"], ["0.2.3-alpha.2", "auto"],
     ["0.2.2-rc.2", "ask"], ["0.2.2-rc.2", "full"], ["0.2.2-rc.2", undefined],
@@ -215,10 +222,29 @@ describe("DeepSeek approval patch", () => {
     });
     expect(deepseekSupport.spawnArgs(config, { threadId: "t", text: "hi", approvalMode }))
       .toEqual(["--profile", "acp", "--patch", patch]);
-    expect(parse(readFileSync(patch, "utf8"))).toEqual([{ insert: [
-      { id: "openmausbot-approval-preset", name: plugin, config: { review, dataDir: DATA_DIR } },
-    ] }]);
-    expect(readFileSync(plugin, "utf8")).toBe(DSH_APPROVAL_PLUGIN);
+    expectApprovalFiles(patch, review);
+  });
+
+  it("atomically replaces stale approval files and reuses them on the next launch", async () => {
+    const config = { cli, fullAuto: false };
+    const turn = { threadId: "t", text: "hi", approvalMode: "auto" } as const;
+    const patch = join(dir, "approval-review.patch.yml");
+    const files = [plugin, patch];
+    const inodes = () => files.map(path => statSync(path, { bigint: true }).ino);
+    mkdirSync(dir, { recursive: true });
+    for (const path of files) writeFileSync(path, "stale");
+    const stale = inodes();
+
+    await resolveCommand("0.2.2-rc.2", config);
+    deepseekSupport.spawnArgs(config, turn);
+    expectApprovalFiles(patch, true);
+    const current = inodes();
+    for (const [i, inode] of current.entries()) expect(inode).not.toBe(stale[i]);
+    expect(readdirSync(dir).filter(name => name.endsWith(".tmp"))).toEqual([]);
+
+    deepseekSupport.spawnArgs(config, turn);
+    expect(inodes()).toEqual(current);
+    expect(readdirSync(dir).filter(name => name.endsWith(".tmp"))).toEqual([]);
   });
 
   it.each(["0.2.2-rc.1", "0.2.1-rc.2", "unknown", ""])(
