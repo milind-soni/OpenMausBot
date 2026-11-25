@@ -68,13 +68,30 @@ describe("bridging a native Antigravity account's turn", () => {
   });
 
   it.each([
-    ["the default path", { config: { cli: "agy" } }],
-    ["no path", { config: {} }],
-    ["an absolute path", { config: { cli: "/usr/local/bin/antigravity" } }],
-  ])("is off for an account set to %s", (_label, overrides) => {
-    const { engine, host } = setup(overrides as Partial<BridgeEngine>);
+    ["the default path", { cli: "agy" }],
+    ["no path", {}],
+    ["a blank path", { cli: "  " }],
+  ])("is on for an account set to %s that runs the native CLI this app installed", (_label, config) => {
+    const { engine, host } = setup({ config });
+    expect(decided(engine, host)).toBeNull();
+  });
+
+  it.each([
+    ["the default path", { cli: "agy" }],
+    ["no path", {}],
+  ])("is off for an account set to %s that runs the pinned runtime", (_label, config) => {
+    const { engine, host } = setup({ config, nativeCli: undefined });
     expect(decided(engine, host)).toBe("the switch is off");
-    expect(engineBridgeRefusal({}, engine, {}, host)).toBe("the account does not name the native Antigravity CLI");
+    expect(engineBridgeRefusal({}, engine, {}, host)).toBe("the account does not run the native Antigravity CLI this app installed");
+  });
+
+  it.each([
+    ["an absolute path", { cli: "/usr/local/bin/antigravity" }],
+    ["the pinned runtime's alias", { cli: "agy_acp_server" }],
+  ])("is off for an account set to %s, whatever it runs", (_label, config) => {
+    const { engine, host } = setup({ config });
+    expect(decided(engine, host)).toBe("the switch is off");
+    expect(engineBridgeRefusal({}, engine, {}, host)).toBe("the account names an Antigravity program of its own");
   });
 
   it("is on from 1.5.14, whose permission requests were recorded, to before 1.6.0", () => {
@@ -87,7 +104,8 @@ describe("bridging a native Antigravity account's turn", () => {
       expect(decided(engine, host), version).toMatch(/outside the releases the bridge is used with/u);
     }
     const { engine, host } = setup({ nativeCli: undefined });
-    expect(decided(engine, host)).toBe("the native Antigravity CLI is not installed");
+    expect(decided(engine, host)).toBe("the switch is off");
+    expect(engineBridgeRefusal({}, engine, {}, host)).toBe("the account does not run the native Antigravity CLI this app installed");
   });
 
   it("is off for a release recorded as asking in a spelling this version does not know, and only for that release", () => {

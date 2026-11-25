@@ -63,6 +63,9 @@ try {
   writeFileSync(ownTools, JSON.stringify(Array.from({ length: 12 }, (_, i) => ({
     name: `note_${i}`, description: `Reads saved note ${i}. `.repeat(30), inputSchema: { type: "object", properties: { id: { type: "string", description: "Which note.".repeat(20) } } },
   }))));
+  const { bot: newcomer } = await api("POST", "/api/bots", { name: "Newcomer", description: "On an account a new install leaves.", modelSelection: { instanceId: "antigravityDefault", model: "fixture-base-model" } });
+  await say(newcomer.id, "fake-agy: tools", "default path: tools the model sees");
+  check("an account with no CLI path that runs the native CLI is bridged too", lastTools()?.visible.includes("mcp_agents_find_tool") === true, lastTools()?.visible);
   report.ownServer = await api("POST", "/api/mcp/servers", { name: "notes", command: process.execPath, args: [fileURLToPath(new URL("../server/testing/fake-mcp-server.ts", import.meta.url))], env: { FAKE_MCP_TOOLS_FILE: ownTools }, enabled: true });
 
   await api("PATCH", "/api/mcp/servers/notes", { enabled: true });

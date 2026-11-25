@@ -338,9 +338,11 @@ export async function launchVerificationServer(
   // The native Antigravity CLI stand-in installed as the app installs Google's, already signed in.
   if (extraProviders.includes("antigravity")) {
     installFakeManagedCli(dataDir, "b".repeat(64), parentEnv.FAKE_AGY_VERSION ?? "1.5.16");
-    const credential = join(antigravityProfileDirectory("antigravity", dataDir), "antigravity-acp", "antigravity-oauth-token");
-    mkdirSync(dirname(credential), { recursive: true });
-    writeFileSync(credential, "{}\n", { mode: 0o600 });
+    for (const instanceId of ["antigravity", "antigravityDefault"]) {
+      const credential = join(antigravityProfileDirectory(instanceId, dataDir), "antigravity-acp", "antigravity-oauth-token");
+      mkdirSync(dirname(credential), { recursive: true });
+      writeFileSync(credential, "{}\n", { mode: 0o600 });
+    }
   }
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
     ...(boatFixtureApi ? { box: { token: "box_verification_fixture" } } : {}),
@@ -352,11 +354,15 @@ export async function launchVerificationServer(
         driver: "kimiAgent", displayName: "Verification Kimi",
         config: { cli: fileURLToPath(new URL("../server/testing/fake-acp-cli.ts", import.meta.url)) },
       } } : {}),
-      ...(extraProviders.includes("antigravity") ? { antigravity: {
-        driver: "antigravityAgent", displayName: "Verification Antigravity", config: { cli: "antigravity", fullAuto: false },
+      ...(extraProviders.includes("antigravity") ? Object.fromEntries(([
+        // The CLI path Switch to Google Antigravity CLI saves, and none, which a new install leaves.
+        ["antigravity", { cli: "antigravity" }], ["antigravityDefault", {}],
+      ] as Array<[string, Record<string, string>]>).map(([id, path]) => [id, {
+        driver: "antigravityAgent", displayName: id === "antigravity" ? "Verification Antigravity" : "Verification Antigravity (default path)",
+        config: { ...path, fullAuto: false },
         environment: { FAKE_AGY_LOG: join(dataDir, "fake-antigravity.log"),
           ...Object.fromEntries(Object.entries(parentEnv).filter(([key, value]) => key.startsWith("FAKE_AGY_") && key !== "FAKE_AGY_LOG" && value)) },
-      } } : {}),
+      }])) : {}),
       ...(extraProviders.includes("grok") ? { grok: {
         driver: "grokAgent", displayName: "Verification Grok",
         config: { cli: fileURLToPath(new URL("../server/testing/fake-acp-cli.ts", import.meta.url)), fullAuto: true },

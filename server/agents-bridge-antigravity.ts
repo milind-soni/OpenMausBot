@@ -34,18 +34,26 @@ const cliOf = (config: unknown): string | undefined => {
   return typeof cli === "string" ? cli : undefined;
 };
 
-/** Whether this account's turns run the native CLI and so lose their largest MCP tools past the CLI's budget
- * (google-antigravity/antigravity-cli#1530). Only the bare alias counts: it can start nothing but the native CLI. */
-export function dropsToolsPastBudget(engine: { driverKind: string; config?: unknown } | null | undefined): boolean {
-  return engine?.driverKind === "antigravityAgent" && isAntigravityNativeAlias(cliOf(engine.config));
+/** Whether the account leaves its runtime to this app: the native CLI's alias, or no path or `agy`, which run the native
+ * CLI wherever this computer has chosen it. A path of the person's own or the pinned runtime's alias never counts. */
+function appChoosesRuntime(cli: string | undefined): boolean {
+  const named = cli?.trim();
+  return !named || named === "agy" || isAntigravityNativeAlias(named);
 }
 
-/** The native CLI release a turn of this account would start, read from the install records without starting it. */
+/** Whether this turn runs the native CLI this app installed, and so would lose its largest MCP tools past the CLI's
+ * budget (google-antigravity/antigravity-cli#1530). */
+export function dropsToolsPastBudget(engine: { driverKind: string; config?: unknown; nativeCli?: NativeCliRelease } | null | undefined): boolean {
+  return engine?.driverKind === "antigravityAgent" && appChoosesRuntime(cliOf(engine.config)) && engine.nativeCli !== undefined;
+}
+
+/** The native CLI release this app installed that a turn of this account would start, read from the install records as
+ * the driver reads them; undefined for the pinned runtime, a CLI found on PATH or a path of the person's own. */
 export async function antigravityNativeRelease(engine: { driverKind: string; config?: unknown }, env: NodeJS.ProcessEnv = process.env): Promise<NativeCliRelease | undefined> {
-  if (!dropsToolsPastBudget(engine)) return undefined;
+  if (engine.driverKind !== "antigravityAgent" || !appChoosesRuntime(cliOf(engine.config))) return undefined;
   try {
     const runtime = await resolveAntigravityRuntime(cliOf(engine.config), env);
-    return runtime.harnessPath === null && runtime.version ? { executablePath: runtime.executablePath, version: runtime.version } : undefined;
+    return runtime.harnessPath === null && runtime.source === "managed" && runtime.version ? { executablePath: runtime.executablePath, version: runtime.version } : undefined;
   } catch {
     return undefined;
   }
@@ -156,8 +164,8 @@ function checkProfile(profile: string): void {
 
 /** Why this native Antigravity turn is not bridged, or null. */
 export function antigravityRefusal(engine: AntigravityBridgeEngine, host: AntigravityBridgeHost): string | null {
-  if (!isAntigravityNativeAlias(cliOf(engine.config))) return "the account does not name the native Antigravity CLI";
-  if (!engine.nativeCli) return "the native Antigravity CLI is not installed";
+  if (!appChoosesRuntime(cliOf(engine.config))) return "the account names an Antigravity program of its own";
+  if (!engine.nativeCli) return "the account does not run the native Antigravity CLI this app installed";
   if (!bridgedRelease(engine.nativeCli.version)) return `native Antigravity CLI ${engine.nativeCli.version} is outside the releases the bridge is used with`;
   if (unbridgeableVersions(host.unbridgeableFile ?? unbridgeableFile()).includes(releaseOf(engine.nativeCli.version) ?? "")) {
     return `native Antigravity CLI ${engine.nativeCli.version} asked for a bridged tool in a form this version does not know`;

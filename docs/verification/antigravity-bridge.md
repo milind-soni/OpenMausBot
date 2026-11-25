@@ -20,6 +20,8 @@ budget measured on 1.5.16, and asks permission in 1.5.14's format. A prompt line
 `fake-agy: call <server>/<tool> <JSON>` stands for the model's tool call. The
 script exits non-zero on any failed check and writes `report.json`:
 
+- an account with no CLI path that runs the native CLI is bridged, as one
+  whose path is `antigravity` is;
 - with no switch the turn is bridged and nothing is dropped; with the switch
   off the CLI drops `coordinate_bots` and the model cannot call it; on and off
   again in the same conversation, each change starts a new process on the same
