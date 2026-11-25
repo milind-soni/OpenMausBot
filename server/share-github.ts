@@ -101,11 +101,14 @@ async function fetchFolder(base: string, names: readonly string[], fetcher: Fetc
   return null;
 }
 
+/** The folder's own name, which stands in for an id its manifest leaves out. */
+const folderName = (base: string) => base.slice(base.lastIndexOf("/") + 1);
+
 /** A template folder at a raw.githubusercontent.com address, through the folder reader. */
 export async function fetchGithubFolder(base: string, fetcher: Fetcher = fetch): Promise<ShareFolder> {
   const files = await fetchFolder(base, FOLDER_MANIFESTS, fetcher);
   if (!files) throw new GithubTemplateError("No bot.md or team.md was found in that folder.", 404);
-  return readShareFolder(files);
+  return readShareFolder(files, folderName(base));
 }
 
 /** The template a GitHub link points at, through the folder reader. Throws GithubTemplateError or PackageFormatError. */
@@ -119,7 +122,7 @@ export async function fetchGithubTemplate(input: string, fetcher: Fetcher = fetc
   }
   for (const folder of source.folders) {
     const files = await fetchFolder(folder.base, folder.names, fetcher);
-    if (files) return readShareFolder(files);
+    if (files) return readShareFolder(files, folderName(folder.base));
   }
   throw new GithubTemplateError("No bot.md or team.md was found at that GitHub link.", 404);
 }
