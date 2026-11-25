@@ -209,10 +209,14 @@ export class SessionTools {
         if (!server || (isHttp(server) ? typeof server.url !== "string" : typeof server.command !== "string")) continue;
         connections.push(await McpConnection.open(options.names.nameFor(server), server, options.cwd, options.version));
       }
+      return SessionTools.written(connections, options);
     } catch (error) {
       for (const connection of connections) connection.close();
       throw error;
     }
+  }
+
+  private static written(connections: McpConnection[], options: { stateDir: string; budget: number }): SessionTools {
     for (const connection of connections) {
       const folder = join(options.stateDir, "mcp", connection.name);
       rmSync(folder, { recursive: true, force: true });
