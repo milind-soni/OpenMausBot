@@ -202,7 +202,7 @@ describe("what a place tells the other of its bots", () => {
 
   it("a bot that takes no work now crosses as paused and the other place leaves it out; hidden and moved bots never cross", () => {
     const cloudBots: Bot[] = [{ id: "cloud-mausbot", name: "MausBot", chiefOfStaff: true }, { id: "sleepy", name: "Sleepy" },
-      { id: "gone", name: "Gone", hidden: true }, { id: "moved", name: "Moved", movedTo: { place: "x" } }, { id: "helper", name: "Helper" }];
+      { id: "gone", name: "Gone", hidden: true }, { id: "moved", name: "Moved", movedTo: { team: { id: "x", name: "X" }, state: "moved" } }, { id: "helper", name: "Helper" }];
     const cloud = linkOver(cloudBots, new Set(["sleepy"]));
     const macBots: Bot[] = [{ id: "chief", name: "MausBot", chiefOfStaff: true }];
     const macLink = linkOver(macBots, new Set());
