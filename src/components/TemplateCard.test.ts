@@ -15,6 +15,7 @@ vi.mock("@/state/store", async () => {
   return { StoreContext: createContext(null), useStore: () => ({ state: place.state, dispatch }), api: (path: string, init?: RequestInit) => api(path, init) };
 });
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => place.admin }));
+vi.mock("@/state/store-select", () => ({ useStoreSelector: <T,>(select: (state: never) => T) => select(place.state as never) }));
 vi.mock("@/lib/session", () => ({
   readSessionState: async () => ({ kind: "loopback" }),
   profileForSession: (profile: { name?: string } | undefined, session: unknown) => (session && place.own ? profile : undefined),

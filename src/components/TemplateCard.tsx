@@ -16,6 +16,7 @@ import { profileForSession, readSessionState, type SessionState } from "@/lib/se
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useModalDialog } from "@/hooks/use-modal-dialog";
 import { useStore, type Message } from "@/state/store";
+import { useStoreSelector } from "@/state/store-select";
 import { ASK_CHIP, ASK_CHIP_IDLE, ASK_PRIMARY_BUTTON } from "./AskCard";
 import { BotAvatar } from "./Avatar";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
@@ -85,14 +86,14 @@ export function TemplateCardBody({ card }: { card: TemplateCard }) {
 
 /** The profile's name when the profile is this person's own (not a shared workspace's owner's). */
 function useOwnProfileName(): string {
-  const { state } = useStore();
+  const profile = useStoreSelector((state) => state.config?.profile);
   const [session, setSession] = useState<SessionState | null>(null);
   useEffect(() => {
     let live = true;
     void readSessionState().then((next) => { if (live) setSession(next); });
     return () => { live = false; };
   }, []);
-  return profileForSession(state.config?.profile, session)?.name?.trim() ?? "";
+  return profileForSession(profile, session)?.name?.trim() ?? "";
 }
 
 /** What the card's buttons do. The card shown is the latest the server answered, until the message brings a newer one. */
