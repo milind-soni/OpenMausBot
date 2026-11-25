@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createPlacesElsewhere, ONE_PLACE } from "./places-elsewhere.ts";
+import { createPlacesElsewhere, ONE_PLACE, STALE_MS } from "./places-elsewhere.ts";
 import { createPlacesElsewhereRoutes } from "./routes/places-elsewhere.ts";
 import { PASS } from "./routes/table.ts";
 import { resolveTeammate } from "./peer-roster.ts";
@@ -73,6 +73,55 @@ describe("where the person's other bots live", () => {
   });
 });
 
+describe("when the app couldn't read a place lately", () => {
+  const HOUR = 3_600_000;
+  const ZIGGY = { name: "My Cloud", kind: "cloud" as const, bots: ["Ziggy"] };
+
+  it("a bot that lived there when last read is still said to live there, with how long ago once that is a while", () => {
+    let now = 10 * HOUR;
+    const here = createPlacesElsewhere({ dataDir: dataDir(), now: () => now });
+    here.write({ v: 1, self: { name: "this computer", kind: "computer" }, places: [{ ...ZIGGY, seen: now - HOUR }] });
+    expect((here.explain("ziggy") as { where: string }).where).toMatch(/^Ziggy lives on My Cloud, not here\. Bots work together only within one place/u);
+    now += STALE_MS;
+    expect((here.explain("ziggy") as { where: string }).where).toMatch(/^Ziggy lives on My Cloud, not here \(the person's app last saw it there 7 hours ago\)\. Bots work together/u);
+    now += 3 * 24 * HOUR;
+    expect((here.explain("ziggy") as { where: string }).where).toContain("(the person's app last saw it there 3 days ago)");
+    expect(here.explain("Nobody"), "a name it never saw: may be a newer bot there").toEqual({ hint: `The person's app hasn't seen the bots on My Cloud lately, so it may live there. ${ONE_PLACE}` });
+  });
+
+  it("a place the app couldn't read yet: no such bot here never stands alone", () => {
+    const here = createPlacesElsewhere({ dataDir: dataDir() });
+    here.write({ v: 1, self: { name: "this computer", kind: "computer" }, places: [{ name: "My Cloud", kind: "cloud", bots: [] }, GARAGE] });
+    expect(here.explain("Ziggy")).toEqual({ hint: `The person's app hasn't seen the bots on My Cloud lately, so it may live there. ${ONE_PLACE}` });
+    expect((here.explain("Ledger") as { where: string }).where).toMatch(/^Ledger lives on Garage server, not here\./u);
+    const bots = [{ id: "scout", name: "Scout" }];
+    expect(resolveTeammate(bots, bots[0]!, "Ziggy", here.explain)).toEqual({ error: expect.stringContaining("hasn't seen the bots on My Cloud lately, so it may live there.") });
+  });
+
+  it("a when from the app is never later than its word", () => {
+    const here = createPlacesElsewhere({ dataDir: dataDir(), now: () => 100 * HOUR });
+    here.write({ v: 1, self: { name: "this computer", kind: "computer" }, places: [{ ...ZIGGY, seen: 900 * HOUR }] });
+    expect((here.explain("Ziggy") as { where: string }).where).not.toContain("last saw");
+  });
+
+  it("list_bots names the bots of the person's other places, and a request by name that reached a bot here says another of that name lives elsewhere", () => {
+    let now = 10 * HOUR;
+    const here = createPlacesElsewhere({ dataDir: dataDir(), now: () => now });
+    expect(here.roster()).toBe("");
+    expect(here.alsoNamed("Ziggy")).toBe("");
+    here.write({ v: 1, self: { name: "this computer", kind: "computer" }, places: [{ ...ZIGGY, seen: now }, { name: "Acme", kind: "team", bots: ["Sales"] }, { name: "Garage server", kind: "server", bots: [] }] });
+    expect(here.roster()).toBe("The person's bots in their other places, which can't be reached from here: Ziggy (on My Cloud); Sales (in Acme). If asked for one, say where it lives.");
+    expect(here.roster((kind) => kind !== "team"), "the link reaches My Cloud's").toBe("The person's bots in their other places, which can't be reached from here: Sales (in Acme). If asked for one, say where it lives.");
+    now += 2 * 24 * HOUR;
+    expect(here.roster()).toContain("Ziggy (on My Cloud, last seen 2 days ago)");
+    expect(here.alsoNamed("ziggy")).toBe("This went to ziggy on this computer; another bot named Ziggy is on My Cloud.");
+    expect(here.alsoNamed("Scout")).toBe("");
+    const many = createPlacesElsewhere({ dataDir: dataDir() });
+    many.write({ v: 1, self: { name: "My Cloud", kind: "cloud" }, places: [{ name: "Work laptop", kind: "computer", bots: Array.from({ length: 15 }, (_, at) => `Bot ${at}`) }] });
+    expect(many.roster()).toContain("Bot 11 and 3 more (on Work laptop)");
+  });
+});
+
 describe("/api/places/elsewhere", () => {
   const ask = async (owner: boolean, method: string, body?: unknown) => {
     const elsewhere = createPlacesElsewhere({ dataDir: dataDir() });
@@ -92,6 +141,8 @@ describe("/api/places/elsewhere", () => {
     expect(taken.elsewhere.read()?.places).toEqual([LAPTOP]);
     expect((await ask(true, "PUT", { ...valid, places: [{ ...LAPTOP, origin: "https://laptop.example.test" }] })).answered?.status, "names only: no address").toBe(400);
     expect((await ask(true, "PUT", { ...valid, places: [{ ...LAPTOP, bots: ["x".repeat(81)] }] })).answered?.status).toBe(400);
+    expect((await ask(true, "PUT", { ...valid, places: [{ ...LAPTOP, seen: 5 }, { name: "My Cloud", kind: "cloud", bots: [] }] })).answered?.status, "when, and a place not read yet").toBe(200);
+    expect((await ask(true, "PUT", { ...valid, places: [{ ...LAPTOP, seen: -1 }] })).answered?.status).toBe(400);
     expect((await ask(true, "GET")).answered).toEqual({ status: 200, body: { v: 1, places: [] } });
     expect((await ask(true, "POST", valid)).answered?.status).toBe(405);
     const other = createPlacesElsewhereRoutes({ elsewhere: createPlacesElsewhere({ dataDir: dataDir() }), owner: () => true });

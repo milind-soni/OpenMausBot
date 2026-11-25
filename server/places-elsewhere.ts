@@ -14,13 +14,15 @@ import { foldName } from "./peer-delivery.ts";
 import { mentionedBots } from "./store.ts";
 
 const FILE = "places-elsewhere.json";
+const ROSTER_MAX = 12;
 const name = z.string().trim().min(1).max(80);
 const kind = z.enum(["computer", "server", "cloud", "team"]);
 export const elsewhereSchema = z.object({
   v: z.literal(1),
   /** This place, as the person's app names it. */
   self: z.object({ name, kind }).strict(),
-  places: z.array(z.object({ name, kind, bots: z.array(name).max(500) }).strict()).max(20),
+  /** Each with its bots as the app last read them, and when (`seen`). No bots: the app couldn't read that place yet. */
+  places: z.array(z.object({ name, kind, bots: z.array(name).max(500), seen: z.number().int().nonnegative().optional() }).strict()).max(20),
 }).strict();
 const storedSchema = elsewhereSchema.extend({ at: z.number().int().nonnegative() });
 export type Elsewhere = z.infer<typeof storedSchema>;
@@ -28,9 +30,22 @@ type Place = Elsewhere["places"][number];
 export type Explained = { where: string } | { hint: string } | null;
 
 /** Bots work together only within one place; said whenever a bot can't be found and the person's app never said where else
- * their bots live. */
-export const ONE_PLACE = "Bots work together only within one place, so a bot on another computer or server can't be reached from here. "
-  + "To bring them together, the person can make one place their bots' home: in the app, right-click their own server's icon on the left of the app and choose \"Make … my home\".";
+ * their bots live, or hasn't seen one of those places' bots lately. */
+export const ONE_PLACE = "Bots work together only within one place, so a bot on another of the person's places (My Cloud, another computer or a server) can't be reached from here; if it may live there, tell the person plainly. "
+  + "To bring them together, the person can make one place their bots' home: My Cloud in Settings → Import & export → Move to My Cloud, or their own server by right-clicking its icon on the left of the app and choosing \"Make … my home\".";
+
+/** A place whose bots the app read longer ago than this is said with how long ago. */
+export const STALE_MS = 6 * 60 * 60_000;
+const inOn = (place: Place) => (place.kind === "team" ? "in" : "on");
+/** When the app last read `place`'s bots, never after it last said anything here; null when it couldn't read them yet. */
+const seenAt = (place: Place, told: number) => (place.bots.length ? Math.min(place.seen ?? told, told) : null);
+/** "3 hours" or "4 days": how long ago, past STALE_MS; "" when fresher than that. */
+function ago(place: Place, told: number, now: number): string {
+  const seen = seenAt(place, told);
+  if (seen === null || now - seen <= STALE_MS) return "";
+  const hours = Math.round((now - seen) / 3_600_000);
+  return hours < 48 ? `${hours} hours` : `${Math.round(hours / 24)} days`;
+}
 
 
 /** How the person brings these two places' bots together, told to a bot (to offer it) or to the person: on the place that
@@ -56,11 +71,13 @@ function moveToTeam(place: Place, self: Elsewhere["self"], to: "bot" | "person")
   return to === "bot" ? `Tell the person they can ask it in ${place.name}, ${move}.` : `Ask it in ${place.name}, ${move}.`;
 }
 
-/** What a bot is told when `bot` lives in another of the person's places. */
-export function livesElsewhere(bot: string, place: Place, self: Elsewhere["self"]): string {
-  if (place.kind === "team") return `${bot} lives in ${place.name}, the person's team, not here. Bots work together only within one place, so it can't be reached from here. ${moveToTeam(place, self, "bot")}`;
+/** What a bot is told when `bot` lives in another of the person's places; `age`: how long ago the app last saw it there,
+ * when that was a while. */
+export function livesElsewhere(bot: string, place: Place, self: Elsewhere["self"], age = ""): string {
+  const seen = age ? ` (the person's app last saw it there ${age} ago)` : "";
+  if (place.kind === "team") return `${bot} lives in ${place.name}, the person's team, not here${seen}. Bots work together only within one place, so it can't be reached from here. ${moveToTeam(place, self, "bot")}`;
   const where = place.kind === "computer" ? `on ${place.name}, the person's computer` : `on ${place.name}`;
-  return `${bot} lives ${where}, not here. Bots work together only within one place, so it can't be reached from here. Tell the person plainly. ${bringTogether(place, self, "bot")}`;
+  return `${bot} lives ${where}, not here${seen}. Bots work together only within one place, so it can't be reached from here. Tell the person plainly. ${bringTogether(place, self, "bot")}`;
 }
 
 /** The bots of the person's other places that `text` @mentions, none named like a bot here. */
@@ -107,7 +124,25 @@ export function createPlacesElsewhere({ dataDir, now = Date.now }: { dataDir: st
       const known = read();
       if (!known) return { hint: ONE_PLACE };
       const found = where(bot);
-      return found ? { where: livesElsewhere(found.bot, found.place, known.self) } : null;
+      if (found) return { where: livesElsewhere(found.bot, found.place, known.self, ago(found.place, known.at, now())) };
+      // A place the app couldn't read lately may have it under a newer name: said, rather than "no such bot" alone.
+      const unsure = known.places.filter((place) => seenAt(place, known.at) === null || ago(place, known.at, now()));
+      return unsure.length ? { hint: `The person's app hasn't seen the bots ${unsure.map((place) => `${inOn(place)} ${place.name}`).join(" or ")} lately, so it may live there. ${ONE_PLACE}` } : null;
+    },
+    /** Said after a request by name reached `bot` here when another of the person's places has a bot of that name too. */
+    alsoNamed(bot: string): string {
+      const known = read(), found = where(bot);
+      return known && found ? `This went to ${bot} on ${known.self.name}; another bot named ${found.bot} is ${inOn(found.place)} ${found.place.name}.` : "";
+    },
+    /** One line for list_bots: the bots of the person's other places, which can't be reached from here (`skip`: kinds of
+     * place that can, through the link). */
+    roster(skip: (kind: Place["kind"]) => boolean = () => false): string {
+      const known = read();
+      const listed = (known?.places ?? []).filter((place) => place.bots.length && !skip(place.kind)).map((place) => {
+        const age = ago(place, known!.at, now()), more = place.bots.length - ROSTER_MAX;
+        return `${place.bots.slice(0, ROSTER_MAX).join(", ")}${more > 0 ? ` and ${more} more` : ""} (${inOn(place)} ${place.name}${age ? `, last seen ${age} ago` : ""})`;
+      });
+      return listed.length ? `The person's bots in their other places, which can't be reached from here: ${listed.join("; ")}. If asked for one, say where it lives.` : "";
     },
     /** What kind of place of the person's other places has `bot`, or null. */
     kindOf: (bot: string): Place["kind"] | null => where(bot)?.place.kind ?? null,

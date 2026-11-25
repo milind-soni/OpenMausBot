@@ -28,14 +28,19 @@ async function made(side: Side, name: string): Promise<Bot> {
   expect((await side("PATCH", `/api/bots/${bot.id}`, { soul: `You are ${name}.` })).status).toBe(200);
   return bot;
 }
-/** A turn of `bot`'s on the server at `base` asks for a teammate by name, as coordinate_bots does. */
-async function coordinate(base: string, bot: Bot, name: string): Promise<{ status: number; error: string }> {
+/** A turn of `bot`'s on the server at `base` calls one of its internal routes. */
+async function internal(base: string, bot: Bot, path: string, body?: unknown): Promise<{ status: number; body: any }> {
   const minted = await fetch(`${base}/api/testing/internal-capability`, { method: "POST", headers: { "content-type": "application/json", "x-openmausbot-test-capability": KEY },
     body: JSON.stringify({ botId: bot.id, threadId: bot.threadId }) });
   const { token } = await minted.json() as { token: string };
-  const asked = await fetch(`${base}/api/internal/coordinate-bots`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ botIds: [name], message: "Check this month's numbers." }) });
-  return { status: asked.status, error: ((await asked.json()) as { error: string }).error };
+  const asked = await fetch(`${base}${path}`, { method: body === undefined ? "GET" : "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  return { status: asked.status, body: await asked.json() };
+}
+/** A turn of `bot`'s on the server at `base` asks for a teammate by name, as coordinate_bots does. */
+async function coordinate(base: string, bot: Bot, name: string): Promise<{ status: number; error: string }> {
+  const asked = await internal(base, bot, "/api/internal/coordinate-bots", { botIds: [name], message: "Check this month's numbers." });
+  return { status: asked.status, error: (asked.body as { error: string }).error };
 }
 
 it("a bot asking for a teammate on the person's other place hears where it lives and how to bring them together; never on a server shared with others", async () => {
@@ -52,12 +57,14 @@ it("a bot asking for a teammate on the person's other place hears where it lives
   fx.main.refresh();
   await expect.poll(() => fx.main.owns(garage.place), { timeout: 10_000, interval: 100 }).toBe(true);
   const file = join(fx.root, "two-places.json");
+  const read: { value: unknown } = { value: null };
+  const lastRead = { read: () => read.value, write: (value: unknown) => { read.value = value; } };
   const main = installTwoPlacesMain({
     ipcMain: { handle: () => {} }, guard: (_channel: string, handler: (...args: unknown[]) => unknown) => handler,
     localRequest: (route: string, init: RequestInit = {}) => fetch(`${fx.desktopBase}${route}`, { ...init, headers: { ...init.headers as Record<string, string>, "x-openmausbot-desktop-owner": fx.ownerCapability } }),
     fetch: fx.windowFetch, environments: () => [garage.place, family.place], cloud: () => ({ origin: null, asleep: false }),
     oneHome: { journal: () => null, keep: { state: () => ({ shown: false, on: false, moved: false }), set: async () => {} } },
-    ownHome: fx.main, tell: () => {},
+    ownHome: fx.main, tell: () => {}, lastRead,
     dismissed: { read: () => JSON.parse(readFileSync(file, "utf8")), write: (value: unknown) => { writeFileSync(`${file}.tmp`, JSON.stringify(value)); renameSync(`${file}.tmp`, file); } },
   });
   try {
@@ -84,6 +91,27 @@ it("a bot asking for a teammate on the person's other place hears where it lives
   expect(typo.error).not.toContain("Bots work together");
   const shared = await coordinate(family.base, helper, "Scout");
   expect(shared.error, "never told where the person's other bots live").not.toContain("Work laptop");
+
+  // The app opens again while Garage server can't be read: this computer still holds Ledger, never an empty list.
+  const offline = installTwoPlacesMain({
+    ipcMain: { handle: () => {} }, guard: (_channel: string, handler: (...args: unknown[]) => unknown) => handler,
+    localRequest: (route: string, init: RequestInit = {}) => fetch(`${fx.desktopBase}${route}`, { ...init, headers: { ...init.headers as Record<string, string>, "x-openmausbot-desktop-owner": fx.ownerCapability } }),
+    fetch: async () => { throw new Error("offline"); }, environments: () => [garage.place], cloud: () => ({ origin: null, asleep: false }),
+    oneHome: { journal: () => null, keep: { state: () => ({ shown: false, on: false, moved: false }), set: async () => {} } },
+    ownHome: fx.main, tell: () => {}, lastRead, dismissed: { read: () => null, write: () => {} },
+  });
+  try { await offline.refresh({ force: true }); } finally { offline.close(); }
+  expect((await fx.local("GET", "/api/places/elsewhere")).body).toMatchObject({ places: [{ name: "Garage server", kind: "server", bots: ["Ledger"] }] });
+  expect((await coordinate(fx.desktopBase, scout, "Ledger")).error).toMatch(/^Ledger lives on Garage server, not here\./u);
+
+  // list_bots names them, so a bot never answers "no such bot" for one.
+  expect((await internal(fx.desktopBase, scout, `/api/internal/agents?self=${scout.id}`)).body.elsewhere)
+    .toBe("The person's bots in their other places, which can't be reached from here: Ledger (on Garage server). If asked for one, say where it lives.");
+  // A bot here named like one elsewhere: the request goes to the one here, and says so.
+  await made(fx.local, "Ledger");
+  const twin = await internal(fx.desktopBase, scout, "/api/internal/coordinate-bots", { botIds: ["Ledger"], message: "Check this month's numbers.", reply: "none" });
+  expect(twin.status, JSON.stringify(twin.body)).toBe(200);
+  expect(twin.body.message).toMatch(/This went to Ledger on this computer; another bot named Ledger is on Garage server\.$/u);
 
   // The person @mentions Scout to Ledger: the turn is told where Scout lives, and a room says it once in plain words.
   expect((await garage.as("POST", `/api/bots/${ledger.id}/messages`, { text: "@Scout can you check this month's numbers?", threadId: ledger.threadId })).status).toBe(202);

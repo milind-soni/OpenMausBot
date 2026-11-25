@@ -139,13 +139,13 @@ test("each place of the person's own hears which bots their other places have, n
     local: async () => (mine === null ? null : summary(...mine)),
     here: { name: async () => "Work laptop", tell: async (payload) => { told.here.push(payload); } },
     places: () => [place("cloud:https://omb-u-1.fly.dev", "My Cloud", "cloud", () => ["Chief"], "cloud"), place("server:https://garage.example.test", "Garage server", "server", () => ledger, "garage")],
-    settled: () => true, quiet: () => moving, dismissed: memory(),
+    settled: () => true, quiet: () => moving, dismissed: memory(), now: () => 7_000,
   });
   await two.refresh();
   assert.deepEqual(told.garage, [{ v: 1, self: { name: "Garage server", kind: "server" },
-    places: [{ name: "Work laptop", kind: "computer", bots: ["Scout"] }, { name: "My Cloud", kind: "cloud", bots: ["Chief"] }] }]);
+    places: [{ name: "Work laptop", kind: "computer", bots: ["Scout"], seen: 7_000 }, { name: "My Cloud", kind: "cloud", bots: ["Chief"], seen: 7_000 }] }]);
   assert.deepEqual(told.here, [{ v: 1, self: { name: "this computer", kind: "computer" },
-    places: [{ name: "My Cloud", kind: "cloud", bots: ["Chief"] }, { name: "Garage server", kind: "server", bots: ["Ledger"] }] }]);
+    places: [{ name: "My Cloud", kind: "cloud", bots: ["Chief"], seen: 7_000 }, { name: "Garage server", kind: "server", bots: ["Ledger"], seen: 7_000 }] }]);
   assert.equal(told.cloud.length, 1);
   assert.ok(!/https?:|bot:/u.test(JSON.stringify(told)), "never an address or an id");
   await two.refresh({ force: true });
@@ -173,4 +173,126 @@ test("each place of the person's own hears which bots their other places have, n
   await two.refresh({ force: true });
   assert.equal(told.here.length, 2, "this computer's bots moved: it is told nothing more, whatever changed elsewhere");
   assert.deepEqual(told.garage.at(-1).places.map((entry) => entry.name), ["My Cloud"], "and the others no longer hear of bots on it");
+});
+
+// What a place is told stands until a good read says otherwise: My Cloud asleep, offline or refusing the sign-in, or this
+// computer not answering, never tells anyone a place has no bots.
+function laptop({ lastRead = memory(), cloud, local = async () => summary("Scout"), at = 1_000, cloudTell = true } = {}) {
+  const told = { here: [], cloud: [] }, clock = { at };
+  const two = createTwoPlaces({
+    local, lastRead, now: () => clock.at, settled: () => true, dismissed: memory(),
+    here: { name: async () => "Work laptop", tell: async (payload) => { told.here.push(payload); } },
+    places: () => [{ key: "cloud:https://omb-u-1.fly.dev", name: "My Cloud", kind: "cloud", read: cloud,
+      ...(cloudTell ? { tell: async (payload) => { told.cloud.push(payload); } } : {}) }],
+  });
+  return { two, told, clock, lastRead };
+}
+
+test("a Cloud that can't be read keeps the bots it had when last read, with when, across a restart; only a good read with no bots drops them", async () => {
+  const first = laptop({ cloud: async () => summary("Ziggy") });
+  await first.two.refresh();
+  assert.deepEqual(first.told.here.at(-1).places, [{ name: "My Cloud", kind: "cloud", bots: ["Ziggy"], seen: 1_000 }]);
+  const failures = [["asleep or offline", async () => null], ["timed out", async () => { throw new Error("timeout"); }],
+    ["a sign-in page or an error, not a move summary", async () => ({ error: "sign in" })]];
+  for (const [why, cloud] of failures) {
+    const restarted = laptop({ lastRead: first.lastRead, cloud, at: 9_000_000 });
+    await restarted.two.refresh();
+    assert.deepEqual(restarted.told.here.at(-1).places, [{ name: "My Cloud", kind: "cloud", bots: ["Ziggy"], seen: 1_000 }], why);
+    assert.deepEqual(restarted.two.state(), { suggest: null }, `${why}: nothing remembered suggests anything`);
+  }
+  const emptied = laptop({ lastRead: first.lastRead, cloud: async () => summary(), at: 9_000_000 });
+  await emptied.two.refresh();
+  assert.deepEqual(emptied.told.here.at(-1).places, [], "it said it has no bots: now none");
+  const after = laptop({ lastRead: first.lastRead, cloud: async () => null, at: 9_500_000 });
+  await after.two.refresh();
+  assert.deepEqual(after.told.here.at(-1).places, [], "and that stands too");
+});
+
+test("a Cloud never read yet is told as not known, never as having no bots", async () => {
+  const w = laptop({ cloud: async () => null });
+  await w.two.refresh();
+  assert.deepEqual(w.told.here.at(-1).places, [{ name: "My Cloud", kind: "cloud", bots: [] }]);
+});
+
+test("this computer not answering tells nobody it has no bots, and keeps what it had", async () => {
+  let answer = async () => { throw new Error("no answer"); };
+  const w = laptop({ cloud: async () => summary("Ziggy"), local: () => answer() });
+  await w.two.refresh();
+  assert.deepEqual([w.told.here.length, w.told.cloud.length], [0, 0], "never heard from it: nobody is told anything");
+  answer = async () => summary("Scout");
+  await w.two.refresh({ force: true });
+  assert.deepEqual(w.told.cloud.at(-1).places, [{ name: "Work laptop", kind: "computer", bots: ["Scout"], seen: 1_000 }]);
+  answer = async () => { throw new Error("no answer"); };
+  w.clock.at = 2 * 60 * 60_000;
+  await w.two.refresh({ force: true });
+  assert.deepEqual(w.told.cloud.at(-1).places, [{ name: "Work laptop", kind: "computer", bots: ["Scout"], seen: 1_000 }], "what it had stands, with when");
+});
+
+test("a place is told again about once an hour though nothing changed, so what it holds says how fresh it is", async () => {
+  const w = laptop({ cloud: async () => summary("Ziggy") });
+  await w.two.refresh();
+  w.clock.at += LOOK_EVERY_MS;
+  await w.two.refresh();
+  assert.equal(w.told.here.length, 1, "ten minutes on: not told again");
+  w.clock.at += 60 * 60_000;
+  await w.two.refresh();
+  assert.equal(w.told.here.length, 2);
+  assert.equal(w.told.here.at(-1).places[0].seen, w.clock.at);
+});
+
+test("a place on an older version, which refuses when or a place not read yet, still hears about the bots of the person's own places", async () => {
+  const told = [];
+  const two = createTwoPlaces({
+    local: async () => summary("Scout"), settled: () => true, dismissed: memory(), now: () => 5,
+    here: { name: async () => "Work laptop", tell: async () => {} },
+    places: () => [
+      { key: "cloud:https://omb-u-1.fly.dev", name: "My Cloud", kind: "cloud", read: async () => summary("Ziggy"), tell: async (payload) => {
+        told.push(payload);
+        if (payload.places.some((place) => "seen" in place || !place.bots.length)) throw Object.assign(new Error("refused"), { status: 400 });
+      } },
+      { key: "server:https://garage.example.test", name: "Garage server", kind: "server", read: async () => null },
+    ],
+  });
+  await two.refresh();
+  assert.deepEqual(told.map((payload) => payload.places), [
+    [{ name: "Work laptop", kind: "computer", bots: ["Scout"], seen: 5 }, { name: "Garage server", kind: "server", bots: [] }],
+    [{ name: "Work laptop", kind: "computer", bots: ["Scout"] }],
+  ]);
+});
+
+test("main: a sleeping Cloud is never asked or told anything, and this computer still hears the bots it had", async () => {
+  const asked = [], told = [];
+  let asleep = false;
+  const lastRead = memory();
+  const install = () => installTwoPlacesMain({
+    ipcMain: { handle: () => {} }, guard: (_channel, handler) => handler,
+    localRequest: async (route, init) => { if (init?.method === "PUT") { told.push(JSON.parse(init.body)); return Response.json({ ok: true }); } return route.startsWith("/.well-known") ? Response.json({ label: "Work laptop" }) : Response.json(summary("Scout")); },
+    fetch: async (url, init) => { asked.push(`${init?.method ?? "GET"} ${new URL(url).pathname}`); return init?.method === "PUT" ? Response.json({ ok: true }) : Response.json(summary("Ziggy")); },
+    environments: () => [], cloud: () => ({ origin: "https://omb-u-1.fly.dev", asleep }),
+    oneHome: { journal: () => null, keep: { state: () => ({ shown: true, on: true, moved: false }), set: async () => {} } },
+    ownHome: { owns: () => false, offers: () => false, start: async () => {}, active: () => false, away: () => false, refresh: () => {} },
+    dismissed: memory(), lastRead, tell: () => {},
+  });
+  const awake = install();
+  try { await awake.refresh({ force: true }); } finally { awake.close(); }
+  assert.deepEqual(told.at(-1).places.map(({ name, bots }) => ({ name, bots })), [{ name: "My Cloud", bots: ["Ziggy"] }]);
+  asleep = true;
+  asked.length = 0;
+  const restarted = install();
+  try {
+    await restarted.refresh({ force: true });
+    assert.deepEqual(asked, [], "never woken");
+    assert.deepEqual(told.at(-1).places.map(({ name, bots }) => ({ name, bots })), [{ name: "My Cloud", bots: ["Ziggy"] }], "not told My Cloud has no bots");
+    assert.deepEqual(restarted.state(), { suggest: null }, "nor suggested while asleep");
+  } finally { restarted.close(); }
+  const notAnswering = installTwoPlacesMain({
+    ipcMain: { handle: () => {} }, guard: (_channel, handler) => handler,
+    localRequest: async () => new Response("down", { status: 503 }), fetch: async () => Response.json(summary("Ziggy")),
+    environments: () => [], cloud: () => ({ origin: "https://omb-u-1.fly.dev", asleep: false }),
+    oneHome: { journal: () => null, keep: { state: () => ({ shown: true, on: true, moved: false }), set: async () => {} } },
+    ownHome: { owns: () => false, offers: () => false, start: async () => {}, active: () => false, away: () => false, refresh: () => {} },
+    dismissed: memory(), lastRead, tell: () => {},
+  });
+  try { await notAnswering.refresh({ force: true }); } finally { notAnswering.close(); }
+  assert.ok(!asked.includes("PUT /api/places/elsewhere"), "this computer not answering is not 'its bots moved': My Cloud is not told it has none");
 });

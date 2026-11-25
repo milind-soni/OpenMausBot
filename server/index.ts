@@ -13020,7 +13020,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               description: b.description || undefined,
             };
           });
-        return json(res, 200, { bots: [...bots, ...botLink.link.agents(), ...remoteHandoff.agents()] });
+        return json(res, 200, { bots: [...bots, ...botLink.link.agents(), ...remoteHandoff.agents()], elsewhere: placesElsewhere.roster((kind) => botLink.link.on() && kind !== "team") || undefined });
       }
       if (await dispatchRoutes([createInternalThreadRoutes({
         store, coordinator, from: internalSender, fromThreadId: internalCapability.threadId,
@@ -13491,11 +13491,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const destination = groupId ? store.group(groupId) : undefined;
         if (groupId && !destination) return refuse(404, "No such room; use list_room_targets.");
         if (destination && destination.id !== source?.id && !outsideLineage.mayReach(address.threadId, destination.threadId)) return refuse(403, OUTSIDE_STAYS_HERE);
-        const botIds: string[] = [];
+        const botIds: string[] = [], alsoNamed: string[] = [];
         for (const raw of call.botIds) {
           const resolved = resolveTeammate(store.bots, internalSender, raw, (name) => botLink.explain(name, placesElsewhere), (bot) => (CLOUD_TEAM ? lookedAfterBy(bot, teamHost.personName) : null), { reaches: (bot) => personalReach.listed(internalSender, bot, address.threadId), hides: (bot) => personalReach.hides(internalSender, bot), refusal: (bot) => personalReach.refusal(internalSender, bot, address.threadId) });
           if ("error" in resolved) return refuse(403, resolved.error);
-          botIds.push(resolved.id);
+          botIds.push(resolved.id); if (resolved.byName) alsoNamed.push(placesElsewhere.alsoNamed(store.bot(resolved.id)?.name ?? ""));
         }
         if (new Set(botIds).size !== botIds.length) return refuse(400, "bot_ids name the same teammate twice — send each teammate once");
         const addressedRoom = destination && { id: destination.id, name: destination.name, here: destination.id === source?.id };
@@ -13618,7 +13618,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           { senderId: internalSender.id, returns, lanes, awaited: reply !== "none" }) : "";
         if (EXTERNAL) coordinator.endTurn(generation, { ok: sent, text: sent ? "" : refused.join("; ") });
         const message = coordinateResultMessage(reply, answeredOnly);
-        return { status: sent ? 200 : 409, body: { receipts, ...(sent ? { message: lead ? `${lead} ${message}` : message } : { error: refused.join("; "), ...(refusalsOnlyInstructions(refused, receipts) ? { instructionOnly: true } : {}) }),
+        return { status: sent ? 200 : 409, body: { receipts, ...(sent ? { message: [lead, message, ...alsoNamed].filter(Boolean).join(" ") } : { error: refused.join("; "), ...(refusalsOnlyInstructions(refused, receipts) ? { instructionOnly: true } : {}) }),
           ...(EXTERNAL && sent ? { rootId: generation } : {}) } };
       }, handoffContext = { sender: internalSender, address: { groupId: store.groupByThread(internalCapability.threadId)?.id, threadId: internalCapability.threadId, botId: internalSender.id }, generation: internalCapability.generation, parentId: internalCapability.roomHandoffId, external: EXTERNAL, handed: delegatedThisTurn, problem: linkSourceProblem(internalSender.id, internalCapability.threadId) }, coordinateBots = (call: CoordinateBotsCall) => remoteHandoff.coordinate(call, handoffContext, (rest) => botLink.link.coordinate(rest, handoffContext, coordinateHere));
       if (method === "GET" && path === "/api/internal/assignment-status") {

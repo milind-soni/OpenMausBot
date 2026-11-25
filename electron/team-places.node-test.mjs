@@ -51,12 +51,12 @@ test("a team is a place the person's own places hear about, never one that is to
       { key: "cloud:https://omb-u-1.fly.dev", name: "My Cloud", kind: "cloud", read: async () => summary("Scout"), tell: async (payload) => { told.push(["cloud", payload]); } },
       { key: "team:team-acme", name: "Acme", kind: "team", read: async () => summary("Sales") },
     ],
-    settled: () => true, dismissed: { read: () => null, write() {} },
+    settled: () => true, dismissed: { read: () => null, write() {} }, now: () => 5,
   });
   await two.refresh({ force: true });
   assert.deepEqual(told.map(([who]) => who), ["here", "cloud"]);
   const toCloud = told.find(([who]) => who === "cloud")[1];
-  assert.deepEqual(toCloud.places.find((place) => place.kind === "team"), { name: "Acme", kind: "team", bots: ["Sales"] });
+  assert.deepEqual(toCloud.places.find((place) => place.kind === "team"), { name: "Acme", kind: "team", bots: ["Sales"], seen: 5 });
   assert.deepEqual(two.state(), { suggest: null });
 });
 
@@ -98,7 +98,7 @@ test("main reads the teams the verified session lists and tells them nothing; a 
   try {
     await main.refresh({ force: true });
     assert.deepEqual(calls, ["GET https://omb-t-acme.fly.dev/api/bots?messages=0"]);
-    assert.deepEqual(told.at(-1).places, [{ name: "Acme", kind: "team", bots: ["Sales"] }]);
+    assert.deepEqual(told.at(-1).places.map(({ seen, ...place }) => (assert.equal(typeof seen, "number"), place)), [{ name: "Acme", kind: "team", bots: ["Sales"] }]);
     assert.equal(main.state().suggest, null);
     teams = [];
     await main.refresh({ force: true });
