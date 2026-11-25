@@ -19,8 +19,6 @@ export const RESUME_WINDOW_MS = 24 * 60 * 60_000;
 const NOTICE_TTL_MS = 30 * 24 * 60 * 60_000;
 export const RECHECK_MS = 15_000;
 const RECHECK_MAX_MS = 5 * 60_000;
-/** Sign-in events this close together are one sign-in: the app's own, then the status read that sees it. */
-export const SAME_SIGN_IN_MS = 60_000;
 /** Status reads that did not say signed in, in a row, before an AI's waiting messages wait for its next sign-in. */
 export const RECHECKS_UNANSWERED = 5;
 
@@ -36,6 +34,17 @@ export interface SignInWait {
 export interface SignedOutNotice { instanceId: string; threadId: string; messageId: string; at: number }
 
 interface Saved { waiting?: SignInWait[]; notices?: SignedOutNotice[] }
+
+const text = (value: unknown): value is string => typeof value === "string" && value.length > 0;
+const savedWait = (row: unknown): row is SignInWait => {
+  const wait = row as Partial<SignInWait> | null;
+  return Boolean(wait) && text(wait!.botId) && text(wait!.threadId) && text(wait!.messageId) && Number.isFinite(wait!.failedAt)
+    && text(wait!.selection?.instanceId) && typeof wait!.selection?.model === "string";
+};
+const savedNotice = (row: unknown): row is SignedOutNotice => {
+  const notice = row as Partial<SignedOutNotice> | null;
+  return Boolean(notice) && text(notice!.instanceId) && text(notice!.threadId) && text(notice!.messageId) && Number.isFinite(notice!.at);
+};
 
 export interface SignInResumeDeps {
   file?: string;
@@ -68,7 +77,7 @@ export function createSignInResume(deps: SignInResumeDeps) {
   const sending = new Set<SignInWait>();
   const signedInAt = new Map<string, number>();
   const chains = new Map<string, Promise<void>>();
-  const scheduled = new Map<string, Promise<void>>();
+  const queuedPasses = new Map<string, Promise<void>>();
   const rechecks = new Map<string, { ms: number; armed: boolean; unanswered: number }>();
 
   const prune = (): void => {
@@ -79,9 +88,12 @@ export function createSignInResume(deps: SignInResumeDeps) {
 
   if (deps.file) {
     try {
-      const saved = JSON.parse(readFileSync(deps.file, "utf8")) as Saved;
-      waiting = Array.isArray(saved.waiting) ? saved.waiting : [];
-      notices = Array.isArray(saved.notices) ? saved.notices : [];
+      const saved = JSON.parse(readFileSync(deps.file, "utf8")) as unknown;
+      const rows = (key: keyof Saved) => saved && typeof saved === "object" && Array.isArray((saved as Saved)[key]) ? (saved as Record<string, unknown[]>)[key]! : [];
+      waiting = rows("waiting").filter(savedWait);
+      notices = rows("notices").filter(savedNotice);
+      const dropped = rows("waiting").length + rows("notices").length - waiting.length - notices.length;
+      if (dropped) log(`sign-in resume: left out ${dropped} unreadable saved rows`);
     } catch {}
     prune();
   }
@@ -95,7 +107,6 @@ export function createSignInResume(deps: SignInResumeDeps) {
     }
   };
 
-  /** The message to send again, "park" while its bot has no room, or null when it no longer stands as it was left. */
   const resumable = (wait: SignInWait): Message | "park" | null => {
     const { store } = deps;
     if (!store.taskByThread(wait.botId, wait.threadId) || deps.busy(wait.botId, wait.threadId)) return null;
@@ -129,7 +140,6 @@ export function createSignInResume(deps: SignInResumeDeps) {
     state.unanswered = 0;
   };
 
-  /** Another pass after a wait that grows each time, while `instanceId` has rows it could not deal with yet. */
   const recheck = (instanceId: string, unanswered: boolean): void => {
     const state = recheckState(instanceId);
     state.unanswered = unanswered ? state.unanswered + 1 : 0;
@@ -146,6 +156,7 @@ export function createSignInResume(deps: SignInResumeDeps) {
     const signedInWhen = signedInAt.get(instanceId) ?? now();
     const mine = (row: { selection?: ModelSelection; instanceId?: string; failedAt?: number; at?: number }) =>
       (row.selection?.instanceId ?? row.instanceId) === instanceId && (row.failedAt ?? row.at ?? 0) < signedInWhen;
+    if (!waiting.some(mine) && !notices.some(mine)) return;
     const stands = await deps.signedInNow(instanceId).catch(() => null);
     if (!stands) {
       if (waiting.some(mine) || notices.some(mine)) recheck(instanceId, true);
@@ -155,7 +166,7 @@ export function createSignInResume(deps: SignInResumeDeps) {
     let parked = false;
     for (const wait of waiting.filter((one) => mine(one) && !sending.has(one))) {
       if (!stands()) break;
-      const message = resumable(wait);
+      const message = now() - wait.failedAt < RESUME_WINDOW_MS ? resumable(wait) : null;
       if (message === "park") {
         parked = true;
         continue;
@@ -188,15 +199,14 @@ export function createSignInResume(deps: SignInResumeDeps) {
     else resetRecheck(instanceId);
   };
 
-  /** One pass at a time for each AI; a pass asked for while another waits to start is that same pass. */
   const pass = (instanceId: string): Promise<void> => {
-    const waitingToStart = scheduled.get(instanceId);
+    const waitingToStart = queuedPasses.get(instanceId);
     if (waitingToStart) return waitingToStart;
     const next = (chains.get(instanceId) ?? Promise.resolve()).then(() => {
-      scheduled.delete(instanceId);
+      queuedPasses.delete(instanceId);
       return run(instanceId);
     }).catch((error: unknown) => log(`sign-in resume: ${error instanceof Error ? error.message : String(error)}`));
-    scheduled.set(instanceId, next);
+    queuedPasses.set(instanceId, next);
     chains.set(instanceId, next);
     return next;
   };
@@ -220,8 +230,7 @@ export function createSignInResume(deps: SignInResumeDeps) {
     },
     /** Something says this AI is signed in again: a status read, or a sign-in in the app. */
     signedIn(instanceId: string): Promise<void> {
-      const last = signedInAt.get(instanceId);
-      if (last === undefined || now() - last >= SAME_SIGN_IN_MS) signedInAt.set(instanceId, now());
+      signedInAt.set(instanceId, now());
       resetRecheck(instanceId);
       return pass(instanceId);
     },
@@ -241,7 +250,7 @@ export type SignInResume = ReturnType<typeof createSignInResume>;
  * pass, so the turn it sends again is not held at its start. */
 export function createSignInResumeHost(deps: Omit<SignInResumeDeps, "file" | "signedInNow" | "retry"> & {
   dataDir: string;
-  registry: Pick<ProviderRegistry, "forgetSnapshots" | "get" | "onSignedIn">;
+  registry: Pick<ProviderRegistry, "forgetSnapshots" | "get" | "onSignedIn" | "sawSignedIn">;
   takeover: { signedIn(instanceId: string): void };
   startTurn(botId: string, text: string, opts: { threadId: string; editedMessageId: string; replyTo?: Message; dataContext?: Message["dataContext"]; trigger?: UsageTrigger; sender?: Message["sender"] }): Promise<unknown>;
   replyTarget(threadId: string, id: string): Message | undefined;
@@ -270,5 +279,10 @@ export function createSignInResumeHost(deps: Omit<SignInResumeDeps, "file" | "si
   };
   registry.onSignedIn(signedIn);
   void Promise.resolve(deps.startupRead).then(() => resume.resumeSaved());
-  return { ...resume, signedIn };
+  /** A sign-in made in the app: the status read that later finds it is the same sign-in, not another. */
+  const appSignedIn = (instanceId: string): void => {
+    registry.sawSignedIn(instanceId);
+    signedIn(instanceId);
+  };
+  return { ...resume, signedIn, appSignedIn };
 }

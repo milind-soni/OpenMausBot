@@ -10218,6 +10218,7 @@
   "serverError.wait.alreadyEnded": "Esta espera já terminou.",
   "chat.notice.failoverSignedInAgain": "{engine} está com o login ativo novamente, então esta conversa voltou para {engine}.",
   "chat.notice.failoverSignedOut": "{from} está sem login, então {to} assumiu.",
+  "chat.notice.signedInAgain": "{engine} está com login de novo.",
   "serverError.botDefaults.nameLength": "O nome precisa ter no máximo 100 caracteres",
   "serverError.botDefaults.sectionLength": "O nome da equipe precisa ter no máximo 60 caracteres",
   "serverError.botDefaults.invalid": "Estas configurações do bot são inválidas.",

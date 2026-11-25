@@ -79,9 +79,12 @@ it.skipIf(process.platform === "win32")("a bot on a signed-out Antigravity runs 
     expect(now.filter((row) => row.role === "user").map((row) => row.text)).toEqual(["继续吧"]);
     expect(now.filter((row) => row.role === "bot" && row.kind === "text").at(-1)).toMatchObject({ text: "fixture reply" });
   } finally {
-    writeFileSync(`${logPath}.sign-in-resume-agy.json`, JSON.stringify(evidence, null, 2));
-    await waitForExit(server, { signal: "SIGTERM" });
-    await fixture.close();
-    console.info(JSON.stringify({ logPath, evidence: `${logPath}.sign-in-resume-agy.json` }));
+    try {
+      writeFileSync(`${logPath}.sign-in-resume-agy.json`, JSON.stringify(evidence, null, 2));
+      console.info(JSON.stringify({ logPath, evidence: `${logPath}.sign-in-resume-agy.json` }));
+    } finally {
+      await waitForExit(server, { signal: "SIGTERM" });
+      await fixture.close();
+    }
   }
 }, hostTimeout(300_000));

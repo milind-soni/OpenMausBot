@@ -1,11 +1,11 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModelSelection } from "../../shared/wire.ts";
 import type { Message } from "../store.ts";
-import { createSignInResume, RECHECK_MS, RECHECKS_UNANSWERED, RESUME_WINDOW_MS, SAME_SIGN_IN_MS, type SignInResumeDeps, type SignInWait } from "./sign-in-resume.ts";
+import { createSignInResume, RECHECK_MS, RECHECKS_UNANSWERED, RESUME_WINDOW_MS, type SignInResumeDeps, type SignInWait } from "./sign-in-resume.ts";
 
 const claude: ModelSelection = { instanceId: "claude", model: "sonnet" };
 const scratch: string[] = [];
@@ -20,6 +20,7 @@ function world(options: { file?: string } = {}) {
   let full = false;
   let signedIn = true;
   let probe: Promise<boolean> | null = null;
+  let readStarted: (() => void) | undefined;
   const timers: Array<() => void> = [];
   const sent: Array<{ wait: SignInWait; message: Message }> = [];
   let nextId = 0;
@@ -43,7 +44,10 @@ function world(options: { file?: string } = {}) {
         return path[at]!;
       },
     } as unknown as SignInResumeDeps["store"],
-    signedInNow: async () => (probe ? await probe : signedIn) ? () => true : null,
+    signedInNow: async () => {
+      readStarted?.();
+      return (probe ? await probe : signedIn) ? () => true : null;
+    },
     engineName: () => "Claude",
     busy: (_botId, threadId) => busy.has(threadId),
     atCapacity: () => full,
@@ -70,6 +74,7 @@ function world(options: { file?: string } = {}) {
     tick: (ms: number) => { clock += ms; },
     set full(value: boolean) { full = value; },
     set signedIn(value: boolean) { signedIn = value; },
+    reading: () => new Promise<void>((resolve) => { readStarted = resolve; }),
     hold: () => { let release!: (value: boolean) => void; probe = new Promise((resolve) => { release = resolve; }); return (value: boolean) => { probe = null; release(value); }; },
     noticeTool: (threadId: string, id: string) => paths.get(threadId)!.find((message) => message.id === id)!.tool,
   };
@@ -148,7 +153,7 @@ describe("createSignInResume", () => {
     w.row("t-kai", { tool: { name: "error: Not logged in · Please run /login", ok: false, setup: true } });
     const resent = w.paths.get("t-kai")!.findLast((message) => message.role === "user")!;
     await resume.waiting({ ...kai.wait, messageId: resent.id, failedAt: 1_015 });
-    w.tick(SAME_SIGN_IN_MS);
+    w.tick(10);
     await resume.signedIn("claude");
     expect(w.sent.map(({ message }) => message.id), "a sign-in after the second refusal takes it up").toEqual([kai.asked.id, resent.id]);
   });
@@ -252,22 +257,26 @@ describe("createSignInResume", () => {
     expect(w.sent).toHaveLength(1);
   });
 
-  it("answers a sign-in only with what was left before it: a sign-out met after it waits for the next one", async () => {
+  it("answers a sign-in only with what was left before it: a sign-out met during its status read waits for the next one", async () => {
     const w = world();
     const resume = createSignInResume(w.deps);
+    const rosa = w.stuck("t-rosa", "Draft the budget");
+    resume.waiting({ ...rosa.wait, botId: "rosa" });
+    const reading = w.reading();
     const release = w.hold();
     w.tick(10);
     const pass = resume.signedIn("claude");
+    await reading;
     w.tick(10);
     const later = w.stuck("t-kai");
     resume.waiting(later.wait); resume.noticed(later.noticed);
     release(true);
     await pass;
-    expect(w.sent).toEqual([]);
+    expect(w.sent.map(({ message }) => message.text)).toEqual(["Draft the budget"]);
     expect(w.noticeTool("t-kai", later.notice.id)?.setup, "the new notice still offers Sign in").toBe(true);
-    w.tick(SAME_SIGN_IN_MS);
+    w.tick(10);
     await resume.signedIn("claude");
-    expect(w.sent).toHaveLength(1);
+    expect(w.sent.map(({ message }) => message.text)).toEqual(["Draft the budget", "Draft the plan"]);
   });
 
   it("stops sending when the AI's instance is replaced partway through a pass, and reads the new one", async () => {
@@ -283,25 +292,6 @@ describe("createSignInResume", () => {
     current = true;
     w.timers.shift()!();
     await vi.waitFor(() => expect(w.sent.map(({ message }) => message.text)).toEqual(["Draft the plan", "Draft the budget"]));
-  });
-
-  it("takes a second sign-in event soon after the first for the same sign-in", async () => {
-    const w = world();
-    const resume = createSignInResume(w.deps);
-    const kai = w.stuck("t-kai");
-    resume.waiting(kai.wait);
-    w.tick(10);
-    await resume.signedIn("claude");
-    w.tick(5);
-    const resent = w.paths.get("t-kai")!.findLast((message) => message.role === "user")!;
-    w.row("t-kai", { tool: { name: "error: Not logged in · Please run /login", ok: false, setup: true } });
-    await resume.waiting({ ...kai.wait, messageId: resent.id, failedAt: 1_015 });
-    w.tick(1_000);
-    await resume.signedIn("claude");
-    expect(w.sent, "the status read that sees the same sign-in sends nothing again").toHaveLength(1);
-    w.tick(SAME_SIGN_IN_MS);
-    await resume.signedIn("claude");
-    expect(w.sent).toHaveLength(2);
   });
 
   it("leaves a refusal told in the same millisecond as a sign-in for the next sign-in", async () => {
@@ -407,6 +397,22 @@ describe("createSignInResume", () => {
     w.tick(10);
     await resume.signedIn("claude");
     expect(w.sent).toEqual([]);
+  });
+
+  it("starts with what it can read of a damaged saved file", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "omb-sign-in-resume-"));
+    scratch.push(directory);
+    const file = join(directory, "sign-in-resume.json");
+    const w = world({ file });
+    const kai = w.stuck("t-kai");
+    writeFileSync(file, JSON.stringify({ waiting: [null, { botId: "kai" }, kai.wait], notices: [7, kai.noticed] }));
+    w.tick(10);
+    const resume = createSignInResume(w.deps);
+    await resume.resumeSaved();
+    expect(w.sent.map(({ message }) => message.id)).toEqual([kai.asked.id]);
+    expect(w.noticeTool("t-kai", kai.notice.id)?.nameCode).toBe("chat.notice.signedInAgain");
+    writeFileSync(file, "[1, 2]");
+    expect(() => createSignInResume(w.deps)).not.toThrow();
   });
 
   it("after a restart, asks the AI once and sends what was left waiting", async () => {

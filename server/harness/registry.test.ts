@@ -231,6 +231,31 @@ describe("ProviderRegistry", () => {
     expect(heard, "signed in all along: nothing new to tell").toEqual(["a"]);
   });
 
+  it("tells nothing more for a sign-in the app saw, and nothing for a provider put in place of a signed-out one", async () => {
+    let authenticated: boolean | undefined = false;
+    const fake = makeFakeDriver({ get answer() { return { state: "available" as const, version: "1.0.0", ...(authenticated === undefined ? {} : { authenticated }) }; } });
+    const registry = new ProviderRegistry([fake.driver]);
+    await registry.load({ a: { driver: "fake" } });
+    const heard: string[] = [];
+    registry.onSignedIn((instanceId) => heard.push(instanceId));
+    const read = async () => {
+      registry.forgetSnapshots();
+      await registry.describe();
+    };
+    await read();
+    authenticated = true;
+    registry.sawSignedIn("a");
+    await read();
+    expect(heard, "the app told this sign-in itself").toEqual([]);
+    authenticated = false;
+    await read();
+    await registry.dispose("a");
+    await registry.load({ a: { driver: "fake" } });
+    authenticated = true;
+    await read();
+    expect(heard, "the new provider was never read signed out").toEqual([]);
+  });
+
   it("tells its listeners of a sign-in when a read between said nothing about the sign-in", async () => {
     let authenticated: boolean | undefined = false;
     const fake = makeFakeDriver({ get answer() { return { state: "available" as const, version: "1.0.0", ...(authenticated === undefined ? {} : { authenticated }) }; } });

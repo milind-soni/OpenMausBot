@@ -63,9 +63,12 @@ async function withSignedOutClaude(check: (fixture: {
       all: async (threadId) => (await page(threadId)).messages,
     });
   } finally {
-    writeFileSync(join(scratch, "evidence.json"), JSON.stringify(evidence, null, 2));
-    console.info(JSON.stringify({ log: fixture.info.logPath, evidence: join(scratch, "evidence.json") }));
-    await fixture.close();
+    try {
+      writeFileSync(join(scratch, "evidence.json"), JSON.stringify(evidence, null, 2));
+      console.info(JSON.stringify({ log: fixture.info.logPath, evidence: join(scratch, "evidence.json") }));
+    } finally {
+      await fixture.close();
+    }
   }
 }
 
@@ -97,6 +100,7 @@ it("signing in again runs each stuck conversation's message once more, and its s
       expect(setupRows(now), "no sign-out row on the conversation as it reads now").toEqual([]);
       expect(now.filter((row) => row.role === "user").map((row) => row.text)).toEqual([`Draft the plan for ${bot.name}`]);
       expect(now.some((row) => row.role === "bot" && row.kind === "text" && row.text && !row.text.startsWith("Hi, I'm"))).toBe(true);
+      await expect.poll(async () => (await all(bot.activeTaskId)).some((row) => row.tool?.nameCode === "chat.notice.signedInAgain"), { timeout: 30_000 }).toBe(true);
       const history = await all(bot.activeTaskId);
       expect(setupRows(history).map((row) => row.tool!.name), "the failed try stays on its own version").toEqual(["error: Not logged in · Please run /login"]);
       expect(history.filter((row) => row.tool?.nameCode === "chat.notice.signedInAgain"), "and its notice says the AI is signed in again").toHaveLength(1);
