@@ -204,12 +204,8 @@ export function BotContextMenu({
       )}
     >
       {icon}
-      {opts?.trailing ? (
-        <>
-          <span className="flex-1 truncate text-start">{label}</span>
-          {opts.trailing}
-        </>
-      ) : label}
+      {label}
+      {opts?.trailing && <span className="ms-auto">{opts.trailing}</span>}
     </button>
   );
   const divider = (key: string) => <div key={key} role="separator" className={MENU_ITEM_SEPARATOR} />;
