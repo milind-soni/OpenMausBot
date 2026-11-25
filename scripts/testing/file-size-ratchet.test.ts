@@ -16,15 +16,15 @@ const HARD_CAP = 2000;
 const LISTED_FROM = 1000;
 
 const LINES: Record<string, number> = {
-  "server/index.ts": 15258,
+  "server/index.ts": 15400, // Replay admission at each redispatch site. Owner: Rey. Expires: 2026-12-31.
   "src/state/store.tsx": 3260,
   "electron/main.mjs": 3124,
   "server/store.ts": 2256,
   "src/components/Sidebar.tsx": 1657,
-  "server/drivers/claude.ts": 2016,
-  "server/drivers/acp/core.ts": 1541,
+  "server/drivers/claude.ts": 2074, // No-dispatch evidence and serving-model reporting. Owner: Rey. Expires: 2026-12-31.
+  "server/drivers/acp/core.ts": 1612, // Keep the first prompt call's own error for OpenCode's tool-limit refusal proof. Owner: Rey. Expires: 2026-12-31.
   "server/drivers/codex.ts": 1585,
-  "server/routines.ts": 1553,
+  "server/routines.ts": 1566, // Replay admission for routine recovery. Owner: Rey. Expires: 2026-12-31.
   "src/components/ComputerPanel.tsx": 1782,
   "src/components/RoutineCalendarPage.tsx": 1485,
   "server/config.ts": 1227,
