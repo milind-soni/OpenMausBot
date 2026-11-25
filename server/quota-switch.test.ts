@@ -508,9 +508,13 @@ describe("quota switch", () => {
 
       it("with no backup chosen moves nothing, and a second refusal adds no notice", async () => {
         backups = [];
+        const shown: Array<{ threadId: string; instanceId: string; id: string }> = [];
+        quota = createQuotaSwitch({ ...deps, signedOutNotice: (threadId, instanceId, row) => shown.push({ threadId, instanceId, id: row.id }) });
         await signedOut({ messageId: said("hi") });
         await signedOut({ messageId: said("hi again") });
         expect(notices()).toEqual([{ name: `notice: ${NOTICE}`, ok: true, setup: true }]);
+        const notice = store.messagesFor(bot.threadId).find((message) => message.tool?.name === `notice: ${NOTICE}`)!;
+        expect(shown, "the notice is handed on, to say the AI is signed in again later").toEqual([{ threadId: bot.threadId, instanceId: defaultSelection().instanceId, id: notice.id }]);
         expect(thread().modelSelection).toEqual(defaultSelection());
         expect(resend).not.toHaveBeenCalled();
       });

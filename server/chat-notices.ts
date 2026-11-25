@@ -128,6 +128,7 @@ export const CHAT_NOTICE = {
   "chat.notice.engineSignedOut": "{name} is signed out.",
   "chat.notice.failoverSignedInAgain": "{engine} is signed in again, so this conversation is back on {engine}.",
   "chat.notice.failoverSignedOut": "{from} is signed out, so {to} took over.",
+  "chat.notice.signedInAgain": "{engine} is signed in again.",
   "chat.notice.backupCardWaiting": "switched to {name}. Your request waits on a card above and continues on {name} once you act on it.",
   "chat.notice.backupRequestUnderWay": "switched to {name}. Your request is still under way here and continues on {name}.",
   "chat.notice.backupConversationBusy": "switched to {name}. This conversation is working, so your message was not sent again.",
