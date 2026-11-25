@@ -388,4 +388,15 @@ describe("a bot's conversations in its panel", () => {
     expect(listed()).toEqual(["deck"]);
     expect(host.querySelector("[data-conversations-ended]")).toBeNull();
   });
+
+  it("keeps search when the only other conversation has ended, and finds it", () => {
+    const lead = { botId: "lead", name: "Lead", at: now };
+    render(research({ tasks: [task("who", "Who am I?", 2), task("deck", "Summarise the board deck", 4, { closedBy: lead })] }));
+    expect(listed()).toEqual(["who"]);
+    expect(host.querySelector("[data-conversations-ended]")!.textContent).toBe("Ended (1)");
+    click(host.querySelector("[data-conversations-search]"));
+    type(host.querySelector<HTMLInputElement>("[data-conversations-query]")!, "board");
+    expect(listed()).toEqual(["deck"]);
+  });
 });
+

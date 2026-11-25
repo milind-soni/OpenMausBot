@@ -136,9 +136,9 @@ export function BotConversations({ bot }: { bot: Bot }) {
     setSearching(false);
   };
 
-  // An open search stays up even if archiving leaves one conversation, so it can still be cleared.
-  // An archived open conversation stays listed too, so it is not hidden while it is open.
-  const listed = conversations.length >= 2 || searching || conversations.some((task) => task.threadId === bot.threadId && isArchived(task));
+  // Ended conversations count, since search finds them. An open search stays up even if archiving leaves one
+  // conversation, so it can still be cleared. An archived open conversation stays listed too, so it is not hidden while it is open.
+  const listed = conversations.length + ended.length >= 2 || searching || conversations.some((task) => task.threadId === bot.threadId && isArchived(task));
   const row = (task: (typeof threads)[number]) => (
     <div role="listitem" key={task.threadId} data-conversation={task.threadId}>
       <SidebarThreadRow panel preview={preview(task.threadId)} task={task} ownerId={bot.id} current={task.threadId === bot.threadId}
