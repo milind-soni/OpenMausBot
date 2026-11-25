@@ -413,6 +413,17 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     expect(fake.requests.length).toBe(asked);
   });
 
+  it("keeps every browser in the home for the day when the sandbox could not take the policy that blocks file://", async () => {
+    fake.policy = false;
+    const cloud = browser();
+    expect(await cloud.open(request())).toEqual({ home: "no-policy" });
+    expect(fake.upgrades, "never dialed").toEqual([]);
+    expect(fake.quits()).toEqual([`quit:${profileKey("scout")}`]);
+    const asked = fake.requests.length;
+    expect(await cloud.open(request("writer"))).toEqual({ home: "no-route" });
+    expect(fake.requests.length).toBe(asked);
+  });
+
   it("a Chrome that does not start counts as a failure and opens in the home", async () => {
     fake.chromeStarts = false;
     expect(await browser().open(request())).toEqual({ home: "start-failed" });

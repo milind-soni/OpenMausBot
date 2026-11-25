@@ -46,7 +46,8 @@ export interface ComputerOps {
   resume(boxId: string): Promise<void>;
   state(boxId: string): Promise<string | null>;
   /** One bot's Chrome started on its profile, with this open's door secret; `home` is the sandbox's home folder. */
-  launch(boxId: string, key: string, secret: string): Promise<{ chrome: boolean; home: string | null }>;
+  /** `policy`: the Chrome policy that blocks file:// and Chrome's own pages could be written in the sandbox. */
+  launch(boxId: string, key: string, secret: string): Promise<{ chrome: boolean; home: string | null; policy: boolean }>;
   /** A finished download (a sandbox path) brought into `folder` as `to`, with the cloud computers' copy checks and limits. */
   fetchFile(boxId: string, path: string, folder: string, to: string): Promise<CopyOutcome>;
   /** A file of the Cloud (`from`, inside `folder`) copied to a sandbox path for an upload. */
@@ -156,7 +157,7 @@ export function providerOps(cfg: () => AppConfig): ComputerOps {
       if (!HEX16.test(key) || !HEX48.test(secret)) throw new Error("bad browser profile key or door secret");
       const answer = await action(boxId, { action: "launch", key, secret });
       const home = typeof answer?.home === "string" && /^\/[^\0\n]*$/.test(answer.home) && !answer.home.split("/").includes("..") ? answer.home.replace(/\/+$/, "") : null;
-      return { chrome: answer?.chrome === true, home };
+      return { chrome: answer?.chrome === true, home, policy: answer?.policy === true };
     },
     fetchFile: (boxId, path, folder, to) => copyFromComputer(cfg(), boxId, folder, { path, to }, AbortSignal.timeout(10 * 60_000)),
     sendFile: (boxId, folder, from, path) => copyToComputer(cfg(), boxId, folder, { from, path }, AbortSignal.timeout(10 * 60_000)),

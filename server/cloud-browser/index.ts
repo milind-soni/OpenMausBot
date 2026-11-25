@@ -165,6 +165,12 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
         await quit();
         return home(request, "start-failed");
       }
+      // Without the policy a page could open file:// and read another process's files in the sandbox: no browser runs there today.
+      if (!answer.policy) {
+        rails.noRoute();
+        await quit();
+        return home(request, "no-policy");
+      }
       const relay = await ops.host(box.id, COMPUTER_DOOR_PORT).catch(() => null);
       const url = relay ? dialable(relay) : null;
       if (!url) {

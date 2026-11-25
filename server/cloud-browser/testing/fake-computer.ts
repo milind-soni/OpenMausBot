@@ -29,6 +29,8 @@ export interface FakeComputer {
   hostRoute: boolean;
   unprotected: boolean;
   chromeStarts: boolean;
+  /** Whether the launch could write the Chrome policy (sudo in the sandbox). */
+  policy: boolean;
   requests: Request[];
   upgrades: Array<{ path: string; host: string | undefined; origin: string | undefined; query?: string }>;
   frames: string[];
@@ -63,7 +65,7 @@ export async function startFakeComputer(): Promise<FakeComputer> {
   let retired = true;
   const fake = {
     base: "", state: "ready", exists: true, startStatus: 200, startBody: { ok: true }, oldRelay: false, available: true, unavailableReason: "fleet_starts",
-    unavailableUntil: null, hostRoute: true, unprotected: false, chromeStarts: true, requests: [], upgrades: [], frames: [], boxId: "bx_23456789",
+    unavailableUntil: null, hostRoute: true, unprotected: false, chromeStarts: true, policy: true, requests: [], upgrades: [], frames: [], boxId: "bx_23456789",
     files: new Map(), cookies: new Map(), commands: [], failing: new Set(),
   } as unknown as FakeComputer;
   const watchers = new Map<string, Set<import("ws").WebSocket>>();
@@ -128,7 +130,7 @@ export async function startFakeComputer(): Promise<FakeComputer> {
       if (rest === `/sandboxes/${boxId}/browser`) {
         if (body.action === "launch" && typeof body.key === "string" && typeof body.secret === "string") {
           secrets.set(body.key, body.secret);
-          return send(200, { ok: true, chrome: fake.chromeStarts, policy: true, home: HOME });
+          return send(200, { ok: true, chrome: fake.chromeStarts, policy: fake.policy, home: HOME });
         }
         if (body.action === "remove-download") fake.files.delete(`${HOME}/.omb-browser/.downloads/${String(body.key)}/${String(body.name)}`);
         return send(200, { ok: true });
