@@ -119,12 +119,15 @@ auto-approve an MCP tool by its name (measured on 1.5.16); a bridged call would
 reach it as `use_tool`. Its permission rules (`permissions.allow` and `deny`)
 have no effect over ACP.
 
-On a bridged turn a permission request that may be an agents bridge call but is
-not in the recorded spelling (`mcp_agents_use_tool`, `Run mcp_agents_use_tool`,
-kind `other`) is refused and the turn ends. That release is then recorded in
-`antigravity-bridge.json` in the data folder, and its turns list the agents
-tools directly from the next message on, as before this bridge; deleting the
-file tries the bridge again. A new set of MCP servers, as when
+On a bridged turn a permission request whose name is an agents bridge tool in a
+spelling other than the recorded one (`mcp_agents_use_tool`,
+`Run mcp_agents_use_tool`, kind `other`) is refused and the turn ends. That
+release is then recorded in `antigravity-bridge.json` in the data folder, and its
+turns list the agents tools directly from the next message on, as before this
+bridge; deleting the file tries the bridge again. A request under an unknown
+name that carries `use_tool`'s input is rejected for that call only and records
+nothing, since another tool's input can look the same; with no reject option it
+is cancelled and the turn ends. A new set of MCP servers, as when
 the switch changes, starts a new process that resumes the same session: the CLI
 renames a server it registers again in one process.
 
