@@ -76,6 +76,16 @@ describe("Kimi approval mode", () => {
     ]);
   });
 
+  it("fails the turn before the prompt when Kimi rejects the mode", async () => {
+    // Not advertising "default" makes the fallback set_mode answer -32602.
+    await create({ FAKE_ACP_SESSION_MODES: "plan,yolo" });
+    await expect(turn("ask")).resolves.toMatchObject({ ok: false });
+    const rpc = methods();
+    expect(rpc).toContain("session/set_mode");
+    expect(rpc).not.toContain("session/prompt");
+    expect(recorder!.events.some((event) => event.type === "runtime.error" && event.message.includes("session/set_mode"))).toBe(true);
+  });
+
   it("still prompts when the CLI has no session/set_mode", async () => {
     await create({ FAKE_ACP_MODE: "no-session-config" });
     await expect(turn("ask")).resolves.toMatchObject({ ok: true });

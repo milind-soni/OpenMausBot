@@ -592,8 +592,9 @@ const support: AcpSupport = {
       await request("session/set_mode", { sessionId, modeId });
     } catch (error) {
       const code = (error as { code?: unknown }).code;
-      // A Kimi without session/set_mode (-32601) or without this mode (-32602) keeps its own mode.
-      if (code === -32601 || code === -32602) return;
+      // Only a Kimi without session/set_mode (-32601) keeps its own mode. Any other rejection fails the turn before the
+      // prompt, so Ask never silently runs in a config.toml yolo/auto mode.
+      if (code === -32601) return;
       throw new Error(`Kimi rejected mode "${modeId}" via session/set_mode: ${(error as Error).message}`);
     }
   },
