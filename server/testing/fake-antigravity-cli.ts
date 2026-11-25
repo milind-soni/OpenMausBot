@@ -147,7 +147,7 @@ async function mountTools(sessionId: string, params: Params): Promise<void> {
   sessionTools.get(sessionId)?.close();
   const mounted = await SessionTools.mount(params.mcpServers ?? [], { names: serverNames, cwd: params.cwd ?? process.cwd(), stateDir, budget, version });
   sessionTools.set(sessionId, mounted);
-  log({ event: "tools", sessionId, visible: mounted.visible(), hidden: mounted.hidden() });
+  log({ event: "tools", sessionId, bytes: mounted.bytes(), visible: mounted.visible(), hidden: mounted.hidden() });
 }
 
 const update = (sessionId: string, value: Record<string, unknown>) => out({ method: "session/update", params: { sessionId, update: value } });

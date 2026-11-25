@@ -88,6 +88,7 @@ Use only mapped, tested commands:
 - [Pi shell timeout bounds and recovery after tool errors](pi-shell-timeouts.md)
 - [Cline engine and native loopback qualification](cline.md)
 - [Grok steering a running turn](grok-steering.md)
+- [The agents tool bridge on Google's native Antigravity CLI](antigravity-bridge.md)
 - [Claude coordination and turn-scoped tools](claude-tool-lifecycle.md)
 - [Codex bot instructions](codex-instructions.md)
 - [Codex browser routing and native search](codex-browser-routing.md)

@@ -88,12 +88,41 @@ name can be read by OpenMausBot too:
 | API models: OpenAI-compatible, Cerebras, Greenference, ModelGo, Grok API, Groq, Meta, MiniMax, Mistral | Yes | The chat runtime never asks for the agents server (`server/drivers/chat-mcp-tools.ts:371`) and reads no configuration of the person's about a tool. |
 | Codex, including the ChatGPT plan | No | Codex reads a layered configuration of its own: `config.toml` under `CODEX_HOME` or `~/.codex`, a Company engine's own home under OpenMausBot's data, a trusted project's `.codex/config.toml`, `/etc/codex/config.toml` and `/etc/codex/managed_config.toml`; and it has `PreToolUse` and `PermissionRequest` hooks of its own. Any of these can take a rule about a tool by name, and this version does not examine them. |
 | Pi | No | pi is launched with `-e` for OpenMausBot's extension and nothing that keeps the person's own extensions out (`server/drivers/pi.ts`, `PI_ARGS`), in the person's home. Pi loads the extensions it finds there, and an extension's `tool_call` handler can block a call by the name it sees, as OpenMausBot's own does (`server/drivers/pi-mcp-extension.ts`). This version does not examine them. |
-| ACP agents: Grok, Kimi, Droid, Cursor, Antigravity, OpenCode, Qwen, Hermes, Cline, Gemini, custom | No | They keep their own permissions. "Allow for this session" hands the agent its own remembered approval ([approval levels](approval-levels.md)); given once for a harmless `use_tool` call it would cover every hidden tool. A reviewer would also lose the read-only marks the hidden reads carry, and Grok has native tools named `use_tool` and `search_tool`. |
+| Google's native Antigravity CLI, an account whose CLI path is `antigravity` | Yes, without the switch, with the exceptions below | The CLI drops the largest MCP tools once a session's tool definitions pass its budget, with no lazy fallback ([google-antigravity/antigravity-cli#1530](https://github.com/google-antigravity/antigravity-cli/issues/1530)), so the agents tools are bridged to keep `coordinate_bots` and the rest callable. A bridged `use_tool` is approved as the tool it names: its card, the never-list and "answers alone" read the tool's own input, and it is allowed once only. |
+| ACP agents: Grok, Kimi, Droid, Cursor, Antigravity on its pinned runtime or another path, OpenCode, Qwen, Hermes, Cline, Gemini, custom | No | They keep their own permissions. "Allow for this session" hands the agent its own remembered approval ([approval levels](approval-levels.md)); given once for a harmless `use_tool` call it would cover every hidden tool. A reviewer would also lose the read-only marks the hidden reads carry, and Grok has native tools named `use_tool` and `search_tool`. |
 | Muse Code, and any engine not named above | No | Not shown to qualify. |
 
 If the decision itself fails (a file it reads throws, a record it is handed
 cannot be read), the turn runs unbridged, exactly as with the switch off, and
 one line is logged naming the kind of error and nothing of what was read.
+
+### Google's native Antigravity CLI
+
+A native account is bridged unless `OMB_AGENTS_TOOL_BRIDGE=0` or
+`{"features": {"agentsToolBridge": false}}` turns it off, or any of these holds
+(`server/agents-bridge-antigravity.ts`):
+
+- the installed CLI is not a release whose permission requests were recorded
+  (1.5.14 and 1.5.16), or the turn would start a different file than the one
+  decided for;
+- another of the turn's MCP servers is named `agents` or starts with `agents_`;
+- the launch folder or any folder above it, read both as written and through
+  its links, holds an `.agents` folder with anything but skills, a legacy
+  `.agent`, `_agents`, `_agent` or `.antigravity`, or a workspace
+  `.gemini/config.json`;
+- the account's profile holds settings beyond the sign-in, hooks, MCP servers,
+  project settings, or a plugin that is not built in.
+
+The CLI runs tool hooks from those places, and a `PreToolUse` hook can deny or
+auto-approve an MCP tool by its name (measured on 1.5.16); a bridged call would
+reach it as `use_tool`. Its permission rules (`permissions.allow` and `deny`)
+have no effect over ACP.
+
+On a bridged turn a permission request that may be an agents bridge call but is
+not in the recorded spelling (`mcp_agents_use_tool`, `Run mcp_agents_use_tool`,
+kind `other`) is refused and the turn ends. A new set of MCP servers, as when
+the switch changes, starts a new process that resumes the same session: the CLI
+renames a server it registers again in one process.
 
 ### Claude Code
 

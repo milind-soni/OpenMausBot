@@ -15,6 +15,8 @@ import { launchUi, runControlOmbUi } from "./testing/control-omb-ui.ts";
 import { removeTempDir, waitForExit } from "../server/testing/cleanup.ts";
 import { hostTimeout } from "../server/testing/host-timeout.ts";
 import { freePortBlock } from "../server/testing/ports.ts";
+import { installFakeManagedCli } from "../server/testing/antigravity-native-fixture.ts";
+import { antigravityProfileDirectory } from "../server/drivers/antigravity-acp.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 /** Outside the bot name pool, so no suite can plan a bot that collides with the
@@ -296,7 +298,7 @@ export async function launchVerificationServer(
   enterprise?: { dir: string; licenseKey: string },
   room?: { scripted: boolean },
   /** Optional repository-owned fake providers for multi-engine setup checks. */
-  extraProviders: Array<"codex" | "cline" | "copilot" | "customAcp" | "opencode" | "kimi" | "grok"> = [],
+  extraProviders: Array<"codex" | "cline" | "copilot" | "customAcp" | "opencode" | "kimi" | "grok" | "antigravity"> = [],
   /** Programmatic tests only: an owned loopback Boat provider, never a live account. */
   boatFixtureApi?: string,
   /** Programmatic web UI qualification against the fixture's static server. */
@@ -333,6 +335,13 @@ export async function launchVerificationServer(
   const imageGen = /^http:\/\/127\.0\.0\.1:\d{1,5}\/v1$/.test(imageApi)
     ? { primary: { provider: "openai" }, fallback: { provider: "custom", model: "fixture-image" }, customUrl: imageApi }
     : undefined;
+  // The native Antigravity CLI stand-in installed as the app installs Google's, already signed in.
+  if (extraProviders.includes("antigravity")) {
+    installFakeManagedCli(dataDir, "b".repeat(64), parentEnv.FAKE_AGY_VERSION ?? "1.5.16");
+    const credential = join(antigravityProfileDirectory("antigravity", dataDir), "antigravity-acp", "antigravity-oauth-token");
+    mkdirSync(dirname(credential), { recursive: true });
+    writeFileSync(credential, "{}\n", { mode: 0o600 });
+  }
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
     ...(boatFixtureApi ? { box: { token: "box_verification_fixture" } } : {}),
     ...(imageGen ? { imageGen } : {}),
@@ -342,6 +351,11 @@ export async function launchVerificationServer(
       ...(extraProviders.includes("kimi") ? { kimi: {
         driver: "kimiAgent", displayName: "Verification Kimi",
         config: { cli: fileURLToPath(new URL("../server/testing/fake-acp-cli.ts", import.meta.url)) },
+      } } : {}),
+      ...(extraProviders.includes("antigravity") ? { antigravity: {
+        driver: "antigravityAgent", displayName: "Verification Antigravity", config: { cli: "antigravity", fullAuto: false },
+        environment: { FAKE_AGY_LOG: join(dataDir, "fake-antigravity.log"),
+          ...Object.fromEntries(Object.entries(parentEnv).filter(([key, value]) => key.startsWith("FAKE_AGY_") && key !== "FAKE_AGY_LOG" && value)) },
       } } : {}),
       ...(extraProviders.includes("grok") ? { grok: {
         driver: "grokAgent", displayName: "Verification Grok",

@@ -165,6 +165,11 @@ export class SessionTools {
       .map((tool) => `mcp_${connection.name}_${tool.name}`));
   }
 
+  /** Bytes of every tool definition the servers listed, before the budget. */
+  bytes(): number {
+    return this.connections.reduce((sum, connection) => sum + connection.tools.reduce((n, tool) => n + toolBytes(tool), 0), 0);
+  }
+
   hidden(): string[] {
     return [...this.dropped].map((key) => `mcp_${key.replace("/", "_")}`);
   }
