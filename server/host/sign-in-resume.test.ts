@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ModelSelection } from "../../shared/wire.ts";
 import type { Message } from "../store.ts";
-import { createSignInResume, RECHECK_MS, RECHECKS_UNANSWERED, RESUME_WINDOW_MS, type SignInResumeDeps, type SignInWait } from "./sign-in-resume.ts";
+import { createSignInResume, createSignInResumeHost, RECHECK_MS, RECHECKS_UNANSWERED, RESUME_WINDOW_MS, type SignInResumeDeps, type SignInWait } from "./sign-in-resume.ts";
 
 const claude: ModelSelection = { instanceId: "claude", model: "sonnet" };
 const scratch: string[] = [];
@@ -413,6 +413,41 @@ describe("createSignInResume", () => {
     expect(w.noticeTool("t-kai", kai.notice.id)?.nameCode).toBe("chat.notice.signedInAgain");
     writeFileSync(file, "[1, 2]");
     expect(() => createSignInResume(w.deps)).not.toThrow();
+  });
+
+  it("takes the app's own report of a sign-in the status read already found for the same sign-in", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "omb-sign-in-resume-"));
+    scratch.push(directory);
+    const w = world();
+    let readSignedIn = false;
+    const listeners: Array<(instanceId: string) => void> = [];
+    const instance = { snapshot: async () => ({ state: "available" as const, authenticated: true }) };
+    const takeover = { signedIn: vi.fn() };
+    const host = createSignInResumeHost({
+      ...w.deps, dataDir: directory, takeover, startupRead: null,
+      registry: {
+        forgetSnapshots: () => {},
+        get: () => instance as never,
+        onSignedIn: (listener) => { listeners.push(listener); },
+        sawSignedIn: () => { const known = readSignedIn; readSignedIn = true; return known; },
+      },
+      startTurn: async (_botId, text, opts) => { w.sent.push({ wait: { threadId: opts.threadId } as SignInWait, message: { text } as Message }); },
+      replyTarget: () => undefined,
+    });
+    const kai = w.stuck("t-kai");
+    host.waiting(kai.wait);
+    w.tick(10);
+    readSignedIn = true;
+    listeners.forEach((listener) => listener("claude"));
+    await vi.waitFor(() => expect(w.sent).toHaveLength(1));
+    w.tick(5);
+    const resent = w.row("t-kai", { role: "user", kind: "text", text: "Draft the plan" });
+    await host.waiting({ ...kai.wait, messageId: resent.id, failedAt: 1_015 });
+    w.tick(10);
+    host.appSignedIn("claude");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(w.sent, "the app's report is the sign-in the status read already found").toHaveLength(1);
+    expect(takeover.signedIn).toHaveBeenCalledTimes(2);
   });
 
   it("after a restart, asks the AI once and sends what was left waiting", async () => {

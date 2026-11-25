@@ -279,10 +279,10 @@ export function createSignInResumeHost(deps: Omit<SignInResumeDeps, "file" | "si
   };
   registry.onSignedIn(signedIn);
   void Promise.resolve(deps.startupRead).then(() => resume.resumeSaved());
-  /** A sign-in made in the app: the status read that later finds it is the same sign-in, not another. */
+  /** A sign-in made in the app is one sign-in with the status read that finds it, whichever comes first. */
   const appSignedIn = (instanceId: string): void => {
-    registry.sawSignedIn(instanceId);
-    signedIn(instanceId);
+    if (registry.sawSignedIn(instanceId)) deps.takeover.signedIn(instanceId);
+    else signedIn(instanceId);
   };
   return { ...resume, signedIn, appSignedIn };
 }
