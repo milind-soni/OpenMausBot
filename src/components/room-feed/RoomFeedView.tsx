@@ -183,7 +183,7 @@ export function RoomFeedView({ group }: { group: Group }) {
                 {items.map((item) => item.kind === "fold" ? (
                   <li key={`fold:${item.key}`} className="flex">
                     <button type="button" data-feed-fold={item.key} onClick={() => unfold(item.threadIds)}
-                      className="ms-12 flex h-8 items-center rounded-md px-2 text-[13px] font-medium leading-[18px] text-ink-secondary transition-colors duration-[120ms] hover:bg-ink/[0.06] hover:text-ink active:bg-ink/[0.08] motion-reduce:transition-none">
+                      className="ms-12 flex h-8 touch:h-10 items-center rounded-md px-2 text-[13px] font-medium leading-[18px] text-ink-secondary transition-colors duration-[120ms] hover:bg-ink/[0.06] hover:text-ink active:bg-ink/[0.08] motion-reduce:transition-none">
                       {item.threadIds.length === 1 ? t("room.feed.closedOne") : t("room.feed.closedMany", { count: item.threadIds.length })}
                     </button>
                   </li>

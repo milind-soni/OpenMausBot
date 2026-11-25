@@ -9955,7 +9955,7 @@ async function runClaimedGroupMemberTurn(
     outsideRoom.length > 0 && roomPeerRosterSystemPrompt(outsideRoom), sharedNamesNote(roomMembers.filter((member) => member.id !== bot.id), Boolean(integrations.agents)),
     integrations.agents && (CREDENTIAL_PROMPT + botLogins.secretsPrompt(bot.id, vaultReaders.turn(threadId)) + (orchestration && !orchestration.roomHandoffId ? THREADS_PROMPT : "")).trim(),
     integrations.agents && (!orchestration || orchestration.roomHandoffId) && "For actual OpenMausBot teamwork, discover IDs with list_room_targets and use coordinate_bots for advice or work in this or another room. Do not substitute native coding helpers for these named bots. Consult only when needed to make a decision; no discussion step is mandatory. Give concrete responsibilities, exact accessible paths and acceptance checks. End your turn after assigning; busy teammates queue and results automatically resume you. When they return, finish the requested verification and give the user one final answer. Native helper names are not evidence that an OpenMausBot teammate participated. Plain @mentions are only for conversational replies in this room." + requesterRule,
-    integrations.agents && TRIGGER_PROMPT.trim(), integrations.agents && !readyGroup.dm && ROOM_CLOSE_PROMPT,
+    integrations.agents && TRIGGER_PROMPT.trim(), integrations.agents && !readyGroup.dm && !orchestration?.roomHandoffId && ROOM_CLOSE_PROMPT,
     integrations.agents && PROFILE_PROMPT.trim(),
     integrations.agents && skillAuthoringEnabled(cfg) && LEARN_RULES_PROMPT.trim(),
     orchestration?.systemInstructions,

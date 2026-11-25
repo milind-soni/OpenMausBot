@@ -143,7 +143,6 @@ export function createInternalThreadRoutes(deps: {
       return json(res, 403, { error: "source conversation does not belong to sender" });
     }
     const threadId = closeMatch[1]!;
-    // A room member closes the room thread it speaks in, and only that one, once its reply there ends.
     const room = threadId === fromThreadId ? store.groupByThread(threadId) : undefined;
     if (room && !room.dm) {
       const task = store.groupTaskByThread(room.id, threadId);

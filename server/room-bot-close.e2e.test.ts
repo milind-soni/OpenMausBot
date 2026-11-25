@@ -40,6 +40,7 @@ it("closes its room thread with its final reply, and a person's next line opens 
     expect((await cli("wait", "--channel", room.id, "--timeout", "45")).status).toBe("settled");
     const turn = evidence().find((record) => record.planKey === "W1");
     expect(turn.system).toContain("When the work in this thread is finished, close it with your final reply");
+    expect((turn.evidence[0].result.tools as Array<{ name: string; inputSchema: { required?: string[] } }>).find((tool) => tool.name === "close_thread")?.inputSchema.required ?? []).not.toContain("thread_id");
     const closeAnswer = turn.evidence.at(-1).response.result;
     expect(closeAnswer.isError ?? false, JSON.stringify(closeAnswer)).toBe(false);
     expect(closeAnswer.content[0].text).toContain("closes when this reply ends");
@@ -49,7 +50,6 @@ it("closes its room thread with its final reply, and a person's next line opens 
     expect(closed).toMatchObject({ closedAt: expect.any(Number), unread: true });
     const transcript = (await api("GET", `/api/threads/${room.threadId}/messages`)).messages as Array<{ role: string; text?: string }>;
     expect(transcript.some((message) => message.role === "bot" && message.text === "Fixed the typo.")).toBe(true);
-    // The turn's late lines (its digest) land after it ends; none of them opens the thread.
     await new Promise((resolve) => setTimeout(resolve, 2_000));
     expect((await task()).closedAt).toBe(closed.closedAt);
 
