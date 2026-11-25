@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ProviderInstance } from "../../contracts.ts";
 import { recordEvents } from "../../testing/events.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
+import { antigravityHarnessLimit } from "../antigravity-turn-outcome.ts";
 import { ANTIGRAVITY_SESSION_SETUP_TIMEOUT_MS } from "../antigravity.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 import { ANTIGRAVITY_HARNESS_FAILURE_LOG } from "./harness-failure.ts";
@@ -83,6 +84,27 @@ describe("an agent whose own log says its local harness failed", () => {
       expect(recorder.events.filter((event) => event.type === "runtime.error" && event.turnId === turnId).at(-1)).toMatchObject({ message: "The local agent connection failed." });
     }
     expect(Number(readFileSync(launches, "utf8"))).toBe(2);
+    recorder.stop();
+  });
+
+  it("ends the turn on the usage limit a failure line reports, so a fallback model can carry on", async () => {
+    const directory = folder();
+    const quotaLine = "E1124 14:52:01.000001 4242 local_connection.py:551] harness stderr: Agent run failed: agent executor error: "
+      + "Error 429, Message: Quota exhausted., Status: RESOURCE_EXHAUSTED, Details: [map[metadata:map[quotaResetDelay:38m0s] reason:QUOTA_EXHAUSTED]]";
+    const driver = createAcpDriver({
+      ...SUPPORT,
+      stderrFailure: { line: ANTIGRAVITY_HARNESS_FAILURE_LOG, message: "The local agent connection failed.", failure: (line) => antigravityHarnessLimit("Turn Health Test", line) },
+    });
+    instance = await driver.create({
+      instanceId: "turn-health-quota", displayName: "Turn Health", enabled: true, config: driver.defaultConfig(),
+      environment: { FAKE_ACP_PROMPT_STDERR: quotaLine, FAKE_ACP_PROMPT_STDERR_THEN: "hang" },
+    });
+    const recorder = recordEvents(instance.adapter);
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "thread-quota", text: "go", cwd: directory });
+    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId, 5_000)).toMatchObject({ ok: false, stopReason: "quota" });
+    expect(recorder.events.find((event) => event.type === "runtime.error" && event.turnId === turnId)).toMatchObject({
+      limit: "engine", message: expect.stringContaining("reached its usage limit"),
+    });
     recorder.stop();
   });
 });

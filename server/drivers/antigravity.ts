@@ -39,7 +39,7 @@ import {
   validateAntigravityRuntime,
   verifyAntigravityBrowserHelper,
 } from "./antigravity-acp.ts";
-import { antigravityLimitFacts, watchAntigravityPromptOutcome } from "./antigravity-turn-outcome.ts";
+import { antigravityHarnessLimit, antigravityLimitFacts, watchAntigravityPromptOutcome } from "./antigravity-turn-outcome.ts";
 import { splitAntigravityThinking } from "./antigravity-models.ts";
 import { AntigravityAuthController } from "./antigravity-auth.ts";
 import { AntigravityCliLogin, type LoginProcesses } from "./antigravity-native-login.ts";
@@ -206,6 +206,8 @@ const support: AcpSupport = {
   stderrFailure: {
     line: ANTIGRAVITY_HARNESS_FAILURE_LOG,
     message: "Antigravity's local agent connection failed. Send the message again to continue in a fresh Antigravity process.",
+    // A run that failed on an exhausted quota is a usage limit, so the bot's fallback model can carry on.
+    failure: (line) => antigravityHarnessLimit(support.displayName, line),
   },
   clientFileSystem: true,
   // Only the native CLI takes them; agy_acp_server keeps its stdio proxies.
