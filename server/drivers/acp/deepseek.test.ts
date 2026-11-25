@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -206,7 +206,8 @@ describe("DeepSeek approval patch", () => {
   function expectApprovalFiles(patch: string, review: boolean) {
     expect(readFileSync(plugin, "utf8")).toBe(DSH_APPROVAL_PLUGIN);
     expect(parse(readFileSync(patch, "utf8"))).toEqual([{ insert: [
-      { id: "openmausbot-approval-preset", name: plugin, config: { review, dataDir: DATA_DIR } },
+      // The real path, as a conversation's folder is named under it (the test data folder may sit behind /tmp's link).
+      { id: "openmausbot-approval-preset", name: plugin, config: { review, dataDir: realpathSync(DATA_DIR) } },
     ] }]);
   }
 

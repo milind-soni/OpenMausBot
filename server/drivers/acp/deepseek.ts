@@ -27,7 +27,7 @@
 // Picker ids are `<provider>/<model>` so bot settings, badges and config.json
 // stay readable; resolveTurnModel turns them into dsh's wire pair just before
 // the core selects the model.
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parse as parseYaml, stringify } from "yaml";
@@ -321,12 +321,17 @@ const approvalPlugin = join(approvalDir, "approval-preset.mjs");
 const reviewPatch = join(approvalDir, "approval-review.patch.yml");
 const sandboxPatch = join(approvalDir, "approval-sandbox.patch.yml");
 
+/** The data folder as a conversation's folder is named (its real path), so the plugin finds the bot's memory from it. */
+function approvalDataDir(): string {
+  try { return realpathSync(DATA_DIR); } catch { return DATA_DIR; }
+}
+
 function approvalPatch(review: boolean): string {
   const patch = review ? reviewPatch : sandboxPatch;
   mkdirSync(approvalDir, { recursive: true });
   writeFileAtomicIfChanged(approvalPlugin, DSH_APPROVAL_PLUGIN);
   writeFileAtomicIfChanged(patch, stringify([{ insert: [
-    { id: "openmausbot-approval-preset", name: approvalPlugin, config: { review, dataDir: DATA_DIR } },
+    { id: "openmausbot-approval-preset", name: approvalPlugin, config: { review, dataDir: approvalDataDir() } },
   ] }]));
   return patch;
 }
