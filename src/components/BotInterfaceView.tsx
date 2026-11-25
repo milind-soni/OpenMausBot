@@ -8,6 +8,22 @@ import { ChatHeadPill } from "./ChatHeadPill";
 import { useCaptionChrome } from "./DesktopCapabilities";
 import { ELEVATED_FLOAT } from "./elevated";
 import { Segmented } from "./SettingsPrimitives";
+import DashboardPage from "./dashboard/DashboardPage";
+import { CheatSheetPage } from "./ui-interface/CheatSheetPage";
+import { CustomPage } from "./ui-interface/CustomPage";
+
+function renderInterfaceLayout(layout: Bot["uiInterfaceLayout"]) {
+  switch (layout) {
+    case "dashboard":
+      return <DashboardPage />;
+    case "cheat-sheet":
+      return <CheatSheetPage />;
+    case "custom":
+      return <CustomPage />;
+    default:
+      return null;
+  }
+}
 
 export function BotViewSwitcher({ botId, view, enabled = true, children }: {
   botId: string;
@@ -43,7 +59,9 @@ export function BotInterfaceView({ bot }: { bot: Bot }) {
           </BotViewSwitcher>
         </div>
       </div>
-      <div data-bot-interface-page="" className="min-h-0 w-full flex-1" />
+      <div data-bot-interface-page="" className="min-h-0 w-full flex-1">
+        {renderInterfaceLayout(bot.uiInterfaceLayout)}
+      </div>
     </main>
   );
 }
