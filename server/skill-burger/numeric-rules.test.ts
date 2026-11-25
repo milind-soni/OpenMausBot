@@ -13,6 +13,8 @@ import { createSkillBurgerRoutes } from "./routes.ts";
 import type { RunEnvelope } from "./runner.ts";
 import { createSkillBurgerRuns, RESUME_PATH, RUN_PATH } from "./runs.ts";
 
+// Each case reads its count from a shell step, which the command executor runs as the bot on POSIX only (executors.test.ts).
+const POSIX_ONLY = process.platform === "win32";
 const roots: string[] = [];
 const servers: Server[] = [];
 afterEach(async () => {
@@ -62,7 +64,7 @@ async function serve(value: unknown, tail: unknown[], check?: unknown) {
   };
 }
 
-it.each([null, undefined, false, "", " \t", [], [0], "Infinity", "-Infinity", "NaN"].map((value) => ({ value })))("does not run numeric branches for a count of $value", async ({ value }) => {
+it.skipIf(POSIX_ONLY).each([null, undefined, false, "", " \t", [], [0], "Infinity", "-Infinity", "NaN"].map((value) => ({ value })))("does not run numeric branches for a count of $value", async ({ value }) => {
   const h = await serve(value, [file("below", condition("lt", 1)), file("above", condition("gt", -1)), file("complete")]);
   expect(await h.run()).toMatchObject({ ok: true, status: "ok" });
   expect(h.ran("below")).toBe(false);
@@ -70,7 +72,7 @@ it.each([null, undefined, false, "", " \t", [], [0], "Infinity", "-Infinity", "N
   expect(h.ran("complete")).toBe(true);
 });
 
-it.each([
+it.skipIf(POSIX_ONLY).each([
   { value: 0, below: true }, { value: -2, below: true }, { value: 2.5, below: false }, { value: " 2.5 ", below: false },
 ])("keeps numeric comparison for $value", async ({ value, below }) => {
   const h = await serve(value, [file("below", condition("lt", 1)), file("above", condition("gt", 1)), file("complete")]);
@@ -79,14 +81,14 @@ it.each([
   expect(h.ran("above")).toBe(!below);
 });
 
-it.each([null, "", [], "Infinity"].map((threshold) => ({ threshold })))("does not run a numeric branch with a nonnumeric threshold of $threshold", async ({ threshold }) => {
+it.skipIf(POSIX_ONLY).each([null, "", [], "Infinity"].map((threshold) => ({ threshold })))("does not run a numeric branch with a nonnumeric threshold of $threshold", async ({ threshold }) => {
   const h = await serve(5, [file("below", condition("lt", threshold)), file("above", condition("gt", threshold)), file("complete")]);
   expect(await h.run()).toMatchObject({ ok: true, status: "ok" });
   expect(h.ran("below")).toBe(false);
   expect(h.ran("above")).toBe(false);
 });
 
-it("uses the otherwise case when a numeric decision has no reported count", async () => {
+it.skipIf(POSIX_ONLY)("uses the otherwise case when a numeric decision has no reported count", async () => {
   const h = await serve(null, [
     { id: "choose", kind: "decide", label: "Choose a count path", cases: ["low", "unknown"], rules: [{ ...condition("lt", 1), case: "low" }], otherwise: "unknown" },
     file("low", onCase("choose", "low")), file("unknown", onCase("choose", "unknown")),
@@ -96,7 +98,7 @@ it("uses the otherwise case when a numeric decision has no reported count", asyn
   expect(h.ran("unknown")).toBe(true);
 });
 
-it("fails a numeric check on null and resumes from disk once the source contains zero", async () => {
+it.skipIf(POSIX_ONLY)("fails a numeric check on null and resumes from disk once the source contains zero", async () => {
   const h = await serve(null, [file("complete")], { says: "A numeric count was received and is below one", rule: { path: "count", op: "lt", value: 1 } });
   const stopped = await h.run();
   expect(stopped).toMatchObject({ ok: false, error: { type: "step_failed", step: "read", message: expect.stringContaining("its check didn't hold") } });
@@ -106,7 +108,7 @@ it("fails a numeric check on null and resumes from disk once the source contains
   expect(readFileSync(join(h.root, "complete.txt"), "utf8")).toBe("ran");
 });
 
-it("leaves boolean equality and existence conditions intact", async () => {
+it.skipIf(POSIX_ONLY)("leaves boolean equality and existence conditions intact", async () => {
   const h = await serve(false, [file("equals", condition("eq", false)), file("exists", condition("exists"))]);
   expect(await h.run()).toMatchObject({ ok: true, status: "ok" });
   expect(h.ran("equals")).toBe(true);
