@@ -60,7 +60,8 @@ async function listen(token: string) {
 }
 
 beforeAll(async () => {
-  fx = await launchCloudSendFixture({ onePasswordToken: `ops_fake-team-board-${randomBytes(8).toString("hex")}`, team: { id: "team-acme-board", name: "Acme" } });
+  // The dispatcher's quiet minutes after a start last hours here: this file is about items, and nothing takes them.
+  fx = await launchCloudSendFixture({ onePasswordToken: `ops_fake-team-board-${randomBytes(8).toString("hex")}`, team: { id: "team-acme-board", name: "Acme", env: { OMB_BOARD_TIME_SCALE: "1000" } } });
   team = fx.team!;
   olive = (await team.pair(OLIVE)).token!;
   mira = (await team.pair(MIRA)).token!;

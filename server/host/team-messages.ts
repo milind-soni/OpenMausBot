@@ -206,6 +206,22 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
     return { status: 200, text: `Passed on to ${to.name}'s inbox; they were notified. Only your message went, nothing else from here. Their answer comes back here, and you carry on from it.` };
   }
 
+  /** A board item's bot asks a teammate (by name or address, else by person key) in a room thread: the question reaches
+   * their inbox, from the bot, and their answer comes back to that thread. No hourly cap: a bot asks once per item turn. */
+  function ask(botId: string, threadId: string, to: { name?: string; key?: string }, question: string, title: string): Passed & { person?: string } {
+    const at = where(botId, threadId);
+    if (!team || !at?.group) return { status: 403, text: "Only a bot in this room can ask from it." };
+    if (deps.confined?.(threadId)) return { status: 403, text: OUTSIDE_REFUSAL };
+    const found = to.name ? resolve(to.name) : { person: byKey(to.key) };
+    if ("error" in found) return { status: found.status, text: found.error };
+    const person = found.person;
+    if (!person) return { status: 404, text: "Nobody here was named, and nobody made this item: name the person to ask." };
+    if (!deps.sees(person).thread(threadId)) return { status: 403, text: `${person.name} can't see this room, so they can't answer here. Ask someone who can.` };
+    const delivered = inbox.deliver(person.key, { kind: "message", from: { name: at.bot.name, botId: at.bot.id }, to: "bot", origin: originOf(at, threadId), text: question, title, notify: "mention" });
+    if (!delivered) return { status: 409, text: `${person.name} has no inbox here yet, so the question waits in this thread for anyone who sees it.` };
+    return { status: 200, text: `Asked ${person.name} in their inbox.`, person: person.key };
+  }
+
   const handledTurns = new Set<string>();
   const mentionable = () => mentionablePeople(current().map((one) => ({ key: one.key, name: one.name })));
   const botNames = () => store.bots.filter((bot) => !bot.hidden).map((bot) => bot.name);
@@ -328,6 +344,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       return ctx.json(ctx.res, passed.status, passed.status === 200 ? { text: passed.text } : { error: passed.text });
     },
     pass,
+    ask,
     inbox,
     /** Each teammate here and the tags that reach them ("@Ada", "@Ada Lovelace"); empty off a team. A bot sharing a tag
      * is never reached by it: a tie is the person's (shared/person-mention.ts). */

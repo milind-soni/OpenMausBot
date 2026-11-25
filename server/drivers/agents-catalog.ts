@@ -13,7 +13,7 @@ import { APP_SETTINGS_TOOL_DEFINITION } from "./agents-app-settings-tool.ts";
 import { THREAD_POST_TOOL_DEFINITION } from "./agents-thread-post-tool.ts";
 import { RENAME_THREAD_TOOL_DEFINITION } from "./agents-thread-title-tool.ts";
 import { WORKFLOW_TOOL_DEFINITIONS, WORKFLOW_TOOL_NAMES } from "./agents-workflow-tool.ts";
-import { WAIT_TOOL_DEFINITIONS, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts"; import { CHECK_BACK_TOOL_DEFINITIONS, CHECK_BACK_TOOL_NAMES } from "./agents-check-back-tool.ts";
+import { WAIT_TOOL_DEFINITIONS, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts"; import { CHECK_BACK_TOOL_DEFINITIONS, CHECK_BACK_TOOL_NAMES } from "./agents-check-back-tool.ts"; import { BOARD_TOOL_DEFINITIONS, BOARD_TOOL_NAMES } from "./agents-board-tools.ts";
 import { COMPUTER_ASK_TOOL_DEFINITIONS, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
 import { IMAGE_TOOL_DEFINITIONS, IMAGE_TOOL_NAMES } from "./agents-image-tools.ts";
 import { HOSTING_TOOL_DEFINITIONS, HOSTING_TOOL_NAMES } from "./agents-hosting-tools.ts";
@@ -651,7 +651,7 @@ const TOOL_DEFINITIONS = [
     },
   },
   ...WAIT_TOOL_DEFINITIONS,
-  ...CHECK_BACK_TOOL_DEFINITIONS,
+  ...CHECK_BACK_TOOL_DEFINITIONS, ...BOARD_TOOL_DEFINITIONS,
   ...COMPUTER_ASK_TOOL_DEFINITIONS,
   {
     name: "propose_profile",
@@ -859,7 +859,7 @@ function catalogTools(profile: CatalogProfile) {
     (profile.botId === WATCHER_OPTIONS_CARD_BOT_ID || !WATCHER_TOOL_NAMES.has(tool.name)) &&
     (profile.memoryEnabled !== false || (tool.name !== "memory_update" && tool.name !== "memory_log")) &&
     (profile.computerSelection === true || tool.name !== "select_computer") &&
-    (profile.room !== true || !ROOM_REFUSED_TOOL_NAMES.has(tool.name)) &&
+    (profile.room !== true || !ROOM_REFUSED_TOOL_NAMES.has(tool.name)) && (profile.board === true || !BOARD_TOOL_NAMES.has(tool.name)) &&
     (profile.imageGeneration === true || !IMAGE_TOOL_NAMES.has(tool.name)) && (profile.appHosting === true || !HOSTING_TOOL_NAMES.has(tool.name)) &&
     (profile.meetings === true || (!MEETING_TOOL_NAMES.has(tool.name) && tool.name !== "reset_cloud_computer")) &&
     (profile.skillBurger !== false || !WORKFLOW_TOOL_NAMES.has(tool.name)));
