@@ -1,8 +1,12 @@
 export interface ConnectorCardData {
-  /** What the card connects: a Composio app (absent or "composio"), or a sign-in to an MCP server ("mcp"). */
-  source?: "composio" | "mcp";
+  /** What the card connects: a Composio app (absent or "composio"), a sign-in to an MCP server ("mcp"), or the GitHub
+   * sign-in after a clone, fetch or push failed for want of one ("github", whose `text` names the bot and the repository). */
+  source?: "composio" | "mcp" | "github";
   /** Composio toolkit slug, or the MCP server's name. It is validated server-side before every action. */
   slug: string;
+  /** A "github" card on a Team Cloud: the member whose own GitHub sign-in it asks for (their person key), kept on the
+   * card so only they can settle it, whoever writes in the chat later and across restarts. */
+  person?: string;
   label: string;
   description: string;
   status: "required" | "authorizing" | "connected" | "failed";
