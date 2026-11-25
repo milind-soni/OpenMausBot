@@ -3,6 +3,7 @@
 import type { ResolvedSender } from "../../shared/wire.ts";
 import { BOARD_LIMITS, type BoardItem, type BoardItemFrame } from "../../shared/board.ts";
 import { resolveMentions } from "../../shared/room-mentions.ts";
+import { queuedChannelSends } from "../channel-queue.ts";
 import type { VisibleSet } from "../bot-visibility.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { createBoardRoutes, type BoardPerson } from "../routes/board.ts";
@@ -78,7 +79,8 @@ export function createTeamBoard(deps: TeamBoardDeps) {
     board, on, timeScale: scale,
     roomBots: memberBots,
     botFree: deps.botFree,
-    threadWorking: deps.threadWorking,
+    // A person's line queued behind a running turn starts the next one there: the thread is still at work.
+    threadWorking: (groupId, threadId) => deps.threadWorking(groupId, threadId) || queuedChannelSends(threadId) > 0,
     capped: deps.capped,
     modelReady: deps.modelReady,
     brief,

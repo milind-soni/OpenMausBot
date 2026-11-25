@@ -17,7 +17,8 @@ const MIRA = { email: "mira@acme.test", role: "member" as const };
 const ENGINE = `const dir = process.env.FAKE_CLAUDE_FIXTURE_DIR;
 process.env.FAKE_CLAUDE_DUMP = dir + "/dump.json";
 process.env.FAKE_CLAUDE_TOOL_CALLS_FILE = dir + "/tool-calls.json";
-process.env.FAKE_CLAUDE_MARKERS_LATEST = "1";`;
+process.env.FAKE_CLAUDE_MARKERS_LATEST = "1";
+process.env.FAKE_CLAUDE_RELEASE = dir + "/release";`;
 
 type Bot = { id: string; name: string; threadId: string };
 type Room = { id: string; threadId: string };
@@ -141,11 +142,38 @@ it("an ask waits on the person who made the item, reaches their inbox, and their
   expect(rooms.find((room) => room.id === launch.id)!.tasks!.find((task) => task.threadId === gamma.threadId)!.activity).toBe("waiting-on-you");
   const replied = await team.as(mira, "POST", `/api/groups/${launch.id}/messages`, { text: "Friday the 5th", threadId: gamma.threadId });
   expect(replied.status, JSON.stringify(replied.body)).toBe(202);
-  expect(replied.body.message?.text).toBe("@Writer Friday the 5th");
+  // Writer's asking turn may still be ending (the item waits on Mira from the moment it asked), so her line is either
+  // started at once or queued behind that turn; either way it is saved addressed to Writer.
+  if (replied.body.queued) expect(replied.body.queueId).toBeTruthy();
+  else expect(replied.body.message?.text).toBe("@Writer Friday the 5th");
+  await until(async () => (await messages(mira, gamma.threadId)).some((line) => line.role === "user" && line.text === "@Writer Friday the 5th"), "Mira's line, addressed to Writer");
+  expect((await messages(mira, gamma.threadId)).filter((line) => line.role === "user" && line.text?.includes("Friday the 5th"))).toHaveLength(1);
   await settled(gamma.threadId, "done");
   expect(await item(gamma.threadId)).toMatchObject({ result: "Launch set for Friday the 5th.", attempts: 1 });
   const answers = (await messages(mira, gamma.threadId)).filter((line) => line.role === "bot" && line.kind === "text");
   expect(answers.every((line) => line.from?.botId === writer.id), "Reviewer, the room's default, never answered").toBe(true);
+}, hostTimeout(120_000));
+
+it("a reply queued behind the turn that asked still goes to the same bot, and the item is not handed on meanwhile", async () => {
+  rmSync(file("release"), { force: true });
+  parts({
+    "Thursday works": [update({ move: "done", text: "Booked Thursday." })],
+    // Writer asks, then stays in its turn until the release file exists: Mira's reply has to wait in the queue.
+    "Theta booking": [update({ move: "ask", text: "Which day should I book?" }), { name: "Bash", input: { command: "echo still finishing" }, hold: true }],
+  });
+  const theta = await add(mira, { groupId: launch.id, title: "Theta booking", forBotId: writer.id });
+  await settled(theta.threadId, "needs_person");
+  const replied = await team.as(mira, "POST", `/api/groups/${launch.id}/messages`, { text: "Thursday works", threadId: theta.threadId });
+  expect(replied.status, JSON.stringify(replied.body)).toBe(202);
+  expect(replied.body.queued, "Writer's turn is still running").toBe(true);
+  expect(await item(theta.threadId)).toMatchObject({ state: "working", holder: { botId: writer.id }, attempts: 1 });
+  writeFileSync(file("release"), "");
+  await settled(theta.threadId, "done");
+  expect(await item(theta.threadId)).toMatchObject({ result: "Booked Thursday.", attempts: 1 });
+  const lines = await messages(mira, theta.threadId);
+  expect(lines.filter((line) => line.role === "user" && line.text?.includes("Thursday works")).map((line) => line.text)).toEqual(["@Writer Thursday works"]);
+  expect(lines.filter((line) => line.sender?.name === "Board"), "never handed out again").toHaveLength(1);
+  rmSync(file("release"), { force: true });
 }, hostTimeout(120_000));
 
 it("an answer from the person's inbox, which starts no turn by itself, brings the item back to the bot that asked", async () => {
