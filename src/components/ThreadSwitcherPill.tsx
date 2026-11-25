@@ -140,7 +140,8 @@ export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle
     const chip = row.querySelector<HTMLElement>('[aria-selected="true"]') ?? row.querySelector<HTMLElement>("[role=option]");
     chip?.focus({ preventScroll: true });
     const settle = window.setTimeout(() => {
-      centreChip(row, chip);
+      // The person may have picked another thread meanwhile: centre the one selected now, not the one focused at open.
+      centreChip(row, row.querySelector<HTMLElement>('[aria-selected="true"]') ?? chip);
       measure();
     }, reducedMotion() ? 0 : RESIZE_MS);
     return () => window.clearTimeout(settle);
@@ -176,7 +177,8 @@ export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle
   };
   const scrollSideways = (event: ReactWheelEvent<HTMLDivElement>) => {
     if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
-    event.currentTarget.scrollLeft += event.deltaY;
+    const row = event.currentTarget;
+    row.scrollLeft += getComputedStyle(row).direction === "rtl" ? -event.deltaY : event.deltaY;
   };
   const onKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const chips = Array.from(list.current?.querySelectorAll<HTMLElement>("[role=option]") ?? []);

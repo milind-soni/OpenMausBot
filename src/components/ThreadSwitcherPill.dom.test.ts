@@ -110,6 +110,36 @@ describe("the pill's thread switcher", () => {
     expect(row.scrollLeft).toBe(40);
   });
 
+  it("turns a vertical wheel the reading way in a right-to-left row", () => {
+    render(pepper(THREADS, "launch"));
+    act(() => q("[data-chathead-threads]")!.click());
+    const row = q("[role=listbox]")!;
+    row.style.direction = "rtl";
+    row.scrollLeft = 0;
+    act(() => { row.dispatchEvent(new WheelEvent("wheel", { deltaY: 40, bubbles: true })); });
+    expect(row.scrollLeft).toBe(-40);
+  });
+
+  it("centres the thread picked while the row was still opening, not the one selected at open", () => {
+    vi.useFakeTimers();
+    try {
+      render(pepper(THREADS, "launch"));
+      act(() => q("[data-chathead-threads]")!.click());
+      const row = q("[role=listbox]")!;
+      const scrollBy = vi.fn();
+      row.scrollBy = scrollBy as never;
+      const box = (left: number) => () => ({ left, width: 20, top: 0, height: 20, right: left + 20, bottom: 20, x: left, y: 0, toJSON: () => ({}) }) as DOMRect;
+      row.getBoundingClientRect = () => ({ ...box(0)(), width: 100, right: 100 }) as DOMRect;
+      q('[data-thread-chip="launch"]')!.getBoundingClientRect = box(0);
+      q('[data-thread-chip="trip"]')!.getBoundingClientRect = box(200);
+      act(() => root!.render(createElement(ChatHeadPill, { bot: pepper(THREADS, "trip"), avatar: {} as never, privacy: null, onToggle, switcher: true })));
+      act(() => { vi.advanceTimersByTime(2000); });
+      expect(scrollBy.mock.calls.at(-1)?.[0]).toMatchObject({ left: 160 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("moves between threads with the arrow keys, and folds back on Escape", () => {
     render(pepper(THREADS, "launch"));
     act(() => q("[data-chathead-threads]")!.click());
