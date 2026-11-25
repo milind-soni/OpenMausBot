@@ -244,14 +244,15 @@ describe("ProviderRegistry", () => {
     };
     await read();
     authenticated = true;
-    expect(registry.sawSignedIn("a"), "no read had found it signed in yet").toBe(false);
+    registry.sawSignedIn("a");
     await read();
     expect(heard, "the app told this sign-in itself").toEqual([]);
-    expect(registry.sawSignedIn("a"), "the app reporting it again is the same sign-in").toBe(true);
     authenticated = false;
     await read();
-    expect(registry.sawSignedIn("a"), "a read found it signed out since: a new sign-in").toBe(false);
     authenticated = true;
+    await read();
+    expect(heard, "signed out and in again since: a new sign-in").toEqual(["a"]);
+    heard.length = 0;
     authenticated = false;
     await read();
     await registry.dispose("a");

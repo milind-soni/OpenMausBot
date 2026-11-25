@@ -276,40 +276,22 @@ export function createSignInResumeHost(deps: Omit<SignInResumeDeps, "file" | "si
       const stands = () => Boolean(instance) && registry.get(instanceId) === instance;
       return stands() && snapshot?.state === "available" && snapshot.authenticated === true ? stands : null;
     },
-    retry: async (wait, message) => {
-      const sent = await deps.startTurn(wait.botId, message.text ?? "", {
-        threadId: wait.threadId, editedMessageId: message.id, dataContext: message.dataContext,
-        ...(message.replyToId ? { replyTo: deps.replyTarget(wait.threadId, message.replyToId) } : {}),
-        ...(wait.trigger ? { trigger: wait.trigger } : {}), ...(message.sender ? { sender: message.sender } : {}),
-      });
-      const id = (sent as { id?: unknown } | null | undefined)?.id;
-      if (typeof id === "string") sentAgain.add(id);
-    },
+    retry: (wait, message) => deps.startTurn(wait.botId, message.text ?? "", {
+      threadId: wait.threadId, editedMessageId: message.id, dataContext: message.dataContext,
+      ...(message.replyToId ? { replyTo: deps.replyTarget(wait.threadId, message.replyToId) } : {}),
+      ...(wait.trigger ? { trigger: wait.trigger } : {}), ...(message.sender ? { sender: message.sender } : {}),
+    }),
   });
-  const now = deps.now ?? Date.now;
-  /** The messages a pass sent again: one refused again says nothing new about the AI's sign-in. */
-  const sentAgain = new Set<string>();
-  const statusToldAt = new Map<string, number>();
-  const refusedAt = new Map<string, number>();
   const signedIn = (instanceId: string): void => {
     deps.takeover.signedIn(instanceId);
     void resume.signedIn(instanceId);
   };
-  registry.onSignedIn((instanceId) => {
-    statusToldAt.set(instanceId, now());
-    signedIn(instanceId);
-  });
+  registry.onSignedIn(signedIn);
   void Promise.resolve(deps.startupRead).then(() => resume.resumeSaved());
-  /** A sign-in made in the app is the one a status read already told only when that read came after the last refusal of a
-   * message the person sent; a message sent again and refused again does not count. */
+  /** A sign-in made in the app is a sign-in, and the status read that later finds it does not tell it again. */
   const appSignedIn = (instanceId: string): void => {
-    const told = registry.sawSignedIn(instanceId) && (statusToldAt.get(instanceId) ?? -Infinity) > (refusedAt.get(instanceId) ?? -Infinity);
-    if (told) deps.takeover.signedIn(instanceId);
-    else signedIn(instanceId);
+    registry.sawSignedIn(instanceId);
+    signedIn(instanceId);
   };
-  const waiting = (wait: SignInWait) => {
-    if (!sentAgain.has(wait.messageId)) refusedAt.set(wait.selection.instanceId, Math.max(refusedAt.get(wait.selection.instanceId) ?? -Infinity, wait.failedAt));
-    return resume.waiting(wait);
-  };
-  return { ...resume, waiting, signedIn, appSignedIn };
+  return { ...resume, signedIn, appSignedIn };
 }

@@ -423,7 +423,7 @@ describe("createSignInResume", () => {
     const directory = mkdtempSync(join(tmpdir(), "omb-sign-in-resume-"));
     scratch.push(directory);
     const w = world();
-    let readSignedIn = false;
+    const sawSignedIn = vi.fn();
     const listeners: Array<(instanceId: string) => void> = [];
     const instance = { snapshot: async () => ({ state: "available" as const, authenticated: true }) };
     const takeover = { signedIn: vi.fn() };
@@ -433,7 +433,7 @@ describe("createSignInResume", () => {
         forgetSnapshots: () => {},
         get: () => instance as never,
         onSignedIn: (listener) => { listeners.push(listener); },
-        sawSignedIn: () => { const known = readSignedIn; readSignedIn = true; return known; },
+        sawSignedIn,
       },
       startTurn: async (_botId, text, opts) => {
         const sent = w.row(opts.threadId, { role: "user", kind: "text", text });
@@ -442,40 +442,19 @@ describe("createSignInResume", () => {
       },
       replyTarget: () => undefined,
     });
-    const statusRead = () => {
-      readSignedIn = true;
-      listeners.forEach((listener) => listener("claude"));
-    };
-    return { w, host, takeover, statusRead };
+    return { w, host, takeover, sawSignedIn, listeners };
   }
 
-  it("takes the app's own report of a sign-in the status read already found for the same sign-in", async () => {
-    const { w, host, takeover, statusRead } = hostWorld();
+  it("runs a pass for a sign-in made in the app, and marks it so the status read that finds it tells nothing more", async () => {
+    const { w, host, takeover, sawSignedIn } = hostWorld();
     const kai = w.stuck("t-kai");
-    host.waiting(kai.wait);
-    w.tick(10);
-    statusRead();
-    await vi.waitFor(() => expect(w.sent).toHaveLength(1));
-    w.tick(5);
-    const resent = w.sent[0]!.message;
-    w.row("t-kai", { tool: { name: "error: Not logged in · Please run /login", ok: false, setup: true } });
-    await host.waiting({ ...kai.wait, messageId: resent.id, failedAt: w.deps.now!() });
+    host.waiting(kai.wait); host.noticed(kai.noticed);
     w.tick(10);
     host.appSignedIn("claude");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(w.sent, "the app's report is the sign-in the status read already found").toHaveLength(1);
-    expect(takeover.signedIn).toHaveBeenCalledTimes(2);
-  });
-
-  it("takes the app's sign-in for a new one when a message was refused after the status read last found it signed in", async () => {
-    const { w, host, statusRead } = hostWorld();
-    statusRead();
-    w.tick(10);
-    const kai = w.stuck("t-kai");
-    host.waiting(kai.wait);
-    w.tick(10);
-    host.appSignedIn("claude");
-    await vi.waitFor(() => expect(w.sent.map(({ message }) => message.text)).toEqual(["Draft the plan"]));
+    expect(sawSignedIn).toHaveBeenCalledWith("claude");
+    expect(takeover.signedIn).toHaveBeenCalledWith("claude");
+    await vi.waitFor(() => expect(w.noticeTool("t-kai", kai.notice.id)?.nameCode).toBe("chat.notice.signedInAgain"));
+    expect(w.sent.map(({ message }) => message.text)).toEqual(["Draft the plan"]);
   });
 
   it("after a restart, asks the AI once and sends what was left waiting", async () => {

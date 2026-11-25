@@ -655,12 +655,9 @@ export class ProviderRegistry {
     this.signedInListeners.add(listener);
   }
 
-  /** A sign-in the app made and tells itself: the next read that finds it signed in tells nothing new. True when a read
-   * had already found it signed in, so it was told then. */
-  sawSignedIn(instanceId: InstanceId): boolean {
-    const known = this.lastAuth.get(instanceId)?.authenticated === true;
+  /** A sign-in the app made and tells itself: the next read that finds it signed in tells nothing new. */
+  sawSignedIn(instanceId: InstanceId): void {
     this.lastAuth.set(instanceId, { authenticated: true, read: ++this.readsBegun });
-    return known;
   }
 
   private saveStatus(): void {
