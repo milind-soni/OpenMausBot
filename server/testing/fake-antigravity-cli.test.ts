@@ -11,6 +11,7 @@ import bridgedAgents from "../drivers/agents-catalog-goldens/bridged.tools-list.
 import fullAgents from "../drivers/agents-catalog-goldens/full.tools-list.json" with { type: "json" };
 import { spawnCli } from "../procs.ts";
 import { nativeFixture } from "./antigravity-native-fixture.ts";
+import { removeTempDir, waitForExit } from "./cleanup.ts";
 import { droppedTools, ServerNames } from "./fake-antigravity-mcp.ts";
 
 const FAKE_MCP = join(dirname(fileURLToPath(import.meta.url)), "fake-mcp-server.ts");
@@ -74,11 +75,19 @@ function acpClient(profile: string, env: Record<string, string>) {
 }
 
 describe("the fake native CLI's MCP turns", () => {
-  const children: Array<{ kill(): void }> = [];
-  afterEach(() => { for (const child of children.splice(0)) child.kill(); });
+  const children: ReturnType<typeof spawnCli>[] = [];
+  const folders: string[] = [];
+  afterEach(async () => {
+    for (const child of children.splice(0)) {
+      if (child.exitCode === null) child.kill();
+      await waitForExit(child);
+    }
+    for (const folder of folders.splice(0)) await removeTempDir(folder);
+  });
 
   it("asks permission as 1.5.14 does, runs the tool once allowed, renames a changed server in one process and not after a restart", async () => {
     const directory = mkdtempSync(join(tmpdir(), "fake-agy-mcp-"));
+    folders.push(directory);
     const fixture = nativeFixture(join(directory, "bin"));
     const profile = join(directory, "profile");
     writeFileSync(join(directory, "token"), "");
@@ -125,6 +134,7 @@ describe("the fake native CLI's MCP turns", () => {
 
   it("holds a turn whose permission was cancelled until session/cancel", async () => {
     const directory = mkdtempSync(join(tmpdir(), "fake-agy-cancel-"));
+    folders.push(directory);
     const fixture = nativeFixture(join(directory, "bin"));
     const profile = join(directory, "profile");
     const credential = join(profile, "antigravity-acp", "antigravity-oauth-token");

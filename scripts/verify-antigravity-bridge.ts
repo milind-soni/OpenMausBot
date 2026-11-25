@@ -129,7 +129,8 @@ try {
   };
   const direct = await answerCard("direct list_bots at Ask, allowed for the session", "fake-agy: call agents/list_bots {}", true);
   check("Ask: a direct call's card offers allow for the session", direct?.allowSession === true, direct);
-  const again = await answerCard("use_tool after a session allow", 'fake-agy: call agents/use_tool {"name":"list_bots","arguments":{}}', false);
+  // The same tool, title and input as the direct call, toolSummary included, so a session allow would match it if use_tool could take one.
+  const again = await answerCard("use_tool after a session allow", 'fake-agy: call agents/use_tool {"name":"list_bots","arguments":{"toolSummary":"Run list_bots"}}', false);
   check("Ask: use_tool still asks after the session allow, for the same tool", again?.requestId !== undefined && !again.allowSession && !again.allowKey, again);
 
   await api("PATCH", `/api/bots/${chief.id}`, { approvalMode: "full" });
