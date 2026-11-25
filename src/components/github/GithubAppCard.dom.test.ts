@@ -13,7 +13,7 @@ import { GithubAppCard } from "./GithubAppCard";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const SIGNED_OUT: GithubSignInStatus = { state: "signed-out", download: false };
-const CODE: GithubSignInStatus = { state: "signing-in", code: "wdjbmjht", verificationUrl: "https://github.com/login/device", expiresAt: Date.UTC(2026, 10, 24, 9, 15) };
+const CODE: GithubSignInStatus = { state: "signing-in", code: "wdjbmjht", verificationUrl: "https://github.com/login/device", expiresAt: Date.now() + 900_000 };
 
 let root: Root | null = null;
 let host: HTMLElement;
