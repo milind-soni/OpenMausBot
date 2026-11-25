@@ -22,7 +22,7 @@ const render = (data: FeedRowData, onOpen = vi.fn(), open = false, actions?: Fee
   act(() => root!.render(createElement(RoomFeedRow, { row: data, groupId: "room", bots: BOTS, you: "Sam", now: NOW, open, onOpen, actions })));
   return onOpen;
 };
-const roomActions = (deletable = true): FeedRowActions => ({ onRename: vi.fn(), onDelete: vi.fn(), onPin: vi.fn(), onArchive: vi.fn(), deletable });
+const roomActions = (deletable = true): FeedRowActions => ({ onRename: vi.fn(), onDelete: vi.fn(), onPin: vi.fn(), onArchive: vi.fn(), onSetClosed: vi.fn(), deletable });
 const menuItem = (label: string) => [...document.querySelectorAll<HTMLButtonElement>("[data-thread-overlay] button")].find((button) => button.textContent?.includes(label));
 const item = () => document.querySelector<HTMLElement>("[data-feed-thread]")!;
 afterEach(() => { act(() => root?.unmount()); root = null; document.body.innerHTML = ""; });

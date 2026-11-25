@@ -204,7 +204,7 @@ export interface GroupTask {
   pinned?: boolean;
   updatedAt?: number;
   turnTimeoutMinutes?: number;
-  archivedAt?: number; activity?: "waiting-on-you";
+  archivedAt?: number; activity?: "waiting-on-you"; closedAt?: number; closedBy?: import("../../shared/room-threads").RoomThreadCloser;
   lastThreadOrderAt?: number;
   working?: boolean;
   busyBotId?: string | null;

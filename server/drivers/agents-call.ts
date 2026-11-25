@@ -433,8 +433,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   }
   if (name === LIST_THREADS_TOOL) return callListThreadsTool(args, context);
   if (name === "close_thread") {
-    const threadId = String(args.thread_id ?? "").trim();
-    if (!threadId) return { text: "close_thread needs the thread_id from list_threads or start_thread.", isError: true };
+    const threadId = String(args.thread_id ?? "").trim() || THREAD_ID;
     const r = await api(`/api/internal/threads/${encodeURIComponent(threadId)}/close`, { method: "POST", body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID }) });
     if (r.error) return { text: `Couldn't close that thread: ${String(r.error)}`, isError: true };
     return { text: closedThreadText(r) };

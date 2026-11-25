@@ -169,6 +169,7 @@ export const VITEST_SUBSETS = {
       "server/cloud-send-arrived.test.ts",
       "server/cloud-team-bot-access.e2e.test.ts",
       "server/room-thread-summaries.e2e.test.ts",
+      "server/room-thread-close.e2e.test.ts",
       "server/cloud-team-one-answer.e2e.test.ts",
       "server/cloud-team-preference.e2e.test.ts",
       "server/cloud-team-rules.e2e.test.ts",
