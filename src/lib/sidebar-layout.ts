@@ -165,6 +165,8 @@ type UnreadListBot = {
   unread?: boolean;
   tasks?: ReadonlyArray<{ unread?: boolean; routineRunId?: string; archivedAt?: number; updatedAt?: number; createdAt?: number }> | null;
   messages?: ReadonlyArray<{ at: number }>;
+  /** A row of the other place in the one list (place-rows.ts): when its conversations last moved there. */
+  lastAt?: number;
 };
 
 /** The bot kept in Unread after it was opened from there, with the time it was listed by and the conversation open then. */
@@ -172,7 +174,7 @@ export type UnreadHold = { id: string; since: number; chat?: string };
 
 function unreadSince(bot: UnreadListBot): number {
   const threads = (bot.tasks ?? []).filter((task) => task.unread && !task.routineRunId && task.archivedAt === undefined);
-  if (threads.length === 0) return bot.messages?.at(-1)?.at ?? 0;
+  if (threads.length === 0) return bot.messages?.at(-1)?.at ?? bot.lastAt ?? 0;
   return Math.max(...threads.map((task) => task.updatedAt ?? task.createdAt ?? 0));
 }
 

@@ -21,6 +21,13 @@ export interface PlaceBotRow {
   waiting?: true;
   working?: true;
   unread?: true;
+  /** The start of its newest message while that is words said (at most PREVIEW_MAX characters, Markdown as written):
+   * its second line in the one list, as this page's own rows show theirs. Absent for a step, a card or a file. */
+  preview?: string;
+  /** The title of the conversation it has open there: its second line while no preview came. */
+  chat?: string;
+  /** Epoch ms its conversations last moved there (the newest thread's `updatedAt`): Unread's order across places. */
+  lastAt?: number;
 }
 
 export interface PlacesTogetherState {
@@ -60,4 +67,6 @@ export interface NewBotChoice {
 }
 
 export const PLACES_TOGETHER_FILE: string;
+export const PREVIEW_MAX: number;
+export const PREVIEW_LOOK: number;
 export function otherHome(asking: "local" | "cloud" | BotHome): BotHome;
