@@ -87,12 +87,13 @@ const WINDOWS_STOP_PROCESSES = "foreach ($e in $env:OMB_AGY_STOP.Split(' ')) { $
   + "; if ($p -and $p.CreationDate -and $p.CreationDate.ToUniversalTime().ToString('o') -eq $s) { taskkill /PID $id /T /F | Out-Null"
   + "; if ($LASTEXITCODE -eq 0) { Wait-Process -Id $id -Timeout 10 -ErrorAction SilentlyContinue; if (-not (Get-Process -Id $id -ErrorAction SilentlyContinue)) { $id } } } }; exit 0";
 
-type PowerShell = (script: string, env: NodeJS.ProcessEnv) => Promise<string | null>;
+type PowerShell = (script: string, env: NodeJS.ProcessEnv, timeoutMs?: number) => Promise<string | null>;
 
-const powershell: PowerShell = (script, env) => new Promise((done) => {
+/** A script that fails or runs out of time still gives the lines it wrote in full; a line it was writing is dropped. */
+const powershell: PowerShell = (script, env, timeoutMs = 30_000) => new Promise((done) => {
   execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
-    encoding: "utf8", timeout: 30_000, windowsHide: true, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, ...env },
-  }, (error, stdout) => done(error ? null : stdout));
+    encoding: "utf8", timeout: timeoutMs, windowsHide: true, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, ...env },
+  }, (error, stdout) => done(error ? stdout.slice(0, stdout.lastIndexOf("\n") + 1) || null : stdout));
 });
 
 function listedRows(listing: string | null): RuntimeProcessRow[] {
@@ -119,7 +120,8 @@ export async function stopOrphanedAntigravityRuntimes(options: OrphanStopOptions
   const root = antigravityRuntimesRoot(options.dataDir ?? DATA_DIR);
   const orphans = orphanedRuntimeProcesses(listedRows(await run(WINDOWS_RUNTIME_PROCESSES, { OMB_AGY_RUNTIMES: root })), root);
   if (!orphans.length) return 0;
-  const stopped = await run(WINDOWS_STOP_PROCESSES, { OMB_AGY_STOP: orphans.map(({ pid, started }) => `${pid}=${started}`).join(" ") });
+  // Each stop may wait up to 10 s for its runtime to exit.
+  const stopped = await run(WINDOWS_STOP_PROCESSES, { OMB_AGY_STOP: orphans.map(({ pid, started }) => `${pid}=${started}`).join(" ") }, 30_000 + orphans.length * 15_000);
   const gone = new Set(stopped?.split(/\s+/));
   return orphans.filter(({ pid }) => gone.has(String(pid))).length;
 }

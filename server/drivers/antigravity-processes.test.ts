@@ -1,9 +1,14 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { sep } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as procs from "../procs.ts";
 import { AntigravityProcesses, orphanedRuntimeProcesses, stopOrphanedAntigravityRuntimes } from "./antigravity-processes.ts";
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return { ...actual, execFile: vi.fn(actual.execFile) };
+});
 
 const children: ReturnType<typeof spawn>[] = [];
 
@@ -90,6 +95,16 @@ describe("runtimes an earlier server left running on Windows", () => {
     ));
     expect(await stopOrphanedAntigravityRuntimes({ platform: "win32", dataDir, run })).toBe(0);
     expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it("counts the stops PowerShell confirmed before it ran out of time, not a pid it was still writing", async () => {
+    const listed = (pid: number) => ({ ProcessId: pid, ExecutablePath: `${release}\\agy_acp_server.exe`, Started: "2026-11-21T08:00:00.0000000Z", ParentStarted: null });
+    type Done = (error: Error | null, stdout: string) => void;
+    const ran = vi.mocked(execFile as unknown as (file: string, args: string[], options: { timeout: number }, done: Done) => void);
+    ran.mockImplementationOnce((_file, _args, _options, done) => done(null, JSON.stringify([listed(41), listed(4), listed(43)])))
+      .mockImplementationOnce((_file, _args, _options, done) => done(Object.assign(new Error("timed out"), { killed: true }), "41\r\n4"));
+    expect(await stopOrphanedAntigravityRuntimes({ platform: "win32", dataDir })).toBe(1);
+    expect(ran.mock.calls[1]![2].timeout).toBeGreaterThan(3 * 10_000);
   });
 
   it("stops nothing when no orphan is listed or the listing fails", async () => {
