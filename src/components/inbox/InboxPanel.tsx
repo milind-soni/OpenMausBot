@@ -14,12 +14,14 @@ import { InboxActive, inboxAttentionEntries, inboxOpenThread, readNewsThreads, u
 import { attentionUnpinAction } from "../SidebarBotActivity";
 import { InboxReading } from "./InboxReading";
 import { InboxRowItem } from "./InboxRow";
-import { FinishedThreads, finishedThreads } from "./FinishedThreads";
+import { FINISHED_LIMIT, FinishedThreads, finishedThreads } from "./FinishedThreads";
 import { PinnedThreads, pinnedThreadRows } from "./PinnedThreads";
 import { matchesSearch, nextAfter } from "./inbox-answer";
 import { listedRows, rowsIn, waitingCount } from "./inbox-view";
 import { useInboxActions, useInboxJump } from "./use-inbox-actions";
 import { roundButtonCls } from "../bot-panel/rows";
+import { matchesThreadFilter, threadFilterOn, threadOwners, type ThreadFilter } from "./thread-filter";
+import { ThreadFilterBar } from "./ThreadFilterBar";
 
 
 export const InboxPanel = memo(function InboxPanel() {
@@ -34,6 +36,7 @@ export const InboxPanel = memo(function InboxPanel() {
   const [now, setNow] = useState(() => Date.now());
   const [query, setQuery] = useState("");
   const [showDone, setShowDone] = useState(false);
+  const [filter, setFilter] = useState<ThreadFilter>({});
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
@@ -79,9 +82,18 @@ export const InboxPanel = memo(function InboxPanel() {
   };
   const pinnedRows = useStoreSelector((state) => pinnedThreadRows(state.bots, state.groups, state.pendingQueued), sameJson);
   const pinnedThreads = useMemo(() => new Set(pinnedRows.map((row) => row.task.threadId)), [pinnedRows]);
-  const finishedRows = useStoreSelector((state) => finishedThreads(state.bots, state.groups, state.pendingQueued, undefined, readNewsThreads(view), pinnedThreads), sameJson);
-  const unread = useStoreSelector((state) => unreadConversations(inboxAttentionEntries(state, view), view));
-  const count = waitingCount(view) + unread;
+  // The filter picks from every finished conversation before the list keeps its newest ten.
+  const threads = useStoreSelector((state) => {
+    const entries = inboxAttentionEntries(state, view);
+    const active = entries.filter((entry) => !pinnedThreads.has(entry.task.threadId));
+    const finished = finishedThreads(state.bots, state.groups, state.pendingQueued, Infinity, readNewsThreads(view), pinnedThreads);
+    const finishedRows = finished.filter((row) => matchesThreadFilter(row, filter)).slice(0, FINISHED_LIMIT);
+    return {
+      owners: threadOwners([...active, ...finished], filter.owner), finishedRows, unread: unreadConversations(entries, view),
+      any: finishedRows.length > 0 || active.some((entry) => matchesThreadFilter(entry, filter)),
+    };
+  }, sameJson);
+  const count = waitingCount(view) + threads.unread;
   const openThread = useStoreSelector((state) => inboxOpenThread(state), sameJson);
   const body = (
     <>
@@ -133,9 +145,16 @@ export const InboxPanel = memo(function InboxPanel() {
                     )
                   : rows.map((row) => <InboxRowItem key={row.id} row={row} now={now} onOpen={open} onAction={run} />)}
               </div>
-              {!query.trim() && <InboxActive view={view} current={openThread} exclude={pinnedThreads} />}
+              {!query.trim() && threads.owners.length > 0 && <ThreadFilterBar owners={threads.owners} filter={filter} onChange={setFilter} />}
+              {!query.trim() && threadFilterOn(filter) && !threads.any && (
+                <div data-inbox-filter-empty className="flex flex-col items-center gap-1 px-4 py-6 text-center">
+                  <p className="text-[13px] text-ink-secondary">{t("inbox.filter.noMatch")}</p>
+                  <button type="button" onClick={() => setFilter({})} className="text-[12px] text-accent hover:underline">{t("inbox.filter.clear")}</button>
+                </div>
+              )}
+              {!query.trim() && <InboxActive view={view} current={openThread} exclude={pinnedThreads} filter={filter} />}
               {/* The finished, already-read conversations. */}
-              {!query.trim() && <FinishedThreads rows={finishedRows} now={now} current={openThread} onOpen={jump} />}
+              {!query.trim() && <FinishedThreads rows={threads.finishedRows} now={now} current={openThread} onOpen={jump} />}
               {done.length > 0 && (
                 <section data-inbox-done className="px-1.5 pb-1.5">
                   <button type="button" data-inbox-done-toggle aria-expanded={showDone} onClick={() => setShowDone(!showDone)}

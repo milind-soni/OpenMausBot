@@ -15,6 +15,7 @@ import { setAttentionPinned, useAttentionPinned } from "./attention-pinned";
 import { closeInbox } from "@/state/inbox";
 import { inboxFixes } from "./inbox-view";
 import { useInboxJump } from "./use-inbox-actions";
+import { matchesThreadFilter, type ThreadFilter } from "./thread-filter";
 
 /** The conversations this list shows: the work in progress — at work, waiting on a teammate or on the person, or
  * finished but still unread. A conversation the person has read leaves for the finished list below, so the two lists
@@ -65,15 +66,18 @@ export function unreadConversations(entries: readonly AttentionThread[], view?: 
   return entries.filter((entry) => entry.task.unread === true && !lined.has(entry.task.threadId)).length;
 }
 
-export function InboxActive({ view, current, exclude }: {
+export function InboxActive({ view, current, exclude, filter = {} }: {
   view: InboxView | null; current?: OpenThread;
   /** Conversations the pinned section at the top already shows: these lists leave them out so none appears twice. */
   exclude?: ReadonlySet<string>;
+  /** The bot and status the person picked above the lists. */
+  filter?: ThreadFilter;
 }) {
   const jump = useInboxJump();
   const team = useTeamPeople();
   const pinned = useAttentionPinned();
-  const entries = useStoreSelector((state) => inboxAttentionEntries(state, view).filter((entry) => !exclude?.has(entry.task.threadId)), sameJson);
+  const entries = useStoreSelector((state) => inboxAttentionEntries(state, view)
+    .filter((entry) => !exclude?.has(entry.task.threadId) && matchesThreadFilter(entry, filter)), sameJson);
   const fixes = inboxFixes(team?.needsYou, view);
   return (
     <>
