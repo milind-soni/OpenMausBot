@@ -1289,10 +1289,15 @@ describe("the link between a computer and its Cloud", () => {
     cloud.link.receive = (peer, frames) => { for (const frame of frames as Frame[]) if (frame.t === "hello") { const busy = frame.bots.find((one) => one.name.startsWith("Busy")); if (busy) told.push(busy.name); } receive(peer, frames); };
     const bot = { id: "busy", name: "Busy0" };
     computer.bots.push(bot);
-    // Changes 300 ms apart for 6 s: heard at the 3 s ceiling, then once more after they stop.
+    // Changes 300 ms apart for 6 s or more: heard at each 3 s ceiling while they keep coming, then once more after they
+    // stop. A slow runner stretches the changes, so the ceilings are counted from the time they really took.
+    const began = Date.now();
     for (let index = 0; index < 20; index += 1) { bot.name = `Busy${index}`; computer.link.botsChanged(); await new Promise((resolve) => setTimeout(resolve, 300)); }
+    const took = Date.now() - began;
     await until(() => cloud.link.resolve("Busy19") !== undefined, "the Cloud hears the last name");
-    expect(told).toHaveLength(2);
+    expect(told.length).toBeGreaterThanOrEqual(2);
+    expect(told.length).toBeLessThanOrEqual(Math.floor(took / 3_000) + 1);
+    expect(told[0]).not.toBe("Busy19");
     expect(told.at(-1)).toBe("Busy19");
   }, 30_000);
 
