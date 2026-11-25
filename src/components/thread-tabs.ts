@@ -48,6 +48,14 @@ export function threadTabs(bot: TabsBot): ThreadTab[] {
   return tabs;
 }
 
+const sameTab = (a: ThreadTab, b: ThreadTab) => a.threadId === b.threadId && a.title === b.title && a.pinned === b.pinned
+  && a.working === b.working && a.draft === b.draft && a.closable === b.closable && a.renamable === b.renamable;
+
+/** Whether two strips draw the same tabs in the same order. */
+export function sameTabs(a: readonly ThreadTab[], b: readonly ThreadTab[]): boolean {
+  return a === b || (a.length === b.length && a.every((tab, i) => sameTab(tab, b[i]!)));
+}
+
 /** The strip shows for a bot with two threads or more, its blank New thread chat counted. */
 export const showsTabs = (tabs: readonly ThreadTab[]): boolean => tabs.length > 1;
 
