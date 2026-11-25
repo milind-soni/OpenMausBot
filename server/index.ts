@@ -8216,7 +8216,7 @@ async function beginTurn(
       if (computerSelection) computerSelection.mounted = mountedComputer ?? (integrations.browser ? "browser" : undefined);
       recordTurnPlace(bot.id, threadId, plan.computer === undefined && mountedComputer === "local" && integrations.browser ? "browser" : mountedComputer ?? (integrations.browser ? "browser" : null));
       // Never overlap a replacement with a cancelled adapter's pre-id window: wait for it, then revalidate this exact claim.
-      setup.lap("sync"); const nativeCli = await antigravityNativeRelease({ driverKind: instance.driverKind, config: providerConfigs()[instance.instanceId]?.config }); await pendingCancelledProviderHandshakes.waitForClear(threadId); setup.lap("handshakeClear");
+      setup.lap("sync"); const nativeCli = await antigravityNativeRelease({ driverKind: instance.driverKind, config: providerConfigs()[instance.instanceId]?.config }); setup.lap("engineRead"); await pendingCancelledProviderHandshakes.waitForClear(threadId); setup.lap("handshakeClear");
       if (!markDirectTurnDispatching(bot.id, dispatchClaimId, threadId)) {
         throw new DirectTurnSetupCancelled("turn stopped before dispatch");
       }
