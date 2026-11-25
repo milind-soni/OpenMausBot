@@ -10213,7 +10213,18 @@
   "together.state.offlineComputer": "现在无法读取这台电脑上的机器人。",
   "together.switch.title": "这台电脑和 My Cloud 合在一起",
   "together.switch.line": "默认关闭。Cloud 上的机器人和这台电脑上的机器人显示在同一个列表中，各自在所在的位置打开。",
+  "together.switch.commands": "开启后，My Cloud 上的机器人也能在这台电脑上运行命令；你可以从 OpenMausBot 图标关闭此权限。",
   "together.switch.failed": "未能保存。请重试。",
+  "together.mark.workingCloud": "正在 My Cloud 上工作",
+  "together.mark.workingComputer": "正在这台电脑上工作",
+  "together.mark.asleep": "My Cloud 正在休眠。打开 {name} 会唤醒它。",
+  "together.mark.offlineCloud": "暂时无法连接 My Cloud。它恢复后 {name} 会继续。",
+  "together.line.asleep": "My Cloud 正在休眠。打开它即可查看其中的机器人。",
+  "together.mark.livesCloud": "位于 My Cloud",
+  "together.mark.livesComputer": "位于这台电脑",
+  "together.mark.livesOn": "位于 {place}",
+  "together.mark.workingOn": "正在 {place} 上工作",
+  "together.mark.offline": "暂时无法连接 {place}。它恢复后 {name} 会继续。",
   "together.state.signin": "打开一次 My Cloud 以登录。",
   "sidebar.newBotOn.computer": "在这台电脑上新建机器人",
   "sidebar.newBotOn.cloud": "在 My Cloud 上新建机器人",
@@ -10373,5 +10384,7 @@
   "phone.reach.offAdding": "已关闭 · 添加手机会开启这些",
   "settings.nav.devicesNeedYou": "有设备或私有网络需要你处理",
   "settings.nav.phoneConnectedAllClear": "有一部手机已连接，没有需要你处理的事",
-  "keys.vps.ownServer": "你自己的服务器 (SSH)"
+  "keys.vps.ownServer": "你自己的服务器 (SSH)",
+  "chat.notice.cloudBusyStart": "这个 Cloud 现在太忙，无法启动 AI，所以这个任务没有运行。请等一分钟后再发送，停止一个正在运行的繁重任务，或换用更大的方案以获得更多空间。",
+  "chat.notice.cloudOutOfCpu": "你的 Cloud 没有足够的 CPU 来处理这个任务，所以 AI 无法启动，什么也没有运行。请等一分钟后再发送，停止一个正在运行的繁重任务，或换用更大的方案以获得更多 CPU。"
 }

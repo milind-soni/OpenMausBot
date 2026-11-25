@@ -51,6 +51,7 @@
 //   FAKE_ACP_RPC_FAILURE_FILE  JSON-RPC error for session/prompt; once read the process stays poisoned
 //   FAKE_ACP_RPC_FAILURE_METHOD  initialize, authenticate, session/new or session/prompt (default)
 //   FAKE_ACP_RPC_FAILURE_GATE  hold the error until this file exists
+//   FAKE_ACP_RPC_FAILURE_ONCE  fail once, then answer as usual (the failure file is removed)
 //   FAKE_ACP_RPC_FAILURE_AFTER_OUTPUT  emit text and a tool result before failing
 //   FAKE_ACP_RPC_FAILURE_AFTER_USAGE  emit the scripted usage updates and FAKE_ACP_UPDATES_FILE's before failing
 //   FAKE_ACP_LOAD_ERROR  JSON-RPC error returned by session/load
@@ -714,6 +715,10 @@ function failRpc(msg: { method: string; id: unknown }): boolean {
   const fail = () => {
     recordMethod(`${msg.method}.error`);
     out({ jsonrpc: "2.0", id: msg.id, error: rpcFailure });
+    if (process.env.FAKE_ACP_RPC_FAILURE_ONCE === "1") {
+      rpcFailure = null;
+      if (failureFile) try { unlinkSync(failureFile); } catch {}
+    }
   };
   const gate = process.env.FAKE_ACP_RPC_FAILURE_GATE;
   if (gate && !existsSync(gate)) {

@@ -7741,7 +7741,18 @@
   "remote.tailscale.needsApproval": "이 컴퓨터는 Tailscale 네트워크에서 승인을 기다리고 있습니다. Tailscale 관리 콘솔에서 승인한 다음 다시 시도하세요.",
   "together.switch.title": "이 컴퓨터와 내 클라우드 함께 보기",
   "together.switch.line": "기본값은 꺼짐입니다. 클라우드의 봇과 이 컴퓨터의 봇이 하나의 목록에 표시되며, 각 봇은 자기가 있는 곳에서 열립니다.",
+  "together.switch.commands": "켜면 내 클라우드의 봇이 이 컴퓨터에서 명령도 실행할 수 있습니다. OpenMausBot 아이콘에서 끌 수 있습니다.",
   "together.switch.failed": "저장하지 못했습니다. 다시 시도하세요.",
+  "together.mark.workingCloud": "지금 내 클라우드에서 작업 중",
+  "together.mark.workingComputer": "지금 이 컴퓨터에서 작업 중",
+  "together.mark.asleep": "내 클라우드가 절전 중입니다. {name}을(를) 열면 깨어납니다.",
+  "together.mark.offlineCloud": "지금은 내 클라우드에 연결할 수 없습니다. 다시 연결되면 {name}이(가) 이어서 작업합니다.",
+  "together.line.asleep": "내 클라우드가 절전 중입니다. 열면 봇을 볼 수 있습니다.",
+  "together.mark.livesCloud": "내 클라우드에 있음",
+  "together.mark.livesComputer": "이 컴퓨터에 있음",
+  "together.mark.livesOn": "{place}에 있음",
+  "together.mark.workingOn": "지금 {place}에서 작업 중",
+  "together.mark.offline": "지금은 {place}에 연결할 수 없습니다. 다시 연결되면 {name}이(가) 이어서 작업합니다.",
   "imageGen.complexity.label": "세부 수준",
   "imageGen.complexity.help": "GPT-Image-2.6 이미지의 세부 정도입니다. 낮을수록 단순하고 빠릅니다.",
   "imageGen.complexity.low": "낮음",
@@ -7873,5 +7884,7 @@
   "phone.reach.offAdding": "꺼짐 · 휴대폰을 추가하면 이 설정이 켜져요",
   "settings.nav.devicesNeedYou": "기기나 사설 네트워크를 확인해야 해요",
   "settings.nav.phoneConnectedAllClear": "휴대폰이 연결되어 있고 확인할 것이 없어요",
-  "keys.vps.ownServer": "내 서버 (SSH)"
+  "keys.vps.ownServer": "내 서버 (SSH)",
+  "chat.notice.cloudBusyStart": "지금 이 Cloud가 너무 바빠서 AI를 시작하지 못해 이 작업은 실행되지 않았어요. 1분 정도 기다렸다가 다시 보내거나, 실행 중인 무거운 작업을 멈추거나, 여유 있는 더 큰 요금제로 바꿔 주세요.",
+  "chat.notice.cloudOutOfCpu": "이 작업에 쓸 CPU가 Cloud에서 부족해 AI를 시작하지 못했고 아무것도 실행되지 않았어요. 1분 정도 기다렸다가 다시 보내거나, 실행 중인 무거운 작업을 멈추거나, CPU가 더 많은 더 큰 요금제로 바꿔 주세요."
 }

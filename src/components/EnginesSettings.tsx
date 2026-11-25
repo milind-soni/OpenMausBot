@@ -27,6 +27,7 @@ import { InstanceProviderMark } from "./ProviderIcons";
 import { GEMINI_PRESET, GeminiServer, hasGeminiServer } from "./OpenAiCompatServers";
 import { HiddenEngines, HiddenProviderRows, useHiddenProviders } from "./HiddenProviders";
 import { AdminOnly } from "./AdminOnly";
+import { modelgoOfferable } from "@/lib/modelgo-offer";
 import { sameFields, useStoreActions, useStoreSelector } from "@/state/store-select";
 
 export { HiddenEngines };
@@ -490,7 +491,7 @@ function GeminiProviderRow({ open, onToggle }: { open: boolean; onToggle: () => 
   </>;
 }
 
-function SimpleEngines({ rows, isReady, renderEngine, more, accountsOnly = false, offerGemini = false }: {
+function SimpleEngines({ rows, isReady, renderEngine, more, accountsOnly = false, offerGemini = false, offerModelgo = false }: {
   rows: InstanceInfo[];
   isReady: (instance: InstanceInfo) => boolean;
   renderEngine: (instance: InstanceInfo, bare?: boolean) => ReactNode;
@@ -499,12 +500,16 @@ function SimpleEngines({ rows, isReady, renderEngine, more, accountsOnly = false
   accountsOnly?: boolean;
   /** Offer the Google AI Studio row: no Gemini server is added yet and this workspace can add one. */
   offerGemini?: boolean;
+  /** The sponsor's provider sits in the main list, after the Google AI Studio row, where it may be offered (modelgoOfferable). */
+  offerModelgo?: boolean;
 }) {
   const [opened, setOpened] = useState<string | null>(null);
   // A hidden provider is gone from the instance list, so without these rows nothing in Settings brings it back.
   const allHidden = useHiddenProviders(), hidden = accountsOnly ? [] : allHidden;
   const featured = rows.filter((instance) => accountsOnly || isReady(instance) || instance.authentication !== undefined || hasGeminiServer([instance]));
-  const others = rows.filter((instance) => !featured.includes(instance));
+  const modelgo = offerModelgo && !accountsOnly && !featured.some((instance) => instance.driverKind === "modelgo")
+    ? rows.find((instance) => instance.driverKind === "modelgo") : undefined;
+  const others = rows.filter((instance) => !featured.includes(instance) && instance !== modelgo);
   // A hidden Gemini server comes back through its own hidden row; adding another would only make a second one.
   const gemini = offerGemini && !hidden.some((provider) => provider.driverKind === "openai-compat" && provider.displayName === GEMINI_PRESET.name);
   const folded = others.length + hidden.length;
@@ -518,6 +523,7 @@ function SimpleEngines({ rows, isReady, renderEngine, more, accountsOnly = false
       <SettingsRows icons>
         {featured.map((instance) => row(instance, false))}
         {gemini && <GeminiProviderRow open={opened === "google-ai-studio"} onToggle={() => setOpened(opened === "google-ai-studio" ? null : "google-ai-studio")} />}
+        {modelgo && row(modelgo, false)}
         {folded > 0 && (
           <SettingsFoldRow id={more.id} title={t("settings.ai.moreProviders")} value={String(folded)} open={more.open} onToggle={more.onToggle}
             leading={<span aria-hidden="true" />}>
@@ -560,7 +566,7 @@ export function AiSignInSettings() {
 }
 
 export function EnginesSettings({ simple = false, more }: { simple?: boolean; more?: { id: string; open: boolean; onToggle: () => void } }) {
-  const state = useStoreSelector((s) => ({ instances: s.instances }), sameFields);
+  const state = useStoreSelector((s) => ({ instances: s.instances, policy: s.config?.managedPolicy }), sameFields);
   // Leaving Settings ends the "now uses the copy OpenMausBot installed" lines.
   useEffect(() => forgetAppCopySwitches, []);
   const listed = state.instances.filter((i) => i.readOnly || i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable" || isApiKeyEngine(i) || i.claudeEndpoint !== undefined || i.claudeBedrock !== undefined || i.codexEndpoint !== undefined);
@@ -580,7 +586,8 @@ export function EnginesSettings({ simple = false, more }: { simple?: boolean; mo
   };
 
   if (simple && more) return <>
-    <SimpleEngines rows={rows} isReady={isReady} renderEngine={renderEngine} more={more} offerGemini={!hostedWorkspace && !hasGeminiServer(state.instances)} />
+    <SimpleEngines rows={rows} isReady={isReady} renderEngine={renderEngine} more={more} offerGemini={!hostedWorkspace && !hasGeminiServer(state.instances)}
+      offerModelgo={modelgoOfferable(state.policy)} />
     {orphanEndpoints && <div className="px-4"><ClaudeEndpoints /><ClaudeBedrockEndpoints /></div>}
     {orphanCodexEndpoints && <div className="px-4"><CodexEndpoints /></div>}
   </>;

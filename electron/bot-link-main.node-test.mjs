@@ -30,7 +30,7 @@ function harness({ origin = CLOUD, pairStatus = 200, on = false, putFails = fals
       if (init.method === "DELETE") return answer(200, { ok: true });
       return pairStatus === 200 ? answer(200, { token: "link-sign-in-0123456789", place: { id: "cloud-1", name: "My Cloud" } }) : answer(pairStatus, { error: "no" });
     },
-    cloud: () => ({ origin: the.origin, account: the.account, asleep: the.asleep, signedOut: the.signedOut }),
+    cloud: () => ({ origin: the.origin, account: the.account, asleep: the.asleep, since: the.since ?? null, signedOut: the.signedOut }),
     cloudName: () => "My Cloud",
     watchMs,
     changed: () => { the.changes = (the.changes ?? 0) + 1; },
@@ -199,7 +199,7 @@ test("the Admin's word on sleep goes to this computer's server for its own Cloud
   await h.link.look();
   h.the.asleep = true;
   await h.link.look();
-  assert.deepEqual(h.localCalls.at(-1), { method: "PUT", body: { cloud: "asleep", origin: CLOUD } });
+  assert.deepEqual(h.localCalls.at(-1), { method: "PUT", body: { cloud: "asleep", origin: CLOUD, heardAt: 1_000_000 } });
   const puts = h.localCalls.filter((call) => call.method === "PUT").length;
   await h.link.look();
   assert.equal(h.localCalls.filter((call) => call.method === "PUT").length, puts);
@@ -224,4 +224,29 @@ test("the Admin's word on sleep goes to this computer's server for its own Cloud
   ended.the.asleep = false;
   await ended.link.look();
   assert.deepEqual(ended.localCalls.filter((call) => call.method === "PUT"), [{ method: "PUT", body: { cloud: "awake", origin: CLOUD } }]);
+});
+
+test("\"asleep\" goes with when main first heard it: the same word keeps its time, a new one (a new since, or awake between) gets a new time", async (t) => {
+  const h = harness({ on: true });
+  t.after(() => h.link.close());
+  await h.link.look();
+  const sleeps = () => h.localCalls.filter((call) => call.method === "PUT" && call.body.cloud === "asleep").map((call) => call.body.heardAt);
+  h.the.asleep = true; h.the.since = "2026-11-24T10:00:00Z";
+  await h.link.look();
+  // This computer's end did not park (the Cloud answered work since): main says it again each minute, with the same time.
+  h.server = { ...h.server, asleep: false };
+  h.the.clock += 60_000;
+  await h.link.look();
+  assert.deepEqual(sleeps(), [1_000_000, 1_000_000]);
+  h.the.since = "2026-11-24T10:05:00Z";
+  h.the.clock += 60_000;
+  h.server = { ...h.server, asleep: false };
+  await h.link.look();
+  h.the.asleep = false;
+  await h.link.look();
+  h.the.asleep = true;
+  h.the.clock += 60_000;
+  h.server = { ...h.server, asleep: false };
+  await h.link.look();
+  assert.deepEqual(sleeps(), [1_000_000, 1_000_000, 1_120_000, 1_180_000]);
 });

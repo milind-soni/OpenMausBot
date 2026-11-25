@@ -6513,7 +6513,18 @@
   "remote.tailscale.needsApproval": "Este ordenador espera la aprobación en tu red de Tailscale. Apruébalo en la consola de administración de Tailscale y vuelve a intentarlo.",
   "together.switch.title": "Este equipo y My Cloud juntos",
   "together.switch.line": "Desactivado de forma predeterminada. Los bots del Cloud y los de este equipo aparecen en una sola lista, y cada uno se abre donde está.",
+  "together.switch.commands": "Al activarlo, los bots de My Cloud también pueden ejecutar comandos en este equipo; puedes desactivarlo desde el icono de OpenMausBot.",
   "together.switch.failed": "No se pudo guardar. Inténtalo de nuevo.",
+  "together.mark.workingCloud": "Trabajando ahora en My Cloud",
+  "together.mark.workingComputer": "Trabajando ahora en este equipo",
+  "together.mark.asleep": "My Cloud está en reposo. Al abrir {name} se despierta.",
+  "together.mark.offlineCloud": "No se puede acceder a My Cloud ahora mismo. {name} seguirá cuando vuelva.",
+  "together.line.asleep": "My Cloud está en reposo. Ábrelo para ver sus bots.",
+  "together.mark.livesCloud": "Vive en My Cloud",
+  "together.mark.livesComputer": "Vive en este equipo",
+  "together.mark.livesOn": "Vive en {place}",
+  "together.mark.workingOn": "Trabajando ahora en {place}",
+  "together.mark.offline": "No se puede acceder a {place} ahora mismo. {name} seguirá cuando vuelva.",
   "imageGen.complexity.label": "Nivel de detalle",
   "imageGen.complexity.help": "Cuánto detalle tienen las imágenes de GPT-Image-2.6. Más bajo es más simple y rápido.",
   "imageGen.complexity.low": "Bajo",
@@ -6649,5 +6660,7 @@
   "phone.reach.offAdding": "Desactivado · Al añadir un teléfono se activan",
   "settings.nav.devicesNeedYou": "Un dispositivo o la red privada te necesita",
   "settings.nav.phoneConnectedAllClear": "Hay un teléfono conectado y nada te necesita",
-  "keys.vps.ownServer": "Tu propio servidor (SSH)"
+  "keys.vps.ownServer": "Tu propio servidor (SSH)",
+  "chat.notice.cloudBusyStart": "Esta Cloud está demasiado ocupada ahora mismo para iniciar la IA, así que esta tarea no se ejecutó. Espera un minuto y vuelve a enviarla, detén una tarea pesada que esté en marcha o pasa a un plan mayor para tener más espacio.",
+  "chat.notice.cloudOutOfCpu": "Tu Cloud se quedó sin CPU para esta tarea, así que la IA no pudo iniciarse y no se ejecutó nada. Espera un minuto y vuelve a enviarla, detén una tarea pesada que esté en marcha o pasa a un plan mayor para tener más CPU."
 }

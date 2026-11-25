@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import type { BotCreateResponse, WireBot } from "../../shared/wire.ts";
 import { freshLook } from "../bot-look.ts";
 import { LINK_PREFIX } from "../bot-link/protocol.ts";
@@ -21,6 +23,7 @@ import { writeMemoryFile, writeMemoryTopic } from "../workspace.ts";
 import { refusalBody, userError } from "../user-errors.ts";
 import type { ServerErrorBody } from "../../shared/server-text.ts";
 import { botLimitRefusal } from "../bot-limit.ts";
+import { arrivalMark, personalTeam } from "../bot-moves.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export type ModelSelectionCheck = { ok: true; selection: ModelSelection } | ({ ok: false; status: number } & ServerErrorBody);
@@ -55,7 +58,12 @@ export interface BotCreateRouteDeps {
   personaliseSetupCard?(bot: BotRecord): void;
   /** The Chief of Staff of a scope changed: these bots' flags did. */
   chiefChanged?(changed: readonly BotRecord[]): void;
+  /** The request may make a bot that arrives by a move (`arriving`): the app's own main process on this computer, or My
+   * Cloud's owner on My Cloud (index.ts cloudSendOwner); never on a team's Cloud. */
+  movesIn?(auth: RequestAuth): boolean;
 }
+
+const arrivingSchema = z.object({ team: z.object({ id: z.string().regex(/^[\w-]{1,128}$/u).refine(personalTeam), name: z.string().trim().min(1).max(80) }) }).strict();
 
 const OWN_ID = /^[\w-]{8,128}$/;
 
@@ -104,6 +112,19 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       let body = await readBody(req);
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         return json(res, 400, { error: "bot must be a JSON object" });
+      }
+      // A bot arriving by a move (bot-moves.ts) is made held, hidden and taking no turn, so it is never live here beside
+      // the place it comes from, not even until the move holds it.
+      const { arriving: askedArrival, ...unmarked } = body as Record<string, unknown>;
+      body = unmarked;
+      let arriving: z.infer<typeof arrivingSchema> | null = null;
+      if (askedArrival !== undefined) {
+        if (!deps.movesIn?.(auth)) return json(res, 403, { error: "forbidden: only a move makes a bot that arrives" });
+        const parsed = arrivingSchema.safeParse(askedArrival);
+        if (!parsed.success || typeof unmarked.id !== "string") return json(res, 400, { error: "send arriving: { team: { id, name } } with the bot's own id" });
+        arriving = parsed.data;
+        // It brings its own settings; nothing of this place's New bot defaults (a routine, say) is added to it.
+        body = { ...unmarked, useDefaults: false };
       }
       if (req.headers["x-openmausbot-companion"] === "1") {
         const field = adminOnlyBotSetting(askedSettings(body));
@@ -225,7 +246,8 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
           browserProfile: ordinary.browserProfile || undefined,
           voiceNoteEveryReply: ordinary.voiceNoteEveryReply ?? undefined,
           autoApprove: ordinary.approvalMode === "auto",
-        });
+          ...(arriving ? { movedTo: arrivalMark(arriving.team, Date.now()), hidden: true } : {}),
+        } as Partial<BotRecord>);
       } });
       const createdRoutines: Array<{ id: string; enabled: boolean }> = [];
       try {

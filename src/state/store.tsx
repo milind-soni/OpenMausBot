@@ -424,7 +424,7 @@ export interface InstanceInfo extends InstanceEndpointInfo {
   snapshot: {
     state: "available" | "unavailable";
     reason?: string;
-    authenticated?: boolean; /** The CLI path runs another program, not this engine's CLI. */ notEngineCli?: true; /** Runs Google's native Antigravity CLI. */ nativeCli?: true; /** Its runtime is being installed now. */ installing?: true;
+    authenticated?: boolean; /** Its status check could not finish (a busy machine): not a sign that it is missing. */ busy?: true; /** Installed, not yet confirmed. */ unverified?: true; /** The CLI path runs another program, not this engine's CLI. */ notEngineCli?: true; /** Runs Google's native Antigravity CLI. */ nativeCli?: true; /** Its runtime is being installed now. */ installing?: true;
     chatgptPlan?: boolean;
     /** Ready only through OpenCode's free no-login models: a backup, never "an AI already works". */
     freeFallback?: boolean;

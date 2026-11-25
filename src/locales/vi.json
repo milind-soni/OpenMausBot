@@ -6008,7 +6008,18 @@
   "remote.tailscale.needsApproval": "Máy tính này đang chờ được phê duyệt trên mạng Tailscale của bạn. Hãy phê duyệt trong bảng điều khiển quản trị Tailscale, rồi thử lại.",
   "together.switch.title": "Máy tính này và My Cloud cùng nhau",
   "together.switch.line": "Mặc định là tắt. Bot trên Cloud và bot trên máy tính này hiện trong một danh sách, và mỗi bot mở ở nơi nó đang ở.",
+  "together.switch.commands": "Khi bật, bot trên My Cloud cũng có thể chạy lệnh trên máy tính này; bạn có thể tắt việc đó từ biểu tượng OpenMausBot.",
   "together.switch.failed": "Không lưu được. Hãy thử lại.",
+  "together.mark.workingCloud": "Đang làm việc trên My Cloud",
+  "together.mark.workingComputer": "Đang làm việc trên máy tính này",
+  "together.mark.asleep": "My Cloud đang ngủ. Mở {name} sẽ đánh thức nó.",
+  "together.mark.offlineCloud": "Hiện không kết nối được với My Cloud. {name} sẽ tiếp tục khi nó trở lại.",
+  "together.line.asleep": "My Cloud đang ngủ. Mở nó để xem các bot của nó.",
+  "together.mark.livesCloud": "Ở trên My Cloud",
+  "together.mark.livesComputer": "Ở trên máy tính này",
+  "together.mark.livesOn": "Ở trên {place}",
+  "together.mark.workingOn": "Đang làm việc trên {place}",
+  "together.mark.offline": "Hiện không kết nối được với {place}. {name} sẽ tiếp tục khi nó trở lại.",
   "imageGen.complexity.label": "Mức chi tiết",
   "imageGen.complexity.help": "Mức độ chi tiết của ảnh GPT-Image-2.6. Thấp hơn thì đơn giản và nhanh hơn.",
   "imageGen.complexity.low": "Thấp",
@@ -6144,5 +6155,7 @@
   "phone.reach.offAdding": "Tắt · Thêm điện thoại sẽ bật các mục này",
   "settings.nav.devicesNeedYou": "Một thiết bị hoặc mạng riêng cần bạn",
   "settings.nav.phoneConnectedAllClear": "Một điện thoại đang kết nối, và không có gì cần bạn",
-  "keys.vps.ownServer": "Máy chủ của riêng bạn (SSH)"
+  "keys.vps.ownServer": "Máy chủ của riêng bạn (SSH)",
+  "chat.notice.cloudBusyStart": "Cloud này hiện quá bận để khởi động AI, nên việc này chưa chạy. Hãy chờ một phút rồi gửi lại, dừng một việc nặng đang chạy, hoặc chuyển sang gói lớn hơn để có thêm chỗ.",
+  "chat.notice.cloudOutOfCpu": "Cloud của bạn đã hết CPU cho việc này, nên AI không khởi động được và chưa có gì chạy. Hãy chờ một phút rồi gửi lại, dừng một việc nặng đang chạy, hoặc chuyển sang gói lớn hơn để có thêm CPU."
 }

@@ -21,6 +21,13 @@ export interface BoardItemQuestion {
   person?: string;
 }
 
+/** Its bot set the item aside to look again at `at` (board_update later): the item stays `working` and keeps its holder,
+ * and the server starts that bot again then with `note`. */
+export interface BoardItemLater {
+  at: number;
+  note: string;
+}
+
 export interface BoardItemCreator {
   kind: "person" | "bot";
   /** A person key or a bot id. */
@@ -44,6 +51,10 @@ export interface BoardItem {
   /** Times a bot took it since it was made or last reopened. */
   attempts: number;
   question?: BoardItemQuestion;
+  /** Set while its bot waits to look again. */
+  later?: BoardItemLater;
+  /** Times its bot set it aside to look again since it was made or last reopened. */
+  laterCount?: number;
   /** What came of it, set when it is settled. */
   result?: string;
   createdBy: BoardItemCreator;
@@ -65,6 +76,11 @@ export const BOARD_LIMITS = {
   openPerRoom: 200,
   /** Items one bot call may add. */
   itemsPerCall: 15,
+  /** board_update later: minutes ahead, and times per item. */
+  laterMinutesMax: 1_440,
+  latersMax: 20,
+  /** Dispatches before a turn that ends without settling the item fails it. */
+  triesMax: 3,
 } as const;
 
 /** A label key: lowercase letters, digits, `_` and `-`. */

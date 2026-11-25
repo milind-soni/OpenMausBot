@@ -47,6 +47,9 @@ export function snapshotFrom(value: unknown): ProviderSnapshot | null {
     ...(flag(raw.chatgptPlan) ? { chatgptPlan: raw.chatgptPlan } : {}),
     // Until the start-up read reaches it, OpenCode on its free models alone still ranks and reads as the backup it is.
     ...(flag(raw.freeFallback) ? { freeFallback: raw.freeFallback } : {}),
+    // Installed but not yet confirmed (probe-hold.ts): a restart on a busy machine starts from that, not from nothing.
+    ...(raw.unverified === true && raw.state === "available" ? { unverified: true as const } : {}),
+    ...(raw.busy === true && raw.state === "unavailable" ? { busy: true as const } : {}),
     ...(text(raw.authenticationUnavailableReason) ? { authenticationUnavailableReason: raw.authenticationUnavailableReason } : {}),
     ...(signedInAs ? { account: signedInAs } : {}),
     ...(text(raw.version) || raw.version === null ? { version: raw.version } : {}),

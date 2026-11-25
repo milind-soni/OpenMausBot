@@ -6,7 +6,7 @@ import { createPresenceRoutes } from "./presence.ts";
 function call(auth: RequestAuth, body: unknown, active = vi.fn(async () => ({ returned: true })), team = false) {
   const answers: Array<[number, unknown]> = [];
   const heard = vi.fn((_auth: RequestAuth, _language: string) => {});
-  const sawChat = vi.fn((_auth: RequestAuth, _threadId: string) => {});
+  const sawChat = vi.fn((_auth: RequestAuth, _threadId: string, _typing: boolean) => {});
   const route = createPresenceRoutes({ isOwner: (who) => who.scopes.includes("admin"), active, heard, sawChat, ...(team ? { member: () => ({ returned: false }) } : {}) });
   const done = route({
     req: {} as never, res: {} as never, url: new URL("http://x/api/presence/active"), path: "/api/presence/active", method: "POST", auth,
@@ -50,7 +50,13 @@ describe("POST /api/presence/active", () => {
     const owner = { kind: "loopback", scopes: ["admin", "client"] } as RequestAuth;
     const open = call(owner, { source: "desktop", language: "en", threadId: "3f2a-thread_1" });
     await open.done;
-    expect(open.sawChat).toHaveBeenCalledWith(owner, "3f2a-thread_1");
+    expect(open.sawChat).toHaveBeenCalledWith(owner, "3f2a-thread_1", false);
+    const typing = call(owner, { source: "desktop", language: "en", threadId: "t1", typing: true });
+    await typing.done;
+    expect(typing.sawChat, "a key in its composer").toHaveBeenCalledWith(owner, "t1", true);
+    const truthy = call(owner, { threadId: "t1", typing: "yes" });
+    await truthy.done;
+    expect(truthy.sawChat).toHaveBeenCalledWith(owner, "t1", false);
     for (const threadId of ["../etc", "x".repeat(101), 42, ""]) {
       const odd = call(owner, { threadId });
       await odd.done;
@@ -62,7 +68,7 @@ describe("POST /api/presence/active", () => {
     const member = { kind: "loopback", scopes: ["client"] } as RequestAuth;
     const onTeam = call(member, { threadId: "t1" }, undefined, true);
     await onTeam.done;
-    expect(onTeam.sawChat, "a User's open chat is in front of them as an admin's is").toHaveBeenCalledWith(member, "t1");
+    expect(onTeam.sawChat, "a User's open chat is in front of them as an admin's is").toHaveBeenCalledWith(member, "t1", false);
     const guest = call(member, { threadId: "t1" });
     await guest.done;
     expect(guest.sawChat, "a My Cloud guest's is not the owner's").not.toHaveBeenCalled();

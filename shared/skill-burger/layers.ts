@@ -109,6 +109,10 @@ export function isServerRow(message: RunMessage): boolean {
 /** The unquoted output redirect of a command (`> notes.md`, `>> log.txt`, `cat > a.md <<EOF`), other than to /dev/…:
  * it writes a file, whatever program it runs. */
 export function redirectTarget(command: string): string | null {
+  return redirectOf(command)?.path ?? null;
+}
+
+function redirectOf(command: string): { path: string; append: boolean } | null {
   let quote: string | null = null;
   for (let i = 0; i < command.length; i += 1) {
     const char = command[i]!;
@@ -118,11 +122,13 @@ export function redirectTarget(command: string): string | null {
     const before = command[i - 1] ?? " ";
     if (/[0-9&>-]/.test(before) && before !== " ") continue;
     let j = i + 1;
-    if (command[j] === ">") j += 1;
+    const append = command[j] === ">";
+    if (append) j += 1;
     if (command[j] === "&" || command[j] === "(") continue;
     while (command[j] === " ") j += 1;
-    const target = /^["']?([^\s"';|&]+)/.exec(command.slice(j))?.[1];
-    if (target && !target.startsWith("/dev/")) return target;
+    const target = /^(?:"([^"]+)"|'([^']+)'|["']?([^\s"';|&]+))/.exec(command.slice(j));
+    const path = target?.[1] ?? target?.[2] ?? target?.[3];
+    if (path && !path.startsWith("/dev/")) return { path, append };
   }
   return null;
 }
@@ -384,11 +390,43 @@ function joinDesktop(layers: BurgerLayer[]): BurgerLayer[] {
   return out;
 }
 
-/** The file a layer writes, when it writes one: a later write of the same file is the try that counts. */
-function writesTo(layer: BurgerLayer): string | null {
-  if (layer.kind === "file" && typeof layer.args?.path === "string") return layer.args.path.split(/[\\/]/).pop() ?? null;
-  if (layer.kind === "shell" && typeof layer.args?.command === "string") return redirectTarget(layer.args.command)?.split(/[\\/]/).pop() ?? null;
-  return null;
+/** The folders a command's leading `cd <dir> &&` steps move into, and the rest of it; null after any other `cd`. */
+function afterCd(command: string): { folders: string[]; rest: string } | null {
+  const folders: string[] = [];
+  let rest = command;
+  for (let found = LEADING_CD.exec(rest); found; found = LEADING_CD.exec(rest)) {
+    folders.push(found[1] ?? found[2] ?? found[3]!);
+    rest = rest.slice(found[0].length);
+  }
+  return /(?:^|[;&|(]\s*)cd(?:\s|$)/.test(rest) ? null : { folders, rest };
+}
+const LEADING_CD = /^\s*cd\s+(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))\s*&&\s*/;
+
+/** A path as one key: the conversation folder as ".", either slash, and ".", ".." and repeated slashes resolved. */
+function resolvePath(parts: readonly string[]): string {
+  const out: string[] = [];
+  let root = "";
+  for (const part of parts) {
+    const clean = part.replace(CONVERSATION_FOLDER, ".").replace(/\\/g, "/");
+    const absolute = /^(?:[A-Za-z]:)?\//.exec(clean)?.[0];
+    if (absolute) { root = absolute; out.length = 0; }
+    for (const segment of clean.slice(absolute?.length ?? 0).split("/")) {
+      if (segment === "" || segment === ".") continue;
+      if (segment === ".." && out.length && out[out.length - 1] !== "..") out.pop();
+      else if (segment !== ".." || !root) out.push(segment);
+    }
+  }
+  return root + out.join("/");
+}
+
+/** The file a layer writes, by its full path on its computer, and whether it only adds to the end of it. */
+function writesTo(layer: BurgerLayer): { file: string; append: boolean } | null {
+  const cwd = typeof layer.args?.cwd === "string" ? layer.args.cwd : ".";
+  if (layer.kind === "file" && typeof layer.args?.path === "string") return { file: `${layer.where}:${resolvePath([cwd, layer.args.path])}`, append: false };
+  if (layer.kind !== "shell" || typeof layer.args?.command !== "string") return null;
+  const moved = afterCd(layer.args.command);
+  const redirect = moved && redirectOf(moved.rest);
+  return redirect ? { file: `${layer.where}:${resolvePath([cwd, ...moved.folders, redirect.path])}`, append: redirect.append } : null;
 }
 
 /** A read the run made that leaves no layer: a page looked at, a file or listing read. */
@@ -418,10 +456,17 @@ export function burgerLayers(messages: readonly RunMessage[], live: ReadonlySet<
     if (found.some((layer) => layer.read)) read = true;
   }
   const kept: BurgerLayer[] = [];
-  const replaced = (layer: BurgerLayer, later: BurgerLayer) => (later.status !== "failed" && sameStep(layer, later) && layer.status === "failed") || (writesTo(layer) !== null && writesTo(layer) === writesTo(later) && later.status !== "failed");
+  const writes = layers.map(writesTo);
+  const rewrites = (earlier: number, later: number) => {
+    const [first, last] = [writes[earlier], writes[later]];
+    return Boolean(first && last && !first.append && !last.append && first.file === last.file
+      && !writes.slice(earlier + 1, later).some((between) => between?.append && between.file === first.file));
+  };
+  const replaced = (earlier: number, later: number) => layers[later]!.status !== "failed"
+    && ((sameStep(layers[earlier]!, layers[later]!) && layers[earlier]!.status === "failed") || rewrites(earlier, later));
   layers.forEach((layer, index) => {
-    if (layers.slice(index + 1).some((later) => replaced(layer, later))) return;
-    const tries = layers.slice(0, index).filter((earlier) => replaced(earlier, layer)).length;
+    if (layers.some((_, later) => later > index && replaced(index, later))) return;
+    const tries = layers.filter((_, earlier) => earlier < index && replaced(earlier, index)).length;
     kept.push(tries && layer.status !== "failed" ? { ...layer, tries } : layer);
   });
   return withReview(joinDelegations(joinDesktop(kept), round, repliesIn(run)), run);

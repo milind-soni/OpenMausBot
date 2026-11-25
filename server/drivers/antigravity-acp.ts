@@ -778,6 +778,14 @@ export function antigravityTakesSystemPrompt(initialized: any): boolean {
   return initialized?.agentCapabilities?._meta?.antigravity?.systemPrompt?.append === true;
 }
 
+/** The native CLI (1.5.16) advertises no MCP transport in `initialize`, yet connects to a session's `type: "http"` servers.
+ * It gives a session's MCP servers about 5 s to list their tools during session/new or session/resume ("Failed to preload
+ * the session's MCP servers: context deadline exceeded"), then prompts without the ones still starting, so a stdio proxy
+ * whose process starts slowly loses its tools; a URL answers in milliseconds. */
+export function antigravityCliTakesHttpMcp(initialized: unknown): boolean {
+  return (initialized as { agentInfo?: { name?: unknown } } | null | undefined)?.agentInfo?.name === "Antigravity ACP Server";
+}
+
 /** The agy CLI has no harness sibling and serves ACP through its `acp` subcommand. It joins `--app-data-dir` beneath
  * `--gemini-dir`, including when the value is absolute. */
 export function antigravityLaunchArgs(runtime: Pick<AntigravityRuntime, "harnessPath">, profileDirectory: string, platform: NodeJS.Platform = process.platform): string[] {

@@ -52,13 +52,18 @@ export interface DraftChoices {
 
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 
+/** The app or file step a generated writer prepares a field for. */
+export function composedFor(id: string): string | null {
+  return /^(.+)_write(?:_\d+)?$/.exec(id)?.[1] ?? null;
+}
+
 /** The steps whose output `node` uses. */
 function refsIn(node: unknown, into = new Set<string>()): Set<string> {
   if (Array.isArray(node)) node.forEach((item) => refsIn(item, into));
   else if (node && typeof node === "object") {
     const record = node as Record<string, unknown>;
     if (typeof record.$step === "string") into.add(record.$step);
-    for (const [key, value] of Object.entries(record)) if (key !== "id") refsIn(value, into);
+    for (const value of Object.values(record)) refsIn(value, into);
   }
   return into;
 }
@@ -88,7 +93,7 @@ export function draftView(workflow: Workflow, layers: readonly BurgerLayer[], me
     const base: DraftStepView = {
       id: step.id, kind: step.kind, label: step.label, exact: step.kind !== "ai" && !(step.kind === "decide" && !step.rules?.length), needs: needsOf(step),
       ...(step.kind === "app" ? { app: step.app } : {}), ...(detailOf(step) ? { detail: detailOf(step) } : {}),
-      ...(layer?.tries && !step.id.endsWith("_write") ? { tries: layer.tries } : {}),
+      ...(layer?.tries && !composedFor(step.id) ? { tries: layer.tries } : {}),
     };
     if (step.kind !== "delegate") return base;
     const delegation = layer?.delegation;
@@ -118,7 +123,7 @@ export function dependents(steps: ReadonlyArray<{ id: string; needs: readonly st
   return [...out];
 }
 
-/** Renames an arg everywhere it is used: references and the OMB_ARG_ variables in commands. */
+/** Renames an arg in references, prompt placeholders and the OMB_ARG_ variables in commands. */
 function renameArg(steps: WorkflowStep[], from: string, to: string): WorkflowStep[] {
   const env = new RegExp(`OMB_ARG_${from.toUpperCase()}(?![A-Z0-9_])`, "g");
   const walk = (node: unknown): unknown => {
@@ -130,7 +135,10 @@ function renameArg(steps: WorkflowStep[], from: string, to: string): WorkflowSte
   };
   return steps.map((step) => {
     const renamed = walk(step) as WorkflowStep;
-    return renamed.kind === "shell" ? { ...renamed, run: renamed.run.replace(env, `OMB_ARG_${to.toUpperCase()}`) } : renamed;
+    if (renamed.kind === "shell") renamed.run = renamed.run.replace(env, `OMB_ARG_${to.toUpperCase()}`);
+    if ((renamed.kind === "ai" || renamed.kind === "decide") && renamed.prompt) renamed.prompt = renamed.prompt.replaceAll(`{${from}}`, `{${to}}`);
+    if (renamed.check && typeof renamed.check === "object") renamed.check.says = renamed.check.says.replaceAll(`{${from}}`, `{${to}}`);
+    return renamed;
   });
 }
 
@@ -138,7 +146,10 @@ function renameArg(steps: WorkflowStep[], from: string, to: string): WorkflowSte
 export function applyChoices(workflow: Workflow, choices: DraftChoices | undefined): Workflow | { error: string } {
   if (!choices) return workflow;
   const skip = new Set(choices.skip ?? []);
-  let steps = workflow.steps.filter((step) => !skip.has(step.id) && !(step.id.endsWith("_write") && skip.has(step.id.replace(/_write$/, ""))));
+  let steps = workflow.steps.filter((step) => {
+    const parent = composedFor(step.id);
+    return !skip.has(step.id) && !(parent && skip.has(parent));
+  });
   if (!steps.length) return { error: "Keep at least one step." };
   const kept = new Set(steps.map((step) => step.id));
   for (const step of steps) {

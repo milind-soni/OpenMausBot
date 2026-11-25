@@ -17,13 +17,17 @@ export interface DelegationState {
   who: Record<string, { id: string; name: string } | null>;
   requests: Array<{ part: string; botId: string; name: string; requestId: string }>;
   replies: Record<string, { name: string; ok: boolean; text: string; round: number }>;
+  /** A round still being sent; its requests already accepted work, and only the remaining parts may be sent. */
+  pendingSend?: { fixes?: Record<string, string> };
 }
+
+type DelegateReceipt = { botId: string; name: string; requestId: string };
 
 export interface DelegateExecutors {
   /** The teammates this bot can hand work to now. */
   teammates(signal: AbortSignal): Promise<Teammate[]>;
   /** One coordinate_bots call as this turn: its receipts, or why it was refused. */
-  delegate(input: { botIds: string[]; message: string; doneWhen?: string; rework?: boolean; consult?: boolean; signal: AbortSignal }): Promise<{ ok: true; receipts: Array<{ botId: string; name: string; requestId: string }> } | { ok: false; error: string }>;
+  delegate(input: { botIds: string[]; message: string; doneWhen?: string; rework?: boolean; consult?: boolean; signal: AbortSignal }): Promise<{ ok: true; receipts: DelegateReceipt[] } | { ok: false; error: string; receipts?: DelegateReceipt[] }>;
   /** A hand-off's status and result, once it can be read. */
   assignment(id: string, signal: AbortSignal): Promise<Settled | null>;
 }
@@ -85,11 +89,11 @@ export function missingPrompt(missing: DelegateStep["tasks"]): string {
 /** Sends the round's work: each part's message to whoever does it now, one call per distinct message (at most four
  * teammates a call). Returns the hand-offs, or why a call was refused. */
 export async function sendRound(step: DelegateStep, state: DelegationState, fill: (ref: WorkflowRef) => unknown, exec: DelegateExecutors, signal: AbortSignal,
-  fixes?: Record<string, string>): Promise<{ ok: true; requests: DelegationState["requests"] } | { ok: false; error: string }> {
+  fixes?: Record<string, string>, accepted: DelegationState["requests"] = []): Promise<{ ok: true; requests: DelegationState["requests"] } | { ok: false; error: string; requests: DelegationState["requests"] }> {
   const calls = new Map<string, { parts: string[]; botIds: string[]; message: string; doneWhen?: string }>();
   for (const task of step.tasks) {
     const to = state.who[task.bot.name];
-    if (!to || (fixes && !(task.bot.name in fixes))) continue;
+    if (!to || (fixes && !(task.bot.name in fixes)) || accepted.some((request) => request.part === task.bot.name)) continue;
     const base = textOf(task.message, fill);
     const message = fixes ? `${fixes[task.bot.name]}\n\nThe work, as first asked:\n${base}` : base;
     const key = `${message}\u0000${task.doneWhen ?? ""}`;
@@ -97,19 +101,19 @@ export async function sendRound(step: DelegateStep, state: DelegationState, fill
     if (!call.botIds.includes(to.id)) { call.parts.push(task.bot.name); call.botIds.push(to.id); }
     calls.set(key, call);
   }
-  const requests: DelegationState["requests"] = [];
+  const requests: DelegationState["requests"] = [...accepted];
   for (const call of calls.values()) {
     for (let at = 0; at < call.botIds.length; at += 4) {
       const botIds = call.botIds.slice(at, at + 4);
       const sent = await exec.delegate({ botIds, message: call.message, ...(call.doneWhen ? { doneWhen: call.doneWhen } : {}), ...(fixes ? { rework: true } : {}), ...(step.consult ? { consult: true } : {}), signal });
-      if (!sent.ok) return sent;
       for (const [index, botId] of botIds.entries()) {
-        const receipt = sent.receipts.find((one) => one.botId === botId);
+        const receipt = sent.receipts?.find((one) => one.botId === botId);
         if (receipt?.requestId) requests.push({ part: call.parts[at + index]!, botId, name: receipt.name, requestId: receipt.requestId });
       }
+      if (!sent.ok) return { ok: false, error: sent.error, requests };
     }
   }
-  return requests.length ? { ok: true, requests } : { ok: false, error: "no teammate took the work" };
+  return requests.length ? { ok: true, requests } : { ok: false, error: "no teammate took the work", requests };
 }
 
 /** The replies, once every hand-off of the round has settled; the names still working while some haven't. */
@@ -151,7 +155,8 @@ export function readReview(response: string, state: DelegationState): Record<str
   const out: Record<string, string> = {};
   for (const [name, fix] of Object.entries(redo as Record<string, unknown>)) {
     const part = Object.entries(state.replies).find(([key, reply]) => norm(key) === norm(name) || norm(reply.name) === norm(name))?.[0];
-    if (part && typeof fix === "string" && fix.trim()) out[part] = fix.trim().slice(0, 2_000);
+    if (!part || typeof fix !== "string" || !fix.trim()) return null;
+    out[part] = fix.trim().slice(0, 2_000);
   }
   return out;
 }

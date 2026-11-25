@@ -1434,14 +1434,63 @@ describe("ModelGo's sponsor card", () => {
     expect(await relaunch(), "then it comes").toContain(TITLE);
   });
 
-  it("never in the launch the welcome took or over a live call, and waits for the bots to load", async () => {
+  it("never over a live call, and waits for the bots to load", async () => {
     f.state.liveCall = { status: "active" };
     expect(await launch(), "a live call").not.toContain(TITLE);
     f.state.liveCall = undefined; f.state.hydrated = false;
     expect(await relaunch(), "until the bots load").not.toContain(TITLE);
-    f.state.hydrated = true; session.clear(); markWelcomeFinished();
-    expect(await launch(), "the welcome's own launch").not.toContain(TITLE);
-    expect(launchNotice()).not.toBe(MODELGO_OFFER_NOTICE);
+    f.state.hydrated = true;
+    expect(await relaunch()).toContain(TITLE);
+  });
+
+  for (const metChief of [false, true]) {
+    it(`a new install sees it in the launch its welcome finished, once its first chat has a reply, and only once${metChief ? " (after meeting the Chief)" : ""}`, async () => {
+      f.state.bots = [];
+      f.state.config.onboarding = { ...EMPTY_ONBOARDING };
+      expect(await launch(), "the welcome is due").not.toContain(TITLE);
+      f.state.welcomeOpen = true;
+      f.state.config.onboarding = { ...EMPTY_ONBOARDING, completedAt: "2026-11-01", version: 1, hintsSeen: [...withTourFinished(undefined), ...(metChief ? [MET_CHIEF_HINT] : [])] };
+      expect(await settle(), "the welcome is open").not.toContain(TITLE);
+      f.state.welcomeOpen = false; markWelcomeFinished();
+      expect(await settle(), "the welcome just finished, nothing said yet").not.toContain(TITLE);
+      f.state.bots = [{ tasks: [{ threadId: "first" }] }];
+      expect(await settle(), "the first chat, before its first reply").not.toContain(TITLE);
+      expect(launchNotice()).toBeNull();
+      f.state.bots = structuredClone(FIRST_REPLY);
+      expect(await settle(), "the first reply came: the card, in this same launch").toContain(TITLE);
+      expect(launchNotice()).toBe(MODELGO_OFFER_NOTICE);
+      press("Not now"); await flush();
+      expect(render()).toBe("");
+      expect(await launch(), "a reload").not.toContain(TITLE);
+      expect(await relaunch(), "a later launch").not.toContain(TITLE);
+    });
+  }
+
+  it("on a new install's first launch it follows the move popup once that closes and the first reply has come", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout"] });
+    storage.delete(GROK_MOVE_NOTICE);
+    vi.stubGlobal("document", { activeElement: null, body: null, documentElement: { dataset: {} }, getElementById: () => null,
+      querySelector: (selector: string) => selector === "[data-grok-move-popup]" ? { querySelectorAll: () => [] } : null, querySelectorAll: () => [] });
+    f.state.bots = [{ tasks: [{ threadId: "first" }] }];
+    f.state.config.onboarding = { ...EMPTY_ONBOARDING, completedAt: "2026-11-01", version: 1, hintsSeen: [...withTourFinished(undefined), MET_CHIEF_HINT] };
+    markWelcomeFinished();
+    expect(await launch(), "its first messages are still arriving").toBe("");
+    vi.advanceTimersByTime(6_000);
+    const grok = await settle();
+    expect(grok).toContain("data-grok-move-popup"); expect(grok).not.toContain(TITLE);
+    press("Not now"); await flush();
+    expect(await settle(), "the first chat has no reply yet").not.toContain(TITLE);
+    f.state.bots = structuredClone(FIRST_REPLY);
+    expect(await settle(), "then the card, in the same launch").toContain(TITLE);
+  });
+
+  it("follows MausBot's first-launch card in the same launch once it closes", async () => {
+    f.viewerEmail = null;
+    f.state.bots = [{ ...structuredClone(FIRST_REPLY[0]), id: "maus", defaultBot: {} }];
+    expect(await launch(), "the card is due: the sponsor's card waits for it").not.toContain(TITLE);
+    markLaunchDialog("mausbot"); f.state.bots[0].welcomed = true;
+    expect(await settle(), "the card closed in this launch").toContain(TITLE);
+    expect(launchNotice()).toBe(MODELGO_OFFER_NOTICE);
   });
 
   it("is on every page: the desktop, My Cloud, a Team Cloud's Member and a browser", async () => {
