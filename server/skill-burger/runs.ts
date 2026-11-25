@@ -79,10 +79,11 @@ export function createSkillBurgerRuns(deps: { dataDir: string; root?: string; ho
   const states = createRunStates(join(deps.dataDir, "skill-burger-runs"));
   const history = createRunHistory(join(deps.dataDir, "skill-burger-runs"));
   const open = new Map<string, Set<string>>();
-  const runDeps = (turn: BurgerTurn): RunDeps => ({
+  const runDeps = (turn: BurgerTurn, signal: AbortSignal): RunDeps => ({
     exec: deps.executors?.(turn) ?? createExecutors({ botId: turn.botId, cwd: turn.cwd, internal: turn.internal, ...(turn.connected ? { connected: turn.connected } : {}) }),
     events: stepEvents(turn, open),
     save: (state) => states.save(state),
+    signal,
   });
   const finished = (turn: BurgerTurn, name: string | undefined, envelope: RunEnvelope) => {
     if (envelope.status !== "needs_input") open.delete(envelope.run);
@@ -92,13 +93,16 @@ export function createSkillBurgerRuns(deps: { dataDir: string; root?: string; ho
 
   const internalRoutes = (turn: BurgerTurn): RouteHandler => async ({ req, res, path, method, json, readBody }) => {
     if (method !== "POST" || ![RUN_PATH, RESUME_PATH, EDIT_PATH, UNDO_PATH].includes(path)) return PASS;
+    const controller = new AbortController();
+    res.once("close", () => { if (!res.writableEnded) controller.abort(); });
+    if (res.destroyed) controller.abort();
     const body = await readBody(req);
     if (path === RUN_PATH) {
       const parsed = runBody.safeParse(body);
       if (!parsed.success) return json(res, 400, { error: "run_workflow needs the Skill Burger's name." });
       const found = findWorkflowSkill(turn.botId, parsed.data.name, deps.root);
       if (!found) return json(res, 404, { error: `No Skill Burger named "${parsed.data.name}" here. Check the names in your skills index.` });
-      const envelope = await startRun({ name: parsed.data.name, botId: turn.botId, threadId: turn.threadId, sha256: found.sha256, workflow: found.workflow, ...(parsed.data.args ? { args: parsed.data.args } : {}) }, runDeps(turn));
+      const envelope = await startRun({ name: parsed.data.name, botId: turn.botId, threadId: turn.threadId, sha256: found.sha256, workflow: found.workflow, ...(parsed.data.args ? { args: parsed.data.args } : {}) }, runDeps(turn, controller.signal));
       return json(res, 200, finished(turn, parsed.data.name, envelope));
     }
     if (path === RESUME_PATH) {
@@ -106,7 +110,7 @@ export function createSkillBurgerRuns(deps: { dataDir: string; root?: string; ho
       if (!parsed.success) return json(res, 400, { error: "Resume needs the run's token and your response." });
       const state = states.take(parsed.data.run, turn.botId);
       if (!state) return json(res, 404, { error: "That run can't be resumed: it finished, was resumed already, or is more than a day old." });
-      return json(res, 200, finished(turn, state.name, await resumeRun({ ...state, threadId: turn.threadId }, parsed.data.response, runDeps(turn))));
+      return json(res, 200, finished(turn, state.name, await resumeRun({ ...state, threadId: turn.threadId }, parsed.data.response, runDeps(turn, controller.signal))));
     }
     if (path === UNDO_PATH) {
       const parsed = undoBody.safeParse(body);

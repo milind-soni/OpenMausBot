@@ -214,8 +214,8 @@ export function AddDevicePanel(props: AddDeviceProps) {
                     <NetworkStep network={network} action={stepAction} waiting={Boolean(shared && !tailnetAddress)} onCheck={onCheck} checking={checking} />
                   </>}
                 </Step>}
-                <Step n={here && network ? 2 : 1} title={t(here && network ? "devicesPage.addFlow.installBoth" : "devicesPage.addFlow.installStep", { app: productName() })} state={!here || networkReady ? "now" : "later"}>
-                  {here && network && <p className={BODY}>{t("devicesPage.addFlow.installBothLine")}</p>}
+                <Step n={here && network ? 2 : 1} title={t(here && network ? "devicesPage.addFlow.installOther" : "devicesPage.addFlow.installStep", { app: productName() })} state={!here || networkReady ? "now" : "later"}>
+                  {here && network && <p data-add-install-why="" className={BODY}>{t("devicesPage.addFlow.installOtherLine")}</p>}
                   <span className="flex flex-wrap gap-2">
                     <a href={DESKTOP_DOWNLOAD_URL} target="_blank" rel="noreferrer" className="ui-button ui-button-sm w-fit">{t("computerAsk.action.getApp", { app: productName() })}</a>
                     {here && network && <a href={TAILSCALE_GET} target="_blank" rel="noreferrer" className="ui-button ui-button-sm w-fit">{t("remote.tailscale.getIt")}</a>}
@@ -227,9 +227,9 @@ export function AddDevicePanel(props: AddDeviceProps) {
               </Steps>)}
             {kind === "server" && <Steps>
               <Step n={1} title={t("devicesPage.addFlow.serverRunTerminal")}>
-                <CommandRow label={t("devicesPage.addFlow.serverAnywhere")} command={SERVER_COMMANDS.anywhere} />
+                <p data-add-server-why="" className={BODY}>{t("devicesPage.addFlow.serverCommandsLine", { app: productName() })}</p>
+                <CommandRow label={t("devicesPage.route.anywhere", { app: productName() })} command={SERVER_COMMANDS.anywhere} />
                 <CommandRow label={t("devicesPage.addFlow.serverPrivate")} command={SERVER_COMMANDS.tailscale} />
-                <p className="text-[12px] leading-4 text-ink-secondary">{t("devicesPage.addFlow.serverHow")}</p>
               </Step>
               <Step n={2} title={t("devicesPage.addFlow.pasteLink")}>
                 {canConnectServer

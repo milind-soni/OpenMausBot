@@ -5,7 +5,7 @@ import { ComposerForkError, useComposerFork } from "./ComposerFork";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { Mic, Square } from "lucide-react";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { useStoreRef } from "@/state/store-ref"; import { sameDrawnBots } from "@/lib/drawn-bots";
-import { visibleMessages, currentTaskBot, type Bot, type Group, type InstanceInfo, type Message } from "@/state/store";
+import { visibleMessages, currentTaskBot, type Action, type Bot, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { useMenuMotion } from "./MenuMotion";
@@ -119,7 +119,7 @@ export function Composer({
   onClearReply,
   onConsumeReply,
   onRestoreReply,
-  locked: setupLocked = false,
+  locked: setupLocked = false, onSendGroup,
 }: {
   bot?: Bot;
   group?: Group;
@@ -130,6 +130,8 @@ export function Composer({
   onConsumeReply?: () => void;
   onRestoreReply?: (message: Message, threadId: string) => void;
   locked?: boolean;
+  /** Takes a room's send instead of the store: the room feed starts a new thread with it. */
+  onSendGroup?: (action: Extract<Action, { type: "sendGroup" }>) => void;
 }) {
   const bot = profile ? currentTaskBot(profile) : undefined;
   const locked = setupLocked || Boolean(bot?.awaitingThreadSnapshot);
@@ -557,7 +559,7 @@ export function Composer({
       },
     };
     if (group) {
-      dispatch({ type: "sendGroup", groupId: group.id, mode: failedMode, ...(failed.followUp ? { followUp: failed.followUp } : {}), ...retry });
+      (onSendGroup ?? dispatch)({ type: "sendGroup", groupId: group.id, mode: failedMode, ...(failed.followUp ? { followUp: failed.followUp } : {}), ...retry });
     } else if (bot) {
       dispatch({ type: "send", botId: bot.id, mode: failedMode, followUp: failed.followUp, ...retry });
     }
@@ -595,7 +597,7 @@ export function Composer({
     };
     if (group) {
       const points = effectiveChannelMode === "goal" ? null : takePointedChips(threadId);
-      dispatch({
+      (onSendGroup ?? dispatch)({
         type: "sendGroup",
         groupId: group.id,
         text: body,
@@ -910,7 +912,7 @@ export function Composer({
             simple: !advanced, locked: setupLocked, approval: blocking, attaching: attachmentPending, listening: recording,
             replying: Boolean(replyTo), busy, canSteer: steersNow, queued: pendingCount > 0, busyName, sendLabel, group, members: members ?? [],
             jevOn: jevRoomRoutingOn(state.config), goal: channelMode === "goal", botName: bot?.name ?? "",
-            setupHint: group ? null : setupRequestPlaceholder(bot, threadId),
+            setupHint: group ? null : setupRequestPlaceholder(bot, threadId), startsThread: Boolean(onSendGroup),
           })}
           aria-label={t("composer.placeholder.bot", { name: group ? group.name : (bot?.name ?? "") })}
             className={cn(

@@ -23,6 +23,8 @@ import { ChatView } from "@/components/ChatView";
 import { HandoffExchangeHost } from "@/components/HandoffExchange";
 import { GroupView } from "@/components/GroupView";
 import { ForkPanel } from "@/components/ForkPanel";
+import { RoomFeedView } from "@/components/room-feed/RoomFeedView";
+import { useRoomFeed } from "@/components/room-feed/use-room-feed";
 import { PHONE_LAYOUT, SIDEBAR_AND_BOT_PANEL_FIT, SIDEBAR_AND_NARROW_PANEL_FIT, SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQuery } from "@/lib/use-media-query";
 import { anySidePanel, botPanelFloats, panelsMovingSidebar, sidebarFoldsForPanel, type OpenSidePanels } from "@/lib/sidebar-fold";
 import { preloadConnectedApps } from "@/lib/connected-apps";
@@ -187,7 +189,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     view: state.activeView, pluginsOpen: state.pluginsOpen, settingsOpen: state.settingsOpen });
   const closeDrawer = useCallback(() => { hideDrawer(); menuButtonRef.current?.focus(); }, [hideDrawer]);
   const notificationFeed = useNotificationFeed() && !remoteClient;
-  const advanced = useAdvancedMode(), skillBurger = useFeature("skillBurger");
+  const advanced = useAdvancedMode(), skillBurger = useFeature("skillBurger"), roomFeed = useRoomFeed(group);
   const roomPanelOpen = useRoomPanelShown({ group, state, simple: !advanced && !remoteClient });
   const sidePanels: OpenSidePanels = {
     simple: !advanced, remoteClient, bot: Boolean(bot) && state.settingsOpen, room: roomPanelOpen, inbox: inboxShown, inboxWide: inboxPanel.wide === true,
@@ -465,6 +467,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         <CloudEngineSignIn />
       ) : chiefStep ? (
         <EmptyChatShell />
+      ) : group && roomFeed ? (
+        <RoomFeedView key={group.id} group={group} />
       ) : group ? (
         <GroupView key={group.id} group={group} />
       ) : bot ? (

@@ -65,7 +65,7 @@ export function LimitField({ id, value, onChange, range, placeholder, disabled, 
   return (
     <input id={id} type="number" inputMode="numeric" min={range.min} max={range.max} step={1} value={value}
       onChange={(e) => onChange(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onEnter()} disabled={disabled}
-      placeholder={String(placeholder)} aria-invalid={limitValue(value, range) === null}
+      placeholder={t("keys.vps.field.inherited", { value: placeholder })} aria-invalid={limitValue(value, range) === null}
       className={cn(KEY_FIELD, "tabular-nums")} />
   );
 }
@@ -149,7 +149,7 @@ export function VpsServerEditor({ onRemoved, hint = true, ...which }: VpsServerE
   return (
     <div data-vps-server={alias} role="group" aria-label={label} className="flex flex-col gap-3 @container/vps">
       <div className="grid grid-cols-1 gap-3 @min-[22rem]/vps:grid-cols-2">
-        <Field id={ids.name} label={t(isDefault ? "keys.vps.field.sshName" : "keys.vps.field.name")} wide>
+        <Field id={ids.name} label={t(isDefault ? "keys.vps.field.sshSettingsName" : "keys.vps.field.name")} wide>
           <input
             id={ids.name}
             type="text"
@@ -163,7 +163,7 @@ export function VpsServerEditor({ onRemoved, hint = true, ...which }: VpsServerE
             aria-describedby={isDefault ? undefined : `${fieldId}-ssh`}
             className={cn(KEY_FIELD, isDefault && "font-mono")}
           />
-          {!isDefault && <span id={`${fieldId}-ssh`} data-vps-ssh-name="" className="break-all text-[12px] leading-4 text-ink-secondary">{t("keys.vps.sshNameLine", { alias })}</span>}
+          {!isDefault && <span id={`${fieldId}-ssh`} data-vps-ssh-name="" className="break-all text-[12px] leading-4 text-ink-secondary">{t("keys.vps.sshSettingsName", { alias })}</span>}
         </Field>
         <Field id={ids.memory} label={t("keys.vps.field.memory")}>
           <LimitField id={ids.memory} value={memory} onChange={setMemory} range={MEMORY_GB} placeholder={inherited.memoryGb} disabled={busy} onEnter={submit} />
