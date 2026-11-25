@@ -523,5 +523,21 @@ describe("message-linked files", () => {
     );
     expect(safe).toHaveLength(1);
     expect(safe[0]!.toLowerCase()).toContain("team-docs");
+
+    const dataFile = join(dataDir, "bot.json");
+    writeFileSync(dataFile, "{}");
+    await expect(
+      openMessageFile(dataFile, [workspace], undefined, { extraRoots: [dataDir], forbiddenDirs: [dataDir] }),
+    ).rejects.toMatchObject({ status: 403, code: "outside_workspace" });
+    await expect(
+      listMessageFolder(dataDir, [workspace], { extraRoots: [dataDir], forbiddenDirs: [dataDir] }),
+    ).rejects.toMatchObject({ status: 403, code: "outside_workspace" });
+
+    writeFileSync(join(workspace, "note.md"), "ok");
+    const openedWorkspaceData = await openMessageFile("note.md", [workspace], undefined, {
+      extraRoots: [docsDir],
+      forbiddenDirs: [workspace, dataDir],
+    });
+    await openedWorkspaceData.handle.close();
   });
 });

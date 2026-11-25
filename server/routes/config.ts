@@ -155,6 +155,15 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       if (patch.fileLinks?.extraRoots !== undefined) {
         if (CLOUD_HOME) return json(res, 403, { error: "Extra file link folders are only available on self-hosted servers." });
         if (!ownerOrAdmin(auth)) return json(res, 403, { error: "Only an owner or admin can configure extra file link folders." });
+        if (body.expectedExtraFileLinkRoots !== undefined) {
+          if (!Array.isArray(body.expectedExtraFileLinkRoots) || body.expectedExtraFileLinkRoots.some((item: unknown) => typeof item !== "string")) {
+            return json(res, 400, { error: "expectedExtraFileLinkRoots must be a list of folder paths." });
+          }
+          const current = cfg.fileLinks?.extraRoots ?? [];
+          if (JSON.stringify(body.expectedExtraFileLinkRoots) !== JSON.stringify(current)) {
+            return json(res, 409, { error: "Allowed file link folders changed in another window. Review the refreshed list and try again." });
+          }
+        }
         const forbidden = deps.forbiddenFileLinkDirs?.() ?? [DATA_DIR, ...(process.env.OMB_USER_DATA ? [process.env.OMB_USER_DATA] : [])];
         const clean: string[] = [];
         for (const entry of patch.fileLinks.extraRoots) {

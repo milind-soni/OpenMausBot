@@ -365,6 +365,27 @@ export function validateExtraFileLinkRoot(raw: string, forbiddenDirs: readonly s
   return normalized;
 }
 
+export interface ExtraFileLinkPolicy {
+  extraRoots?: readonly string[];
+  forbiddenDirs?: readonly string[];
+}
+
+async function resolveCanonicalForbiddenDirs(forbiddenDirs: readonly string[] = []): Promise<string[]> {
+  const resolved: string[] = [];
+  for (const dir of forbiddenDirs) {
+    if (!dir) continue;
+    const lex = resolve(dir);
+    resolved.push(lex);
+    const real = await realpath(lex).catch(() => null);
+    if (real && real !== lex) resolved.push(real);
+  }
+  return resolved;
+}
+
+function overlapsCanonicalDir(target: string, dirs: readonly string[]): boolean {
+  return dirs.some((dir) => containedBy(dir, target) || containedBy(target, dir));
+}
+
 /** Resolves valid, non-overlapping existing directories from owner-configured extra file link roots. */
 export async function safeExtraFileLinkRoots(
   roots: readonly string[] | undefined,
@@ -373,12 +394,7 @@ export async function safeExtraFileLinkRoots(
   if (!roots?.length) return [];
   const valid: string[] = [];
   const seen = new Set<string>();
-  const resolvedForbidden = await Promise.all(forbiddenDirs.filter(Boolean).map(async (dir) => {
-    const lex = resolve(dir);
-    const real = await realpath(lex).catch(() => null);
-    return real ? [lex, real] : [lex];
-  }));
-  const allForbidden = resolvedForbidden.flat();
+  const allForbidden = await resolveCanonicalForbiddenDirs(forbiddenDirs);
   for (const raw of roots) {
     const normalized = validateExtraFileLinkRoot(raw, forbiddenDirs);
     if (!normalized) continue;
@@ -390,7 +406,7 @@ export async function safeExtraFileLinkRoots(
       continue;
     }
     if (inSecretFolder(canonical)) continue;
-    if (allForbidden.some((dir) => containedBy(dir, canonical) || containedBy(canonical, dir))) continue;
+    if (overlapsCanonicalDir(canonical, allForbidden)) continue;
     const key = process.platform === "win32" ? canonical.toLowerCase() : canonical;
     if (!seen.has(key)) {
       seen.add(key);
@@ -448,26 +464,44 @@ export function mimeFor(path: string): string {
   }
 }
 
+async function resolveMessageFileRoots(
+  roots: readonly string[],
+  policy?: ExtraFileLinkPolicy,
+): Promise<{ roots: Array<{ path: string; isExtra: boolean }>; forbidden: string[] }> {
+  const forbidden = await resolveCanonicalForbiddenDirs(policy?.forbiddenDirs);
+  const resolved: Array<{ path: string; isExtra: boolean }> = [];
+  const seen = new Set<string>();
+  const addRoot = async (raw: string, isExtra: boolean) => {
+    try {
+      const canonical = await realpath(raw);
+      if (!(await stat(canonical)).isDirectory()) return;
+      if (isExtra && overlapsCanonicalDir(canonical, forbidden)) return;
+      const key = process.platform === "win32" ? canonical.toLowerCase() : canonical;
+      if (seen.has(key)) return;
+      seen.add(key);
+      resolved.push({ path: canonical, isExtra });
+    } catch {
+    }
+  };
+  for (const root of roots) await addRoot(root, false);
+  for (const root of policy?.extraRoots ?? []) await addRoot(root, true);
+  return { roots: resolved, forbidden };
+}
+
 /** Canonicalised before and after opening, and the handle compared with the post-open path, to reject symlink escapes and directory swaps. */
 export async function openMessageFile(
   href: string,
   roots: readonly string[],
   maxBytes = MESSAGE_FILE_MAX_BYTES,
+  extraPolicy?: ExtraFileLinkPolicy,
 ): Promise<OpenedMessageFile> {
   const requested = referencedPath(href);
-  const canonicalRoots = (await Promise.all(roots.map(async (root) => {
-    try {
-      const canonical = await realpath(root);
-      return (await stat(canonical)).isDirectory() ? canonical : null;
-    } catch {
-      return null;
-    }
-  }))).filter((root): root is string => Boolean(root));
+  const { roots: canonicalRoots, forbidden } = await resolveMessageFileRoots(roots, extraPolicy);
 
   if (canonicalRoots.length === 0) throw statusError(404, "the linked file is unavailable");
   const candidates = isAbsolute(requested)
     ? [resolve(requested)]
-    : canonicalRoots.map((root) => resolve(root, requested));
+    : canonicalRoots.map((root) => resolve(root.path, requested));
 
   let sawOutsideRoot = false;
   for (const candidate of new Set(candidates)) {
@@ -477,12 +511,13 @@ export async function openMessageFile(
     } catch {
       continue;
     }
-    const root = canonicalRoots.find((allowed) => containedBy(allowed, canonicalBefore));
+    const root = canonicalRoots.find((allowed) => containedBy(allowed.path, canonicalBefore));
     if (!root) {
       sawOutsideRoot = true;
       continue;
     }
     if (inSecretFolder(canonicalBefore)) throw statusError(403, SECRET_FILE_REFUSAL, "secret_file");
+    if (root.isExtra && overlapsCanonicalDir(canonicalBefore, forbidden)) throw outsideWorkspace();
 
     let handle: FileHandle | undefined;
     try {
@@ -495,8 +530,9 @@ export async function openMessageFile(
       if (opened.size > maxBytes) throw fileTooLarge(opened.size, maxBytes, canonicalBefore);
 
       const canonicalAfter = await realpath(candidate);
-      if (!containedBy(root, canonicalAfter)) throw outsideWorkspace();
+      if (!containedBy(root.path, canonicalAfter)) throw outsideWorkspace();
       if (inSecretFolder(canonicalAfter)) throw statusError(403, SECRET_FILE_REFUSAL, "secret_file");
+      if (root.isExtra && overlapsCanonicalDir(canonicalAfter, forbidden)) throw outsideWorkspace();
       const after = await stat(canonicalAfter);
       if (opened.dev !== after.dev || opened.ino !== after.ino) {
         throw statusError(409, "the linked file changed while it was being opened");
@@ -569,8 +605,12 @@ export interface MessageFolderListing {
   truncated: boolean;
 }
 
-export async function listMessageFolder(href: string, roots: readonly string[]): Promise<MessageFolderListing> {
-  const { path: _path, ...listing } = await readMessageFolder(href, roots);
+export async function listMessageFolder(
+  href: string,
+  roots: readonly string[],
+  extraPolicy?: ExtraFileLinkPolicy,
+): Promise<MessageFolderListing> {
+  const { path: _path, ...listing } = await readMessageFolder(href, roots, extraPolicy);
   return listing;
 }
 
@@ -579,31 +619,26 @@ export async function openMessageFolderEntry(
   entry: string,
   roots: readonly string[],
   maxBytes = MESSAGE_FILE_MAX_BYTES,
+  extraPolicy?: ExtraFileLinkPolicy,
 ): Promise<OpenedMessageFile> {
-  const folder = await readMessageFolder(href, roots);
+  const folder = await readMessageFolder(href, roots, extraPolicy);
   if (!folder.entries.some((listed) => listed.name === entry)) {
     throw statusError(404, "the linked file is unavailable");
   }
-  return openMessageFile(pathToFileURL(join(folder.path, entry)).href, roots, maxBytes);
+  return openMessageFile(pathToFileURL(join(folder.path, entry)).href, roots, maxBytes, extraPolicy);
 }
 
 async function readMessageFolder(
   href: string,
   roots: readonly string[],
+  extraPolicy?: ExtraFileLinkPolicy,
 ): Promise<MessageFolderListing & { path: string }> {
   const requested = referencedPath(href);
-  const canonicalRoots = (await Promise.all(roots.map(async (root) => {
-    try {
-      const canonical = await realpath(root);
-      return (await stat(canonical)).isDirectory() ? canonical : null;
-    } catch {
-      return null;
-    }
-  }))).filter((root): root is string => Boolean(root));
+  const { roots: canonicalRoots, forbidden } = await resolveMessageFileRoots(roots, extraPolicy);
   if (canonicalRoots.length === 0) throw statusError(404, "the linked folder is unavailable");
   const candidates = isAbsolute(requested)
     ? [resolve(requested)]
-    : canonicalRoots.map((root) => resolve(root, requested));
+    : canonicalRoots.map((root) => resolve(root.path, requested));
 
   let sawOutsideRoot = false;
   for (const candidate of new Set(candidates)) {
@@ -613,12 +648,13 @@ async function readMessageFolder(
     } catch {
       continue;
     }
-    const root = canonicalRoots.find((allowed) => containedBy(allowed, folder));
+    const root = canonicalRoots.find((allowed) => containedBy(allowed.path, folder));
     if (!root) {
       sawOutsideRoot = true;
       continue;
     }
     if (inSecretFolder(folder)) throw statusError(403, SECRET_FILE_REFUSAL, "secret_file");
+    if (root.isExtra && overlapsCanonicalDir(folder, forbidden)) throw outsideWorkspace();
     if (!(await stat(folder)).isDirectory()) throw statusError(400, "the link does not point to a folder");
 
     const names = (await readdir(folder)).sort((a, b) => a.localeCompare(b));
@@ -630,7 +666,8 @@ async function readMessageFolder(
         const own = await lstat(child);
         if (!own.isFile() && !own.isSymbolicLink()) continue;
         const target = await realpath(child);
-        if (!containedBy(root, target) || inSecretFolder(target)) continue;
+        if (!containedBy(root.path, target) || inSecretFolder(target)) continue;
+        if (root.isExtra && overlapsCanonicalDir(target, forbidden)) continue;
         const info = await stat(target);
         if (!info.isFile()) continue;
         if (entries.length >= MESSAGE_FOLDER_MAX_ENTRIES) {

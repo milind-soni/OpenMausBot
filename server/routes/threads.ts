@@ -6,6 +6,7 @@ import type { BotsResponse, SearchResponse, WireBot, WireGroup } from "../../sha
 import { NO_SUCH_BOT } from "../../shared/bot-read.ts";
 import { closeUnfinishedCodeFence } from "../../shared/markdown-code-fence.ts";
 import { KEPT_ORIGINALS_DIR, keptOriginal } from "../attachment-originals.ts";
+import { DATA_DIR } from "../config.ts";
 import {
   ATTACHMENTS_DIR, attachmentStorageUsage, clearAttachments, deleteAttachment, extensionForMime, FILE_MAX_BYTES, IMAGE_MAX_BYTES,
   parseAudioRange, readAttachment, saveFile, saveImageUpload, validateAttachmentUploadId, type SavedAttachment,
@@ -22,7 +23,7 @@ import { readMessage, searchMessagesAsync } from "../message-db.ts";
 import { cappedMediaRange, MessageMediaLinks, STREAMABLE_MEDIA_MIMES } from "../message-media-links.ts";
 import {
   listMessageFolder, MESSAGE_FILE_DOWNLOAD_MAX_BYTES, MESSAGE_FILE_MAX_BYTES, messageAttachmentName, messageFileDisposition, messageFileDownloadName, messageFolderEntryName,
-  messageImageTargetAt, messageReferencesFile, openMessageFile, openMessageFolderEntry, referencedFileName,
+  messageImageTargetAt, messageReferencesFile, openMessageFile, openMessageFolderEntry, referencedFileName, type ExtraFileLinkPolicy,
 } from "../message-file.ts";
 import { ownerOrAdmin, resolveRequestAuth, type RequestAuth, type ResolveOptions } from "../request-auth.ts";
 import type { queuedSteerSnapshot } from "../steer-queue.ts";
@@ -66,6 +67,7 @@ export interface ThreadRouteDeps {
   botComputerControlSnapshot(botId: string): ReturnType<ComputerControl["snapshot"]>;
   messageFileRootsForThread(senderId: string, threadId: string): string[];
   extraFileLinkRoots?(): Promise<string[]>;
+  forbiddenFileLinkDirs?(): string[];
   viewerFor(auth: RequestAuth): Viewer;
   /** A room's unread mark as this person has read it (a Team Cloud); the room as it is anywhere else. */
   groupFor?(auth: RequestAuth, group: WireGroup): WireGroup;
@@ -242,6 +244,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       if (!href) return json(res, 400, { error: "path is required" });
 
       let roots: string[];
+      let extraPolicy: ExtraFileLinkPolicy | undefined;
       let downloadName: string | undefined;
       const botAttachment = message.role === "bot"
         ? message.attachments?.find((attachment) => attachment.path === href)
@@ -270,7 +273,11 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         const runThread = message.automation?.executionThreadId;
         const fromRun = runThread && store.botByThread(runThread)?.id === senderId ? messageFileRootsForThread(senderId, runThread) : [];
         const extra = ownerOrAdmin(auth) && extraFileLinkRoots ? await extraFileLinkRoots() : [];
-        roots = [...new Set([...messageFileRootsForThread(senderId, threadId), ...fromRun, ...extra])];
+        const extraForbidden = extra.length > 0
+          ? (deps.forbiddenFileLinkDirs?.() ?? [DATA_DIR, ...(process.env.OMB_USER_DATA ? [process.env.OMB_USER_DATA] : [])])
+          : [];
+        extraPolicy = extra.length > 0 ? { extraRoots: extra, forbiddenDirs: extraForbidden } : undefined;
+        roots = [...new Set([...messageFileRootsForThread(senderId, threadId), ...fromRun])];
       }
 
       const folderEntry = mediaGrant
@@ -287,8 +294,8 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
           // What the person sent, even when a bot has since saved over the stored file.
           const kept = message.role === "user" && !folderEntry ? keptOriginal(href, ATTACHMENTS_DIR) : null;
           file = folderEntry
-            ? await openMessageFolderEntry(href, folderEntry, roots, maxBytes)
-            : kept ? await openMessageFile(kept, [KEPT_ORIGINALS_DIR], maxBytes) : await openMessageFile(href, roots, maxBytes);
+            ? await openMessageFolderEntry(href, folderEntry, roots, maxBytes, extraPolicy)
+            : kept ? await openMessageFile(kept, [KEPT_ORIGINALS_DIR], maxBytes) : await openMessageFile(href, roots, maxBytes, extraPolicy);
           // Says the bytes are exactly what the person sent, so a comparison may call them that.
           if (kept) res.setHeader("x-openmausbot-kept-original", "1");
         } catch (error) {
@@ -304,7 +311,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
           } else {
             // Only a client that asks for listings gets one; older clients keep the 400.
             if (body?.listFolder !== true || folderEntry || code !== "directory") throw error;
-            const listing = await listMessageFolder(href, roots);
+            const listing = await listMessageFolder(href, roots, extraPolicy);
             res.setHeader("x-openmausbot-folder", "1");
             res.setHeader("cache-control", "private, no-store");
             return json(res, 200, listing);

@@ -4,7 +4,7 @@ import { Trash2 } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { REVEALABLE_PATH } from "@/lib/reveal-host-path";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
-import { api, StoreContext, type ConfigStatus } from "@/state/store";
+import { api, ApiError, StoreContext, type ConfigStatus } from "@/state/store";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { SETTINGS_INLINE_INPUT, SettingRow, SettingsGroup, SettingsRows } from "./SettingsPrimitives";
 
@@ -15,6 +15,29 @@ function parentFolderPath(filePath: string): string {
   if (slash === 0) return "/";
   const parent = clean.slice(0, slash);
   return /^[a-z]:$/i.test(parent) ? `${parent}\\` : parent;
+}
+
+async function saveExtraFileLinkRoots(
+  next: string[],
+  expected: string[],
+  dispatch: (action: { type: "configStatus"; config: ConfigStatus }) => void,
+): Promise<void> {
+  try {
+    const config = await api<ConfigStatus>("/api/config", {
+      method: "PUT",
+      body: JSON.stringify({ fileLinks: { extraRoots: next }, expectedExtraFileLinkRoots: expected }),
+    });
+    dispatch({ type: "configStatus", config });
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 409) {
+      try {
+        const config = await api<ConfigStatus>("/api/config");
+        dispatch({ type: "configStatus", config });
+      } catch {
+      }
+    }
+    throw cause;
+  }
 }
 
 /** Inline owner action beside an out-of-workspace path on self-hosted remote clients. */
@@ -37,8 +60,7 @@ export function AllowFileLinkFolderButton({ filePath }: { filePath: string }) {
     setProblem("");
     try {
       const next = existingRoots.includes(folder) ? existingRoots : [...existingRoots, folder];
-      const config = await api<ConfigStatus>("/api/config", { method: "PUT", body: JSON.stringify({ fileLinks: { extraRoots: next } }) });
-      store.dispatch({ type: "configStatus", config });
+      await saveExtraFileLinkRoots(next, existingRoots, store.dispatch);
       setAllowedNow(true);
     } catch (cause) {
       setProblem(cause instanceof Error ? cause.message : t("settings.fileLinks.error"));
@@ -75,11 +97,7 @@ export function FileLinkFoldersSettings() {
     setSaving(true);
     setError("");
     try {
-      const config = await api<ConfigStatus>("/api/config", {
-        method: "PUT",
-        body: JSON.stringify({ fileLinks: { extraRoots: next } }),
-      });
-      dispatch({ type: "configStatus", config });
+      await saveExtraFileLinkRoots(next, extraRoots, dispatch);
       if (clearDraft) setDraft("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("settings.fileLinks.error"));

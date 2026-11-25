@@ -22,13 +22,18 @@ describe("fileLinks.extraRoots configuration", () => {
     mkdirSync(dataDir, { recursive: true });
     mkdirSync(docsDir, { recursive: true });
     try {
-      const callRoute = async (cloudHome: boolean, auth: RequestAuth, extraRoots: string[]) => {
+      const callRoute = async (
+        cloudHome: boolean,
+        auth: RequestAuth,
+        extraRoots: string[],
+        options: { configured?: string[]; expectedExtraFileLinkRoots?: unknown } = {},
+      ) => {
         const replies: Array<{ status: number; body: unknown }> = [];
         const route = createConfigRoutes({
           cloudHome,
           forbiddenFileLinkDirs: () => [dataDir],
           store: { bots: [] },
-          cfg: {},
+          cfg: options.configured ? { fileLinks: { extraRoots: options.configured } } : {},
           registry: { get: vi.fn(), forgetSnapshots: vi.fn() },
           sessions: { revalidateEmailSessions: vi.fn() },
           browserCleanup: { hasPendingProfile: () => false, prepare: vi.fn(), abort: vi.fn(), commit: vi.fn(), ensure: vi.fn() },
@@ -69,7 +74,10 @@ describe("fileLinks.extraRoots configuration", () => {
         await route({
           req: {}, res: {}, url: new URL("http://127.0.0.1/api/config"), path: "/api/config", method: "PUT", auth,
           json: (_res: unknown, status: number, body: unknown) => { replies.push({ status, body }); },
-          readBody: async () => ({ fileLinks: { extraRoots } }),
+          readBody: async () => ({
+            fileLinks: { extraRoots },
+            ...(options.expectedExtraFileLinkRoots !== undefined ? { expectedExtraFileLinkRoots: options.expectedExtraFileLinkRoots } : {}),
+          }),
         } as unknown as Parameters<typeof route>[0]);
         return replies[0]!;
       };
@@ -79,6 +87,8 @@ describe("fileLinks.extraRoots configuration", () => {
       expect((await callRoute(false, ownerAuth, ["relative/dir"])).status).toBe(400);
       expect((await callRoute(false, ownerAuth, [dataDir])).status).toBe(400);
       expect((await callRoute(false, ownerAuth, [dir])).status).toBe(400);
+      expect((await callRoute(false, ownerAuth, [docsDir], { configured: [], expectedExtraFileLinkRoots: ["/stale/folder"] })).status).toBe(409);
+      expect((await callRoute(false, ownerAuth, [docsDir], { configured: [], expectedExtraFileLinkRoots: [123] })).status).toBe(400);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
