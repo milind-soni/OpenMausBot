@@ -18,6 +18,7 @@ import type { ResolvedSender } from "../../shared/wire.ts";
 import { audienceMember, type Audience } from "../audience.ts";
 import type { CloudTeam, TeamRole } from "../cloud-team.ts";
 import type { json as sendJson } from "../harness/http.ts";
+import { namesTeammate, peerName } from "../peer-roster.ts";
 import { personKey } from "../person-key.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { PASS } from "../routes/table.ts";
@@ -222,6 +223,20 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
     return { status: 200, text: `Asked ${person.name} in their inbox.`, person: person.key };
   }
 
+  /** message_person is for people: when `to` names a bot here, as coordinate_bots reads a name (its id, or its name in any
+   * case, with or without @), the refusal that points there; null when no bot has that name. Nothing is posted either way,
+   * so no bot waits on an answer that cannot come. `alone`: a place of one person, reached by leaving out to. */
+  function botNamed(botId: string, to: string, alone: boolean): string | null {
+    const wanted = to.replace(/^@+/, "").trim();
+    const named = wanted ? store.bots.filter((bot) => !bot.hidden && namesTeammate(bot, wanted)) : [];
+    if (!named.length) return null;
+    const person = alone ? " For the person, leave out to." : "";
+    const other = named.find((bot) => bot.id !== botId);
+    if (!other) return `${JSON.stringify(peerName(wanted))} is you, so nothing was sent and no answer will come.${person}`;
+    const name = peerName(other.name);
+    return `${name} is a bot, not a person, so nothing was sent and no answer will come. Use coordinate_bots with bot_ids ${JSON.stringify([name])}.${person}`;
+  }
+
   const handledTurns = new Set<string>();
   const mentionable = () => mentionablePeople(current().map((one) => ({ key: one.key, name: one.name })));
   const botNames = () => store.bots.filter((bot) => !bot.hidden).map((bot) => bot.name);
@@ -333,14 +348,23 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       if (!team && deps.place) {
         const body = placeBodySchema.safeParse(await ctx.readBody());
         if (!body.success) return ctx.json(ctx.res, 400, { error: `message_person needs message (up to ${MESSAGE_PERSON_MAX} characters).` });
+        const to = body.data.to ?? "";
+        const bot = to ? botNamed(ctx.botId, to, true) : null;
+        if (bot) return ctx.json(ctx.res, 409, { error: bot });
         const sent = deps.place.message(ctx.botId, ctx.threadId, body.data.message);
-        return ctx.json(ctx.res, sent.status, sent.status === 200 ? { text: sent.text } : { error: sent.text });
+        // There is one person here: a name that is no bot's still reaches them, and the bot is told so, never left waiting on "Bob".
+        const shown = JSON.stringify(oneLine(to, 80));
+        const text = to && sent.status === 200 ? `No bot here is called ${shown}, and only the person you work for can be messaged from here, so this went to their own Inbox. ${sent.text}` : sent.text;
+        return ctx.json(ctx.res, sent.status, sent.status === 200 ? { text } : { error: sent.text });
       }
       if (!team || !deps.people) return ctx.json(ctx.res, 404, { error: "Passing a message to a person works only on a team's Cloud." });
       if (deps.confined?.(ctx.threadId)) return ctx.json(ctx.res, 403, { error: OUTSIDE_REFUSAL });
       const body = bodySchema.safeParse(await ctx.readBody());
       if (!body.success) return ctx.json(ctx.res, 400, { error: `message_person needs to (a teammate's name or email) and message (up to ${MESSAGE_PERSON_MAX} characters).` });
       const passed = pass(ctx.botId, ctx.threadId, body.data.to, body.data.message);
+      // Nobody on the team has that name but a bot does: the same refusal as off a team. A person keeps their name.
+      const bot = passed.status === 404 ? botNamed(ctx.botId, body.data.to, false) : null;
+      if (bot) return ctx.json(ctx.res, 409, { error: bot });
       return ctx.json(ctx.res, passed.status, passed.status === 200 ? { text: passed.text } : { error: passed.text });
     },
     pass,

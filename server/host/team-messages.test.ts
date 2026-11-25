@@ -131,6 +131,45 @@ describe("message_person", () => {
   });
 });
 
+describe("message_person naming a bot", () => {
+  /** message_person as the agents server sends it, from Scout's own chat. */
+  const send = async (f: ReturnType<typeof fixture>, body: Record<string, unknown>) => {
+    let answered: { status: number; body: { text?: string; error?: string } } | null = null;
+    await f.team.internal({ method: "POST", path: "/api/internal/people/message", res: {} as never, botId: "scout", threadId: "scout-main",
+      json: ((_res: unknown, status: number, sent: { text?: string; error?: string }) => { answered = { status, body: sent }; }) as never, readBody: async () => body });
+    return answered! as { status: number; body: { text?: string; error?: string } };
+  };
+
+  it("off a team, puts nothing in the person's Inbox for a bot, however it is written, and names coordinate_bots", async () => {
+    const f = fixture({ team: false, place: true });
+    for (const to of ["Reporter", "reporter", "@Reporter", " REPORTER ", "reporter"]) {
+      const answer = await send(f, { to, message: "Send me the Q4 numbers." });
+      expect(answer.status, to).toBe(409);
+      expect(answer.body.error).toBe('Reporter is a bot, not a person, so nothing was sent and no answer will come. Use coordinate_bots with bot_ids ["Reporter"]. For the person, leave out to.');
+    }
+    expect(await send(f, { to: "Scout", message: "Note to self" })).toEqual({ status: 409, body: { error: '"Scout" is you, so nothing was sent and no answer will come. For the person, leave out to.' } });
+    expect(f.lines("scout-main"), "no line, so no Inbox row").toEqual([]);
+    expect(f.notified).toEqual([]);
+    const posted = await send(f, { message: "The report is ready." });
+    expect(posted, "the hourly cap was not spent on the refusals").toEqual({ status: 200, body: { text: "It is in their Inbox and they were notified. Their answer comes back here, and you carry on from it." } });
+  });
+
+  it("off a team, says plainly that a name no bot has went to the person's own Inbox", async () => {
+    const f = fixture({ team: false, place: true });
+    const answer = await send(f, { to: "Bob", message: "Can you send the slides?" });
+    expect(answer).toEqual({ status: 200, body: { text: 'No bot here is called "Bob", and only the person you work for can be messaged from here, so this went to their own Inbox. It is in their Inbox and they were notified. Their answer comes back here, and you carry on from it.' } });
+    expect(f.lines("scout-main")).toEqual([expect.objectContaining({ kind: "text", text: "Can you send the slides?", inbox: expect.objectContaining({ kind: "message" }) })]);
+  });
+
+  it("on a team, refuses a bot no person shares the name of with the same words, and a person keeps their name", async () => {
+    const f = fixture();
+    const answer = await send(f, { to: "reporter", message: "Send me the Q4 numbers." });
+    expect(answer).toEqual({ status: 409, body: { error: 'Reporter is a bot, not a person, so nothing was sent and no answer will come. Use coordinate_bots with bot_ids ["Reporter"].' } });
+    expect((await send(f, { to: "Zed", message: "Hi" })).body.error).toContain("The people here: Ada, Ben, Cleo.");
+    expect((await send(f, { to: "Ben", message: "Hi" })).status).toBe(200);
+  });
+});
+
 describe("a teammate who shares a bot's name", () => {
   it("is still the one their tag reaches: a tie is the person's, and their tags are known", () => {
     const f = fixture();
