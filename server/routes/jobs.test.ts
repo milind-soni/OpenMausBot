@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { VisibleSet } from "../bot-visibility.ts";
 import { DATA_DIR } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
+import type { HandoffView } from "../coordinator.ts";
 import { json, readBody } from "../harness/http.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { requiredScope } from "../request-auth.ts";
@@ -24,6 +25,7 @@ afterEach(async () => {
 interface Fixture {
   store: Store; rows: Assignment[]; reads: number; hidden: Set<string>; subscribers: () => number; failing?: boolean;
   session?: { live: boolean };
+  nodes?: Map<string, Partial<HandoffView>>; stops?: string[]; refusal?: string;
 }
 
 async function serve(f: Fixture, recheckMs = 60_000): Promise<string> {
@@ -43,7 +45,17 @@ async function serve(f: Fixture, recheckMs = 60_000): Promise<string> {
       f.reads += 1;
       if (f.failing) throw new Error("runtime.db is not readable");
       return { scopes: f.rows.filter((row) => !row.parentId).map((row) => row.id), rows: f.rows };
+    },
+    node: (id) => f.nodes?.get(id) as HandoffView | undefined,
+    stopHandoff: (id) => {
+      const node = f.nodes?.get(id);
+      if (!node?.parentId) return undefined;
+      if (node.status === "completed" || node.status === "cancelled") return "ended";
+      f.stops?.push(id);
+      node.status = "cancelled";
+      return "stopped";
     } },
+    stopRefusal: () => f.refusal ?? null,
     groupThreadIsWorking: () => false,
     viewerFor: () => ({ kind: "all" }),
     visibleTo: () => ({ thread: (threadId: string) => !f.hidden.has(threadId) }) as VisibleSet,
@@ -193,5 +205,76 @@ describe("GET /api/threads/:id/job", () => {
     controller.abort();
     await expect(held).rejects.toThrow();
     await expect.poll(() => f.subscribers()).toBe(0);
+  });
+});
+
+describe("POST /api/threads/:id/job/:assignmentId/stop", () => {
+  /** The person's turn in their chat handed work to a helper, which handed some on. */
+  const handedOut = () => {
+    const f = fixture();
+    f.stops = [];
+    f.nodes = new Map<string, Partial<HandoffView>>([
+      ["root", { id: "root", rootId: "root", threadId: f.threadId, botId: f.botId, status: "source" }],
+      ["as-help", { id: "as-help", rootId: "root", parentId: "root", threadId: "helper-work", botId: "helper", status: "running" }],
+      ["as-deep", { id: "as-deep", rootId: "root", parentId: "as-help", threadId: "scout-work", botId: "scout", status: "queued" }],
+      ["as-room", { id: "as-room", rootId: "root", parentId: "root", threadId: "room-1", groupId: "g1", botId: "helper", status: "running" }],
+      ["other", { id: "other", rootId: "other", threadId: "elsewhere", botId: "helper", status: "source" }],
+      ["as-other", { id: "as-other", rootId: "other", parentId: "other", threadId: "helper-work", botId: "helper", status: "running" }],
+    ]);
+    return f;
+  };
+  const post = async (base: string, path: string) => {
+    const response = await fetch(`${base}${path}`, { method: "POST" });
+    return { status: response.status, body: await response.json() as any };
+  };
+
+  it("is a client action, like stopping the conversation", () => {
+    expect(requiredScope("POST", "/api/threads/thread-1/job/as-1/stop")).toBe("client");
+  });
+
+  it("stops a hand-off this conversation made, a deeper one included, and says when it had already ended", async () => {
+    const f = handedOut();
+    const base = await serve(f);
+    expect(await post(base, `/api/threads/${f.threadId}/job/as-deep/stop`)).toEqual({ status: 200, body: { ok: true, outcome: "stopped" } });
+    expect(await post(base, `/api/threads/${f.threadId}/job/as-help/stop`)).toEqual({ status: 200, body: { ok: true, outcome: "stopped" } });
+    expect(f.stops).toEqual(["as-deep", "as-help"]);
+    expect(await post(base, `/api/threads/${f.threadId}/job/as-help/stop`)).toEqual({ status: 200, body: { ok: true, outcome: "already-ended" } });
+    expect(f.stops).toEqual(["as-deep", "as-help"]);
+  });
+
+  it("finds nothing to stop outside this conversation's hand-offs: its own turn, room work, another conversation's, an unknown id", async () => {
+    const f = handedOut();
+    const base = await serve(f);
+    for (const id of ["root", "as-room", "as-other", "missing"]) {
+      expect(await post(base, `/api/threads/${f.threadId}/job/${id}/stop`)).toMatchObject({ status: 404 });
+    }
+    expect(await post(base, "/api/threads/elsewhere/job/as-help/stop")).toMatchObject({ status: 404 });
+    expect(f.stops).toEqual([]);
+  });
+
+  it("finds nothing where the reader may not open the conversation or the helper's thread", async () => {
+    const f = handedOut();
+    const base = await serve(f);
+    f.hidden.add("helper-work");
+    expect(await post(base, `/api/threads/${f.threadId}/job/as-help/stop`)).toMatchObject({ status: 404 });
+    f.hidden.clear();
+    f.hidden.add(f.threadId);
+    expect(await post(base, `/api/threads/${f.threadId}/job/as-help/stop`)).toMatchObject({ status: 404 });
+    expect(f.stops).toEqual([]);
+  });
+
+  it("refuses a reader who may not stop this conversation's work, with the code the client knows", async () => {
+    const f = handedOut();
+    f.refusal = "Only Ana can stop this request.";
+    const base = await serve(f);
+    expect(await post(base, `/api/threads/${f.threadId}/job/as-help/stop`)).toEqual({ status: 403, body: { error: "Only Ana can stop this request.", code: "stop_not_yours" } });
+    expect(f.stops).toEqual([]);
+  });
+
+  it("leaves other methods and paths to the routes after it", async () => {
+    const f = handedOut();
+    const base = await serve(f);
+    expect(await get(base, `/api/threads/${f.threadId}/job/as-help/stop`)).toEqual({ status: 404, body: { from: "inline routes" } });
+    expect(await post(base, `/api/threads/${f.threadId}/stop`)).toEqual({ status: 404, body: { from: "inline routes" } });
   });
 });

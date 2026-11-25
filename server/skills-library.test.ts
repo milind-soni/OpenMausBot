@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, beforeEach } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AppConfig } from "./config.ts";
@@ -90,10 +90,43 @@ describe("skills library store", () => {
     writeFileSync(join(library.skillsLibraryRoot(), "skills", "audit", "SKILL.md"), SKILL("audit", "Tampered."), { mode: 0o600 });
     const [listing] = library.listLibrarySkills().filter((skill) => skill.name === "audit");
     expect(listing.enabled).toBe(false);
-    expect(listing.warnings).toContain("stored SKILL.md changed after review — enablement is blocked");
+    expect(listing.warnings).toContain("stored skill files changed after review — enablement is blocked");
     expect(library.readLibrarySkillFile("audit")).toBeNull();
     const approve = library.setLibrarySkillReviewState("audit", "approved");
-    expect(approve).toEqual({ error: "stored SKILL.md changed after review — the library entry cannot be approved" });
+    expect(approve).toEqual({ error: "stored skill files changed after review — the library entry cannot be approved" });
+  });
+
+  it("stores a whole skill folder, records its GitHub origin and blocks it once a file beside SKILL.md changes", () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-skills-library-"));
+    const github = { owner: "x", repo: "y", ref: "HEAD", commit: "b".repeat(40), path: "skills/folder-skill" };
+    mkdirSync(join(root, "skills", "folder-skill"), { recursive: true });
+    writeFileSync(join(root, "skills", "folder-skill", "left-by-a-crash.md"), "unreferenced");
+    const listing = library.installLibrarySkill({
+      name: "folder-skill",
+      instructions: SKILL("folder-skill"),
+      source: "github.com/x/y/skills/folder-skill",
+      reviewState: "approved",
+      files: [
+        { path: "references/guide.md", content: "# Guide\n" },
+        { path: "scripts/run.sh", content: "#!/bin/sh\necho run\n", executable: true },
+      ],
+      skippedFiles: ["video.mp4"],
+      github,
+      root,
+    });
+    expect(listing).toMatchObject({ name: "folder-skill", enabled: true, skippedFiles: ["video.mp4"], github, warnings: [] });
+    const folder = join(root, "skills", "folder-skill");
+    expect(readFileSync(join(folder, "references", "guide.md"), "utf8")).toBe("# Guide\n");
+    expect(existsSync(join(folder, "left-by-a-crash.md"))).toBe(false);
+    expect(library.readSkillLibraryIndex(root)["folder-skill"]).toMatchObject({ filesSha256: expect.stringMatching(/^[a-f0-9]{64}$/), github });
+
+    writeFileSync(join(folder, "scripts", "run.sh"), "#!/bin/sh\necho changed\n");
+    const [changed] = library.listLibrarySkills(root);
+    expect(changed).toMatchObject({ enabled: false, warnings: ["stored skill files changed after review — enablement is blocked"] });
+    expect(library.installLibrarySkill({ name: "escapes", instructions: SKILL("escapes"), source: "a", files: [{ path: "../x.md", content: "x" }], root }))
+      .toEqual({ error: expect.stringContaining("outside the skill folder") });
+    expect(existsSync(join(root, "skills", "x.md"))).toBe(false);
+    expect(library.readSkillLibraryIndex(root)["escapes"]).toBeUndefined();
   });
 
   it("toggles review state at library scope and emits an invalidation event", () => {
@@ -142,10 +175,10 @@ describe("skills library store", () => {
       const on = hostWith({ features: { skillsLibrary: true } } as AppConfig);
       expect(on.skillsIndex(record, "main")).toContain(name);
       expect(on.skillsIndex(record, undefined)).toContain(name);
-      expect(on.expandSkillCommand(record, "main", `/${name}`)).toContain(`ran your ${name} skill`);
+      expect(on.expandSkillCommand(record, "main", `/${name}`, undefined, [], true)).toContain(`ran your ${name} skill`);
       const off = hostWith({} as AppConfig);
       expect(off.skillsIndex(record, "main")).not.toContain(name);
-      expect(off.expandSkillCommand(record, "main", `/${name}`)).toBe(`/${name}`);
+      expect(off.expandSkillCommand(record, "main", `/${name}`, undefined, [], true)).toBe(`/${name}`);
     } finally {
       library.setLibrarySkillEveryBot(name, false);
     }
@@ -182,6 +215,28 @@ describe("assignment resolution", () => {
     const only = resolved.find((skill) => skill.name === "library-only")!;
     expect(only.source).toBe("lib");
     expect(only.editable).toBe(false);
+  });
+
+  it("takes a shared skill off one bot and leaves the library copy and every other bot", () => {
+    const name = `shared-${Math.random().toString(36).slice(2, 10)}`;
+    const other = `lib-bot-${Math.random().toString(36).slice(2, 10)}`;
+    const instructions = SKILL(name, "Shared steps.");
+    expect("error" in library.installLibrarySkill({ name, instructions, source: "lib", reviewState: "approved" })).toBe(false);
+    library.setLibrarySkillEveryBot(name, true);
+    try {
+      expect(skills.resolveBotSkills(bot, []).map((skill) => skill.name)).toContain(name);
+      expect(skills.resolveBotSkills(other, []).map((skill) => skill.name)).toContain(name);
+      expect(library.unassignLibrarySkill(bot, name, ["kept", name])).toEqual({ unassigned: true, assignedSkills: ["kept"] });
+      expect(skills.resolveBotSkills(bot, ["kept"]).map((skill) => skill.name)).not.toContain(name);
+      expect(skills.resolveBotSkills(other, []).map((skill) => skill.name)).toContain(name);
+      expect(library.readLibrarySkillFile(name)).toBe(instructions);
+      const page = skills.listBotSkillsWithOrigin(bot, ["kept"]);
+      expect(page.skills.map((skill) => skill.name)).not.toContain(name);
+      expect(page.library.map((skill) => skill.name)).toContain(name);
+      expect(skills.resolveBotSkills(bot, [name]).map((skill) => skill.name)).toContain(name);
+    } finally {
+      expect(library.setLibrarySkillEveryBot(name, false)).toMatchObject({ everyBot: false });
+    }
   });
 
   it("without assignments, resolution is exactly listSkills (the flag-off contract)", () => {

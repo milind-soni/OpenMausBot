@@ -13,7 +13,7 @@ describe("AskCard", () => {
   it("is one raised card in both modes: the composer's surface, a 0.5px hairline, rounded 20, 560 wide", () => {
     const html = renderToStaticMarkup(createElement(AskCard, { ariaLabel: "Plan", title: "Choose a plan", explanation: "Why it asks." }));
     const card = classesOf(html, /^<div[^>]*class="([^"]*)"/);
-    expect(card).toEqual(expect.arrayContaining(["bg-composer", "ring-[0.5px]", "ring-ink/10", "rounded-[20px]", "max-w-[560px]", "w-full", "text-start"]));
+    expect(card).toEqual(expect.arrayContaining(["bg-composer", "ring-[0.5px]", "ring-ink/10", "rounded-[18px]", "max-w-[560px]", "w-full", "text-start"]));
     expect(html).toContain('role="group"');
     expect(html).toContain('aria-label="Plan"');
     expect(html).toContain("Why it asks.");
@@ -32,6 +32,13 @@ describe("AskCard", () => {
     const base = { ariaLabel: "Key", title: "API key" };
     expect(renderToStaticMarkup(createElement(AskCard, { ...base, onDismiss: () => {} }))).not.toContain("<button");
     expect(renderToStaticMarkup(createElement(AskCard, { ...base, onDismiss: () => {}, dismissLabel: "Not now" }))).toContain('aria-label="Not now"');
+  });
+
+  it("stays in view below the header, however tall the header grows", () => {
+    const html = renderToStaticMarkup(createElement(AskCard, { ariaLabel: "Key", title: "API key", stays: true }));
+    const card = classesOf(html, /^<div[^>]*class="([^"]*)"/);
+    expect(card).toEqual(expect.arrayContaining(["sticky", "z-10", "top-[var(--glass-top,60px)]"]));
+    expect(card).not.toContain("top-[60px]");
   });
 });
 

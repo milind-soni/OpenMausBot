@@ -55,7 +55,7 @@ export const TeamPicture = memo(function TeamPicture({ active }: { active: boole
   const moving = useLiveMotion(root) && active;
   const id = useId(), glow = `${id}-glow`;
   return <div ref={root} className="absolute inset-0" data-team-picture="" data-moving={moving ? "" : undefined}>
-    <svg role="img" aria-label={t("whatsNew.team.pictureAlt")} viewBox="0 0 520 260" preserveAspectRatio="xMidYMid meet" className="size-full">
+    <svg role="img" aria-label={t("whatsNew.team.picture")} viewBox="0 0 520 260" preserveAspectRatio="xMidYMid meet" className="size-full">
       <defs>
         <radialGradient id={glow} cx="50%" cy="55%" r="50%">
           <stop offset="0" stopColor="var(--color-accent)" stopOpacity="0.16" />

@@ -13,6 +13,7 @@ const fixture = vi.hoisted(() => {
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
   return { instances: [] as InstanceInfo[], modelVariantSessions: {} as AppState["modelVariantSessions"], dispatch: vi.fn() };
 });
+vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/state/store")>()),
   useStore: () => ({
@@ -133,6 +134,36 @@ describe("EffortRow", () => {
   it("renames xhigh, the one level that does not capitalize cleanly", () => {
     expect(renderEffort([engine(["xhigh"])])).toContain(">X-High<");
   });
+
+  it("offers per-model effort levels (including Ultra) and clears unsupported effort on switch", () => {
+    const tieredEngine: InstanceInfo = {
+      ...engine(["low", "medium", "high", "xhigh", "max", "ultra"]),
+      models: {
+        default: "gpt-6.2-sol",
+        options: [
+          { id: "gpt-6.2-sol", label: "GPT-6.2-Sol", effortLevels: ["low", "medium", "high", "xhigh", "max", "ultra"] },
+          { id: "gpt-6-luna", label: "GPT-6-Luna", effortLevels: ["low", "medium", "high", "xhigh", "max"] },
+        ],
+      },
+    };
+    fixture.instances = [tieredEngine];
+
+    const solMarkup = renderToStaticMarkup(createElement(EffortRow, {
+      bot: { ...bot("ultra"), modelSelection: { instanceId: "codex", model: "gpt-6.2-sol", effort: "ultra" } },
+    }));
+    expect(levelButtons(solMarkup).map((button) => button.label)).toEqual(["Default", "Low", "Medium", "High", "X-High", "Max", "Ultra"]);
+
+    const lunaMarkup = renderToStaticMarkup(createElement(EffortRow, {
+      bot: { ...bot(), modelSelection: { instanceId: "codex", model: "gpt-6-luna" } },
+    }));
+    expect(levelButtons(lunaMarkup).map((button) => button.label)).toEqual(["Default", "Low", "Medium", "High", "X-High", "Max"]);
+
+    expect(modelSelectionForPick(
+      { instanceId: "codex", model: "gpt-6.2-sol", effort: "ultra" },
+      tieredEngine,
+      "gpt-6-luna",
+    )).toEqual({ instanceId: "codex", model: "gpt-6-luna" });
+  });
 });
 
 
@@ -158,7 +189,8 @@ describe("OpenCode model variants", () => {
         selection: { instanceId: "opencode", model: "provider/model", ...(variant !== undefined ? { variant } : {}) } });
     }
     const markup = renderToStaticMarkup(createElement(ModelVariantRow, { bot: { ...selected("removed"), busy: true }, compact: true }));
-    expect(markup).toContain('disabled=""');
+    // A reasoning variant is read when each turn starts, so it stays changeable while the bot works.
+    expect(markup).not.toMatch(/<select[^>]* disabled=/);
     expect(markup).toContain("removed (unverified)");
     expect(markup).toContain("Use session setting");
   });
@@ -312,7 +344,7 @@ describe("ModelPicker trigger", () => {
     expect(markup).toContain("GPT-5.6");
     expect(effortChip(markup)).toBeUndefined();
     expect(markup).not.toContain("effort");
-    expect(markup).toContain("@max-4xl/chathead:size-[30px]");
+    expect(markup).toContain("@max-4xl/chathead:size-9");
     expect(markup).not.toContain("data-model-account-compact");
   });
 
@@ -327,7 +359,7 @@ describe("ModelPicker trigger", () => {
     expect(markup).toMatch(/<span data-model-account[^>]*>Work · <\/span>/);
     expect(markup).not.toMatch(/<span data-model-account[^>]*>Personal/);
     expect(markup).toMatch(/<span data-model-account-compact="true" class="hidden max-w-20 truncate @max-4xl\/chathead:inline">Work<\/span><span class="[^"]*@max-4xl\/chathead:hidden"/);
-    expect(markup).not.toContain("@max-4xl/chathead:size-[30px]");
+    expect(markup).not.toContain("@max-4xl/chathead:size-9");
   });
 });
 
@@ -358,7 +390,9 @@ describe("OpenAI sign-ins in the rail", () => {
 
 describe("Claude provider and account selection", () => {
   const personal: InstanceInfo = { ...engine(), instanceId: "claude-personal", driverKind: "claudeAgent", displayName: "Personal" };
-  const work: InstanceInfo = { ...engine(), instanceId: "claude-work", driverKind: "claudeAgent", displayName: "Work", access: "custom" };
+  const work: InstanceInfo = { ...engine(), instanceId: "claude-work", driverKind: "claudeAgent", displayName: "Work" };
+  const endpoint: InstanceInfo = { ...engine(), instanceId: "claude-endpoint-1", driverKind: "claudeAgent", displayName: "My gateway", access: "custom" };
+  const bedrock: InstanceInfo = { ...engine(), instanceId: "claude-bedrock-1", driverKind: "claudeAgent", displayName: "Claude on Bedrock", access: "custom" };
 
   it("renders one Claude provider across Cloud and Local, pressed for either account", () => {
     for (const selectedInstance of [personal, work]) {
@@ -372,6 +406,17 @@ describe("Claude provider and account selection", () => {
       expect(markup).not.toContain('aria-label="Work"');
       expect(markup).toContain("w-14");
     }
+  });
+
+  it("gives a custom endpoint and Bedrock their own buttons, apart from the Claude accounts", () => {
+    const markup = renderToStaticMarkup(createElement(ModelEngineRail, {
+      instances: [personal, work, endpoint, bedrock], selectedInstance: endpoint, onSelect: () => {},
+    }));
+    expect(markup.match(/aria-label="Claude"/g)).toHaveLength(1);
+    expect(markup).toContain('aria-label="Claude" aria-pressed="false"');
+    expect(markup).toContain('aria-label="My gateway" aria-pressed="true"');
+    expect(markup).toContain('aria-label="Claude on Bedrock" aria-pressed="false"');
+    expect(markup).not.toContain('aria-label="Work"');
   });
 
   it("opens the remembered concrete Claude account, falling back to the first account", () => {

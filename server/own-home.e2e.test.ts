@@ -54,7 +54,7 @@ it("only a server that is the person's alone says it is theirs, takes a move and
   expect(fx.main.chosen()).toBeNull();
   expect((await family.as("POST", "/api/cloud-send/memory", { v: 1, about: "", teams: [] })).status).toBe(403);
   expect((await family.as("POST", "/api/cloud-send/arrived", { v: 1, computer: "Work laptop", webhooks: [] })).status).toBe(404);
-  expect((await family.as("PUT", "/api/cloud-connections/highlevel", {})).status).toBe(404);
+  expect((await family.as("PUT", "/api/cloud-connections/email", { accounts: [] })).status).toBe(404);
   // Garage server takes them from this sign-in: a body it can't read is answered as such, never refused.
   expect((await garage.as("POST", "/api/cloud-send/arrived", { v: 1 })).status).toBe(400);
 }, hostTimeout(60_000));
@@ -120,9 +120,10 @@ it("Make Garage server my home: bots, chats, memory and routines arrive, this co
   expect(webhook.webhook.id).toBeTruthy();
   expect((await local("GET", "/api/move/freeze")).body).toMatchObject({ frozen: true, cloud: garage.base, place: "Garage server" });
 
-  // This computer is lent with Scout's project folder to Garage server, its phone link stops, and the window opens Garage server.
+  // This computer is lent with Scout's project folder to Garage server and the window opens Garage server; its phone link
+  // stays on, so a paired phone hears where the bots went.
   expect(fx.spies.lent).toEqual([{ projects: [project], place: garage.base }]);
-  expect(fx.spies.phoneStops).toBe(1);
+  expect(fx.spies.phoneStops).toBe(0);
   expect(fx.spies.opened).toEqual([garage.base]);
   expect(fx.main.offers(garage.place), "home is there: nothing more to offer").toBe(false);
 
@@ -154,6 +155,9 @@ it("this computer then works for Garage server by itself, and never for the serv
     expect(sharing.cloudState(garage.place)).toMatchObject({ enabled: true, terminal: false });
     expect(sharing.state(family.place.id).enabled).toBe(false);
     expect((await family.as("GET", "/api/shared-computers")).status, "nothing is lent where others sign in").not.toBe(200);
+    expect(await sharing.ownServer(family.place), "a server others sign in to is never offered as the person's own").toBeNull();
+    await expect(sharing.lendOwn(family.place, { computer: true })).rejects.toThrow();
+    expect((await family.as("GET", "/api/auth/session")).body, "nor told what it would take").not.toHaveProperty("lending");
     // Pause: Garage server stops using this computer, until Resume.
     sharing.pause();
     await expect.poll(async () => ((await garage.as("GET", "/api/shared-computers")).body?.computers ?? []).filter((computer: { online?: boolean; connected?: boolean }) => computer.online !== false && computer.connected !== false).length,

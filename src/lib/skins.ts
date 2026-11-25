@@ -1,18 +1,10 @@
+import { SKIN_IDS } from "../../shared/app-settings";
+import { paintAuroraField } from "./aurora-field";
+import { syncBrowserChrome } from "./browser-chrome";
 import { hasPriorRun } from "./prior-run";
+import { windowPrefChanged } from "./window-pref-changes";
 
-export const SKIN_IDS = [
-  "midnight",
-  "atelier",
-  "foundry",
-  "lagoon",
-  "graphite",
-  "linen",
-  "dusk",
-  "daylight",
-  "meadow",
-  "pop",
-  "halloween",
-] as const;
+export { SKIN_IDS };
 export type SkinId = (typeof SKIN_IDS)[number];
 
 export type Skin = {
@@ -33,6 +25,8 @@ export const SKINS: readonly Skin[] = [
   { id: "meadow", name: "Meadow", tagline: "Fresh white with a calm green. The MausBot look." },
   { id: "pop", name: "Pop", tagline: "Cream paper, thick ink outlines, hard shadows. Chunky and cheerful." },
   { id: "halloween", name: "Halloween", tagline: "Plum after dark, lit in pumpkin orange. Bats optional." },
+  { id: "diwali", name: "Diwali", tagline: "Indigo night, lit in marigold and diya gold. Fireworks optional." },
+  { id: "aurora", name: "Aurora", tagline: "Near-black, crossed by a band of green light. Glass on top." },
 ];
 
 /** "system" follows the OS between the light and dark skins below; anything else pins one skin. */
@@ -102,6 +96,8 @@ export function subscribeSkin(listener: () => void): () => void {
 
 function paintSkin(id: SkinId): void {
   document.documentElement.dataset.skin = id;
+  if (id === "aurora") paintAuroraField();
+  syncBrowserChrome();
   for (const listener of listeners) listener();
   // On Windows the caption buttons sit in a native overlay the main process paints, out of CSS's reach.
   try {
@@ -130,6 +126,7 @@ function followSystem(follow: boolean): void {
 export function wearSkin(value: unknown): void {
   if (!isSkinId(value)) return;
   document.documentElement.dataset.skin = value;
+  syncBrowserChrome();
   for (const listener of listeners) listener();
 }
 
@@ -140,6 +137,7 @@ export function applySkinChoice(choice: SkinChoice): void {
   }
   followSystem(choice === "system");
   paintSkin(resolveSkin(choice));
+  windowPrefChanged();
 }
 
 export function applySkin(id: SkinId): void {

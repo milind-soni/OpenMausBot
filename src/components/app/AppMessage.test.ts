@@ -6,9 +6,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BotEditorStore, type Message, type useStore } from "@/state/store";
-import type { AppDocument, AppPayload } from "../../../shared/app";
+import { ROOM_VIEW_ONLY, type AppDocument, type AppPayload } from "../../../shared/app";
 import { APP_SAMPLES, MCP_APP_SAMPLES } from "../../../shared/app-samples";
 import { botHtmlDocument, mcpAppDocument } from "../../../shared/app-frame/document";
+import { getDraft, setDraft } from "@/lib/drafts";
 import { createAppPool, type AppPool } from "./app-pool";
 import { AppMessage, forgetAppRows } from "./AppMessage";
 
@@ -47,12 +48,12 @@ let host: HTMLDivElement;
 let root: Root;
 let pool: AppPool;
 
-const view = (message: Message) => createElement(BotEditorStore, {
+const view = (message: Message, room?: boolean) => createElement(BotEditorStore, {
   value: store,
-  children: createElement(AppMessage, { botId: "pepper", botName: "Pepper", threadId: "t1", message, pool }),
+  children: createElement(AppMessage, { botId: "pepper", botName: "Pepper", threadId: "t1", message, pool, ...(room ? { room } : {}) }),
 });
-const mount = async (message: Message) => {
-  await act(async () => { root.render(view(message)); });
+const mount = async (message: Message, room?: boolean) => {
+  await act(async () => { root.render(view(message, room)); });
   await settle();
 };
 /** Let fetches, pool grants and effects run. */
@@ -125,6 +126,18 @@ describe("the row before its frame runs", () => {
     expect(renderToStaticMarkup(view(row(mcpPayload())))).toContain("App from Excalidraw");
   });
 
+  it("shows the last change the card made itself, so a reopened conversation does not look unsent (#4532)", async () => {
+    expect(renderToStaticMarkup(view(row(mcpPayload())))).not.toContain("data-app-done");
+    const done = { tool: "Create issue", text: "Created issue #12", url: "https://github.com/o/r/issues/12", at: 2 };
+    const markup = renderToStaticMarkup(view(row(mcpPayload({ done }))));
+    expect(markup).toContain("Done: Create issue · Created issue #12");
+    expect(markup.indexOf("data-app-done")).toBeGreaterThan(markup.indexOf("data-app-box"));
+    expect(renderToStaticMarkup(view(row(mcpPayload({ done: { tool: "Create issue", at: 2 } }))))).not.toMatch(/data-app-done[^]*<button/);
+    await mount(row(mcpPayload({ done })));
+    await act(async () => { find<HTMLButtonElement>("[data-app-done] button")!.click(); });
+    expect((window as unknown as { ogb: { openExternal: ReturnType<typeof vi.fn> } }).ogb.openExternal).toHaveBeenCalledWith("https://github.com/o/r/issues/12");
+  });
+
   it("reads as its text when there is no payload", () => {
     const markup = renderToStaticMarkup(view(row(undefined)));
     expect(markup).not.toContain("data-app=");
@@ -155,6 +168,15 @@ describe("a bot's page", () => {
     expect(pool.live()).toEqual(["t1:a1"]);
   });
 
+  it("shows a frameless page as part of the chat: no card around it, still in the sandboxed frame, with its title and tools", async () => {
+    await mount(row(htmlPayload({ border: false })));
+    expect(find("[data-app] > div")!.className).not.toContain("rounded-3xl");
+    expect(find("[data-app-box]")!.className).not.toContain("border-t");
+    expect(frame().getAttribute("sandbox")).toBe("allow-scripts allow-forms");
+    expect(find("[data-app]")!.textContent).toContain("Coffee counter");
+    expect(button("Reload app")).toBeTruthy();
+  });
+
   it("lists what the frame may reach, its size, and what is always off", async () => {
     await mount(row(htmlPayload()));
     await act(async () => button("About this app")!.click());
@@ -165,19 +187,30 @@ describe("a bot's page", () => {
     expect(button("About this app")!.getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("sends mausbot.send as the person's message from this app, only while they use it", async () => {
-    await mount(row(htmlPayload()));
-    await handshake();
-    const ask = { jsonrpc: "2.0", id: "m1", method: "ui/message", params: { role: "user", content: [{ type: "text", text: "I have had 3 cups." }] } };
-    await fromView(ask);
-    expect(toView.find((message) => message.id === "m1")).toMatchObject({ error: { code: -32000 } });
-    expect(posts("/messages")).toEqual([]);
-    await engage();
-    await fromView({ ...ask, id: "m2" });
-    await settle();
-    expect(flushBotPatches).toHaveBeenCalledWith("pepper");
-    expect(posts("/api/bots/pepper/messages")).toEqual([{ threadId: "t1", sendId: expect.any(String), appMessage: { messageId: "a1", text: "I have had 3 cups." } }]);
-    expect(toView.find((message) => message.id === "m2")).toEqual({ jsonrpc: "2.0", id: "m2", result: {} });
+  it("puts mausbot.send in the person's message box as a draft, only while they use it, and sends nothing itself", async () => {
+    const composer = document.createElement("div");
+    composer.dataset.tour = "composer";
+    composer.appendChild(document.createElement("textarea"));
+    document.body.appendChild(composer);
+    try {
+      await mount(row(htmlPayload()));
+      await handshake();
+      const ask = { jsonrpc: "2.0", id: "m1", method: "ui/message", params: { role: "user", content: [{ type: "text", text: "I have had 3 cups." }] } };
+      await fromView(ask);
+      expect(toView.find((message) => message.id === "m1")).toMatchObject({ error: { code: -32000 } });
+      expect(getDraft(localStorage, "bot:pepper:t1")).toBe("");
+      await engage();
+      await fromView({ ...ask, id: "m2" });
+      await settle();
+      expect(posts("/messages")).toEqual([]);
+      expect(flushBotPatches).not.toHaveBeenCalled();
+      expect(getDraft(localStorage, "bot:pepper:t1")).toBe("I have had 3 cups.");
+      expect(document.activeElement).toBe(composer.querySelector("textarea"));
+      expect(toView.find((message) => message.id === "m2")).toEqual({ jsonrpc: "2.0", id: "m2", result: {} });
+    } finally {
+      composer.remove();
+      setDraft(localStorage, "bot:pepper:t1", "");
+    }
   });
 
   it("keeps what the page says it shows for the model, and follows its height", async () => {
@@ -189,6 +222,29 @@ describe("a bot's page", () => {
     await fromView({ jsonrpc: "2.0", method: "ui/notifications/size-changed", params: { height: 333 } });
     expect(find<HTMLElement>("[data-app-box]")!.style.height).toBe("333px");
     expect(frame().style.height).toBe("333px");
+  });
+
+  it("in a room, shows the page to everyone as a card that opens with Point but no Share, and the page sends nothing for anyone", async () => {
+    fetchMock.mockImplementation(async (path) => /\/app(\?|$)/.test(path) ? json(200, botHtmlDocument({ messageId: "a1", rev: 0, html: counter.html, room: true })) : json(202, { ok: true }));
+    await mount(row(htmlPayload()), true);
+    expect(find("[data-app]")!.hasAttribute("data-app-room")).toBe(true);
+    expect(frame().getAttribute("sandbox")).toBe("allow-scripts allow-forms");
+    expect(frame().getAttribute("srcdoc")).toContain("var room = true;");
+    expect(find("[data-page-tools]")).toBeNull();
+    await handshake();
+    await engage();
+    await fromView({ jsonrpc: "2.0", id: "m1", method: "ui/message", params: { role: "user", content: [{ type: "text", text: "I have had 3 cups." }] } });
+    await fromView({ jsonrpc: "2.0", id: "c1", method: "ui/update-model-context", params: { content: [{ type: "text", text: "3 cups" }] } });
+    await settle();
+    expect(toView.find((message) => message.id === "m1")).toEqual({ jsonrpc: "2.0", id: "m1", error: { code: -32000, message: ROOM_VIEW_ONLY } });
+    expect(toView.find((message) => message.id === "c1")).toEqual({ jsonrpc: "2.0", id: "c1", error: { code: -32000, message: ROOM_VIEW_ONLY } });
+    expect(posts("/messages")).toEqual([]);
+    expect(posts("/context")).toEqual([]);
+    await act(async () => { button("Open page")!.click(); });
+    const opened = Array.from(document.body.querySelectorAll<HTMLButtonElement>("[role=dialog][data-page-fullscreen] button"), (element) => element.textContent?.trim() || element.getAttribute("aria-label"));
+    expect(opened).toContain("Point");
+    expect(opened).toContain("Close full screen");
+    expect(opened).not.toContain("Share");
   });
 
   it("opens a link the person clicked through the desktop's browser", async () => {
@@ -294,6 +350,18 @@ describe("an MCP app", () => {
     await mount(row(mcpPayload()));
     expect(find("[data-app]")!.getAttribute("data-app-state")).toBe("live");
     expect(find("[data-app-strip]")!.textContent).toContain("Excalidraw is no longer connected");
+  });
+
+  it("sends what the view asks to say as the person's message, as MCP apps do", async () => {
+    fetchMock.mockImplementation(async (path) => /\/app(\?|$)/.test(path) ? json(200, mcpDoc()) : json(202, { ok: true }));
+    await mount(row(mcpPayload()));
+    await handshake();
+    await engage();
+    await fromView({ jsonrpc: "2.0", id: "m1", method: "ui/message", params: { role: "user", content: [{ type: "text", text: "Draw a cat." }] } });
+    await settle();
+    expect(flushBotPatches).toHaveBeenCalledWith("pepper");
+    expect(posts("/api/bots/pepper/messages")).toEqual([{ threadId: "t1", sendId: expect.any(String), appMessage: { messageId: "a1", text: "Draw a cat." } }]);
+    expect(getDraft(localStorage, "bot:pepper:t1")).toBe("");
   });
 
   it("draws no card around a view that asked for none", async () => {

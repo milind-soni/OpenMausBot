@@ -1,0 +1,54 @@
+---
+title: Themes
+description: Ask a bot to restyle the whole app, or make and share your own theme in Settings.
+icon: Palette
+---
+
+Ask a bot to change how the app looks, for example "make my app look like a 90s terminal" or "give the chat a slow moving starry background". The bot makes a **theme** and your open windows switch to it at once, on the desktop app and the web app. Phones keep their own look.
+
+A theme only changes the look for you. On a team, your teammates keep theirs.
+
+## What a theme can change
+
+- **Colours.** A background and an accent colour. The app works out the rest: surfaces, lines and text that stay readable. Single colours can be set too, separately for light and dark.
+- **Fonts.** The fonts that come with the app, fonts installed on your computer, or a font file the theme carries.
+- **Anything else, with CSS.** Borders, roundness, spacing, message bubble shapes, the sidebar, the message box, the chat header, animated backgrounds, hover effects.
+- **Pictures.** The bot can add images from its own folder or from files you attach to the chat, including animated GIF and WebP, for backgrounds and textures.
+
+The bot cannot see the result. It makes small changes and asks you how it looks. Every change has **Undo** on the card in the chat.
+
+## Chat backgrounds
+
+Attach a picture and say "make this my chat background", or describe one: "a slow moving gradient", "faint drifting dots", "a starry night". The bot writes the background itself, behind the messages, and it stays put while the conversation scrolls. It can also cover the whole window, sidebar included.
+
+- **Your own picture.** Attach it in this message or an earlier one; the bot can also use a picture from its own folder. PNG, JPEG, WebP, GIF, AVIF and SVG work, up to 10 MB. iPhone HEIC photos do not: send the photo as a JPEG (on an iPhone, share it and choose **Options → Most Compatible**), or ask a bot that can run commands to convert it first.
+- **Readable text.** The bot is guided to lay a veil of the theme's own background colour over a picture so messages stay readable in light and dark. If text is hard to read, ask it to dim the background.
+- **Animation.** Moving chat backgrounds stand still when your computer is set to reduce motion.
+
+A theme that changes the background also lives in **Your themes**, with Undo on its card like any other change.
+
+## Going back
+
+MausBot keeps your last 30 look changes, from a bot or from Settings. Say what you want in the chat:
+
+- "Undo that" or "go back two changes" goes back that many steps.
+- "Go back to the purple one from earlier" makes the bot look through the recent changes and return to that one, with the theme's colours and CSS as they were then.
+- "Reset to the default look" takes your theme off.
+
+Going back is itself a change, so "undo that" right after it puts things back again. **Recent changes** in Settings → Appearance lists the same changes with **Restore** beside each.
+
+## Nothing loads from the internet
+
+A theme's CSS could otherwise send what is on your screen to another site. So a theme loads only its own pictures and fonts, kept with your workspace, and pictures written into the CSS itself. Anything else is removed before the CSS is used: links to other sites, `@import`, `image-set()` and escaped characters that hide them.
+
+## Settings → Appearance
+
+Under **Your themes** you can use, edit, rename, duplicate and delete themes, and change a theme's colours and CSS. **Export** saves a theme with its pictures as one file to share; **Import** adds one. **Reset look** goes back to the default look.
+
+## Getting back
+
+If a theme hides something you need:
+
+- Press **Cmd+Option+Shift+R** on a Mac or **Ctrl+Alt+Shift+R** on Windows and Linux. It works anywhere in the app and goes back to the default look.
+- On the web app, open the address with `?safe-look` at the end, such as `https://you.mausbot.cloud/?safe-look`. That window starts without your theme.
+- Ask the bot to undo, or to reset to the default look.

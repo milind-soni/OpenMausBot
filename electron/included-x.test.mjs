@@ -44,6 +44,17 @@ describe("included X research access on the desktop", () => {
     expect(sent).toEqual([access, access]);
   });
 
+  it("a change of account with the Admin down: the account before's token doesn't stay with the server", async () => {
+    const fetchAccess = vi.fn(async () => access);
+    const { x, sent } = sync(fetchAccess);
+    await x.onState(paid("device-a"));
+    fetchAccess.mockRejectedValueOnce(new Error("offline"));
+    await x.onState(paid("device-b"));
+    expect(sent).toEqual([access, null]);
+    await x.onState(paid("device-b"));
+    expect(sent).toEqual([access, null, access]);
+  });
+
   it("sends nothing for a free account, and null when the Admin says the plan is not active", async () => {
     const free = sync();
     await free.x.onState({ status: "connected", deviceId: "d", entitlement: { plan: "free", status: "inactive", tier: null } });

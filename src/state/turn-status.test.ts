@@ -1,13 +1,35 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RuntimeEvent } from "../../shared/runtime-events";
-import { noteTurnEvent, resetTurnLive, turnLive } from "./turn-status";
+import { noteTurnEvent, resetTurnLive, silentSince, turnLive } from "./turn-status";
 
 let seq = 0;
 const note = (event: Partial<RuntimeEvent>, threadId = "t") =>
   noteTurnEvent({ eventId: `e${++seq}`, provider: "claudeAgent", threadId, createdAt: "2026-10-23T12:00:00.000Z", turnId: "turn-1", ...event } as RuntimeEvent);
 
-afterEach(() => resetTurnLive());
+afterEach(() => {
+  resetTurnLive();
+  vi.restoreAllMocks();
+});
+
+describe("a thread's silence", () => {
+  it("restarts at every frame, even one that changes nothing on the line", () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    note({ type: "content.delta", streamKind: "assistant_text", delta: "a" } as Partial<RuntimeEvent>);
+    const status = turnLive("t");
+    clock.mockReturnValue(5_000);
+    note({ type: "content.delta", streamKind: "assistant_text", delta: "b" } as Partial<RuntimeEvent>);
+    expect(silentSince("t")).toBe(5_000);
+    expect(turnLive("t"), "the line's state is untouched, so nothing re-renders").toBe(status);
+  });
+
+  it("before any frame, counts from when the window first asked, however often it asks", () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    expect(silentSince("t")).toBe(1_000);
+    clock.mockReturnValue(90_000);
+    expect(silentSince("t")).toBe(1_000);
+  });
+});
 
 describe("a thread's live turn", () => {
   it("knows nothing before any frame", () => {
@@ -47,6 +69,22 @@ describe("a thread's live turn", () => {
     expect(turnLive("t").ended, "a late frame of the ended turn does not reopen it").toBe(true);
     note({ type: "item.completed", itemType: "assistant_text", text: "late", turnId: "turn-2" } as Partial<RuntimeEvent>);
     expect(turnLive("t")).toEqual({ turnId: "turn-2", ended: false, status: null });
+  });
+
+  it("says it is summarizing earlier messages until the summary is done, and leaves anything newer on the line", () => {
+    note({ type: "turn.completed", ok: true } as Partial<RuntimeEvent>);
+    note({ type: "context.summarizing", active: true, turnId: undefined } as Partial<RuntimeEvent>);
+    expect(turnLive("t")).toMatchObject({ turnId: "turn-1", ended: false, status: { activity: "summarizing" } });
+    note({ type: "context.summarizing", active: false, turnId: undefined } as Partial<RuntimeEvent>);
+    expect(turnLive("t").status, "a finished or stopped summary clears the line").toBeNull();
+    expect(turnLive("t").ended, "a summary after the turn ended (Compact button) leaves it ended").toBe(true);
+    note({ type: "context.summarizing", active: true, turnId: undefined } as Partial<RuntimeEvent>);
+    note({ type: "turn.started", turnId: "turn-2" } as Partial<RuntimeEvent>);
+    expect(turnLive("t")).toEqual({ turnId: "turn-2", ended: false, status: null });
+    note({ type: "content.delta", streamKind: "reasoning_text", delta: "x", turnId: "turn-2" } as Partial<RuntimeEvent>);
+    note({ type: "context.summarizing", active: false, turnId: undefined } as Partial<RuntimeEvent>);
+    expect(turnLive("t").status, "a late end leaves the turn's own status").toEqual({ activity: "thinking" });
+    expect(turnLive("t").ended, "a summary inside a running turn leaves it running").toBe(false);
   });
 
   it("carries what a call works on, how it is doing and its last output, and changes only when one of them does", () => {

@@ -9,6 +9,8 @@ export interface CompanionPairingRouteSource {
   addresses?: string[];
   tailscale?: string;
   tailnetName?: string;
+  /** The per-route switches from Settings; the sidecar's tailnetName can lag them. */
+  routes?: { tailscale?: { on: boolean; name?: string | null } };
   lan?: string | null;
   hosts?: string[];
   endpoints?: CompanionEndpoint[];
@@ -39,6 +41,8 @@ export function companionPairingAddressText(route: CompanionPairingRoute): strin
 export interface CompanionPairingRoutePin {
   route: CompanionPairingRoute;
   protectedEndpoint: CompanionEndpoint | null;
+  /** Whether the protected endpoint came from the advertised list, rather than a saved route name. */
+  protectedEndpointAdvertised: boolean;
 }
 
 const deduplicatedHosts = (hosts: string[]): string[] => {
@@ -85,7 +89,24 @@ export function companionPairingRoute(
 
   const advertised = qrEndpoints(source.endpoints);
   if (mode === "tailscale") {
-    let preferred = advertised.find((endpoint) => endpoint.kind === "tailnet") ?? null;
+    // The saved switch is the authority: a switched-off route is never
+    // offered, even while the sidecar still advertises its old endpoint.
+    if (source.routes?.tailscale?.on === false) return null;
+    // The saved name is the authority too: after a rename the sidecar can
+    // still advertise the old hostname, and a pin built from it fails the
+    // availability check, which compares against the saved name.
+    let preferred: CompanionEndpoint | null = null;
+    if (source.routes?.tailscale?.on) {
+      const routeName = source.routes.tailscale.name?.trim();
+      if (routeName) {
+        preferred = qrEndpoints([{
+          url: directHTTPOrigin(routeName, source.port),
+          kind: "tailnet",
+          priority: 0,
+        }])[0] ?? null;
+      }
+    }
+    preferred ??= advertised.find((endpoint) => endpoint.kind === "tailnet") ?? null;
     if (!preferred && source.tailnetName?.trim()) {
       preferred = qrEndpoints([{
         url: directHTTPOrigin(source.tailnetName.trim(), source.port),
@@ -184,20 +205,54 @@ export function companionPairingRoutePin(
         : null;
   if (mode !== "local" && !protectedEndpoint) return null;
 
+  const advertised = qrEndpoints(source.endpoints);
   return {
     route: { ...route, endpoints },
     protectedEndpoint,
+    protectedEndpointAdvertised: protectedEndpoint
+      ? advertised.some(
+        (endpoint) => endpoint.kind === protectedEndpoint.kind
+          && endpoint.url === protectedEndpoint.url,
+      )
+      : false,
   };
 }
 
 /** No silent substitution of another protected endpoint: a new transport needs a fresh pairing credential. */
 export function companionPairingRoutePinAvailable(
-  source: Pick<CompanionPairingRouteSource, "endpoints">,
+  source: Pick<CompanionPairingRouteSource, "endpoints" | "routes" | "tailnetName">,
   pin: CompanionPairingRoutePin,
 ): boolean {
   if (!pin.protectedEndpoint) return true;
-  return qrEndpoints(source.endpoints).some(
+  const endpointLive = qrEndpoints(source.endpoints).some(
     (endpoint) => endpoint.kind === pin.protectedEndpoint?.kind
       && endpoint.url === pin.protectedEndpoint.url,
   );
+  if (pin.protectedEndpoint.kind !== "tailnet") return endpointLive;
+  // The saved switch and name are the authority for a tailnet pin: a
+  // switched-off route or a changed name invalidates it even while the old
+  // endpoint is still advertised.
+  if (source.routes?.tailscale?.on === false) return false;
+  const routeName = source.routes?.tailscale?.on
+    ? source.routes.tailscale.name?.trim().toLowerCase().replace(/\.$/, "")
+    : undefined;
+  const pinHost = tailnetHostname(pin.protectedEndpoint.url);
+  if (routeName && pinHost !== routeName) return false;
+  if (endpointLive) return true;
+  // An advertised pin whose endpoint is gone has lost its basis; a pin rebuilt
+  // from the saved name only needs that name to still match.
+  if (pin.protectedEndpointAdvertised) return false;
+  if (routeName) return pinHost === routeName;
+  // Without a saved name, a pin built from the legacy tailnetName only needs
+  // that name to still match.
+  const legacyName = source.tailnetName?.trim().toLowerCase().replace(/\.$/, "");
+  return !!legacyName && pinHost === legacyName;
 }
+
+const tailnetHostname = (url: string): string | undefined => {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/\.$/, "");
+  } catch {
+    return undefined;
+  }
+};

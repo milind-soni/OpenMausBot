@@ -8,6 +8,13 @@ export function versionFromProbe(stdout: string | undefined, stderr: string | un
   return err || null;
 }
 
+/** A CLI path that runs another program answers --version as that program: an install command pasted as the path
+ * (`curl https://cursor.com/install -fsS | bash`) runs curl, whose `--version` wins over its other arguments. The
+ * registry drops such a path once the engine's own CLI is installed, so the person never has to. */
+export function notThisCli(cli: string, name: string): string {
+  return `\`${cli}\` is not ${name}'s CLI: it answered --version as another program.`;
+}
+
 export type VersionTriple = readonly [number, number, number];
 
 export function parseVersionTriple(value: string): VersionTriple | null {

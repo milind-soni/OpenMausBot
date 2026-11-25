@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { newBotDefaultsSchema, resolveBotCreationDefaults } from "./new-bot-defaults.ts";
+import { newBotApproval, newBotDefaultsSchema, resolveBotCreationDefaults } from "./new-bot-defaults.ts";
 import { parseConfigPatch } from "./config.ts";
 
 describe("new-bot templates", () => {
@@ -21,12 +21,28 @@ describe("new-bot templates", () => {
     }
   });
 
+  it("reads saved defaults that still carry a peers list or a peer-approval switch as if they never had them", () => {
+    const defaults = newBotDefaultsSchema.parse({ profile: { name: "Sky", approvePeerComms: true, peers: ["x"] } });
+    expect(defaults.profile).toEqual({ name: "Sky" });
+    expect(resolveBotCreationDefaults(defaults, { settings: { peers: null } }).profile).toEqual({ name: "Sky" });
+  });
+
   it("takes the helper-model switch in the request that creates a bot, as a boolean and nothing else", () => {
     expect(resolveBotCreationDefaults(undefined, { settings: { helperModel: false } }).profile).toEqual({ helperModel: false });
     // beside a tool selection, as the sidebar's Duplicate sends them
     expect(resolveBotCreationDefaults(undefined, { settings: { toolScope: { allow: [] }, helperModel: false } }).profile).toEqual({ toolScope: { allow: [] }, helperModel: false });
     for (const wrong of ["false", 0, null]) {
       expect(() => resolveBotCreationDefaults(undefined, { settings: { helperModel: wrong } }), JSON.stringify(wrong)).toThrow();
+    }
+  });
+
+  it("saves the voice-note switches as defaults and gives them to new bots", () => {
+    const profile = { voiceNotes: false, voiceNoteEveryReply: true };
+    expect(parseConfigPatch({ newBotDefaults: { profile } }).newBotDefaults?.profile).toEqual(profile);
+    expect(resolveBotCreationDefaults(newBotDefaultsSchema.parse({ profile }), { name: "Ada" }).profile).toEqual({ name: "Ada", ...profile });
+    expect(newBotDefaultsSchema.parse({ profile: { voiceNoteEveryReply: null } }).profile).toEqual({ voiceNoteEveryReply: null });
+    for (const wrong of [{ voiceNotes: "false" }, { voiceNotes: null }, { voiceNoteEveryReply: 1 }]) {
+      expect(newBotDefaultsSchema.safeParse({ profile: wrong }).success, JSON.stringify(wrong)).toBe(false);
     }
   });
 
@@ -61,5 +77,20 @@ describe("new-bot templates", () => {
   it("bounds the complete template, including multiple individually valid files", () => {
     const memory = Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`memory/file${index}.md`, "x".repeat(262_144)]));
     expect(newBotDefaultsSchema.safeParse({ memory }).success).toBe(false);
+  });
+});
+
+describe("the saved level a bot made outside New bot starts at", () => {
+  const saved = (approvalMode?: "ask" | "auto" | "full" | "custom") => newBotDefaultsSchema.parse({ profile: approvalMode ? { approvalMode } : {} });
+  it("is the template's level, and none when the template sets none", () => {
+    expect(newBotApproval(saved("auto"), false)).toBe("auto");
+    expect(newBotApproval(saved("ask"), true)).toBe("ask");
+    expect(newBotApproval(saved("full"), false)).toBe("full");
+    expect(newBotApproval(saved(), false)).toBeUndefined();
+    expect(newBotApproval(undefined, false)).toBeUndefined();
+  });
+  it("leaves Custom and a hosted workspace's Full access to the workspace default", () => {
+    expect(newBotApproval(saved("custom"), false)).toBeUndefined();
+    expect(newBotApproval(saved("full"), true)).toBeUndefined();
   });
 });

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { demuxLogs, negotiateApi, pullFailure, pullParams, type DockerInfo } from "../src/docker.ts";
+import { demuxLogs, dockerApiProblem, negotiateApi, pullFailure, pullParams, type DockerInfo, type DockerVersion } from "../src/docker.ts";
 import { BOX_PROBE, boxProbeFix, hostChecks, hostFacts, hostHealth, probeBox, usernsAllowed, type HostReader } from "../src/host.ts";
 import { FakeDocker } from "./fake-docker.ts";
 
@@ -85,6 +85,18 @@ describe("speaking to Docker", () => {
     expect(negotiateApi({ ApiVersion: "1.41" })).toBeNull();
     expect(negotiateApi({ ApiVersion: "1.60", MinAPIVersion: "1.50" })).toBeNull();
     expect(negotiateApi({ ApiVersion: "garbage" })).toBeNull();
+  });
+
+  it("says at start, in one line with its fix, when Docker cannot be spoken to, instead of crashing over and over", async () => {
+    const engine = (version: Partial<DockerVersion> | Error) => ({ version: async () => { if (version instanceof Error) throw version; return { Version: "29.9.3", ApiVersion: "1.52", MinAPIVersion: "1.44", ...version }; } });
+    expect(await dockerApiProblem(engine({}), "/var/run/docker.sock")).toBeNull();
+    expect(await dockerApiProblem(engine({ Version: "20.10.24", ApiVersion: "1.41", MinAPIVersion: "1.12" }), "/var/run/docker.sock"))
+      .toBe("Docker 20.10.24 is too old: it speaks API 1.41, and the connector speaks API 1.43 to 1.47. Update it with: curl -fsSL https://get.docker.com | sudo sh");
+    // An engine that has raised its floor past what this connector knows: a newer connector is the fix.
+    expect(await dockerApiProblem(engine({ Version: "31.0.0", ApiVersion: "1.60", MinAPIVersion: "1.50" }), "/var/run/docker.sock"))
+      .toBe("Docker 31.0.0 no longer speaks an API this connector knows (it needs 1.50 or newer, and the connector speaks API 1.43 to 1.47). Run the install command again to get the current connector.");
+    expect(await dockerApiProblem(engine(new Error("connect ENOENT /var/run/docker.sock")), "/var/run/docker.sock"))
+      .toBe("Docker does not answer on /var/run/docker.sock (connect ENOENT /var/run/docker.sock). Start it with: sudo systemctl enable --now docker");
   });
 
   it("pulls by digest, and reads a failure Docker reports inside a 200 stream", () => {

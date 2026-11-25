@@ -126,7 +126,7 @@ export function ChiefIntro({ replay, onDone, onLeave }: { replay: boolean; onDon
       onClickCapture={early}
       onKeyDownCapture={(event) => (event.key === "Enter" || event.key === " ") && early(event)}
       data-chief-intro={choosing ? "choose" : "intro"}
-      className={cn("ui-modal animate-pop-in w-[min(440px,calc(100vw-32px))] rounded-[16px] border-0 outline-none", leaving && "pointer-events-none")}
+      className={cn("ui-modal animate-pop-in w-[min(440px,calc(100vw-32px))] border-0 outline-none", leaving && "pointer-events-none")}
     >
       {choosing ? (
         <div className="p-4">

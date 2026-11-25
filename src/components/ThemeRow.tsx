@@ -19,10 +19,10 @@ export function ThemeRow({ simple = false }: { simple?: boolean }) {
   const look = THEMES.some((theme) => theme.choice === choice) ? undefined : SKINS.find((skin) => skin.id === choice)?.name;
   return (
     <SettingRow
-      title={t("settings.theme.title")}
+      title={t(simple ? "settings.theme.lightOrDark" : "settings.theme.title")}
       subtitle={look ? t("settings.theme.look", { name: look }) : simple ? undefined : t("settings.theme.subtitle")}
     >
-      <div role="radiogroup" aria-label={t("settings.theme.title")} className={simple ? "inline-flex h-7 rounded-full bg-ink/[0.06] p-0.5" : "inline-flex rounded-full bg-inset p-0.5"}>
+      <div role="radiogroup" aria-label={t(simple ? "settings.theme.lightOrDark" : "settings.theme.title")} className={simple ? "inline-flex h-7 rounded-full bg-ink/[0.06] p-0.5" : "inline-flex rounded-full bg-inset p-0.5"}>
         {THEMES.map((theme) => (
           <button
             key={theme.choice}

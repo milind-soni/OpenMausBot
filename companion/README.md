@@ -29,7 +29,7 @@ upstream hardened its loopback gate.
 
 | | |
 |---|---|
-| **Pairing** | A high-entropy QR credential plus a six-digit manual fallback, valid two minutes and single-use. Redeeming either returns a device token stored only as a SHA-256 digest. |
+| **Pairing** | A high-entropy QR credential plus a six-digit manual fallback, valid two minutes and single-use. Redeeming either returns a device token stored only as a SHA-256 digest. A phone re-pairing may send the token it already holds (`replacesToken`): that device is replaced, not added to, and the new one starts with a fresh pairing's grants. At 20 devices a new pairing is refused with `pairing_device_limit`. |
 | **Authorisation** | Every request needs that token. Computer access — the cloud desktop, and seeing or taking control of the Local VM — is a separate per-device capability, off by default. A rebinding page cannot obtain either. |
 | **The allowlist** | Default deny, per method and path (`src/routes.ts`). Bot PATCH accepts only reading state, pins, colour, mascot and avatar image or framing fields; the harness rejects other fields before applying any change. A new bot may carry only its name, profile, look and model; asking for anything else (approval level, computer, folder, Chief of Staff, peers, tools, department, preset) is refused and no bot is made. General room PATCH stays closed, and approval grants use narrow verbs. A new harness route stays closed to devices until it is explicitly listed. |
 | **Scrubbing** | `resumeCursors` — the harness's own provider session ids — never reach a device, whether or not the harness still sends them. |
@@ -123,12 +123,18 @@ it is switched on, so the opt-in is never implicit.
 | `OMB_CONTROL_TOKEN` | random | that token (43 base64url characters), for a script that starts the sidecar; the desktop app ignores it |
 | `OMB_COMPANION_DIR` | `~/.openmausbot-companion` | paired devices live here |
 | `OMB_COMPANION_NAME` | your name, from the harness | what the phone calls this computer |
+| `OMB_COMPANION_E2E` | off | `1` turns on the end-to-end encrypted connection when standing alone (the desktop app turns it on itself); the transport key is kept in `e2e-key.json` beside the devices |
+| `OMB_COMPANION_ROUTES` | `wifi` | the direct ways in, a comma list of `wifi` (this computer's LAN addresses and Bonjour) and `tailscale` (its tailnet address); empty for neither, when only the relay or an HTTPS address reaches it. A connection is answered only when both ends are private (loopback, RFC 1918, link-local, fd00::/8, or a tailnet peer on Tailscale's own interface) and it arrived on a way in that is on. The desktop app sets it from Settings → Remote access |
+| `OMB_COMPANION_TAILNET_NAME` | none | this computer's MagicDNS name, offered while `tailscale` is listed. The sidecar never runs Tailscale to learn it: the desktop app asks Tailscale once, when the person turns Tailscale on |
+| `OMB_COMPANION_BONJOUR` | on | `0` keeps a test rig off the network's Bonjour |
+| `OMB_COMPANION_RELAY_URL` | none | test rigs only: a `ws://127.0.0.1:<port>` relay in place of `wss://relayN.openmausbot.com` |
 
 `OMB_COMPANION_NAME` overrides a name the sidecar otherwise asks the harness
-for at startup — the profile from onboarding, as *"Ada's computer"*. It falls
-back to `OpenMausBot` when the harness is not up or has no profile. Read once
-and cached: the name goes into the Bonjour record, and re-advertising under a
-new one later would show the phone two computers.
+for: the computer name set in Settings → Remote access, else the profile from
+onboarding, as *"Ada's computer"*. It falls back to `OpenMausBot` when neither
+is set. The sidecar asks again every 30 seconds; a changed name withdraws the
+old Bonjour record (a goodbye) before advertising the new one, so the phone
+does not see two computers.
 
 The harness owns two ports, not one: itself, and a webhook receiver one above
 it (`OMB_WEBHOOK_PORT`). The companion refuses to start on either and says

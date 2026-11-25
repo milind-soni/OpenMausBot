@@ -1,8 +1,9 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AttachedFileChip } from "./AttachmentPreview";
-import { HTML_PREVIEW_MAX_BYTES, HtmlPreviewFrame, htmlPreviewDocument, isHtmlFile } from "./HtmlFilePreview";
+import { HtmlPreviewFrame, OpenInBrowserButton, htmlPreviewDocument, isHtmlFile } from "./HtmlFilePreview";
+import { PREVIEW_MAX_BYTES } from "../../shared/upload-limits";
 import { readTableResponse } from "./TableFilePreview";
 
 const message = { threadId: "t", messageId: "m" };
@@ -59,10 +60,43 @@ describe("file chip preview button", () => {
   });
 });
 
+describe("HTML file chip (#4406)", () => {
+  it("opens the preview from the file name and keeps saving on its own button", () => {
+    const html = chip("report.html");
+    expect(html).toMatch(/aria-label="Preview page: report.html"[^>]*>[^]*report\.html/);
+    expect(html).not.toMatch(/<button[^>]*aria-label="Save a copy of report.html"[^>]*class="flex min-h-10/);
+    expect(html).toMatch(/class="table-action" aria-label="Save a copy of report.html"/);
+  });
+
+  it("leaves other files as they were: the name saves, the side button previews", () => {
+    const csv = chip("data.csv");
+    expect(csv).toMatch(/aria-label="Save a copy of data.csv"/);
+    expect(csv).toContain("Preview table: data.csv");
+    expect(csv).not.toContain("Preview page:");
+  });
+});
+
+describe("OpenInBrowserButton", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const button = () => renderToStaticMarkup(createElement(OpenInBrowserButton, { source: "<p>hi</p>", name: "report.html", onError: () => undefined }));
+
+  it("shows on the desktop app that holds the file", () => {
+    vi.stubGlobal("window", { ogb: { openHtmlInBrowser: async () => true } });
+    expect(button()).toContain('aria-label="Open report.html in your browser"');
+  });
+
+  it("is hidden in a web browser and when the window shows another computer", () => {
+    vi.stubGlobal("window", {});
+    expect(button()).toBe("");
+    vi.stubGlobal("window", { ogb: { openHtmlInBrowser: async () => true, remoteClient: { active: true } } });
+    expect(button()).toBe("");
+  });
+});
+
 describe("bounded read", () => {
   it("stops an HTML page at its own cap", async () => {
     const signal = new AbortController().signal;
-    expect(await readTableResponse(new Response("<p>ok</p>"), signal, HTML_PREVIEW_MAX_BYTES)).toBe("<p>ok</p>");
-    await expect(readTableResponse(new Response(new Uint8Array(HTML_PREVIEW_MAX_BYTES + 1)), signal, HTML_PREVIEW_MAX_BYTES)).rejects.toThrow("size");
+    expect(await readTableResponse(new Response("<p>ok</p>"), signal, PREVIEW_MAX_BYTES)).toBe("<p>ok</p>");
+    await expect(readTableResponse(new Response(new Uint8Array(PREVIEW_MAX_BYTES + 1)), signal, PREVIEW_MAX_BYTES)).rejects.toThrow("size");
   });
 });

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
 import { closeMessageDb,
@@ -12,12 +12,17 @@ import { closeMessageDb,
   insertMessage,
   insertNotificationLog,
   lastRowAt,
+  liveAppRows,
+  latestMessageAts,
   latestPersonLineAts,
+  optionCardsForTools,
+  openCardRows,
   logNotification,
   openRescueMessages,
+  LATEST_SAID_BY_BOT_SQL,
   latestSaidByBot,
   markNotificationLogRead,
-  markThreadNotificationLogRead,
+  prepared,
   readMessageText,
   recentMessages,
   recentNotificationLog,
@@ -62,6 +67,16 @@ describe("message-db", () => {
     const thread = readThread("t1", legacy("t1"));
     expect(thread.messages.map((m) => m.text)).toEqual(["hello, edited", "world"]);
     expect(thread.activeLeafId).toBe("m2");
+  });
+
+  it("lists the live pages, newest first, up to the limit", () => {
+    const app = (id: string, live?: true) => msg(id, "", { role: "bot", kind: "app", app: { title: "Sales", doc: `d-${id}`, rev: 0, ...(live ? { live } : {}) } } as Partial<Message>);
+    insertMessage("t1", app("a1", true));
+    insertMessage("t1", app("a2"));
+    insertMessage("t2", app("a3", true));
+    insertMessage("t2", msg("m1", "{\"app\":{\"live\":true}}"));
+    expect(liveAppRows()).toEqual([{ threadId: "t2", messageId: "a3" }, { threadId: "t1", messageId: "a1" }]);
+    expect(liveAppRows(1)).toEqual([{ threadId: "t2", messageId: "a3" }]);
   });
 
   it("finds the first-reply rescue rows that never settled or ended", () => {
@@ -109,6 +124,22 @@ describe("message-db", () => {
     new Store(selection);
     expect(searchMessages("unopened legacy")).toMatchObject([{ threadId: bot.threadId, messageId: "old" }]);
     expect(existsSync(`${legacy(bot.threadId)}.imported`)).toBe(true);
+  });
+
+  // Windows will not delete a file SQLite holds open.
+  it.skipIf(process.platform === "win32")("opens the database again when its file was deleted under it, looking at most once a second", () => {
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    try {
+      insertMessage("t-gone", msg("m1", "before"));
+      for (const suffix of ["", "-wal", "-shm"]) rmSync(join(DATA_DIR, `messages.db${suffix}`), { force: true });
+      clock.mockReturnValue(now + 1_000);
+      insertMessage("t-gone", msg("m2", "after"));
+      expect(existsSync(join(DATA_DIR, "messages.db"))).toBe(true);
+      expect(readThread("t-gone", legacy("t-gone")).messages.map((m) => m.id)).toEqual(["m2"]);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("stores transcripts with owner-only permissions", () => {
@@ -197,6 +228,23 @@ describe("message-db", () => {
     expect(recallMessages("audit", ["own-a", "own-b"])).toEqual([]);
   });
 
+  it("recalls exact Han tokens with CJK punctuation only in the requested threads and range", () => {
+    const text = "本季度预算审批结果：已通过";
+    insertMessage("own-a", msg("m1", text, { at: 2000 }));
+    insertMessage("own-a", msg("old", text, { at: 1000 }));
+    insertMessage("other-bot", msg("private", text, { at: 2000 }));
+    insertMessage("own-a", msg("chip", text, { kind: "activity", at: 2000 }));
+
+    const recall = (query: string) => recallMessages(query, ["own-a"], 12, { since: 1500 }, "any");
+    expect(recall("本季度预算审批结果?").map((hit) => hit.messageId)).toEqual(["m1"]);
+    for (const query of ["本季度预算审批结果？", "「本季度预算审批结果」", "预算、本季度预算审批结果；进度"]) {
+      const hits = recall(query);
+      expect(hits.map((hit) => hit.messageId)).toEqual(["m1"]);
+      expect(hits[0]?.snippet).toContain("[本季度预算审批结果]");
+    }
+    expect(recallMessages("本季度预算审批结果？", [], 12, undefined, "any")).toEqual([]);
+  });
+
   it("recall by time: a window on ranked hits, a newest-first listing without words", () => {
     const day = 86_400_000;
     const now = Date.UTC(2026, 8, 16, 12);
@@ -221,6 +269,7 @@ describe("message-db", () => {
     const now = Date.UTC(2026, 8, 16, 12);
     const hour = 3_600_000;
     insertMessage("dm", msg("d1", "I started the invoice run", { role: "bot", at: now - 3 * hour }));
+    insertMessage("dm", msg("d0", "A reply with the same timestamp", { role: "bot", at: now - hour }));
     insertMessage("dm", msg("d2", "Sent the three flagged invoices.\n\nAnything else?", { role: "bot", at: now - hour }));
     insertMessage("dm", msg("d3", "thanks", { role: "user", at: now - hour + 1 }));
     insertMessage("room", msg("r1", "I can take the deploy", { role: "bot", at: now - 2 * hour, from: { botId: "me", name: "Me", color: "#000" } }));
@@ -234,6 +283,8 @@ describe("message-db", () => {
       { threadId: "room", messageId: "r1", at: now - 2 * hour, head: "I can take the deploy" },
     ]);
     expect(latestSaidByBot(["dm", "room"], "me", now - 48 * hour, 1).map((row) => row.threadId)).toEqual(["dm"]);
+    expect(latestSaidByBot(["dm", "dm", "room", "dm"], "me", now - 48 * hour).map((row) => row.threadId)).toEqual(["dm", "room"]);
+    expect(latestSaidByBot(["dm", "dm", "room"], "me", now - 48 * hour, 2).map((row) => row.threadId)).toEqual(["dm", "room"]);
     expect(latestSaidByBot([], "me", 0)).toEqual([]);
   });
 
@@ -423,14 +474,14 @@ describe("latestPersonLineAts", () => {
   });
 });
 
-describe("messages_thread_at", () => {
+describe("thread time indexes", () => {
   beforeEach(() => {
     closeMessageDb();
     rmSync(DATA_DIR, { recursive: true, force: true });
     mkdirSync(DATA_DIR, { recursive: true });
   });
 
-  it("plans a thread's latest rows on messages_thread_at", () => {
+  it("adds the bot text index on reopen and uses it only for recent replies", () => {
     for (let thread = 0; thread < 4; thread += 1) {
       for (let n = 0; n < 50; n += 1) {
         insertMessage(`thread-${thread}`, msg(`m-${thread}-${n}`, "hello from the bot", { role: "bot", at: n }));
@@ -438,26 +489,62 @@ describe("messages_thread_at", () => {
     }
     closeMessageDb();
     const raw = new DatabaseSync(join(DATA_DIR, "messages.db"));
-    const planOf = (sql: string) => raw.prepare(`EXPLAIN QUERY PLAN ${sql}`).all()
-      .map((row) => String((row as { detail: string }).detail))
-      .join("\n");
     try {
-      // Same statements as latestSaidByBot and latestMessageAts.
-      const said = planOf(
-        "SELECT thread_id, id, at, head FROM (" +
-          "SELECT m.thread_id, m.id, m.at, substr(m.text, 1, 400) AS head, " +
-          "ROW_NUMBER() OVER (PARTITION BY m.thread_id ORDER BY m.at DESC) AS rn " +
-          "FROM messages m " +
-          "WHERE m.kind = 'text' AND m.role = 'bot' AND m.text IS NOT NULL AND m.at >= ? AND m.thread_id IN (?, ?) " +
-          "AND (json_extract(m.json, '$.from.botId') IS NULL OR json_extract(m.json, '$.from.botId') = ?)" +
-          ") WHERE rn = 1 ORDER BY at DESC LIMIT ?",
-      );
-      const ats = planOf("SELECT thread_id, MAX(at) AS at FROM messages WHERE thread_id IN (?, ?) GROUP BY thread_id");
-      expect(said).toContain("messages_thread_at");
-      expect(ats).toContain("messages_thread_at");
+      raw.exec("DROP INDEX IF EXISTS messages_thread_bot_text");
     } finally {
       raw.close();
     }
+
+    expect(latestSaidByBot(["thread-0"], "bot", 0).map((row) => row.messageId)).toEqual(["m-0-49"]);
+    const planOf = (sql: string, ...params: (string | number)[]) => prepared(`EXPLAIN QUERY PLAN ${sql}`).all(...params)
+      .map((row) => String((row as { detail: string }).detail))
+      .join("\n");
+    const threads = JSON.stringify(["thread-0"]);
+    const said = planOf(LATEST_SAID_BY_BOT_SQL, 0, "bot", threads, 10);
+    const ats = planOf("SELECT value AS thread_id, (SELECT MAX(at) FROM messages WHERE thread_id = value) AS at FROM json_each(?)", threads);
+    expect(said).toContain("SEARCH m2 USING INDEX messages_thread_bot_text");
+    expect(said).toContain("SEARCH m USING INDEX sqlite_autoindex_messages_1");
+    expect(said.split("\n")).not.toContain("SCAN m");
+    expect(ats).toContain("messages_thread_at");
+  });
+});
+
+describe("start-up reads on their indexes", () => {
+  beforeEach(() => {
+    closeMessageDb();
+    rmSync(DATA_DIR, { recursive: true, force: true });
+    mkdirSync(DATA_DIR, { recursive: true });
+  });
+
+  it("orders a thread by its newest person line or finished reply, at the turn's completion when it has one", () => {
+    insertMessage("chat", msg("asked", "Plan the week.", { at: 10 }));
+    insertMessage("chat", msg("working", "Looking.", { at: 20, role: "bot", turnId: "turn-1" }));
+    insertMessage("chat", msg("done", "Here it is.", { at: 30, role: "bot", turnId: "turn-1", turnTerminal: true, turnCompletedAt: 45 }));
+    insertMessage("chat", { ...msg("tool", "", { at: 60, role: "bot", turnId: "turn-1" }), kind: "activity" });
+    insertMessage("peer", msg("handoff", "Take this over.", { at: 70, peerAsk: { botId: "teammate", name: "Teammate" } }));
+    insertMessage("peer", msg("note", "No turn.", { at: 50, role: "bot" }));
+    insertMessage("quiet", { ...msg("only-tool", "", { at: 80, role: "bot" }), kind: "activity" });
+    expect(Object.fromEntries(latestMessageAts(["chat", "peer", "quiet", "empty"], true))).toEqual({ chat: 45, peer: 50 });
+    expect(Object.fromEntries(latestMessageAts(["chat", "peer", "quiet", "empty"]))).toEqual({ chat: 60, peer: 70, quiet: 80 });
+  });
+
+  it("finds the option cards naming a tool, oldest first, among every other kind of row", () => {
+    const card = (id: string, tool: string, at: number): Message => ({ ...msg(id, "", { at, role: "bot" }), kind: "options", card: { title: "Allow?", subtitle: "", options: ["Yes"], requestType: "question", tool } as Message["card"] });
+    insertMessage("b", card("second", "your_computer", 20));
+    insertMessage("a", card("first", "your_computer", 10));
+    insertMessage("a", card("other", "ask_peer", 30));
+    insertMessage("a", { ...msg("call", "", { at: 40, role: "bot" }), kind: "activity", tool: { name: "your_computer", ok: true } as Message["tool"] });
+    insertMessage("a", msg("said", "your_computer", { at: 50 }));
+    expect(optionCardsForTools(["your_computer"])).toEqual([{ threadId: "b", messageId: "second" }, { threadId: "a", messageId: "first" }]);
+    expect(optionCardsForTools(["your_computer", "ask_peer"]).map((row) => row.messageId)).toEqual(["second", "first", "other"]);
+    expect(optionCardsForTools([])).toEqual([]);
+  });
+
+  it("says which open card is an automation's copy of another one", () => {
+    const card = { title: "Allow?", subtitle: "", options: ["Approve", "Deny"], requestType: "question", requestId: "q" } as Message["card"];
+    insertMessage("run", { ...msg("asked", "", { at: 10, role: "bot" }), kind: "options", card });
+    insertMessage("results", { ...msg("copy", "", { at: 20, role: "bot" }), kind: "options", card, automation: { routineId: "r", runId: "run-1", needsYou: true, copyOf: "asked" } } as Message);
+    expect(openCardRows().map((row) => [row.threadId, row.id, row.copyOf])).toEqual([["run", "asked", null], ["results", "copy", "asked"]]);
   });
 });
 
@@ -552,17 +639,6 @@ describe("notification_log", () => {
     rows = recentNotificationLog();
     expect(rows).toHaveLength(3);
     expect(rows.filter((r) => r.read).map((r) => r.id).sort()).toEqual(["n1", "n2"]);
-  });
-
-  it("reading a conversation reads only its own notifications, a pending question's included", () => {
-    insertNotificationLog(entry("n1", 1000));
-    insertNotificationLog(entry("n2", 2000, { kind: "question" }));
-    insertNotificationLog(entry("n3", 3000, { threadId: "thread-2" }));
-    expect(markThreadNotificationLogRead("thread-1").sort()).toEqual(["n1", "n2"]);
-    const rows = recentNotificationLog();
-    expect(rows.filter((r) => r.read).map((r) => r.id).sort()).toEqual(["n1", "n2"]);
-    expect(rows.find((r) => r.id === "n3")?.read).toBe(false);
-    expect(markThreadNotificationLogRead("thread-1")).toEqual([]);
   });
 
   it("keeps only the newest 500 rows, FIFO", () => {

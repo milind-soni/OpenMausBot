@@ -1,13 +1,30 @@
 // EventSource hides SSE comment keepalives, so liveness comes from the server's visible `ping` frame.
 import type { ServerFrame } from "../../shared/wire";
 import { cloudAsleep, markCloudAsleep, onCloudPower, sleepingFrame } from "./cloud-power";
+import { relayEventSource, relayLink, type LiveEventSourceLike } from "./relay-server";
 import { recordBotTextMessage, recordRuntimeEvent } from "./voice-latency-probe";
 import { noteTurnEvent } from "@/state/turn-status";
+import { forgetLiveReplies, noteLiveReplyEvent, noteLiveReplyMessage } from "@/state/live-reply";
 
 export const LIVE_EVENTS_PATH = "/api/events";
 export const LIVE_EVENTS_STALE_MS = 40_000;
 export const LIVE_EVENTS_RETRY_MIN_MS = 500;
 export const LIVE_EVENTS_RETRY_MAX_MS = 10_000;
+const RETRY_LIVE_EVENTS = "omb:retry-live-events";
+
+/** What the page's live connection is doing, by a fixed word: the app's 30-second "still waiting" event names it. */
+export const LIVE_PHASES = ["idle", "opening", "open", "retrying", "offline", "hidden", "asleep"] as const;
+export type LivePhase = (typeof LIVE_PHASES)[number];
+let livePhaseNow: LivePhase = "idle";
+export function livePhase(): LivePhase {
+  return livePhaseNow;
+}
+const holdReason = (platform: Pick<LiveEventsPlatform, "isOnline" | "isVisible">): LivePhase | null =>
+  !platform.isOnline() ? "offline" : !platform.isVisible() ? "hidden" : cloudAsleep() ? "asleep" : null;
+
+export function retryLiveEvents(): void {
+  window.dispatchEvent(new Event(RETRY_LIVE_EVENTS));
+}
 
 export interface LiveFrame {
   kind: string;
@@ -16,17 +33,7 @@ export interface LiveFrame {
   event?: unknown;
 }
 
-interface LiveMessageEvent {
-  data: string;
-  lastEventId?: string;
-}
-
-export interface LiveEventSourceLike {
-  onopen: (() => void) | null;
-  onerror: (() => void) | null;
-  onmessage: ((event: LiveMessageEvent) => void) | null;
-  close: () => void;
-}
+export type { LiveEventSourceLike };
 
 interface ListenerTarget {
   addEventListener: (type: string, listener: () => void) => void;
@@ -53,25 +60,44 @@ export interface LiveEventsHandlers {
   retryMaxMs?: number;
 }
 
-export function liveEventsUrl(options?: { since?: string | null }): string {
+/** `screens: false` asks the server to leave out live screen frames; `window=1` tells it an app window is open;
+ * `frames=thread` that this client keeps a bot's other threads when a bot frame says `tasksPartial`. */
+export function liveEventsUrl(options?: { since?: string | null; screens?: boolean }): string {
   const params = new URLSearchParams();
   if (options?.since) params.set("since", options.since);
-  const query = params.toString();
-  return query ? `${LIVE_EVENTS_PATH}?${query}` : LIVE_EVENTS_PATH;
+  if (options?.screens === false) params.set("screens", "off");
+  params.set("window", "1");
+  params.set("frames", "thread");
+  return `${LIVE_EVENTS_PATH}?${params}`;
 }
 
 export interface LiveFrameListener {
   onFrame: (frame: ServerFrame) => void;
   onMissedFrames?: () => void;
+  /** Draws live screens: while a listener with this is registered the stream carries screen frames; with none it does not. */
+  screens?: boolean;
 }
 
 const liveFrameListeners = new Set<LiveFrameListener>();
+const screenWishListeners = new Set<() => void>();
+const screensWanted = () => [...liveFrameListeners].some((listener) => listener.screens);
 
 export function listenLiveFrames(listener: LiveFrameListener): () => void {
+  const before = screensWanted();
   liveFrameListeners.add(listener);
+  if (screensWanted() !== before) for (const changed of screenWishListeners) changed();
   return () => {
+    const wanted = screensWanted();
     liveFrameListeners.delete(listener);
+    if (screensWanted() !== wanted) for (const changed of screenWishListeners) changed();
   };
+}
+
+/** A frame kept for later (before the first snapshot is drawn) needs no pixels: viewers saw them as it arrived. */
+export function withoutScreenPixels(frame: ServerFrame): ServerFrame {
+  if (frame.kind !== "screen") return frame;
+  const { png: _png, ...rest } = frame;
+  return { ...rest, png: "" };
 }
 
 export function publishLiveFrame(frame: ServerFrame): void {
@@ -79,6 +105,7 @@ export function publishLiveFrame(frame: ServerFrame): void {
 }
 
 export function publishMissedFrames(): void {
+  forgetLiveReplies();
   for (const listener of liveFrameListeners) listener.onMissedFrames?.();
 }
 
@@ -118,8 +145,10 @@ function tapLiveFrame(frame: ServerFrame): void {
   if (frame.kind === "runtime") {
     // The chat's status line reads every live runtime frame; none of them is stored.
     noteTurnEvent(frame.event);
+    noteLiveReplyEvent(frame.event);
     recordRuntimeEvent(frame.event);
   } else if (frame.kind === "message" && frame.message?.role === "bot" && frame.message?.kind === "text") {
+    noteLiveReplyMessage(frame.threadId, frame.message);
     recordBotTextMessage(frame.message, frame.threadId);
   }
 }
@@ -128,22 +157,23 @@ function browserPlatform(overrides: Partial<LiveEventsPlatform>): LiveEventsPlat
   const NativeEventSource = globalThis.EventSource;
   const createEventSource =
     overrides.createEventSource ??
-    (!NativeEventSource
-      ? undefined
-      : (url: string) => {
-          const native = new NativeEventSource(url);
-          const adapter: LiveEventSourceLike = {
-            onopen: null,
-            onerror: null,
-            onmessage: null,
-            close: () => native.close(),
-          };
-          native.onopen = () => adapter.onopen?.();
-          native.onerror = () => adapter.onerror?.();
-          native.onmessage = (event) => adapter.onmessage?.(event);
-          return adapter;
-        });
-  if (!createEventSource) return null;
+    ((url: string) => {
+      const relay = relayLink();
+      if (relay) return relayEventSource(relay, url);
+      if (!NativeEventSource) throw new Error("no EventSource");
+      const native = new NativeEventSource(url);
+      const adapter: LiveEventSourceLike = {
+        onopen: null,
+        onerror: null,
+        onmessage: null,
+        close: () => native.close(),
+      };
+      native.onopen = () => adapter.onopen?.();
+      native.onerror = () => adapter.onerror?.();
+      native.onmessage = (event) => adapter.onmessage?.(event);
+      return adapter;
+    });
+  if (!overrides.createEventSource && !NativeEventSource && !relayLink()) return null;
 
   const browserWindow = globalThis.window;
   const browserDocument = globalThis.document;
@@ -189,6 +219,7 @@ export function openLiveEvents(
 
   let stopped = false;
   let source: LiveEventSourceLike | null = null;
+  let sourceScreens = screensWanted();
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let retryAttempt = 0;
   let cursor: string | null = null;
@@ -224,6 +255,7 @@ export function openLiveEvents(
   let connect: () => void;
   const scheduleReconnect = () => {
     // A Cloud home that went to sleep: reconnecting would wake it. The person's next action does (src/lib/cloud-power.ts).
+    if (!stopped) livePhaseNow = holdReason(platform) ?? "retrying";
     if (stopped || retryTimer !== null || !platform.isOnline() || !platform.isVisible() || cloudAsleep()) return;
     const exponent = Math.min(retryAttempt, 20);
     const delay = Math.min(retryMaxMs, retryMinMs * 2 ** exponent);
@@ -243,12 +275,12 @@ export function openLiveEvents(
   };
 
   connect = () => {
+    if (!stopped && !source) livePhaseNow = (!platform.isOnline() ? "offline" : cloudAsleep() ? "asleep" : null) ?? "opening";
     if (stopped || source || !platform.isOnline() || cloudAsleep()) return;
     let current: LiveEventSourceLike;
     try {
-      current = platform.createEventSource(
-        liveEventsUrl({ since: cursor }),
-      );
+      sourceScreens = screensWanted();
+      current = platform.createEventSource(liveEventsUrl({ since: cursor, screens: sourceScreens }));
     } catch {
       handlers.onError?.();
       scheduleReconnect();
@@ -260,6 +292,7 @@ export function openLiveEvents(
     current.onopen = () => {
       if (stopped || source !== current) return;
       lastHeardAt = platform.now();
+      livePhaseNow = "open";
       handlers.onOpen?.();
     };
     current.onerror = () => connectionLost(current);
@@ -309,6 +342,7 @@ export function openLiveEvents(
             }
             cursor = pending.newestFrameCursor ?? pending.boundaryCursor;
             pendingSnapshot = null;
+            onScreenWish();
           })();
         }
       } else if (event.lastEventId) {
@@ -359,24 +393,34 @@ export function openLiveEvents(
   const onVisibilityChange = () => {
     if (platform.isVisible()) recover();
   };
+  const onRetry = () => {
+    if (platform.isVisible() && !cloudAsleep()) reconnectNow(true);
+  };
 
+  const onScreenWish = () => queueMicrotask(() => {
+    if (source && cursor && !pendingSnapshot && screensWanted() !== sourceScreens) reconnectNow(false);
+  });
+  screenWishListeners.add(onScreenWish);
   connect();
   const staleTimer = setInterval(recover, staleCheckMs);
   // The person is back after the Cloud slept: reconnect at once, which wakes it.
   const stopPower = onCloudPower((asleep) => { if (!asleep) reconnectNow(false); });
   platform.windowTarget?.addEventListener("online", onOnline);
   platform.windowTarget?.addEventListener("focus", onFocus);
+  platform.windowTarget?.addEventListener(RETRY_LIVE_EVENTS, onRetry);
   platform.documentTarget?.addEventListener("visibilitychange", onVisibilityChange);
 
   return () => {
     if (stopped) return;
     stopped = true;
+    screenWishListeners.delete(onScreenWish);
     stopPower();
     clearInterval(staleTimer);
     clearRetry();
     closeSource();
     platform.windowTarget?.removeEventListener("online", onOnline);
     platform.windowTarget?.removeEventListener("focus", onFocus);
+    platform.windowTarget?.removeEventListener(RETRY_LIVE_EVENTS, onRetry);
     platform.documentTarget?.removeEventListener("visibilitychange", onVisibilityChange);
   };
 }

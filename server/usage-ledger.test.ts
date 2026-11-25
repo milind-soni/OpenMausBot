@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -13,8 +13,11 @@ import {
   triggerLabel,
   usageCsv,
   usageFileFor,
+  usageLedgerParses,
+  USAGE_GROUPINGS,
   type UsageRow,
 } from "./usage-ledger.ts";
+import { summarizeInsights } from "./usage-insights.ts";
 
 function row(overrides: Partial<UsageRow> = {}): Omit<UsageRow, "at"> & { at?: string } {
   return {
@@ -96,6 +99,94 @@ describe("usage ledger files", () => {
   });
 });
 
+describe("usage ledger reads", () => {
+  let dataDir: string;
+  beforeEach(() => { dataDir = mkdtempSync(join(tmpdir(), "omb-usage-")); });
+  afterEach(async () => { await removeTempDir(dataDir); });
+
+  const september = { from: new Date("2026-09-01T00:00:00Z"), to: new Date("2026-09-30T23:59:59Z") };
+  const both = { from: new Date("2026-09-01T00:00:00Z"), to: new Date("2026-10-31T23:59:59Z") };
+  const file = () => usageFileFor(dataDir, new Date("2026-09-15T00:00:00Z"));
+  /** The rows a plain parse of the files gives, with no memory of an earlier read. */
+  const parsedAfresh = (range: { from: Date; to: Date }): UsageRow[] => ["2026-09", "2026-10"].flatMap((month) => {
+    const path = join(dataDir, "usage", `${month}.jsonl`);
+    if (!existsSync(path)) return [];
+    return readFileSync(path, "utf8").split("\n").flatMap((line) => {
+      try {
+        const value = JSON.parse(line) as UsageRow;
+        const at = Date.parse(value.at);
+        return typeof value.botId === "string" && at >= range.from.getTime() && at <= range.to.getTime() ? [value] : [];
+      } catch { return []; }
+    });
+  });
+  const seed = async () => {
+    appendUsage(dataDir, row({ at: "2026-09-03T10:00:00.000Z" }));
+    appendUsage(dataDir, row({ at: "2026-09-20T11:00:00.000Z", botId: "b2", botName: "Clerk", costUsd: null }));
+    appendUsage(dataDir, row({ at: "2026-10-01T00:00:00.000Z", botId: "b3", botName: "Later" }));
+    await flushUsageLedger(dataDir);
+  };
+  const parsesDuring = (run: () => void) => { const before = usageLedgerParses(); run(); return usageLedgerParses() - before; };
+
+  it("parses a month file once, and answers every later read and range from it with the same rows", async () => {
+    await seed();
+    let first: UsageRow[] = [];
+    expect(parsesDuring(() => { first = readUsage(dataDir, both); })).toBe(2);
+    expect(first).toEqual(parsedAfresh(both));
+    expect(parsesDuring(() => {
+      expect(readUsage(dataDir, both)).toEqual(first);
+      expect(readUsage(dataDir, september)).toEqual(parsedAfresh(september));
+      const late = { from: new Date("2026-09-10T00:00:00Z"), to: new Date("2026-09-30T23:59:59Z") };
+      expect(readUsage(dataDir, late).map((r) => r.botId)).toEqual(["b2"]);
+      expect(readUsage(dataDir, late)).toEqual(parsedAfresh(late));
+    })).toBe(0);
+  });
+
+  it("reads again after the server's own append", async () => {
+    await seed();
+    readUsage(dataDir, september);
+    appendUsage(dataDir, row({ at: "2026-09-21T00:00:00.000Z", botId: "b4" }));
+    await flushUsageLedger(dataDir);
+    let rows: UsageRow[] = [];
+    expect(parsesDuring(() => { rows = readUsage(dataDir, september); })).toBe(1);
+    expect(rows.map((r) => r.botId)).toEqual(["b1", "b2", "b4"]);
+    expect(rows).toEqual(parsedAfresh(september));
+  });
+
+  it("reads again when anything else changed the file: more bytes, a new time, another file in its place, or none", async () => {
+    await seed();
+    readUsage(dataDir, september);
+    appendFileSync(file(), JSON.stringify({ ...row({ botId: "b5" }), at: "2026-09-22T00:00:00.000Z" }) + "\n");
+    expect(readUsage(dataDir, september).map((r) => r.botId)).toEqual(["b1", "b2", "b5"]);
+
+    utimesSync(file(), new Date("2026-09-25T00:00:00Z"), new Date("2026-09-25T00:00:00Z"));
+    expect(parsesDuring(() => readUsage(dataDir, september))).toBe(1);
+
+    const replacement = `${file()}.next`;
+    writeFileSync(replacement, readFileSync(file(), "utf8").replaceAll('"botId":"b5"', '"botId":"b6"'));
+    utimesSync(replacement, statSync(file()).atime, statSync(file()).mtime);
+    renameSync(replacement, file());
+    expect(readUsage(dataDir, september).map((r) => r.botId)).toEqual(["b1", "b2", "b6"]);
+
+    rmSync(file());
+    expect(readUsage(dataDir, september)).toEqual([]);
+    expect(readUsage(dataDir, both).map((r) => r.botId)).toEqual(["b3"]);
+  });
+
+  it("hands every reader the same row objects, which no summary changes", async () => {
+    await seed();
+    const frozen = <T>(value: T): T => {
+      if (value && typeof value === "object") { Object.freeze(value); Object.values(value).forEach(frozen); }
+      return value;
+    };
+    const rows = frozen(readUsage(dataDir, both));
+    const before = JSON.stringify(rows);
+    for (const groupBy of USAGE_GROUPINGS) summarizeUsage(rows, groupBy, null, groupBy === "model" ? null : "model");
+    usageCsv(rows);
+    summarizeInsights(rows, { from: "2026-09-01", to: "2026-10-31" }, "UTC");
+    expect(JSON.stringify(readUsage(dataDir, both))).toBe(before);
+  });
+});
+
 describe("usage ranges", () => {
   const now = new Date("2026-09-15T12:00:00Z");
 
@@ -146,6 +237,65 @@ describe("usage summaries", () => {
     expect(summarizeUsage([], "day")).toEqual({ groups: [], total: expect.objectContaining({ turns: 0, costUsd: null }) });
   });
 
+  it("splits any group by model, largest bar first, only when a different dimension is asked for", () => {
+    const mixed: UsageRow[] = [
+      rows[0]!,
+      { ...rows[0]!, model: "gpt-6.1-sol", driverKind: "codex", instanceId: "codex", input: 100, output: 20, cachedInput: 0, costUsd: 0.001 },
+      rows[1]!,
+    ];
+    const [scout, clerk] = summarizeUsage(mixed, "bot", null, "model").groups;
+    expect(scout!.segments?.map((piece) => [piece.key, piece.input, piece.output])).toEqual([
+      ["model:claudeAgent/claude-sonnet-5", 1200, 300],
+      ["model:codex/gpt-6.1-sol", 100, 20],
+    ]);
+    expect(clerk!.segments?.map((piece) => piece.key)).toEqual(["model:codex/gpt-5"]);
+    expect(summarizeUsage(mixed, "bot").groups[0]!.segments).toBeUndefined();
+    expect(summarizeUsage(mixed, "model", null, "model").groups[0]!.segments).toBeUndefined();
+    expect(summarizeUsage(mixed, "day", null, "model").groups[0]!.segments?.map((piece) => piece.key)).toEqual([
+      "model:claudeAgent/claude-sonnet-5",
+      "model:codex/gpt-5",
+      "model:codex/gpt-6.1-sol",
+    ]);
+  });
+
+  it("orders a group's segments by the fresh tokens its bar draws, not by cached input", () => {
+    const cached: UsageRow = {
+      ...rows[0]!,
+      model: "claude-sonnet-5",
+      input: 10_000,
+      cachedInput: 9_800,
+      output: 100,
+    };
+    const fresh: UsageRow = {
+      ...rows[0]!,
+      model: "gpt-6.1-sol",
+      driverKind: "codex",
+      instanceId: "codex",
+      input: 600,
+      output: 100,
+      cachedInput: 0,
+    };
+    expect(summarizeUsage([cached, fresh], "bot", null, "model").groups[0]!.segments?.map((piece) => piece.key)).toEqual([
+      "model:codex/gpt-6.1-sol",
+      "model:claudeAgent/claude-sonnet-5",
+    ]);
+  });
+
+  it("keeps the bar total additive when one row's cached input exceeds its input", () => {
+    const uneven: UsageRow[] = [
+      { ...row({ model: "claude-sonnet-5", input: 100, output: 10, cachedInput: 150 }), at: "2026-09-01T10:00:00.000Z" } as UsageRow,
+      { ...row({ model: "gpt-6.1-sol", driverKind: "codex", instanceId: "codex", input: 500, output: 50, cachedInput: 100 }), at: "2026-09-01T11:00:00.000Z" } as UsageRow,
+    ];
+    const [scout] = summarizeUsage(uneven, "bot", null, "model").groups;
+    const fresh = (entry: UsageRow) =>
+      Math.max(0, entry.input - Math.min(entry.cachedInput ?? 0, entry.input)) + entry.output;
+    const expected = uneven.reduce((sum, entry) => sum + fresh(entry), 0);
+    expect(scout!.barTokens).toBe(expected);
+    expect(scout!.segments!.reduce((sum, piece) => sum + (piece.barTokens ?? 0), 0)).toBe(expected);
+    expect(scout!.barTokens).toBe(460);
+    expect(scout!.input - Math.min(scout!.cachedInput, scout!.input) + scout!.output).toBe(410);
+  });
+
   it("groups by routine, with every non-routine turn in one manual bucket", () => {
     const summary = summarizeUsage(rows, "routine");
     expect(summary.groups.map((g) => [g.key, g.label, g.turns, g.costUsd])).toEqual([
@@ -169,6 +319,26 @@ describe("usage summaries", () => {
     expect(usageCsv([rows[0]!]).split("\n")[0]).not.toContain("billable_usd");
   });
 
+  it("groups by department as booked, and counts a routine's or a teammate's work for a person as theirs", () => {
+    const booked: UsageRow[] = [
+      { ...rows[0]!, section: "Finance" },
+      { ...rows[2]!, section: "Finance", trigger: { kind: "routine", routineId: "r1", label: "Morning digest", email: "ada@example.test" } },
+      { ...rows[3]!, trigger: { kind: "bot", botId: "b1", email: "bob@example.test" } },
+      rows[1]!,
+    ];
+    expect(summarizeUsage(booked, "department").groups.map((g) => [g.key, g.label, g.turns])).toEqual([
+      ["department:Finance", "Finance", 2],
+      ["department:", "", 2],
+    ]);
+    expect(summarizeUsage(booked, "user").groups.map((g) => [g.key, g.turns])).toEqual([
+      ["user:ada@example.test", 2],
+      ["user:bob@example.test", 1],
+      ["owner", 1],
+    ]);
+    expect(summarizeUsage(booked, "routine").groups[0]).toMatchObject({ key: "routine:r1", turns: 1 });
+    expect(usageCsv([booked[1]!]).split("\n")[1]).toMatch(/,Finance,ada@example\.test$/);
+  });
+
   it("names a person by email before device label and never throws on an empty trigger", () => {
     expect(triggerLabel({ kind: "user", label: "Phone" })).toBe("Phone");
     expect(triggerKey({ kind: "user", email: "Ada@Example.test" })).toBe("user:ada@example.test");
@@ -190,7 +360,7 @@ describe("usage summaries", () => {
     expect(summarizeUsage([helper], "bot").groups.map((group) => group.label)).toEqual(["Clerk"]);
     expect(summarizeUsage([helper], "engine").groups.map((group) => group.label)).toEqual(["claudeAgent"]);
     expect(summarizeUsage([helper], "routine").groups.map((group) => group.key)).toEqual(["manual"]);
-    expect(usageCsv([helper]).split("\n")[1]).toBe("2026-09-02T11:00:00.000Z,Clerk,claude-haiku-4-5,claudeAgent,Helper model,1200,300,900,0.002,reported,memory-1");
+    expect(usageCsv([helper]).split("\n")[1]).toBe("2026-09-02T11:00:00.000Z,Clerk,claude-haiku-4-5,claudeAgent,Helper model,1200,300,900,0.002,reported,memory-1,,");
   });
 
   it("exports spreadsheet-safe CSV with one line per turn", () => {
@@ -199,11 +369,11 @@ describe("usage summaries", () => {
       { ...rows[1]!, botName: '=HYPERLINK("x")', trigger: { kind: "user", email: "a,b@example.test" } },
     ]);
     const lines = csv.trim().split("\n");
-    expect(lines[0]).toBe("time,bot,model,engine,triggered_by,input_tokens,output_tokens,cached_input_tokens,cost_usd,cost_source,thread");
-    expect(lines[1]).toBe("2026-09-01T10:00:00.000Z,Scout,claude-sonnet-5,claudeAgent,ada@example.test,1200,300,900,0.012,reported,t1");
+    expect(lines[0]).toBe("time,bot,model,engine,triggered_by,input_tokens,output_tokens,cached_input_tokens,cost_usd,cost_source,thread,department,person");
+    expect(lines[1]).toBe("2026-09-01T10:00:00.000Z,Scout,claude-sonnet-5,claudeAgent,ada@example.test,1200,300,900,0.012,reported,t1,,ada@example.test");
     expect(lines[2]).toContain("\"'=HYPERLINK(\"\"x\"\")\"");
     expect(lines[2]).toContain('"a,b@example.test"');
-    expect(lines[2]).toMatch(/,,,t1$/);
+    expect(lines[2]).toMatch(/,,,t1,,"a,b@example.test"$/);
     expect(usageCsv([{ ...rows[0]!, costSource: "estimated" }]).split("\n")[1]).toContain(",0.012,estimated,t1");
   });
 

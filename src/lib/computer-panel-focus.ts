@@ -9,14 +9,25 @@ export type ComputerPanelOpen = {
   opener: HTMLElement | null;
   /** The activation came from the keyboard, so the panel takes focus. */
   tabs: boolean;
+  /** Open on the Browser view (the chat's Watch button during a browser call). */
+  browser?: boolean;
 };
 
 let pendingTabFocus: string | null = null;
+let pendingBrowserView: string | null = null;
 let opener: { botId: string; element: HTMLElement | null } | null = null;
 
 export function rememberComputerPanelOpen(open: ComputerPanelOpen): void {
   opener = { botId: open.botId, element: open.opener };
   pendingTabFocus = open.tabs ? open.botId : null;
+  pendingBrowserView = open.browser ? open.botId : null;
+}
+
+/** One shot per open, like the tab focus: whether this open asked for the Browser view. */
+export function takeComputerPanelBrowserView(botId: string): boolean {
+  if (pendingBrowserView !== botId) return false;
+  pendingBrowserView = null;
+  return true;
 }
 
 /** One shot per open: a panel that remounts for the same bot (a bot switch, or

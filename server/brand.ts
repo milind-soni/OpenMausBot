@@ -39,6 +39,8 @@ export const brandSchema = z
 export type Brand = z.infer<typeof brandSchema>;
 
 export const DEFAULT_BRAND: Brand = { name: "OpenMausBot" };
+/** The product's name wherever a person reads it. OpenMausBot names only the open-source project and its repository. */
+export const PRODUCT_NAME = "MausBot";
 
 export interface BrandStatus {
   brand: Brand;
@@ -82,4 +84,9 @@ export function loadBrand(options: { file?: string; isEntitled?: (feature: strin
 export function describeBrand(status: BrandStatus): string {
   if (status.source === "file") return `brand: ${status.brand.name} (from ${status.file})`;
   return `brand: default${status.notice ? ` (${status.notice})` : ""}`;
+}
+
+/** The name a person reads: an applied brand file's own name, else MausBot. `DEFAULT_BRAND.name` stays the project's name. */
+export function productName(status: BrandStatus = loadBrand()): string {
+  return status.source === "file" ? status.brand.name : PRODUCT_NAME;
 }

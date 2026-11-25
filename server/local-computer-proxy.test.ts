@@ -392,6 +392,40 @@ readline.createInterface({input: process.stdin}).on("line", (line) => {
     }
   });
 
+  it("win32: a relayed call's answer is marked complete for a client on the 2026-07-28 protocol, and left as it was for an older one", async () => {
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ held: false, helpOpen: false }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const connection = gatedLocalComputer(
+      { command: process.execPath, args: ["-e", PACING_DRIVER], env: {}, platform: "win32", scope: "local-computer" },
+      { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/control`, token: "relay-result-type-fixture-token" },
+    );
+    const child = spawn(connection.command, connection.args, { env: { ...process.env, ...connection.env }, stdio: ["pipe", "pipe", "pipe"] });
+    try {
+      const lines = createInterface({ input: child.stdout! })[Symbol.asyncIterator]();
+      const typed = async (id: number, protocolVersion: string) => {
+        const params = { name: "type_text", arguments: { pid: 4242, window_id: 0x30a5c, delivery_mode: "foreground", text: "ab" }, _meta: { "io.modelcontextprotocol/protocolVersion": protocolVersion } };
+        child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params }) + "\n");
+        const answer = JSON.parse((await lines.next()).value as string);
+        expect(answer.id).toBe(id);
+        return answer.result;
+      };
+      child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }) + "\n");
+      await lines.next();
+      const marked = await typed(2, "2026-07-28");
+      expect(marked.isError).toBeUndefined();
+      expect(marked.resultType).toBe("complete");
+      const legacy = await typed(3, "2025-06-18");
+      expect(legacy.isError).toBeUndefined();
+      expect(legacy).not.toHaveProperty("resultType");
+    } finally {
+      child.kill("SIGKILL");
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it.each(["win32", "darwin"] as const)("%s: a call the bridge answers itself is never journalled, so its request stays incomplete", async (platform) => {
     const journal = new ComputerJournal();
     let generation = "plain";

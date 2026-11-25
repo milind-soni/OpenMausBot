@@ -74,16 +74,18 @@ export function describeShape(value: unknown): string {
 
 /** A query that is valid against this exact value, so the model's first attempt is never a syntax lesson. */
 export function exampleQuery(value: unknown): string {
+  const identifier = (key: string) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) ? key : JSON.stringify(key);
   const pick = (items: readonly unknown[], prefix: string): string => {
     const first = items.find((item) => item !== null && item !== undefined);
     if (!isRecord(first)) return `${prefix}[0:20]`;
-    const fields = Object.keys(first).slice(0, 2).map((key) => `${key}: ${key}`);
+    const fields = Object.keys(first).slice(0, 2).map((key) => `${identifier(key)}: ${identifier(key)}`);
+    if (!fields.length) return `${prefix}[0:20]`;
     return `${prefix}[0:20].{${fields.join(", ")}}`;
   };
   if (Array.isArray(value)) return pick(value, "");
   if (isRecord(value)) {
     const array = Object.keys(value).find((key) => Array.isArray(value[key]));
-    if (array) return pick(value[array] as unknown[], array);
+    if (array !== undefined) return pick(value[array] as unknown[], identifier(array));
     return "keys(@)";
   }
   return "@";
@@ -103,7 +105,7 @@ export class ResultStore {
 
   put(tool: string, value: unknown, bytes?: number): string {
     const handle = `r${this.#next++}`;
-    const size = bytes ?? (JSON.stringify(value)?.length ?? 0);
+    const size = bytes ?? Buffer.byteLength(JSON.stringify(value) ?? "", "utf8");
     this.#entries.set(handle, { tool, value, bytes: size });
     this.#bytes += size;
     for (const [oldest, held] of this.#entries) {
@@ -124,12 +126,13 @@ const text = (body: string, isError?: true): QueryToolResult => ({ content: [{ t
 
 /** Answer one query_result call locally; the upstream server never sees it. */
 export function answerQuery(store: ResultStore, args: unknown, budget: number): QueryToolResult {
+  const fail = (body: string) => text(trimResultText({ text: body, budget }).text, true);
   if (!isRecord(args) || typeof args.result !== "string" || typeof args.query !== "string" || !args.query.trim()) {
-    return text(`${QUERY_TOOL_NAME} needs {"result": "<handle from the shaped result>", "query": "<JMESPath>"}.`, true);
+    return fail(`${QUERY_TOOL_NAME} needs {"result": "<handle from the shaped result>", "query": "<JMESPath>"}.`);
   }
   const held = store.get(args.result);
   if (!held) {
-    return text(`Result "${args.result}" is no longer held; call the original tool again and query the new handle it gives you.`, true);
+    return fail(`Result "${args.result}" is no longer held; call the original tool again and query the new handle it gives you.`);
   }
   const shape = describeShape(held.value);
   const example = exampleQuery(held.value);
@@ -138,7 +141,7 @@ export function answerQuery(store: ResultStore, args: unknown, budget: number): 
     selected = jmespath.search(held.value, args.query);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    return text(`Invalid JMESPath query (${reason}). The held result "${args.result}" is ${shape}. Examples: ${example}; length(@).`, true);
+    return fail(`Invalid JMESPath query (${reason}). The held result "${args.result}" is ${shape}. Examples: ${example}; length(@).`);
   }
   const body = JSON.stringify(selected) ?? "null";
   if (body.length <= budget) return text(body);

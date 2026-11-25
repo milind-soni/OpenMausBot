@@ -18,6 +18,7 @@ import { resolveElement } from "./selectors.ts";
 import { takeSnapshot, visibleText, type Snapshot } from "./snapshot.ts";
 import { releaseSession, setUpDocumentSession, setUpWorkerSession, type TargetSetup } from "./targets.ts";
 import { Lifecycle, waitFor, type LoadState, type WaitConditions, type WaitContext } from "./wait.ts";
+import { extensionPage } from "../extensions.ts";
 
 export const DEFAULT_NAVIGATION_TIMEOUT_MS = 15_000;
 
@@ -41,6 +42,8 @@ export interface PageHost {
 export interface NavigateOptions {
   readiness?: LoadState | "none";
   timeoutMs?: number;
+  /** The person picked an installed extension's page from the panel's Extensions menu; never set for a bot. */
+  personExtension?: boolean;
 }
 
 export interface NavigationResult {
@@ -87,6 +90,7 @@ export class CdpPage implements ActionContext, WaitContext {
   #devicePixelRatio: number | null = null;
   #documentStatus: { loaderId: string; status: number } | null = null;
   #emulated: { width: number; height: number; zoom: number } | null = null;
+  #endedEmulation: { width: number; height: number } | null = null;
 
   constructor(host: PageHost, session: CdpSession, info: TargetInfo) {
     this.#host = host;
@@ -206,8 +210,8 @@ export class CdpPage implements ActionContext, WaitContext {
     return this.#host.bringToFront(this);
   }
 
-  async navigate(url: string, { readiness = "load", timeoutMs = DEFAULT_NAVIGATION_TIMEOUT_MS }: NavigateOptions = {}): Promise<NavigationResult> {
-    if (!navigable(url)) throw new DriverError("refused", `Only http(s), about:blank and data: addresses open here, not ${url.slice(0, 80)}.`);
+  async navigate(url: string, { readiness = "load", timeoutMs = DEFAULT_NAVIGATION_TIMEOUT_MS, personExtension = false }: NavigateOptions = {}): Promise<NavigationResult> {
+    if (!navigable(url) && !(personExtension && extensionPage(url))) throw new DriverError("refused", `Only http(s), about:blank and data: addresses open here, not ${url.slice(0, 80)}.`);
     this.#usable();
     await this.bringToFront();
     return this.dialogs.acceptingBeforeUnload(async () => {
@@ -285,13 +289,26 @@ export class CdpPage implements ActionContext, WaitContext {
   /** Lays the page out at `size` whatever its window's size, drawn `zoom` times larger, as DevTools' device mode does; null ends that. */
   async emulateSize(size: { width: number; height: number } | null, zoom = 1): Promise<void> {
     if (!size) {
+      const ended = this.#emulated;
       this.#emulated = null;
       await this.session.send("Emulation.clearDeviceMetricsOverride");
+      if (ended) this.#endedEmulation = { width: ended.width, height: ended.height };
       return;
     }
     const ratio = await this.devicePixelRatio().catch(() => 1);
     await this.session.send("Emulation.setDeviceMetricsOverride", { width: size.width, height: size.height, deviceScaleFactor: ratio * zoom, mobile: false });
     this.#emulated = { width: size.width, height: size.height, zoom };
+  }
+
+  /**
+   * The layout of an emulation that ended since this was last asked. Chrome answers the end before the page's renderer
+   * takes it, so the page can report this size a moment longer; a window fitted from that measure is sized for a page
+   * that is not there.
+   */
+  takeEndedEmulation(): { width: number; height: number } | null {
+    const ended = this.#endedEmulation;
+    this.#endedEmulation = null;
+    return ended;
   }
 
   async devicePixelRatio(): Promise<number> {

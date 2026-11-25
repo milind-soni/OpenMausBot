@@ -179,6 +179,30 @@ describe("hosted bridge in the full server", () => {
     expect((await call("/api/auth/session", { cookie: memberCookie })).body).toMatchObject({ scopes: ["client"], hosted: true });
     expect((await call("/api/auth/sessions", { cookie: memberCookie })).status).toBe(403);
   });
+  it("keeps an Azure Live call to a workspace admin, in plain words, and never takes a local request for one", async () => {
+    state();
+    const botId = await policyBot();
+    const admin = await login();
+    const start = (options: { cookie?: string; local?: boolean }) => call("/api/live/session", { method: "POST", body: { botId, sdp: "v=0\r\n", client: "web" }, ...options });
+    const refusal = "Live calls here go through Azure OpenAI, so only an admin or the owner of this server can start one. Ask an admin if you need a call.";
+    expect((await call("/api/live/settings", { method: "PATCH", cookie: admin, body: { provider: "azure", azureEndpoint: "https://fixture.openai.azure.com", azureDeployment: "fixture-dep" } })).status).toBe(200);
+    try {
+      // No key is saved: past the limit, the call stops at the setup prompt and nothing leaves this machine.
+      expect(await start({ cookie: admin })).toMatchObject({ status: 409, body: { needsKey: true } });
+      // This fixture runs with OMB_LOOPBACK_TRUST=owner, an operator's override: every bot's shell is a local caller too.
+      expect(await start({ local: true })).toMatchObject({ status: 403, body: { error: refusal } });
+      state("member");
+      const member = await login();
+      expect(await start({ cookie: member })).toMatchObject({ status: 403, body: { error: refusal } });
+      const seen = (await call("/api/config", { cookie: member })).body.live;
+      expect(seen).toMatchObject({ provider: "azure" });
+      expect(seen).not.toHaveProperty("azureEndpoint");
+      expect(seen).not.toHaveProperty("azureDeployment");
+    } finally {
+      state();
+      expect((await call("/api/live/settings", { method: "PATCH", cookie: await login(), body: { provider: "openai", azureEndpoint: "", azureDeployment: "" } })).status).toBe(200);
+    }
+  });
   it("closes an existing quiet event stream within fifteen seconds of remote revocation", async () => {
     state();
     const cookie = await login();
@@ -367,6 +391,7 @@ describe("hosted bridge in the full server", () => {
     const botId = created.body.bot.id as string;
 
     expect((await call("/api/auth/session", { local: true })).body).toMatchObject({ kind: "loopback", scopes: ["client"], trust: "service" });
+    expect(await call("/api/live/session", { method: "POST", local: true, body: { botId, sdp: "v=0\r\n", client: "web" } })).toMatchObject({ status: 403, body: { error: expect.stringContaining("may only use the service routes") } });
     const health = await call("/api/health", { local: true });
     expect(health.status).toBe(200);
     expect(health.body.capabilities).toMatchObject({ guardedMessages: 1, guardedRequests: 1, sharedWorkspaceFullAccess: 1 });

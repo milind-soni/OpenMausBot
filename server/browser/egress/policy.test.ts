@@ -7,12 +7,15 @@ import { addressClass, allowList, browserEgressConfigSchema, namesThisMachine, p
 const own = new BlockList();
 own.addAddress("198.51.100.7", "ipv4");
 own.addAddress("192.168.1.5", "ipv4");
+// The address a fake-IP proxy (Clash, Surge) gives its own TUN interface.
+own.addAddress("198.18.0.1", "ipv4");
 
 const rules = (host: EgressHost, over: Partial<EgressRules> = {}): EgressRules => ({
   host,
   ownPort: (port) => port === 8799,
   botPort: async (port) => port === 3000,
-  localNetwork: true,
+  // As in BrowserEgress.rules(): the desktop's local network is open by default, a server's switch is off.
+  localNetwork: host !== "server",
   allowed: () => false,
   ...over,
 });
@@ -111,12 +114,43 @@ describe("what each host lets a bot's browser reach", () => {
     expect(await decide("desktop", "nas.local:443", ["192.168.1.20"], { localNetwork: false })).toBe("local-network");
   });
 
+  it("lets the desktop reach a proxy's fake-IP answers (198.18.0.0/15) like the local network; servers and Cloud keep refusing them", async () => {
+    // Clash, Surge and similar proxies in TUN + fake-IP mode answer every name with an address in 198.18.0.0/15.
+    expect(await decide("desktop", "example.com:443", ["198.18.0.7"])).toBeNull();
+    expect(await decide("desktop", "github.com:443", ["198.19.255.254", "::ffff:198.18.1.2"])).toBeNull();
+    expect(await decide("desktop", "example.com:443", ["198.18.0.7"], { localNetwork: false })).toBe("local-network");
+    // The proxy's own interface is this computer: only a name for this machine reaches it, never a public one.
+    expect(await decide("desktop", "example.com:443", ["198.18.0.1"])).toBe("rebinding");
+    expect(await decide("desktop", "198.18.0.1:8080", ["198.18.0.1"])).toBeNull();
+    // The proxy may route a fake-IP answer to this computer, so OpenMausBot's own ports stay closed through it.
+    expect(await decide("desktop", "example.com:8799", ["198.18.0.7"])).toBe("omb");
+    for (const host of ["server", "cloud"] as const) {
+      expect(await decide(host, "example.com:443", ["198.18.0.7"], { allowed: () => true }), host).toBe("reserved");
+    }
+  });
+
   it("lets a server reach only the loopback ports a bot's own processes opened, or that an admin allowed", async () => {
     expect(await decide("server", "localhost:3000", ["127.0.0.1"])).toBeNull();
     expect(await decide("server", "localhost:3001", ["127.0.0.1"])).toBe("this-computer");
     expect(await decide("server", "127.0.0.1:9000", ["127.0.0.1"], { allowed: (address, port) => address === "127.0.0.1" && port === 9000 })).toBeNull();
     expect(await decide("cloud", "localhost:3000", ["127.0.0.1"])).toBeNull();
     expect(await decide("cloud", "localhost:9000", ["127.0.0.1"], { allowed: () => true })).toBe("this-computer");
+  });
+
+  it("lets a server's owner open this server's own sites and its local network, but never OpenMausBot or metadata", async () => {
+    const on = { localNetwork: true };
+    expect(await decide("server", "app.example:443", ["198.51.100.7"], on)).toBeNull();
+    expect(await decide("server", "localhost:5173", ["127.0.0.1"], on)).toBeNull();
+    expect(await decide("server", "127.0.0.1:5173", ["127.0.0.1"], on)).toBeNull();
+    expect(await decide("server", "evil.example:5173", ["127.0.0.1"], on)).toBe("this-computer");
+    expect(await decide("server", "nas:443", ["10.0.0.20"], on)).toBeNull();
+    expect(await decide("server", "app.example:8799", ["198.51.100.7"], on)).toBe("omb");
+    expect(await decide("server", "169.254.169.254:80", ["169.254.169.254"], on)).toBe("metadata");
+    expect(await decide("server", "172.17.0.1:8799", ["172.17.0.1"], on)).toBe("omb");
+    const off = { localNetwork: false };
+    expect(await decide("server", "app.example:443", ["198.51.100.7"], off)).toBe("this-computer");
+    expect(await decide("server", "nas:443", ["10.0.0.20"], off)).toBe("local-network");
+    expect(await decide("cloud", "app.example:443", ["198.51.100.7"], on)).toBe("this-computer");
   });
 
   it("keeps a server off the local network unless an admin allowed it, and Cloud off it always", async () => {
@@ -157,6 +191,23 @@ describe("browserEngine.egress.allow", () => {
     expect(allowed("fd12::1", 443)).toBe(true);
     expect(allowed("fd12::1", 80)).toBe(false);
     expect(allowList(undefined)("10.0.0.5", 80)).toBe(false);
+  });
+
+  it("lets an entry for one loopback address cover the other on the same port only", async () => {
+    const v4 = allowList(["127.0.0.1:4321"]);
+    expect(v4("127.0.0.1", 4321)).toBe(true);
+    expect(v4("::1", 4321)).toBe(true);
+    expect(v4("::1", 4322)).toBe(false);
+    expect(v4("127.0.0.2", 4321)).toBe(false);
+    expect(allowList(["[::1]:4321"])("127.0.0.1", 4321)).toBe(true);
+    expect(allowList(["[::1]:4321"])("127.0.0.1", 4322)).toBe(false);
+    expect(allowList(["127.0.0.0/8"])("::1", 80)).toBe(false);
+    expect(allowList(["10.0.0.5:4321"])("::1", 4321)).toBe(false);
+    expect(allowList(["127.0.0.1"])("::1", 4321)).toBe(false);
+    expect(allowList(["::1"])("127.0.0.1", 4321)).toBe(false);
+    // `localhost` resolves to both, so the page opens with only the IPv4 entry configured.
+    expect(await decide("server", "localhost:4321", ["127.0.0.1", "::1"], { allowed: v4 })).toBeNull();
+    expect(await decide("server", "localhost:4322", ["127.0.0.1", "::1"], { allowed: v4 })).toBe("this-computer");
   });
 
   it("refuses a config entry it cannot read", () => {

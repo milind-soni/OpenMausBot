@@ -147,11 +147,13 @@ export async function resolveStep(step: RecipeStep, caller: ComputerCaller, sign
   const target = `"${element.label}" (${element.role}) in ${window.title}`;
   if (!found.ok) return found.reason === "none" ? missing(`no ${target}`) : fail(`more than one ${target}`);
   const { element_token: token, element_index: index } = found.value;
+  // cua-driver 0.41 acts on an element only through its element_token; an index is no longer an address it accepts.
+  if (token === undefined) return fail(`${target} has no element token to act on`);
   // Safety invariant: set_value replaces what a field holds, and a repeat never replaces someone's text.
   if (step.tool === "set_value" && holdsTypedText(element.role)) {
     const held = heldValue(tree.elements, index);
     if (held === undefined) return fail(`could not read what ${target} holds`);
     if (held !== "" && held !== step.args.value) return fail(`${target} already holds other text`);
   }
-  return { ok: true, args: token === undefined ? { ...args, element_index: index } : { ...args, element_token: token } };
+  return { ok: true, args: { ...args, element_token: token } };
 }

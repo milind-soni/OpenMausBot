@@ -8,15 +8,16 @@ import { useModalDialog } from "@/hooks/use-modal-dialog";
 import { appTriggerApi, type AppEventCatalog, type AppTrigger, type AppTriggerFilter } from "@/lib/app-triggers";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { useStore, type Bot } from "@/state/store";
+import { type Bot } from "@/state/store";
 import { Select } from "../Select";
 import { suggestedName } from "../WebhookTrigger";
+import { useStoreDispatch } from "@/state/store-select";
 
 const FIELD = "w-full rounded-xl border border-hairline/60 bg-panel px-3.5 py-2.5 text-[13px] text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/70";
 const LABEL = "mb-1.5 block text-[12px] font-medium text-ink-secondary";
 
 export function AppEventEditor({ trigger, bots, initialBotId, onClose, onSaved }: { trigger?: AppTrigger; bots: Bot[]; initialBotId?: string; onClose: () => void; onSaved?: (trigger: AppTrigger) => void }) {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const [botId, setBotId] = useState(trigger?.botId ?? (initialBotId && bots.some((bot) => bot.id === initialBotId) ? initialBotId : bots[0]?.id) ?? "");
   const [catalog, setCatalog] = useState<AppEventCatalog | null>(null);
   const [app, setApp] = useState(trigger?.app ?? "");
@@ -86,7 +87,7 @@ export function AppEventEditor({ trigger, bots, initialBotId, onClose, onSaved }
   const title = trigger ? t("automations.editor.app.editTitle") : t("automations.editor.appEvent.title");
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-5 backdrop-blur-sm" onMouseDown={(click) => click.target === click.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-5" onMouseDown={(click) => click.target === click.currentTarget && onClose()}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} className="flex max-h-[90vh] w-full max-w-[560px] flex-col overflow-hidden rounded-2xl border border-hairline/60 bg-panel shadow-2xl">
         <div className="flex items-start justify-between border-b border-hairline/40 px-5 py-4">
           <div className="text-[17px] font-semibold text-ink">{title}</div>

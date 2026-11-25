@@ -16,7 +16,12 @@ async function serve() {
   const settled: Array<{ botId: string; threadId: string; messageId: string; outcome: SignInOutcome }> = [];
   const saved: Array<{ botId: string; threadId: string; messageId: string; body: Record<string, unknown> }> = [];
   const targets: Array<{ botId: string; threadId: string; messageId: string }> = [];
+  const used: unknown[] = [];
   const routes = [createSignInCardRoutes({
+    vault: {
+      list: () => ({ status: 200, body: { choices: [{ id: "l1", name: "alice" }] } }),
+      use: (...args) => { used.push(args); return { status: 200, body: { done: true, resumed: true, saved: true, site: "example.com" } }; },
+    },
     settle: (botId, threadId, messageId, outcome) => {
       settled.push({ botId, threadId, messageId, outcome });
       return messageId === "gone" ? { status: 404, body: { error: "no such sign-in request" } } : { status: 200, body: { resumed: true } };
@@ -40,7 +45,7 @@ async function serve() {
   await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const post = (path: string, body: unknown, type = "application/json") => fetch(`${base}${path}`, { method: "POST", headers: { "content-type": type }, body: JSON.stringify(body) });
-  return { base, settled, saved, targets, post };
+  return { base, settled, saved, targets, used, post };
 }
 
 describe("sign-in card routes", () => {
@@ -100,6 +105,17 @@ describe("sign-in card routes", () => {
     expect((await post("/api/bots/scout/sign-in-cards/m1/save-login", { threadId: "hidden", password: "fake-card-pass" })).status).toBe(404);
     expect((await fetch(`${base}/api/bots/scout/sign-in-cards/m1/save-login?threadId=hidden`)).status).toBe(404);
     expect([settled, saved, targets]).toEqual([[], [], []]);
+  });
+
+  it("names the saved logins a card could use, and uses one only as JSON and only in a thread the caller can see", async () => {
+    const { base, used, post } = await serve();
+    expect(await (await fetch(`${base}/api/bots/scout/sign-in-cards/m1/saved-logins?threadId=t1`)).json()).toEqual({ choices: [{ id: "l1", name: "alice" }] });
+    expect(await (await fetch(`${base}/api/bots/scout/sign-in-cards/m1/saved-logins?threadId=hidden`)).json()).toEqual({ choices: [] });
+    expect((await post("/api/bots/scout/sign-in-cards/m1/use-login", { threadId: "t1", loginId: "l1" }, "text/plain")).status).toBe(415);
+    expect((await post("/api/bots/scout/sign-in-cards/m1/use-login", { threadId: "hidden", loginId: "l1" })).status).toBe(404);
+    expect(used).toEqual([]);
+    expect(await (await post("/api/bots/scout/sign-in-cards/m1/use-login", { threadId: "t1", loginId: "l1" })).json()).toMatchObject({ done: true, saved: true });
+    expect(used).toEqual([["scout", "t1", "m1", "l1"]]);
   });
 
   it("takes a login as JSON only, so another page's form cannot post one", async () => {

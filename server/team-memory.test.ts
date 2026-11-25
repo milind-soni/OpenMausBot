@@ -21,6 +21,15 @@ afterEach(async () => {
 });
 
 describe("propose", () => {
+  it("refuses an over-long field and says how to send it again, naming the limit", () => {
+    expect(() => memory.propose("", { kind: "term", name: "OMB", detail: "x".repeat(601) }, source))
+      .toThrow("detail is over its 600-character limit, so nothing was done. Keep the fact, its context and why it matters, then send it again.");
+    expect(() => memory.propose("", { kind: "term", name: "x".repeat(121), detail: "ok" }, source)).toThrow("name is over its 120-character limit");
+    expect(() => memory.propose("", { kind: "term", name: "OMB", detail: "ok", aliases: ["x".repeat(121)] }, source)).toThrow("one of the aliases is over its 120-character limit");
+    expect(() => memory.propose("", { kind: "term", name: "  ", detail: "ok" }, source)).toThrow("name is required");
+    expect(memory.list("")).toEqual([]);
+  });
+
   it.each(["{broken", '{"version":1,"sections":{"Team":[{"invalid":true}]}}'])("preserves an unreadable existing file instead of replacing it: %s", (bytes) => {
     const file = join(dir, "team-memory.json");
     writeFileSync(file, bytes);
@@ -252,6 +261,8 @@ it("rejects stale edits, deletion and pending replacements while retaining the o
   expect(() => memory.remove("", old.id, old.revision)).toThrow(TeamMemoryConflict);
   expect(() => memory.resolve("", next.entry.id, "accept")).toThrow(TeamMemoryConflict);
   expect(memory.list("")[0].history?.[0].detail).toBe("Blue");
+  expect(new TeamMemoryConflict()).toMatchObject({ message: "This department memory changed. Reload it before saving or approving.", errorKey: "serverError.department.memoryChanged" });
+  expect(new TeamMemoryConflict("Another wording")).not.toHaveProperty("errorKey");
 });
 
 it("replaces a keyed decision even when its name changes and preserves its history", () => {

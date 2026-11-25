@@ -4,14 +4,15 @@ import type { BotCreationDraft } from "./bot-creation-draft";
 import { imageAttachmentFromFile } from "./composer-attachments";
 import type { BotVisibility } from "../../shared/wire";
 import { botAvatarUrlFromStoredPath } from "../../shared/bot-avatar";
+import { t } from "@/lib/i18n";
 
 export async function preparedBotTemplate(draft: BotCreationDraft) {
   const template = draft.export();
   if (template.profile.avatarUrl?.startsWith("blob:")) {
-    if (!draft.avatarFile) throw new Error("Choose the avatar image again");
+    if (!draft.avatarFile) throw new Error(t("newBot.avatar.chooseAgain"));
     const uploaded = await imageAttachmentFromFile(draft.avatarFile);
     const avatarUrl = uploaded && botAvatarUrlFromStoredPath(uploaded.path);
-    if (!avatarUrl) throw new Error("Could not store the avatar image");
+    if (!avatarUrl) throw new Error(t("newBot.avatar.storeFailed"));
     template.profile.avatarUrl = avatarUrl;
   }
   return template;
@@ -25,13 +26,13 @@ export async function createConfiguredBot(
   approvals = desktopApprovalBridge(),
   visibility?: BotVisibility,
   reportsTo?: string,
-): Promise<{ bot: Bot; warnings: string[] }> {
+): Promise<{ bot: Bot; warnings: string[]; paused?: true }> {
   const template = await preparedBotTemplate(draft);
   const { chiefOfStaff, managedSections, toolScope, modelSelection, ...profile } = template.profile;
-  if (!profile.name?.trim()) throw new Error("Give the bot a name");
+  if (!profile.name?.trim()) throw new Error(t("newBot.nameRequired"));
   const preset = draft.preset;
   const chosenAi = modelSelection?.instanceId && modelSelection.model ? { modelSelection, requireAvailableModel: true } : {};
-  const response = await request<{ bot: Bot }>("/api/bots", {
+  const response = await request<{ bot: Bot; paused?: true }>("/api/bots", {
     method: "POST", body: JSON.stringify({ name: profile.name, title: profile.title,
       description: profile.description, ...chosenAi, section: profile.section,
       useDefaults: false, ...(visibility !== undefined ? { visibility } : {}), ...(reportsTo ? { reportsTo } : {}),
@@ -47,32 +48,45 @@ export async function createConfiguredBot(
     bot = { ...bot, ...patched };
     if (profile.approvalMode === "full" || profile.approvalMode === "custom") {
       if (patched.approvalMode !== profile.approvalMode) {
-        throw new Error("The bot's requested approval level was not granted");
+        throw new Error(t("newBot.approvalNotGranted"));
       }
       const granted = await persistTaskApproval(bot.id, bot.threadId, {
         approvalMode: profile.approvalMode,
         acknowledgeLocalAuto: draft.consent.acknowledgeLocalAuto === true,
       }, approvals, request);
       if (granted.approvalMode !== profile.approvalMode) {
-        throw new Error("The initial thread's requested approval level was not granted");
+        throw new Error(t("newBot.threadApprovalNotGranted"));
       }
     }
-    for (const [path, text] of Object.entries(template.memory)) {
-      if (preset?.notes.includes(path)) continue;
-      await request(`/api/bots/${bot.id}/memory/file`, {
-        method: "PUT", body: JSON.stringify({ path, text }),
-      });
-    }
-    for (const skill of template.skills) {
-      if (preset?.skills.includes(skill.name)) continue;
-      await request(`/api/bots/${bot.id}/skill-template`, { method: "POST", body: JSON.stringify(skill) });
-    }
-    for (const routine of template.routines) {
-      const result = await request<{ routine: Routine }>("/api/routines", {
-        method: "POST", body: JSON.stringify({ ...routine, botId: bot.id, enabled: false }),
-      });
-      routines.push({ id: result.routine.id, enabled: routine.enabled !== false });
-    }
+    const botId = bot.id;
+    // Memory, skills and routines are separate stores on the server: each kind is written in its own order, the three
+    // side by side. Every request has answered before a failure is reported, so cleanup sees each routine that was made.
+    const setup = await Promise.allSettled([
+      (async () => {
+        for (const [path, text] of Object.entries(template.memory)) {
+          if (preset?.notes.includes(path)) continue;
+          await request(`/api/bots/${botId}/memory/file`, {
+            method: "PUT", body: JSON.stringify({ path, text }),
+          });
+        }
+      })(),
+      (async () => {
+        for (const skill of template.skills) {
+          if (preset?.skills.includes(skill.name)) continue;
+          await request(`/api/bots/${botId}/skill-template`, { method: "POST", body: JSON.stringify(skill) });
+        }
+      })(),
+      (async () => {
+        for (const routine of template.routines) {
+          const result = await request<{ routine: Routine }>("/api/routines", {
+            method: "POST", body: JSON.stringify({ ...routine, botId, enabled: false }),
+          });
+          routines.push({ id: result.routine.id, enabled: routine.enabled !== false });
+        }
+      })(),
+    ]);
+    const failed = setup.find((step) => step.status === "rejected");
+    if (failed) throw failed.reason;
   } catch (error) {
     const cleanup: string[] = [];
     for (const routine of routines) {
@@ -92,12 +106,13 @@ export async function createConfiguredBot(
       });
       bot = { ...bot, ...result.bot };
     } catch (error) {
-      warnings.push(`Review this bot's Chief of Staff setting: ${error instanceof Error ? error.message : String(error)}`);
+      warnings.push(t("newBot.warning.chiefOfStaff", { error: error instanceof Error ? error.message : String(error) }));
     }
   }
-  for (const routine of routines.filter(routine => routine.enabled)) {
-    try { await request(`/api/routines/${routine.id}`, { method: "PATCH", body: JSON.stringify({ enabled: true }) }); }
-    catch (error) { warnings.push(`Could not activate a routine: ${error instanceof Error ? error.message : String(error)}`); }
+  const switchedOn = await Promise.allSettled(routines.filter(routine => routine.enabled).map(routine =>
+    request(`/api/routines/${routine.id}`, { method: "PATCH", body: JSON.stringify({ enabled: true }) })));
+  for (const outcome of switchedOn) {
+    if (outcome.status === "rejected") warnings.push(t("newBot.warning.routine", { error: outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason) }));
   }
-  return { bot, warnings };
+  return { bot, warnings, ...(response.paused ? { paused: true as const } : {}) };
 }

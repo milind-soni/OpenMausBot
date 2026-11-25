@@ -70,7 +70,6 @@ export function openBoxEgressGate(options: EgressGateOptions): Promise<BoxEgress
     lookupOptions.all ? callback(null, addresses) : callback(null, addresses[0]!.address, addresses[0]!.family);
 
   const server: Server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    track(req.socket);
     let url: URL;
     try {
       url = new URL(req.url ?? "");
@@ -97,8 +96,8 @@ export function openBoxEgressGate(options: EgressGateOptions): Promise<BoxEgress
     upstream.on("error", () => { if (!res.headersSent) res.writeHead(502, { "content-type": "text/plain" }).end("The connection failed.\n"); else res.destroy(); });
     req.pipe(upstream);
   });
+  server.on("connection", track);
   server.on("connect", async (req: IncomingMessage, client: Duplex, head: Buffer) => {
-    track(client);
     const target = parseConnectTarget(req.url);
     if (!target) { client.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n"); return; }
     const verdict = await check(target);

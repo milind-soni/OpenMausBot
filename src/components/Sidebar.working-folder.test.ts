@@ -87,7 +87,7 @@ describe("working folder through the rendered sidebar", () => {
     access.advanced = false;
     render();
     openMenu();
-    expect(menuItem("New thread")).toBeUndefined();
+    expect(menuItem("New thread")).toBeDefined();
     expect(menuItem("New thread in a working folder…")).toBeUndefined();
   });
 });

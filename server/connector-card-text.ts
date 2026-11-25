@@ -23,3 +23,13 @@ export function connectorCardDescription(label: string, alias: string | undefine
 export function signInCardText(botName: string, site: string, language?: string): string {
   return serverLine(language, "server.connect.signInCard", { bot: botName, site });
 }
+
+/** An MCP server's Sign in card: the line a client that does not draw the card shows, naming the server. */
+export function mcpSignInCardText(label: string, language?: string): string {
+  return serverLine(language, "server.mcp.signIn.card", { label });
+}
+
+/** What an MCP server's Sign in card asks, and why. */
+export function mcpSignInCardDescription(bot: string, label: string, host: string, language?: string): string {
+  return serverLine(language, "server.mcp.signIn.description", { bot, label, host });
+}

@@ -3,7 +3,12 @@
 // while a computer is on, up to its own eight-hour auto-stop.
 import * as boat from "../boat.ts";
 import { boatCreateRecoverySnapshot } from "../boat-create-idempotency.ts";
-import { hasPendingBoatDeletionForBot } from "../boat-delete-journal.ts";
+import { BOAT_DELETING, BOAT_DELETION_FINISHED, hasPendingBoatDeletionForBot } from "../boat-delete-journal.ts";
+import { boatHealth, type BoatHealth } from "../boat-health.ts";
+import { boatReadiness, type BoatAnswer, type BoatReadiness } from "../boat-ready.ts";
+import type { WakeTimeoutContext, WakeTimeoutOutcome } from "../boat-recovery.ts";
+import { withinBudget } from "../auto-vm-claims.ts";
+import { backgroundCommandRunning } from "../cloud-computer-background.ts";
 import { ComputerIdleTimer } from "../computer-idle.ts";
 import type { AppConfig } from "../config.ts";
 import { redactSecretsInText } from "../redact.ts";
@@ -16,6 +21,15 @@ export const CLOUD_COMPUTER_IDLE_MS = Math.max(1_000, Number(process.env.OMB_CLO
  * minutes or more often never waits on a wake: each wake spends one start from the Boat account's pool, shared by every customer. */
 export const ROUTINE_DUE_SOON_MS = 30 * 60_000;
 const MAX_LISTING_RETRY_MS = 60 * 60_000;
+/** Above a slow first start; Boat's own ready wait is 90 seconds. */
+export const CLOUD_COMPUTER_START_BUDGET_MS = Math.max(1_000, Number(process.env.OMB_CLOUD_COMPUTER_START_BUDGET_MS) || 150_000);
+export const CLOUD_COMPUTER_STARTING = "The cloud computer is still starting. This call was not performed. Take a fresh screenshot in a moment.";
+export const CLOUD_COMPUTER_DID_NOT_START = "the cloud computer didn't start in time";
+/** The provider says ready and the computer is silent. Worded apart from a start that failed, and passing: three runs in
+ * a row that fail on a start turn their routine off, and a computer that is only slow to answer must not count as one. */
+export const CLOUD_COMPUTER_NOT_ANSWERING_YET = "the cloud computer is awake but is not answering yet";
+export const CLOUD_COMPUTER_DISK_NOT_BACK_YET = "the cloud computer is awake but still restoring its disk";
+const REMOVAL_POLL_MS = 3_000;
 
 type ScheduledRoutine = Pick<Routine, "botId" | "runOn" | "enabled" | "nextRunAt">;
 
@@ -32,6 +46,23 @@ export interface CloudComputerPowerDeps {
   routineComputer(routine: ScheduledRoutine): string | null;
   broadcast(payload: Record<string, unknown>): void;
   log(line: string): void;
+  readiness?: Pick<BoatReadiness, "awaitAnswer">;
+  /** Where a wake or a create is noted, so a computer is never set aside within its first half hour unseen. */
+  health?: Pick<BoatHealth, "woke">;
+  /** A computer woken or created for a turn stayed silent past the wake's patience: restart it, then set it aside
+   * within every guard (server/boat-recovery.ts). Absent, such a computer is only reported. */
+  wakeTimedOut?(owner: string, boxId: string, ctx: WakeTimeoutContext): Promise<WakeTimeoutOutcome>;
+}
+
+/** How a turn's start went, for the line the bot hears meanwhile. */
+export interface CloudComputerReadyHooks {
+  onRestoring?(): void;
+  /** Woken and silent: the wait goes on. */
+  onWaking?(): void;
+  /** Silent past the wake's patience, and being restarted; its files are kept. */
+  onRestarting?(): void;
+  /** Still silent after that, every guard passed, and being set aside for a new computer. */
+  onReplacing?(): void;
 }
 
 export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
@@ -40,6 +71,12 @@ export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
   const turnOwners = new Map<string, { generation: string; owner: string }>();
   /** A start can outlive the turn that asked for it; stopping a computer mid-create would make provisionBoat delete it. */
   const starting = new Map<string, number>();
+  const readiness = deps.readiness ?? boatReadiness;
+  const health = deps.health ?? boatHealth;
+  /** Computers this process created or woke and has not yet heard answer. */
+  const unheard = new Set<string>();
+  /** Computers a turn's start is waiting on (ready): the background recovery leaves them to it. */
+  const waits = new Map<string, number>();
   let listingRetry: ReturnType<typeof setTimeout> | null = null;
   let closed = false;
 
@@ -62,6 +99,8 @@ export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
     const state = typeof machine?.state === "string" ? machine.state : null;
     if (!state || boat.SLEEPING_BOAT_STATES.has(state)) return forget(owner);
     if (boat.boatTurnLifecycleAction(state) !== "attach" || busy(owner)) return "busy";
+    if (typeof machine?.id === "string" && await backgroundCommandRunning(cfg, machine.id)) return "busy";
+    if (closed) return;
     let release: () => void;
     try {
       release = deps.claim(owner);
@@ -104,11 +143,13 @@ export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
     used(held.owner);
   }
 
-  async function start(bot: BotRecord, turn: TurnOwner) {
+  /** `existingOnly`: wake or attach the bot's computer, but never create one (null when it has none). Every wait inside
+   * fits `budgetMs`. */
+  async function start(bot: BotRecord, turn: TurnOwner, opts: { existingOnly?: boolean; budgetMs?: number } = {}) {
     attached(turn, bot.id);
     starting.set(bot.id, (starting.get(bot.id) ?? 0) + 1);
     try {
-      return await startBotBoat(bot);
+      return await startBotBoat(bot, opts.existingOnly === true, Date.now() + (opts.budgetMs ?? CLOUD_COMPUTER_START_BUDGET_MS));
     } finally {
       const left = (starting.get(bot.id) ?? 1) - 1;
       if (left > 0) starting.set(bot.id, left);
@@ -116,23 +157,40 @@ export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
     }
   }
 
-  async function startBotBoat(bot: BotRecord) {
+  async function startBotBoat(bot: BotRecord, existingOnly: boolean, deadline: number) {
     let b = await boat.findBoat(cfg, bot.id);
     const lifecycleOf = () => boat.boatTurnLifecycleAction(typeof b?.state === "string" ? b.state : null);
     let lifecycle = lifecycleOf();
+    if (lifecycle === "provision" && existingOnly) return null;
     if (lifecycle === "provision") {
       broadcast({ kind: "computer", botId: bot.id, state: "provisioning", place: "cloud" });
-      await boat.provisionBoat(cfg, bot.id, bot.name);
+      await provisionOnceRemoved(bot, deadline);
       b = await boat.findBoat(cfg, bot.id);
       lifecycle = lifecycleOf();
+      if (typeof b?.id === "string") { unheard.add(b.id); health.woke(b.id, true); }
     }
     // An archived Boat answers every action with an error until it resumes: wake it once here.
     if (lifecycle === "wake") {
       broadcast({ kind: "computer", botId: bot.id, state: "waking", place: "cloud" });
-      b = (await boat.readyBoat(cfg, bot.id)) ?? b;
+      b = (await boat.readyBoat(cfg, bot.id, Math.max(1_000, deadline - Date.now()))) ?? b;
       lifecycle = lifecycleOf();
+      if (typeof b?.id === "string") { unheard.add(b.id); health.woke(b.id, true); }
     }
     return b && lifecycle === "attach" ? b : null;
+  }
+
+  /** A start that failed removes the computer it created, so the next one can meet that removal still under way. */
+  async function provisionOnceRemoved(bot: BotRecord, deadline: number): Promise<void> {
+    for (;;) {
+      try {
+        await boat.provisionBoat(cfg, bot.id, bot.name);
+        return;
+      } catch (error) {
+        const code = (error as { code?: unknown } | null)?.code;
+        if ((code !== BOAT_DELETING && code !== BOAT_DELETION_FINISHED) || closed || Date.now() + REMOVAL_POLL_MS >= deadline) throw error;
+        if (code === BOAT_DELETING) await new Promise(resolve => setTimeout(resolve, REMOVAL_POLL_MS));
+      }
+    }
   }
 
   /** At startup: what a previous run left on gets the same window. Orphans (no owner left) stay for Settings → Computers. */
@@ -151,8 +209,71 @@ export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
     }
   }
 
+  const notAnswering = (answer: Extract<BoatAnswer, { ok: false }>) =>
+    Object.assign(new Error(answer.phase === "restoring" ? CLOUD_COMPUTER_DISK_NOT_BACK_YET : CLOUD_COMPUTER_NOT_ANSWERING_YET), { status: 503, transient: true });
+
+  /** Waits for the computer to answer a command, not only be reported ready; one that answered moments ago is not asked
+   * again. After a wake the wait is patient (READY_WAIT.wakePatienceMs, longer while the provider says its disk is restored). */
+  async function awaitAnswer(boxId: string, opts: { woke?: boolean } & CloudComputerReadyHooks): Promise<BoatAnswer & { woke: boolean }> {
+    const woke = opts.woke === true || unheard.has(boxId);
+    const answer = await readiness.awaitAnswer(cfg, boxId, {
+      woke,
+      onPhase: (phase) => { if (phase === "restoring") opts.onRestoring?.(); else opts.onWaking?.(); },
+    });
+    if (answer.ok) unheard.delete(boxId);
+    return { ...answer, woke };
+  }
+
+  /** After a start, before the turn's first call is sent. The failure is passing, so the turn's next call tries again. */
+  async function answering(boxId: string, opts: { woke?: boolean; onRestoring?: () => void } = {}): Promise<void> {
+    const answer = await awaitAnswer(boxId, opts);
+    if (!answer.ok) throw notAnswering(answer);
+  }
+
+  /** A passing failure: the turn's next computer call claims again, however often (`keepsTrying`), since MausBot keeps
+   * bringing the computer back meanwhile. */
+  const passing = (why: string) => Object.assign(new Error(why), { status: 503, transient: true, keepsTrying: true });
+
+  /** A bot's own computer for a turn: started (woken, or created) within `budgetMs`, then waited on until it answers. One
+   * woken or created here that stays silent past the wake's patience is restarted (its files kept) and waited for again;
+   * only if it is still silent and every guard holds is it set aside, with its files, for a new one, and the turn goes on
+   * on that. Otherwise the turn's claim fails as a passing failure, and the computer is left as it is. Null when
+   * `existingOnly` and the bot has none. */
+  async function ready(bot: BotRecord, turn: TurnOwner, opts: { existingOnly?: boolean; budgetMs: number } & CloudComputerReadyHooks) {
+    for (let replaced = false; ; replaced = true) {
+      // The replacement stands in for the computer the bot already had, so it is made even where a first one would not be.
+      const machine = await withinBudget(start(bot, turn, { existingOnly: !replaced && opts.existingOnly, budgetMs: opts.budgetMs }), opts.budgetMs, CLOUD_COMPUTER_DID_NOT_START);
+      if (!machine) {
+        if (replaced) throw passing("the cloud computer was set aside, with its files, for a new one, but the new one could not be found yet. Trying again later is fine");
+        return null;
+      }
+      const boxId = machine.id as string;
+      if (replaced) { unheard.add(boxId); health.woke(boxId, true); }
+      waits.set(boxId, (waits.get(boxId) ?? 0) + 1);
+      let outcome: WakeTimeoutOutcome;
+      try {
+        const answer = await awaitAnswer(boxId, opts);
+        if (answer.ok) return machine;
+        // A computer this process did not wake keeps today's short wait: the recovery restarts it, then may set it aside.
+        if (!answer.woke || !deps.wakeTimedOut) throw notAnswering(answer);
+        if (replaced) throw passing("the cloud computer was set aside, with its files, for a new one, but the new one did not answer in time either. Trying again later is fine");
+        outcome = await deps.wakeTimedOut(bot.id, boxId, { turn, onRestarting: opts.onRestarting, onReplacing: opts.onReplacing });
+      } finally {
+        const left = (waits.get(boxId) ?? 1) - 1;
+        if (left > 0) waits.set(boxId, left); else waits.delete(boxId);
+      }
+      if (outcome.kind === "answers") return machine;
+      if (outcome.kind === "kept") throw passing(outcome.why);
+      deps.log(`cloud computer ${bot.id}: ${boxId} ${outcome.kind === "gone" ? "is gone" : "was set aside"} after it did not answer its wake; starting the new one for the turn`);
+    }
+  }
+
   return {
     start,
+    answering,
+    ready,
+    /** A turn's start is waiting on this computer to answer, or deciding what to do about it. */
+    waiting: (boxId: string): boolean => waits.has(boxId),
     attached,
     released,
     used,

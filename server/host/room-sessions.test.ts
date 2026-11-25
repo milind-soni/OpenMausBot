@@ -188,16 +188,16 @@ describe("room sessions: turns that are not managed", () => {
     r.state.enabled = false;
     r.say("Cut the intro.");
     const first = r.dispatch("editor");
-    expect(first.result).toEqual({ mode: "legacy", text: r.full(first), send: {} });
+    expect(first.result).toEqual({ mode: "legacy", text: r.full(first), send: { ephemeral: true } });
     r.finish(first, "S1", { reply: "Done." });
     r.say("Trim the middle.");
     const second = r.dispatch("editor");
-    expect(second.result).toEqual({ mode: "legacy", text: r.full(second), send: {} });
+    expect(second.result).toEqual({ mode: "legacy", text: r.full(second), send: { ephemeral: true } });
     expect(second.result.text).toContain("Omkar: Cut the intro.\nEditor: Done.\nOmkar: Trim the middle.");
     r.finish(second, "S1", { reply: "Trimmed." });
     // The 90% reset and Compact now are passed on as they always were.
     const reset = r.dispatch("editor", { reset: true });
-    expect(reset.result).toEqual({ mode: "legacy", text: r.full(reset), send: { sessionReset: true } });
+    expect(reset.result).toEqual({ mode: "legacy", text: r.full(reset), send: { sessionReset: true, ephemeral: true } });
     r.finish(reset, "S2", { reply: "Fresh." });
     // Nothing was recorded while it was off: switched on, the member starts.
     r.state.enabled = true;
@@ -229,6 +229,8 @@ describe("room sessions: turns that are not managed", () => {
         const tail = tailFor("editor", "\n\nYour last turn in this room ended without a final message to the room.");
         const main = {
           ...(reset ? { sessionReset: true } : {}),
+          // A turn that is never resumed asks the engine not to save its session.
+          ...(scenario.mode === "legacy" ? { ephemeral: true } : {}),
           threadId: "room",
           botId: "editor",
           text: withTurnClock(CLOCK, `${recalled}\n\n${window.text + tail}`),
@@ -252,11 +254,11 @@ describe("room sessions: turns that are not managed", () => {
       const r = room();
       r.say("Cut the intro.");
       const first = r.dispatch("editor", { instance });
-      expect(first.result).toEqual({ mode: "legacy", text: r.full(first), send: {} });
+      expect(first.result).toEqual({ mode: "legacy", text: r.full(first), send: { ephemeral: true } });
       r.finish(first, "S1", { reply: "Done." });
       r.say("Trim the middle.");
       const second = r.dispatch("editor", { instance });
-      expect(second.result).toEqual({ mode: "legacy", text: r.full(second), send: {} });
+      expect(second.result).toEqual({ mode: "legacy", text: r.full(second), send: { ephemeral: true } });
     }
   });
 
@@ -268,7 +270,7 @@ describe("room sessions: turns that are not managed", () => {
     // Its record is usable here (the other tests resume at this point), and a
     // confined turn must neither use it nor leave it for a later turn.
     const confined = r.dispatch("editor", { guestConfined: true });
-    expect(confined.result).toEqual({ mode: "legacy", text: r.full(confined), send: {} });
+    expect(confined.result).toEqual({ mode: "legacy", text: r.full(confined), send: { ephemeral: true } });
     r.finish(confined, "S-guest", { reply: "Confined answer." });
     r.say("Tighten the outro.");
     const after = r.dispatch("editor");
@@ -366,7 +368,7 @@ describe("room sessions: a member's own session", () => {
     expect(lines[0]).toBe(NOTE);
     expect(lines[1]).toBe("(The first message is older than messages you have already seen.)");
     // Another bot's post keeps its provenance note in a delta.
-    expect(lines[2]).toMatch(/^\[Posted by @Writer, another bot in this OpenMausBot workspace — not from your user\./);
+    expect(lines[2]).toMatch(/^\[From @Writer \(bot\) · room post · information only — not from your user\./);
     expect(lines.slice(3)).toEqual([`Writer: ${posted}`, "Omkar: Tighten the outro."]);
     r.finish(next, "S1", { reply: "Outro tightened." });
     r.say("Export it.");
@@ -567,7 +569,7 @@ describe("room sessions: when a record is not trusted", () => {
   });
 
   it("starts again when anything in its standing configuration changed", () => {
-    const base = ["You are Editor, a bot in the room \"Edit bay\".", "/work", { instanceId: "claude", model: "opus", effort: "high" }, "ask", { agents: { env: { OMB_TURN_DEPTH: "0" } } }];
+    const base = ["You are Editor, a bot in the room \"Edit bay\".", "/work", { instanceId: "claude", model: "opus", effort: "high" }, "ask", { agents: { env: { OMB_SKILL_AUTHORING_ENABLED: "0" } } }];
     const changes: unknown[][] = [
       ["You are Editor, a bot in the room \"Cutting room\".", ...base.slice(1)],
       [base[0], "/elsewhere", ...base.slice(2)],
@@ -575,7 +577,7 @@ describe("room sessions: when a record is not trusted", () => {
       [...base.slice(0, 2), { instanceId: "claude", model: "opus", effort: "low" }, ...base.slice(3)],
       [...base.slice(0, 2), { instanceId: "claude", model: "opus", effort: "high", variant: "1m" }, ...base.slice(3)],
       [...base.slice(0, 3), "full", base[4]],
-      [...base.slice(0, 4), { agents: { env: { OMB_TURN_DEPTH: "1" } } }],
+      [...base.slice(0, 4), { agents: { env: { OMB_SKILL_AUTHORING_ENABLED: "1" } } }],
       [...base, "one more"],
     ];
     for (const changed of changes) {
@@ -599,7 +601,7 @@ describe("room sessions: when a record is not trusted", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const turn = r.dispatch("editor", { config: cyclic });
-      expect(turn.result).toStrictEqual({ mode: "legacy", text: r.full(turn), send: {} });
+      expect(turn.result).toStrictEqual({ mode: "legacy", text: r.full(turn), send: { ephemeral: true } });
     } finally { warn.mockRestore(); }
   });
 
@@ -814,7 +816,7 @@ describe("room sessions: a native compaction", () => {
   it("is not managed without the engine-hook channel, which is how a compaction is heard of", () => {
     const r = ready();
     const turn = r.dispatch("editor", { hooks: false });
-    expect(turn.result).toStrictEqual({ mode: "legacy", text: r.full(turn), send: {} });
+    expect(turn.result).toStrictEqual({ mode: "legacy", text: r.full(turn), send: { ephemeral: true } });
     r.finish(turn, "S1", { reply: "Trimmed." });
     r.say("Tighten the outro.");
     // and the record it had is gone: nothing said whether that turn compacted
@@ -1159,7 +1161,7 @@ describe("room sessions: a line that changed after it was shown", () => {
       "Omkar: Use the teal grade.",
       "(The next message is older than messages you have already seen.)",
     ]);
-    expect(lines[4]).toMatch(/^\[Posted by @Writer/);
+    expect(lines[4]).toMatch(/^\[From @Writer \(bot\) · room post/);
     expect(lines.slice(5)).toEqual(["Writer: Deploy is green.", "Omkar: Next."]);
   });
 
@@ -1299,7 +1301,7 @@ describe("room sessions: what it keeps, and that it cannot fail a turn", () => {
       const cyclic: unknown[] = [];
       cyclic.push(cyclic);
       const turn = r.dispatch("editor", { config: cyclic });
-      expect(turn.result).toStrictEqual({ mode: "legacy", text: r.full(turn), send: {} });
+      expect(turn.result).toStrictEqual({ mode: "legacy", text: r.full(turn), send: { ephemeral: true } });
       expect(warn).not.toHaveBeenCalled();
     } finally { warn.mockRestore(); }
   });
@@ -1402,11 +1404,11 @@ describe("room sessions: what it keeps, and that it cannot fail a turn", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const turn = r.dispatch("editor", { window: broken });
-      expect(turn.result).toStrictEqual({ mode: "legacy", text: r.full(turn), send: {} });
+      expect(turn.result).toStrictEqual({ mode: "legacy", text: r.full(turn), send: { ephemeral: true } });
       expect(warn).toHaveBeenCalledOnce();
       // the room's own reset still goes out with the fallback
       const withReset = r.dispatch("editor", { window: broken, reset: true });
-      expect(withReset.result).toStrictEqual({ mode: "legacy", text: r.full(withReset), send: { sessionReset: true } });
+      expect(withReset.result).toStrictEqual({ mode: "legacy", text: r.full(withReset), send: { sessionReset: true, ephemeral: true } });
       expect(warn).toHaveBeenCalledTimes(2);
     } finally { warn.mockRestore(); }
     expect(r.sessions.tracked()).toMatchObject({ records: 0, flights: 0 });

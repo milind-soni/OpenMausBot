@@ -63,60 +63,64 @@ beforeEach(() => {
 });
 
 describe("AutomaticRecoverySettings", () => {
-  it("starts off and explains scope, bounded recovery, no replay, provider charges and that a bot's own backups need no switch", () => {
+  it("starts off with one short line and no Save; Learn more explains scope, no replay, provider charges and a bot's own backups", () => {
     const view = render();
     expect(view.toggle.props.checked).toBe(false);
-    expect(view.engine.props.disabled).toBe(true);
-    expect(view.save.props.disabled).toBe(true);
-    expect(view.html).toContain("If an ACP model provider (such as Qwen or OpenCode) fails before starting, try a backup once. Work that may have already run is not replayed.");
-    expect(view.html).toContain("direct bot threads, including Chief and delegated work");
-    expect(view.html).toContain("Channels are not included");
-    expect(view.html).toContain("Only this thread switches; bot defaults stay unchanged.");
-    expect(view.html).toContain("Permissions stay unchanged; some provider switches need confirmation.");
-    expect(view.html).toContain("can incur charges from its provider");
-    expect(view.html).toContain('for="automatic-recovery-engine"');
-    expect(view.html).toContain('for="automatic-recovery-model"');
-    expect(view.html).toContain("Bots with backups of their own (Model → Backup models for this bot) use those instead, whether or not this is on.");
-    expect(view.html).toContain('aria-describedby="automatic-recovery-help automatic-recovery-scope automatic-recovery-own"');
+    // Off, the provider and model rows are not shown, and there is no Save: it saves as you go.
+    expect(view.engine).toBeUndefined();
+    expect(view.model).toBeUndefined();
+    expect(view.save).toBeUndefined();
+    expect(view.html).toContain("If a provider fails before it starts, try a backup once.");
+    expect(view.html).toContain("Learn more");
+    expect(view.html).not.toContain("Channels are not included");
+    expect(view.html).toContain('aria-describedby="automatic-recovery-help"');
+    // Learn more (the fourth piece of state) opens the rest under the row.
+    fixture.values[3] = true;
+    const more = render().html;
+    expect(more).toContain("If an ACP model provider (such as Qwen or OpenCode) fails before starting, try a backup once. Work that may have already run is not replayed.");
+    expect(more).toContain("direct bot threads, including Chief and work handed on");
+    expect(more).toContain("Channels are not included");
+    expect(more).toContain("Only this thread switches; bot defaults stay unchanged.");
+    expect(more).toContain("Permissions stay unchanged; some provider switches need confirmation.");
+    expect(more).toContain("can incur charges from its provider");
+    expect(more).toContain("Bots with backups of their own (Model → Backup models for this bot) use those instead, whether or not this is on.");
   });
 
-  it("requires a ready backup, preserves drafts through broadcasts and failed saves, and saves only once", async () => {
+  it("saves as soon as a ready backup is chosen, keeps the draft through broadcasts and a failed save, and saves once at a time", async () => {
     click(render().toggle);
-    expect(render().save.props.disabled).toBe(true);
+    expect(fixture.api).not.toHaveBeenCalled();
+    expect(render().html).toContain('aria-label="Backup provider"');
+    expect(render().html).toContain("Choose a backup provider and model to turn this on.");
     choose(render().engine, "backup");
+    expect(fixture.api).not.toHaveBeenCalled();
+    let reject!: (cause: Error) => void;
+    fixture.api.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
     choose(render().model, "m");
+    choose(render().model, "m");
+    expect(fixture.api).toHaveBeenCalledTimes(1);
+    expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ automaticRecovery: { enabled: true, backup: { instanceId: "backup", model: "m" } } }) });
     fixture.config = { automaticRecovery: { enabled: false } };
     expect(render().toggle.props.checked).toBe(true);
     expect(render().model.props.value).toBe("m");
-    let reject!: (cause: Error) => void;
-    fixture.api.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
-    click(render().save);
-    click(render().save);
-    expect(fixture.api).toHaveBeenCalledTimes(1);
-    expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ automaticRecovery: { enabled: true, backup: { instanceId: "backup", model: "m" } } }) });
     expect(render().toggle.props.disabled).toBe(true);
     reject(new Error("Fixture save failed"));
     await flush();
     expect(render().html).toContain('role="alert"');
     expect(render().html).toContain("Fixture save failed");
     expect(render().model.props.value).toBe("m");
-    expect(render().save.props.disabled).toBe(false);
     fixture.api.mockResolvedValueOnce({ automaticRecovery: { enabled: true, backup: { instanceId: "backup", model: "m" } } });
-    click(render().save);
+    choose(render().model, "m");
     await flush();
     expect(fixture.dispatch).toHaveBeenCalledOnce();
-    expect(render().save.props.disabled).toBe(true);
     expect(render().html).not.toContain("Fixture save failed");
   });
 
-  it("keeps a saved unavailable backup visible and allows disabling it", async () => {
+  it("keeps a saved unavailable backup visible and turning it off saves at once", async () => {
     fixture.config = { automaticRecovery: { enabled: true, backup: { instanceId: "gone", model: "old" } } };
     expect(render().engine.props.value).toBe("gone");
     expect(render().html).toContain("gone (unavailable)");
-    expect(render().save.props.disabled).toBe(true);
-    click(render().toggle);
     fixture.api.mockResolvedValueOnce({ automaticRecovery: { enabled: false, backup: { instanceId: "gone", model: "old" } } });
-    click(render().save);
+    click(render().toggle);
     await flush();
     expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ automaticRecovery: { enabled: false, backup: { instanceId: "gone", model: "old" } } }) });
   });
@@ -124,9 +128,8 @@ describe("AutomaticRecoverySettings", () => {
   it("clears an incomplete selection when turning recovery off", async () => {
     click(render().toggle);
     choose(render().engine, "backup");
-    click(render().toggle);
     fixture.api.mockResolvedValueOnce({ automaticRecovery: { enabled: false } });
-    click(render().save);
+    click(render().toggle);
     await flush();
     expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ automaticRecovery: { enabled: false } }) });
   });

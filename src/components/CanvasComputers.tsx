@@ -7,6 +7,8 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
+import { randomUuid } from "@/lib/random-uuid";
+import { serverFetch } from "@/lib/relay-server";
 
 const control = "rounded-lg px-3 py-2 text-[12px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40";
 const field = "w-full rounded-lg border border-hairline/60 bg-inset px-3 py-2 text-[12px] text-ink outline-none focus:border-accent";
@@ -39,7 +41,7 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
   const [busy, setBusy] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
-  const requestId = useRef(crypto.randomUUID());
+  const requestId = useRef(randomUuid());
   const submittedName = useRef<string | null>(null);
   const nameInput = useRef<HTMLInputElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
@@ -51,7 +53,7 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
   const [assignment, setAssignment] = useState<{ computer: TeamComputer; section: string | null } | null>(null);
   const [viewer, setViewer] = useState<{ id: string; url: string } | null>(null);
   const [heldHere, setHeldHere] = useState<string | null>(null);
-  const controlLeaseId = useRef(crypto.randomUUID());
+  const controlLeaseId = useRef(randomUuid());
   const heldHereRef = useRef<string | null>(null);
   const shelf = useRef<HTMLElement>(null);
   const pointer = useRef<{ id: number; x: number; y: number; moved: boolean; computer: TeamComputer; handle: HTMLElement } | null>(null);
@@ -74,7 +76,7 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
   useEffect(() => () => {
     const held = heldHereRef.current;
     if (!held) return;
-    void fetch(`/api/team-computers/${encodeURIComponent(held)}/control`, {
+    void serverFetch(`/api/team-computers/${encodeURIComponent(held)}/control`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "release", controlLeaseId: controlLeaseId.current }),
@@ -208,7 +210,7 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
           if (!value || !inventory?.configured) return;
           submittedName.current = value;
           void mutate("create", () => api("/api/team-computers", { method: "POST", body: JSON.stringify({ name: value, requestId: requestId.current, acknowledgeCost: true }) }), () => {
-            setName(""); setCreating(false); requestId.current = crypto.randomUUID(); submittedName.current = null;
+            setName(""); setCreating(false); requestId.current = randomUuid(); submittedName.current = null;
           }, () => {
             submittedName.current = null;
           });

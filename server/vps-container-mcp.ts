@@ -3,7 +3,7 @@ import { runMcpBridge } from "./mcp-bridge.ts";
 import { vpsContainerMcpArgs, vpsDockerArgs } from "./vps-computer.ts";
 import { DATA_DIR } from "./config.ts";
 import { augmentedPath } from "./env-path.ts";
-import { prepareVpsSsh } from "./vps-ssh.ts";
+import { ensureVpsSshMaster, prepareVpsSsh } from "./vps-ssh.ts";
 
 const [alias, containerName] = process.argv.slice(2);
 const sshAlias = alias ?? "";
@@ -20,11 +20,18 @@ const controlUrl = process.env.OMB_CONTROL_URL ?? "";
 const controlToken = process.env.OMB_CONTROL_TOKEN ?? "";
 const ssh = prepareVpsSsh(DATA_DIR, augmentedPath());
 
+try { await ensureVpsSshMaster(ssh, sshAlias); }
+catch (error) {
+  process.stderr.write(`VPS SSH initialization failed: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.exit(1);
+}
+
 runMcpBridge({
   command: "docker",
   args,
   env: { ...process.env, PATH: ssh.path },
   label: "VPS Cua Driver",
+  consoleChild: true,
   // Probe the transport, not the driver: a busy desktop mid-tool-call must never look dead.
   liveness: { command: "docker", args: vpsDockerArgs(sshAlias, ["version", "--format", "{{.Server.Version}}"]) },
   ...(controlUrl && controlToken ? { gate: { url: controlUrl, token: controlToken } } : {}),

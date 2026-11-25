@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import type { Message } from "@/state/store";
-import { nowSteps, quietText, stepLabel } from "./now-steps";
+import { nowSteps, quietText, silenceText, stepLabel } from "./now-steps";
+
+describe("a turn that has gone silent", () => {
+  it("says nothing for the first two minutes, then counts minutes and hours", () => {
+    expect(silenceText(0, 119_000)).toBeUndefined();
+    expect(silenceText(0, 5 * 60_000)).toBe("nothing new for 5 min");
+    expect(silenceText(0, 125 * 60_000)).toBe("nothing new for 2 h");
+  });
+});
 
 let id = 0;
 const ask = (text: string, extra: Partial<Message> = {}): Message => ({ id: `u${++id}`, role: "user", kind: "text", at: id, text, ...extra });

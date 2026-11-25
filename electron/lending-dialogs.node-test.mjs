@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import vm from "node:vm";
 
 import { createLendingDialogs, serverAccessDetail } from "./lending-dialogs.mjs";
+import { installServerLending } from "./server-lending.mjs";
+import nativeText from "./native-text.cjs";
 
 function fakeDialog({ response = 1, picked = { canceled: true, filePaths: [] } } = {}) {
   const calls = [];
@@ -58,6 +58,23 @@ test("the terminal is lent only after its warning's own yes, one question at a t
   assert.deepEqual([stopped, off.calls.length], [1, 0]);
 });
 
+test("the terminal warning follows the app's language and keeps Cancel as its default", async () => {
+  const text = nativeText.createNativeText({ saved: "en" });
+  const { dialog, calls } = fakeDialog();
+  const dialogs = createLendingDialogs({ dialog, window: liveWindow, validate: named, t: text.t });
+  for (const [language, message, buttons] of [
+    ["en", "Let your Clouds run commands on this computer?", ["Let them run commands", "Cancel"]],
+    ["pt-br", "Permitir que seus Clouds executem comandos neste computador?", ["Permitir que executem comandos", "Cancelar"]],
+  ]) {
+    text.set(language);
+    assert.equal(await dialogs.lendTerminal(true, () => assert.fail("Cancel never grants access")), false);
+    const options = calls.at(-1)[1];
+    assert.equal(options.message, message);
+    assert.deepEqual(options.buttons, buttons);
+    assert.deepEqual([options.defaultId, options.cancelId], [1, 1]);
+  }
+});
+
 test("the whole home folder is lent only after its own warning, and is named in the access dialog", async () => {
   const win = liveWindow(), isHome = async (path) => path === "/Users/me";
   for (const [response, lent] of [[0, true], [1, false], [-1, false]]) {
@@ -101,25 +118,14 @@ test("a server's computer access is allowed only by the dialog's own Allow, and 
   assert.match(quiet[2], /^Computer control: can view your screen/);
 });
 
-const MAIN = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
-function mainSection(start, end) {
-  const from = MAIN.indexOf(start), to = MAIN.indexOf(end, from);
-  assert.ok(from >= 0 && to > from, `main.mjs section moved: ${start}`);
-  return MAIN.slice(from, to);
-}
-
 function mainSharing({ response }) {
   const handlers = new Map(), saved = [], win = liveWindow();
   const { dialog, calls } = fakeDialog({ response, picked: { canceled: false, filePaths: ["/Users/me/Plans"] } });
   const team = { id: "team", name: "Team server", origin: "https://team.example.test" };
-  const context = vm.createContext({
-    createLendingDialogs, dialog, mainWindow: win, validateSharedFolders: named, isHomeFolder: async () => false,
-    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, localWorkspaceOnly: (_channel, handler) => handler,
-    requireSharedComputers: async () => {}, savedWorkspace: () => team,
-    sharingController: () => ({ identity: async () => ({ id: "info" }), save: async (env, grant, info) => { saved.push([env.id, grant, info]); } }),
-  });
-  vm.runInContext(mainSection("const lendingDialogs = createLendingDialogs(", 'ipcMain.handle("sharing:revoke"')
-    + mainSection('ipcMain.handle("sharing:save"', "const cloudSync = installCloudFiles("), context);
+  const controller = { state: () => ({}), ownServer: async () => null, identity: async () => ({ id: "info" }), save: async (env, grant, info) => { saved.push([env.id, grant, info]); } };
+  installServerLending({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, guard: (_channel, handler) => handler, sharing: () => controller,
+    dialogs: createLendingDialogs({ dialog, window: () => win, validate: named, isHome: async () => false }), validate: named, dialog, window: () => win,
+    saved: () => team, candidate: () => true, flag: async () => true, environments: () => [team] });
   return { handlers, saved, calls };
 }
 

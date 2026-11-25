@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { McpOAuthError, McpOAuthManager, mcpCallbackOrigin, mcpOAuthRedirectUri, type McpSignInStatus, withMcpSignIn, withoutPendingSignIn } from "./mcp-oauth.ts";
+import { cardOwner, McpOAuthError, McpOAuthManager, mcpCallbackOrigin, mcpOAuthRedirectUri, type McpSignInPhase, type McpSignInStatus, withMcpSignIn, withoutPendingSignIn } from "./mcp-oauth.ts";
 import type { McpOAuthClientConfig } from "./mcp-registry.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
 import { startFakeOAuth, type FakeOAuth, type FakeOAuthOptions } from "./testing/fake-oauth-server.ts";
@@ -114,6 +114,24 @@ describe("McpOAuthManager sign-in", () => {
     await expect(manager.start("docs", mcp.url)).rejects.toMatchObject({ code: "no-registration" });
   });
 
+  it("shows the server's own reason when it refuses to register the app", async () => {
+    await setup({ registerRefusal: { status: 429, body: { error: "too_many_requests", error_description: "Too many client registrations from this address. Please try again in an hour." }, headers: { "retry-after": "3600" } } });
+    const error = await manager.start("docs", mcp.url).catch((cause: unknown) => cause);
+    expect((error as Error).message).toBe("This server would not register OpenMausBot for sign-in (HTTP 429): Too many client registrations from this address. Please try again in an hour. It asked to wait: Retry-After 3600 seconds. Try again later.");
+  });
+
+  it("keeps the plain refusal when the server gives no reason", async () => {
+    await setup({ registerRefusal: { status: 500, body: {} } });
+    const error = await manager.start("docs", mcp.url).catch((cause: unknown) => cause);
+    expect((error as Error).message).toBe("This server would not register OpenMausBot for sign-in. Try again later.");
+  });
+
+  it("still reports the refusal when the body is JSON null", async () => {
+    await setup({ registerRefusal: { status: 429, body: null, headers: { "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" } } });
+    const error = await manager.start("docs", mcp.url).catch((cause: unknown) => cause);
+    expect((error as Error).message).toBe("This server would not register OpenMausBot for sign-in (HTTP 429). It asked to wait: Retry-After Wed, 21 Oct 2026 07:28:00 GMT. Try again later.");
+  });
+
   it("refuses a server that does not use OAuth", async () => {
     await setup();
     const open = await startFakeHttpMcp();
@@ -134,6 +152,14 @@ describe("McpOAuthManager tokens", () => {
     await approve(started);
     await settled("docs", started.flowId);
   }
+
+  it("requests offline access advertised by the authorization server and refreshes the resulting token", async () => {
+    await signedIn({ expiresIn: 60, offlineAccess: true });
+    expect(oauth.lastAuthorize?.get("scope")).toBe("mcp offline_access");
+    expect(oauth.isValid(`Bearer ${await manager.accessToken("docs", mcp.url)}`)).toBe(true);
+    expect(oauth.counts.refresh).toBe(1);
+    expect(manager.authState("docs", mcp.url)).toBe("signed-in");
+  });
 
   it("refreshes a token about to expire, once for concurrent callers", async () => {
     await signedIn({ expiresIn: 60 });
@@ -175,6 +201,30 @@ describe("McpOAuthManager tokens", () => {
     expect(manager.authState("docs", mcp.url)).toBe("needs-sign-in");
     manager.forget("docs");
     expect(manager.authState("docs", mcp.url)).toBe("none");
+  });
+
+  it("records that a sign-in is required for a server with no record", async () => {
+    await setup();
+    manager.requireSignIn("docs", mcp.url);
+    expect(manager.authState("docs", mcp.url)).toBe("needs-sign-in");
+  });
+
+  it("leaves a signed-in server signed in and never revokes", async () => {
+    await signedIn();
+    const token = await manager.accessToken("docs", mcp.url);
+    manager.requireSignIn("docs", mcp.url);
+    manager.requireSignIn("docs", mcp.url);
+    expect(manager.authState("docs", mcp.url)).toBe("signed-in");
+    expect(await manager.accessToken("docs", mcp.url)).toBe(token);
+    expect(oauth.counts.revoke).toBe(0);
+  });
+
+  it("keeps a requirement it already recorded", async () => {
+    await setup();
+    manager.requireSignIn("docs", mcp.url);
+    manager.requireSignIn("docs", mcp.url);
+    expect(manager.authState("docs", mcp.url)).toBe("needs-sign-in");
+    expect(oauth.counts.revoke).toBe(0);
   });
 });
 
@@ -276,6 +326,34 @@ describe("review fixes", () => {
     expect(manager.authState("docs", mcp.url)).toBe("signed-in");
   });
 
+  it("keeps a secret the server issues at registration and proves it on sign-in, refresh and sign-out", async () => {
+    await setup({ registerConfidential: "client_secret_basic", expiresIn: 60 });
+    const started = await manager.start("docs", mcp.url);
+    await approve(started);
+    expect((await settled("docs", started.flowId)).phase).toBe("succeeded");
+    const token = await manager.accessToken("docs", mcp.url);
+    expect(oauth.counts.refresh).toBe(1);
+    expect(oauth.isValid(`Bearer ${token}`)).toBe(true);
+    await manager.signOut("docs", mcp.url);
+    expect(oauth.counts.revoke).toBe(1);
+    expect(oauth.clientAuths).toEqual([
+      { method: "basic", clientId: "client_1" },
+      { method: "basic", clientId: "client_1" },
+      { method: "basic", clientId: "client_1" },
+    ]);
+  });
+
+  it("sends an issued secret in the form when the registration asks for that", async () => {
+    await setup({ registerConfidential: "client_secret_post" });
+    const started = await manager.start("docs", mcp.url);
+    await approve(started);
+    expect((await settled("docs", started.flowId)).phase).toBe("succeeded");
+    expect(oauth.clientAuths).toEqual([{ method: "post", clientId: "client_1" }]);
+    const stored = JSON.parse(readFileSync(join(dir, "mcp-oauth.json"), "utf8")).servers.docs;
+    expect(stored).toMatchObject({ clientId: "client_1", tokenAuth: "client_secret_post" });
+    expect(stored.clientSecret).toMatch(/^secret_/);
+  });
+
   it("registers a fresh client for every sign-in", async () => {
     await setup();
     for (let i = 0; i < 2; i++) {
@@ -321,6 +399,13 @@ describe("a sign-in app registered in advance", () => {
     expect(oauth.counts.register).toBe(0);
     expect(oauth.clientAuths).toEqual([{ method: "none", clientId: "entra-app" }]);
     expect(oauth.isValid(`Bearer ${await manager.accessToken("docs", mcp.url)}`)).toBe(true);
+  });
+
+  it("preserves explicitly configured scopes when offline access is advertised", async () => {
+    await setup({ noRegistration: true, preRegistered: { "read-only": null }, offlineAccess: true });
+    registered = { clientId: "read-only", scopes: ["mcp"] };
+    const started = await manager.start("docs", mcp.url);
+    expect(new URL(started.authorizationUrl!).searchParams.get("scope")).toBe("mcp");
   });
 
   it("uses the app in place of registration even when the server offers it", async () => {
@@ -375,6 +460,41 @@ describe("a sign-in app registered in advance", () => {
     registered = { clientId: "another-app", clientSecret: "pw" };
     expect(oauth.isValid(`Bearer ${await manager.accessToken("docs", mcp.url)}`)).toBe(true);
     expect(oauth.counts.refresh).toBe(0);
+  });
+
+  it("lets two connections to one server sign in at the same time", async () => {
+    await setup({ noRegistration: true, preRegistered: { "app-a": null, "app-b": null } });
+    const two = new McpOAuthManager({
+      file: join(dir, "mcp-oauth-two.json"),
+      clients: (name) => (name === "docs" ? { clientId: "app-a" } : name === "mirror" ? { clientId: "app-b" } : undefined),
+    });
+    const wait = async (name: string, flowId: string) => {
+      for (let i = 0; i < 100; i++) {
+        const status = two.status(name, flowId);
+        if (status && status.phase !== "waiting") return status;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      throw new Error("sign-in never settled");
+    };
+    try {
+      const a = await two.start("docs", mcp.url);
+      const b = await two.start("mirror", mcp.url);
+      expect(a.phase).toBe("waiting");
+      expect(b.phase).toBe("waiting");
+      const address = (status: McpSignInStatus) => new URL(status.authorizationUrl!).searchParams.get("redirect_uri");
+      expect(address(a)).toBe(address(b));
+      await approve(a);
+      await approve(b);
+      expect((await wait("docs", a.flowId!)).phase).toBe("succeeded");
+      expect((await wait("mirror", b.flowId!)).phase).toBe("succeeded");
+      const tokenA = await two.accessToken("docs", mcp.url);
+      const tokenB = await two.accessToken("mirror", mcp.url);
+      expect(tokenA).not.toBe(tokenB);
+      expect(oauth.isValid(`Bearer ${tokenA}`)).toBe(true);
+      expect(oauth.isValid(`Bearer ${tokenB}`)).toBe(true);
+    } finally {
+      two.dispose();
+    }
   });
 
   it("explains a busy redirect port instead of moving to another one", async () => {
@@ -566,6 +686,58 @@ describe("MCP sign-in from another computer", () => {
   });
 });
 
+describe("McpOAuthManager onSettled", () => {
+  async function watched(lifetimeMs?: number) {
+    await setup({}, lifetimeMs);
+    const calls: Array<[string, McpSignInPhase, string]> = [];
+    manager = new McpOAuthManager({
+      file: join(dir, "mcp-oauth.json"), ...(lifetimeMs ? { lifetimeMs } : {}),
+      onSettled: (name, phase, owner) => { calls.push([name, phase, owner]); },
+    });
+    return calls;
+  }
+
+  it("onSettled fires once with succeeded for a card owner", async () => {
+    const calls = await watched();
+    const owner = cardOwner("thread-1", "msg-1");
+    expect(owner).toBe("card:thread-1:msg-1");
+    const started = await manager.start("docs", mcp.url, undefined, owner);
+    expect(calls).toEqual([]);
+    expect((await approve(started)).status).toBe(200);
+    expect(calls).toEqual([["docs", "succeeded", owner]]);
+    manager.cancel("docs");
+    manager.dispose();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("reports a sign-in that expires or is cancelled, and nothing when the server shuts down", async () => {
+    const calls = await watched(100);
+    await manager.start("docs", mcp.url, undefined, "loopback");
+    await expect.poll(() => calls).toEqual([["docs", "expired", "loopback"]]);
+    await manager.start("docs", mcp.url, undefined, "loopback");
+    manager.cancel("docs");
+    expect(calls.at(-1)).toEqual(["docs", "cancelled", "loopback"]);
+    await manager.start("docs", mcp.url, undefined, "loopback");
+    manager.dispose();
+    expect(calls).toHaveLength(2);
+  });
+});
+
+describe("McpOAuthManager with a failing onSettled", () => {
+  it("a throwing onSettled neither breaks a callback nor escapes the expiry timer", async () => {
+    await setup({}, 150);
+    const heard: McpSignInPhase[] = [];
+    manager = new McpOAuthManager({ file: join(dir, "mcp-oauth.json"), lifetimeMs: 150, onSettled: (_name, phase) => { heard.push(phase); throw new Error("listener broke"); } });
+    const started = await manager.start("docs", mcp.url);
+    const page = await approve(started);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toBe("Signed in. You can close this tab and return to OpenMausBot.");
+    expect(manager.authState("docs", mcp.url)).toBe("signed-in");
+    await manager.start("docs", mcp.url);
+    await expect.poll(() => heard).toEqual(["succeeded", "expired"]);
+  });
+});
+
 describe("McpOAuthManager sign-in from a browser on another computer", () => {
   const elsewhere = { remote: true, origin: "https://cloud.example" };
 
@@ -658,6 +830,20 @@ describe("McpOAuthManager sign-in from a browser on another computer", () => {
     expect(new URL(started.authorizationUrl!).searchParams.get("redirect_uri")).toBe(mcpOAuthRedirectUri(mcp.url));
     expect(started.pasteBack).toBe(true);
     expect(oauth.counts.register).toBe(0);
+  });
+
+  it("returns a configured app to its configured https address, on any browser, with no loopback listener", async () => {
+    await setup({ noRegistration: true, preRegistered: { corp: null } });
+    registered = { clientId: "corp", redirectUri: "https://cloud.example/mcp-oauth/callback" };
+    const started = await manager.start("docs", mcp.url, undefined, "alice", elsewhere);
+    expect(new URL(started.authorizationUrl!).searchParams.get("redirect_uri")).toBe("https://cloud.example/mcp-oauth/callback");
+    expect(started.pasteBack).toBeUndefined();
+    expect(oauth.counts.register).toBe(0);
+    expect(await portFree(Number(new URL(mcpOAuthRedirectUri(mcp.url)).port))).toBe(true);
+    const callback = await returnAddress(started);
+    expect((await manager.publicCallback("cloud.example", callback.search)).status).toBe(200);
+    expect(manager.status("docs", started.flowId, "alice")?.phase).toBe("succeeded");
+    expect(oauth.isValid(`Bearer ${await manager.accessToken("docs", mcp.url)}`)).toBe(true);
   });
 
   it("asks a browser on this machine to paste nothing", async () => {

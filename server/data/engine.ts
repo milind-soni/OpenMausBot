@@ -3,13 +3,15 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { cpus, totalmem } from "node:os";
 import { join } from "node:path";
 import type * as DuckDB from "@duckdb/node-api";
 
 import { DATA_LIMITS, DATA_RESULTS_SCHEMA } from "../../shared/data-surface.ts";
 import { botFolder as defaultBotFolder } from "../bot-folder.ts";
+import { boxCpus } from "../box-cpus.ts";
+import { boxMemory } from "../box-memory.ts";
 import { DATA_DIR } from "../config.ts";
+import { tableIdentifierParts } from "./identifiers.ts";
 import {
   DataFailure,
   type BotDatabase,
@@ -18,6 +20,7 @@ import {
   type DataConnection,
   type DataEngine,
   type DataExtension,
+  type DataHeld,
   type DataHistogram,
   type DataPage,
   type DescribeResult,
@@ -27,6 +30,8 @@ import {
 } from "./types.ts";
 
 type Binding = typeof DuckDB;
+type DataShut = { closed: true } | { closed: false; why: DataHeld["why"]; detail?: string };
+const CLOSED: DataShut = { closed: true };
 type Cell = string | number | boolean | null;
 
 export const DATA_DB_FILE = "data.duckdb";
@@ -47,6 +52,10 @@ export interface DataEngineOptions {
   env?: NodeJS.ProcessEnv;
   idleMs?: number;
   binding?: Binding;
+  /** Tests: the wait before a status read's answer is confirmed by loading the binding. */
+  confirmInstalledMs?: number;
+  /** Tests: the look for the binding's files. */
+  filesFound?: (directory: string | null) => boolean;
 }
 
 /** Null means the server's own node_modules. */
@@ -68,15 +77,32 @@ function loadBinding(directory: string | null): Binding {
   return nativeRequire(directory)("@duckdb/node-api") as Binding;
 }
 
-/** DuckDB's defaults assume it owns the machine (80 % of RAM, every core), and a native OOM takes the server down. */
-export function instanceSettings(folder: string, dataDir: string, duckdbVersion: string, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
-  const quarterOfRam = Math.floor(totalmem() / 4);
+/** A status read asks before anything needs the binding; this long after, the binding is loaded to confirm the answer. */
+export const CONFIRM_INSTALLED_MS = 5_000;
+
+/** Whether this platform's binding files are where the loader would look, found without loading them. */
+export function bindingFilesFound(directory: string | null): boolean {
+  try {
+    const bindings = createRequire(nativeRequire(directory).resolve("@duckdb/node-api")).resolve("@duckdb/node-bindings");
+    const from = createRequire(bindings);
+    const native = `@duckdb/node-bindings-${process.platform}-${process.arch}`;
+    return [native, `${native}-musl`].some((name) => { try { from.resolve(`${name}/duckdb.node`); return true; } catch { return false; } });
+  } catch {
+    return false;
+  }
+}
+
+/** DuckDB's defaults assume it owns the machine (80 % of RAM, every core), and a native OOM takes the server down. A
+ * container's limits count, not its host's: each thread also counts against the container's pids limit. */
+export function instanceSettings(folder: string, dataDir: string, duckdbVersion: string, env: NodeJS.ProcessEnv = process.env,
+  box: { cpus: number; memoryBytes: number } = { cpus: boxCpus(), memoryBytes: boxMemory().bytes }): Record<string, string> {
+  const quarterOfRam = Math.floor(box.memoryBytes / 4);
   const memoryMiB = Math.max(256, Math.floor(Math.min(2 * 1024 ** 3, quarterOfRam) / 1024 ** 2));
   return {
     memory_limit: env.OMB_DUCKDB_MEMORY_LIMIT || `${memoryMiB}MiB`,
     temp_directory: join(folder, DATA_TMP_DIR),
     max_temp_directory_size: env.OMB_DUCKDB_MAX_TEMP_SIZE || "20GB",
-    threads: String(Math.max(1, Math.min(4, cpus().length || 1))),
+    threads: String(Math.max(1, Math.min(4, Math.floor(box.cpus) || 1))),
     // Extensions are tied to the exact DuckDB version.
     extension_directory: join(dataDir, "duckdb-extensions", duckdbVersion),
     autoinstall_known_extensions: "false",
@@ -165,7 +191,7 @@ function missingTableName(message: string): string | null {
 
 type InterruptCause = "timeout" | "cancelled";
 
-type RunState = { interrupted: InterruptCause | null; retry?: NodeJS.Timeout };
+type RunState = { interrupted: InterruptCause | null; deadline: number; retry?: NodeJS.Timeout };
 
 function failureFrom(error: unknown, sql: string, interrupted: InterruptCause | null, timeoutMs: number): DataFailure {
   if (error instanceof DataFailure) return error;
@@ -195,27 +221,10 @@ export class Lane {
   private async execute<T>(sql: string, options: { timeoutMs?: number; signal?: AbortSignal }, work: (connection: DuckDB.DuckDBConnection) => Promise<T>): Promise<T> {
     const timeoutMs = options.timeoutMs ?? DATA_LIMITS.sqlTimeoutMs;
     if (options.signal?.aborted) throw new DataFailure({ code: "cancelled", message: "Cancelled before it ran.", sql });
-    const state: RunState = { interrupted: null };
-    const deadline = Date.now() + timeoutMs;
+    const state: RunState = { interrupted: null, deadline: Date.now() + timeoutMs };
     this.running = state;
-    // DuckDB honours an interrupt only once its statement is dispatched, so a cause keeps re-delivering
-    // until the statement settles: one that lands first is not lost, and no cause blocks the next.
-    const interrupt = (cause: InterruptCause) => {
-      state.interrupted ??= cause;
-      this.connection.interrupt();
-      if (state.retry || Date.now() >= deadline) return;
-      const retry = setInterval(() => {
-        if (Date.now() >= deadline) {
-          clearInterval(retry);
-          state.retry = undefined;
-          return;
-        }
-        this.connection.interrupt();
-      }, INTERRUPT_DELIVERY_MS);
-      state.retry = retry;
-    };
-    const timer = setTimeout(() => interrupt("timeout"), timeoutMs);
-    const onAbort = () => interrupt("cancelled");
+    const timer = setTimeout(() => this.stop(state, "timeout"), timeoutMs);
+    const onAbort = () => this.stop(state, "cancelled");
     options.signal?.addEventListener("abort", onAbort, { once: true });
     try {
       return await work(this.connection);
@@ -230,9 +239,24 @@ export class Lane {
   }
 
   interrupt(): void {
-    if (!this.running) return;
-    this.running.interrupted ??= "cancelled";
+    if (this.running) this.stop(this.running, "cancelled");
+  }
+
+  // DuckDB honours an interrupt only once its statement is dispatched, so a cause keeps re-delivering
+  // until the statement settles: one that lands first is not lost, and no cause blocks the next.
+  private stop(state: RunState, cause: InterruptCause): void {
+    state.interrupted ??= cause;
     this.connection.interrupt();
+    if (state.retry || Date.now() >= state.deadline) return;
+    const retry = setInterval(() => {
+      if (Date.now() >= state.deadline) {
+        clearInterval(retry);
+        state.retry = undefined;
+        return;
+      }
+      this.connection.interrupt();
+    }, INTERRUPT_DELIVERY_MS);
+    state.retry = retry;
   }
 }
 
@@ -274,7 +298,9 @@ function formatEpoch(seconds: number, dateOnly: boolean): string {
 
 class BotDb implements BotDatabase {
   private state: Promise<Open> | null = null;
-  private closing: Promise<void> | null = null;
+  private closing: Promise<DataShut> | null = null;
+  /** The instance a close could not let go of: still open on the file, so the next statement uses it, never a second one. */
+  private kept: Promise<Open> | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
   private inFlight = 0;
   private readonly statsCache = new Map<string, DataColumnStats>();
@@ -286,9 +312,10 @@ class BotDb implements BotDatabase {
 
   private open(): Promise<Open> {
     if (!this.state) {
-      // The file admits one instance per process: a reopen waits for a close that may still be draining.
-      const previous = this.closing ?? Promise.resolve();
-      const opening = previous.then(() => this.openNow());
+      // The file admits one instance per process: a reopen waits for a close that may still be draining, and after a close
+      // that could not let go of the instance it goes on with that one.
+      const previous = this.closing ?? Promise.resolve(CLOSED);
+      const opening = previous.then((shut) => (shut.closed || !this.kept ? this.openNow() : this.kept));
       this.state = opening;
       opening.catch(() => {
         if (this.state === opening) this.state = null;
@@ -452,7 +479,7 @@ class BotDb implements BotDatabase {
   }
 
   private async lookup(name: string): Promise<CatalogEntry> {
-    const parts = this.splitIdentifier(name.trim()).slice(-2);
+    const parts = (tableIdentifierParts(name) ?? this.splitIdentifier(name.trim())).slice(-2);
     const table = parts[parts.length - 1];
     const schema = parts.length === 2 ? parts[0] : null;
     if (!table) throw new DataFailure({ code: "invalid_input", message: "A table name is required." });
@@ -521,8 +548,10 @@ class BotDb implements BotDatabase {
 
   private async source(target: string): Promise<string> {
     const text = target.trim().replace(/;+\s*$/, "");
-    const looksLikeName = /^[\w."$ -]+$/.test(text) && !/\s(?:from|select|with|values)\s/i.test(text) && !/^(?:select|with|from|values|pivot|unpivot|show|describe)\b/i.test(text);
-    if (looksLikeName) return this.resolveTable(text);
+    // Keep accepting the display names callers could pass before quoted SQL
+    // identifiers were recognized here (for example, Order Items).
+    const displayName = /^[\w."$ -]+$/.test(text) && !/\s(?:from|select|with|values)\s/i.test(text) && !/^(?:select|with|from|values|pivot|unpivot|show|describe)\b/i.test(text);
+    if (tableIdentifierParts(text) || displayName) return this.resolveTable(text);
     return `(${text}) AS omb_described`;
   }
 
@@ -578,10 +607,14 @@ class BotDb implements BotDatabase {
     const result: DataHistogram = { table: this.displayName(entry), column: found.name, bins: [] };
 
     if (numeric || temporal) {
-      const value = numeric ? `CAST(${id} AS DOUBLE)` : `epoch(CAST(${id} AS TIMESTAMP))`;
-      const sql = `WITH omb_range AS (SELECT min(${value}) AS lo, max(${value}) AS hi FROM ${from} WHERE ${id} IS NOT NULL)
-SELECT coalesce(LEAST(floor((${value} - omb_range.lo) / nullif(omb_range.hi - omb_range.lo, 0) * ${bins}), ${bins - 1}), 0)::INTEGER AS bin, count(*) AS n, min(omb_range.lo), min(omb_range.hi)
-FROM ${from}, omb_range WHERE ${id} IS NOT NULL GROUP BY bin ORDER BY bin`;
+      const sourceId = `omb_source.${id}`;
+      const value = numeric ? `CAST(${sourceId} AS DOUBLE)` : `epoch(CAST(${sourceId} AS TIMESTAMP))`;
+      // NaN/infinity cannot define a finite bucket. Infinite dates produce
+      // NULL epochs; they must not be counted in the constant/first bucket.
+      const finite = `isfinite(${value})`;
+      const sql = `WITH omb_range AS (SELECT min(${value}) AS lo, max(${value}) AS hi FROM ${from} AS omb_source WHERE ${finite})
+SELECT LEAST(coalesce(floor((${value} - omb_range.lo) / nullif(omb_range.hi - omb_range.lo, 0) * ${bins}), 0), ${bins - 1})::INTEGER AS bin, count(*) AS n, min(omb_range.lo), min(omb_range.hi)
+FROM ${from} AS omb_source, omb_range WHERE ${finite} GROUP BY bin ORDER BY bin`;
       const rows = (await this.statement("panel", sql, options, (o, conn) => this.read(o, conn, sql))).rows;
       if (!rows.length) return result;
       const lo = Number(rows[0][2]);
@@ -673,28 +706,51 @@ FROM ${from}, omb_range WHERE ${id} IS NOT NULL GROUP BY bin ORDER BY bin`;
   }
 
   async close(): Promise<void> {
+    await this.shut();
+  }
+
+  /** Closed, or why the instance is still open: a statement that did not stop, or a close that failed. */
+  async shut(): Promise<DataShut> {
     if (this.idleTimer) {
       clearTimeout(this.idleTimer);
       this.idleTimer = null;
     }
     const pending = this.state;
-    if (!pending) return this.closing ?? undefined;
+    if (!pending) return this.closing ?? CLOSED;
     this.state = null;
     this.statsCache.clear();
-    const closing = (async () => {
+    const closing = (async (): Promise<DataShut> => {
       let open: Open;
-      try { open = await pending; } catch { return; }
-      // Closing a connection with a statement in flight is undefined: interrupt first, then let the lanes drain.
-      for (const lane of Object.values(open.lanes)) lane.interrupt();
-      if (!await drainLanes(Object.values(open.lanes), CLOSE_DRAIN_MS)) {
-        console.warn(`data: ${this.botId}'s database still had a statement running after ${CLOSE_DRAIN_MS} ms; its handles are left to the process`);
-        return;
+      try { open = await pending; } catch { return CLOSED; }
+      const shut = await this.closeOpen(open);
+      if (shut.closed) this.kept = null;
+      else {
+        this.kept = pending;
+        if (!this.state) this.state = pending;
       }
-      for (const lane of Object.values(open.lanes)) lane.connection.closeSync();
-      open.instance.closeSync();
+      return shut;
     })();
     this.closing = closing;
-    try { await closing; } finally { if (this.closing === closing) this.closing = null; }
+    try { return await closing; } finally { if (this.closing === closing) this.closing = null; }
+  }
+
+  private async closeOpen(open: Open): Promise<DataShut> {
+    // Closing a connection with a statement in flight is undefined: interrupt first, then let the lanes drain.
+    for (const lane of Object.values(open.lanes)) { try { lane.interrupt(); } catch { /* the drain below decides */ } }
+    if (!await drainLanes(Object.values(open.lanes), CLOSE_DRAIN_MS)) {
+      console.warn(`data: ${this.botId}'s database still had a statement running after ${CLOSE_DRAIN_MS} ms; its handles are left to the process`);
+      return { closed: false, why: "running" };
+    }
+    try {
+      for (const lane of Object.values(open.lanes)) lane.connection.closeSync();
+      // The last close writes the WAL into the file and removes it: the file then holds every table on its own.
+      open.instance.closeSync();
+    } catch (error) {
+      const detail = (error instanceof Error ? error.message : String(error)).split("\n")[0]!.slice(0, 200);
+      console.warn(`data: ${this.botId}'s database did not close: ${detail}`);
+      return { closed: false, why: "failed", detail };
+    }
+    return CLOSED;
   }
 
   get isOpen(): boolean {
@@ -705,6 +761,10 @@ FROM ${from}, omb_range WHERE ${id} IS NOT NULL GROUP BY bin ORDER BY bin`;
 class Engine implements DataEngine {
   private readonly databases = new Map<string, BotDb>();
   private loaded: { binding: Binding } | { reason: string } | null = null;
+  private confirming: ReturnType<typeof setTimeout> | null = null;
+  private readonly installedListeners = new Set<() => void>();
+  private readonly confirmInstalledMs: number;
+  private readonly filesFound: (directory: string | null) => boolean;
   readonly env: NodeJS.ProcessEnv;
   readonly dataDir: string;
   readonly idleMs: number;
@@ -714,6 +774,8 @@ class Engine implements DataEngine {
     this.env = options.env ?? process.env;
     this.dataDir = options.dataDir ?? DATA_DIR;
     this.idleMs = options.idleMs ?? IDLE_CLOSE_MS;
+    this.confirmInstalledMs = options.confirmInstalledMs ?? CONFIRM_INSTALLED_MS;
+    this.filesFound = options.filesFound ?? bindingFilesFound;
     this.folder = options.botFolder ?? defaultBotFolder;
     if (options.binding) this.loaded = { binding: options.binding };
   }
@@ -745,6 +807,20 @@ class Engine implements DataEngine {
     return "reason" in loaded ? loaded.reason : null;
   }
 
+  installed(): boolean {
+    if (this.loaded) return "binding" in this.loaded;
+    const found = this.filesFound(duckdbDirectory(this.env));
+    if (!this.confirming) {
+      this.confirming = setTimeout(() => { if ((this.unavailable() === null) !== found) for (const listener of this.installedListeners) listener(); }, this.confirmInstalledMs);
+      this.confirming.unref?.();
+    }
+    return found;
+  }
+
+  onInstalledChange(listener: () => void): void {
+    this.installedListeners.add(listener);
+  }
+
   async forBot(botId: string): Promise<BotDatabase> {
     if (!botId || /[\\/]|^\.\.?$/.test(botId)) throw new DataFailure({ code: "invalid_input", message: `Not a bot id: "${botId}".` });
     this.binding();
@@ -765,6 +841,13 @@ class Engine implements DataEngine {
       // Windows keeps a just-closed file busy for a moment; rm retries EBUSY/EPERM.
       await rm(join(folder, name), { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     }
+  }
+
+  /** Every bot's database closed and kept, to open again on its next statement; the ones still open, and why. */
+  async release(): Promise<DataHeld[]> {
+    const open = [...this.databases.values()];
+    const shut = await Promise.all(open.map((db) => db.shut()));
+    return open.flatMap((db, i) => { const one = shut[i]!; return one.closed ? [] : [{ botId: db.botId, why: one.why, ...(one.detail ? { detail: one.detail } : {}) }]; });
   }
 
   async closeAll(): Promise<void> {

@@ -288,6 +288,50 @@ describe("Pi MCP extension registration", () => {
     return dir;
   };
 
+  it.each([undefined, { allow: ["native:bash", "native:powershell"] }])(
+    "rejects shell timeouts mistaken for milliseconds with scope %j",
+    async (toolScope) => {
+      scopeConfig(toolScope);
+      const f = scopedApi(["bash", "powershell"]);
+      await extension(f.api);
+      for (const toolName of ["bash", "powershell"]) {
+        const input = { command: "echo should-not-run", timeout: 90_000 };
+        expect(await f.handlers.get("tool_call")?.({ toolName, input })).toMatchObject({
+          block: true,
+          reason: expect.stringMatching(/seconds.*900/),
+        });
+        expect(input.timeout).toBe(90_000);
+      }
+    },
+  );
+
+  it("bounds shell calls without a timeout and preserves valid seconds", async () => {
+    scopeConfig(undefined);
+    const f = scopedApi(["bash", "powershell", "read"]);
+    await extension(f.api);
+    for (const toolName of ["bash", "powershell"]) {
+      const input: { command: string; timeout?: number } = { command: "echo bounded" };
+      expect(await f.handlers.get("tool_call")?.({ toolName, input })).toBeUndefined();
+      expect(input.timeout).toBe(120);
+      for (const timeout of [0.1, 90, 900]) {
+        const explicit = { command: "echo valid", timeout };
+        expect(await f.handlers.get("tool_call")?.({ toolName, input: explicit })).toBeUndefined();
+        expect(explicit.timeout).toBe(timeout);
+      }
+    }
+    const input = { path: "fixture.txt" };
+    expect(await f.handlers.get("tool_call")?.({ toolName: "read", input })).toBeUndefined();
+    expect(input).toEqual({ path: "fixture.txt" });
+  });
+
+  it.each([0, -1, NaN, Infinity, null, "90"])("rejects invalid shell timeout %s", async (timeout) => {
+    scopeConfig(undefined);
+    const f = scopedApi(["bash"]);
+    await extension(f.api);
+    expect(await f.handlers.get("tool_call")?.({ toolName: "bash", input: { command: "echo invalid", timeout } }))
+      .toMatchObject({ block: true, reason: expect.stringMatching(/seconds/) });
+  });
+
   it("intersects native and package tools before the first turn and after restoration", async () => {
     scopeConfig({ allow: ["native:read", "native:edit", "native:write"] });
     const f = scopedApi(["read", "write", "bash", "package_tool"]);

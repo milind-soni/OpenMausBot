@@ -1,13 +1,13 @@
-import { FolderOpen, Globe, Puzzle, UsersRound, Zap } from "lucide-react";
-import type { ReactNode } from "react";
+import { AppWindow, FolderOpen, FolderTree, Globe, Puzzle, Rocket, UsersRound, Zap } from "lucide-react";
+import { useMemo, type ReactNode } from "react";
 
 import { useAppTriggers } from "@/lib/app-triggers";
+import { automationsFrom, hasUnseenProblemRun } from "@/lib/automations";
 import { cn } from "@/lib/cn";
 import { useCloudFilesReady } from "@/lib/cloud-files";
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useWebPanels } from "@/lib/web-panel-preferences";
-import { isRoutineProblemRun } from "@/lib/routines";
 import { useSidebarToolsLayout, type SidebarDensity } from "@/lib/sidebar-preferences";
 import { useStore } from "@/state/store";
 
@@ -47,12 +47,13 @@ function NavRow({
       aria-current={active ? "page" : undefined}
       className={cn(
         "relative flex items-center rounded-xl transition-colors",
-        rail ? "size-9 shrink-0 justify-center" : iconsOnly ? "mx-auto size-[46px] shrink-0 justify-center" : "w-full min-h-9 gap-3 px-3 py-1.5 text-left",
-        active ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
+        // A labelled row follows the bot rows: a 16px icon, a 10px gap, a regular 14/20 label and the ink hover.
+        rail ? "size-9 shrink-0 justify-center" : iconsOnly ? "mx-auto size-[46px] shrink-0 justify-center" : "w-full min-h-9 gap-2.5 px-3 py-1.5 text-left",
+        active ? "bg-raised text-ink" : "text-ink hover:bg-ink/[0.06]",
       )}
     >
       {icon(active)}
-      {!iconsOnly && <span className="flex-1 truncate text-[14px] font-medium leading-5">{label}</span>}
+      {!iconsOnly && <span className="flex-1 truncate text-[14px] leading-5">{label}</span>}
       {attention && (
         <span
           data-testid="routines-attention"
@@ -80,16 +81,20 @@ export function SidebarAppsButton() {
         state.pluginsOpen ? "bg-raised text-accent" : "text-ink-secondary hover:bg-raised/50 hover:text-ink",
       )}
     >
-      <Puzzle size={18} />
+      <Puzzle size={16} />
     </button>
   );
 }
 
-/** An unseen failed run, or an app trigger in trouble. */
+/** An unseen failed run of an automation the Automations page lists (the same list, so opening it clears the dot), or an app trigger in trouble. */
 export function useAutomationsNeedYou(): boolean {
   const { state } = useStore();
   const appTriggers = useAppTriggers();
-  return state.routineRuns.some((run) => isRoutineProblemRun(run) && !run.seenAt) || appTriggers.triggers.some((trigger) => trigger.enabled && trigger.problem);
+  const routinesOnly = typeof window !== "undefined" && window.ogb?.remoteClient?.active === true;
+  const unseenProblem = useMemo(() => hasUnseenProblemRun(automationsFrom({
+    routines: state.routines, webhooks: routinesOnly ? [] : state.webhooks, appTriggers: appTriggers.triggers, runs: state.routineRuns, bots: state.bots,
+  })), [state.routines, state.webhooks, appTriggers.triggers, state.routineRuns, state.bots, routinesOnly]);
+  return unseenProblem || appTriggers.triggers.some((trigger) => trigger.enabled && trigger.problem);
 }
 
 export function SidebarBottomButtons() {
@@ -118,7 +123,8 @@ export function SidebarFooterNav({
   const iconsOnly = density === "icons";
   const toolsLayout = useSidebarToolsLayout();
   const toolbar = advanced && !iconsOnly && toolsLayout === "toolbar";
-  const iconSize = iconsOnly && !rail ? 20 : 18;
+  // 16 in rows, toolbars and 36px buttons; the avatars-only column's 46px buttons keep 20.
+  const iconSize = iconsOnly && !rail ? 20 : 16;
   const tone = (active: boolean) => (active ? "text-accent" : "text-ink-secondary");
   const automationsNeedYou = useAutomationsNeedYou();
   const automationsRow = <NavRow
@@ -169,6 +175,24 @@ export function SidebarFooterNav({
         />
       )}
       {filesRow}
+      <NavRow
+        id="published-apps"
+        label={t("sidebar.nav.publishedApps")}
+        iconsOnly={iconsOnly || toolbar}
+        active={state.activeView === "published-apps"}
+        icon={(active) => <Rocket size={iconSize} className={tone(active)} />}
+        onClick={() => dispatch({ type: "showPublishedApps" })}
+      />
+      {state.config?.team && (
+        <NavRow
+          id="team-files"
+          label={t("sidebar.nav.teamFiles")}
+          iconsOnly={iconsOnly || toolbar}
+          active={state.activeView === "team-files"}
+          icon={(active) => <FolderTree size={iconSize} className={tone(active)} />}
+          onClick={() => dispatch({ type: "showTeamFiles" })}
+        />
+      )}
       {advanced && webPanels.map((panel) => (
         <NavRow
           key={panel.id}
@@ -176,7 +200,7 @@ export function SidebarFooterNav({
           label={panel.name}
           iconsOnly={iconsOnly || toolbar}
           active={state.activeView === "web-panel" && state.webPanelId === panel.id}
-          icon={(active) => <Globe size={iconSize} className={tone(active)} />}
+          icon={(active) => (panel.page ? <AppWindow size={iconSize} className={tone(active)} /> : <Globe size={iconSize} className={tone(active)} />)}
           onClick={() => dispatch({ type: "showWebPanel", id: panel.id })}
         />
       ))}

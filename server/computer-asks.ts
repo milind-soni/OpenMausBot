@@ -11,6 +11,7 @@ import { optionCardsForTools } from "./message-db.ts";
 import { buildNotification, type Notification } from "./notify.ts";
 import type { BotRecord, Store } from "./store.ts";
 import type { CardAnswerer } from "../shared/wire.ts";
+import { turnWaitedOnPerson } from "./waiting-on-person.ts";
 import {
   ASK_FOR_COMPUTER_TOOL, cleanAskWhy, COMPUTER_ASK_TOOL, computerAskHeadline, computerAskReasonLine, computerAskText, needsTheApp, turnsOnFromHere,
   type ComputerAskCard, type ComputerAskReason, type ComputerAskState, type ComputerDevice, type ComputerNeed,
@@ -362,7 +363,7 @@ export class ComputerAsks {
 
   private idle(ask: Ask): void {
     const task = this.deps.store.projectBotForTask(ask.botId, ask.threadId);
-    if (task?.activity === "waiting-on-you") this.deps.store.setTaskActivity(task.id, ask.threadId, "working");
+    if (turnWaitedOnPerson(task)) this.deps.store.setTaskActivity(task.id, ask.threadId, "working");
   }
 
   private patch(ask: Ask, fields: { answered?: string; answeredBy?: Answerer; dismissed?: boolean }): void {

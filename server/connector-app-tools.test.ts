@@ -3,14 +3,14 @@ import { describe, expect, it } from "vitest";
 import { APP_TOOLS, appToolAnswer, appToolCall, appToolEntries, appToolsFor } from "./connector-app-tools.ts";
 
 const CONNECTED = ["gmail", "googlecalendar", "github"];
-const READS = ["gmail.search_emails", "gmail.read_email", "gmail.read_email_thread", "googlecalendar.list_events", "googlecalendar.list_calendars"];
+const READS = ["gmail.search_emails", "gmail.read_email", "gmail.read_email_thread", "gmail.list_drafts", "gmail.read_draft", "googlecalendar.list_events", "googlecalendar.list_calendars"];
 
 describe("the connected-app tools a bot gets", () => {
   it("are its connected apps' tools, and only the reads of an app it may only read", () => {
     expect(appToolsFor({}, CONNECTED)).toEqual(APP_TOOLS.map((tool) => tool.name));
     expect(appToolsFor({ connectorScopes: { apps: { gmail: "read", googlecalendar: "read" } }, connectorTools: { gmail: { tools: "*" }, googlecalendar: { tools: "*" } } }, CONNECTED)).toEqual(READS);
     expect(appToolsFor({ connectorScopes: { apps: { gmail: "write" } }, connectorTools: { gmail: { tools: "*" } } }, CONNECTED))
-      .toEqual(["gmail.search_emails", "gmail.read_email", "gmail.read_email_thread", "gmail.create_draft", "gmail.send_email"]);
+      .toEqual(APP_TOOLS.filter(tool => tool.name.startsWith("gmail.")).map(tool => tool.name));
   });
 
   it("never offers an app that is not connected, not granted, or granted other tools only", () => {
@@ -24,7 +24,7 @@ describe("the connected-app tools a bot gets", () => {
 describe("how an engine sees them", () => {
   it("lists them under the dotted names for an engine that finds tools by their own name, and with an underscore elsewhere", () => {
     expect(appToolEntries(["gmail.search_emails"], "dotted").map((entry) => entry.name)).toEqual(["gmail.search_emails"]);
-    expect(appToolEntries(READS, "plain").map((entry) => entry.name)).toEqual(["gmail_search_emails", "gmail_read_email", "gmail_read_email_thread", "googlecalendar_list_events", "googlecalendar_list_calendars"]);
+    expect(appToolEntries(READS, "plain").map((entry) => entry.name)).toEqual(READS.map(name => name.replace(".", "_")));
   });
 
   it("keeps every schema one flat object, the shape every engine's converter keeps", () => {
@@ -38,6 +38,19 @@ describe("how an engine sees them", () => {
 });
 
 describe("a call to one", () => {
+  it("keeps draft identity and threading when replacing a reply", () => {
+    const input = { draft_id: "r123", to: "support@example.test", subject: "Re: Account", body: "Revised reply", thread_id: "t123" };
+    const update = appToolCall("gmail_update_draft", input);
+    expect(update?.slug).toBe("GMAIL_UPDATE_DRAFT");
+    expect(update?.frame(1)).toMatchObject({ params: { arguments: { tools: [{ tool_slug: "GMAIL_UPDATE_DRAFT", arguments: {
+      user_id: "me", draft_id: "r123", recipient_email: "support@example.test", subject: "Re: Account", body: "Revised reply", thread_id: "t123",
+    } }] } } });
+    expect(appToolCall("gmail.create_draft", input)?.frame(2)).toMatchObject({ params: { arguments: { tools: [{ tool_slug: "GMAIL_CREATE_EMAIL_DRAFT", arguments: {
+      thread_id: "t123", subject: "Re: Account", body: "Revised reply",
+    } }] } } });
+    expect(appToolsFor({ connectorTools: { gmail: { tools: ["GMAIL_CREATE_EMAIL_DRAFT"] } } }, ["gmail"])).toEqual(["gmail.create_draft"]);
+  });
+
   it("runs its Composio tool through the multi-execute tool, by either name, with the arguments it takes", () => {
     const call = appToolCall("gmail.search_emails", { query: "from:ada@example.test", max_results: "5" });
     expect(call?.slug).toBe("GMAIL_FETCH_EMAILS");
@@ -48,6 +61,19 @@ describe("a call to one", () => {
     expect(appToolCall("gmail_send_email", { to: "ada@example.test, max@example.test", subject: "Hi", body: "Hello" })?.frame(1))
       .toMatchObject({ params: { arguments: { tools: [{ tool_slug: "GMAIL_SEND_EMAIL", arguments: { recipient_email: "ada@example.test", extra_recipients: ["max@example.test"], subject: "Hi", body: "Hello" } }] } } });
     expect(appToolCall("COMPOSIO_SEARCH_TOOLS", {})).toBeNull();
+  });
+
+  it("names the connected account the bot chose, so an account limit can be met through the shortcut too", () => {
+    for (const tool of APP_TOOLS) {
+      const [entry] = appToolEntries([tool.name], "plain");
+      expect((entry!.inputSchema as { properties: Record<string, unknown> }).properties.account).toMatchObject({ type: "string" });
+    }
+    expect(appToolCall("gmail.search_emails", { query: "is:unread", account: " ca_home " })?.frame(1)).toMatchObject({ params: { arguments: { tools: [{
+      tool_slug: "GMAIL_FETCH_EMAILS", account: "ca_home", arguments: { query: "is:unread" },
+    }] } } });
+    const item = (appToolCall("googlecalendar.list_events", { account: "" })!.frame(1) as { params: { arguments: { tools: Array<Record<string, unknown>> } } }).params.arguments.tools[0]!;
+    expect(item).not.toHaveProperty("account");
+    expect(item.arguments).not.toHaveProperty("account");
   });
 
   it("answers with the tool's own data, and passes a refusal or failure through as it came", () => {

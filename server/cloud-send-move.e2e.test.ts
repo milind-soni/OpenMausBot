@@ -1,7 +1,7 @@
 // The one-time move to the person's own Cloud, end to end: this computer's server and a Cloud home
 // (scripts/testing/cloud-send-fixture.ts) with main's own wiring between them, the move run and checked as main runs and
-// checks it, the connected-apps service with a fake Composio behind it, a fake sign-in server for an MCP server's own
-// account and a fake HighLevel. Disposable homes; no network.
+// checks it, the connected-apps service with a fake Composio behind it and a fake sign-in server for an MCP server's
+// own account. Disposable homes; no network.
 import { randomBytes, randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -14,7 +14,6 @@ import { createComputerSharing } from "../electron/computer-sharing.mjs";
 import { itemKey } from "../electron/cloud-send-parts.mjs";
 import { launchCloudSendFixture, type CloudSendFixture } from "../scripts/testing/cloud-send-fixture.ts";
 import { startBrokerFake, type BrokerFake } from "./testing/broker-fake.ts";
-import { FAKE_LOCATION_ID, startFakeHighLevel, startFakeRelay, type FakeHighLevel, type FakeRelay } from "./testing/fake-highlevel.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 
 // Obvious fakes only.
@@ -25,14 +24,11 @@ const DODO_KEY = `dodo_test_fake_${hex(12)}`;
 const DOCS_TOKEN = `fake-docs-token-${hex(8)}`;
 const CLIENT_SECRET = `fake-client-secret-${hex(8)}`;
 const OPENROUTER_KEY = `sk-or-v1-fake${hex(16)}`;
-const PIT = `pit-fake-move-${hex(8)}`;
 const ACCESS = `fake-access-${hex(8)}`, REFRESH = `fake-refresh-${hex(8)}`;
-const SECRETS = [TOKEN, PASSWORD, DODO_KEY, DOCS_TOKEN, CLIENT_SECRET, OPENROUTER_KEY, PIT, ACCESS, REFRESH];
+const SECRETS = [TOKEN, PASSWORD, DODO_KEY, DOCS_TOKEN, CLIENT_SECRET, OPENROUTER_KEY, ACCESS, REFRESH];
 const LINEAR_URL = "https://mcp.linear.example.test/mcp";
 
 let broker: BrokerFake;
-let hl: FakeHighLevel;
-let relay: FakeRelay;
 let fx: CloudSendFixture;
 let signIns: Server;
 let tokenEndpoint = "";
@@ -47,9 +43,7 @@ beforeAll(async () => {
   mkdirSync(join(scratch, "turns"));
   writeFileSync(release, "");
   broker = await startBrokerFake();
-  hl = await startFakeHighLevel();
-  relay = await startFakeRelay({ onAccessToken: (token) => hl.tokens.add(token) });
-  fx = await launchCloudSendFixture({ onePasswordToken: TOKEN, broker, toolCalls: 36, env: { OMB_HIGHLEVEL_RELAY_URL: relay.url, OMB_HIGHLEVEL_API_URL: hl.url },
+  fx = await launchCloudSendFixture({ onePasswordToken: TOKEN, broker, toolCalls: 36,
     cloudEngine: `process.env.FAKE_CLAUDE_MODE = "hang"; process.env.FAKE_CLAUDE_RELEASE = ${JSON.stringify(release)};
 if (process.argv[2] !== "--version") { process.env.FAKE_CLAUDE_DUMP = ${JSON.stringify(join(scratch, "turns"))} + "/" + process.pid + ".json"; process.env.FAKE_CLAUDE_TEXT_DUMP = ${JSON.stringify(join(scratch, "one-shot.json"))}; }` });
   signIns = createServer((req, res) => {
@@ -69,8 +63,6 @@ afterAll(async () => {
   for (const proxy of proxies) proxy.kill();
   await fx?.close();
   await broker?.close();
-  await relay?.close();
-  await hl?.close();
   await new Promise((resolve) => signIns?.close(resolve));
   if (scratch) rmSync(scratch, { recursive: true, force: true });
 });
@@ -202,8 +194,8 @@ it("a move carries everything, apps and keys first, and its check finds every ro
   expect((await local("POST", "/api/logins", { site: "accounts.example.test", username: "alice", password: PASSWORD, totp: "JBSWY3DPEHPK3PXP", bots: [ember.id] })).status).toBe(201);
   expect((await local("POST", "/api/logins/1password", { token: TOKEN })).status).toBe(200);
 
-  // Apps and keys: an MCP server's key and another's header token, a sign-in of its own, an AI key, HighLevel by its token,
-  // and the connected-apps account.
+  // Apps and keys: an MCP server's key and another's header token, a sign-in of its own, an AI key and the connected-apps
+  // account.
   for (const server of [
     { name: "dodo", command: "node", args: ["-e", "process.stdin.resume()"], env: { DODO_PAYMENTS_API_KEY: DODO_KEY } },
     { name: "docs", type: "http", url: "https://mcp.docs.example.test/mcp", headers: { Authorization: `Bearer ${DOCS_TOKEN}` } },
@@ -216,8 +208,6 @@ it("a move carries everything, apps and keys first, and its check finds every ro
   writeFileSync(desktopSignIns, JSON.stringify({ servers: { linear: { url: LINEAR_URL, state: "signed-in", clientId: "omb-fixture-client", tokenAuth: "client_secret_post",
     tokenEndpoint, tokens: { access: ACCESS, refresh: REFRESH, expiresAt: Date.now() + 3_600_000 } } } }));
   expect((await local("PATCH", "/api/config", { openrouter: { key: OPENROUTER_KEY } })).status).toBe(200);
-  hl.tokens.add(PIT);
-  expect((await local("POST", "/api/highlevel/token", { token: PIT, locationId: FAKE_LOCATION_ID })).status).toBe(200);
   const gmail = broker.account(fx.desktopInstallation!.userId, "gmail");
 
   // The first pass: everything but the sign-in that refreshes itself, which stays here while this computer is home.
@@ -251,7 +241,7 @@ it("a move carries everything, apps and keys first, and its check finds every ro
   expect(report.attachments).toEqual([]);
   expect(report.secrets.differs).toEqual([]);
   expect(report.secrets.missing).toEqual([]);
-  expect(report.secrets.equal).toEqual(expect.arrayContaining([itemKey.login("example.test", "alice"), "1password", "key:openrouter", "mcp:dodo", "mcp:docs", "mcp:linear", "highlevel"]));
+  expect(report.secrets.equal).toEqual(expect.arrayContaining([itemKey.login("example.test", "alice"), "1password", "key:openrouter", "mcp:dodo", "mcp:docs", "mcp:linear"]));
 
   // Read back the way each side's chat view and bot read it.
   const [here, there] = [await history(local, archie.threadId), await history(onCloud, archie.threadId)];

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { t } from "./i18n";
@@ -58,5 +59,12 @@ describe("chrome", () => {
     expect(swatch).not.toContain("repeating");
     for (const tone of CHROME_GRADIENT) expect(swatch).toContain(tone);
     expect(colorSwatch("blue")).toBe(MAUS_COLORS.blue);
+  });
+});
+
+describe("the lent computer's menu dots", () => {
+  it("use the mascot colours, so a bot's dot there matches its mascot", () => {
+    const table = /BOT_COLOR_HEX = Object\.freeze\(\{([^}]+)\}\)/.exec(readFileSync(new URL("../../electron/color-dot.mjs", import.meta.url), "utf8"))?.[1] ?? "";
+    expect(Object.fromEntries([...table.matchAll(/(\w+): "(#[0-9A-F]{6})"/gi)].map(([, name, hex]) => [name, hex]))).toEqual(MAUS_COLORS);
   });
 });

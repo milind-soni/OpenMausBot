@@ -3,20 +3,21 @@ import { createPortal } from "react-dom";
 import { ChevronDown, LifeBuoy, Plus } from "lucide-react";
 
 import { cn } from "@/lib/cn";
-import { configuredModelInstances } from "@/lib/engine-rail";
+import { backupNote, configuredModelInstances } from "@/lib/engine-rail";
 import { t } from "@/lib/i18n";
 import type { Typeahead } from "@/lib/menu-keys";
 import { pickerPlacement, type PickerPlacement } from "@/lib/picker-placement";
 import { shortModelLabel } from "@/lib/model-friendly";
 import { modelName, providerName, simpleModelMenu } from "@/lib/simple-model-menu";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
-import { useStore, type Bot, type InstanceInfo } from "@/state/store";
+import { type Bot, type InstanceInfo } from "@/state/store";
 import { useMenuMotion } from "../MenuMotion";
 import { modelMenuKey, modelMenuPointerMove } from "../model-menu-keys";
 import { SIMPLE_POPOVER_WIDTH } from "../ModelPicker";
 import { InstanceProviderMark } from "../ProviderIcons";
 import { SimpleModelMenu } from "../SimpleModelMenu";
 import { buttonCls, Card, ColRow, RowIcon, RowText, TrashButton } from "./rows";
+import { sameFields, useStoreActions, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 type Backup = NonNullable<Bot["fallback"]>[number];
 
@@ -24,6 +25,8 @@ type Backup = NonNullable<Bot["fallback"]>[number];
 export const MAX_BACKUPS = 5;
 
 const NO_SELECTION = { instanceId: "", model: "" };
+/** One model of one account: a bot's backups may share an account, never a model. */
+const modelKey = (instanceId: string, model: string) => `${instanceId}\u0000${model}`;
 const NOTHING_PROBED: ReadonlySet<string> = new Set();
 
 function BackupChooser({ bot, current, exclude, onPick, label, title, buttonRef, className, children, ...rest }: {
@@ -38,7 +41,7 @@ function BackupChooser({ bot, current, exclude, onPick, label, title, buttonRef,
   children: ReactNode;
   "data-panel-action"?: string;
 }) {
-  const { state, dispatch, refreshInstances, refreshModels } = useStore();
+  const state = useStoreSelector((s) => ({ instances: s.instances }), sameFields), dispatch = useStoreDispatch(), { refreshInstances, refreshModels } = useStoreActions();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
@@ -107,12 +110,21 @@ function BackupChooser({ bot, current, exclude, onPick, label, title, buttonRef,
   };
 
   const menuFor = () => {
-    const listed = configuredModelInstances(state.instances, current?.instanceId).filter((instance) => !exclude.has(instance.instanceId));
+    const listed = configuredModelInstances(state.instances, current?.instanceId).flatMap((instance) => {
+      const options = instance.models.options.filter((option) => !exclude.has(modelKey(instance.instanceId, option.id)));
+      if (options.length === instance.models.options.length) return [instance];
+      return options.length ? [{ ...instance, models: { ...instance.models, options } }] : [];
+    });
     const built = simpleModelMenu({
       instances: state.instances, listed, selection: current ?? NO_SELECTION,
       bot: { name: bot.name, selection: bot.modelSelection }, query, expanded, probing: NOTHING_PROBED, loading, refreshing,
     });
-    return current ? built : { ...built, current: null };
+    const main = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
+    const groups = built.groups.map((group) => {
+      const note = backupNote(main, group.instance);
+      return note ? { ...group, note } : group;
+    });
+    return { ...built, groups, ...(current ? {} : { current: null }) };
   };
 
   const onMenuKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -205,11 +217,11 @@ function BackupChooser({ bot, current, exclude, onPick, label, title, buttonRef,
 }
 
 export function BackupAis({ bot, onChange }: { bot: Bot; onChange: (fallback: Backup[]) => void }) {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ instances: s.instances }), sameFields);
   const chain = bot.fallback ?? [];
   const addRef = useRef<HTMLButtonElement>(null);
-  const others = (except: number | null) =>
-    new Set([bot.modelSelection.instanceId, ...chain.filter((_, index) => index !== except).map((entry) => entry.instanceId)]);
+  const others = (except: number | null) => new Set([bot.modelSelection, ...chain.filter((_, index) => index !== except)]
+    .map((entry) => modelKey(entry.instanceId, entry.model)));
   const describe = (entry: Backup) => {
     const instance = state.instances.find((candidate) => candidate.instanceId === entry.instanceId);
     const option = instance?.models.options.find((candidate) => candidate.id === entry.model);
@@ -230,7 +242,7 @@ export function BackupAis({ bot, onChange }: { bot: Bot; onChange: (fallback: Ba
             {chain.map((entry, index) => {
               const { instance, name, short } = describe(entry);
               return (
-                <li key={entry.instanceId} data-backup={entry.instanceId} className="flex min-w-0 items-center gap-1.5">
+                <li key={index} data-backup={entry.instanceId} className="flex min-w-0 items-center gap-1.5">
                   <span className="w-3 shrink-0 text-[12px] tabular-nums text-ink-tertiary" aria-hidden="true">{index + 1}</span>
                   <BackupChooser
                     bot={bot}
@@ -240,7 +252,7 @@ export function BackupAis({ bot, onChange }: { bot: Bot; onChange: (fallback: Ba
                     label={t("botPanel.backups.row", { position: index + 1, model: name })}
                     title={instance ? `${instance.displayName} · ${name}` : name}
                     data-panel-action="backup-change"
-                    className="group flex h-8 min-w-0 flex-1 items-center gap-2 rounded-[9px] bg-ink/[0.04] pl-2.5 pr-2 text-left text-[13px] text-ink hover:bg-ink/[0.07] aria-expanded:bg-ink/[0.08]"
+                    className="group flex h-8 min-w-0 flex-1 items-center gap-2 rounded-[8px] bg-ink/[0.04] pl-2.5 pr-2 text-left text-[13px] text-ink hover:bg-ink/[0.07] aria-expanded:bg-ink/[0.08]"
                   >
                     {instance
                       ? <InstanceProviderMark instance={instance} size={14} subtle />

@@ -14,14 +14,14 @@ const secret = "S".repeat(43);
 function routes(withPlan = true) {
   let counter = 0;
   const now = () => 1_800_000_000_000;
-  const told: boolean[] = [];
+  const told: boolean[] = [], tiers: string[] = [];
   const sessions = new SessionRegistry({ file: join(DATA_DIR, "sessions.json"), now });
   const health = createCloudHealth({
     store: { onChange: () => () => {}, botByThread: () => null, bots: [] }, bus: { subscribe: () => () => {} },
     engines: () => [], dataDir: DATA_DIR, eventsDir: DATA_DIR, version: "0.1.0", image: undefined, connectors: () => null,
     browser: () => ({ available: true, installing: false, interrupted: 0 }), now,
   });
-  const handle = createCloudSignedRoutes({ secret, sessions, health, now, ...(withPlan ? { plan: (cancelled: boolean) => { told.push(cancelled); } } : {}) });
+  const handle = createCloudSignedRoutes({ secret, sessions, health, now, ...(withPlan ? { plan: (cancelled: boolean) => { told.push(cancelled); }, planTier: (tier: string) => { tiers.push(tier); } } : {}) });
   const sign = (body: string, key = secret, method = "POST") => {
     const timestamp = String(Math.floor(now() / 1000)), nonce = `nonce-${String(++counter).padStart(12, "0")}`;
     return { "content-type": "application/json", "x-omb-cloud-timestamp": timestamp, "x-omb-cloud-nonce": nonce,
@@ -36,10 +36,31 @@ function routes(withPlan = true) {
     (req as unknown as PassThrough).end(body);
     return { answered: await answered, status, body: text ? JSON.parse(text) : null };
   };
-  return { sign, send, told };
+  return { sign, send, told, tiers };
 }
 
 describe("POST /api/cloud/plan", () => {
+  it("takes which plan this Cloud is on, alone or with the cancelled word, and leaves it alone when an older Admin says nothing of it", async () => {
+    const { sign, send, told, tiers } = routes();
+    const post = (value: unknown) => { const body = JSON.stringify(value); return send("POST", sign(body), body); };
+    expect((await post({ v: 1, tier: "starter" })).status).toBe(200);
+    expect(tiers).toEqual(["starter"]);
+    expect(told).toEqual([]);
+    expect((await post({ v: 1, cancelled: false })).status).toBe(200);
+    expect(tiers).toEqual(["starter"]);
+    expect(told).toEqual([false]);
+    expect((await post({ v: 1, cancelled: true, tier: "pro" })).status).toBe(200);
+    expect(tiers).toEqual(["starter", "pro"]);
+    for (const bad of [{ v: 1 }, { v: 1, tier: "NOT A TIER" }, { v: 1, tier: 3 }, { v: 1, cancelled: false, tier: "../x" }, { v: 1, cancelled: "yes", tier: "pro" }]) {
+      expect(await post(bad)).toMatchObject({ status: 400, body: { error: "invalid_plan" } });
+    }
+    expect(tiers).toEqual(["starter", "pro"]);
+    expect(told).toEqual([false, true]);
+    const forged = JSON.stringify({ v: 1, tier: "max" });
+    expect((await send("POST", sign(forged, "F".repeat(43)), forged)).status).toBe(401);
+    expect(tiers).toEqual(["starter", "pro"]);
+  });
+
   it("takes the Admin's signed word that the plan was cancelled, or renews again", async () => {
     const { sign, send, told } = routes();
     const cancelled = JSON.stringify({ v: 1, cancelled: true });

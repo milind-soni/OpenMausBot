@@ -2,14 +2,17 @@
 import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { cpus, tmpdir, totalmem } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 import type { DuckDBConnection } from "@duckdb/node-api";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { DATA_LIMITS, DATA_RESULTS_SCHEMA } from "../../shared/data-surface.ts";
-import { CLOSE_DRAIN_MS, EXTENSION_INSTALL_TIMEOUT_MS, Lane, closeNames, createDataEngine, dataEngine, drainLanes, duckdbDirectory, instanceSettings, levenshtein, likePattern, loadExtensions, type DataEngineOptions } from "./engine.ts";
+import { CLOSE_DRAIN_MS, EXTENSION_INSTALL_TIMEOUT_MS, Lane, closeNames, createDataEngine, dataEngine, drainLanes, duckdbDirectory, instanceSettings, levenshtein, likePattern, loadExtensions, quoteIdentifier, type DataEngineOptions } from "./engine.ts";
 import { DataFailure, type BotDatabase, type DataEngine } from "./types.ts";
+import { DataSheetStore } from "./sheet.ts";
+import { planLoad } from "./tools.ts";
 
 const root = mkdtempSync(join(tmpdir(), "omb-data-engine-"));
 const outOfTree = join(root, "duckdb-resources");
@@ -104,6 +107,43 @@ describe("loading the binding", () => {
     expect(error.error.message).toBe(reason);
   });
 
+  it("answers a status read from the binding's files, loading nothing, then confirms by loading", async () => {
+    const loadedFrom = (dir: string) => Object.keys(createRequire(import.meta.url).cache).filter((file) => file.startsWith(realpathSync(dir)));
+    const fresh = join(root, "duckdb-status");
+    cpSync(outOfTree, fresh, { recursive: true });
+    const changed = vi.fn();
+    const e = engine({ env: { ...process.env, OMB_DUCKDB_DIR: fresh }, confirmInstalledMs: 0 });
+    e.onInstalledChange(changed);
+    expect(e.installed()).toBe(true);
+    expect(loadedFrom(fresh)).toEqual([]);
+    await vi.waitFor(() => expect(loadedFrom(fresh).some((file) => file.endsWith("duckdb.node"))).toBe(true));
+    expect(e.installed()).toBe(true);
+    expect(changed).not.toHaveBeenCalled();
+    expect(engine({ env: { ...process.env, OMB_DUCKDB_DIR: join(root, "no-binding-here") } }).installed()).toBe(false);
+  });
+
+  it("tells its listeners when files that looked right do not load", async () => {
+    const broken = join(root, "duckdb-broken");
+    cpSync(outOfTree, broken, { recursive: true });
+    writeFileSync(join(broken, "node_modules", "@duckdb", `node-bindings-${process.platform}-${process.arch}`, "duckdb.node"), "not a library");
+    const changed = vi.fn();
+    const e = engine({ env: { ...process.env, OMB_DUCKDB_DIR: broken }, confirmInstalledMs: 0 });
+    e.onInstalledChange(changed);
+    expect(e.installed()).toBe(true);
+    await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
+    expect(e.installed()).toBe(false);
+    expect(e.unavailable()).toContain(broken);
+  });
+
+  it("tells its listeners when a binding whose files were not found loads after all", async () => {
+    const changed = vi.fn();
+    const e = engine({ confirmInstalledMs: 0, filesFound: () => false });
+    e.onInstalledChange(changed);
+    expect(e.installed()).toBe(false);
+    await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
+    expect(e.installed()).toBe(true);
+  });
+
   it("ships a default engine that loads nothing until asked", () => {
     expect(typeof dataEngine.forBot).toBe("function");
     expect(dataEngine.unavailable()).toBeNull();
@@ -118,10 +158,9 @@ describe("loading the binding", () => {
 
 describe("instance settings", () => {
   it("caps memory at a quarter of RAM or 2 GB, threads at four, and keeps extensions per version", () => {
-    const settings = instanceSettings("/bots/b", "/data", "v1.5.6", {});
-    const expectedMiB = Math.max(256, Math.floor(Math.min(2 * 1024 ** 3, Math.floor(totalmem() / 4)) / 1024 ** 2));
-    expect(settings.memory_limit).toBe(`${expectedMiB}MiB`);
-    expect(settings.threads).toBe(String(Math.min(4, cpus().length)));
+    const settings = instanceSettings("/bots/b", "/data", "v1.5.6", {}, { cpus: 10, memoryBytes: 64 * 1024 ** 3 });
+    expect(settings.memory_limit).toBe("2048MiB");
+    expect(settings.threads).toBe("4");
     expect(settings.temp_directory).toBe(join("/bots/b", "data-tmp"));
     expect(settings.extension_directory).toBe(join("/data", "duckdb-extensions", "v1.5.6"));
     expect(settings.max_temp_directory_size).toBe("20GB");
@@ -132,6 +171,13 @@ describe("instance settings", () => {
     expect(instanceSettings("/b", "/d", "v1", { OMB_DUCKDB_MEMORY_LIMIT: "3GB", OMB_DUCKDB_MAX_TEMP_SIZE: "1GB" })).toMatchObject({ memory_limit: "3GB", max_temp_directory_size: "1GB" });
   });
 
+  it("sizes threads and memory from the container's limits, not the host's", () => {
+    const limited = instanceSettings("/b", "/d", "v1", {}, { cpus: 2, memoryBytes: 2 * 1024 ** 3 });
+    expect(limited.threads).toBe("2");
+    expect(limited.memory_limit).toBe("512MiB");
+    expect(instanceSettings("/b", "/d", "v1", {}, { cpus: 0.5, memoryBytes: 512 * 1024 ** 2 })).toMatchObject({ threads: "1", memory_limit: "256MiB" });
+  });
+
   it("applies them to the opened database", async () => {
     const e = engine({ env: { ...process.env, OMB_DUCKDB_DIR: outOfTree, OMB_DUCKDB_MEMORY_LIMIT: "300MiB" } });
     const db = await e.forBot("settings");
@@ -139,7 +185,7 @@ describe("instance settings", () => {
     const result = await db.run(`SELECT ${names.map((name) => `current_setting('${name}')`).join(", ")}`, bot);
     const [memory, threads, temp, extensions, secrets, order, autoinstall, autoload] = result.rows[0];
     expect(memory).toBe("300.0 MiB");
-    expect(threads).toBe(String(Math.min(4, cpus().length)));
+    expect(threads).toBe(String(Math.min(4, availableParallelism())));
     expect(temp).toBe(join(root, "bots", "settings", "data-tmp"));
     expect(String(extensions).startsWith(join(root, "data", "duckdb-extensions"))).toBe(true);
     expect(String(extensions)).toMatch(/v\d+\.\d+\.\d+$/);
@@ -252,6 +298,24 @@ describe("a bot's database", () => {
     expect(some.truncated).toBe(true);
   });
 
+  it.each([
+    { label: "compressed files", names: ["one.csv.gz", "nested/two.csv.gz"] },
+    { label: "uppercase extensions", names: ["one.CSV", "nested/two.CSV"] },
+    { label: "mixed names", names: ["one.csv", "two.CSV", "nested/three.csv.gz"] },
+  ])("loads every discovered CSV in a folder with $label", async ({ names }) => {
+    await ready;
+    const source = mkdtempSync(join(root, "load-folder-"));
+    mkdirSync(join(source, "nested"));
+    for (const [index, name] of names.entries()) {
+      const csv = `amount\n${index + 1}\n`;
+      writeFileSync(join(source, name), name.endsWith(".gz") ? gzipSync(csv) : csv);
+    }
+    const plans = planLoad({ source, kind: "folder" });
+    expect(plans).toHaveLength(1);
+    const result = await db.run(`SELECT count(*)::INTEGER, sum(amount)::INTEGER FROM ${plans[0]!.reader}`, bot);
+    expect(result.rows).toEqual([[names.length, names.length * (names.length + 1) / 2]]);
+  });
+
   it("returns JSON cells: big numbers and decimals as text, dates as DuckDB prints them, blobs by size, nested values as JSON text", async () => {
     await ready;
     const result = await db.run(`SELECT 1::BIGINT AS big, 1.25::DECIMAL(10,2) AS dec, DATE '2024-01-02' AS d, TIMESTAMP '2024-01-02 03:04:05' AS ts, 'ab'::BLOB AS bl, [1,2] AS l, {'x':1} AS st, INTERVAL 1 DAY AS iv, 1::HUGEINT AS hu, 1.5::DOUBLE AS dbl, true AS bo, NULL::INTEGER AS nul, MAP {'k':1} AS mp, 'x' AS v`, bot);
@@ -277,6 +341,17 @@ describe("a bot's database", () => {
     await db.dropResult("gone");
     await db.dropResult("gone");
     expect((await failure(db.run(`SELECT * FROM ${DATA_RESULTS_SCHEMA}.gone`, bot))).error.code).toBe("table_not_found");
+  });
+
+  it("keeps an earlier query result when the sheet reopens before the next query", async () => {
+    const database = await engine().forBot("result-names");
+    const options = { botId: "result-names", dir: join(root, "bots", "result-names") };
+    const first = new DataSheetStore(options).nextResultName();
+    await database.materialise("SELECT 11 AS value", first, bot);
+    const second = new DataSheetStore(options).nextResultName();
+    await database.materialise("SELECT 22 AS value", second, bot);
+    expect((await database.run(`SELECT * FROM ${DATA_RESULTS_SCHEMA}.${first}`, panel)).rows).toEqual([[11]]);
+    expect((await database.run(`SELECT * FROM ${DATA_RESULTS_SCHEMA}.${second}`, panel)).rows).toEqual([[22]]);
   });
 
   it("drops a result on the panel's connection without waiting behind the bot's statement", async () => {
@@ -365,6 +440,19 @@ describe("a bot's database", () => {
     const query = await db.describe("SELECT id FROM sales WHERE id < 10", bot);
     expect(query.rowCount).toBe(10);
     expect(query.columns[0]).toMatchObject({ name: "id", max: "9" });
+  });
+
+  it.each(["分析", "report/2026", 'Revenue "USD"', "select from report", " padded "])("describes a quoted table named %j without treating its name as SQL", async (name) => {
+    await ready;
+    await db.run(`CREATE TABLE ${quoteIdentifier(name)} AS SELECT 17 AS amount`, bot);
+    const described = await db.describe(`main . ${quoteIdentifier(name)}`, bot);
+    expect(described).toMatchObject({ rowCount: 1, columns: [{ name: "amount", min: "17", max: "17" }] });
+  });
+
+  it("still describes an existing unquoted display name with spaces", async () => {
+    await ready;
+    await db.run('CREATE TABLE "Old display name" AS SELECT 19 AS amount', bot);
+    expect(await db.describe("Old display name", bot)).toMatchObject({ rowCount: 1, columns: [{ name: "amount", min: "19" }] });
   });
 
   it("profiles at most describeColumnsMax columns and lists the rest by type only", async () => {
@@ -515,41 +603,57 @@ describe("cancellation", () => {
     expect((await failure(db.run("SELECT 1", { ...bot, signal: early.signal }))).error.code).toBe("cancelled");
   });
 
-  it("cancels a statement whose abort landed before it dispatched", async () => {
-    let dispatched = false;
-    let delivered = 0;
+  /** A lane whose statement reaches the connection only on `dispatch()`; an interrupt before that is lost, as DuckDB's is,
+   * and one that is never delivered after it lets the statement finish half a second later. */
+  function undispatched(signal?: AbortSignal) {
+    const seen = { dispatched: false, delivered: 0 };
     let abandon: (() => void) | undefined;
-    const connection = {
+    const lane = new Lane({
       run: () => {
-        dispatched = true;
+        seen.dispatched = true;
         return new Promise<unknown>((resolve, reject) => {
           const finish = setTimeout(() => resolve("finished without an interrupt"), 500);
           abandon = () => { clearTimeout(finish); reject(new Error("INTERRUPT Error: Interrupted!")); };
         });
       },
       interrupt: () => {
-        delivered++;
+        seen.delivered++;
         abandon?.();
       },
-    };
-    const lane = new Lane(connection as never);
+    } as never);
     let parked!: () => void;
     const atWork = new Promise<void>((done) => { parked = done; });
-    let open!: () => void;
-    const gate = new Promise<void>((done) => { open = done; });
-    const controller = new AbortController();
-    const running = lane.run("SELECT 1", { signal: controller.signal, timeoutMs: 30_000 }, async (conn) => {
+    let dispatch!: () => void;
+    const gate = new Promise<void>((done) => { dispatch = done; });
+    const running = lane.run("SELECT 1", { signal, timeoutMs: 30_000 }, async (conn) => {
       parked();
       await gate;
       return conn.run("SELECT 1");
     });
-    await atWork;
+    return { seen, lane, atWork, dispatch, running };
+  }
+
+  it("cancels a statement whose abort landed before it dispatched", async () => {
+    const controller = new AbortController();
+    const statement = undispatched(controller.signal);
+    await statement.atWork;
     controller.abort();
-    open();
-    const error = await failure(running);
-    expect(dispatched).toBe(true);
+    statement.dispatch();
+    const error = await failure(statement.running);
+    expect(statement.seen.dispatched).toBe(true);
     expect(error.error.code).toBe("cancelled");
-    expect(delivered).toBeGreaterThan(1);
+    expect(statement.seen.delivered).toBeGreaterThan(1);
+  });
+
+  it("cancels a statement whose interrupt landed before it dispatched", async () => {
+    const statement = undispatched();
+    await statement.atWork;
+    statement.lane.interrupt();
+    statement.dispatch();
+    const error = await failure(statement.running);
+    expect(statement.seen.dispatched).toBe(true);
+    expect(error.error.code).toBe("cancelled");
+    expect(statement.seen.delivered).toBeGreaterThan(1);
   });
 
   it("interrupts one connection while the other keeps working, and queued statements still run", async () => {

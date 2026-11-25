@@ -1,4 +1,6 @@
+import type { InputDropReason } from "./browser-input-drops";
 import type { PreviewStreamClient, PreviewStreamControl, PreviewStreamInput } from "./browser-stream-client";
+import { t } from "./i18n";
 
 export type BrowserTakeStatus = "" | "pending" | "slow" | "stale";
 
@@ -14,6 +16,8 @@ export interface ControlTransport {
   /** Resolves once this viewer holds the browser; `waited` when bot work was running then. */
   take(): Promise<{ waited: boolean } | void>;
   release(): Promise<void>;
+  /** Counts input this control dropped, where the transport reports drops. */
+  dropped?(reason: InputDropReason): void;
 }
 
 export const BROWSER_HAND_BACK_MS = 8_000;
@@ -27,7 +31,8 @@ const DISCRETE_KEYS = new Set(["Backspace", "Enter", "Tab", "Escape", "Delete", 
 const COMMANDS = new Set<PreviewStreamInput["type"]>(["navigate", "history", "reload", "tabSelect", "tabNew", "tabClose"]);
 const ABSOLUTE_COMMANDS = new Set<PreviewStreamInput["type"]>(["navigate", "tabNew"]);
 
-function startsInteraction(input: PreviewStreamInput): boolean {
+/** Whether an input begins something a person means: a press, a typed key, text, a scroll or a toolbar action. */
+export function startsInteraction(input: PreviewStreamInput): boolean {
   if (COMMANDS.has(input.type)) return true;
   if (input.type === "mouse") return input.action === "down";
   if (input.type === "key") return input.action === "down" && !MODIFIER_KEYS.has(input.key);
@@ -58,7 +63,6 @@ export function createBrowserControl(options: {
   mine?: () => boolean;
   onTakeStatus: (status: BrowserTakeStatus) => void;
   onError: (message: string) => void;
-  onHalted: () => void;
 }) {
   const transport = options.transport;
   let state: "bot" | "taking" | "held" | "releasing" = "bot";
@@ -134,9 +138,14 @@ export function createBrowserControl(options: {
       if (closed) return;
       if (grant) {
         state = "held";
-        report(grant.reply?.waited === true && dropStale() ? "stale" : "");
+        const stale = grant.reply?.waited === true && dropStale();
+        if (stale) transport.dropped?.("stale_after_wait");
+        report(stale ? "stale" : "");
         await flush();
-      } else { report(""); state = "bot"; buffer = []; held.clear(); }
+      } else {
+        if (buffer.length) transport.dropped?.("take_failed");
+        report(""); state = "bot"; buffer = []; held.clear();
+      }
       arm();
     }).catch(() => {});
   };
@@ -148,10 +157,8 @@ export function createBrowserControl(options: {
       if (isRelease(input) && dropped.delete(id)) return;
       if (isPress(input)) dropped.delete(id);
       const waiting = state === "taking" || flushing;
-      if (state !== "held" && !waiting) {
-        if (!startsInteraction(input)) return;
-        if (transport.stopped() && !COMMANDS.has(input.type)) { options.onHalted(); return; }
-      }
+      // A take also brings a halted v1 queue back, so a press after a halt takes the browser again.
+      if (state !== "held" && !waiting && !startsInteraction(input)) return;
       if (COMMANDS.has(input.type) && waiting && buffer.some((queued) => COMMANDS.has(queued.type))) return;
       if (startsInteraction(input)) {
         soon = false;
@@ -227,14 +234,14 @@ export function streamTransport(client: PreviewStreamClient, control: {
     take: () => new Promise((resolve, reject) => {
       const before = control.current();
       if (before?.controller === "you") { resolve({ waited: false }); return; }
-      if (!client.send({ type: "takeControl" })) { reject(new Error("The browser view is not connected. Reconnect it, then try again.")); return; }
+      if (!client.send({ type: "takeControl" })) { reject(new Error(t("browser.panel.notConnected"))); return; }
       const waited = before?.controller === "agent";
       const done = (outcome: () => void) => { clearTimeout(timer); unwatch(); outcome(); };
-      const timer = setTimeout(() => done(() => reject(new Error("Could not take control of the browser. Try again shortly."))), TAKE_TIMEOUT_MS);
+      const timer = setTimeout(() => done(() => reject(new Error(t("browser.panel.takeFailed")))), TAKE_TIMEOUT_MS);
       const unwatch = control.watch((next) => {
         if (next?.controller === "you") done(() => resolve({ waited }));
         else if (next?.controller === "another-viewer") done(() => reject(new Error(heldElsewhere)));
-        else if (next === null) done(() => reject(new Error("The browser view disconnected.")));
+        else if (next === null) done(() => reject(new Error(t("browser.panel.viewDisconnected"))));
       });
     }),
     release: async () => { client.send({ type: "releaseControl" }); },

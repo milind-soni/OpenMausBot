@@ -1,3 +1,5 @@
+import type { ServerText } from "../../shared/server-text.ts";
+import { fittedLine } from "../routine-lines.ts";
 // The goal run card: one receipt per run in the conversation it runs in, a room's or a one-on-one chat's.
 import type { GroupGoalRunCardData, GroupGoalRunStatus } from "../../shared/group-goal-run.ts";
 import { redactSecretsInText } from "../../shared/redact.ts";
@@ -25,6 +27,11 @@ export interface GoalCardDeps {
   notify(notification: Notification | null): void;
   routineSourceOwner(run: RoutineRun): { bot: BotRecord } | null;
   routineSourceThread(run: RoutineRun): string | null;
+}
+
+function detailFields(detail: string, text?: ServerText) {
+  const { text: safe, codes } = fittedLine("attention", detail, text);
+  return { detail: safe, detailCode: codes.attentionCode, detailParams: codes.attentionParams };
 }
 
 /** A goal card's text for clients that show no cards, by how the goal stands. */
@@ -82,6 +89,7 @@ export function createGoalCards(deps: GoalCardDeps) {
     status: Exclude<GroupGoalRunStatus, "working">,
     detail: string,
     stillHere: () => boolean,
+    text?: ServerText,
   ): void {
     if (!run || run.finished) return;
     run.finished = true;
@@ -95,7 +103,7 @@ export function createGoalCards(deps: GoalCardDeps) {
       coordinatorName: redactSecretsInText(run.coordinatorName),
       turnCount: run.turnCount,
       maxTurns: run.maxTurns,
-      detail: safeDetail,
+      ...detailFields(safeDetail, text),
       startedAt: run.startedAt,
       finishedAt,
     };
@@ -134,11 +142,13 @@ export function createGoalCards(deps: GoalCardDeps) {
     });
   }
 
-  function progress(threadId: string, run: LiveGoalRun | undefined, detail: string): void {
+  function progress(threadId: string, run: LiveGoalRun | undefined, detail: string, text?: ServerText): void {
     if (!run || run.finished) return;
     const safeDetail = redactSecretsInText(detail.trim()).slice(0, 500);
     const current = store.messagesFor(threadId).find((message: Message) => message.id === run.cardMessageId);
-    if (current?.goalRun?.status === "working" && current.goalRun.detail === safeDetail) return;
+    const fields = detailFields(safeDetail, text);
+    if (current?.goalRun?.status === "working" && current.goalRun.detail === safeDetail && current.goalRun.detailCode === fields.detailCode
+      && JSON.stringify(current.goalRun.detailParams) === JSON.stringify(fields.detailParams)) return;
     store.patchMessage(threadId, run.cardMessageId, {
       text: serverLine(conversationLanguage(threadId), "server.teammates.goal.working", { detail: safeDetail || redactSecretsInText(run.goal) }),
       goalRun: {
@@ -149,7 +159,7 @@ export function createGoalCards(deps: GoalCardDeps) {
         coordinatorName: redactSecretsInText(run.coordinatorName),
         turnCount: run.turnCount,
         maxTurns: run.maxTurns,
-        ...(safeDetail ? { detail: safeDetail } : {}),
+        ...fields,
         startedAt: run.startedAt,
       },
     });

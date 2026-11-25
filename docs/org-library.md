@@ -45,14 +45,45 @@ Compared with a file:
 
 A bot added from the organization's library shows where it came from in
 **Bot settings → Identity**: "From Sales desk 1.3.0 · Acme Partners". A bot
-imported from a file shows no such line, as before. This version never
-changes something it already added. When the catalog names a newer release,
-the card says "Version X available. Updates arrive automatically in an
-upcoming OpenMausBot update."
+imported from a file shows no such line, as before. When the catalog names
+a newer release of an added team, it comes over on its own (see Updates
+below). Until its file is downloaded, the card says "Version X available. It
+comes over on its own once it's downloaded, and keeps your changes."
 
 **Required** is treated as Available in this version, with a "Recommended
 by …" badge. Entries the organization switched **off** are hidden, and
 their copies stay.
+
+## Updates
+
+After each relayed catalog, every added team whose catalog release differs
+from the one it has is brought up to that release, once its file is
+downloaded and readable by this app (`server/org-library-releases.ts`). A
+release listed under `withdrawnReleases` is never moved to, and a withdrawn
+or removed install is left alone.
+
+It goes part by part, by the `r` and `w` hashes stamped when each part was
+written. A part takes the new release's value only when the publisher changed
+it (its new hash is not `r`) and the person did not (the part as it is now
+still hashes to `w`). It is then written and stamped with the new hash. A part
+the person changed keeps their version, now and in later releases.
+
+| Part | Updated |
+|---|---|
+| A bot's name, title, description, instructions and playbooks | yes; a new name another bot already has is kept back |
+| A bot's skills | each skill's text, and a skill new to that bot in this release (while the file of the release it had is still kept, which is how a new skill is told from one the person took off); never one the person took off, and a skill switched off stays off |
+| A group chat's name and bulletin | yes |
+| A routine's name, prompt and schedule | yes; whether it is on stays the person's |
+| The team brief | yes |
+| Look, connections, approval, room members and responder, routine targets, the leader | not in this version: they stay as they were added |
+| Bots, group chats and routines new in a release | not added in this version |
+
+An update never raises approval, switches a routine on, or adds a
+connection. The install, each bot's `installedPackage` and each updated
+skill's stamp move to the new release. If a part can't be written, the parts
+written so far keep their new stamps, the install stays on its release, and
+the next catalog finishes it; a skill whose new text can't be written is put
+back as it was.
 
 ## Withdrawn releases
 
@@ -154,9 +185,9 @@ are gone the install is `removed` and **Add** brings the whole team back.
 
 Each install's `removedLocally` (contract §3.4) lists the parts of an added
 team the person deleted: `agent:<key>` for a bot, `room:<key>` for a group
-chat and `routine:<key>` for a routine. The automatic update (v1.1) reads it
-to tell a part the person deleted from a part a new release adds, and never
-brings a deleted part back. It is kept like this:
+chat and `routine:<key>` for a routine. It tells a part the person deleted
+from a part a new release adds, so an update never brings a deleted part
+back. It is kept like this:
 
 - **When it is noted.** Each time the index is rebuilt, a key the index held
   that no longer has a record is added to the list once. Rebuilding again,
@@ -214,9 +245,10 @@ starts with `OMB_TEST_ORG_LIBRARY_KEY`, and the request carries that key in
 
 ## Not in this version
 
-These arrive in v1.1 with no format change:
+These arrive later with no format change:
 
-- automatic updates;
+- updating a bot's look, connections and approval, room members, routine
+  targets and the leader, and adding parts new in a release;
 - Required with auto-install;
 - honouring `offAction: "remove"`;
 - the Admin Withdraw button.

@@ -1,8 +1,15 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DISCOVERY_CLIENT_NAME, discoverAcpModels, resolveCustomAcpModels } from "./custom-model-catalog.ts";
+import {
+  acpDiscoveryProblem, AcpDiscoveryRpcError, AcpDiscoveryTimeoutError, DISCOVERY_CLIENT_NAME, discoverAcpModels, discoveryCutShort,
+  resolveCustomAcpModels,
+} from "./custom-model-catalog.ts";
+import { classifyDevinError } from "./devin.ts";
+
+const FAKE_ACP_CLI = join(dirname(fileURLToPath(import.meta.url)), "../../testing/fake-acp-cli.ts");
 
 /** Lets a test see a process that reports it would not stop; the real stop still runs. */
 const stop = vi.hoisted(() => ({ refuses: false }));
@@ -24,14 +31,21 @@ import { createInterface } from 'node:readline';
 let current='deep';
 const mode=process.env.CATALOG_MODE;
 const modelOptions=[{value:'deep',name:'Deep'},{value:'flash',name:'Flash'},{value:'silent',name:'Silent'},{value:'rejected',name:'Rejected'}];
-function result(){return {sessionId:'fake-session',configOptions:[{id:'model',type:'select',category:'model',currentValue:current,options:modelOptions},...(current==='silent'?[]:[{id:current==='flash'?'thought_level':'reasoning_effort',type:'select',category:'thought_level',currentValue:current==='flash'?'low':'max',options:[{value:current==='flash'?'low':'max',name:current==='flash'?'Low':'Max'}]}])]};}
+function result(){if(mode==='hostile'||mode==='hostile-default'||mode==='hostile-labels'||mode==='hostile-all'){const options=mode==='hostile-labels'
+ ?[{value:'plain-model',name:'Plain'+String.fromCharCode(0x202e)+'Reversed'},{value:'good-model',name:'Good Model'}]
+ :mode==='hostile-all'
+ ?[{value:'../../.openmausbot',name:'Traversal'},{value:'bad'+String.fromCharCode(0)+'id',name:'Control'},{value:'x'.repeat(500),name:'Long'}]
+ :[{value:'../../.openmausbot',name:'Traversal'},{value:'bad'+String.fromCharCode(0)+'id',name:'Control'},{value:'x'.repeat(500),name:'Long'},{value:'ok-model',name:'Fine'+String.fromCharCode(7)+'Name'},{value:'good-model',name:'Good Model'}];
+ return {sessionId:'fake-session',configOptions:[{id:'model',type:'select',category:'model',currentValue:mode==='hostile-default'?String.fromCharCode(46,46,92)+String.fromCharCode(46,46,92)+'private':mode==='hostile-all'?'../../.openmausbot':'good-model',options}]};}
+ return {sessionId:'fake-session',configOptions:[{id:'model',type:'select',category:'model',currentValue:current,options:modelOptions},...(current==='silent'?[]:[{id:current==='flash'?'thought_level':'reasoning_effort',type:'select',category:'thought_level',currentValue:current==='flash'?'low':'max',options:[{value:current==='flash'?'low':'max',name:current==='flash'?'Low':'Max'}]}])]};}
 function emit(value){process.stdout.write(JSON.stringify(value)+'\\n');}
 function legacyResult(){const r=result();return {...r,models:{currentModelId:current,availableModels:modelOptions.map(x=>({modelId:x.value,name:x.name}))},configOptions:r.configOptions.filter(x=>x.id!=='model')}}
 appendFileSync(process.env.CATALOG_DUMP,JSON.stringify({cwd:process.cwd(),pid:process.pid})+'\\n');
 for await(const line of createInterface({input:process.stdin})){
  const msg=JSON.parse(line); appendFileSync(process.env.CATALOG_DUMP,JSON.stringify({cwd:process.cwd(),...msg})+'\\n');
  if(!msg.method)continue;
- if(msg.method==='initialize'){emit({jsonrpc:'2.0',id:msg.id,result:{protocolVersion:1}});continue;}
+ if(msg.method==='initialize'){emit({jsonrpc:'2.0',id:msg.id,result:{protocolVersion:1,...(mode==='deletes'?{agentCapabilities:{sessionCapabilities:{delete:{}}}}:{})}});continue;}
+ if(msg.method==='session/delete'){emit({jsonrpc:'2.0',id:msg.id,result:{}});continue;}
  if(msg.method==='session/new'){
   if(mode==='exit'){process.exit(3);}
   if(mode==='legacy'){emit({jsonrpc:'2.0',id:msg.id,result:legacyResult()});continue;}
@@ -135,6 +149,19 @@ describe("custom ACP catalog discovery (isolated fake CLI)", () => {
     expect(stuck).not.toHaveBeenCalled();
   });
 
+  it("deletes its session over ACP when the agent offers session/delete, and then skips forgetSession", async () => {
+    const fixture = await fake("deletes");
+    const forgetSession = vi.fn(async () => {});
+    await discoverAcpModels(fixture.env, fixture.config.cli, [], { forgetSession });
+    const deletes = (await fixture.requests()).filter((request) => request.method === "session/delete");
+    expect(deletes.map((request) => request.params.sessionId)).toEqual(["fake-session"]);
+    expect(forgetSession).not.toHaveBeenCalled();
+
+    const plain = await fake();
+    await discoverAcpModels(plain.env, plain.config.cli, []);
+    expect((await plain.requests()).some((request) => request.method === "session/delete")).toBe(false);
+  });
+
   it("stops a custom agent at once, and lets an agent asked to exit gracefully read EOF first", async () => {
     const custom = await fake();
     await resolveCustomAcpModels(custom.env, custom.config);
@@ -158,5 +185,105 @@ describe("custom ACP catalog discovery (isolated fake CLI)", () => {
     await expect(resolveCustomAcpModels(fixture.env, fixture.config)).rejects.toThrow("line limit");
     const requests = await fixture.requests();
     await expect(readFile(requests[0].cwd)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("skips discovered entries whose id or label is not a usable slug, and never sends them back to the agent", async () => {
+    const fixture = await fake("hostile");
+    const catalog = await discoverAcpModels(fixture.env, fixture.config.cli, []);
+    expect(catalog.options).toEqual([
+      { id: "ok-model", label: "ok-model" },
+      { id: "good-model", label: "Good Model" },
+    ]);
+    expect(catalog.default).toBe("good-model");
+    const sent = JSON.stringify(await fixture.requests());
+    expect(sent).not.toContain("../.openmausbot");
+    expect(sent).not.toContain("bad\u0000id");
+    expect(sent).not.toContain("x".repeat(500));
+  });
+
+  it("never lets an unusable session model become the catalog default", async () => {
+    const fixture = await fake("hostile-default");
+    const catalog = await discoverAcpModels(fixture.env, fixture.config.cli, []);
+    expect(catalog.default).toBe("ok-model");
+    expect(catalog.options.map((option) => option.id)).toEqual(["ok-model", "good-model"]);
+  });
+
+  it("rejects a custom catalog whose every discovered id was unusable instead of leaving only the default", async () => {
+    const fixture = await fake("hostile-all");
+    await expect(resolveCustomAcpModels(fixture.env, fixture.config)).rejects.toThrow("did not advertise any usable models");
+  });
+
+  it("rejects bidirectional controls and control characters in labels, and falls back to the id", async () => {
+    const fixture = await fake("hostile-labels");
+    const catalog = await discoverAcpModels(fixture.env, fixture.config.cli, []);
+    expect(catalog.options).toEqual([
+      { id: "plain-model", label: "plain-model" },
+      { id: "good-model", label: "Good Model" },
+    ]);
+  });
+});
+
+describe("a model list whose per-model effort reads are cut short (shared fake ACP CLI)", () => {
+  const MODELS = Array.from({ length: 6 }, (_, index) => `fixture-model-${index}`);
+  const EFFORTS = [{ value: "low", name: "Low" }, { value: "high", name: "High" }];
+  const env = (extra: Record<string, string>) => ({
+    ...process.env, FAKE_ACP_MODELS: MODELS.join(","),
+    FAKE_ACP_VARIANTS: JSON.stringify(Object.fromEntries(MODELS.map((model) => [model, { currentValue: "low", options: EFFORTS }]))),
+    ...extra,
+  });
+  // As Devin's driver reads it: its own default first, then each model with the efforts it offers.
+  const DEVIN_LIKE = { passthrough: { id: "agent-default", label: "Default" }, variantLimit: 128, maxModels: 4096 };
+  const withEfforts = (catalog: { options: Array<{ id: string; variants?: unknown[] }> }) =>
+    catalog.options.filter((option) => option.variants?.length).map((option) => option.id);
+
+  it("keeps every listed model when the whole read runs out of time, with efforts only for the models it reached", async () => {
+    const catalog = await discoverAcpModels(env({ FAKE_ACP_HANG_ON_MODEL: MODELS[3] }), FAKE_ACP_CLI, [], { ...DEVIN_LIKE, timeoutMs: 5_000 });
+    expect(catalog.default).toBe("agent-default");
+    expect(catalog.options.map((option) => option.id)).toEqual(["agent-default", ...MODELS]);
+    expect(withEfforts(catalog)).toEqual(MODELS.slice(0, 3));
+    expect(catalog.options.find((option) => option.id === MODELS[1])?.variants).toEqual([{ id: "low", label: "Low" }, { id: "high", label: "High" }]);
+    expect(discoveryCutShort(catalog)).toBe(true);
+  }, 20_000);
+
+  it("keeps every listed model, and reads the rest, when one switch takes longer than a request may", async () => {
+    const catalog = await discoverAcpModels(env({ FAKE_ACP_HANG_ON_MODEL: MODELS[2] }), FAKE_ACP_CLI, [], { ...DEVIN_LIKE, requestTimeoutMs: 5_000 });
+    expect(catalog.options.map((option) => option.id)).toEqual(["agent-default", ...MODELS]);
+    expect(withEfforts(catalog)).toEqual(MODELS.filter((model) => model !== MODELS[2]));
+    expect(discoveryCutShort(catalog)).toBe(true);
+  }, 20_000);
+
+  it("keeps every listed model when the agent exits partway through the switches", async () => {
+    const catalog = await discoverAcpModels(env({ FAKE_ACP_EXIT_ON_MODEL: MODELS[3] }), FAKE_ACP_CLI, [], DEVIN_LIKE);
+    expect(catalog.options.map((option) => option.id)).toEqual(["agent-default", ...MODELS]);
+    expect(withEfforts(catalog)).toEqual(MODELS.slice(0, 3));
+    expect(discoveryCutShort(catalog)).toBe(true);
+  });
+
+  it("marks nothing when every switch answered, or when a model was refused", async () => {
+    const catalog = await discoverAcpModels(env({}), FAKE_ACP_CLI, [], DEVIN_LIKE);
+    expect(withEfforts(catalog)).toEqual(MODELS);
+    expect(discoveryCutShort(catalog)).toBe(false);
+    const fixture = await fake();
+    const refused = await resolveCustomAcpModels(fixture.env, fixture.config);
+    expect(discoveryCutShort(refused)).toBe(false);
+  });
+
+  it("still fails when time runs out before the agent has listed its models, and names it a timeout", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omb-catalog-silent-"));
+    scratch.push(dir);
+    const cli = join(dir, "silent.mjs");
+    await writeFile(cli, "process.stdin.resume();\n");
+    const error = await discoverAcpModels(process.env, `${JSON.stringify(process.execPath)} ${JSON.stringify(cli)}`, [], { requestTimeoutMs: 500 })
+      .then(() => undefined, (failure: unknown) => failure);
+    expect(error).toBeInstanceOf(AcpDiscoveryTimeoutError);
+    expect(acpDiscoveryProblem(error)).toBe("timedOut");
+  }, 20_000);
+
+  it("names a refused sign-in only when the engine's own classifier reads it as one", () => {
+    const loggedOut = new AcpDiscoveryRpcError(-32000, "Please log in to use Devin. Use `/login` to authenticate again.");
+    expect(acpDiscoveryProblem(loggedOut, classifyDevinError)).toBe("signedOut");
+    expect(acpDiscoveryProblem(loggedOut)).toBe("failed");
+    expect(acpDiscoveryProblem(new AcpDiscoveryRpcError(-32603, "Internal error"), classifyDevinError)).toBe("failed");
+    expect(acpDiscoveryProblem(new Error("ACP agent closed during model discovery."), classifyDevinError)).toBe("failed");
   });
 });

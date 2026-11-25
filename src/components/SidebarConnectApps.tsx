@@ -6,7 +6,8 @@ import { t } from "@/lib/i18n";
 import { useStore } from "@/state/store";
 
 import { loadAppCards } from "./bot-settings/useBotApps";
-import { preloadConnectedApps, type ToolkitCard } from "./PluginsPanel";
+import { preloadConnectedApps } from "@/lib/connected-apps";
+import type { ToolkitCard } from "./ServiceIcon";
 import { ELEVATED_CONTROL, ELEVATED_HOVER } from "./elevated";
 import { SIMPLE_TOP_BUTTON } from "./SidebarSimpleTop";
 
@@ -53,7 +54,7 @@ function AppFaceIcon({ face, className }: { face: AppFace; className?: string })
   const [failed, setFailed] = useState(0);
   const src = sources[failed];
   return (
-    <span data-app-face={face.slug} className={cn("flex size-[18px] shrink-0 items-center justify-center overflow-hidden rounded-md bg-white p-px ring-[1.5px] ring-composer", className)}>
+    <span data-app-face={face.slug} className={cn("flex size-[18px] shrink-0 items-center justify-center overflow-hidden rounded-md p-px motion-safe:transition-colors group-hover/apps:bg-white group-focus-visible/apps:bg-white", className)}>
       {src
         ? <img src={src} alt="" draggable={false} className="size-4 object-contain" onError={() => setFailed((count) => count + 1)} />
         : <span className="text-[10px] font-semibold leading-none text-neutral-700">{face.label.slice(0, 1).toUpperCase()}</span>}
@@ -80,11 +81,16 @@ export function SidebarConnectApps({ circle = false }: { circle?: boolean }) {
       onClick={() => dispatch({ type: "togglePlugins", open: true })}
       className={circle ? SIMPLE_TOP_BUTTON : cn("group/apps flex h-9 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-full pl-4 pr-3 text-[14px] font-medium leading-5 text-ink", ELEVATED_CONTROL, ELEVATED_HOVER)}
     >
-      {circle ? <Puzzle size={18} strokeWidth={1.5} aria-hidden="true" /> : <>
-        <span className="min-w-0 truncate">{label}</span>
-        <span aria-hidden="true" className="flex shrink-0 items-center">
+      {circle ? <Puzzle size={16} aria-hidden="true" /> : <>
+        <span data-apps-label="" className="shrink-0 whitespace-nowrap">{label}</span>
+        {/* The logos rest grey and apart, with no tile, so the sidebar's loudest colour is never an ad; hover brings the tiles and colour back.
+            In a tight row the label stays whole and whole logos drop instead: they wrap onto a second line that the one-line
+            height hides; the empty first item, a logo high and no wider than nothing, lets even the first logo wrap rather than show cut. The
+            padding, taken back by the negative margin, leaves room for the hover fan. */}
+        <span aria-hidden="true" data-app-faces="" className="-mx-1 -my-0.5 flex h-[22px] min-w-0 flex-wrap content-start items-center gap-1 overflow-hidden px-1 py-0.5 opacity-60 grayscale motion-safe:transition-[filter,opacity] group-hover/apps:opacity-100 group-hover/apps:grayscale-0 group-hover/apps:invert-0 group-hover/apps:mix-blend-normal group-focus-visible/apps:opacity-100 group-focus-visible/apps:grayscale-0 group-focus-visible/apps:invert-0 group-focus-visible/apps:mix-blend-normal">
+          <span data-app-faces-start="" className="-me-1 h-[18px] w-0" />
           {faces.map((face, index) => <AppFaceIcon key={face.slug} face={face}
-            className={cn(index > 0 && "-ms-1.5", faces.length > 1 && FAN[index === 0 ? 0 : index === faces.length - 1 ? 2 : 1], "motion-safe:transition-transform motion-safe:duration-150")} />)}
+            className={cn(faces.length > 1 && FAN[index === 0 ? 0 : index === faces.length - 1 ? 2 : 1], "motion-safe:transition-transform motion-safe:duration-150")} />)}
         </span>
       </>}
     </button>

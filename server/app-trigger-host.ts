@@ -3,14 +3,16 @@
 import type { ServerResponse } from "node:http";
 
 import { botMayWatchApp, type AppEventCatalog } from "../shared/app-triggers.ts";
+import { accountLimit, type ConnectorScopes } from "../shared/connector-scopes.ts";
 import type { ConnectorToolGrant } from "../shared/wire.ts";
 import { appEventCatalog, appLabel } from "./app-event-catalog.ts";
 import { brokerClient, type AppTriggerBroker, type BrokerAccess } from "./app-trigger-broker.ts";
 import { AppTriggerRequestService, type AppTriggerRequestStore } from "./app-trigger-requests.ts";
 import { AppTriggerError, AppTriggerManager, type AppTriggerPatch } from "./app-triggers.ts";
+import { managedComposioBrokerOff } from "./composio-broker-access.ts";
 import type { RosterMember } from "./peer-roster.ts";
 import type { RequestAuth } from "./request-auth.ts";
-import type { RoutineManager } from "./routines.ts";
+import type { Routine, RoutineManager } from "./routines.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./routes/table.ts";
 import { listTriggers, triggerTarget } from "./trigger-tools.ts";
 import { addressFor } from "./webhook-address.ts";
@@ -18,7 +20,7 @@ import type { WebhookManager } from "./webhooks.ts";
 
 type Bot = RosterMember & {
   color: string; composio?: boolean;
-  connectorTools?: Record<string, ConnectorToolGrant>; connectorScopes?: { apps: Record<string, "read" | "write"> };
+  connectorTools?: Record<string, ConnectorToolGrant>; connectorScopes?: ConnectorScopes;
 };
 type Connected = Record<string, { connected: boolean; accounts: Array<{ id: string; alias?: string; status: string }> }>;
 
@@ -50,6 +52,8 @@ export interface InternalTriggerContext {
   /** A run a webhook or app event started, or work one handed on. */
   outsideDriven: () => boolean;
   canCommit: () => boolean;
+  /** Whether this turn may know of the routine: on a Team Cloud one that lives in someone's private chat only in theirs. */
+  routineShown?: (routine: Routine) => boolean;
 }
 
 const GUEST_REFUSAL = "Only the Cloud's owner can make a bot watch their connected apps. Tell the person to ask from their own conversation.";
@@ -63,6 +67,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
   const service = () => {
     const mode = deps.connectionMode();
     if (mode === "self-hosted") return { available: false as const, reason: "self-hosted" as const };
+    if (managedComposioBrokerOff()) return { available: false as const, reason: "off" as const };
     return mode === "managed" && deps.access() ? { available: true as const } : { available: false as const, reason: "unavailable" as const };
   };
   const manager = new AppTriggerManager({
@@ -71,9 +76,10 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
     service,
     connectedApps: deps.connectedApps,
     botState: deps.botState,
+    accountLimit: (botId, app) => accountLimit(deps.store.bot(botId)?.connectorScopes, app),
     runs: {
       enqueue: (input) => deps.routines().enqueueWebhook(input),
-      merge: (triggerId, eventId, merge) => deps.routines().mergeIntoQueuedRun(triggerId, eventId, merge),
+      merge: (triggerId, eventId, sameConversation, merge) => deps.routines().mergeIntoQueuedRun(triggerId, eventId, sameConversation, merge),
       receipt: (triggerId, eventId) => deps.routines().webhookRunReceipt(triggerId, eventId),
       pending: (triggerId) => deps.routines().activeWebhookRunCount(triggerId),
       cancelQueued: (triggerId, message) => deps.routines().cancelQueuedWebhook(triggerId, message),
@@ -82,7 +88,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
   });
   const requests = new AppTriggerRequestService({ store: deps.store, triggers: manager, botName: (botId) => deps.store.bot(botId)?.name ?? "the bot" });
 
-  const unavailableText = (reason: "self-hosted" | "unavailable") => reason === "self-hosted"
+  const unavailableText = (reason: "self-hosted" | "unavailable" | "off") => reason === "self-hosted"
     ? "App events need OpenMausBot's connected apps. This server uses its own Composio key, so a bot cannot watch apps here yet: use a schedule that checks the app, or a webhook."
     : "Connected apps are not set up here, so a bot cannot watch apps yet.";
 
@@ -92,8 +98,9 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
     const connected = await deps.connectedApps();
     const result = await appEventCatalog({ broker, connected, bot, app, search });
     const wanted = app?.trim().toLowerCase();
-    if (wanted && !result.apps.length && connected[wanted]?.connected && !botMayWatchApp(bot, wanted)) {
-      return { ...result, unavailable: `${bot.name} has not been given access to ${appLabel(wanted)}. Ask the person to allow it under the bot's Access settings.` };
+    if (wanted && !result.apps.length && connected[wanted]?.connected) {
+      if (!botMayWatchApp(bot, wanted)) return { ...result, unavailable: `${bot.name} has not been given access to ${appLabel(wanted)}. Ask the person to allow it under the bot's Access settings.` };
+      if (accountLimit(bot.connectorScopes, wanted)) return { ...result, unavailable: `None of the ${appLabel(wanted)} accounts ${bot.name} may use is connected and working. Ask the person to reconnect one, or to allow another under the bot's Access settings.` };
     }
     return result;
   }
@@ -129,6 +136,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
           ...(body.filter && typeof body.filter === "object" ? { filter: body.filter as never } : {}),
           ...(body.config && typeof body.config === "object" ? { config: body.config as Record<string, unknown> } : {}),
           ...(body.runOn === "cloud" ? { runOn: "cloud" as const } : {}),
+          ...(body.sameConversation === true ? { sameConversation: true } : {}),
         });
         return json(res, 201, { trigger });
       }
@@ -148,6 +156,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
           ...(body.filter === null || (body.filter && typeof body.filter === "object") ? { filter: body.filter as never } : {}),
           ...(body.config && typeof body.config === "object" ? { config: body.config as Record<string, unknown> } : {}),
           ...(typeof body.enabled === "boolean" ? { enabled: body.enabled } : {}),
+          ...(typeof body.sameConversation === "boolean" ? { sameConversation: body.sameConversation } : {}),
         };
         const trigger = await manager.update(id, patch);
         return trigger ? json(res, 200, { trigger }) : json(res, 404, { error: "no such automation" });
@@ -177,7 +186,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
     if ("error" in target) return json(res, target.status, { error: target.error });
     const ownerId = target.forBot?.botId ?? context.from.id;
     const listing = listTriggers({
-      botId: ownerId, triggerId: url.searchParams.get("triggerId") ?? undefined, routines: deps.routines().listRoutines(),
+      botId: ownerId, triggerId: url.searchParams.get("triggerId") ?? undefined, routines: deps.routines().listRoutines().filter((routine) => context.routineShown?.(routine) ?? true),
       webhooks: deps.webhooks.list(), appTriggers: manager.list(), runs: deps.routines().listRuns(), timeZone: deps.timeZone(), now: Date.now(),
     });
     const shown = listing.trigger;
@@ -212,6 +221,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
     }
   }
 
+  const runRefusal = (run: { webhookId?: string; eventSource?: string }) => (run.eventSource === "app" && run.webhookId ? manager.runRefusal(run.webhookId) : null);
   return {
     manager,
     routes,
@@ -219,6 +229,13 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
     submit,
     undo: (args: { botId: string; threadId: string; requestId: string }) => requests.undo(args),
     isApp: (id: string) => manager.get(id) !== null,
+    /** For the run scheduler, right before a queued run starts: why this app-event run may not. */
+    runRefusal,
+    /** The same check right before the run's turn is sent, since its setup awaits and the bot can lose the account meanwhile. */
+    turnRefusal: (threadId: string, runId: string | undefined) => {
+      const run = runId ? deps.routines().runForThread(threadId) : null;
+      return run && run.id === runId ? runRefusal(run) : null;
+    },
     start: () => manager.start(),
     stop: () => manager.stop(),
     /** Access to the service changed (the desktop handed its token over, or a Cloud registered). */

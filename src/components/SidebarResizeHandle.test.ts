@@ -69,7 +69,9 @@ describe("a drag of the sidebar's edge", () => {
     localStorage.setItem(SIDEBAR_WIDTH_KEY, "320");
     await mount();
     await pointer("pointerdown", 320);
-    expect(edge().getAttribute("data-sidebar-resize"), "the edge is lit while it is dragged").toBe("dragging");
+    expect(edge().getAttribute("data-sidebar-resize"), "the edge is marked while it is dragged").toBe("dragging");
+    expect(document.body.style.cursor, "the whole page shows the resize cursor").toBe("col-resize");
+    expect(document.body.style.userSelect).toBe("none");
     await pointer("pointermove", 260);
     expect(width()).toBe("260px");
     await pointer("pointermove", 100);
@@ -78,6 +80,8 @@ describe("a drag of the sidebar's edge", () => {
     await pointer("pointerup", 100);
     expect(localStorage.getItem(SIDEBAR_WIDTH_KEY)).toBe("320");
     expect(edge().getAttribute("data-sidebar-resize")).toBe("");
+    expect(document.body.style.cursor, "and lets it go when the drag ends").toBe("");
+    expect(document.body.style.userSelect).toBe("");
   });
 
   it("out of the column of avatars, opens the sidebar at its last width, then follows the pointer past that edge, and keeps where it is left", async () => {

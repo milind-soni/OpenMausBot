@@ -12,13 +12,21 @@ export function startupBackups(bot: { fallback?: Backup[] }, recovery?: { enable
   return recovery?.enabled && recovery.backup ? [recovery.backup] : [];
 }
 
-/** An automatic switch must not strand the task without its tools or move its filesystem to another machine. */
+/** Every backup a limited bot may be moved to: its own list, then the installation's one backup, which counts only
+ * while Automatic recovery is on (the backup stays saved while it is off). */
+export function chosenBackups(bot: { fallback?: Backup[] } | null | undefined, recovery?: { enabled: boolean; backup?: Backup }): Backup[] {
+  return [...(bot?.fallback ?? []), ...(recovery?.enabled && recovery.backup ? [recovery.backup] : [])];
+}
+
+/** An automatic switch must not strand the task without its tools or move its filesystem to another machine. A USB
+ * phone is not one of those tools: only Codex and Pi drive one, Claude offers it on every desktop, and no Cloud has a
+ * USB port, so counting it left a limited Claude bot with no backup but those two. */
 export function recoveryCapabilityError(from: Engine, to: Engine): string | undefined {
   if (supportsWorkspaceFiles(from.driverKind) !== supportsWorkspaceFiles(to.driverKind)) {
     return "The backup cannot use the same workspace.";
   }
-  const tools = ["agentsMcp", "computerMcp", "composioMcp", "dataMcp", "highlevelMcp", "deviceMcp",
-    "phoneMcp", "browserMcp", "localComputerMcp", "customMcp", "images"] as const;
+  const tools = ["agentsMcp", "computerMcp", "composioMcp", "dataMcp", "emailMcp", "deviceMcp",
+    "browserMcp", "localComputerMcp", "customMcp", "images"] as const;
   if (tools.some(key => from.capabilities[key] === true && to.capabilities[key] !== true)) {
     return "The backup does not support all of this AI's tools and attachments.";
   }

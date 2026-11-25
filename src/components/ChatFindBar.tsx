@@ -3,11 +3,12 @@ import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
 
 import { landOnSearchHit } from "@/lib/focus-message";
 import { t } from "@/lib/i18n";
+import { imeComposing } from "@/lib/send-key";
 import type { SearchHit } from "@/lib/search-hit";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { api, useStore } from "@/state/store";
 
-export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: () => void }) {
+export function ChatFindBar({ threadId, onClose, inForkPanel = false }: { threadId: string; onClose: () => void; inForkPanel?: boolean }) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -55,7 +56,22 @@ export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: 
     const hit = hits[next];
     if (!hit) return;
     setIndex(next);
-    void landOnSearchHit(hit, state, dispatch, showThreads).catch((error) =>
+    const panel = state.forkPanel;
+    const landing = inForkPanel
+      ? (async () => {
+        if (panel?.threadId !== hit.threadId) throw new Error(t("chat.find.unavailable"));
+        if (panel.kind === "bot" && !hit.onActivePath) {
+          const branch = await api(`/api/bots/${panel.ownerId}/active-branch`, {
+            method: "POST",
+            body: JSON.stringify({ messageId: hit.messageId, threadId: hit.threadId }),
+          });
+          if (branch?.activeLeafId) dispatch({ type: "forkPanelActive", threadId: hit.threadId, activeLeafId: branch.activeLeafId });
+        }
+        dispatch({ type: "focusMessage", threadId: hit.threadId, messageId: hit.messageId,
+          matchText: hit.snippet.slice(hit.matchStart, hit.matchStart + hit.matchLength) });
+      })()
+      : landOnSearchHit(hit, state, dispatch, showThreads);
+    void landing.catch((error) =>
       dispatch({ type: "error", message: error instanceof Error ? error.message : t("chat.find.unavailable") }),
     );
   };
@@ -79,6 +95,7 @@ export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: 
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => {
+            if (imeComposing(event.nativeEvent)) { event.stopPropagation(); return; }
             if (event.key === "Escape") {
               event.preventDefault();
               onClose();

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineAccess, ModelCatalog, ModelSelection, ProviderSnapshot } from "./contracts.ts";
@@ -28,6 +28,14 @@ describe("new bot default model selection", () => {
     const instance = { ...codex, instanceId: "mistral", driverKind: "mistral", access: "api" as const };
     const preferred = { instanceId: "mistral", model: "selected-model" };
     expect(selectDefaultModelSelection([instance], preferred)).toEqual(preferred);
+  });
+  it("starts a new bot on the person's own plan, not a custom endpoint on the same driver", () => {
+    const endpoint = { ...claude, instanceId: "claude-endpoint", access: "custom" as const,
+      models: { default: "deepseek-chat", options: [{ id: "deepseek-chat", label: "deepseek-chat" }] } };
+    // Listed first, so only the rank keeps the plan ahead of it.
+    expect(selectDefaultModelSelection([endpoint, claude])).toEqual({ instanceId: "claude", model: "claude-default" });
+    // Alone it is still the engine a new bot starts on.
+    expect(selectDefaultModelSelection([endpoint])).toEqual({ instanceId: "claude-endpoint", model: "deepseek-chat" });
   });
   it("keeps a saved custom endpoint even when its account sign-in is false", () => {
     const instance = { ...codex, access: "custom" as const, snapshot: { state: "available", authenticated: false } satisfies ProviderSnapshot };
@@ -62,6 +70,24 @@ describe("new bot default model selection", () => {
     expect(selection).toEqual({ instanceId: "codex", model: "selected-model" });
     expect(selection).not.toHaveProperty("effort");
     expect(preferred.effort).toBe("high");
+  });
+
+  it("drops a saved effort level unsupported by that specific model even when the engine advertises it", () => {
+    const preferred = { instanceId: "codex", model: "gpt-6-luna", effort: "ultra" as const };
+    const modelScopedCodex = {
+      ...codex,
+      models: {
+        default: "gpt-6.2-sol",
+        options: [
+          { id: "gpt-6.2-sol", label: "GPT-6.2-Sol", effortLevels: ["low", "medium", "high", "xhigh", "max", "ultra"] as const },
+          { id: "gpt-6-luna", label: "GPT-6-Luna", effortLevels: ["low", "medium", "high", "xhigh", "max"] as const },
+        ],
+      },
+      capabilities: { effortLevels: ["low", "medium", "high", "xhigh", "max", "ultra"] as const },
+    };
+    expect(selectDefaultModelSelection([modelScopedCodex], preferred)).toEqual({ instanceId: "codex", model: "gpt-6-luna" });
+    expect(selectDefaultModelSelection([modelScopedCodex], { instanceId: "codex", model: "gpt-6.2-sol", effort: "ultra" }))
+      .toEqual({ instanceId: "codex", model: "gpt-6.2-sol", effort: "ultra" });
   });
 
   it("accepts the provider default even when it is not repeated in its options", () => {
@@ -355,3 +381,12 @@ describe("new bot effort default", () => {
     expect(withNewBotEffort(selection, "high", undefined)).toEqual(selection);
   });
 });
+
+describe("a hidden provider", () => {
+  it("drops out of every selectable list, and an unhidden one comes back", () => {
+    const instances = [{ instanceId: "claude" }, { instanceId: "hermes" }] as unknown as SelectableInstance[];
+    expect(withInstanceConfig(instances, { hermes: { driver: "fake", hidden: true } }).map((instance) => instance.instanceId)).toEqual(["claude"]);
+    expect(withInstanceConfig(instances, { hermes: { driver: "fake" } }).map((instance) => instance.instanceId)).toEqual(["claude", "hermes"]);
+  });
+});
+

@@ -20,9 +20,21 @@ export interface DeviceRecord {
    * person's real accounts is a different risk from a disposable VM. Off on
    * every new and migrated device until the computer owner enables it. */
   browserControlAccess: boolean;
+  /** "local": Wi-Fi and Tailscale only. The relay never admits it and its psk is never tried there. */
+  routes: DeviceRoutes;
+  /** First end-to-end encrypted session. From then on its token is refused on the plain listener. */
+  e2eAt?: number;
 }
 
+export type DeviceRoutes = "any" | "local";
+
 export type PublicDevice = Omit<DeviceRecord, "tokenHash">;
+
+/** A refused `POST /api/pair`: `code` is one of the phone protocol's PairingErrorCode values. */
+export interface PairingRefusal {
+  error: string;
+  code: "pairing_bad_request" | "pairing_not_open" | "pairing_too_many" | "pairing_code_wrong" | "pairing_device_limit" | "pairing_failed";
+}
 
 /** `token` rides in the QR, has enough entropy to stand alone and is never
  * persisted. `code` is six digits, so it lives two minutes and dies after a
@@ -96,17 +108,57 @@ function normalizeDevice(record: Partial<DeviceRecord> & { id: string; tokenHash
     lastSeenAt: timestamp(record.lastSeenAt, createdAt),
     cloudDesktopAccess: record.cloudDesktopAccess === true,
     browserControlAccess: record.browserControlAccess === true,
+    routes: record.routes === "local" ? "local" : "any",
+    ...(typeof record.e2eAt === "number" && record.e2eAt > 0 ? { e2eAt: record.e2eAt } : {}),
   };
 }
 
+/** A device saved at pairing whose token was never used: the phone never got its reply, or lost it. Dropped after this. */
+export const UNCONFIRMED_DEVICE_MS = 5 * 60_000;
+
 export class DeviceRegistry {
   private devices: DeviceRecord[] = [];
+  /** Paired in this run and not yet used; a restart forgets these, and such a device then stays until removed. */
+  private unconfirmed = new Map<string, ReturnType<typeof setTimeout>>();
+  private droppedListeners = new Set<(id: string) => void>();
+  private replacedListeners = new Set<(id: string) => void>();
   private window: PairingWindow | null = null;
+  /** The window a renewal replaced: still valid until its own expiry, so a phone mid-scan never misses. */
+  private previousWindow: PairingWindow | null = null;
   private replay: PairingReplay | null = null;
   private replayExpiryTimer: ReturnType<typeof setTimeout> | null = null;
   private lastSeenWrites = new Map<string, number>();
   /** devices.json exists but could not be read: "no devices" is a guess. */
   private unreadable = false;
+  private changeListeners = new Set<() => void>();
+
+  /** Pairing, removal, a route restriction, or a pairing window opening or closing. */
+  onChange(listener: () => void): () => void {
+    this.changeListeners.add(listener);
+    return () => this.changeListeners.delete(listener);
+  }
+
+  /** A device dropped because its phone never used it. */
+  onDropped(listener: (id: string) => void): void {
+    this.droppedListeners.add(listener);
+  }
+
+  /** The phone holds the token: it authenticated with it, or opened an encrypted session keyed by it. */
+  confirm(id: string): void {
+    const timer = this.unconfirmed.get(id);
+    if (!timer) return;
+    clearTimeout(timer);
+    this.unconfirmed.delete(id);
+  }
+
+  private changed(): void {
+    for (const listener of this.changeListeners) listener();
+  }
+
+  /** Records, token hashes included: the E2E layer derives each psk and admission value from them. */
+  records(): readonly DeviceRecord[] {
+    return this.devices;
+  }
 
   /** Only `id` and `tokenHash` make a record a device; the rest is display and
    * gets defaults. */
@@ -150,28 +202,71 @@ export class DeviceRegistry {
     return this.devices.length;
   }
 
-  /** Expiry is evaluated on read. */
+  /** The newest window. Expiry is evaluated on read. */
   pairing(): PairingWindow | null {
-    if (this.window && this.window.expiresAt <= Date.now()) this.window = null;
-    return this.window;
+    return this.pairingWindows()[0] ?? null;
+  }
+
+  /** Newest first: at most the current window and the one a renewal replaced. */
+  pairingWindows(): PairingWindow[] {
+    const now = Date.now();
+    let expired = false;
+    if (this.previousWindow && this.previousWindow.expiresAt <= now) {
+      this.previousWindow = null;
+      expired = true;
+    }
+    if (this.window && this.window.expiresAt <= now) {
+      this.window = this.previousWindow;
+      this.previousWindow = null;
+      expired = true;
+    }
+    if (expired) this.changed();
+    return [this.window, this.previousWindow].filter((window): window is PairingWindow => window !== null);
+  }
+
+  /** A fresh code while the pairing screen stays open; the one before keeps its remaining time. */
+  renewPairing(): PairingWindow {
+    const current = this.pairing();
+    const next = this.newWindow();
+    this.previousWindow = current;
+    this.window = next;
+    this.changed();
+    return next;
   }
 
   /** `randomInt`, not `Math.random`: the code is a credential. */
-  openPairing(): PairingWindow {
-    this.clearReplay();
-    this.window = {
+  private newWindow(): PairingWindow {
+    return {
       code: String(randomInt(0, 1_000_000)).padStart(6, "0"),
       token: `omb_pair_${randomBytes(32).toString("base64url")}`,
       expiresAt: Date.now() + PAIRING_TTL_MS,
       attemptsLeft: MAX_PAIRING_ATTEMPTS,
     };
+  }
+
+  /** Replaces any open window. */
+  openPairing(): PairingWindow {
+    this.clearReplay();
+    this.previousWindow = null;
+    this.window = this.newWindow();
+    this.changed();
     return this.window;
   }
 
+  /** With a token: the newest window's closes both; the replaced one's closes only that one. */
   closePairing(expectedToken?: string): boolean {
-    if (expectedToken !== undefined && this.pairing()?.token !== expectedToken) return false;
+    const [newest, previous] = this.pairingWindows();
+    if (expectedToken !== undefined && newest?.token !== expectedToken) {
+      if (!previous || previous.token !== expectedToken) return false;
+      this.previousWindow = null;
+      this.changed();
+      return true;
+    }
+    const wasOpen = newest !== undefined;
     this.window = null;
+    this.previousWindow = null;
     this.clearReplay();
+    if (wasOpen) this.changed();
     return true;
   }
 
@@ -183,13 +278,30 @@ export class DeviceRegistry {
     this.replayExpiryTimer = null;
   }
 
+  /** A device replaced by a re-pairing, after the save that removed it. */
+  onReplaced(listener: (id: string) => void): void {
+    this.replacedListeners.add(listener);
+  }
+
+  private deviceWithToken(token: unknown): DeviceRecord | undefined {
+    if (typeof token !== "string" || !token) return undefined;
+    const hash = sha256(token);
+    return this.devices.find((d) => sameDigest(d.tokenHash, hash));
+  }
+
   /** A client that supplies a request id may repeat the same redemption until
-   * the window's original expiry. There is no general token-read endpoint. */
+   * the window's original expiry. There is no general token-read endpoint.
+   *
+   * `replacesToken`: the token this phone already holds here. Its device is removed in the same save, so re-pairing
+   * never grows the list. Security: it acts only after a valid pairing credential, and only for a holder of that
+   * token, who could already use everything that device can; the new device starts with a fresh pairing's grants.
+   * An unknown token is ignored and the reply is the same either way. */
   redeem(
     credential: string,
     name: unknown,
     pairRequestId?: unknown,
-  ): { device: PublicDevice; token: string } | { error: string } {
+    replacesToken?: unknown,
+  ): { device: PublicDevice; token: string } | PairingRefusal {
     const presented = String(credential ?? "");
     const requestId =
       typeof pairRequestId === "string" && /^[A-Za-z0-9._-]{16,128}$/.test(pairRequestId)
@@ -206,22 +318,27 @@ export class DeviceRegistry {
       return this.replay.result;
     }
 
-    const window = this.pairing();
-    if (!window) return { error: "no pairing is in progress — open Phone settings on your computer" };
-    if (!sameCredential(window.code, presented) && !sameCredential(window.token, presented)) {
-      window.attemptsLeft -= 1;
-      // Without burning the window, six digits is seconds of guessing.
-      if (window.attemptsLeft <= 0) {
+    const windows = this.pairingWindows();
+    const window = windows.find((candidate) => sameCredential(candidate.code, presented) || sameCredential(candidate.token, presented));
+    if (windows.length === 0) return { error: "no pairing is in progress — open Phone settings on your computer", code: "pairing_not_open" };
+    if (!window) {
+      // Every open window pays for a wrong guess: without burning them, six digits is seconds of guessing.
+      for (const open of windows) open.attemptsLeft -= 1;
+      if (windows.some((open) => open.attemptsLeft <= 0)) {
         this.closePairing();
-        return { error: "too many incorrect codes — start pairing again" };
+        return { error: "too many incorrect codes — start pairing again", code: "pairing_too_many" };
       }
-      return { error: "that pairing credential is not right" };
+      return { error: "that pairing credential is not right", code: "pairing_code_wrong" };
     }
     // After the code check: a full fleet must not answer wrong guesses, which
     // would leak state and cost no attempts.
-    if (this.devices.length >= MAX_DEVICES) return { error: "too many paired devices — remove one first" };
-    // Consume the window without clearing a replay; `closePairing` clears both.
+    const replaced = this.deviceWithToken(replacesToken);
+    if (this.devices.length - (replaced ? 1 : 0) >= MAX_DEVICES) {
+      return { error: "too many paired devices — remove an old phone on your computer first", code: "pairing_device_limit" };
+    }
+    // Consume every open window without clearing a replay; `closePairing` clears both.
     this.window = null;
+    this.previousWindow = null;
 
     const token = `omb_${randomBytes(32).toString("base64url")}`;
     const device: DeviceRecord = {
@@ -232,16 +349,36 @@ export class DeviceRegistry {
       lastSeenAt: Date.now(),
       cloudDesktopAccess: false,
       browserControlAccess: false,
+      // The owner's restriction carries over; a grant never does.
+      routes: replaced?.routes ?? "any",
     };
-    this.devices.push(device);
+    const previous = this.devices;
+    this.devices = [...previous.filter((d) => d !== replaced), device];
     // Unlike lastSeenAt, a failed write rolls the registration back: a device
     // only in memory is paired until the next restart, then silently is not.
     try {
       this.persist();
     } catch (e) {
-      this.devices.pop();
-      return { error: `could not save the pairing: ${(e as Error).message}` };
+      this.devices = previous;
+      return { error: `could not save the pairing: ${(e as Error).message}`, code: "pairing_failed" };
     }
+    if (replaced) {
+      this.lastSeenWrites.delete(replaced.id);
+      this.confirm(replaced.id);
+    }
+    this.changed();
+    if (replaced) for (const listener of this.replacedListeners) listener(replaced.id);
+    const unconfirmed = setTimeout(() => {
+      this.unconfirmed.delete(device.id);
+      try {
+        if (!this.revoke(device.id)) return;
+      } catch {
+        return;
+      }
+      for (const listener of this.droppedListeners) listener(device.id);
+    }, UNCONFIRMED_DEVICE_MS);
+    unconfirmed.unref?.();
+    this.unconfirmed.set(device.id, unconfirmed);
     const { tokenHash: _tokenHash, ...pub } = device;
     const result = { device: pub, token };
     if (requestId) {
@@ -265,6 +402,7 @@ export class DeviceRegistry {
     const hash = sha256(token);
     const device = this.devices.find((d) => sameDigest(d.tokenHash, hash));
     if (!device) return null;
+    this.confirm(device.id);
     const now = Date.now();
     if (now - (this.lastSeenWrites.get(device.id) ?? 0) > LAST_SEEN_WRITE_MS) {
       device.lastSeenAt = now;
@@ -290,7 +428,36 @@ export class DeviceRegistry {
       throw error;
     }
     this.lastSeenWrites.delete(id);
+    this.confirm(id);
+    this.changed();
     return true;
+  }
+
+  setRoutes(id: string, routes: DeviceRoutes): boolean {
+    const device = this.devices.find((candidate) => candidate.id === id);
+    if (!device) return false;
+    const previous = device.routes;
+    device.routes = routes;
+    try {
+      this.persist();
+    } catch (error) {
+      device.routes = previous;
+      throw error;
+    }
+    this.changed();
+    return true;
+  }
+
+  /** Once: the first end-to-end session ratchets this device off the plain listener for good. */
+  markE2E(id: string): void {
+    const device = this.devices.find((candidate) => candidate.id === id);
+    if (!device || device.e2eAt) return;
+    device.e2eAt = Date.now();
+    try {
+      this.persist();
+    } catch {
+      // Kept in memory; the next successful write saves it.
+    }
   }
 
   /** Per device, so one phone does not inherit another's permission. */

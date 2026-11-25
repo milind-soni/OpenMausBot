@@ -123,6 +123,42 @@ describe("Switch AI", () => {
     expect(saves()).toEqual([["/api/bots/bot-1/tasks/thread-1", { method: "PATCH", body: JSON.stringify({ modelSelection: { instanceId: "claude", model: "opus" } }) }]]);
   });
 
+  it("on a paired desktop, saves a switch that resets approval to Ask on the host, not through the desktop's own bridge", async () => {
+    const setMode = vi.fn();
+    window.ogb = { approvals: { setMode }, remoteClient: { active: true } } as unknown as NonNullable<Window["ogb"]>;
+    try {
+      noteRuntimeTurn(frame("turn.started", "turn-1"));
+      show(createElement(Picker, { bot: bot(true) }), createElement(Row), createElement(Keeper, { bot: bot(true) }));
+      act(() => requestAiSwitch(intent));
+      act(() => seen!.dispatch({ ...toClaude, resetApprovalToAsk: true } as Action));
+      await settle(0);
+      noteRuntimeTurn(frame("turn.completed", "turn-1"));
+      show(createElement(Row), createElement(Keeper, { bot: bot(false) }));
+      await settle();
+      expect(setMode).not.toHaveBeenCalled();
+      expect(saves()).toEqual([["/api/bots/bot-1/tasks/thread-1", { method: "PATCH",
+        body: JSON.stringify({ modelSelection: { instanceId: "claude", model: "opus" }, resetApprovalToAsk: true }) }]]);
+    } finally {
+      delete window.ogb;
+    }
+  });
+
+  it("on a paired desktop, refuses a switch that leaves Custom approval before stopping the turn", async () => {
+    window.ogb = { approvals: { setMode: vi.fn() }, remoteClient: { active: true } } as unknown as NonNullable<Window["ogb"]>;
+    try {
+      const custom = { ...bot(true), approvalMode: "custom" } as Bot;
+      noteRuntimeTurn(frame("turn.started", "turn-1"));
+      show(createElement(Picker, { bot: custom }), createElement(Row), createElement(Keeper, { bot: custom }));
+      act(() => requestAiSwitch(intent));
+      act(() => seen!.dispatch({ ...toClaude, resetApprovalToAsk: true } as Action));
+      await settle();
+      expect(api).not.toHaveBeenCalled();
+      expect(store).toHaveBeenCalledWith({ type: "error", message: expect.stringContaining("host computer") });
+    } finally {
+      delete window.ogb;
+    }
+  });
+
   it("counts the idle wait from the chat going idle, whatever else of the bot changes meanwhile", async () => {
     await pickClaude();
     show(createElement(Row), createElement(Keeper, { bot: bot(false) }));

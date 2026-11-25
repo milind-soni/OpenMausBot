@@ -1,12 +1,13 @@
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
-import { useStore, type Bot } from "@/state/store";
+import { type Bot } from "@/state/store";
 import { HELPER_ASK_KEYS } from "../HelperIntro";
 import { Card } from "./rows";
+import { useStoreDispatch } from "@/state/store-select";
 
 /** MausBot's example asks, in its panel (Simple mode): a tap sends one in the open conversation. */
 export function TryAsking({ bot }: { bot: Bot }) {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const advanced = useAdvancedMode();
   if (advanced || !bot.defaultBot) return null;
   return (

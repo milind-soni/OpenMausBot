@@ -4,18 +4,30 @@
 // OMB's command and environment names, and an AppArmor profile pinned to one
 // exact executable instead of a wildcard path.
 //
-// OMB never turns Chrome's sandbox off by itself. A host that cannot give it one
-// gets the setup command instead, and only an operator's explicit
-// OMB_BROWSER_SANDBOX=0 launches without it.
+// OMB never turns Chrome's sandbox off by itself on a host. A host that cannot
+// give it one gets the manual setup steps instead (a container, that switch), and
+// only an operator's explicit OMB_BROWSER_SANDBOX=0 launches without it. The
+// computer container image (also run on a VPS) is the exception: it drops
+// capabilities, so its Chrome runs without its own sandbox and the container is
+// the isolation boundary.
 
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 
-export const SETUP_COMMAND = "sudo openmausbot browser setup";
+/** Installs the Linux libraries Chrome needs (as root, once). */
+export const LIBRARIES_COMMAND = "sudo openmausbot browser install --with-deps";
+/** There is no command for the sandbox: an administrator allows one root-owned Chrome by hand. */
+export const SANDBOX_STEPS_URL = "https://github.com/milind-soni/OpenMausBot/blob/main/docs/deploy-vps.md#ubuntu-2404-browser-sandbox";
 
 /** What Chrome prints before aborting when it cannot sandbox itself. */
 export const NO_SANDBOX_SIGNATURE = "No usable sandbox";
+/** Chrome's sandbox refuses root, which most containers run as. */
+const ROOT_SIGNATURE = "Running as root without --no-sandbox";
+/** A sandbox with no user namespaces to move into, as in a container. */
+const NAMESPACE_SIGNATURE = "Failed to move to new namespace";
+/** Docker's and Podman's marks inside a container. */
+const CONTAINER_MARKERS = ["/.dockerenv", "/run/.containerenv"];
 
 export function sandboxDisabled(env: Readonly<Record<string, string | undefined>>): boolean {
   return env.OMB_BROWSER_SANDBOX === "0";
@@ -35,7 +47,7 @@ export function appArmorProfile(executable: string): string {
   if (!isAbsolute(executable) || /[\s*?[\]{}"'\\^]/.test(executable) || !executable.startsWith("/opt/")) {
     throw new Error(`The browser's AppArmor exemption is only for a root-owned path under /opt, not ${executable}.`);
   }
-  return `# Written by \`openmausbot browser setup\`: lets OpenMausBot's Chrome use its sandbox.
+  return `# Written for OpenMausBot: lets its Chrome use its sandbox.
 abi <abi/4.0>,
 include <tunables/global>
 
@@ -75,14 +87,18 @@ export const DEBIAN_PACKAGES: ReadonlyArray<ReadonlyArray<string>> = [
   ["fonts-noto-cjk"],
 ];
 
+export type BrowserHostNeed = "sandbox" | "container" | "libraries";
+
 export class BrowserHostError extends Error {
-  readonly kind: "sandbox" | "libraries";
+  readonly kind: BrowserHostNeed;
   readonly libraries: readonly string[];
 
-  constructor(kind: "sandbox" | "libraries", libraries: readonly string[] = []) {
+  constructor(kind: BrowserHostNeed, libraries: readonly string[] = []) {
     super(kind === "sandbox"
-      ? `This host blocks the sandbox the browser runs in (AppArmor on Ubuntu 23.10+). Run \`${SETUP_COMMAND}\` on the host once to allow it, then try again.`
-      : `This host is missing libraries the browser needs (${libraries.join(", ")}). Run \`${SETUP_COMMAND}\` on the host to install them, then try again.`);
+      ? `This host blocks the sandbox the browser runs in (AppArmor on Ubuntu 23.10+). An administrator can allow it for one root-owned copy of Chrome, following ${SANDBOX_STEPS_URL}, then try again.`
+      : kind === "container"
+      ? "Chrome's sandbox can't start in this container. The operator can set OMB_BROWSER_SANDBOX=0 to run the browser without it and rely on the container's isolation, then restart OpenMausBot."
+      : `This host is missing libraries the browser needs (${libraries.join(", ")}). Run \`${LIBRARIES_COMMAND}\` on the host to install them, then try again.`);
     this.name = "BrowserHostError";
     this.kind = kind;
     this.libraries = libraries;
@@ -92,6 +108,11 @@ export class BrowserHostError extends Error {
 const MISSING_LIBRARY = /^\s*(\S+) => not found$/gm;
 /** glibc's loader abort, naming the first library it could not load. */
 const LOADER_ERROR = /error while loading shared libraries: ([^:\s]+)/;
+
+/** The library glibc's loader names in a failed launch's output, if any. */
+export function loaderMissingLibrary(output: string): string | undefined {
+  return LOADER_ERROR.exec(output)?.[1];
+}
 
 function run(command: string, args: readonly string[], env: NodeJS.ProcessEnv): Promise<string> {
   return new Promise((resolve) => {
@@ -106,15 +127,32 @@ function run(command: string, args: readonly string[], env: NodeJS.ProcessEnv): 
  * libraries a host provides another way (NixOS's nix-ld).
  */
 export async function missingLibraries(executable: string, env: NodeJS.ProcessEnv = process.env): Promise<string[]> {
-  const loaderError = LOADER_ERROR.exec(await run(executable, ["--version"], env))?.[1];
+  const loaderError = loaderMissingLibrary(await run(executable, ["--version"], env));
   if (loaderError === undefined) return [];
   const listed = [...(await run("ldd", [executable], env)).matchAll(MISSING_LIBRARY)].map((match) => match[1]!);
   return listed.length > 0 ? listed : [loaderError];
 }
 
-/** After a launch fails, the host setup it is missing, or null when neither explains it. */
-export async function diagnoseLaunchFailure(input: { executable: string; output: string; platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv }): Promise<BrowserHostError | null> {
-  if (input.output.includes(NO_SANDBOX_SIGNATURE)) return new BrowserHostError("sandbox");
+/** The host setup a failure needs, found behind the errors that carried it, or null. */
+export function hostSetupOf(error: unknown): BrowserHostError | null {
+  for (let at = error, depth = 0; at instanceof Error && depth < 8; at = at.cause, depth += 1) {
+    if (at instanceof BrowserHostError) return at;
+  }
+  return null;
+}
+
+/** After a launch fails, the host setup it is missing, or null when none explains it. */
+export async function diagnoseLaunchFailure(input: {
+  executable: string;
+  output: string;
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
+  exists?: (path: string) => boolean;
+}): Promise<BrowserHostError | null> {
+  const { output, exists = existsSync } = input;
+  const noSandbox = output.includes(NO_SANDBOX_SIGNATURE) || output.includes(NAMESPACE_SIGNATURE);
+  if (output.includes(ROOT_SIGNATURE) || (noSandbox && CONTAINER_MARKERS.some(exists))) return new BrowserHostError("container");
+  if (noSandbox) return new BrowserHostError("sandbox");
   if ((input.platform ?? process.platform) !== "linux") return null;
   const libraries = await missingLibraries(input.executable, input.env);
   return libraries.length ? new BrowserHostError("libraries", libraries) : null;

@@ -25,8 +25,20 @@ You'll get a response as soon as possible, normally within a few days.
   guarded routes, so a bot's shell can post into an existing Full-access thread, or open one while
   shared Full access is on, and get Full-access work done without a card. A worker-only relay token
   is the planned fix.
+- `openmausbot login` asks through `POST /api/auth/cli-login`, which needs no session and grants
+  nothing: only Allow in the owner's or an admin's window (an admin route behind the same gate)
+  mints a session, and the terminal collects it once with a secret only it holds. A way to get a
+  session from that route without a person pressing Allow is a vulnerability. Any program here,
+  a bot's shell included, can ask, so the matching code on the card is the person's check. The
+  saved session is in the macOS Keychain or a 0600 file, which a bot with Full access, running as
+  the person, can read like any of their files.
 - API keys live in `~/.openmausbot/config.json` and are write-only through the API (`configured`
-  booleans out, never values). Any path that echoes a stored secret back — API response, SSE event,
+  booleans out, never values). The packaged desktop app keeps AI provider and service keys in an
+  OS-encrypted store (`credentials.bin`) instead; OpenCode provider keys, per-engine `environment`
+  or `key` values, MCP env and header values and `mcp-oauth.json` stay plaintext on every install,
+  except a key a bot set from a secret card, which `config.json` holds only as a `vault:<id>` pointer
+  into the sealed Vault. Any path
+  that echoes a stored secret back — API response, SSE event,
   log line, argv visible in `ps` — is a vulnerability.
 - Agents run real CLIs (`claude`, `codex`) with the user's own privileges, and the permission broker
   is the consent layer for risky actions. Bypasses of the broker (approving without a user decision,
@@ -34,5 +46,9 @@ You'll get a response as soon as possible, normally within a few days.
   access**. Full access is a standing user decision to approve provider permission requests; it must
   never answer questions or silently broaden product-level confirmations such as credentials,
   routines, skills, or peer communication.
+- The announcements file (`announcements/announcements.json`, downloaded from `main`; `docs/announcements.md`) is
+  untrusted input to every install. A card that renders markup, runs anything, navigates the app's own window, opens a
+  non-https address, loads a picture from outside the repository's `announcements/` folder, or makes the download carry
+  anything identifying the install or the person is a vulnerability.
 - Spawning must never route user-influenced strings through a shell. Report any `shell: true` /
   `cmd.exe` string-building you find.

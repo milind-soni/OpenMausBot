@@ -1,81 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createServer } from "node:http";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cancelSurvey, CHECKOUT_SOURCES, checkoutDestination, cloudMenuSublabel, createCloudAccountClient, createCloudAccountStore, cloudOrigin, cloudPlanSnapshot, CLOUD_ORIGIN } from "./cloud-account.mjs";
+import nativeText from "./native-text.cjs";
+import { accessToken, fixture, until } from "./fixtures/cloud-account.mjs";
+import { cancelSurvey, CHECKOUT_SOURCES, checkoutDestination, cloudMenuSublabel, createCloudAccountStore, cloudOrigin, cloudPlanSnapshot, CLOUD_ORIGIN } from "./cloud-account.mjs";
 
-const accessToken = `omc_${"T".repeat(43)}`;
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function until(check) { for (let i = 0; i < 200; i++) { if (check()) return; await sleep(5); } assert.fail("Fixture did not reach the expected state"); }
-async function fixture(t, options = {}) {
-  const f = { now: 1_800_000_000_000, requests: [], browsers: [], states: [], saved: null, approved: false, revoked: false,
-    sessionStatus: 200, invalidIdentity: false, invalidEntitlement: false, badUrl: false, failWrite: false, slowToken: null,
-    entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 0 }, timer: null, delay: null, cloud: undefined, expiresIn: 600,
-    disk: { status: 404, body: "<!doctype html>not here" }, x: { status: 404, body: { error: "unsupported" } }, pages: { status: 404, body: { error: "unsupported" } }, sessionPage: null, sessionError: null, tokenPage: null, publicConfig: { status: 404, body: { error: "not_found" } },
-    offer: undefined, checkout: { status: 404, body: "<!doctype html>not here" }, interest: { status: 200, body: { ok: true } },
-    upgradePreview: { status: 404, body: { error: "not_found" } }, upgrade: { status: 404, body: { error: "not_found" } }, teams: undefined, teamPairing: { status: 404, body: { error: "not_found" } }, moved: { status: 404, body: { error: "not_found" } }, moveStatus: { status: 404, body: { error: "not_found" } },
-    // An Admin before the app's Cancel and Keep: neither route, and the session's `clouds` absent.
-    clouds: undefined, feedback: { status: 404, body: { error: "Not found." } }, renewal: () => ({ status: 404, body: { error: "Not found." } }) };
-  const identity = () => ({ cloudContractVersion: 1, expiresAt: f.now + 86400_000, device: { id: "fixture-device" }, account: { id: "fixture-account", email: "person@example.test" } });
-  const server = createServer(async (req, res) => {
-    let body = ""; for await (const chunk of req) body += chunk;
-    f.requests.push({ route: req.url, method: req.method, token: req.headers.authorization, version: req.headers["x-openmausbot-version"], body });
-    const send = (status, data) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(data)); };
-    if (req.url === "/api/cloud/desktop/authorize") return send(201, { cloudContractVersion: 1, deviceCode: "A".repeat(43), userCode: "ABCDE-FGHJK",
-      verificationUriComplete: f.badUrl ? "https://untrusted.example.test" : `${f.origin}/cloud/desktop?code=ABCDE-FGHJK`, expiresIn: f.expiresIn, interval: 5 });
-    if (req.url === "/api/public/config" && req.method === "GET") {
-      f.requests.at(-1).cookie = req.headers.cookie;
-      if (typeof f.publicConfig.body === "string") { res.writeHead(f.publicConfig.status, { "content-type": "text/html" }); return res.end(f.publicConfig.body); }
-      return send(f.publicConfig.status, f.publicConfig.body);
-    }
-    if (req.url === "/api/cloud/desktop/disk" && req.headers.authorization === `Bearer ${accessToken}`) {
-      if (typeof f.disk.body === "string") { res.writeHead(f.disk.status, { "content-type": "text/html" }); return res.end(f.disk.body); }
-      return send(f.disk.status, f.disk.body);
-    }
-    if (req.url === "/api/cloud/desktop/services/x" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.x.status, f.x.body);
-    if (/^\/api\/cloud\/desktop\/teams\/[^/]+\/pairing$/.test(req.url) && req.method === "POST" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.teamPairing.status, f.teamPairing.body);
-    if (req.url === "/api/cloud/desktop/services/pages" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.pages.status, f.pages.body);
-    if (req.url === "/api/cloud/desktop/moved" && req.method === "POST" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.moved.status, f.moved.body);
-    if (req.url === "/api/cloud/desktop/move-status" && req.method === "POST" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.moveStatus.status, f.moveStatus.body);
-    if (req.url === "/api/cloud/desktop/feedback" && req.method === "POST" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.feedback.status, f.feedback.body);
-    const renewal = /^\/api\/cloud\/desktop\/clouds\/([^/]+)\/(cancel|keep)$/.exec(req.url);
-    if (renewal && req.method === "POST" && req.headers.authorization === `Bearer ${accessToken}`) { const answer = f.renewal(renewal[2], renewal[1]); return send(answer.status, answer.body); }
-    for (const [route, answer] of [["/api/cloud/desktop/checkout", f.checkout], ["/api/cloud/desktop/interest", f.interest],
-      ["/api/cloud/desktop/upgrade/preview", f.upgradePreview], ["/api/cloud/desktop/upgrade", f.upgrade]]) {
-      if (req.url !== route || req.method !== "POST" || req.headers.authorization !== `Bearer ${accessToken}`) continue;
-      if (typeof answer.body === "string") { res.writeHead(answer.status, { "content-type": "text/html" }); return res.end(answer.body); }
-      return send(answer.status, answer.body);
-    }
-    if (req.url === "/api/cloud/desktop/token") {
-      if (f.tokenPage) { res.writeHead(f.tokenPage, { "content-type": "text/html" }); return res.end("<!doctype html>Just a moment"); }
-      if (f.slowToken) await f.slowToken;
-      return f.approved ? send(200, { ...identity(), accessToken }) : send(400, { error: "authorization_pending" });
-    }
-    if (req.url === "/api/cloud/desktop/session" && req.headers.authorization === `Bearer ${accessToken}`) {
-      if (req.method === "DELETE") { if (f.sessionPage) { res.writeHead(f.sessionPage, { "content-type": "text/html" }); return res.end("<!doctype html>Attention required"); } if (f.sessionStatus === 503) return send(503, { error: "unavailable" }); f.revoked = true; return send(200, { revoked: true }); }
-      if (f.revoked) return send(401, { error: "invalid_token" });
-      if (f.sessionPage) { res.writeHead(f.sessionPage, { "content-type": "text/html" }); return res.end("<!doctype html>Attention required"); }
-      if (f.sessionError) return send(f.sessionError.status, f.sessionError.body);
-      if (f.sessionStatus !== 200) return send(f.sessionStatus, { error: "unavailable" });
-      return send(200, { ...identity(), ...(f.invalidIdentity ? { account: { id: "someone-else", email: "other@example.test" } } : {}),
-        entitlement: f.invalidEntitlement ? { plan: "pro", status: "active" } : f.entitlement, ...(f.cloud === undefined ? {} : { cloud: f.cloud }),
-        ...(f.offer === undefined ? {} : { offer: f.offer }), ...(f.teams === undefined ? {} : { teams: f.teams }), ...(f.clouds === undefined ? {} : { clouds: f.clouds }) });
-    }
-    send(404, { error: "not_found" });
-  });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  f.origin = `http://127.0.0.1:${server.address().port}`;
-  f.client = createCloudAccountClient({ origin: f.origin, fixture: true, deviceName: "Fixture computer", platform: "darwin", appVersion: "0.1.fixture", now: () => f.now,
-    store: { read: async () => f.saved, write: async value => { if (f.failWrite) throw new Error("fixture storage failure"); f.saved = structuredClone(value); } },
-    openBrowser: async url => { f.browsers.push(url); }, onState: state => f.states.push(state),
-    setTimer: (callback, delay) => { f.timer = callback; f.delay = delay; return 1; }, clearTimer: () => { f.timer = null; f.delay = null; }, ...options });
-  f.tick = () => { const callback = f.timer; assert.ok(callback); f.timer = null; callback(); };
-  f.connect = async () => { await f.client.begin(); f.approved = true; f.tick(); await until(() => f.client.state().status === "connected"); };
-  t.after(async () => { f.client.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
-  return f;
-}
 
 test("Cloud origin is fixed; only explicit fixtures can use loopback", () => {
   assert.equal(cloudOrigin(), CLOUD_ORIGIN);
@@ -190,6 +121,20 @@ test("a connection that fails while the Admin says My Cloud can't be reached say
   await assert.rejects(f.client.pairHome(), { message: "My Cloud hasn't answered for a few minutes. Nothing was lost, and we've been told." });
   f.cloud = { state: "ready", origin, pairingAvailable: true };
   await assert.rejects(f.client.pairHome(), { message: "Cloud request failed." });
+});
+
+test("a pairing refused while the Admin says why keeps its status; a 429 keeps its Retry-After and doesn't read the session again", async t => {
+  const f = await fixture(t); await f.connect();
+  const origin = "https://home-7f3k2.fly.dev", since = f.now - 6 * 60_000;
+  f.entitlement = { plan: "pro", tier: "pro", status: "active", expiresAt: f.now + 86_400_000, version: 1 };
+  f.cloud = { state: "ready", origin, pairingAvailable: true, unreachable: { cause: "host", since } };
+  await f.client.refresh();
+  f.pairing = { status: 503, body: { error: "unavailable" } };
+  await assert.rejects(f.client.pairHome(), (error) => error.status === 503 && /hosting provider/.test(error.message));
+  f.pairing = { status: 429, body: { error: "rate_limited" }, headers: { "retry-after": "120" } };
+  const reads = f.requests.filter(row => row.route === "/api/cloud/desktop/session").length;
+  await assert.rejects(f.client.pairHome(), (error) => error.status === 429 && error.retryAfter === 120);
+  assert.equal(f.requests.filter(row => row.route === "/api/cloud/desktop/session").length, reads, "the Admin's limit is not met with another request");
 });
 
 test("a free trial and its AI credit come with a verified session, for display only; an Admin without them changes nothing", async t => {
@@ -590,14 +535,16 @@ test("sign-out durably forgets personal Cloud and revokes only its credential; o
 test("failed durable sign-out blocks reconnect until cleanup succeeds", async t => {
   const f = await fixture(t); await f.connect(); f.failWrite = true;
   assert.equal((await f.client.signOut()).message, "signout-storage-failed");
-  await assert.rejects(f.client.begin(), /Sign out/); assert.equal(f.client.state().entitlement, undefined);
+  const asked = f.requests.length, blocked = await f.client.begin();
+  assert.equal(blocked.status, "unavailable"); assert.equal(blocked.reset, true, "clearing it is offered");
+  assert.equal(f.requests.length, asked, "no sign-in starts"); assert.equal(f.client.state().entitlement, undefined);
   f.failWrite = false; await f.client.signOut(); assert.equal(f.saved, null);
 });
 
 test("startup restoration cannot race a new sign-in, and failed token persistence revokes the issued credential", async t => {
   let resolveRead;
   const f = await fixture(t, { store: { read: () => new Promise(resolve => { resolveRead = resolve; }), write: async () => {} } });
-  const restoring = f.client.start(); await assert.rejects(f.client.begin(), /Sign out/);
+  const restoring = f.client.start(); assert.equal((await f.client.begin()).message, "restoring");
   resolveRead(null); await restoring; assert.deepEqual(f.requests, []);
   const broken = await fixture(t); broken.failWrite = true; await broken.client.begin(); broken.approved = true; broken.tick();
   await until(() => broken.revoked); await until(() => broken.client.state().message === "signout-storage-failed");
@@ -673,13 +620,62 @@ test("a locked keychain never removes the saved Cloud sign-in: it is read again,
   lock.locked = true;
   assert.deepEqual(await f.client.start(), { status: "unavailable", message: "restore-failed" });
   assert.equal(f.delay, 15_000);
-  await assert.rejects(f.client.begin(), /Sign out/);
-  for (const delay of [30_000, 60_000, 60_000]) { f.tick(); await until(() => f.timer); assert.equal(f.delay, delay); }
+  assert.deepEqual(await f.client.begin(), { status: "unavailable", message: "restore-failed" });
+  assert.deepEqual(await f.client.emailStart("person@example.test"), { outcome: "blocked", reason: "saved" }, "no clearing offered yet");
+  assert.deepEqual(await f.client.resetSaved(), { status: "unavailable", message: "restore-failed" }, "nothing is cleared before it is offered");
+  // Read again at 0:15, 0:45, 1:45 and 2:45: three failed reads by 0:45, but clearing also waits for two minutes.
+  const offered = [];
+  for (const delay of [30_000, 60_000, 60_000, 60_000]) { f.now += f.delay; f.tick(); await until(() => f.timer); assert.equal(f.delay, delay); offered.push(f.client.state().reset === true); }
+  assert.deepEqual(offered, [false, false, false, true], "offered at the read at 2:45, not the third read at 0:45");
   assert.ok((await stat(file)).isFile(), "a locked sign-in is never removed");
-  assert.equal(f.states.filter(state => state.message === "restore-failed").length, 1, "said once, not on every try");
+  assert.deepEqual(f.states.filter(state => state.message === "restore-failed").map(state => state.reset ?? false), [false, true],
+    "said once, then once more when clearing it is offered, not on every try");
+  assert.deepEqual(await f.client.emailStart("person@example.test"), { outcome: "blocked", reason: "saved", reset: true });
+  assert.equal(f.requests.length, 0);
   lock.locked = false; f.tick();
   await until(() => f.client.state().status === "connected");
   assert.equal(f.client.state().account.email, "person@example.test");
+});
+
+test("Clear pressed while a read of the saved sign-in is under way: a read that opens it keeps it, and signs in", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "omb-cloud-clear-race-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, "cloud-account.bin"), lock = { locked: true };
+  let gate = null;
+  const decrypt = async value => { await gate; return { shouldReEncrypt: false, result: Buffer.from(value).map(byte => byte ^ 0x55).toString() }; };
+  const f = await fixture(t, { store: electron43Store(file, lock, decrypt) });
+  await electron43Store(file).write(savedSignIn(f));
+  await f.client.start();
+  while (!f.client.state().reset) { f.now += f.delay; f.tick(); await until(() => f.timer); }
+  // The keychain is unlocked, and the next read is decrypting as the person presses Clear.
+  let release; gate = new Promise(resolve => { release = resolve; });
+  lock.locked = false; f.now += f.delay; f.tick();
+  const clearing = f.client.resetSaved();
+  release();
+  assert.equal((await clearing).status, "connected");
+  assert.ok((await stat(file)).isFile(), "the saved sign-in that opened is kept");
+  assert.ok(!f.requests.some(row => row.method === "DELETE"), "and never revoked");
+});
+
+test("Clear pressed while a read never finishes (a keychain prompt nobody answers): it clears after a short wait, and a sign-in can start", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "omb-cloud-clear-hung-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, "cloud-account.bin"), lock = { locked: true };
+  let hang = null, release = () => {};
+  const decrypt = async value => { if (hang) await hang; return { shouldReEncrypt: false, result: Buffer.from(value).map(byte => byte ^ 0x55).toString() }; };
+  const f = await fixture(t, { store: electron43Store(file, lock, decrypt), readWaitMs: 50 });
+  await electron43Store(file).write(savedSignIn(f));
+  await f.client.start();
+  while (!f.client.state().reset) { f.now += f.delay; f.tick(); await until(() => f.timer); }
+  hang = new Promise(resolve => { release = resolve; }); lock.locked = false; f.now += f.delay; f.tick();
+  const outcome = await Promise.race([f.client.resetSaved(), new Promise(resolve => setTimeout(() => resolve("still waiting"), 5_000))]);
+  assert.notEqual(outcome, "still waiting", "Clear never waits on a read for ever");
+  assert.equal(outcome.status, "signed-out");
+  await assert.rejects(stat(file), { code: "ENOENT" });
+  assert.equal((await f.client.begin()).status, "connecting", "the sign-in it was cleared for can start");
+  // The prompt is answered at last: that late read changes nothing.
+  release(); await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(f.client.state().status, "connecting");
 });
 
 test("a decrypt answer in a shape this app does not know is never taken for an unreadable sign-in", async t => {
@@ -806,6 +802,14 @@ test("this computer tells the Admin its move is done, and asks for an ended Clou
   assert.deepEqual(JSON.parse(f.requests.findLast(r => r.route === "/api/cloud/desktop/export").body), { installation: computer });
   await assert.rejects(f.client.exportHome());
   assert.deepEqual(JSON.parse(f.requests.findLast(r => r.route === "/api/cloud/desktop/export").body), {});
+});
+
+test("connecting before My Cloud is ready is refused in the app's language", async t => {
+  const english = await fixture(t);
+  await assert.rejects(english.client.pairHome(), { message: "My Cloud is not ready to connect yet." });
+  const { t: words } = nativeText.createNativeText({ saved: "pt-br" });
+  const translated = await fixture(t, { t: words });
+  await assert.rejects(translated.client.pairHome(), { message: "Ainda não é possível se conectar ao Cloud." });
 });
 
 test("usage meter: the session's usage reaches the state and the Cloud page's snapshot, checked; Upgrade sends a change only with this app's own preview", async t => {

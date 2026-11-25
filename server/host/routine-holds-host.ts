@@ -9,6 +9,7 @@ import { join } from "node:path";
 import type { RoutineHoldCause } from "../../shared/routines.ts";
 import { writeFileAtomic } from "../atomic.ts";
 import type { RoutineManager } from "../routines.ts";
+import { conversationLanguage, serverLine, type ServerLineKey } from "../server-lines.ts";
 import type { Store } from "../store.ts";
 
 /** While every connection is gone, whether one came back elsewhere (an app connected from another device) is read again at
@@ -16,10 +17,10 @@ import type { Store } from "../store.ts";
 const RECHECK_MS = 15 * 60_000;
 
 /** The owner's one line when a cause begins and pauses routines. */
-export const ROUTINE_HOLD_LINES: Record<RoutineHoldCause, string> = {
-  plan_cancelled: "Your routines are paused because the plan was cancelled. To keep one running until the plan ends, turn it back on in Routines.",
-  no_engine: "Your routines are paused: none of your AI accounts is signed in here any more. They turn back on by themselves when you sign in again.",
-  no_connections: "Your routines are paused: every connected app and MCP server was removed. They turn back on when you connect one, or turn one back on in Routines.",
+export const ROUTINE_HOLD_KEYS: Record<RoutineHoldCause, ServerLineKey> = {
+  plan_cancelled: "server.routines.held.planCancelled",
+  no_engine: "server.routines.held.noEngine",
+  no_connections: "server.routines.held.noConnections",
 };
 
 interface Saved { away?: true; planCancelled?: true; connectionsGone?: true }
@@ -61,17 +62,20 @@ export function createRoutineHoldsHost(deps: RoutineHoldsHostDeps) {
   }
 
   /** The owner's Chief: the place's own one, else the first made (a Team Cloud's founder's). */
-  function tell(line: string): void {
+  function tell(cause: RoutineHoldCause): void {
     const chief = deps.store.bots.filter((bot) => !bot.hidden && bot.chiefOfStaff)
       .sort((a, b) => Number(Boolean(b.defaultBot)) - Number(Boolean(a.defaultBot)) || a.createdAt - b.createdAt)[0];
-    if (chief) deps.store.appendMessage(chief.threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${line}`, ok: true } });
+    if (chief) {
+      const line = serverLine(conversationLanguage(chief.threadId), ROUTINE_HOLD_KEYS[cause]);
+      deps.store.appendMessage(chief.threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${line}`, ok: true } });
+    }
   }
 
   /** Never throws: it runs inside reading the engines, which must not fail for it. */
   function review(): void {
     if (!routines) return;
     try {
-      for (const cause of routines.holdFor(causes())) tell(ROUTINE_HOLD_LINES[cause]);
+      for (const cause of routines.holdFor(causes())) tell(cause);
     } catch (error) {
       deps.log?.(`[routines] could not pause or resume routines (${error instanceof Error ? error.message : "error"})`);
     }

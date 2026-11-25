@@ -13,6 +13,11 @@ vi.mock("node:child_process", async () => ({
   spawn: spawnMock,
 }));
 
+vi.mock("./vps-ssh.ts", async () => ({
+  ...(await vi.importActual<typeof import("./vps-ssh.ts")>("./vps-ssh.ts")),
+  ensureVpsSshMaster: vi.fn().mockResolvedValue(0),
+}));
+
 import {
   BASE_IMAGE,
   BASE_IMAGE_DIGEST,
@@ -25,6 +30,7 @@ import {
   MANAGED_LABEL,
 } from "./container-computer.ts";
 import { PIDS_LIMIT } from "./container-limits.ts";
+import { ensureVpsSshMaster } from "./vps-ssh.ts";
 import type { AppConfig } from "./config.ts";
 import {
   VPS_CONTAINER_LABEL,
@@ -50,6 +56,9 @@ import {
   vpsUnavailableHint,
   inspectVpsForAuto,
   reuseVps,
+  dockerCliInstallCommand,
+  listManagedVpsComputers,
+  VpsHostUnreachableError,
   type VpsCommandRunner,
 } from "./vps-computer.ts";
 
@@ -299,6 +308,7 @@ describe("VPS computer", () => {
     expect(args).toContain("127.0.0.1:45678:172.17.0.5:6901");
     expect(args.at(-1)).toBe("production-vps");
     expect(args).toContain("ExitOnForwardFailure=yes");
+    expect(args).toContain("ControlPath=none");
     expect(vpsSshTunnelArgs("production-vps", 45678, "172.17.0.5", "/data/ssh/config").slice(0, 3)).toEqual(["-F", "/data/ssh/config", "-N"]);
     expect(vpsSshTunnelArgs("production-vps", 45678, "172.17.0.5", null)[0]).toBe("-N");
     expect(() => vpsSshTunnelArgs("production-vps", 80, "172.17.0.5")).toThrow(/port/);
@@ -455,6 +465,9 @@ describe("VPS computer", () => {
     expect(status.ready).toBe(true);
     const run = provision.calls.find(({ args }) => args[2] === "run")?.args ?? [];
     expect(run).toContain("--memory");
+    expect(run.join(" "), "a VPS desktop has no host mounts, so root may install packages there")
+      .toContain("--cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add FSETID --cap-add SETGID --cap-add SETUID");
+    expect(run).not.toContain("no-new-privileges");
     expect(run[run.indexOf("--pids-limit") + 1], "Firefox needs room for its threads").toBe(String(PIDS_LIMIT));
     expect(run).toContain("--ipc");
     expect(run[run.indexOf("--ipc") + 1]).toBe("private");
@@ -471,7 +484,8 @@ describe("VPS computer", () => {
     expect(run.some((arg) => /^VNC_PW=[A-Za-z0-9_-]{8,}$/.test(arg))).toBe(true);
     expect(run).not.toContain("--mount");
     expect(run).not.toContain("-p");
-    expect(provision.calls.some(({ args }) => args[2] === "build")).toBe(true);
+    const build = provision.calls.find(({ args }) => args[2] === "build");
+    expect(build?.args.slice(2)).toEqual(["build", "--force-rm", "-t", VPS_IMAGE, "-"]);
   });
 
   it("uses the image id produced by a rebuild", async () => {
@@ -1172,7 +1186,7 @@ describe("VPS computer", () => {
   });
 
   it("names the one way on that fits what Auto's VPS check found", () => {
-    const connection = "Check the VPS connection in Settings → API keys.";
+    const connection = "Check the VPS connection in Settings → AI → Other services.";
     expect(vpsUnavailableHint({ reachable: true })).toBe("Open Computer and enable Start VPS automatically, or choose Cloud computer to start it manually.");
     expect(vpsUnavailableHint({ reachable: false })).toBe(connection);
     expect(vpsUnavailableHint({ autoStartVps: true, reachable: true })).toBe(connection);
@@ -1184,23 +1198,103 @@ describe("VPS computer", () => {
 
 // A real loopback listener stands in for SSH; no host or remote daemon is used.
 describe("remote desktop tunnel ownership", () => {
-  async function openFixture() {
-    let server: Server | undefined;
-    const child = Object.assign(new EventEmitter(), {
-      exitCode: null as number | null, killed: false, stderr: new PassThrough(),
-      kill: vi.fn(() => { child.killed = true; server?.close(); child.emit("close", 0); return true; }),
-    });
-    spawnMock.mockImplementation((_binary, args: string[]) => {
+  function tunnelFixture() {
+    const children: ReturnType<typeof fakeTunnel>[] = [];
+    function fakeTunnel(args: string[]) {
       const port = Number(args[args.indexOf("-L") + 1].split(":")[1]);
-      server = createServer(socket => socket.end()).listen(port, "127.0.0.1");
+      const server: Server = createServer(socket => socket.end()).listen(port, "127.0.0.1");
+      const child = Object.assign(new EventEmitter(), {
+        exitCode: null as number | null, killed: false, stderr: new PassThrough(),
+        kill: vi.fn(() => { child.killed = true; server.close(); child.emit("close", 0); return true; }),
+      });
+      return child;
+    }
+    spawnMock.mockImplementation((_binary, args: string[]) => {
+      const child = fakeTunnel(args);
+      children.push(child);
       return child;
     });
-    const runner = fixture().runner;
+    return { children, runner: fixture().runner, cleanup: () => {
+      closeAllVpsDesktopTunnels();
+      for (const child of children) if (!child.killed) child.kill();
+    } };
+  }
+
+  async function openFixture() {
+    const { children, runner, cleanup } = tunnelFixture();
     try {
       await vpsComputerJoin(CONFIG, BOT_ID, runner, true);
-      return { child, runner };
-    } catch (error) { child.kill(); throw error; }
+      return { child: children[0]!, runner };
+    } catch (error) { cleanup(); throw error; }
   }
+
+  it("shares one pending tunnel between concurrent remote and native joins", async () => {
+    const { children, runner, cleanup } = tunnelFixture();
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const inspecting = new Promise<void>(resolve => { entered = resolve; });
+    let inspections = 0;
+    const blocked: VpsCommandRunner = async (args, options) => {
+      if (args[2] === "image") { inspections++; entered(); await gate; }
+      return runner(args, options);
+    };
+    try {
+      const first = vpsComputerJoin(CONFIG, BOT_ID, blocked, true);
+      await inspecting;
+      const second = vpsComputerJoin(CONFIG, BOT_ID, blocked);
+      release();
+      const joined = await Promise.all([first, second]);
+      expect(joined[0].joinUrl).toBe(joined[1].joinUrl);
+      expect(inspections).toBe(1);
+      expect(children).toHaveLength(1);
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const leave = vpsDesktopConnection(BOT_ID)!.retain();
+      leave();
+      await vi.advanceTimersByTimeAsync(30_001);
+      expect(children[0]!.killed).toBe(false);
+      closeAllVpsDesktopTunnels();
+      expect(children.every(child => child.killed)).toBe(true);
+    } finally { release(); cleanup(); vi.useRealTimers(); }
+  });
+
+  it("ignores an old tunnel's queued expiry and close after replacement", async () => {
+    const { children, runner, cleanup } = tunnelFixture();
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    try {
+      await vpsComputerJoin(CONFIG, BOT_ID, runner, true);
+      const expired = timers.mock.calls.find(([, delay]) => delay === 30_000)![0] as () => void;
+      closeAllVpsDesktopTunnels();
+      await vpsComputerJoin(CONFIG, BOT_ID, runner, true);
+      expired();
+      children[0]!.emit("close", 0);
+      expect(vpsDesktopConnection(BOT_ID)?.live()).toBe(true);
+      expect(children[1]!.killed).toBe(false);
+    } finally { timers.mockRestore(); cleanup(); }
+  });
+
+  it("cancels pending joins when all tunnels close and allows a fresh join", async () => {
+    const { children, runner, cleanup } = tunnelFixture();
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const inspecting = new Promise<void>(resolve => { entered = resolve; });
+    const blocked: VpsCommandRunner = async (args, options) => {
+      if (args[2] === "image") { entered(); await gate; }
+      return runner(args, options);
+    };
+    const first = vpsComputerJoin(CONFIG, BOT_ID, blocked, true);
+    const rejected = expect(first).rejects.toThrow(/closed|cancel/i);
+    try {
+      await inspecting;
+      closeAllVpsDesktopTunnels();
+      release();
+      await rejected;
+      expect(children).toHaveLength(0);
+      await expect(vpsComputerJoin(CONFIG, BOT_ID, runner, true)).resolves.toMatchObject({ state: "running" });
+      expect(children).toHaveLength(1);
+    } finally { release(); cleanup(); }
+  });
 
   it("retains multiple tabs, survives reconnect, then reclaims the idle tunnel", async () => {
     const { child } = await openFixture();
@@ -1252,5 +1346,89 @@ describe("remote desktop tunnel ownership", () => {
       await vi.advanceTimersByTimeAsync(30_001);
       expect(child.kill).toHaveBeenCalledTimes(1);
     } finally { closeAllVpsDesktopTunnels(); vi.useRealTimers(); }
+  });
+});
+
+describe("a missing Docker CLI", () => {
+  it("gives every platform it ships one install line", () => {
+    expect(dockerCliInstallCommand("darwin")).toBe("brew install docker");
+    expect(dockerCliInstallCommand("win32")).toBe("winget install -e --id Docker.DockerCLI");
+    expect(dockerCliInstallCommand("linux")).toBe("sudo apt install docker-ce-cli");
+    expect(dockerCliInstallCommand("freebsd")).toBeNull();
+  });
+
+  it("names that install line instead of the spawn error, for the inventory and the status", async () => {
+    const missing = Object.assign(new Error("Docker-over-SSH could not start: spawn docker ENOENT"), { code: "ENOENT" });
+    const runner: VpsCommandRunner = async () => {
+      throw missing;
+    };
+    const command = dockerCliInstallCommand(process.platform)!;
+    const inventory = await listManagedVpsComputers(CONFIG, [], runner);
+    expect(inventory.available).toBe(false);
+    expect(inventory.unreachable).toBeUndefined();
+    expect(inventory.problem).toContain(command);
+    expect(inventory.problem).not.toMatch(/ENOENT/);
+
+    const status = await vpsComputerStatus(CONFIG, BOT_ID, runner);
+    expect(status.problem).toContain(command);
+    expect(status.problem).not.toMatch(/ENOENT/);
+  });
+});
+
+describe("a VPS inventory that fails", () => {
+  it("is unreachable only when the host gave no list at all", async () => {
+    const silent: VpsCommandRunner = async () => {
+      throw new VpsHostUnreachableError("ssh: connect to host fixture port 22: Connection timed out");
+    };
+    expect(await listManagedVpsComputers(CONFIG, [], silent)).toMatchObject({ available: false, unreachable: true });
+
+    // SSH got through and the daemon said no: the host is there, so its computers may be too.
+    const refused: VpsCommandRunner = async () => {
+      throw new Error("permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock");
+    };
+    const refusal = await listManagedVpsComputers(CONFIG, [], refused);
+    expect(refusal.available).toBe(false);
+    expect(refusal.unreachable).toBeUndefined();
+
+    const garbled: VpsCommandRunner = async () => ({ stdout: "not-a-container-id\n", stderr: "" });
+    const unverified = await listManagedVpsComputers(CONFIG, [], garbled);
+    expect(unverified.available).toBe(false);
+    expect(unverified.unreachable).toBeUndefined();
+
+    const answers: VpsCommandRunner = async () => ({ stdout: "", stderr: "" });
+    const both = await listManagedVpsComputers(CONFIG, [], async (args, options) =>
+      args.includes("ssh://other") ? garbled(args, options) : silent(args, options), ["fixture", "other"]);
+    expect(both.available).toBe(false);
+    expect(both.unreachable).toBeUndefined();
+    expect((await listManagedVpsComputers(CONFIG, [], answers)).unreachable).toBeUndefined();
+  });
+
+  it("tells an SSH failure from a Docker refusal on the real command path", async () => {
+    try {
+      mockTransport(async () => {
+        throw new Error("error during connect: command [ssh -- production-vps docker system dial-stdio] has exited with exit status 255, stderr=ssh: Could not resolve hostname production-vps");
+      });
+      expect((await listManagedVpsComputers(CONFIG, [])).unreachable).toBe(true);
+
+      mockTransport(async () => {
+        throw new Error("Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?");
+      });
+      const refused = await listManagedVpsComputers(CONFIG, []);
+      expect(refused.available).toBe(false);
+      expect(refused.unreachable).toBeUndefined();
+
+      // Windows has no shared SSH master to check first.
+      if (process.platform !== "win32") {
+        vi.mocked(ensureVpsSshMaster).mockRejectedValueOnce(new Error("ssh: Could not resolve hostname production-vps"));
+        expect((await listManagedVpsComputers(CONFIG, [])).unreachable).toBe(true);
+        // The host answered with a changed key, or the local ssh never started: the host may still be up.
+        vi.mocked(ensureVpsSshMaster).mockRejectedValueOnce(new Error("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\nHost key verification failed."));
+        expect((await listManagedVpsComputers(CONFIG, [])).unreachable).toBeUndefined();
+        vi.mocked(ensureVpsSshMaster).mockRejectedValueOnce(new Error("spawn ssh ENOENT"));
+        expect((await listManagedVpsComputers(CONFIG, [])).unreachable).toBeUndefined();
+        vi.mocked(ensureVpsSshMaster).mockRejectedValueOnce(Object.assign(new Error("VPS SSH initialization timed out"), { killed: true }));
+        expect((await listManagedVpsComputers(CONFIG, [])).unreachable).toBe(true);
+      }
+    } finally { spawnMock.mockReset(); }
   });
 });

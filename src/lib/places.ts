@@ -68,6 +68,15 @@ export async function removePlace(id: string): Promise<CloudRemoveOutcome> {
   return answer.outcome;
 }
 
+/** Rename, from a server's menu: main saves the name for that server on this computer only. An older app (no such channel)
+ * answers `failed`. */
+export async function renamePlace(id: string, name: string): Promise<"saved" | "name" | "failed"> {
+  const answer = await bridge()?.rename?.(id, name).catch(() => null);
+  if (!answer) return "failed";
+  if (answer.outcome === "saved") void refreshPlaces();
+  return answer.outcome === "saved" || answer.outcome === "name" ? answer.outcome : "failed";
+}
+
 /** Make … my home, from a server's menu: main starts moving this computer's bots there. True once it started, else main's
  * own words for why not. */
 export async function makeHome(id: string): Promise<true | string> {
@@ -85,6 +94,54 @@ export async function makeHome(id: string): Promise<true | string> {
 /** Whether a rail of places stands beside this page: the window's own (main says so: `beside`), or one drawn on it from a
  * list main gave it (two places or more). */
 export const railShown = (state: RailState): boolean => state.beside === true || state.places.length > 0;
+
+/** This computer's circle: This computer, or a workspace of its own (a profile) under its own name. */
+export function computerName(place: Pick<RailPlace, "profile"> & Partial<Pick<RailPlace, "named" | "name">>): string {
+  return place.profile && place.named && place.name ? place.name : t("rail.thisComputer");
+}
+
+export type WorkspaceState = Awaited<ReturnType<NonNullable<NonNullable<typeof window.ogb>["workspaces"]>["state"]>>;
+
+const CLOUD_HOME_NAME = "My Cloud";
+
+/** The name of the place a window shows: its team, the Cloud's own name, the workspace or This computer. */
+export function windowPlaceName(place: WorkspaceState, team: string | undefined): string {
+  if (place.home) return team || (place.name && place.name !== CLOUD_HOME_NAME ? place.name : t("cloudSetup.myCloud"));
+  if (place.profile) return place.profileName || computerName({ profile: place.profile });
+  if (place.local && !place.localPath) return t("rail.thisComputer");
+  return place.name;
+}
+
+/** A new workspace's first name: Work, then Personal, then Workspace 2, 3 and on, whichever no place here has yet. */
+export function suggestedLocalName(taken: readonly string[]): string {
+  const used = new Set(taken.map((name) => name.toLocaleLowerCase()));
+  const free = (name: string) => !used.has(name.toLocaleLowerCase());
+  for (const name of [t("rail.localWork"), t("rail.localPersonal")]) if (free(name)) return name;
+  for (let count = 2; ; count++) { const name = t("rail.localNumbered", { count }); if (free(name)) return name; }
+}
+
+/** A new workspace of this computer's own, from ＋: main makes it and opens it next. */
+export async function createLocal(name: string, color: CloudSwatch | null): Promise<"made" | "name" | "taken" | "failed"> {
+  const answer = await bridge()?.local?.create(name, color).catch(() => null);
+  if (!answer) return "failed";
+  if (answer.outcome === "made") void refreshPlaces();
+  return answer.outcome;
+}
+
+/** A workspace's new name or colour, from its circle's menu. */
+export async function editLocal(id: string, changes: { name: string } | { color: CloudSwatch | null }): Promise<"saved" | "name" | "taken" | "failed"> {
+  const answer = await bridge()?.local?.edit(id, changes).catch(() => null);
+  if (!answer) return "failed";
+  if (answer.outcome === "saved") void refreshPlaces();
+  return answer.outcome === "saved" || answer.outcome === "name" || answer.outcome === "taken" ? answer.outcome : "failed";
+}
+
+/** Removes a workspace from this computer, once the person said yes in its circle's menu. */
+export async function removeLocal(id: string): Promise<"removed" | "failed"> {
+  const answer = await bridge()?.local?.remove(id).catch(() => null);
+  if (answer?.outcome === "removed" || answer?.outcome === "gone") { void refreshPlaces(); return "removed"; }
+  return "failed";
+}
 
 /** A circle's letters: the first of up to two words, so "Client A" is CA and "Acme" is A. */
 export function placeInitials(name: string): string {

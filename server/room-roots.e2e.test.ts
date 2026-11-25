@@ -359,13 +359,13 @@ itHost("R5 queues a member's root on the computer seat at the wait ceiling, FIFO
       try { return (await fetch(base + "/api/health")).ok; } catch { return false; }
     }, Boolean);
 
-    const { bot: holder } = await apiOk("POST", "/api/bots", { name: "Seat Holder" });
+    const { bot: holder } = await apiOk("POST", "/api/bots", { name: "Seat Holder", settings: { approvalMode: "ask" } });
     const { task: held } = await apiOk("POST", `/api/bots/${holder.id}/tasks`, {});
     await apiOk("POST", `/api/bots/${holder.id}/messages`, { text: "Hold the screen slowly.", threadId: held.threadId });
     await until(() => taskOf(holder.id, held.threadId), (task) => task?.busy === true);
-    // On Auto the person is asked once before each turn first uses their computer.
+    // Below Full access (these bots ask), the person is asked once before each turn first uses their computer.
     expect(await withAnswer(base, held.threadId, gate(await dumpFor(holder.id)))).toEqual({ held: false, helpOpen: false });
-    const { bot: waiter } = await apiOk("POST", "/api/bots", { name: "Seat Waiter" });
+    const { bot: waiter } = await apiOk("POST", "/api/bots", { name: "Seat Waiter", settings: { approvalMode: "ask" } });
     const { task: wait } = await apiOk("POST", `/api/bots/${waiter.id}/tasks`, {});
     await apiOk("POST", `/api/bots/${waiter.id}/messages`, { text: "R5-DIRECT: use the screen too.", threadId: wait.threadId });
     await until(() => taskOf(waiter.id, wait.threadId), (task) => task?.busy === true);
@@ -565,3 +565,103 @@ it("R8 runs a chained @mention as a root of its own, with the hop recorded", () 
   expect(nothingLive(f)).toEqual([]);
   expect((await f.roomView(room.id))).toMatchObject({ working: false, busyBotId: null });
 }), hostTimeout(60_000));
+
+it("R8 answers a direct bot @mention again for a bot that already spoke, up to three hops", () => scenario(async (f) => {
+  const mira = await f.bot("Mira", "Engineering");
+  const room = await f.room("Engineering", [f.clive.id, mira.id], { kind: "member", botId: f.clive.id });
+  f.script(f.clive.id,
+    { key: "C0", match: ["R8B-JOB"], reply: "R8B-C0: @Mira please check the total." },
+    { key: "C2", match: ["R8B-M1"], reply: "R8B-C2: @Mira and the tax line?" },
+    { key: "C-EXTRA", repeat: true, match: ["R8B"], reply: "R8B-EXTRA" });
+  f.script(mira.id,
+    { key: "M1", match: ["R8B-C0"], reply: "R8B-M1: 42. @Clive anything else?" },
+    { key: "M3", match: ["R8B-C2"], reply: "R8B-M3: tax is 4. @Clive done." },
+    { key: "M-EXTRA", repeat: true, match: ["R8B"], reply: "R8B-EXTRA" });
+  await f.post(room, "R8B-JOB: what is the week's total?");
+  await f.final(room.threadId, "R8B-M3");
+  await expect.poll(() => f.roomRoots(room.threadId).map((row: any) => row.status), { timeout: 15_000 }).toEqual(["completed", "completed", "completed", "completed"]);
+  expect(f.roomRoots(room.threadId).map((row: any) => row.brief.split(":")[0])).toEqual(["R8B-JOB", "Mentioned by Clive (hop 1)", "Mentioned by Mira (hop 2)", "Mentioned by Clive (hop 3)"]);
+  expect(f.turns().map((record: any) => record.planKey)).toEqual(["C0", "M1", "C2", "M3"]);
+  expect(nothingLive(f)).toEqual([]);
+}), hostTimeout(90_000));
+
+it("R8 does not run a bot twice for one reply when a nested mention already woke it", () => scenario(async (f) => {
+  const mira = await f.bot("Mira", "Engineering");
+  const bee = await f.bot("Bee", "Engineering");
+  const room = await f.room("Engineering", [f.clive.id, mira.id, bee.id], { kind: "mentions" });
+  f.script(bee.id,
+    { key: "B0", match: ["R8C-JOB"], reply: "R8C-B0: noted." },
+    { key: "B1", match: ["R8C-M1"], reply: "R8C-B1: agreed." },
+    { key: "B-EXTRA", repeat: true, match: ["R8C"], reply: "R8C-EXTRA" });
+  f.script(f.clive.id,
+    { key: "C0", match: ["R8C-JOB"], reply: "R8C-C0: @Mira please check, @Bee please confirm." },
+    { key: "C-EXTRA", repeat: true, match: ["R8C"], reply: "R8C-EXTRA" });
+  f.script(mira.id,
+    { key: "M1", match: ["R8C-C0"], reply: "R8C-M1: 42. @Bee agree?" },
+    { key: "M-EXTRA", repeat: true, match: ["R8C"], reply: "R8C-EXTRA" });
+  await f.post(room, "R8C-JOB: @Bee note this, then @Clive ask around.");
+  await f.final(room.threadId, "R8C-B1");
+  await expect.poll(() => nothingLive(f), { timeout: 15_000 }).toEqual([]);
+  expect(f.turns().map((record: any) => record.planKey)).toEqual(["B0", "C0", "M1", "B1"]);
+}), hostTimeout(90_000));
+
+it("R8 does not wake a bot that already spoke for an @everyone from another bot", () => scenario(async (f) => {
+  const mira = await f.bot("Mira", "Engineering");
+  const room = await f.room("Engineering", [f.clive.id, mira.id], { kind: "member", botId: f.clive.id });
+  f.script(f.clive.id,
+    { key: "C0", match: ["R8D-JOB"], reply: "R8D-C0: @Mira please check the total." },
+    { key: "C-EXTRA", repeat: true, match: ["R8D"], reply: "R8D-EXTRA" });
+  f.script(mira.id,
+    { key: "M1", match: ["R8D-C0"], reply: "R8D-M1: 42. Thanks @everyone." },
+    { key: "M-EXTRA", repeat: true, match: ["R8D"], reply: "R8D-EXTRA" });
+  await f.post(room, "R8D-JOB: what is the week's total?");
+  await f.final(room.threadId, "R8D-M1");
+  await expect.poll(() => nothingLive(f), { timeout: 15_000 }).toEqual([]);
+  expect(f.turns().map((record: any) => record.planKey)).toEqual(["C0", "M1"]);
+}), hostTimeout(90_000));
+
+const goalDone = (detail: string) => `<openmaus-goal>${JSON.stringify({ status: "completed", detail })}</openmaus-goal>`;
+const sendGoal = (f: any, bot: { id: string; threadId: string }, text: string) =>
+  f.api("POST", `/api/bots/${bot.id}/messages`, { text, mode: "goal", threadId: bot.threadId });
+
+it("R9 a one-on-one goal step hands work to a teammate from its own root, and the root ends with the step", () => scenario(async (f) => {
+  const mira = await f.bot("Mira", "Leadership");
+  const clive = (await f.bots()).find((bot: any) => bot.id === f.clive.id);
+  f.script(f.clive.id,
+    { key: "C-STEP", match: ["R9-GOAL"], steps: [{ arguments: { bot_ids: [mira.id], message: "R9-BRIEF: check the export numbers." } }],
+      reply: `R9-SENT: Mira is on it.\n${goalDone("Mira is checking the numbers.")}` },
+    { key: "C1", match: ["R9-RESULT"], reply: "R9-FINAL: confirmed, 42." });
+  f.script(mira.id, { key: "M0", match: ["R9-BRIEF"], reply: "R9-RESULT: the numbers add up." });
+  expect((await sendGoal(f, clive, "R9-GOAL: have Mira check the export numbers.")).status).toBe(202);
+  await expect.poll(() => f.db().assignments.find((row: any) => row.parentId)?.status, { timeout: 30_000 }).toBe("completed");
+  const card = (await f.messages(clive.threadId)).find((message: any) => message.kind === "goal.run");
+  const root = f.db().assignments.find((row: any) => !row.parentId);
+  const child = f.db().assignments.find((row: any) => row.parentId);
+  expect(root).toMatchObject({ goalRunId: card.goalRun.runId, assignee: { botId: f.clive.id, destination: { threadId: clive.threadId } } });
+  expect(child).toMatchObject({ parentId: root.id, rootId: root.id, status: "completed", result: "R9-RESULT: the numbers add up.",
+    assignee: { botId: mira.id }, requester: { kind: "bot_turn", botId: f.clive.id, threadId: clive.threadId } });
+  await expect.poll(async () => (await f.messages(clive.threadId)).find((message: any) => message.kind === "goal.run")?.goalRun?.status, { timeout: 15_000 }).toBe("completed");
+  await f.final(clive.threadId, "R9-FINAL", 45_000);
+  await expect.poll(() => nothingLive(f), { timeout: 15_000 }).toEqual([]);
+  expect(f.turns().map((record: any) => record.planKey)).toEqual(["C-STEP", "M0", "C1"]);
+}), hostTimeout(120_000));
+
+it("R9 does not rerun a one-on-one goal step after a restart: its goal run ended with the restart", () => scenario(async (f) => {
+  const clive = (await f.bots()).find((bot: any) => bot.id === f.clive.id);
+  f.script(f.clive.id, { key: "C-STEP", match: ["R9R-GOAL"], readyFile: f.ready("step"), gateFile: f.gate("step"), reply: "never" });
+  expect((await sendGoal(f, clive, "R9R-GOAL: publish the export page.")).status).toBe(202);
+  await expect.poll(() => existsSync(f.ready("step")), { timeout: 30_000 }).toBe(true);
+  const card = (await f.messages(clive.threadId)).find((message: any) => message.kind === "goal.run");
+  await expect.poll(() => f.db().assignments.find((row: any) => !row.parentId)?.status, { timeout: 15_000 }).toBe("running");
+  const step = f.db().assignments.find((row: any) => !row.parentId);
+  expect(step).toMatchObject({ goalRunId: card.goalRun.runId, executions: 1 });
+  await f.restart("SIGTERM");
+  f.open("step");
+  await expect.poll(() => f.db().assignments.find((row: any) => row.id === step.id)?.status, { timeout: 30_000 }).toBe("failed");
+  expect(f.db().assignments.find((row: any) => row.id === step.id)).toMatchObject({ restarts: 1, result: GOAL_RUN_ENDED });
+  await f.settle(1_500);
+  expect(f.turns(f.clive.id).map((record: any) => record.planKey)).toEqual([]);
+  expect(await f.chips(clive.threadId, RERUN_CHIP)).toHaveLength(0);
+  await expect.poll(() => nothingLive(f), { timeout: 15_000 }).toEqual([]);
+}), hostTimeout(90_000));
+

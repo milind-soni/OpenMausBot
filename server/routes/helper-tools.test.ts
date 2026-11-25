@@ -44,7 +44,7 @@ describe("decide", () => {
     const { status, payload } = await call("/api/internal/helpers/decide", { state: "Checkout is down", questions: QUESTIONS });
     expect(status).toBe(409);
     expect(payload?.error).toBe(HELPER_MESSAGES.decideOff);
-    expect(payload?.error).toContain("Settings → Decision and extraction");
+    expect(payload?.error).toContain("Settings › AI › Routing and extraction");
   });
 
   it("asks as botDecide, carefully, and answers with rounded probabilities", async () => {

@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 // The live desktop's own lifecycle, with the connection played by the test.
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -27,6 +28,8 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 }));
 
 const { LiveDesktop } = await import("./LiveDesktop");
+const css = readFileSync("src/styles.css", "utf8");
+const noDragSelector = /\/\* Window drag regions\.[\s\S]*?\*\/\s*([^{]+)\{\s*-webkit-app-region: no-drag;/.exec(css)![1].trim();
 let root: Root;
 let props: Parameters<typeof LiveDesktop>[0];
 const draw = (patch: Partial<typeof props> = {}) => {
@@ -124,5 +127,16 @@ describe("the live desktop", () => {
     expect(props.onExpandedChange).toHaveBeenCalledWith(false);
     flushSync(() => button("Hand control back")!.click());
     expect(props.onHandBack).toHaveBeenCalledTimes(1);
+  });
+
+  // On macOS and frameless Windows the sidebar, chat header and frame bar under the full-screen desktop are window
+  // drag regions, and Electron ignores z-index for them, so a press on the top of the live screen moved the window.
+  it("full screen opts the live screen out of the window drag regions beneath it", () => {
+    const desktop = () => document.querySelector<HTMLElement>("[data-live-desktop]")!;
+    expect(desktop().matches(noDragSelector), "in the side panel nothing changes").toBe(false);
+    draw({ expanded: true });
+    expect(desktop().matches(noDragSelector)).toBe(true);
+    draw({ expanded: false });
+    expect(desktop().matches(noDragSelector)).toBe(false);
   });
 });

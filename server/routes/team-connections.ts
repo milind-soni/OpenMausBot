@@ -1,3 +1,4 @@
+import { userError } from "../user-errors.ts";
 // A Team Cloud's connections, the team's or each person's.
 //   PUT /api/team/connection-scopes { kind: "app" | "mcp", id, scope: "team" | "person" }   an admin: who connects it
 //   GET /api/team/my-connections                                                           the person's own, and what is theirs to connect
@@ -12,7 +13,7 @@ import type { AdminActionRow } from "../admin-activity.ts";
 import type { AppConfig } from "../config.ts";
 import type { TeamConnectionsHost } from "../host/team-connections-host.ts";
 import { McpOAuthError, McpSignInError, mcpCallbackOrigin } from "../mcp-oauth.ts";
-import { isRemoteMcpServer, parseStoredMcpServer } from "../mcp-registry.ts";
+import { isRemoteMcpServer, mcpServerNotFound, parseStoredMcpServer } from "../mcp-registry.ts";
 import { personKey } from "../person-key.ts";
 import { provesSameOrigin, requestOrigin, type RequestAuth } from "../request-auth.ts";
 import { APP_SLUG, appLabel, MCP_NAME, personKeyHeader } from "../team-connections.ts";
@@ -29,6 +30,8 @@ export interface TeamConnectionRouteDeps {
   composio: Pick<typeof Composio, "configured" | "connectedServices" | "authorizeService" | "removeService">;
   /** This server's own https address, where a member's MCP sign-in comes back. */
   publicOrigin: string | null;
+  /** The team's rules: an app or server they don't allow can't be connected by anyone. */
+  policy?: { appRefusal(slug: string): string | undefined; mcpRefusal(name: string, url?: string): string | undefined };
   /** An admin's change, for the team's admin activity. */
   record?(auth: RequestAuth, row: Omit<AdminActionRow, "at" | "actor">): void;
 }
@@ -55,7 +58,7 @@ export function createTeamConnectionRoutes(deps: TeamConnectionRouteDeps): Route
       }
       if (kind === "mcp") {
         const found = server(id);
-        if (!found) return json(res, 404, { error: "MCP server not found." });
+        if (!found) return json(res, 404, { error: mcpServerNotFound(id) });
         if (scope === "person" && !isRemoteMcpServer(found)) return json(res, 409, { error: "Only a server reached by its address can be connected by each person." });
       }
       const before = deps.host.scopes.scope(kind, id);
@@ -72,20 +75,22 @@ export function createTeamConnectionRoutes(deps: TeamConnectionRouteDeps): Route
     if (!member || auth.kind !== "session") return json(res, 403, { error: `Sign in to ${team.name} to connect your own apps.` });
     const person = personKey({ id: "", email: member.member.email });
     const email = member.member.email;
-    const cfg = deps.cfg();
 
     if (path === MY_CONNECTIONS_PATH) {
       if (method !== "GET") return json(res, 405, { error: "method not allowed" });
       const apps = deps.host.personApps();
       const access = deps.host.people.appsAccess(person);
-      const states = access && apps.length ? await deps.composio.connectedServices(cfg, access).catch(() => null) : null;
+      const states = access && apps.length ? await deps.composio.connectedServices(...deps.host.via(access)).catch(() => null) : null;
+      const again = apps.length > 0 && deps.host.people.appsElsewhere(person);
       return json(res, 200, {
         team: { id: team.id, name: team.name },
         link: deps.host.link(),
         email,
+        ...(deps.host.ownAppsNeedKey() ? { ownApps: "needs-key" as const } : {}),
         apps: apps.map((slug) => {
           const state = states?.[slug];
           return { slug, name: appLabel(slug), connected: state?.connected === true,
+            ...(again && state?.connected !== true ? { reconnect: true as const } : {}),
             accounts: (state?.accounts ?? []).map((account) => ({ id: account.id, alias: account.alias?.trim() || null, status: account.status })) };
         }),
         mcp: deps.host.personMcp().flatMap((name) => {
@@ -106,10 +111,16 @@ export function createTeamConnectionRoutes(deps: TeamConnectionRouteDeps): Route
         return json(res, 409, { error: `${appLabel(slug)} is ${team.name}'s, connected once for everyone by an admin.` });
       }
       if (app[2] && method === "POST") {
-        const access = await deps.host.people.ensureAppsAccess(person, email);
-        if (!access) return json(res, 503, { error: "Connected apps aren't available on this Cloud right now. Try again in a minute." });
+        const refused = deps.policy?.appRefusal(slug);
+        if (refused) return json(res, 403, { error: refused, code: "managed_policy" });
+        if (deps.host.ownAppsNeedKey()) return json(res, 409, { ...userError("serverError.team.ownAppsNeedKey", { team: team.name }), code: "own_apps_need_key" });
         try {
-          return json(res, 200, await deps.composio.authorizeService(cfg, slug, null, access));
+          const access = await deps.host.people.ensureAppsAccess(person, email);
+          if (!access) return json(res, 503, { error: "Connected apps aren't available on this Cloud right now. Try again in a minute." });
+          const [asThem, installation] = deps.host.via(access);
+          const started = await deps.composio.authorizeService(asThem, slug, null, installation);
+          deps.host.people.appConnecting(person, slug);
+          return json(res, 200, started);
         } catch (error) {
           const status = (error as { status?: number }).status;
           return json(res, typeof status === "number" && status >= 400 && status < 500 ? status : 502, { error: error instanceof Error ? error.message : "The app's sign-in couldn't start." });
@@ -117,7 +128,7 @@ export function createTeamConnectionRoutes(deps: TeamConnectionRouteDeps): Route
       }
       if (!app[2] && method === "DELETE") {
         const access = deps.host.people.appsAccess(person);
-        if (access) await deps.composio.removeService(cfg, slug, access);
+        if (access) { const [asThem, installation] = deps.host.via(access); await deps.composio.removeService(asThem, slug, installation); }
         return json(res, 200, { ok: true });
       }
       return json(res, 405, { error: "method not allowed" });
@@ -130,6 +141,10 @@ export function createTeamConnectionRoutes(deps: TeamConnectionRouteDeps): Route
         return json(res, 409, { error: `${name} is ${team.name}'s, connected once for everyone by an admin.` });
       }
       deps.host.people.remember(person, email);
+      if ((mcp[2] === "/sign-in" || mcp[2] === "/key") && method !== "DELETE") {
+        const refused = deps.policy?.mcpRefusal(name, stored.url);
+        if (refused) return json(res, 403, { error: refused, code: "managed_policy" });
+      }
       if (mcp[2] === "/sign-in" && method === "POST") {
         const origin = mcpCallbackOrigin(provesSameOrigin(req) ? requestOrigin(req) : null, [deps.publicOrigin]);
         try {
@@ -146,9 +161,9 @@ export function createTeamConnectionRoutes(deps: TeamConnectionRouteDeps): Route
         const body = await readBody(req, 4096);
         const value = typeof body?.value === "string" ? body.value.trim() : "";
         if (value.length < 8 || value.length > 512 || !/^[\x21-\x7e]+(?: [\x21-\x7e]+)?$/.test(value)) return json(res, 400, { error: "Paste the key alone." });
-        if (body?.url !== undefined && (typeof body.url !== "string" || !body.url)) return json(res, 400, { error: "Send the MCP server address as text." });
+        if (body?.url !== undefined && (typeof body.url !== "string" || !body.url)) return json(res, 400, { ...userError("serverError.mcp.addressAsText") });
         const current = server(name);
-        if (!current || !isRemoteMcpServer(current) || (body?.url !== undefined && current.url !== body.url)) return json(res, 409, { error: "The MCP server address changed. Reload the server and try again." });
+        if (!current || !isRemoteMcpServer(current) || (body?.url !== undefined && current.url !== body.url)) return json(res, 409, { ...userError("serverError.mcp.addressChanged") });
         const headerKeys = Object.keys(current.headers);
         deps.host.people.putKey(person, email, name, { url: current.url, ...personKeyHeader(headerKeys, value) });
         return json(res, 200, { ok: true });

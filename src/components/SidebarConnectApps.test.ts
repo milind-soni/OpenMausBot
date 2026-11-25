@@ -27,11 +27,23 @@ describe("the Connect apps faces", () => {
     expect(html).toMatch(/class="group\/apps flex h-9 min-w-0 flex-1 items-center justify-center gap-1\.5 rounded-full pl-4 pr-3 text-\[14px\] font-medium leading-5 text-ink /);
     const faces = [...html.matchAll(/data-app-face="[^"]+" class="([^"]*)"/g)].map(([, classes]) => classes!);
     expect(faces).toHaveLength(3);
-    for (const face of faces) expect(face).toContain("size-[18px] shrink-0 items-center justify-center overflow-hidden rounded-md bg-white p-px");
+    for (const face of faces) expect(face).toContain("size-[18px] shrink-0 items-center justify-center overflow-hidden rounded-md p-px");
     expect(faces[0]).toContain("motion-safe:group-hover/apps:-rotate-[8deg]");
-    expect(faces[1]).toContain("-ms-1.5");
+    expect(faces[1]).not.toContain("-ms-1.5");
     expect(faces[1]).not.toContain("rotate");
     expect(faces[2]).toContain("motion-safe:group-hover/apps:translate-x-[3px] motion-safe:group-hover/apps:rotate-[8deg]");
+  });
+
+  it("never cuts its label short: in a tight row, as beside the update button, whole logos drop instead", () => {
+    const html = renderToStaticMarkup(createElement(SidebarConnectApps));
+    const label = /<span data-apps-label="" class="([^"]*)">Connect apps<\/span>/.exec(html)?.[1]?.split(" ");
+    expect(label).toEqual(expect.arrayContaining(["shrink-0", "whitespace-nowrap"]));
+    expect(label).not.toContain("truncate");
+    expect(label).not.toContain("min-w-0");
+    const faces = /data-app-faces="" class="([^"]*)"/.exec(html)![1]!.split(" ");
+    expect(faces, "the logos give way: they wrap onto a line one logo high hides").toEqual(expect.arrayContaining(["min-w-0", "flex-wrap", "h-[22px]", "overflow-hidden"]));
+    expect(faces).not.toContain("shrink-0");
+    expect(html, "an empty first item, so even the first logo can wrap away whole").toMatch(/data-app-faces="" class="[^"]*"><span data-app-faces-start="" class="-me-1 h-\[18px\] w-0"><\/span><span data-app-face=/);
   });
 
   it("is a round 36px puzzle button on the collapsed rail, named for screen readers", () => {

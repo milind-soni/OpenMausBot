@@ -39,6 +39,7 @@ if (process.argv[2] === "auth") {
   console.log(JSON.stringify({ loggedIn: true, email: "mira@gmail.com" }));
   process.exit(0);
 }
+process.env.FAKE_CLAUDE_TOOL_CALLS_FILE = ${JSON.stringify(join(home, "tool-calls.json"))};
 await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-claude-cli.ts")).href)});
 `, { mode: 0o755 });
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
@@ -86,7 +87,7 @@ it("the Admin reads a Team Cloud's shared connections and AI by a signed request
     summary = (await signed("GET", CLOUD_TEAM_ADMIN_PATH)).body;
     return summary?.ai?.engines?.find((engine: { id: string }) => engine.id === "claude")?.authenticated;
   }, { timeout: 20_000, interval: 200 }).toBe(true);
-  expect(summary.mcp).toEqual([{ name: "linear", transport: "http", host: "mcp.linear.app", enabled: true, signedIn: null, secrets: ["Authorization"] }]);
+  expect(summary.mcp).toEqual([{ name: "linear", transport: "http", host: "mcp.linear.app", enabled: true, signedIn: null, secrets: ["Authorization"], bots: expect.any(Array) }]);
   expect(summary.keys.find((key: { id: string }) => key.id === "treg")).toEqual({ id: "treg", configured: true });
   expect(summary.ai.engines.find((engine: { id: string }) => engine.id === "claude")).toMatchObject({ name: "Claude", authenticated: true, account: { email: "mira@gmail.com" } });
   expect(JSON.stringify(summary)).not.toMatch(/never-shown|token=|Bearer/);
@@ -122,3 +123,31 @@ it("an Owner or Admin's paired session (as the Admin holds one) sets a team key 
   const settings = await admin("GET", "/api/config");
   expect([settings.status, settings.body.language]).toEqual([200, "de"]);
 }, 30_000);
+
+it("the signed read says who added a server, which bots use it and how it is doing, from the bots' own tool calls", async () => {
+  const session = async (role: string) => {
+    const granted = await signed("POST", "/api/cloud/pairing", JSON.stringify({ label: "Team admin (MausBot Cloud)", ttlSeconds: 300, team: TEAM, member: { email: `${role}@acme.test`, role } }));
+    const token = (await call("POST", "/api/auth/pair", { body: JSON.stringify({ code: granted.body.code }), headers: { "content-type": "application/json" } })).body.token as string;
+    return (method: string, path: string, body?: unknown) => call(method, path, { ...(body === undefined ? {} : { body: JSON.stringify(body) }), headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "content-type": "application/json" }) } });
+  };
+  const admin = await session("admin");
+  expect((await admin("POST", "/api/mcp/servers", { name: "tracker", type: "http", url: "https://tracker.example/mcp?token=query-never-shown", headers: { "X-Api-Key": "key-never-shown" } })).status).toBe(201);
+  const created = await admin("POST", "/api/bots", { name: "Scout" });
+  expect(created.status, JSON.stringify(created.body)).toBe(201);
+  const bot = created.body.bot as { id: string; mainThreadId: string };
+  expect((await admin("PATCH", "/api/mcp/servers/tracker", { enabled: true })).status).toBe(200);
+  expect((await admin("PATCH", `/api/bots/${bot.id}`, { mcpServers: ["tracker"] })).status).toBe(200);
+  const tracker = async () => ((await signed("GET", CLOUD_TEAM_ADMIN_PATH)).body.mcp as Array<Record<string, unknown>>).find((server) => server.name === "tracker")!;
+  expect(await tracker()).toMatchObject({ addedBy: { email: "admin@acme.test", name: null }, addedAt: expect.any(String), bots: expect.arrayContaining(["Scout"]) });
+  expect(await tracker()).not.toHaveProperty("health");
+  const turn = async (calls: unknown[], until: (server: Record<string, unknown>) => boolean) => {
+    writeFileSync(join(home, "tool-calls.json"), JSON.stringify(calls));
+    expect((await admin("POST", `/api/bots/${bot.id}/messages`, { text: "Look at the tracker.", threadId: bot.mainThreadId })).status).toBe(202);
+    await expect.poll(async () => until(await tracker()), { timeout: 30_000, interval: 200 }).toBe(true);
+  };
+  await turn([{ name: "mcp__tracker__list_issues", ok: false, output: "HTTP 401 dialing https://tracker.example/mcp" }], (server) => server.health === "refused");
+  expect(await tracker()).toMatchObject({ health: "refused", lastError: "refused", checkedAt: expect.any(String), lastUsedAt: expect.any(String) });
+  await turn([{ name: "mcp__tracker__list_issues", ok: true, output: "[]" }], (server) => server.health === "working");
+  const summary = (await signed("GET", CLOUD_TEAM_ADMIN_PATH)).body;
+  expect(JSON.stringify(summary)).not.toMatch(/never-shown|token=/);
+}, 90_000);

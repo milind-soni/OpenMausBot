@@ -1,11 +1,16 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { computerAskWords } from "@/lib/computer-ask";
+import { setLocale } from "@/lib/i18n";
 
 import { StoreProvider, type Bot, type Message } from "@/state/store";
 import type { ComputerAskCard } from "../../shared/computer-ask";
 import { ApprovalCard } from "./ApprovalCard";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
+
+afterEach(() => setLocale("en"));
 
 const bot = { id: "scout", name: "Scout" } as Bot;
 
@@ -29,6 +34,32 @@ const panel = (message: Message) => {
 };
 
 describe("a bot's ask to turn on what it needs from the person's computer", () => {
+  it.each(["computer", "Mac", "PC"] as const)("localizes the %s device in both the request and reason without changing the wire", (device) => {
+    const message = ask({ device, reason: "paused" });
+    const words = () => computerAskWords(message.card, "Scout")!;
+    expect(words().line).toBe(`Scout wants to use your ${device}'s apps and screen`);
+    expect(words().reason).toBe(`Using your ${device} is paused.`);
+    setLocale("pt-br");
+    const localized = device === "computer" ? "computador" : device;
+    expect(words().line).toBe(`Scout quer usar os apps e a tela do seu ${localized}`);
+    expect(words().reason).toBe(`O uso do seu ${localized} está pausado.`);
+    expect(message.card!.computerAsk!.device).toBe(device);
+    const markup = panel(message);
+    expect(markup).toContain(`Scout quer usar os apps e a tela do seu ${localized}`);
+    expect(markup).toContain(`O uso do seu ${localized} está pausado.`);
+    expect(spokenApprovalPrompt(pendingApprovals([message])[0]!, "Scout")).toBe(`Scout quer usar os apps e a tela do seu ${localized}. O uso do seu ${localized} está pausado.`);
+    setLocale("en");
+    expect(words().line).toBe(`Scout wants to use your ${device}'s apps and screen`);
+  });
+
+  it.each([
+    ["folders", "Scout quer usar os arquivos do seu computador"],
+    ["terminal", "Scout quer executar comandos no seu computador"],
+  ] as const)("uses the localized computer noun for %s", (need, line) => {
+    setLocale("pt-br");
+    expect(computerAskWords(ask({ need, device: "computer" }).card, "Scout")!.line).toBe(line);
+  });
+
   it("says who wants what and why, why it can't now, and offers Turn on and Not now", () => {
     const markup = panel(ask());
     expect(markup).toContain("Scout wants to use your PC&#x27;s apps and screen");

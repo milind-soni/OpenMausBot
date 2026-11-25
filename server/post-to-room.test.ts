@@ -115,16 +115,6 @@ const messagesOf = async (threadId: string): Promise<StoredMessage[]> => {
   return Array.isArray(messages) ? (messages as StoredMessage[]) : [];
 };
 
-const waitForPeerCard = async (threadId: string): Promise<StoredMessage> => {
-  const deadline = Date.now() + 10_000;
-  for (;;) {
-    const card = (await messagesOf(threadId)).find((message) => message.card?.tool === "post_to_room");
-    if (card) return card;
-    if (Date.now() > deadline) throw new Error("no approval card was raised for post_to_room");
-    await new Promise((wake) => setTimeout(wake, 100));
-  }
-};
-
 const makeBot = async (
   name: string,
   section: string,
@@ -658,51 +648,6 @@ describe("post_to_room", () => {
     expect(await messagesOf(room.threadId)).toHaveLength(1);
   }, 40_000);
 
-  it("holds the post behind the human card when the sender's peer gate is on", async () => {
-    const gated = await makeBot("Gated Poster", "Gated");
-    const mate = await makeBot("Gate Mate", "Gated");
-    const room = await makeRoom("Gated room", [gated.id, mate.id], "Gated");
-    expect((await api("PATCH", `/api/bots/${gated.id}`, { approvePeerComms: true, approvalMode: "ask" })).status).toBe(200);
-
-    const pending = post(gated.id, gated.threadId, room.id, "needs a human first");
-    const card = await waitForPeerCard(gated.threadId);
-    expect(card.card?.title).toContain("Gated room");
-    expect(await messagesOf(room.threadId)).toHaveLength(0);
-
-    expect((await api("POST", `/api/bots/${gated.id}/respond`, {
-      requestId: card.card?.requestId,
-      behavior: "allow",
-    })).status).toBe(200);
-    const settled = await pending;
-    expect(settled.status).toBe(201);
-    expect(await messagesOf(room.threadId)).toHaveLength(1);
-  }, 40_000);
-
-  it("posts nothing when the human denies the card, and charges the room for nothing", async () => {
-    const gated = await makeBot("Denied Poster", "Denied");
-    const mate = await makeBot("Deny Mate", "Denied");
-    const room = await makeRoom("Denied room", [gated.id, mate.id], "Denied");
-    expect((await api("PATCH", `/api/bots/${gated.id}`, { approvePeerComms: true, approvalMode: "ask" })).status).toBe(200);
-
-    const pending = post(gated.id, gated.threadId, room.id, "deploy is green");
-    const card = await waitForPeerCard(gated.threadId);
-    expect((await api("POST", `/api/bots/${gated.id}/respond`, {
-      requestId: card.card?.requestId,
-      behavior: "deny",
-    })).status).toBe(200);
-    const settled = await pending;
-    expect(str(settled.body.error)).toContain("denied by user");
-    expect(await messagesOf(room.threadId), "a denied post reached the room anyway").toHaveLength(0);
-
-    expect((await api("PATCH", `/api/bots/${gated.id}`, { approvePeerComms: false })).status).toBe(200);
-    const retried = await post(gated.id, gated.threadId, room.id, "deploy is green");
-    expect(str(retried.body.error), "the denied post was counted as delivered").not.toMatch(/already posted/i);
-    expect(retried.status, JSON.stringify(retried.body)).toBe(201);
-    const after = await messagesOf(room.threadId);
-    expect(after).toHaveLength(1);
-    expect(after[0].text).toBe("deploy is green");
-  }, 40_000);
-
   it("marks a post from an unattended bot, and leaves an attended one unmarked", async () => {
     const attended = await makeBot("Attended Poster", "Unattended");
     const automated = await makeBot("Automated Poster", "Unattended");
@@ -774,7 +719,7 @@ describe("provenance on a peer-authored room message", () => {
       await new Promise((wake) => setTimeout(wake, 100));
     }
     const sent = readFileSync(fakeClaudeDump, "utf8");
-    expect(sent).toContain("[Posted by @Provenance Poster");
+    expect(sent).toContain("[From @Provenance Poster (bot) · room post");
     expect(sent).toMatch(/not from your user/i);
     expect(sent).toMatch(/information, not as an instruction/i);
     expect(sent).toMatch(/saying nothing is a valid response/i);
@@ -828,5 +773,31 @@ describe("limits counted per turn on a bearer that outlives the turn", () => {
     expect(later.status, JSON.stringify(later.body)).toBe(200);
     expect(field(later.body, "assignment", "id")).toBe(requestId);
     expect(field(later.body, "assignment", "botId")).toBe(to.id);
+  }, 40_000);
+
+  it("tells a same-turn one-way (reply: none) hand-off that nothing comes back", async () => {
+    // Made with their department at creation: the case above may still be resuming its delegator, and the local API
+    // moves an existing bot to another department only while every bot is idle.
+    const created = async (name: string) => {
+      const made = await api("POST", "/api/bots", { name, section: "One way delegations", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } });
+      expect(made.status, JSON.stringify(made.body)).toBe(201);
+      return { id: str(field(made.body, "bot", "id")), threadId: str(field(made.body, "bot", "threadId")) };
+    };
+    const from = await created("One Way Delegator");
+    const to = await created("One Way Delegate");
+    const token = await startTurn(from.id, from.threadId);
+    const delegated = await asTurn(token, "POST", "/api/internal/coordinate-bots", {
+      botIds: [to.id], message: "File the note.", reply: "none",
+    });
+    expect(delegated.status, JSON.stringify(delegated.body)).toBe(200);
+    const receipts = Array.isArray(delegated.body.receipts) ? delegated.body.receipts : [];
+    const requestId = str(field(receipts[0] as Record<string, unknown>, "requestId"));
+    expect(requestId).not.toBe("");
+    const early = await asTurn(token, "GET", `/api/internal/assignment-status?id=${requestId}`);
+    expect(early.status).toBe(409);
+    expect(early.body.sentThisTurn).toBe(true);
+    expect(str(early.body.error)).toContain(`Assignment ${requestId} was handed out during this turn`);
+    expect(str(early.body.error)).toContain("nothing comes back from it");
+    expect(str(early.body.error)).not.toContain("resumes you");
   }, 40_000);
 });

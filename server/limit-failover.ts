@@ -1,15 +1,15 @@
+import { type ServerText } from "../shared/server-text.ts";
 // A conversation whose engine hit its usage limit, or was signed out, continues on the configured backup, and goes back to
 // its own engine once that limit has reset or it is signed in again.
 import { readFileSync } from "node:fs";
 
+import { otherSignInOfSameSubscription } from "../shared/limit-backup.ts";
 import { sameModelSelection } from "../shared/thread-model.ts";
 import type { ModelSelection } from "../shared/wire.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import type { InstanceConfig } from "./contracts.ts";
 import { hostTimeZone } from "./turn-clock.ts";
 
-/** Engines a person signs in to with a subscription whose usage limit refuses turns. */
-const SUBSCRIPTION_DRIVERS = new Set(["claudeAgent", "codex", "grokAgent"]);
 /** An engine instance with one of these keys bills each use instead of drawing on a subscription's limit. */
 const PAY_PER_USE_KEYS = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "CODEX_API_KEY", "XAI_API_KEY"];
 
@@ -20,7 +20,7 @@ type Engine = { instanceId: string; driverKind: string };
  * accounts closed. Another engine, or a pay-per-use key on the same one, is fine. */
 export function limitBackupAllowed(from: Engine, to: Engine, toConfig?: Pick<InstanceConfig, "environment" | "access">): boolean {
   if (to.instanceId === from.instanceId) return false;
-  if (to.driverKind !== from.driverKind || !SUBSCRIPTION_DRIVERS.has(from.driverKind)) return true;
+  if (!otherSignInOfSameSubscription(from, to)) return true;
   return billsEachUse(toConfig);
 }
 
@@ -64,6 +64,8 @@ export interface LimitFailover {
   at: number;
   /** `from` was signed out, not limited: the conversation goes back once it is signed in again. */
   why?: "signed-out";
+  /** Only the usage meter held `from`, not a refusal: the conversation goes back once the meter no longer holds it. */
+  meter?: true;
 }
 
 /** With no reset time known, a conversation tries its own engine again no sooner than this. */
@@ -73,7 +75,7 @@ export interface LimitFailoverDeps {
   file: string;
   now?: () => number;
   /** Until when this engine refuses work; null when it should be working. */
-  blockedUntil: (engine: string) => number | null;
+  blockedUntil: (engine: string, model?: string) => number | null;
   /** This engine refused a turn because it is signed out, and has not been signed in again since. */
   signedOut?: (engine: string) => boolean;
   /** The thread's model now, or null when the thread is gone. */
@@ -81,7 +83,7 @@ export interface LimitFailoverDeps {
   /** Switches the thread back; false when that is not allowed now (a busy thread, a permission change). */
   switchBack: (failover: LimitFailover) => boolean;
   /** One plain line in the conversation. */
-  note: (threadId: string, line: string) => void;
+  note: (threadId: string, line: string, text?: ServerText) => void;
   engineName: (engine: string) => string;
 }
 
@@ -90,7 +92,7 @@ function load(file: string): LimitFailover[] {
     const rows = JSON.parse(readFileSync(file, "utf8")) as unknown;
     return Array.isArray(rows) ? rows.filter((row): row is LimitFailover => typeof row?.botId === "string" && typeof row?.threadId === "string" &&
       typeof row?.from?.instanceId === "string" && typeof row?.to?.instanceId === "string" && (row.resetsAt === null || Number.isFinite(row.resetsAt)) &&
-      Number.isFinite(row.at) && (row.why === undefined || row.why === "signed-out")) : [];
+      Number.isFinite(row.at) && (row.why === undefined || row.why === "signed-out") && (row.meter === undefined || row.meter === true)) : [];
   } catch {
     return [];
   }
@@ -124,12 +126,13 @@ export class LimitFailovers {
     const now = this.deps.now?.() ?? Date.now();
     const current = this.deps.threadModel(botId, threadId);
     if (!current || !sameModelSelection(current, row.to)) return this.forget(threadId);
-    const waitUntil = row.why === "signed-out" ? row.at : row.resetsAt ?? row.at + UNKNOWN_RESET_WAIT_MS;
-    if (waitUntil > now || this.deps.blockedUntil(row.from.instanceId) !== null) return false;
+    const blocked = this.deps.blockedUntil(row.from.instanceId, row.from.model) !== null;
+    const waitUntil = row.why === "signed-out" ? row.at : row.meter ? row.at : row.resetsAt ?? row.at + UNKNOWN_RESET_WAIT_MS;
+    if (waitUntil > now || blocked) return false;
     if (row.why === "signed-out" && this.deps.signedOut?.(row.from.instanceId)) return false;
     if (!this.deps.switchBack(row)) return false;
     this.forget(threadId);
-    this.deps.note(threadId, backLine(this.deps.engineName(row.from.instanceId), row.why));
+    this.deps.note(threadId, backLine(this.deps.engineName(row.from.instanceId), row.why), row.why === "signed-out" ? { key: "chat.notice.failoverSignedInAgain", params: { engine: this.deps.engineName(row.from.instanceId) } } : undefined);
     return true;
   }
 

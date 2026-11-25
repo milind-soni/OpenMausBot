@@ -1,4 +1,5 @@
 import type { ComputerHelpRef } from "../../shared/wire";
+import { t } from "./i18n";
 import { productName } from "@/lib/brand";
 
 export type ComputerControlAction = "take" | "release";
@@ -14,10 +15,10 @@ const HELP_PLACES = new Set(["browser", "local", "vm", "cloud"]);
 export function parseComputerHelp(value: unknown): ComputerHelpRef | null {
   const ref = value as Partial<Record<keyof ComputerHelpRef, unknown>> | null;
   if (!ref || typeof ref !== "object") return null;
-  const { botId, threadId, messageId, site, place } = ref;
+  const { botId, threadId, messageId, site, place, instruction } = ref;
   return typeof botId === "string" && typeof threadId === "string" && typeof messageId === "string" &&
     typeof site === "string" && typeof place === "string" && HELP_PLACES.has(place)
-    ? { botId, threadId, messageId, site, place: place as ComputerHelpRef["place"] } : null;
+    ? { botId, threadId, messageId, site, place: place as ComputerHelpRef["place"], ...(typeof instruction === "string" && instruction ? { instruction } : {}) } : null;
 }
 
 export type BrowserControlTransitionFailure =
@@ -68,14 +69,14 @@ export async function transitionComputerControlLease<
 }): Promise<Snapshot> {
   const { action, syncNativeBrowser, requestControl, setNativeBrowserControl } = input;
   if (action === "take" && syncNativeBrowser && !(await setNativeBrowserControl(true))) {
-    throw new Error(`${productName()} could not pause this bot's browser safely`);
+    throw new Error(t("computer.err.pauseBrowser", { app: productName() }));
   }
   const snap = await requestControl(action);
   if (snap.held !== (action === "take")) {
-    throw new Error(`${productName()} could not ${action === "take" ? "confirm" : "release"} computer control`);
+    throw new Error(t(action === "take" ? "computer.err.confirmControl" : "computer.err.releaseControl", { app: productName() }));
   }
   if (action === "release" && syncNativeBrowser && !(await setNativeBrowserControl(false))) {
-    throw new Error("The computer was released, but the browser remains paused for safety");
+    throw new Error(t("computer.err.browserStillPaused"));
   }
   return snap;
 }

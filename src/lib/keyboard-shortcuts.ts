@@ -1,4 +1,6 @@
 import type { SendKey } from "./send-key";
+import { t } from "@/lib/i18n";
+import { en, type LocaleKey } from "@/locales";
 
 export interface ShortcutItem {
   id: string;
@@ -29,6 +31,12 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
         winKeys: ["Ctrl", "N"],
       },
       {
+        id: "new-thread",
+        description: "Start a new thread with the selected bot",
+        macKeys: ["⌘", "⇧", "N"],
+        winKeys: ["Ctrl", "Shift", "N"],
+      },
+      {
         id: "jump-bot",
         description: "Jump to bot 1–9 in the roster",
         macKeys: ["⌘", "1–9"],
@@ -45,6 +53,12 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
         description: "Switch to previous / next bot",
         macKeys: ["⌘", "⇧", "[ / ]"],
         winKeys: ["Ctrl", "Shift", "[ / ]"],
+      },
+      {
+        id: "switch-thread",
+        description: "Switch to the bot's next / previous thread",
+        macKeys: ["⌃", "Tab / ⇧Tab"],
+        winKeys: ["Ctrl", "Tab / Shift+Tab"],
       },
       {
         id: "find-conversation",
@@ -80,6 +94,12 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
         description: "Edit last message (when composer is empty)",
         macKeys: ["↑"],
         winKeys: ["↑"],
+      },
+      {
+        id: "dictation-toggle",
+        description: "Start or stop dictation",
+        macKeys: ["⌘", "D"],
+        winKeys: ["Ctrl", "D"],
       },
       {
         id: "close-panel",
@@ -131,6 +151,22 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
   },
 ];
 
+const CATEGORY_KEY: Record<string, LocaleKey> = {
+  Navigation: "shortcuts.category.navigation",
+  "Chat & Composer": "shortcuts.category.chat",
+  Calls: "shortcuts.category.calls",
+  "Management & Groups": "shortcuts.category.groups",
+};
+
+export const shortcutDescription = (item: ShortcutItem): string => {
+  const key = `shortcuts.${item.id}`;
+  return Object.hasOwn(en, key) ? t(key as LocaleKey) : item.description;
+};
+export const shortcutCategory = (group: ShortcutGroup): string => {
+  const key = CATEGORY_KEY[group.category];
+  return key ? t(key) : group.category;
+};
+
 type Keys = Pick<ShortcutItem, "macKeys" | "winKeys">;
 const ENTER: Keys = { macKeys: ["Return"], winKeys: ["Enter"] };
 const SHIFT_ENTER: Keys = { macKeys: ["⇧", "Return"], winKeys: ["Shift", "Enter"] };
@@ -155,6 +191,39 @@ export function shortcutGroupsFor(sendKey: SendKey): readonly ShortcutGroup[] {
 
 export function isSidebarToggle(event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey" | "defaultPrevented">): boolean {
   return !event.defaultPrevented && event.key === "\\" && (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey;
+}
+
+/**
+ * The step of ⌘⇧] / ⌘⇧[ (Ctrl+Shift outside macOS) through the bots: 1, -1, or null for any other key. Outside
+ * macOS, Shift turns the key into "}" / "{", so those count too. The physical key (`code`) is not used: on many
+ * layouts BracketRight types another character.
+ */
+export function botCycleStep(event: Pick<KeyboardEvent, "key">): 1 | -1 | null {
+  if (event.key === "]" || event.key === "}") return 1;
+  if (event.key === "[" || event.key === "{") return -1;
+  return null;
+}
+
+/** Ctrl on macOS too: ⌘Tab belongs to the system. keyCode 229 is a composing key in browsers that leave isComposing unset. */
+export function threadCycleStep(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "defaultPrevented" | "isComposing" | "keyCode" | "target">): 1 | -1 | null {
+  if (event.key !== "Tab" || !event.ctrlKey || event.metaKey || event.altKey || event.defaultPrevented || event.isComposing || event.keyCode === 229) return null;
+  const target = event.target;
+  if (typeof Element !== "undefined" && target instanceof Element && target.closest("dialog, [role=dialog], [role=alertdialog]")) return null;
+  return event.shiftKey ? -1 : 1;
+}
+
+/**
+ * ⌘D on macOS, Ctrl+D elsewhere. Ctrl+D on macOS stays the text field's delete-forward key. The physical key counts only
+ * when the layout types no Latin letter there (Russian), not when it types another one (Dvorak).
+ */
+export function isDictationToggle(
+  event: Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey" | "defaultPrevented" | "isComposing">,
+  isMac: boolean = isMacPlatform(),
+): boolean {
+  if (event.defaultPrevented || event.isComposing || event.shiftKey || event.altKey) return false;
+  if (isMac ? !event.metaKey || event.ctrlKey : !event.ctrlKey || event.metaKey) return false;
+  const key = event.key.toLowerCase();
+  return key === "d" || (event.code === "KeyD" && !/^[a-z]$/.test(key));
 }
 
 export function shouldOpenKeyboardShortcuts(event: KeyboardEvent): boolean {
@@ -198,8 +267,8 @@ export function filterShortcutGroups(
       const filteredItems = group.items.filter((item) => {
         const keys = shortcutKeysForPlatform(item, isMac).join(" ").toLowerCase();
         return (
-          item.description.toLowerCase().includes(normalized) ||
-          group.category.toLowerCase().includes(normalized) ||
+          shortcutDescription(item).toLowerCase().includes(normalized) ||
+          shortcutCategory(group).toLowerCase().includes(normalized) ||
           keys.includes(normalized)
         );
       });

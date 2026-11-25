@@ -1,3 +1,4 @@
+import { RuntimeNoticeError } from "../runtime-notice-error.ts";
 // What a quiet ACP agent is doing. ACP has no "still working" message, and agents go silent for minutes
 // (Qwen Code 0.24 while it waits out a rate limit, retries, or runs a slow call), so a quiet turn is
 // probed from the agent's debug log and its process tree's connections and CPU.
@@ -7,6 +8,8 @@ import { closeSync, existsSync, fstatSync, openSync, readdirSync, readFileSync, 
 import { join } from "node:path";
 
 import { redactSecretsInText } from "../../redact.ts";
+// The usage-limit wait (OMB_ACP_LIMIT_QUIET_MS) lives with the failure words, so reading a failure loads no ACP driver.
+import { limitQuietMs, usageLimitWait } from "../engine-errors.ts";
 
 // Prompt silence guard (0 disables). Healthy agents go quiet for minutes: Qwen Code 0.24 sends
 // nothing while it compresses history, backs off a rate limit (60 s up to 5 min per wait) or runs
@@ -93,6 +96,7 @@ export function parseOpenCodeLogLine(line: string, sessionId: string): LogSignal
 
 export class LogTail {
   private offset: number | null = null;
+  private identity: string | null = null;
   private partial = "";
   private readonly path: string;
   private readonly maxBytes: number;
@@ -110,7 +114,11 @@ export class LogTail {
       return [];
     }
     try {
-      const size = fstatSync(fd).size;
+      const stat = fstatSync(fd);
+      const size = stat.size;
+      const identity = `${stat.dev}:${stat.ino}`;
+      if (this.identity !== null && this.identity !== identity) { this.offset = 0; this.partial = ""; }
+      this.identity = identity;
       if (this.offset === null) {
         this.offset = size;
         return [];
@@ -312,12 +320,6 @@ export function sampleProcessTree(pid: number, since?: number): Promise<ProcessS
  * (OpenCode 1.18 sleeps for the provider's whole retry-after, uncapped, five times over). */
 export const LIMIT_WORDS = /\b429\b|rate.?limit|too many requests|usage limit|quota|GoUsageLimitError|FreeUsageLimitError|insufficient_quota|credits? (?:exhausted|used up)|out of credits/i;
 
-/** How long an engine may stay quiet after a model request failed on a limit before the turn is ended as a usage limit,
- * so the bot carries on with another AI: longer than any retry an engine makes without a provider's retry-after
- * (OMB_ACP_LIMIT_QUIET_MS overrides). */
-export const DEFAULT_LIMIT_QUIET_MS = 2 * 60_000;
-export const limitQuietMs = (): number => knob("OMB_ACP_LIMIT_QUIET_MS", DEFAULT_LIMIT_QUIET_MS);
-
 /** No open request, no CPU and nothing logged, this long: the engine is stuck, and the turn is stopped
  * (OMB_ACP_NO_SIGNS_STOP_MS overrides). */
 export const DEFAULT_NO_SIGNS_STOP_MS = 5 * 60_000;
@@ -327,7 +329,7 @@ export const noSignsStopMs = (): number => knob("OMB_ACP_NO_SIGNS_STOP_MS", DEFA
 export function waitingOutLimit(signal: LogSignal | null): boolean {
   if (!signal) return false;
   if (signal.kind === "provider-error") return LIMIT_WORDS.test(signal.message);
-  return signal.kind === "retry" && signal.status === 429 && (signal.delayMs ?? 0) > limitQuietMs();
+  return signal.kind === "retry" && usageLimitWait(signal.status, signal.delayMs);
 }
 
 /** A quiet turn after it is classified: no sign of life reads as "between requests" until `stuckAfterMs`, and the turn
@@ -346,10 +348,10 @@ export function quietVerdict(input: {
   const limited = input.logged && waitingOutLimit(input.logged.signal) && input.now - input.logged.at >= limitQuietMs() ? input.logged.signal : null;
   if (limited) {
     const said = limited.kind === "provider-error" ? ` (“${limited.message}”)` : "";
-    return { next, noSignsSince, stop: Object.assign(new Error(`${input.name} reached a usage limit${said} and is waiting it out without replying, so this turn was stopped.`), { acpUsageLimit: true }) };
+    return { next, noSignsSince, stop: Object.assign(new RuntimeNoticeError(`${input.name} reached a usage limit${said} and is waiting it out without replying, so this turn was stopped.`, "chat.notice.acpQuietUsageLimit", { name: input.name, said }), { acpUsageLimit: true }) };
   }
   if (noSignsSince !== null && input.now - noSignsSince >= noSignsStopMs()) {
-    return { next, noSignsSince, stop: Object.assign(new Error(`${input.name} sent nothing for ${formatQuietLimit(input.quietMs)} with no tool running, no open request to its model and no CPU use, so the turn was stopped as stuck. Send the message again to retry.`), { acpPromptStall: true }) };
+    return { next, noSignsSince, stop: Object.assign(new RuntimeNoticeError(`${input.name} sent nothing for ${formatQuietLimit(input.quietMs)} with no tool running, no open request to its model and no CPU use, so the turn was stopped as stuck. Send the message again to retry.`, "chat.notice.acpQuietStuck", { name: input.name, quiet: formatQuietLimit(input.quietMs) }), { acpPromptStall: true }) };
   }
   return { next, noSignsSince, stop: null };
 }
@@ -387,6 +389,7 @@ const minutes = (ms: number): string => {
   return `${Math.round(ms / 60_000)} min`;
 };
 
+/** One sentence for the notice row: what a quiet turn is doing, and what ends it. */
 export function describeQuiet(name: string, state: QuietState, quietMs: number, stopAfterMs: number): string {
   const quiet = minutes(quietMs);
   switch (state.kind) {
@@ -403,10 +406,13 @@ export function describeQuiet(name: string, state: QuietState, quietMs: number, 
       return `${name}'s model request failed: "${state.message}" ${name} may retry or stop; no reply for ${quiet} so far.`;
     case "compressing":
       return `${name} is compressing its conversation history to make room. This can take a few minutes; it is still working.`;
-    case "waiting-model":
-      return state.nearFullContext
-        ? `${name} is waiting on its model: no reply for ${quiet}, but its request is still open. Its history is nearly full, so it may be compressing it.`
-        : `${name} is waiting on its model: no reply for ${quiet}, but its request is still open. Slow models and rate limits look like this.`;
+    case "waiting-model": {
+      if (state.nearFullContext) {
+        return `${name} is waiting on its model: no reply for ${quiet}, but its request is still open. Its history is nearly full, so it may be compressing it.`;
+      }
+      const ownStop = stopAfterMs > 0 ? `; with no tool or question active, the turn may stop after ${formatQuietLimit(stopAfterMs)} of silence` : "";
+      return `${name} is waiting on its model: no reply for ${quiet}, but its request is still open. Its model provider may be slow or busy${ownStop}.`;
+    }
     case "busy":
       return `${name} is busy on this computer but has sent nothing for ${quiet}.`;
     case "between-requests":
@@ -431,4 +437,8 @@ export function lastSeenPhrase(state: QuietState): string {
     case "no-signs": return "no open request and no CPU use";
     case "unknown": return "no readable process state";
   }
+}
+
+export function quietNoticeText(name: string, state: QuietState, quietMs: number) {
+  return state.kind === "provider-error" ? { key: "chat.notice.acpModelRequestFailed", params: { name, message: state.message, quiet: minutes(quietMs) } } : undefined;
 }

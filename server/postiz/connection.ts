@@ -1,3 +1,4 @@
+import { userError, type UserError } from "../user-errors.ts";
 // The `postiz` MCP server entry the Apps card manages: Postiz Cloud's OAuth endpoint for a sign-in, or a Postiz server's
 // key endpoint for an organisation API key. A saved key is sent only to the entry at the address it was saved for.
 import { POSTIZ_CLOUD, POSTIZ_SERVER } from "../../shared/postiz.ts";
@@ -9,7 +10,7 @@ const SIGN_IN_PATH = "/mcp-oauth-dynamic";
 const KEY_PATH = "/mcp";
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
-export type PostizAddress = { ok: true; address: string } | { ok: false; error: string };
+export type PostizAddress = { ok: true; address: string } | ({ ok: false } & UserError);
 
 /** https anywhere, plain http only to this computer (and never on a Cloud, whose own loopback is not the person's).
  * A pasted MCP address is accepted for its server; one with the key in it is refused, so the key never sits in config. */
@@ -20,19 +21,17 @@ export function postizAddress(input: string | null | undefined, options: { loopb
   try {
     url = new URL(raw);
   } catch {
-    return { ok: false, error: "Enter your Postiz server's address, starting with https://." };
+    return { ok: false, ...userError("serverError.postiz.addressHttps") };
   }
-  if (url.protocol !== "https:" && url.protocol !== "http:") return { ok: false, error: "Enter your Postiz server's address, starting with https://." };
-  if (url.username || url.password) return { ok: false, error: "Leave any user name or password out of the Postiz address." };
-  if (url.search || url.hash) return { ok: false, error: "Enter the Postiz address without anything after ? or #." };
+  if (url.protocol !== "https:" && url.protocol !== "http:") return { ok: false, ...userError("serverError.postiz.addressHttps") };
+  if (url.username || url.password) return { ok: false, ...userError("serverError.postiz.addressNoCredentials") };
+  if (url.search || url.hash) return { ok: false, ...userError("serverError.postiz.addressNoQuery") };
   if (url.protocol === "http:" && !(options.loopback && LOOPBACK.has(url.hostname))) {
-    return { ok: false, error: options.loopback
-      ? "Use an https:// address. Plain http:// works only for a Postiz server on this computer."
-      : "Use your Postiz server's https:// address." };
+    return { ok: false, ...userError(options.loopback ? "serverError.postiz.addressLocalHttp" : "serverError.postiz.addressUseHttps") };
   }
   const path = url.pathname.replace(/\/+$/u, "");
   if (/\/(?:mcp|sse)\/[^/]+$/u.test(path)) {
-    return { ok: false, error: "That address has a key in it. Enter the server address alone, and paste the key in its own box." };
+    return { ok: false, ...userError("serverError.postiz.addressContainsKey") };
   }
   return { ok: true, address: `${url.origin}${path.replace(/\/mcp(?:-oauth(?:-[a-z]+)?)?$/u, "")}` };
 }

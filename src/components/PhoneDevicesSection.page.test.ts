@@ -1,0 +1,178 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { CompanionState, PhoneSetupController } from "./PhoneSetupFlow";
+
+const f = vi.hoisted(() => ({ state: null as object | null, bridge: {} as object, account: null as object | null }));
+vi.mock("@/state/store", () => ({ useStore: () => ({ state: { config: {} } }) }));
+vi.mock("./PhoneSetupFlow", () => ({
+  companionBridge: () => f.bridge,
+  companionAccountBridge: () => null,
+  usePhoneSetupController: () => ({ state: f.state, busy: false, accountBusy: false, account: f.account, accountAct: () => undefined, act: vi.fn(), accountError: null, error: null, useLocal: vi.fn(), start: vi.fn(), cancel: vi.fn(), refreshTailscale: vi.fn() }),
+  PhoneSetupFlowView: () => "PAIRING_CODE_VIEW",
+  companionAccountActionError: () => null,
+  loadCompanionBridgeState: () => null,
+  shouldHydrateCompanionEmail: () => false,
+}));
+import { OpenCodeRow, PairPhoneSteps, ReachSection, reachLine, routeStateText, showHttpsAddressRow } from "./PhoneDevicesSection";
+
+const off = { on: false, since: null };
+const NOV_7 = new Date(2026, 10, 7).getTime();
+const routes = (on: Partial<Record<"wifi" | "relay" | "tailscale" | "https", boolean>> = {}) => ({
+  wifi: on.wifi ? { on: true, since: NOV_7 } : off,
+  relay: on.relay ? { on: true, since: NOV_7 } : off,
+  tailscale: on.tailscale ? { on: true, since: NOV_7, name: "mac.tail1.ts.net" } : off,
+  https: on.https ? { on: true, since: NOV_7 } : off,
+});
+const phone = { id: "p1", name: "Ada's iPhone", createdAt: 1, lastSeenAt: Date.now() - 60_000, cloudDesktopAccess: false, routes: "any" as const };
+const state = (overrides: Partial<CompanionState> = {}): CompanionState => ({ enabled: false, keepAwake: false, port: 8810, devices: [], pairing: null, routes: routes(), notices: [], ...overrides });
+const c = () => ({ busy: false, accountBusy: false, account: f.account, accountError: null, act: vi.fn(), useLocal: vi.fn(), start: vi.fn(), cancel: vi.fn(), refreshTailscale: vi.fn() }) as unknown as PhoneSetupController;
+const page = (simple = false, moreWaysAsked = false) =>
+  renderToStaticMarkup(createElement(ReachSection, { c: c(), state: f.state as CompanionState, simple, moreWaysAsked, managedBy: null, onPair: () => {} })).replaceAll("&#x27;", "'");
+
+beforeEach(() => {
+  f.bridge = {};
+  f.account = null;
+  f.state = state();
+});
+
+describe("How your phone reaches this computer", () => {
+  it("with nothing paired and no way in on, keeps its heading over one row that says they are off and adding a phone turns them on", () => {
+    const html = page(true);
+    expect(html).toMatch(/<h3[^>]*>How your phone reaches this computer<\/h3>[\s\S]*data-reach-fold/);
+    expect(html).toMatch(/data-reach-fold[^>]*>[\s\S]*Off · Adding a phone turns these on/);
+    expect(html).not.toContain("You can change them here");
+    expect(html).not.toContain('data-route-row="wifi"');
+    expect(html).toContain('data-settings-block="more-ways"');
+  });
+
+  it("is the same in Advanced: nothing paired and no way on reads as the same one closed row", () => {
+    expect(page(true)).toContain("data-reach-fold");
+    expect(page(false)).toContain("data-reach-fold");
+    expect(page(false)).not.toContain('data-route-row="wifi"');
+  });
+
+  it("in Advanced, with a way on, shows the ways in and the HTTPS address, and no Tailscale switch: the private network row has it", () => {
+    f.state = state({ routes: routes({ wifi: true }) });
+    const html = page(false);
+    expect(html).toMatch(/data-route-row="wifi"[\s\S]*?data-route-row="relay"[\s\S]*?Keep this computer awake[\s\S]*?data-settings-block="more-ways"[\s\S]*?HTTPS address/);
+    expect(html).not.toContain('data-route-row="tailscale"');
+    expect(html).not.toContain("More ways in");
+  });
+
+  it("in Simple, shows the HTTPS address only when search or a link asks for it", () => {
+    expect(page(true, true)).toMatch(/data-settings-block="more-ways"[\s\S]*?HTTPS address[\s\S]*?data-route-row="https"/);
+    f.state = state({ routes: routes({ wifi: true }) });
+    expect(page(true)).not.toContain('data-route-row="https"');
+    expect(page(false)).not.toContain("Advanced setting");
+  });
+
+  it("shows each route on as a switch, open once a phone is paired", () => {
+    f.state = state({ routes: routes({ wifi: true, tailscale: true }) });
+    let html = page(true);
+    expect(html).toMatch(/Same Wi-Fi[\s\S]*?data-route-row="wifi"[\s\S]*?aria-checked="true"[\s\S]*?On · waiting for a paired device/);
+    expect(html).not.toContain('data-route-row="tailscale"');
+    f.state = state({ enabled: true, routes: routes({ wifi: true }), devices: [phone] });
+    html = page(true);
+    expect(html, "a switch that is on needs no line saying so").not.toContain("On · since");
+    expect(html).not.toContain("data-reach-fold");
+  });
+});
+
+describe("Keep this computer awake", () => {
+  const awake = (html: string) => html.match(/<div role="group"[^>]*>(?:(?!<div role="group").)*?Keep this computer awake[\s\S]*?<button[^>]*role="switch"[^>]*>/)![0];
+
+  it("can be turned on when Your other computers is the only way in that is on", () => {
+    f.state = state({ routes: { ...routes({ tailscale: true }), tailscale: { on: true, since: NOV_7, name: "mac.tail1.ts.net", computers: true } } });
+    const row = awake(page(true));
+    expect(row).not.toContain("data-settings-inert");
+    expect(row).not.toContain('disabled=""');
+    f.state = state();
+    expect(page(true)).not.toContain("Keep this computer awake");
+  });
+});
+
+describe("the HTTPS address row", () => {
+  const current = { renewPairing: async () => state() };
+  const held = { available: true, status: "ready", endpoint: "https://c-0123456789abcdef0123456789abcdef.mausbot.si" };
+
+  it("is hidden on a build with the encrypted connection that holds no web address, whether or not the phone link is running", () => {
+    expect(showHttpsAddressRow({ routes: routes({ wifi: true }) }, null, current)).toBe(false);
+    expect(showHttpsAddressRow({ routes: routes() }, { }, current)).toBe(false);
+    f.bridge = current;
+    f.account = { available: true, status: "ready" };
+    for (const enabled of [false, true]) {
+      f.state = state({ enabled, routes: routes({ wifi: true, tailscale: true }) });
+      const html = page(false);
+      expect(html).toContain('data-settings-block="more-ways"');
+      expect(html).not.toContain('data-route-row="https"');
+      expect(html).not.toContain("HTTPS address");
+    }
+  });
+
+  it("stays while the account still holds an address, with Set up when the route is off", () => {
+    expect(showHttpsAddressRow({ routes: routes() }, held, current)).toBe(true);
+    f.bridge = current;
+    f.account = held;
+    f.state = state({ routes: routes({ wifi: true, tailscale: true }) });
+    expect(page(false)).toMatch(/HTTPS address[\s\S]*?data-route-row="https"[\s\S]*?>Set up</);
+  });
+
+  it("stays while the route is on, and on a build before the encrypted connection", () => {
+    expect(showHttpsAddressRow({ routes: routes({ https: true }) }, null, current)).toBe(true);
+    expect(showHttpsAddressRow({ routes: routes() }, null, {})).toBe(true);
+    expect(showHttpsAddressRow({ routes: routes() }, null, null)).toBe(true);
+    f.bridge = current;
+    f.state = state({ routes: routes({ https: true }), endpoints: [{ url: held.endpoint, kind: "hosted", priority: 0 }] });
+    const html = page(true);
+    expect(html).toMatch(/HTTPS address[\s\S]*?data-route-row="https"[\s\S]*?>Turn off</);
+    expect(html).toContain("On · c-0123456789abcdef0123456789abcdef.mausbot.si");
+  });
+});
+
+describe("Add a phone's steps", () => {
+  const steps = (overrides: Partial<CompanionState> = {}) =>
+    renderToStaticMarkup(createElement(PairPhoneSteps, { c: c(), state: state(overrides), codeView: "PAIRING_CODE_VIEW" })).replaceAll("&#x27;", "'");
+
+  it("asks how the phone will reach this computer, as two ways it may pick both of, Same Wi-Fi first, before anything listens", () => {
+    const html = steps();
+    expect(html).toContain("How will your phone reach this computer?");
+    expect(html.match(/type="checkbox"/g)).toHaveLength(2);
+    const input = (route: string) => html.match(new RegExp(`<input[^>]*value="${route}"[^>]*>`))![0];
+    expect(input("wifi")).toContain('checked=""');
+    expect(input("relay"), "signed out: Anywhere can't be picked yet, and says why").toContain('disabled=""');
+    expect(input("relay")).not.toContain('checked=""');
+    expect(html).toContain("Needs a free MausBot sign-in.");
+    expect(html).not.toContain('type="radio"');
+    expect(html).toContain(">Turn on and show code<");
+    expect(html).toContain("You can turn these off any time in Devices.");
+    expect(html).not.toContain(">Cancel<");
+    expect(html).not.toContain("PAIRING_CODE_VIEW");
+  });
+
+  it("goes straight to the code when a way in is already on", () => {
+    expect(steps({ routes: routes({ wifi: true }) })).toBe("PAIRING_CODE_VIEW");
+  });
+});
+
+describe("route words", () => {
+  it("reads a route's state and the reach line in plain words", () => {
+    expect(routeStateText(off, 0)).toBe("Off");
+    expect(routeStateText({ on: true, since: NOV_7 }, 0)).toBe("On · waiting for a paired device");
+    expect(reachLine({ routes: routes() })).toBe("No way in is on yet.");
+    expect(reachLine({ routes: routes({ tailscale: true, relay: true }) })).toBe("Reaches this computer on your private network and anywhere through MausBot.");
+    expect(reachLine({ routes: routes({ wifi: true }) })).toBe("Reaches this computer on the same Wi-Fi.");
+  });
+});
+
+describe("open pairing codes", () => {
+  it("lists a code still open, until when it works, with Revoke", () => {
+    const expiresAt = new Date(2026, 10, 7, 11, 14).getTime();
+    const html = renderToStaticMarkup(createElement(OpenCodeRow, { c: c(), state: state({ pairing: { code: "123456", token: "omb_pair_x", expiresAt } }) }));
+    expect(html).toMatch(/Pairing code open · works until 11:14/);
+    expect(html).toContain(">Revoke<");
+    expect(html).not.toContain("123456");
+    expect(renderToStaticMarkup(createElement(OpenCodeRow, { c: c(), state: state() }))).toBe("");
+  });
+});

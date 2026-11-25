@@ -6,7 +6,9 @@ import type { EffortLevel } from "../shared/wire.ts";
 import type {
   DriverKind, InstanceId, ModelVariantOption, RuntimeEventListener, ThreadId, TurnId,
 } from "../shared/runtime-events.ts";
+import type { LocalModelFacts, OllamaProblem } from "../shared/local-model.ts";
 import type { ProviderIcon } from "../shared/provider-icon.ts";
+import type { ContextBreakdown } from "../shared/context-breakdown.ts";
 
 export type { CloudBackend, EffortLevel, ModelSelection } from "../shared/wire.ts";
 export type {
@@ -87,6 +89,15 @@ export interface TurnImageInput {
   path: string;
   mime: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
   bytes: number;
+  /** Set on a frame sampled from an attached video, so a content-type router can tell it apart from a person's own picture. */
+  source?: "video-frame";
+}
+
+/** A video already admitted to the private attachment store; a driver with `nativeImageInput` gets it as the clip within its `nativeVideoBytes`. Otherwise, best effort, a driver with `nativeImageInput` gets TurnImageInput frames when the turn has image slots left and ffprobe and ffmpeg can sample it, and none when they can't. */
+export interface TurnVideoInput {
+  path: string;
+  mime: "video/mp4" | "video/webm" | "video/quicktime";
+  bytes: number;
 }
 
 // `driver` is any slug: an unknown driver round-trips as an unavailable shadow snapshot.
@@ -98,6 +109,8 @@ export interface InstanceConfig {
   icon?: ProviderIcon;
   environment?: Record<string, string>;
   enabled?: boolean;
+  /** Left out of every model list, picker and automatic choice; the engine itself (its CLI and sign-in) is untouched. */
+  hidden?: boolean;
   /** Picker group over the driver's default: an `openai-compat` instance on a provider's own key is "api". */
   access?: EngineAccess;
   config?: unknown;
@@ -125,16 +138,25 @@ export interface SendTurnInput {
   toolScope?: ToolScope;
   /** A guest turn: no shell or command execution, no reads outside its folder. Sent only to drivers whose guestTurns is "confined". */
   guestConfined?: boolean;
+  /** Work from the person's other place while it may not run commands here (server/bot-link/far-side.ts): no shell,
+   * command execution or reads outside the working folders, at the level `approvalMode` says (writes in the working
+   * folder only). Sent only to drivers whose guestTurns is "confined". */
+  linkLimited?: true;
   /** Why this turn is confined, in the owner's words, for a refusal to end with. */
   confinedWhy?: string;
   /** Images for this user turn only; kept out of replay transcripts. */
   images?: TurnImageInput[];
+  /** Video clips for this user turn only, sent as they are; set only for a driver with `capabilities.nativeVideoBytes`. */
+  videos?: TurnVideoInput[];
   model?: string;
   effort?: EffortLevel;
   variant?: string;
   resumeCursor?: unknown;
   /** Start without the previous native context or retained process; wins over resumeCursor. */
   sessionReset?: boolean;
+  /** No later turn resumes this session (a room turn that sends the whole conversation each time), so a driver whose engine
+   * can skip saving it does: the engine's own apps list every saved session as the person's history. */
+  ephemeral?: boolean;
   /** Hold the startup ACK until prompt dispatch (Claude: first model activity); a retired transient setup failure or sign-in refusal may reject with TurnNotStartedError. */
   startupRecovery?: boolean;
   /** Given to a driver with `capabilities.engineAdmission`: awaited right before it starts an engine process ("process") or
@@ -151,6 +173,9 @@ export interface SendTurnInput {
    * carry the volatile half in the newest user message so the cached prefix stays byte-identical. */
   systemStable?: string;
   systemVolatile?: string;
+  /** The team roster as it appears in systemStable. It changes whenever a bot is added, renamed or removed, so a per-thread
+   * process keys on systemStable without it and a warm one gets a changed roster as a note (prompt-split.ts). */
+  systemRoster?: string;
   /** The message tags teammates, so digest-based delivery must not suppress the mentions note even when it is unchanged. */
   mentionTurn?: boolean;
   /** The bot will likely browse, so a driver may load browser tools up front rather than behind tool search. */
@@ -180,8 +205,8 @@ export interface SendTurnInput {
     browser?: { command: string; args: string[]; env: Record<string, string> };
     /** The Data tools' MCP proxy: DuckDB on this bot's own database. */
     data?: { command: string; args: string[]; env: Record<string, string> };
-    /** The HighLevel CRM tools' MCP proxy: the harness holds the tokens and the per-bot verdict. */
-    highlevel?: { command: string; args: string[]; env: Record<string, string> };
+    /** The Email tools' MCP proxy: the harness holds the passwords and the per-bot verdict. */
+    email?: { command: string; args: string[]; env: Record<string, string> };
     /** The paired phone's app tools' MCP proxy: the harness holds the jobs and the per-bot verdict. */
     device?: { command: string; args: string[]; env: Record<string, string> };
     /** dweb daemon tools; `url` is the dweb HTTP base. */
@@ -195,10 +220,14 @@ export interface SendTurnInput {
     customResultBudgets?: Record<string, number>;
   };
   cwd?: string;
+  /** Engines with no working folder (the chat drivers): where an MCP result too big for the model is saved whole; a folder attach_file can deliver from. */
+  toolResultFolder?: string;
   /** Also load the person's own CLI MCP setup (Claude Code user scope, claude.ai connectors). */
   mcpFromUserConfig?: boolean;
   /** Claude Code loads the person's own `~/.claude/skills` from this folder's `.claude/skills` (`--add-dir`). */
   userSkillsDir?: string;
+  /** Harness-selected SKILL.md files available to this turn; a driver may stage their folders for native file access. */
+  skillFiles?: readonly string[];
   /** The bot's own Claude Code settings: `.claude/settings.json` in its working folder, else in its own folder. A Claude
    * turn in any other folder takes their hooks, plugins, permission rules and env. */
   botSettingsFile?: string;
@@ -247,14 +276,16 @@ export interface ProviderAdapter {
     browserMcp?: boolean;
     /** The driver can mount the Data tools MCP. */
     dataMcp?: boolean;
-    /** The driver can mount the HighLevel CRM tools MCP. */
-    highlevelMcp?: boolean;
+    /** The driver can mount the Email tools MCP. */
+    emailMcp?: boolean;
     /** The driver can mount the phone apps MCP. */
     deviceMcp?: boolean;
     /** The engine accepts images in the prompt (gates composer paste). */
     images?: boolean;
     /** sendTurn consumes `images` as structured input, so dispatch strips the attachment path from `text`. */
     nativeImageInput?: boolean;
+    /** With `nativeImageInput`, sendTurn also takes `videos` as the clips themselves, up to this many bytes per turn; any other clip arrives, best effort, as frames only when the turn has image slots left and ffprobe and ffmpeg can sample it. */
+    nativeVideoBytes?: number;
     /** Effort levels the driver can pass to its CLI, ascending; absent hides the control. */
     effortLevels?: readonly EffortLevel[];
     /** The driver validates and applies model-specific variant IDs per session. */
@@ -270,6 +301,9 @@ export interface ProviderAdapter {
     /** A resumeCursor turn runs in that exact native session, or fails, or starts a new one from recoveryText (session.started says
      * `rebuilt`), never a blank one. */
     strictResume?: boolean;
+    /** The engine compacts its own session as it nears its window and reports it (`context.compacted`), so OpenMausBot
+     * leaves that session alone and folds only one its engine left uncompacted. */
+    nativeCompaction?: boolean;
     /** sendTurn can register the harness's hook helper with the engine (integrations.hooks). */
     hooks?: boolean;
     /** "confined": sendTurn honours `guestConfined`; absent, a guest turn is refused. */
@@ -314,6 +348,30 @@ export interface ProviderAdapter {
     hold(threadId: ThreadId, until: number | null): boolean;
     compact?(threadId: ThreadId, options: { instructions: string; session?: string; signal?: AbortSignal }): Promise<IdleCompactResult>;
   };
+  /** The engine's own compaction of this thread's native session, in place, asked for by the person. `session` is the
+   * resume cursor the host holds, `model` the selection the next turn would run on, and `selectionNow` the instance and model read again
+   * when the engine is about to be asked. Only a kept engine process that is
+   * still on that session takes it: otherwise `ok` is false and nothing was sent to the engine. `usage` is null when the
+   * engine reports none for the compaction. */
+  compactSession?(threadId: ThreadId, options: { botId?: string; session: string; model?: string | null; selectionNow?: () => { instanceId: string; model: string | null } | undefined; signal?: AbortSignal }): Promise<EngineCompactResult>;
+  /** Starting a thread's engine before its next message, so that message finds it running. `start` launches the process
+   * exactly as a turn with this input would and sends it nothing; it resolves true once the process is launched, and the
+   * process closes by itself after `waitMs` (a driver default when absent) with no turn. The next sendTurn on the thread
+   * takes that process when its launch would have been the same, it resumes the same engine session (or none, for a
+   * process started without one), it has started up (`ready`) and it is not older than its wait by the wall clock (it
+   * waited through a sleep); it is replaced otherwise. `held`: one is launching or waiting. `running`: the thread has a
+   * process up of any kind (one waiting, or one a turn used and kept), so there is nothing to start. `drop` stops one that
+   * no turn took; a taken one is the turn's own. */
+  prestart?: {
+    start(input: SendTurnInput, waitMs?: number): Promise<boolean>;
+    held(threadId: ThreadId): boolean;
+    running(threadId: ThreadId): boolean;
+    ready(threadId: ThreadId): boolean;
+    drop(threadId: ThreadId): void;
+  };
+  /** The engine's own count, by category, of what fills this thread's context window. null when the thread has no live
+   * engine process to ask or the engine gave no answer; never an estimate. */
+  contextBreakdown?(threadId: ThreadId, options?: { signal?: AbortSignal }): Promise<ContextBreakdown | null>;
 }
 
 /** Tokens are the ping's own; `costUsd` is notional on a subscription. `busy`: a turn was running and nothing was sent;
@@ -328,6 +386,10 @@ export type IdleCompactResult =
   | { ok: true; session: string; sessionBefore: string; input: number; cacheRead: number; cacheWrite: number; output: number; costUsd: number | null; model: string | null }
   | { ok: false; reason: string; busy?: boolean; limit?: boolean };
 
+export type EngineCompactResult =
+  | { ok: true; usage: { input: number; output: number; cachedInput: number } | null; model: string | null }
+  | { ok: false; reason: string };
+
 export type SteerOutcome = "steered" | "refused" | "indeterminate";
 
 export interface ProviderSnapshot {
@@ -340,6 +402,17 @@ export interface ProviderSnapshot {
   state: "available" | "unavailable";
   reason?: string;
   authenticated?: boolean;
+  /** The CLI path runs another program: it answered --version as something other than this engine's own CLI. */
+  notEngineCli?: true;
+  /** The account runs Google's native Antigravity CLI, not the pinned (Classic) runtime. */
+  nativeCli?: true;
+  /** Not ready because its runtime is being installed on this computer right now. */
+  installing?: true;
+  /** With `unavailable`: its status check could not finish (out of time, killed, no room to start it), which says nothing
+   * about whether it is installed. Never a reason to show that no AI is connected. */
+  busy?: true;
+  /** With `available`: its program file is there but its status check could not finish yet; it is checked again. */
+  unverified?: true;
   /** Display identity from the provider CLI, never credentials; `method` is a personal login or the workspace API key. */
   account?: { email?: string; organization?: string; method?: "login" | "api-key" };
   version?: string | null;
@@ -347,7 +420,10 @@ export interface ProviderSnapshot {
   update?: {
     title: string;
     message: string;
-    command: string;
+    /** Absent when there is nothing to run here, e.g. My Cloud's engines update with the Cloud. */
+    command?: string;
+    /** False when the app installer cannot supply this version; offer the terminal command instead. */
+    serverInstall?: false;
   };
   /** On a subscription a reported cost is notional. */
   billing?: "metered" | "subscription";
@@ -356,6 +432,8 @@ export interface ProviderSnapshot {
     title: string;
     message: string;
   };
+  /** Set with `unavailable` on a server recognised as Ollama: what stops it, for the app to say in its own words. */
+  ollama?: OllamaProblem;
 }
 
 // How a user installs this engine; onboarding, the picker and settings render from it.
@@ -373,10 +451,12 @@ export interface EngineInstall {
   /** The vendor's npm package, for an engine whose `command` is its own installer script: Settings installs it on the
    * server when npm is there, while a terminal keeps the vendor's command. */
   npmPackage?: string;
-  /** The app downloads and verifies a pinned provider runtime itself. */
+  /** The app downloads and verifies a provider runtime itself. `downloadBytes` is a number for every client; with
+   * `sizeUnknown` it is not the size of what will be downloaded, and a client shows no size. */
   managed?: {
     label: string;
     downloadBytes: number;
+    sizeUnknown?: true;
   };
   /** The engine needs a key saved in the app rather than a terminal step. */
   settings?: "connections";
@@ -429,6 +509,9 @@ export interface StandaloneRelease {
   /** Environment for the app's own copy only, such as turning off the vendor's self-updater. */
   runEnv?: Readonly<Record<string, string>>;
   assets: Partial<Record<StandalonePlatform, StandaloneAsset>>;
+  /** The program is a launcher that runs the rest of its folder (Cursor's runs a node and scripts beside it), so bin/
+   * holds a link to it rather than a copy. POSIX only. */
+  launcher?: true;
   /** Program SHA-256s of earlier pinned versions, per platform: a copy of one of those stays usable after the pin moves
    * on, until it is updated. Nothing in the data folder can add to this list. */
   previousPrograms?: Partial<Record<StandalonePlatform, readonly string[]>>;
@@ -441,10 +524,14 @@ export interface ProviderAuthenticationStart {
   expiresAt: string | null;
   /** A short-lived code to enter only at the provider's authorization URL. */
   userCode?: string;
+  /** `pasted-code`: the page the link leads to ends on a code (or an address holding it) that the person pastes back, and
+   * not on a redirect to this computer. */
+  kind?: "pasted-code";
 }
 
 export interface ProviderAuthenticationStatus extends Omit<ProviderAuthenticationStart, "phase"> {
-  phase: "waiting" | "succeeded" | "failed" | "expired" | "cancelled";
+  /** `verifying`: the person's part is done and the provider is finishing the sign-in. */
+  phase: "waiting" | "verifying" | "succeeded" | "failed" | "expired" | "cancelled";
   /** Safe, actionable copy; never unfiltered CLI output or credentials. */
   message?: string;
 }
@@ -462,8 +549,18 @@ export interface ModelCatalog {
     contextWindow?: number;
     /** Discovery hints; the native session revalidates these before each turn. */
     variants?: ModelVariantOption[];
+    /** Effort levels this model accepts when narrower/wider than the engine default. */
+    effortLevels?: readonly EffortLevel[];
+    /** The organization of the signed-in account turned this model off: the engine would answer with another. */
+    orgBlocked?: true;
+    /** The installed CLI is too old for this model: the version it needs. */
+    needsCliUpdate?: string;
+    local?: LocalModelFacts;
   }>;
 }
+
+/** Why an engine's model list could not be read: it refused the sign-in, it took too long, or anything else. */
+export type ModelListProblem = "signedOut" | "timedOut" | "failed";
 
 /** "gpt-5.4-mini" → "Gpt 5.4 Mini", splitting on the caller's word breaks. */
 export function titleCaseModelId(id: string, wordBreaks: RegExp): string {
@@ -510,6 +607,8 @@ export interface TextGenerationOptions {
   /** One of this instance's models instead of the driver's quick-call choice: the helper model setting, and the setup
    * card's quick model (side-jobs.ts). */
   model?: string;
+  /** A one-shot call can reject the resolved model before sending the prompt. */
+  checkModel?: (model: string) => void;
   /** How long the caller will wait; drivers with their own process timer use it instead of their default. */
   timeoutMs?: number;
   /** For a bot's own engine whose driver picks a small model of its own. */
@@ -530,6 +629,12 @@ export interface ProviderInstance {
   readonly displayName: string | undefined;
   readonly enabled: boolean;
   readonly models: ModelCatalog;
+  /** An unmanaged OpenRouter connection, where upkeep can name a model from this account's catalog. */
+  readonly openRouter?: true;
+  /** True while the catalog is the driver's fixed list or a failed read's leftover, not a list the engine gave. */
+  readonly modelsUnconfirmed?: boolean;
+  /** Set with modelsUnconfirmed when the engine's last read of its list failed: why, for the picker to say. */
+  readonly modelsUnreadable?: ModelListProblem;
   /** False while the sign-in can refuse a model its catalog lists (Codex on a ChatGPT account): a short message and background text then stay on the bot's own model. */
   readonly quickModelsUsable?: () => boolean;
   /** Refresh a live catalog without recreating the provider instance. */
@@ -539,12 +644,15 @@ export interface ProviderInstance {
   /** Optional first-party runtime installation and account setup. */
   readonly installRuntime?: () => Promise<void>;
   readonly startAuthentication?: () => Promise<ProviderAuthenticationStart>;
-  readonly authenticationMethod?: "browser-pkce";
+  /** Named when the calls an instance offers do not tell its sign-in apart; `callback-url` is a link plus a redirect URL pasted back. */
+  readonly authenticationMethod?: "browser-pkce" | "browser" | "callback-url";
   readonly getAuthentication?: (flowId: string) => Promise<ProviderAuthenticationStatus>;
   readonly completeAuthentication?: (flowId: string, callbackUrl: string) => Promise<void>;
   readonly cancelAuthentication?: () => Promise<void>;
   /** Remove the provider CLI's stored sign-in on this server; never touches another instance's home. */
   readonly signOut?: () => Promise<void>;
+  /** Drops what was last learned about this instance's sign-in, so the next read asks the engine again. */
+  readonly forgetAuthentication?: () => void;
   readonly adapter: ProviderAdapter;
   snapshot(): Promise<ProviderSnapshot>;
   /** Cheap one-shot text call (titles, summaries); the signal is a best-effort cap. */
@@ -568,6 +676,10 @@ export interface ProviderDriver<Config = unknown> {
     displayName: string;
     supportsMultipleInstances?: boolean;
     access?: EngineAccess;
+    /** Set when the app's sign-in uses a subscription on this account (Google, ChatGPT, Claude): bots may say no API key is needed. */
+    signInAccount?: string;
+    /** What the engine's own CLI answers to `--version`; another answer means the CLI path runs another program. */
+    cliVersion?: RegExp;
   };
   /** Omit for engines that need no local binary (API-key drivers). */
   readonly install?: EngineInstall;

@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
+import { isTitleCall } from "./testing/title-call.ts";
 
 it("keeps the selected API model for direct, group and scheduled Boat turns and preserves human control", async () => {
   const rows: Array<{ id: string; name: string; state: string }> = [];
@@ -28,6 +29,7 @@ it("keeps the selected API model for direct, group and scheduled Boat turns and 
     }
     if (path === "/v1/models") return res.end(JSON.stringify({ data: [{ id: "chosen-vision-model" }, { id: "other-default" }] }));
     if (path === "/v1/chat/completions") {
+      if (isTitleCall(body)) { res.statusCode = 500; return res.end("{}"); }
       requests.push(body);
       const completed = body.messages.some((message: any) => message.role === "tool");
       const tool = body.tools?.find((entry: any) => entry.function.name === "computer_screenshot");
@@ -57,7 +59,7 @@ it("keeps the selected API model for direct, group and scheduled Boat turns and 
   const address = upstream.address();
   if (!address || typeof address === "string") throw new Error("fixture failed to bind");
   const origin = `http://127.0.0.1:${address.port}`;
-  const fixture = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, undefined, [], origin).catch(async error => {
+  const fixture = await launchVerificationServer({ ...process.env, OMB_AGENTS_TOOL_BRIDGE: "0" }, undefined, undefined, undefined, undefined, undefined, [], origin).catch(async error => {
     upstream.closeAllConnections(); await new Promise<void>(resolve => upstream.close(() => resolve())); throw error;
   });
   const api = async (method: string, path: string, body?: unknown) => {
@@ -95,7 +97,8 @@ it("keeps the selected API model for direct, group and scheduled Boat turns and 
       }
       const settled = await control(["wait", ...destination, "--timeout", "20"]);
       expect(settled.status).toBe(scenario === "held" ? "failed" : "settled");
-      expect(requests.slice(before)).toHaveLength(2);
+      // This fake is on loopback, so it counts as a local model: a failed call gets up to two rounds to correct it.
+      expect(requests.slice(before)).toHaveLength(scenario === "held" ? 4 : 2);
       expect(requests.slice(before).every(request => request.model === "chosen-vision-model")).toBe(true);
       const followup = requests[before + 1].messages;
       if (scenario === "held") {

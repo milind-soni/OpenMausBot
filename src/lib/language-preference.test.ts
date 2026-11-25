@@ -7,6 +7,8 @@ const hook = vi.hoisted(() => ({
 }));
 
 vi.mock("react", () => ({
+  useState: (initial: unknown) => [initial, () => {}],
+  useEffect: (effect: () => void) => { effect(); },
   useSyncExternalStore: (
     subscribe: (listener: () => void) => () => void,
     snapshot: () => string | null,
@@ -69,6 +71,23 @@ describe("app language preference", () => {
     expect(preference.languageChoice()).toBe("de");
   });
 
+  it("starts the pairing and sign-in pages in the saved language, not the browser's", async () => {
+    local.setItem("omb-language", "pt-br");
+    const preference = await import("./language-preference");
+    expect(preference.startupLocaleTag("en-US")).toBe("pt-br");
+    const { loadLocale, setLocale, t } = await import("./i18n");
+    expect(await loadLocale(preference.startupLocaleTag("en-US"))).toBe("pt-br");
+    expect(t("pair.signIn")).toBe("Entrar");
+    setLocale("en");
+  });
+
+  it("starts in the browser's language until this device picks one", async () => {
+    const preference = await import("./language-preference");
+    expect(preference.startupLocaleTag("de-DE")).toBe("de-DE");
+    preference.setLanguageChoice("");
+    expect(preference.startupLocaleTag("de-DE")).toBe("de-DE");
+  });
+
   it("keeps an explicit follow-the-system choice over the server's language", async () => {
     const preference = await import("./language-preference");
     preference.setLanguageChoice("");
@@ -121,6 +140,7 @@ function desktopApp(saved: string | null = null) {
           return true;
         }),
         onChange: (next: (language: string) => void) => { listener = next; return () => { listener = undefined; }; },
+        shown: vi.fn(),
       };
     },
   };
@@ -179,6 +199,17 @@ describe("app language in the desktop app", () => {
     expect(page.preference.effectiveLanguage(page.preference.languageChoice(), "fr")).toBe("fr");
     expect(page.preference.effectiveLanguage(page.preference.languageChoice(), undefined)).toBe("");
     expect(page.bridge.set).not.toHaveBeenCalled();
+  });
+
+  it("tells the app the language the window shows, so its menus read in that one too, never the rail's or a stale one", async () => {
+    const page = await openPage(desktopApp());
+    page.preference.usePageLanguage("", false);
+    page.preference.usePageLanguage(page.preference.effectiveLanguage(page.preference.languageChoice(), "pt-br"), true);
+    await vi.waitFor(() => expect(page.bridge.shown).toHaveBeenCalledOnce());
+    expect(page.bridge.shown).toHaveBeenCalledWith("pt-br");
+    page.preference.usePageLanguage("xx-unknown", true);
+    await vi.waitFor(() => expect(page.bridge.shown).toHaveBeenLastCalledWith("en"));
+    expect(page.bridge.set, "showing a language is not a pick").not.toHaveBeenCalled();
   });
 
   it("carries a pick saved in a page's own storage into the app once", async () => {

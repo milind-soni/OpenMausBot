@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { RemoteMcpSpec } from "../contracts.ts";
 import { RemoteMcpClient } from "../mcp-http.ts";
-import { probeMcpServer } from "../mcp-probe.ts";
+import { probeMcpServer, SIGN_IN_CHECK_TOOL } from "../mcp-probe.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import { BOX_BROKER_PORT, type BoxBroker } from "./box.ts";
 import { brokerRemoteMcp, forgetBrokeredMcp, mcpGrantName, mcpReconnectLine, retryBrokeredMcp } from "./broker-mcp.ts";
@@ -55,6 +55,33 @@ describe("remote MCP servers through the broker", () => {
     expect(credentials.stats().tokens).toBe(2);
   });
 
+  withBroker("keeps a token while a server's app stays as it was, and gives a new one once when it becomes connected, never for a server sent credentials", async () => {
+    const b = await broker();
+    let connected = false;
+    const appFor = () => ({ slug: "gmail", label: "Gmail", connected });
+    const servers = { gmail: { type: "http" as const, url: "https://gmailmcp.googleapis.com/mcp/v1", headers: {} } };
+    const url = (out: Record<string, unknown>, name: string) => (out[name] as { url: string }).url;
+    const token = (address: string) => /\/b\/(omb_t0_[a-f0-9]{48})\//.exec(address)![1]!;
+    const turn = { botId: "b1", threadId: "t1" };
+    const first = url(brokerRemoteMcp(servers, turn, b, appFor), "gmail");
+    expect(credentials.lookup(token(first), "mcp-gmail")).toMatchObject({ ok: true, grant: { mcpApp: { slug: "gmail", label: "Gmail", connected: false } } });
+    expect(url(brokerRemoteMcp(servers, turn, b, appFor), "gmail"), "the app as it was").toBe(first);
+    connected = true;
+    const second = url(brokerRemoteMcp(servers, turn, b, appFor), "gmail");
+    expect(second, "the app became connected").not.toBe(first);
+    expect(credentials.lookup(token(second), "mcp-gmail")).toMatchObject({ ok: true, grant: { mcpApp: { connected: true } } });
+    expect(url(brokerRemoteMcp(servers, turn, b, appFor), "gmail"), "then kept again").toBe(second);
+
+    const signedIn = { gmail: { ...servers.gmail, headers: { authorization: "Bearer gmail-token" } } };
+    const other = { botId: "b1", threadId: "t2" };
+    connected = false;
+    const kept = url(brokerRemoteMcp(signedIn, other, b, appFor), "gmail");
+    expect(credentials.lookup(token(kept), "mcp-gmail")).toMatchObject({ ok: true, grant: { mcpServer: "gmail" } });
+    expect((credentials.lookup(token(kept), "mcp-gmail") as { grant: { mcpApp?: unknown } }).grant.mcpApp).toBeUndefined();
+    connected = true;
+    expect(url(brokerRemoteMcp(signedIn, other, b, appFor), "gmail"), "a server sent credentials never carries the app").toBe(kept);
+  });
+
   withBroker("gives a conversation a new token after a URL server failed as its engine started, so the engine reconnects", async () => {
     const b = await broker();
     const url = (servers: Record<string, unknown>) => (servers.notion as { url: string }).url;
@@ -101,7 +128,7 @@ describe("remote MCP servers through the broker", () => {
       await client.initialize("engine", signal);
       expect(await client.request("tools/call", { name: "lookup_order", arguments: { id: "1042" } }, signal)).toEqual({ content: [{ type: "text", text: "remote execution recorded" }] });
       await client.close();
-      expect(gateway.calls).toEqual([{ name: "lookup_order", arguments: { id: "1042" } }]);
+      expect(gateway.calls).toEqual([{ name: SIGN_IN_CHECK_TOOL, arguments: {} }, { name: "lookup_order", arguments: { id: "1042" } }]);
       expect(gateway.seenHeaders.filter((headers) => headers["cf-access-client-id"] === id && headers["cf-access-client-secret"] === secret).length).toBeGreaterThanOrEqual(3);
     } finally {
       await new Promise((resolve) => bridge.close(resolve));

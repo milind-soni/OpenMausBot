@@ -5,9 +5,24 @@ export type CallCapabilityHelp = {
   reason: string;
 };
 
-const turnsNeedMac = (): CallCapabilityHelp => ({
-  label: t("call.capability.turnsNeedMac"),
-  reason: t("call.capability.turnsNeedMacReason"),
+const turnsNeedDesktop = (): CallCapabilityHelp => ({
+  label: t("call.capability.turnsNeedDesktop"),
+  reason: t("call.capability.turnsNeedDesktopReason"),
+});
+
+const turnsNeedFishKey = (): CallCapabilityHelp => ({
+  label: t("call.capability.turnsNeedFishKey"),
+  reason: t("call.capability.turnsNeedFishKeyReason"),
+});
+
+const turnsNeedDeepSeekKey = (): CallCapabilityHelp => ({
+  label: t("call.capability.turnsNeedDeepSeekKey"),
+  reason: t("call.capability.turnsNeedDeepSeekKeyReason"),
+});
+
+const turnsOnThisComputerAnyOs = (): CallCapabilityHelp => ({
+  label: t("call.capability.turnsOnThisComputerAnyOs"),
+  reason: t("call.capability.turnsOnThisComputerAnyOsReason"),
 });
 
 const turnsOnThisComputer = (): CallCapabilityHelp => ({
@@ -18,14 +33,15 @@ const turnsOnThisComputer = (): CallCapabilityHelp => ({
 export function callCapabilityHelp(
   capabilities: DesktopCapabilities,
   speechServiceAvailable: boolean,
+  missingKey: "fish" | "deepseek" | null,
 ): CallCapabilityHelp | null {
   if (!capabilities.dictation.available) {
     switch (capabilities.dictation.reasonCode) {
       case "remote-server":
-        return capabilities.host.platform === "darwin" ? turnsOnThisComputer() : turnsNeedMac();
+        return capabilities.host.platform === "darwin" ? turnsOnThisComputer() : turnsOnThisComputerAnyOs();
       case "desktop-app-required":
       case "unsupported-platform":
-        return turnsNeedMac();
+        return turnsNeedDesktop();
       default:
         return {
           label: t("call.capability.unavailable"),
@@ -33,6 +49,8 @@ export function callCapabilityHelp(
         };
     }
   }
+  if (missingKey === "fish") return turnsNeedFishKey();
+  if (missingKey === "deepseek") return turnsNeedDeepSeekKey();
   if (!speechServiceAvailable) {
     return {
       label: t("call.capability.serviceUnavailable"),

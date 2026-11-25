@@ -1,3 +1,4 @@
+import { createECDH } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { phonePairingLink } from "./pairing-link";
 
@@ -173,5 +174,21 @@ describe("phonePairingLink", () => {
     expect(phonePairingLink({ address: "https://mini.example/omb", token })).toBeNull();
     expect(phonePairingLink({ address: "https://mini.example/?x=1", token })).toBeNull();
     expect(phonePairingLink({ address: "https://mini.example/#pair", token })).toBeNull();
+  });
+
+  it("carries the end-to-end descriptor a phone parses, and leaves out one it would refuse", async () => {
+    const { parseDescriptor } = await import("../companion/src/e2e/descriptor.ts");
+    const k = Buffer.from(createECDH("prime256v1").generateKeys()).toString("base64url");
+    const e2e = { v: 1 as const, k, h: "lz81isB3BuNV6rHgYgG3Wg", r: ["relay1.openmausbot.com", "relay2.openmausbot.com"] };
+    const link = phonePairingLink({ address: "192.168.1.5", port: 8810, token, e2e })!;
+    const parsed = parseDescriptor(new URL(link).searchParams.get("e2e"));
+    expect(parsed).toMatchObject({ outcome: "ok", descriptor: e2e });
+    const direct = phonePairingLink({ address: "192.168.1.5", port: 8810, token, e2e: { v: 1, k } })!;
+    expect(parseDescriptor(new URL(direct).searchParams.get("e2e"))).toMatchObject({ outcome: "ok", descriptor: { v: 1, k } });
+    for (const bad of [{ v: 1 as const, k: "short" }, { ...e2e, r: ["relay.example.com"] }]) {
+      const fallback = phonePairingLink({ address: "192.168.1.5", port: 8810, token, e2e: bad })!;
+      expect(rawField(fallback, "e2e") === undefined || parseDescriptor(new URL(fallback).searchParams.get("e2e")).outcome === "ok").toBe(true);
+    }
+    expect(rawField(phonePairingLink({ address: "192.168.1.5", port: 8810, token, e2e: { v: 1, k: "short" } })!, "e2e")).toBeUndefined();
   });
 });

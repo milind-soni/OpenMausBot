@@ -62,7 +62,8 @@ describe.skipIf(process.platform === "win32")("Grok Build sign-in over HTTP", ()
     expect(await grok()).toMatchObject({
       driverKind: "grokAgent",
       snapshot: { state: "available", authenticated: false },
-      authentication: { method: "device-code", signOut: false },
+      // Grok signs out through its own CLI's logout, so the instance offers sign-out; Settings shows it once signed in.
+      authentication: { method: "device-code", signOut: true },
       install: { signInCommand: "grok login" },
     });
   });

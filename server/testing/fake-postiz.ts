@@ -54,7 +54,9 @@ function readBody(req: IncomingMessage): Promise<string> {
 const json = (res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) =>
   res.writeHead(status, { "content-type": "application/json", ...headers }).end(JSON.stringify(body));
 
-export async function startFakePostiz(): Promise<FakePostiz> {
+/** `signInPage`: an https origin to advertise the sign-in page at, as a real provider does; a test's browser visits that
+ * page at `url` instead. */
+export async function startFakePostiz(options: { signInPage?: string } = {}): Promise<FakePostiz> {
   let base = "";
   const clients = new Map<string, string[]>();
   const codes = new Map<string, { clientId: string; redirectUri: string; challenge: string }>();
@@ -106,7 +108,7 @@ export async function startFakePostiz(): Promise<FakePostiz> {
       }
       if (req.method === "GET" && url.pathname === "/.well-known/oauth-authorization-server/mcp-oauth-dynamic") {
         return json(res, 200, {
-          issuer, authorization_endpoint: `${base}/oauth/authorize`, token_endpoint: `${base}/oauth/token`, registration_endpoint: `${base}/oauth/register`,
+          issuer, authorization_endpoint: `${options.signInPage ?? base}/oauth/authorize`, token_endpoint: `${base}/oauth/token`, registration_endpoint: `${base}/oauth/register`,
           response_types_supported: ["code"], grant_types_supported: ["authorization_code"],
           token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"],
           code_challenge_methods_supported: ["S256"], scopes_supported: ["mcp:read", "mcp:write"],

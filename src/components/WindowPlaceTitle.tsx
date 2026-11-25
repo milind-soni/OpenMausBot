@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { t } from "@/lib/i18n";
 import { usePlaceLook } from "@/lib/place-look";
+import { type WorkspaceState, windowPlaceName } from "@/lib/places";
 import { useStore } from "@/state/store";
 import { PlaceMark } from "./PlacesRail";
 
-type WorkspaceState = Awaited<ReturnType<NonNullable<NonNullable<typeof window.ogb>["workspaces"]>["state"]>>;
+export { windowPlaceName };
 
 /** The place this window shows, as main tells this page: null in a browser, on a remote client, or until main answers. */
 export function useWindowPlace(): WorkspaceState | null {
@@ -19,14 +19,6 @@ export function useWindowPlace(): WorkspaceState | null {
     return () => { alive = false; off?.(); };
   }, []);
   return place;
-}
-
-/** What the window's top bar calls the place: This computer, My Cloud while it is the window's only home (a team's name
- * on a team's Cloud), else the name it was saved under. */
-export function windowPlaceName(place: WorkspaceState, team: string | undefined): string {
-  if (place.home) return team || t("cloudSetup.myCloud");
-  if (place.local && !place.localPath) return t("rail.thisComputer");
-  return place.name;
 }
 
 /** The middle of the window frame's top bar: the place on screen, its mark as the rail draws it and its name, quiet. It

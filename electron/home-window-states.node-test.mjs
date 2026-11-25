@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { cloudScreen, HOME_SCREEN_PATH, installHomeWindowIpc, OPEN_MS } from "./home-window.mjs";
-import { CLIENT, CLIENT_A, CLOUD, connected, LOCAL, world } from "./fixtures/home-window-world.mjs";
+import { ACME, CLIENT, CLIENT_A, CLOUD, connected, LOCAL, TEAM, world } from "./fixtures/home-window-world.mjs";
 
 const ENDED_HOME = { ...CLIENT_A, id: "c-home", name: "My Cloud", color: null, origin: CLOUD, primary: true, status: "ended", deleteAfter: 1_900_000_000_000, removable: true };
 test("My Cloud that ended, asked for before the move: its own screen with the day its files go and Remove from list; its address is never looked up", async () => {
@@ -118,4 +118,65 @@ test("Remove from list on this computer's screen: the Admin first, then the wind
   installHomeWindowIpc({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), on: () => {} }, homeWindow: w.home, cloudPage: () => null });
   w.url = `${CLOUD}/`;
   assert.throws(() => handlers.get("home:remove")({ sender: w.contents, senderFrame: w.contents.mainFrame }), /only available/);
+});
+
+// A computer whose bots moved to one Cloud of the person's while My Cloud is now another (several Clouds per account).
+const MOVED_TO = "https://omb-trial-1.fly.dev";
+test("a freeze that names another Cloud on the person's own list is theirs, never another account's; one not on it is said to be another account's", async () => {
+  const listed = world({ journal: null, marker: { frozen: true, cloud: CLIENT }, state: { ...connected(), clouds: [CLIENT_A] } });
+  await listed.home.show();
+  assert.deepEqual(listed.home.current(), { kind: "cloud", origin: CLIENT });
+  const unlisted = world({ journal: null, marker: { frozen: true, cloud: MOVED_TO }, state: { ...connected(), clouds: [CLIENT_A] } });
+  await unlisted.home.show();
+  assert.deepEqual(unlisted.home.view(), { screen: "signin", other: true });
+});
+
+test("My Cloud ending sends home only a computer that moved to that Cloud", async () => {
+  const held = connected({ status: "stopped", hold: { until: 1_900_000_000_000 } });
+  const elsewhere = world({ journal: { v: 1, phase: "done", cloud: { origin: CLIENT, account: "acct-1", machine: CLIENT }, doneAt: 1 }, state: held });
+  await elsewhere.home.show();
+  assert.deepEqual(elsewhere.home.current(), { kind: "cloud", origin: CLIENT }, "its Cloud goes on: still home");
+  const here = world({ state: held });
+  await here.home.show();
+  assert.deepEqual(here.home.current(), { kind: "computer" });
+  const unnamed = world({ state: { ...connected(), machine: { status: "stopped", hold: { until: 1_900_000_000_000 } } } });
+  await unnamed.home.show();
+  assert.deepEqual(unnamed.home.current(), { kind: "computer" }, "a hold that names no address is taken for the Cloud moved to");
+});
+
+test("Sign in never dead-ends: another account's sign-in ends first, then the browser signs in; one still good only looks again; one open in the browser opens again", async () => {
+  const other = world({ state: { ...connected(), account: { id: "acct-2", email: "else@example.test" } } });
+  await other.home.show();
+  assert.deepEqual(other.home.view(), { screen: "signin", other: true });
+  await other.home.signIn();
+  assert.deepEqual(other.signIns, ["out", "begin"]);
+  const good = world({ journal: null, marker: { frozen: true, cloud: MOVED_TO }, state: { ...connected(), clouds: [] } });
+  await good.home.show();
+  good.state = { ...good.state, clouds: [{ ...CLIENT_A, origin: MOVED_TO }] };
+  await good.home.signIn();
+  assert.deepEqual(good.signIns, [], "the same account never signs out");
+  assert.deepEqual(good.home.current(), { kind: "cloud", origin: MOVED_TO }, "it looked again");
+  const opening = world({ state: { status: "connecting", account: null } });
+  await opening.home.signIn();
+  assert.deepEqual(opening.signIns, ["reopen"]);
+});
+
+test("what a launch may open now, by the session's word alone: a running Cloud or team yes; one ended, set up, held, gone or without an address no; nothing while signed out", async () => {
+  const w = world({ state: { ...connected(), teams: [ACME], clouds: [CLIENT_A, { ...CLIENT_A, id: "c-ended", status: "ended" }, { ...CLIENT_A, id: "c-setup", status: "setting_up", origin: null, setup: { step: "starting" } }] } });
+  await w.home.refresh();
+  assert.equal(w.home.opensNow("cloud"), true);
+  assert.equal(w.home.opensNow({ cloud: "c-a" }), true);
+  assert.equal(w.home.opensNow({ team: ACME.id }), true);
+  for (const ask of [{ cloud: "c-ended" }, { cloud: "c-setup" }, { cloud: "c-gone" }, { team: "team-gone" }]) assert.equal(w.home.opensNow(ask), false, JSON.stringify(ask));
+  assert.deepEqual([w.fetched, w.pairs], [[], 0], "nothing looked up");
+  const held = world({ state: { ...connected(), teams: [{ ...ACME, machine: { status: "stopped", origin: TEAM } }] } });
+  await held.home.refresh();
+  assert.equal(held.home.opensNow({ team: ACME.id }), false, "a team's stopped Cloud");
+  const ended = world({ state: { ...connected({ status: "stopped" }), clouds: [{ ...CLIENT_A, id: "c-home", origin: CLOUD, primary: true, status: "ended" }] } });
+  await ended.home.refresh();
+  assert.equal(ended.home.opensNow("cloud"), false, "My Cloud ended");
+  const out = world({ state: { status: "signed-out" } });
+  await out.home.refresh();
+  assert.equal(out.home.opensNow("cloud"), null);
+  assert.equal(out.home.opensNow({ team: ACME.id }), null);
 });

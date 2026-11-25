@@ -3,7 +3,9 @@
 // /api/cloud-send/chats/rows); My Cloud adds them as Bring newer chats adds a copy's (cloud-chat-merge.ts): only what it
 // lacks, never replacing or deleting anything. A conversation's history therefore goes once, and then only what is new.
 // Admin scope (request-auth's default) on both sides.
-import { lstat, open, readFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { lstat, open } from "node:fs/promises";
+import { pipeline } from "node:stream/promises";
 import { join } from "node:path";
 import { z } from "zod";
 
@@ -11,9 +13,11 @@ import type { ApprovalMode } from "../shared/approval-mode.ts";
 import type { BotVisibility, ModelSelection } from "../shared/wire.ts";
 import { ATTACHMENTS_DIR, FILE_MAX_BYTES, saveNamedAttachment } from "./attachments.ts";
 import { audienceEquals, narrowestAudience } from "./bot-visibility.ts";
-import { activePath, addSentChats, attachmentNames, ATTACHMENT_NAME, type ChatStore, type SentConversation, type SentRoom } from "./cloud-chat-merge.ts";
+import { addSentChats, attachmentNames, ATTACHMENT_NAME, type ChatStore, type SentConversation, type SentRoom } from "./cloud-chat-merge.ts";
 import { threadHeads, threadRowNumbers, threadRowsFrom } from "./message-db.ts";
 import { ownerStamp, unstamped, type CloudOwner } from "./cloud-owner-lines.ts";
+import { attachmentNamesOf, linkedPath, linksOf, storedRows, threadLinks, type ThreadLinks } from "./cloud-send-rows.ts";
+import { roomGoes } from "./cloud-send-scope.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { RouteContext } from "./routes/table.ts";
 import type { BotRecord, GroupRecord, GroupTaskRecord, Message, Store, TaskPatch, TaskRecord } from "./store.ts";
@@ -147,9 +151,8 @@ export function conversationSettings(store: Pick<ChatStore, "bot" | "group">, he
 }
 
 /** Each stored attachment the conversations' rows name, with its size. */
-async function attachmentSizes(store: ChatStore, dataDir: string, heads: readonly ChatHead[]): Promise<Array<{ name: string; size: number }>> {
-  const names = new Set<string>();
-  for (const head of heads) for (const row of store.messagesFor(head.threadId)) for (const name of attachmentNames(row, dataDir)) names.add(name);
+async function attachmentSizes(dataDir: string, heads: readonly ChatHead[]): Promise<Array<{ name: string; size: number }>> {
+  const names = attachmentNamesOf(new Set(heads.map((head) => head.threadId)), dataDir);
   const out: Array<{ name: string; size: number }> = [];
   for (const name of names) {
     const info = await lstat(join(ATTACHMENTS_DIR, name)).catch(() => null);
@@ -234,21 +237,37 @@ export interface CloudSendChatsDeps {
   approvalSupported?(selection: ModelSelection, mode: ApprovalMode): boolean;
   /** A move of this one bot into a team: its conversations only. */
   bot?: string;
+  /** A move of only these bots: their conversations, and the rooms that go with all their bots. */
+  scope?: ReadonlySet<string>;
   /** This Cloud's owner's person key, as their lines here carry it: a bot moving into a team tells the team whose lines
    * become the mover's. */
   ownerKey?: string;
 }
+
+/** Whose rows arriving lines become: none on the person's own computer, where their lines name nobody. */
+const stamping = (owner: CloudOwner | null): CloudOwner | null => (owner?.here ? null : owner);
 
 const ownerOf = (store: Pick<ChatStore, "bots" | "groups">, threadId: string) => {
   const bot = store.bots.find((candidate) => candidate.threadId === threadId || (candidate.tasks ?? []).some((task) => task.threadId === threadId));
   return { bot, room: bot ? undefined : store.groups.find((candidate) => roomThreads(candidate).includes(threadId)) };
 };
 
+/** ownerOf for every conversation at once, for a request about many of them. */
+function ownerIndex(store: Pick<ChatStore, "bots" | "groups">): Map<string, { bot?: BotRecord; room?: Room }> {
+  const index = new Map<string, { bot?: BotRecord; room?: Room }>();
+  for (const bot of store.bots) for (const threadId of [bot.threadId, ...(bot.tasks ?? []).map((task) => task.threadId)]) if (!index.has(threadId)) index.set(threadId, { bot });
+  for (const room of store.groups) for (const threadId of roomThreads(room)) if (!index.has(threadId)) index.set(threadId, { room });
+  return index;
+}
+
+/** A conversation's links as messages.db holds them, or as the store holds a conversation messages.db has no row of. */
+const linksFor = (store: Pick<ChatStore, "messagesFor" | "activeLeaf">, threadId: string): ThreadLinks => threadLinks(threadId) ?? linksOf(store.messagesFor(threadId), store.activeLeaf(threadId));
+
 /** A conversation's rows after a point, a page at a time, as main sends them on; null when no bot or room here has it. */
 export function chatPage({ store, dataDir }: CloudSendChatsDeps, threadId: string, after: number, afterId: string | null) {
   const { bot, room } = ownerOf(store, threadId);
   if ((!bot && !room) || !Number.isSafeInteger(after) || after < 0) return null;
-  const path = activePath(store.messagesFor(threadId), store.activeLeaf(threadId)).map((row) => row.id);
+  const path = linkedPath(linksFor(store, threadId));
   const page = threadRowsAfter(threadId, after, afterId, CHAT_ROWS_PAGE, CHAT_PAGE_BYTES, path);
   const task = bot ? taskOf(bot, threadId) : room!.tasks?.find((candidate) => candidate.threadId === threadId) ?? null;
   const owner = bot ? { bot: bot.id, task: task ? sentTask(task as TaskRecord) : null }
@@ -262,10 +281,10 @@ export function chatPage({ store, dataDir }: CloudSendChatsDeps, threadId: strin
 export function chatIds({ store }: CloudSendChatsDeps, threadId: string, from: number) {
   const { bot, room } = ownerOf(store, threadId);
   if ((!bot && !room) || !Number.isSafeInteger(from) || from < 0) return null;
-  const rows = store.messagesFor(threadId);
-  const path = activePath(rows, store.activeLeaf(threadId)).map((row) => row.id);
-  return { v: 1, ids: rows.slice(from, from + VERIFY_IDS).map((row) => row.id), path: path.slice(from, from + VERIFY_IDS), leaf: path.at(-1) ?? null,
-    more: from + VERIFY_IDS < Math.max(rows.length, path.length) };
+  const links = linksFor(store, threadId);
+  const path = linkedPath(links);
+  return { v: 1, ids: links.ids.slice(from, from + VERIFY_IDS), path: path.slice(from, from + VERIFY_IDS), leaf: path.at(-1) ?? null,
+    more: from + VERIFY_IDS < Math.max(links.ids.length, path.length) };
 }
 
 /** Whether `ids` appear in this order on `path` after the row `after` (from its start when null), and the last of them
@@ -294,12 +313,13 @@ const idsSchema = z.object({
 export function stampHeld(store: CloudSendChatsDeps["store"], conversations: ReadonlyArray<{ threadId: string; ids: readonly string[] }>, owner: CloudOwner): { stamped: number; threads: string[] } {
   let stamped = 0;
   const threads = new Set<string>();
+  const owners = ownerIndex(store);
   for (const { threadId, ids } of conversations) {
-    const where = ownerOf(store, threadId);
-    if (!where.bot && !where.room) continue;
+    if (!owners.has(threadId)) continue;
     const named = new Set(ids);
-    for (const row of store.messagesFor(threadId)) {
-      const stamp = named.has(row.id) ? ownerStamp(row, owner) : null;
+    const rows = threadLinks(threadId) ? storedRows(threadId, [...named], { owners: true }) : store.messagesFor(threadId).filter((row) => named.has(row.id));
+    for (const row of rows) {
+      const stamp = ownerStamp(row, owner);
       if (!stamp || !store.patchMessage(threadId, row.id, stamp)) continue;
       stamped++;
       threads.add(threadId);
@@ -322,13 +342,15 @@ const verifySchema = z.object({
  * (a conversation both sides added to weaves the two together). The last chunk of a path also gets My Cloud's leaf and
  * path length, so the sender can tell an equal path from one that holds inside a longer one. Ids only, never a row. */
 export function verifyChats(store: ChatStore, conversations: z.infer<typeof verifySchema>["conversations"]) {
-  return conversations.map(({ threadId, ids, path }) => {
-    const rows = store.messagesFor(threadId);
-    const byId = new Map(rows.map((row) => [row.id, row]));
-    const bot = Boolean(ownerOf(store, threadId).bot);
-    const visible = path ? activePath(rows, store.activeLeaf(threadId)).map((row) => row.id) : [];
-    return { threadId, missing: (ids ?? []).filter((id) => !byId.has(id)),
-      unstamped: bot ? (ids ?? []).filter((id) => { const row = byId.get(id); return row !== undefined && unstamped(row); }).length : 0,
+  const owners = ownerIndex(store);
+  return conversations.map(({ threadId, ids = [], path }) => {
+    const stored = threadLinks(threadId);
+    const links = stored ?? linksOf(store.messagesFor(threadId), store.activeLeaf(threadId));
+    const held = new Set(ids.filter((id) => links.parent.has(id)));
+    const rows = !owners.get(threadId)?.bot || !held.size ? [] : stored ? storedRows(threadId, [...held], { owners: true })
+      : store.messagesFor(threadId).filter((row) => held.has(row.id));
+    const visible = path ? linkedPath(links) : [];
+    return { threadId, missing: ids.filter((id) => !links.parent.has(id)), unstamped: rows.filter((row) => unstamped(row)).length,
       ...(path ? { path: { ...inOrder(visible, path.after, path.ids), ...(path.last ? { leaf: visible.at(-1) ?? null, length: visible.length } : {}) } } : {}) };
   });
 }
@@ -340,10 +362,12 @@ export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, 
   const { store } = deps;
   // This computer's side: what each conversation has, and its rows after a point.
   if (path === PREFIX && method === "GET") {
-    const heads = deps.bot ? chatHeads(store.bots.filter((bot) => bot.id === deps.bot), []) : chatHeads(store.bots, store.groups);
+    const chosen = deps.scope;
+    const rooms = chosen ? store.groups.filter((room) => roomGoes(room, chosen, (id) => store.bot(id))) : store.groups;
+    const heads = deps.bot ? chatHeads(store.bots.filter((bot) => bot.id === deps.bot), []) : chatHeads(chosen ? store.bots.filter((bot) => chosen.has(bot.id)) : store.bots, rooms);
     json(res, 200, { v: 1, dataDir: deps.dataDir, ...(deps.bot && deps.ownerKey ? { owner: deps.ownerKey } : {}), conversations: heads.map((head) => ({ ...head, settings: conversationSettings(store, head) })),
-      rooms: deps.bot ? [] : emptyRooms(store.groups, heads),
-      ...(url.searchParams.get("attachments") === "1" ? { attachments: await attachmentSizes(store, deps.dataDir, heads) } : {}) });
+      rooms: deps.bot ? [] : emptyRooms(rooms, heads),
+      ...(url.searchParams.get("attachments") === "1" ? { attachments: await attachmentSizes(deps.dataDir, heads) } : {}) });
     return true;
   }
   if (path === `${PREFIX}/settings` && method === "POST") {
@@ -371,6 +395,8 @@ export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, 
     if (!owner) { json(res, 403, { error: "Only My Cloud's owner can say which of its lines are theirs." }); return true; }
     const parsed = idsSchema.safeParse(await readBody(req, 2 * 1024 * 1024));
     if (!parsed.success) { json(res, 400, { error: `send { v: 1, conversations: [{ threadId, ids }] }, at most ${VERIFY_IDS} ids of each` }); return true; }
+    // On the person's own computer their lines name nobody: nothing is stamped.
+    if (owner.here) { json(res, 200, { v: 1, stamped: 0 }); return true; }
     const { stamped, threads } = stampHeld(store, parsed.data.conversations, owner);
     for (const threadId of threads) deps.stamped?.(threadId);
     json(res, 200, { v: 1, stamped });
@@ -390,7 +416,8 @@ export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, 
       const stat = await lstat(file).catch(() => null);
       if (!stat?.isFile() || stat.size > FILE_MAX_BYTES) { json(res, 404, { error: "no such attachment" }); return true; }
       res.writeHead(200, { "content-type": "application/octet-stream", "content-length": String(stat.size) });
-      res.end(await readFile(file));
+      // Streamed, never read whole: a stored file may be as large as FILE_MAX_BYTES.
+      await pipeline(createReadStream(file, { start: 0, end: Math.max(0, stat.size - 1) }), res).catch(() => res.destroy());
       return true;
     }
     // My Cloud's side: an attachment a sent row names, kept under its own name; one already here is the same upload.
@@ -432,7 +459,7 @@ export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, 
     }
     for (const room of store.groups) if (room.busyBotId) for (const threadId of [room.threadId, ...(room.tasks ?? []).map((task) => task.threadId)]) busy.add(threadId);
     const result = addSentChats(store, deps.dataDir, parsed.data.dataDir, parsed.data.conversations as unknown as SentConversation[],
-      { busy: (threadId) => busy.has(threadId), owner: deps.owner?.(auth) ?? null });
+      { busy: (threadId) => busy.has(threadId), owner: stamping(deps.owner?.(auth) ?? null) });
     json(res, 200, result);
     return true;
   }

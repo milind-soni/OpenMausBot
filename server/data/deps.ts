@@ -1,10 +1,12 @@
 import type { ChartCompiler, ChartRenderer, DataEngine, VegaLiteValidator } from "./types.ts";
 import { dataEngine as engine } from "./engine.ts";
 import { compileChart as compile } from "./chart-compiler.ts";
-import { validateVegaLite as validate } from "./vega-lite-validator.ts";
-import { chartRenderer as renderer } from "./render.ts";
 
 export const dataEngine: DataEngine = engine;
 export const compileChart: ChartCompiler = compile;
-export const validateVegaLite: VegaLiteValidator = validate;
-export const chartRenderer: ChartRenderer = renderer;
+// Vega, Vega-Lite and its JSON schema load at the first chart, not with the server.
+export const validateVegaLite: VegaLiteValidator = async (spec) => (await import("./vega-lite-validator.ts")).validateVegaLite(spec);
+export const chartRenderer: ChartRenderer = {
+  svg: async (...args) => (await import("./render.ts")).chartRenderer.svg(...args),
+  png: async (...args) => (await import("./render.ts")).chartRenderer.png(...args),
+};

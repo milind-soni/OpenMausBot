@@ -1,3 +1,4 @@
+import type { ServerText } from "../../shared/server-text.ts";
 // A routine's checks: plain code that reads Calendar and Gmail and other routines' runs on each tick, with no AI. What
 // needs no judgement goes to the brief straight away; what needs judgement goes to one run, and the cursors move only
 // once that run's answer is kept. State is ids and times only, one entry per routine, in routine-checks.json.
@@ -44,7 +45,7 @@ const routineStateSchema = z.object({
   runsCursor: at.optional(),
   address: z.string().max(320).optional(),
   pending: z.record(id, pendingSchema).optional(),
-  failures: z.object({ gmail: failureSchema.optional(), googlecalendar: failureSchema.optional() }).optional(),
+  failures: z.object({ gmail: failureSchema.optional(), outlook: failureSchema.optional(), googlecalendar: failureSchema.optional() }).optional(),
 });
 const fileSchema = z.object({ version: z.literal(1), routines: z.record(id, routineStateSchema) });
 type RoutineState = z.infer<typeof routineStateSchema>;
@@ -62,7 +63,7 @@ export interface CheckReport {
   /** Other routines' runs that finished since the last check. */
   runs?: RoutineRun[];
   /** Apps that could not be read, and whether reconnecting fixes it. */
-  trouble?: Array<{ app: ReadApp; signedOut: boolean }>;
+  trouble?: ReadTrouble[];
   /** New emails that wait for a later run, or true when there were more than one check reads. */
   waiting?: number | true;
   /** Mail and meetings that need an AI this bot's engine cannot fence, so they were not sorted. */
@@ -72,7 +73,7 @@ export interface CheckReport {
   /** Whether Gmail is connected, and the person's address once read: the add-a-key suggestion's cue. */
   gmail?: { connected: boolean; address?: string };
   /** Emails the helper models picked for the brief, with a why built in plain code. */
-  picked?: Array<{ email: EmailHeader; why: string; needsReply: boolean }>;
+  picked?: Array<{ email: EmailHeader; why: string; whyText?: ServerText; needsReply: boolean }>;
   /** The reads of this check, for the brief's own follow-ups (a reply already sent). */
   session?: ReadSession;
 }
@@ -98,13 +99,18 @@ export interface RoutineChecksDeps {
 }
 
 const ACTIVE = new Set(["queued", "running", "waiting"]);
-const appName: Record<ReadApp, string> = { gmail: "Gmail", googlecalendar: "Google Calendar" };
+const appName: Record<ReadApp, string> = { gmail: "Gmail", outlook: "Outlook", googlecalendar: "Google Calendar" };
 const addressOf = (from: string): string => (/<([^<>\s]+)>/.exec(from)?.[1] ?? from).trim().toLowerCase();
 
-export function troubleSentence(trouble: ReadonlyArray<{ app: ReadApp; signedOut: boolean }>): string | undefined {
+/** A read that failed; `severalAccounts` when it named one of the app's several connected accounts. */
+export interface ReadTrouble { app: ReadApp; signedOut: boolean; severalAccounts?: boolean }
+
+export function troubleSentence(trouble: ReadonlyArray<ReadTrouble>): string | undefined {
   if (!trouble.length) return undefined;
   const names = trouble.map((one) => appName[one.app]).join(" or ");
-  return trouble.some((one) => one.signedOut) ? `Couldn't read ${names}. Reconnect it in Connected apps.` : `Couldn't read ${names}. I'll try again soon.`;
+  if (trouble.some((one) => one.signedOut)) return `Couldn't read ${names}. Reconnect it in Connected apps.`;
+  if (trouble.some((one) => one.severalAccounts)) return `Couldn't read ${names}. Several accounts are connected, so I read the newest one; check or reconnect it in Connected apps.`;
+  return `Couldn't read ${names}. I'll try again soon.`;
 }
 
 export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
@@ -181,12 +187,13 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
   }
 
   /** A read that failed counts toward its app's failure streak, so the brief says so once and reads back off. */
-  function failed(entry: RoutineState, app: ReadApp, error: unknown): { app: ReadApp; signedOut: boolean } {
+  function failed(entry: RoutineState, app: ReadApp, error: unknown): ReadTrouble {
     const signedOut = error instanceof SourceError && error.signedOut;
+    const severalAccounts = error instanceof SourceError && error.severalAccounts;
     const previous = entry.failures?.[app];
     entry.failures = { ...entry.failures, [app]: { since: previous?.since ?? now(), count: (previous?.count ?? 0) + 1, lastAt: now(), ...(signedOut ? { signedOut } : {}) } };
     console.warn(`checks: could not read ${appName[app]}: ${error instanceof Error ? error.message : String(error)}`);
-    return { app, signedOut };
+    return { app, signedOut, ...(severalAccounts ? { severalAccounts } : {}) };
   }
   const readsBackOff = (entry: RoutineState, app: ReadApp): boolean => {
     const failure = entry.failures?.[app];
@@ -209,13 +216,13 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
     const brief = routine.deliver === "brief";
     const aiAllowed = !context.hold && (routine.access !== "read-and-draft" || deps.fenced(routine.botId));
     const report: CheckReport = { routine, at };
-    const trouble: Array<{ app: ReadApp; signedOut: boolean }> = [];
+    const trouble: ReadTrouble[] = [];
     const items: CheckItems = { mail: [], prep: [], runs: [] };
     const pending: Omit<Pending, "at"> = { mail: [], prep: [], replies: [] };
     const held = new Set(Object.values(entry.pending ?? {}).flatMap((one) => [...one.mail, ...one.prep]));
     let wakeAt: number | undefined;
     const apps = checks.includes("calendar") || checks.includes("mail") ? await deps.reads.connected().catch(() => null) : null;
-    const session = deps.reads.session();
+    const session = deps.reads.session(routine.botId);
     report.session = session;
     const readable = (app: ReadApp): boolean => apps?.[app] === true && deps.mayRead(routine.botId, app) && !trouble.some((one) => one.app === app) &&
       (context.manual || !readsBackOff(entry, app));
@@ -257,45 +264,77 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
       }
     }
 
-    if (checks.includes("mail") && readable("gmail")) {
-      try {
+    if (checks.includes("mail")) {
+      const readGmail = readable("gmail");
+      const readOutlook = readable("outlook") && typeof session.outlookEmails === "function";
+      if (readGmail || readOutlook) {
         const since = emailSince({ now: at, emailCursor: entry.mailCursor });
-        const { emails, more } = await session.emails(since, MAIL_READ_LIMIT);
-        succeeded(entry, "gmail");
-        const judged = new Set([...(entry.judged ?? []), ...held]);
-        const plan = planMail({ now: at, emails, judged });
-        const waiting = plan.waiting.length;
-        const advanced = waiting || more ? undefined : at;
-        const helpers = brief && deps.inbox?.ready() === true;
-        if (helpers) report.helpersSort = true;
-        const picked = helpers && plan.batch.length ? await deps.inbox!.triage(plan.batch, deps.dismissedFrom()) : null;
-        if (picked) {
-          // Sorted with no AI turn: every email of the batch is judged, and the picks become brief rows.
-          report.picked = picked.flatMap((pick) => {
-            const email = plan.batch.find((one) => one.id === pick.id);
-            return email ? [{ email, why: pick.why, needsReply: pick.needsReply }] : [];
-          });
-          entry.judged = keepNewest([...new Set([...(entry.judged ?? []), ...plan.batch.map((email) => email.id), ...plan.quiet.map((email) => email.id)])], MAX_JUDGED);
-          if (plan.batch.length) deps.sorted?.(routine.id, plan.batch.length);
-          // Mail an earlier run still holds keeps the cursor back, so a failed run's mail is read again.
-          const heldMail = Object.values(entry.pending ?? {}).some((one) => one.mail.length > 0);
-          if (advanced !== undefined && !heldMail) entry.mailCursor = advanced;
-        } else if (helpers && plan.batch.length && !aiAllowed) {
-          // The helper models did not answer this time and no fenced AI may sort: the mail waits for the next check.
-        } else if (plan.batch.length && aiAllowed) {
-          items.mail = plan.batch;
-          pending.mail = [...plan.batch.map((email) => email.id), ...plan.quiet.map((email) => email.id)];
-          pending.replies = plan.batch.map((email) => ({ threadId: email.threadId, to: addressOf(email.from) }));
-          if (advanced !== undefined) pending.mailCursor = advanced;
-        } else {
-          if (plan.batch.length && !context.hold) report.unfenced = true;
-          const sorted = plan.batch.length && context.hold ? [] : [...plan.batch, ...plan.quiet];
-          entry.judged = keepNewest([...new Set([...(entry.judged ?? []), ...sorted.map((email) => email.id)])], MAX_JUDGED);
-          if (advanced !== undefined && !(plan.batch.length && context.hold)) entry.mailCursor = advanced;
+        const found: EmailHeader[] = [];
+        let more = false;
+        let mailRead = false;
+        let mailFailed = false;
+        if (readGmail) {
+          try {
+            const gmail = await session.emails(since, MAIL_READ_LIMIT);
+            succeeded(entry, "gmail");
+            found.push(...gmail.emails);
+            more = more || gmail.more;
+            mailRead = true;
+          } catch (error) {
+            trouble.push(failed(entry, "gmail", error));
+            mailFailed = true;
+          }
         }
-        if (brief && (waiting || more)) report.waiting = more ? true : waiting;
-      } catch (error) {
-        trouble.push(failed(entry, "gmail", error));
+        if (readOutlook) {
+          try {
+            const outlook = await session.outlookEmails!(since, MAIL_READ_LIMIT);
+            succeeded(entry, "outlook");
+            found.push(...outlook);
+            more = more || outlook.length >= MAIL_READ_LIMIT;
+            mailRead = true;
+          } catch (error) {
+            trouble.push(failed(entry, "outlook", error));
+            mailFailed = true;
+          }
+        }
+        const skippedMail = (apps?.gmail === true && deps.mayRead(routine.botId, "gmail") && !readGmail)
+          || (apps?.outlook === true && deps.mayRead(routine.botId, "outlook") && typeof session.outlookEmails === "function" && !readOutlook);
+        if (mailRead) {
+          const emails = [...new Map(found.map((email) => [email.id, email])).values()].sort((a, b) => b.at - a.at);
+          const judged = new Set([...(entry.judged ?? []), ...held]);
+          const plan = planMail({ now: at, emails, judged });
+          const waiting = plan.waiting.length;
+          const advanced = waiting || more || mailFailed || skippedMail ? undefined : at;
+          const helpers = brief && deps.inbox?.ready() === true;
+          if (helpers) report.helpersSort = true;
+          const picked = helpers && plan.batch.length ? await deps.inbox!.triage(plan.batch, deps.dismissedFrom()) : null;
+          if (picked) {
+            // Sorted with no AI turn: every email of the batch is judged, and the picks become brief rows.
+            report.picked = picked.flatMap((pick) => {
+              const email = plan.batch.find((one) => one.id === pick.id);
+              return email ? [{ email, why: pick.why, ...(pick.whyText ? { whyText: pick.whyText } : {}), needsReply: pick.needsReply }] : [];
+            });
+            entry.judged = keepNewest([...new Set([...(entry.judged ?? []), ...plan.batch.map((email) => email.id), ...plan.quiet.map((email) => email.id)])], MAX_JUDGED);
+            if (plan.batch.length) deps.sorted?.(routine.id, plan.batch.length);
+            // Mail an earlier run still holds keeps the cursor back, so a failed run's mail is read again.
+            const heldMail = Object.values(entry.pending ?? {}).some((one) => one.mail.length > 0);
+            if (advanced !== undefined && !heldMail) entry.mailCursor = advanced;
+          } else if (helpers && plan.batch.length && !aiAllowed) {
+            // The helper models did not answer this time and no fenced AI may sort: the mail waits for the next check.
+          } else if (plan.batch.length && aiAllowed) {
+            items.mail = plan.batch;
+            pending.mail = [...plan.batch.map((email) => email.id), ...plan.quiet.map((email) => email.id)];
+            // The only draft a fenced run may write is a Gmail one, so an Outlook email gets no reply slot.
+            pending.replies = plan.batch.filter((email) => email.app !== "outlook").map((email) => ({ threadId: email.threadId, to: addressOf(email.from) }));
+            if (advanced !== undefined) pending.mailCursor = advanced;
+          } else {
+            if (plan.batch.length && !context.hold) report.unfenced = true;
+            const sorted = plan.batch.length && context.hold ? [] : [...plan.batch, ...plan.quiet];
+            entry.judged = keepNewest([...new Set([...(entry.judged ?? []), ...sorted.map((email) => email.id)])], MAX_JUDGED);
+            if (advanced !== undefined && !(plan.batch.length && context.hold)) entry.mailCursor = advanced;
+          }
+          if (brief && (waiting || more)) report.waiting = more ? true : waiting;
+        }
       }
     }
 

@@ -3,22 +3,25 @@ import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const server = vi.hoisted(() => ({ calls: [] as Array<{ path: string; method: string; body?: unknown }>, view: null as null | { rows: Array<{ id: string; tab: string }> } }));
+const server = vi.hoisted(() => ({ calls: [] as Array<{ path: string; method: string; body?: unknown }>, view: null as null | { rows: Array<{ id: string; tab: string; kind?: string; unread?: boolean }> } }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 vi.mock("../../state/api", () => ({
   api: vi.fn(async (path: string, init?: RequestInit) => {
     server.calls.push({ path, method: init?.method ?? "GET", ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
     const done = /^\/api\/inbox\/([\w-]+)\/done$/.exec(path);
     if (done && server.view) server.view = { ...server.view, rows: server.view.rows.map((row) => (row.id === done[1] ? { ...row, tab: "done", unread: false } : row)) };
+    if (path === "/api/inbox/read-all" && server.view) server.view = { ...server.view, rows: server.view.rows.map((row) => (row.unread && row.kind === "result"
+      ? { ...row, unread: false, tab: "done" }
+      : { ...row, unread: false })) };
     return server.view;
   }),
 }));
 
 import { initialState, StoreContext, type AppState, type Bot } from "@/state/store";
 import { BOT_BUTTON, botButtonTone } from "@/lib/bot-button";
-import { closeInbox, currentInboxPanel, inboxVersion, openInbox, setInboxView, useInboxLoader } from "@/state/inbox";
-import { approvalRow, inboxView, messageRow, questionRow, reportRow, settledRow } from "@/testing/inbox-fixture";
-import type { InboxView } from "../../../shared/inbox";
+import { closeInbox, currentInbox, currentInboxPanel, inboxVersion, openInbox, setInboxView, useInboxLoader } from "@/state/inbox";
+import { approvalRow, INBOX_NOW, inboxView, messageRow, questionRow, reportRow, settledRow } from "@/testing/inbox-fixture";
+import type { InboxRow, InboxView } from "../../../shared/inbox";
 import { InboxCardSlot } from "./InboxCard";
 import { InboxPanel } from "./InboxPanel";
 
@@ -49,39 +52,80 @@ afterEach(() => {
 });
 
 describe("the inbox panel", () => {
-  it("opens on Needs you with its count, lists each tab's own lines, and reads one in full", async () => {
-    openInbox({ tab: "needs-you" });
+  it("is one list, newest first, with a dot on what waits on the person and no tabs, and reads one line in full", async () => {
+    openInbox();
     await mount(createElement(InboxPanel));
-    const tab = (name: string) => document.querySelector<HTMLElement>(`[data-inbox-tab="${name}"]`)!;
-    expect(tab("needs-you").getAttribute("aria-selected")).toBe("true");
-    expect(tab("needs-you").getAttribute("aria-label")).toBe("Needs you, 2");
+    expect(document.querySelector("[role=tablist], [data-inbox-tab]")).toBeNull();
     const listed = () => [...document.querySelectorAll<HTMLElement>("[data-inbox-row]")].map((row) => row.dataset.inboxRow);
-    expect(listed()).toEqual([approvalRow.id, questionRow.id]);
+    expect(listed()).toEqual([approvalRow.id, questionRow.id, messageRow.id, reportRow.id]);
+    expect(listed(), "a settled line is not listed again").not.toContain(settledRow.id);
+    expect([...document.querySelectorAll<HTMLElement>("[data-inbox-row] [data-inbox-waits]")].map((dot) => dot.closest<HTMLElement>("[data-inbox-row]")!.dataset.inboxRow)).toEqual([approvalRow.id, questionRow.id]);
     expect(document.querySelector(`[data-inbox-row="${approvalRow.id}"]`)!.hasAttribute("data-unread")).toBe(true);
-    await click('[data-inbox-tab="info"]');
-    expect(listed()).toEqual([messageRow.id, reportRow.id]);
-    await click('[data-inbox-tab="done"]');
-    expect(listed()).toEqual([settledRow.id]);
-    await click('[data-inbox-tab="info"]');
     await click(`[data-inbox-row="${messageRow.id}"] button`);
     expect(document.querySelector(`[data-inbox-reading="${messageRow.id}"]`)?.textContent).toContain("The launch moved to Friday.");
     expect(server.calls).toContainEqual({ path: `/api/inbox/${messageRow.id}/read`, method: "POST" });
     expect(document.querySelector("textarea"), "a message that waits on an answer takes a reply").not.toBeNull();
     await click('[aria-label="Back to the list"]');
-    expect(listed()).toEqual([messageRow.id, reportRow.id]);
+    expect(listed()).toEqual([approvalRow.id, questionRow.id, messageRow.id, reportRow.id]);
   });
 
   it("answers an ask from its row through the copy's own card, as the chat's buttons do, and marks news done", async () => {
-    openInbox({ tab: "needs-you" });
+    openInbox();
     await mount(createElement(InboxPanel));
     await click(`[data-inbox-row="${approvalRow.id}"] [data-inbox-action="allow"]`);
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "decideRequest", threadId: "inbox", requestId: "req-approval", behavior: "allow" }));
     await click(`[data-inbox-row="${questionRow.id}"] [data-inbox-action="close"]`);
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "decideRequest", threadId: "inbox", requestId: "req-question", behavior: "answer" }));
-    await click('[data-inbox-tab="info"]');
     await click(`[data-inbox-row="${reportRow.id}"] [data-inbox-action="done"]`);
     expect(server.calls).toContainEqual({ path: `/api/inbox/${reportRow.id}/done`, method: "POST" });
-    expect(document.querySelector(`[data-inbox-row="${reportRow.id}"]`), "it leaves the tab at once").toBeNull();
+    expect(document.querySelector(`[data-inbox-row="${reportRow.id}"]`), "it leaves the list at once").toBeNull();
+  });
+
+  it("marks every unread line read from one control that only shows while something is unread, and answers no ask", async () => {
+    openInbox();
+    await mount(createElement(InboxPanel));
+    const rowIds = () => [...document.querySelectorAll<HTMLElement>("[data-inbox-row]")].map((row) => row.dataset.inboxRow);
+    const unreadIds = () => [...document.querySelectorAll<HTMLElement>("[data-inbox-row][data-unread]")].map((row) => row.dataset.inboxRow);
+    expect(unreadIds()).toEqual([approvalRow.id, messageRow.id, reportRow.id]);
+    expect(document.querySelector("[data-inbox-mark-all]")!.textContent).toBe("Mark all as read");
+    await click("[data-inbox-mark-all]");
+    expect(server.calls).toContainEqual({ path: "/api/inbox/read-all", method: "POST" });
+    expect(unreadIds()).toEqual([]);
+    expect(rowIds(), "the finished work leaves the list, the rest stays").toEqual([approvalRow.id, questionRow.id, messageRow.id]);
+    expect(document.querySelector(`[data-inbox-row="${approvalRow.id}"] [data-inbox-action="allow"]`), "the ask still waits on its answer").not.toBeNull();
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "decideRequest" }));
+    expect(server.calls.filter((call) => /\/(done)$/.test(call.path))).toEqual([]);
+    expect(currentInbox()!.rows.map((row) => [row.id, row.tab])).toEqual(server.view!.rows.map((row) => [row.id, row.tab]));
+    expect(document.querySelector("[data-inbox-mark-all]"), "nothing is unread").toBeNull();
+  });
+
+  it("keeps the control out of an inbox with nothing unread", async () => {
+    shown(inboxView([{ ...approvalRow, unread: false }, { ...messageRow, unread: false }]));
+    openInbox();
+    await mount(createElement(InboxPanel));
+    expect(document.querySelector("[data-inbox-row]")).not.toBeNull();
+    expect(document.querySelector("[data-inbox-mark-all]")).toBeNull();
+  });
+
+  it("opens the conversation a finished notice came from when the person clicks it", async () => {
+    const notice: InboxRow = { ...reportRow, id: "line-notice", origin: { botId: "reporter", threadId: "rep-daily", title: "Daily digest", messageId: "m-report" } };
+    shown(inboxView([notice]));
+    openInbox();
+    await mount(createElement(InboxPanel), [{ id: "reporter", name: "Reporter", color: "orange" } as Bot]);
+    await click(`[data-inbox-row="${notice.id}"] button`);
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "revealThread", threadId: "rep-daily" }));
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "focusMessage", threadId: "rep-daily", messageId: "m-report" }));
+    expect(document.querySelector(`[data-inbox-reading="${notice.id}"]`), "it is not read in the panel").toBeNull();
+  });
+
+  it("keeps what it took out of the list where the person can find it again", async () => {
+    shown(inboxView([approvalRow, { ...reportRow, tab: "done" }]));
+    openInbox();
+    await mount(createElement(InboxPanel));
+    const listed = () => [...document.querySelectorAll<HTMLElement>("[data-inbox-row]")].map((row) => row.dataset.inboxRow);
+    expect(listed(), "a settled line is not listed again").toEqual([approvalRow.id]);
+    await click("[data-inbox-done-toggle]");
+    expect(listed()).toEqual([approvalRow.id, reportRow.id]);
   });
 
   it("is a sheet at phone width", async () => {
@@ -90,6 +134,24 @@ describe("the inbox panel", () => {
     await mount(createElement(InboxPanel));
     expect(document.querySelector('[data-inbox-panel="sheet"]')).not.toBeNull();
     expect(document.querySelector('[data-inbox-panel="side"]')).toBeNull();
+  });
+
+  it("shows a pinned conversation once, and counts its unread news once", async () => {
+    const reporter = {
+      id: "reporter", name: "Reporter", threadId: "rep-main", tasks: [
+        { threadId: "rep-daily", title: "Daily digest", createdAt: 0, updatedAt: INBOX_NOW, pinned: true, unread: true },
+        { threadId: "rep-old", title: "Older digest", createdAt: 0, updatedAt: INBOX_NOW - 60_000, pinned: true },
+      ],
+    } as unknown as Bot;
+    shown(inboxView([{ ...reportRow, unread: true }]));
+    openInbox();
+    await mount(createElement(InboxPanel), [reporter]);
+    expect([...document.querySelectorAll("[data-pinned-title]")].map((el) => el.textContent)).toEqual(["Daily digest", "Older digest"]);
+    const active = [...document.querySelectorAll("[data-inbox-active] button")].map((button) => button.textContent).join(" ");
+    expect(active, "the pinned section already shows it").not.toContain("Daily digest");
+    const finished = [...document.querySelectorAll("[data-inbox-finished] button")].map((button) => button.textContent).join(" ");
+    expect(finished).not.toContain("Older digest");
+    expect(document.querySelector("[data-inbox-tab-count]")?.textContent, "one line plus the same conversation is one").toBe("1");
   });
 });
 
@@ -106,7 +168,7 @@ describe("the inbox's card in the chat", () => {
     await click('[data-inbox-card] [data-inbox-choice="Pricing"]');
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "decideRequest", threadId: "inbox", requestId: "req-question", behavior: "answer", message: "Pricing" }));
     await click('[data-inbox-card] header button');
-    expect(currentInboxPanel()).toMatchObject({ open: true, tab: "needs-you" });
+    expect(currentInboxPanel()).toMatchObject({ open: true, reading: null });
     await mount(createElement(InboxCardSlot, { threadId: "elsewhere", messageId: approvalRow.id }));
     expect(document.querySelector("[data-inbox-card]"), "never in another conversation").toBeNull();
   });
@@ -159,28 +221,25 @@ describe("answer buttons in the asking bot's colour", () => {
 });
 
 describe("keeping the list live", () => {
-  function Loader({ version }: { version: string | null }) {
+  function Loader({ version }: { version: string }) {
     useInboxLoader(version);
     return null;
   }
 
-  it("reads the list again whenever the person's inbox task says it changed, and never off a team", async () => {
+  it("reads the list again whenever what it depends on changes", async () => {
     const task = (inboxChangedAt?: number, openAsks?: number) => [{ id: "bens-chief", tasks: [{ threadId: "inbox", inbox: true as const, ...(inboxChangedAt ? { inboxChangedAt } : {}), ...(openAsks ? { openAsks } : {}) }] }];
     expect(inboxVersion([{ id: "solo", tasks: [{ threadId: "t1" }] }]), "nothing is anyone's inbox off a team").toBeNull();
     const first = inboxVersion(task(5, 2));
     expect(inboxVersion(task(6, 2))).not.toBe(first);
     expect(inboxVersion(task(5, 1))).not.toBe(first);
-    await mount(createElement(Loader, { version: first }));
+    await mount(createElement(Loader, { version: first! }));
     await settle();
     const reads = () => server.calls.filter((call) => call.path === "/api/inbox").length;
     expect(reads()).toBe(1);
-    await mount(createElement(Loader, { version: first }));
+    await mount(createElement(Loader, { version: first! }));
     await settle();
     expect(reads(), "the same version reads nothing").toBe(1);
-    await mount(createElement(Loader, { version: inboxVersion(task(6, 1)) }));
-    await settle();
-    expect(reads()).toBe(2);
-    await mount(createElement(Loader, { version: null }));
+    await mount(createElement(Loader, { version: inboxVersion(task(6, 1))! }));
     await settle();
     expect(reads()).toBe(2);
   });

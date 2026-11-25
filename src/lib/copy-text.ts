@@ -8,34 +8,84 @@ export const COPY_FEEDBACK_MS = 1200;
 /** Bounds a web write that never settles; Chromium rejects an unfocused write at once. */
 export const WEB_WRITE_TIMEOUT_MS = 3000;
 
-function writeWeb(text: string): Promise<boolean> {
+function writeWeb(text: string | Promise<string>): Promise<boolean> {
   return new Promise((resolve) => {
     let done = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const finish = (ok: boolean) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
       resolve(ok);
     };
-    const timer = setTimeout(() => finish(false), WEB_WRITE_TIMEOUT_MS);
+    const startTimeout = () => { if (!done) timer = setTimeout(() => finish(false), WEB_WRITE_TIMEOUT_MS); };
     try {
-      if (!navigator.clipboard?.writeText) return finish(false);
-      Promise.resolve(navigator.clipboard.writeText(text)).then(() => finish(true), () => finish(false));
+      if (typeof text === "string") {
+        startTimeout();
+        if (!navigator.clipboard?.writeText) return finish(false);
+        Promise.resolve(navigator.clipboard.writeText(text)).then(() => finish(true), () => finish(false));
+      } else {
+        // WebKit needs the write inside the click, before asynchronous conversation reads finish.
+        if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+          void text.then((content) => content.trim() ? writeWeb(content).then(finish) : finish(false), () => finish(false));
+          return;
+        }
+        const data = text.then((content) => {
+          if (!content.trim()) throw new Error("Nothing to copy");
+          startTimeout();
+          return new Blob([content], { type: "text/plain" });
+        });
+        void data.catch(() => finish(false));
+        Promise.resolve(navigator.clipboard.write([new ClipboardItem({ "text/plain": data })])).then(() => finish(true), () => finish(false));
+      }
     } catch {
       finish(false);
     }
   });
 }
 
-/** The web Clipboard API rejects unfocused, denied and insecure-context writes; then the desktop bridge runs. Never throws. */
-export async function copyText(text: string): Promise<CopyResult> {
+/**
+ * Legacy execCommand fallback: on insecure-context (plain-LAN-HTTP) mobile
+ * browsers `navigator.clipboard` is undefined and only the classic
+ * select-then-copy path works. No-op outside a real DOM.
+ */
+function writeLegacy(text: string): boolean {
+  if (typeof document === "undefined" || !document.body || typeof document.execCommand !== "function") return false;
+  const active = document.activeElement as HTMLElement | null;
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.left = "-9999px";
+  try {
+    document.body.appendChild(area);
+    area.select();
+    area.setSelectionRange(0, text.length);
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    area.remove();
+    active?.focus?.({ preventScroll: true });
+  }
+}
+
+/** Web Clipboard API, then the desktop bridge, then legacy execCommand (insecure-context mobile). Never throws. */
+export async function copyText(content: string | Promise<string>): Promise<CopyResult> {
+  if (typeof content === "string" && !content.trim()) return "empty";
+  if (await writeWeb(content)) return "copied";
+  let text: string;
+  try {
+    text = await content;
+  } catch {
+    return "failed";
+  }
   if (!text.trim()) return "empty";
-  if (await writeWeb(text)) return "copied";
   try {
     if (typeof window !== "undefined" && (await window.ogb?.copyText?.(text)) === true) return "copied";
   } catch {
   }
-  return "failed";
+  return writeLegacy(text) ? "copied" : "failed";
 }
 
 interface CopyFeedbackOptions {
@@ -90,17 +140,17 @@ export function createCopyFeedback({
   };
 }
 
-export function useCopyFeedback(text: string) {
+export function useCopyFeedback(text: string, write: (text: string) => Promise<CopyResult> = copyText) {
   const [state, setState] = useState<CopyFeedback>("idle");
   const controller = useRef<ReturnType<typeof createCopyFeedback> | null>(null);
   useEffect(() => {
-    const next = createCopyFeedback({ copy: copyText, onChange: setState });
+    const next = createCopyFeedback({ copy: write, onChange: setState });
     controller.current = next;
     return () => {
       next.dispose();
       controller.current = null;
     };
-  }, []);
+  }, [write]);
   const copy = useCallback(() => void controller.current?.click(text), [text]);
   return { state, copy };
 }

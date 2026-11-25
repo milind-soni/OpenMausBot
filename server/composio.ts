@@ -1,20 +1,25 @@
 import type { AppConfig } from "./config.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
+import { ACCOUNT_ID, inventoryAccountSchema, toolkitInventoryPageSchema, toolkitPageSchema, type ToolkitItem } from "./composio-inventory-schema.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { managedConnectorUnavailableReason, managedCustomAuthReason } from "../shared/connector-availability.ts";
 import {
   DEFAULT_BACKEND_ORIGIN,
   apiBase,
   canonicalToolkitSlug,
+  deleteConnectedAccount,
   inputError,
   keepAuthConfigPick,
+  listConnectedAccounts,
+  MAX_CONNECTED_ACCOUNT_PAGES,
   noAuthConfigReason,
   projectHeaders,
   refusedAuthConfigReason,
   responseError,
+  type ConnectedAccountResponse,
 } from "./composio-project.ts";
-import { MULTI_ACCOUNT_CONFIG, authConfigRefusal, ensureProjectSession, projectApiKey, sessionForToolkit } from "./composio-session.ts";
+import { MULTI_ACCOUNT_CONFIG, authConfigRefusal, ensureProjectSession, projectApiKey, raiseAccountCap, sessionForToolkit } from "./composio-session.ts";
 import { authConfigUseLine, noManagedAuthToolkit, withNoManagedAuthNote } from "./connector-auth-config-hint.ts";
 import { planAccountLink } from "../shared/connector-account-link.ts";
 import type { CuratedConnectorSlug } from "../shared/connector-curated.ts";
@@ -27,11 +32,14 @@ import {
   serializeConnectorAllowedTools,
   serializeConnectorServiceSlugs,
 } from "./connector-advertisement.ts";
-import { serviceSlugFor, serviceSlugForCandidates } from "./connector-verdict.ts";
+import { connectedAppGrantSlugs, serviceSlugFor, serviceSlugForCandidates } from "./connector-verdict.ts";
 import { parseMcpResponse, withToolsListFallback } from "./connector-tools-list.ts";
-import { brokerAccess, type BrokerAccess } from "./composio-broker-access.ts";
+import { brokerAccess, managedComposioBrokerOff, type BrokerAccess } from "./composio-broker-access.ts";
 export { applyManagedBrokerMessage, brokerAccess, setManagedBrokerAccess, type BrokerAccess } from "./composio-broker-access.ts";
 export { prepareProjectSession, trustedSessionMcpUrl } from "./composio-session.ts";
+import { catalogFor, type CatalogPagination, type ToolkitCard } from "./composio-catalog.ts";
+import { forgetInventory, inventoryDiffers, sharedInventory } from "./composio-inventory-cache.ts";
+export { onCatalogChange, rememberCatalogIn, toolkitCategories, type CatalogPagination, type CatalogStopReason, type ToolkitCard } from "./composio-catalog.ts";
 
 function toolkitBase() {
   return (process.env.OMB_COMPOSIO_TOOLKITS_API ?? `${DEFAULT_BACKEND_ORIGIN}/api/v3`).replace(/\/$/, "");
@@ -55,44 +63,17 @@ interface AccountLinkRequest {
   alias?: string;
 }
 
-const connectedAccountResponseSchema = z.object({
-  id: z.string().optional(),
-  alias: z.string().nullable().optional(),
-  status: z.string().optional(),
-  updated_at: z.string().optional(),
-  toolkit: z.object({ slug: z.string().optional() }).optional(),
-});
-type ConnectedAccountResponse = z.infer<typeof connectedAccountResponseSchema>;
-
-const connectedAccountsPageSchema = z.object({
-  items: z.array(connectedAccountResponseSchema),
-  next_cursor: z.string().nullable().optional(),
-});
-
-const toolkitItemSchema = z.object({
-  slug: z.string().optional(),
-  is_no_auth: z.boolean().optional(),
-  connected_account: z.object({ id: z.string().optional(), status: z.string().optional() }).nullable().optional(),
-});
-type ToolkitItem = z.infer<typeof toolkitItemSchema>;
-const toolkitPageSchema = z.object({
-  items: z.array(toolkitItemSchema).optional(),
-  next_cursor: z.string().nullable().optional(),
-});
-
 const connectorServiceSchema = z.object({
   connected: z.boolean(),
   pending: z.boolean().optional(),
   status: z.string().optional(),
   accounts: z.array(z.object({ id: z.string(), alias: z.string().optional(), status: z.string() })).optional(),
 });
-const connectorServicesResponseSchema = z.object({ services: z.record(z.string(), connectorServiceSchema).optional() });
+const connectorServicesResponseSchema = z.object({ services: z.record(z.string(), connectorServiceSchema).optional(), complete: z.boolean().optional() });
 const removalResponseSchema = z.object({ removed: z.number() });
 const authUrlResponseSchema = z.object({ url: z.string().optional() });
 const linkResponseSchema = z.object({ redirect_url: z.string().optional() });
 
-const MAX_CONNECTED_ACCOUNT_PAGES = 100;
-const ACCOUNT_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const printableAliasSchema = z.string().min(1).max(64).refine((value) => {
   for (const character of value) {
     const codePoint = character.codePointAt(0);
@@ -188,7 +169,7 @@ export function connectorSetup(
   managedHost: boolean = process.env.OMB_DESKTOP_PARENT === "1",
 ): ConnectorSetup {
   if (configured(cfg)) return "ready";
-  return managedHost ? "service-unavailable" : "needs-setup";
+  return managedHost && !managedComposioBrokerOff() ? "service-unavailable" : "needs-setup";
 }
 
 async function brokerRequest(path: string, init?: RequestInit, broker = brokerAccess()): Promise<Response> {
@@ -251,7 +232,7 @@ export async function mcpIntegration(
   }
   const serviceSlugs = context.connectorTools === undefined
     ? undefined
-    : serializeConnectorServiceSlugs(await connectedServiceSlugs(cfg, context.as));
+    : serializeConnectorServiceSlugs(await connectedServiceSlugs(cfg, context.as, { waitMs: TURN_START_SLUGS_WAIT_MS }));
   if (serviceSlugs?.oversized) {
     console.warn(
       `[composio] connector service slugs for bot ${context.botId} exceed ${CONNECTOR_SERVICE_SLUGS_MAX_BYTES} bytes;`
@@ -281,7 +262,7 @@ export async function relayMcp(
   cfg: AppConfig,
   payload: JsonValue,
   transportSessionId?: string,
-  beforeSend?: () => void, signal?: AbortSignal, as?: BrokerAccess,
+  beforeSend?: () => void | JsonValue | Promise<void | JsonValue>, signal?: AbortSignal, as?: BrokerAccess,
 ): Promise<{ status: number; bytes: Uint8Array; contentType: string; transportSessionId?: string }> {
   const apiKey = as ? null : projectApiKey(cfg);
   let url: string;
@@ -313,7 +294,7 @@ export async function relayMcp(
     headers.set("mcp-session-id", forwardedTransportSessionId);
   }
   // Discovery may await I/O: check turn authority and permissions after it, right before dispatch.
-  beforeSend?.();
+  const sent = await beforeSend?.(); if (sent !== undefined) payload = sent; // beforeSend may answer the frame to send instead (files it uploaded)
   const response = await withToolsListFallback(identity, payload, () => fetch(url, {
     method: "POST",
     headers,
@@ -336,46 +317,14 @@ export async function relayMcp(
   return { status: response.status, bytes, contentType, transportSessionId: nextTransportSessionId };
 }
 
-async function listConnectedAccounts(
-  apiKey: string,
-  userId: string,
-  slugs: string[],
-): Promise<ConnectedAccountResponse[]> {
-  const accounts: ConnectedAccountResponse[] = [];
-  const seenCursors = new Set<string>();
-  let cursor: string | undefined;
-
-  for (let page = 0; page < MAX_CONNECTED_ACCOUNT_PAGES; page += 1) {
-    const params = new URLSearchParams({
-      limit: "50",
-      user_ids: userId,
-      order_by: "updated_at",
-      order_direction: "desc",
-    });
-    if (slugs.length) params.set("toolkit_slugs", slugs.join(","));
-    if (cursor) params.set("cursor", cursor);
-    const response = await fetch(`${apiBase()}/connected_accounts?${params}`, {
-      headers: projectHeaders(apiKey),
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!response.ok) throw new Error(await responseError(response, `Composio accounts: HTTP ${response.status}`));
-    const body = connectedAccountsPageSchema.parse(await response.json());
-    accounts.push(...body.items);
-    const next = body.next_cursor || undefined;
-    if (!next || seenCursors.has(next)) return accounts;
-    seenCursors.add(next);
-    cursor = next;
-  }
-  throw new Error("Composio account inventory exceeded the pagination safety limit");
-}
-
 async function listSessionToolkits(
   apiKey: string,
   sessionId: string,
-): Promise<ToolkitItem[]> {
-  const toolkits: ToolkitItem[] = [];
+): Promise<{ items: ToolkitItem[]; complete: boolean }> {
+  const items: ToolkitItem[] = [];
   const seenCursors = new Set<string>();
   let cursor: string | undefined;
+  let complete = true;
   for (let page = 0; page < MAX_CONNECTED_ACCOUNT_PAGES; page += 1) {
     // Unfiltered, this endpoint pages through the whole marketplace 50 at a time.
     const params = new URLSearchParams({ limit: "50", is_connected: "true" });
@@ -385,10 +334,13 @@ async function listSessionToolkits(
       { headers: projectHeaders(apiKey), signal: AbortSignal.timeout(15_000) },
     );
     if (!response.ok) throw new Error(await responseError(response, `Composio toolkits: HTTP ${response.status}`));
-    const body = toolkitPageSchema.parse(await response.json());
-    toolkits.push(...(body.items ?? []));
+    const raw: unknown = await response.json();
+    const body = toolkitPageSchema.parse(raw);
+    items.push(...(body.items ?? []));
+    complete &&= toolkitInventoryPageSchema.safeParse(raw).success;
     const next = body.next_cursor || undefined;
-    if (!next || seenCursors.has(next)) return toolkits;
+    if (!next) return { items, complete };
+    if (seenCursors.has(next)) return { items, complete: false };
     seenCursors.add(next);
     cursor = next;
   }
@@ -475,8 +427,8 @@ export async function connectedServicesInventory(cfg: AppConfig, as?: BrokerAcce
   if (!apiKey) {
     const response = await brokerRequest("/v1/connectors/connected", undefined, as);
     if (!response.ok) await throwBrokerError(response, `Connected apps: HTTP ${response.status}`);
-    const body = connectorServicesResponseSchema.parse(await response.json());
-    const services = canonicalServiceRecord(body.services ?? {});
+    const body = connectorServicesResponseSchema.required({ services: true }).parse(await response.json());
+    const services = canonicalServiceRecord(body.services);
     return {
       services: Object.fromEntries(
         Object.entries(services).map(([slug, state]) => [slug, {
@@ -486,7 +438,8 @@ export async function connectedServicesInventory(cfg: AppConfig, as?: BrokerAcce
           accounts: state.accounts ?? [],
         }]),
       ),
-      complete: true,
+      // A broker that predates this field sends none, so only an explicit false means its account read came up short.
+      complete: body.complete !== false,
     };
   }
   const session = await ensureProjectSession(cfg);
@@ -495,13 +448,32 @@ export async function connectedServicesInventory(cfg: AppConfig, as?: BrokerAcce
   const [toolkits, accountResult] = await Promise.all([
     listSessionToolkits(apiKey, session.session_id),
     // Scoped project keys can grant Session reads without the raw connected-account list.
-    listConnectedAccounts(apiKey, userId, []).then((accounts) => ({ accounts, complete: true as const }))
-      .catch(() => ({ accounts: [] as ConnectedAccountResponse[], complete: false as const })),
+    listConnectedAccounts(apiKey, userId, []).then((accounts) => ({ accounts, complete: accounts.every((account) => inventoryAccountSchema.safeParse(account).success) }))
+      .catch(() => ({ accounts: [] as ConnectedAccountResponse[], complete: false })),
   ]);
   return {
-    services: allServiceStates(summarizeAccounts(accountResult.accounts, []), toolkits),
-    complete: accountResult.complete,
+    services: allServiceStates(summarizeAccounts(accountResult.accounts, []), toolkits.items),
+    complete: accountResult.complete && toolkits.complete,
   };
+}
+
+/** The inventory as the Apps page shows it: one read for readers together or within 20 s, read anew after a connection is
+ * started or removed here, or a status check differs from it. `fresh` always reads. */
+export function sharedConnectedInventory(cfg: AppConfig, options: { fresh?: boolean } = {}): Promise<ConnectedServicesInventory> {
+  return sharedInventory(connectorToolsIdentity(cfg), () => connectedServicesInventory(cfg), options.fresh);
+}
+
+function connectionsChanged(cfg: AppConfig, as?: BrokerAccess): void {
+  const identity = connectorToolsIdentity(cfg, as);
+  forgetInventory(identity);
+  if (connectorServiceSlugsCache?.identity === identity) connectorServiceSlugsCache = { ...connectorServiceSlugsCache, at: -Infinity };
+  if (connectorServiceSlugsRequest?.identity === identity) connectorServiceSlugsRequest = null;
+}
+
+export async function verifiedConnectedServiceSlugs(cfg: AppConfig, as?: BrokerAccess): Promise<readonly string[]> {
+  const { services, complete } = await connectedServicesInventory(cfg, as);
+  if (!complete) throw new Error("Connected-app inventory is incomplete; account discovery did not finish.");
+  return Object.keys(services);
 }
 
 export async function connectedServices(cfg: AppConfig, as?: BrokerAccess): Promise<Record<string, ConnectorServiceState>> {
@@ -525,15 +497,15 @@ export async function validateConnectorGrants(
       return `connectorTools.${slug}.tools names tools that belong to another service: ${misplaced.join(", ")}`;
     }
   }
-  if (!connected) return null;
-  const unconnected = Object.keys(grants).filter((slug) => !connected[slug]?.connected);
+  if (!connected || !connectedAppGrantSlugs(grants).length) return null;
+  const unconnected = connectedAppGrantSlugs(grants).filter((slug) => !connected[slug]?.connected);
   if (unconnected.length) {
     return `connectorTools names services that are not connected: ${unconnected.join(", ")}`;
   }
   const catalog = await listToolkits(cfg);
-  if (catalog.source !== "api" || !catalog.pagination?.complete) return null;
+  if (catalog.source !== "api" || !catalog.pagination?.complete || !catalog.fresh) return null;
   const known = new Set(catalog.cards.map((card) => card.slug.toLowerCase()));
-  const unknown = Object.keys(grants).filter((slug) => !known.has(slug));
+  const unknown = connectedAppGrantSlugs(grants).filter((slug) => !known.has(slug));
   if (unknown.length) {
     return `connectorTools names services missing from the connected-apps catalog: ${unknown.join(", ")}`;
   }
@@ -573,40 +545,65 @@ let connectorToolsCache: { at: number; identity: string; services: Record<string
 /** Cache key per backend, so a config switch never serves the previous backend's tools. */
 function connectorToolsIdentity(cfg: AppConfig, as?: BrokerAccess): string {
   const apiKey = as ? null : projectApiKey(cfg);
-  if (apiKey) return backendFingerprint("project-tools", apiBase(), apiKey);
+  if (apiKey) return backendFingerprint("project-tools", `${apiBase()}\0${cfg.composio?.userId ?? ""}`, apiKey);
   const broker = as ?? brokerAccess();
   return broker ? backendFingerprint("managed-tools", broker.url, broker.token) : "none";
 }
 
 let connectorToolsRequest: { identity: string; services: Promise<Record<string, ConnectorToolListing[]>> } | null = null;
 
-/** Real backend slugs, so an underscored service (bland_ai) is never captured by a plain-prefix grant (bland); a failed read answers the last good one. */
-export async function connectedServiceSlugs(cfg: AppConfig, as?: BrokerAccess): Promise<readonly string[]> {
+/** Real backend slugs, so an underscored service (bland_ai) is never captured by a plain-prefix grant (bland); a failed read
+ * answers the last good one. An answer under a minute old is used as it is. An older one is used while it is read again
+ * behind, until it is CONNECTOR_SERVICE_SLUGS_STALE_MS old or a connection was started or removed here: from then the read
+ * is waited for, for at most `waitMs` when a caller gives one.
+ *
+ * Security: this list only decides which service a tool's name belongs to. It never makes a connection usable: the vendor
+ * refuses a removed one, and a call that names no tool is checked against verifiedConnectedServiceSlugs, which is never
+ * cached. The risk in an old list is a service connected elsewhere since (bland_ai) being read as another's (bland), so the
+ * list a call is judged by is never more than CONNECTOR_SERVICE_SLUGS_STALE_MS old. */
+export async function connectedServiceSlugs(cfg: AppConfig, as?: BrokerAccess, options: { waitMs?: number } = {}): Promise<readonly string[]> {
   const identity = connectorToolsIdentity(cfg, as);
-  if (connectorServiceSlugsCache?.identity === identity
-    && Date.now() - connectorServiceSlugsCache.at < CONNECTOR_SERVICE_SLUGS_CACHE_MS) {
-    return connectorServiceSlugsCache.slugs;
-  }
-  if (connectorServiceSlugsRequest?.identity === identity) return connectorServiceSlugsRequest.slugs;
-  const walk = connectedServices(cfg, as).then(
+  const known = connectorServiceSlugsCache?.identity === identity ? connectorServiceSlugsCache : null;
+  const age = known ? Date.now() - known.at : Infinity;
+  if (known && age < CONNECTOR_SERVICE_SLUGS_CACHE_MS) return known.slugs;
+  const read = connectorServiceSlugsRequest?.identity === identity ? connectorServiceSlugsRequest.slugs : readServiceSlugs(cfg, as, identity);
+  if (known && age < CONNECTOR_SERVICE_SLUGS_STALE_MS) return known.slugs;
+  if (options.waitMs === undefined) return read;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const lastKnown = new Promise<readonly string[]>((resolve) => { timer = setTimeout(() => resolve(known?.slugs ?? []), options.waitMs); });
+  return Promise.race([read, lastKnown]).finally(() => clearTimeout(timer));
+}
+
+function readServiceSlugs(cfg: AppConfig, as: BrokerAccess | undefined, identity: string): Promise<readonly string[]> {
+  const read = connectedServices(cfg, as).then(
     (services) => {
       const slugs = Object.keys(services);
-      connectorServiceSlugsCache = { at: Date.now(), identity, slugs };
+      // A read that a connection change overtook answers its own caller and is not kept.
+      if (connectorServiceSlugsRequest?.slugs === read) connectorServiceSlugsCache = { at: Date.now(), identity, slugs };
       return slugs;
     },
     () => connectorServiceSlugsCache?.identity === identity ? connectorServiceSlugsCache.slugs : [] as readonly string[],
-  );
-  connectorServiceSlugsRequest = { identity, slugs: walk };
-  try {
-    return await walk;
-  } finally {
-    if (connectorServiceSlugsRequest?.slugs === walk) connectorServiceSlugsRequest = null;
-  }
+  ).finally(() => {
+    if (connectorServiceSlugsRequest?.slugs === read) connectorServiceSlugsRequest = null;
+  });
+  connectorServiceSlugsRequest = { identity, slugs: read };
+  serviceSlugReads.add(read);
+  void read.finally(() => serviceSlugReads.delete(read));
+  return read;
+}
+
+/** Resolves once no read of the service slugs is running. */
+export async function serviceSlugsReadSettled(): Promise<void> {
+  while (serviceSlugReads.size) await Promise.all(serviceSlugReads);
 }
 
 const CONNECTOR_SERVICE_SLUGS_CACHE_MS = 60_000;
+export const CONNECTOR_SERVICE_SLUGS_STALE_MS = 5 * 60_000;
+/** How long a turn's start waits for the slugs when none it may use are held. */
+const TURN_START_SLUGS_WAIT_MS = 5_000;
 let connectorServiceSlugsCache: { at: number; identity: string; slugs: readonly string[] } | null = null;
 let connectorServiceSlugsRequest: { identity: string; slugs: Promise<readonly string[]> } | null = null;
+const serviceSlugReads = new Set<Promise<readonly string[]>>();
 
 const TOOL_DESCRIPTION_MAX = 240;
 const TOOLS_LIST_PAGES_MAX = 10;
@@ -625,8 +622,7 @@ function connectorToolListing(tool: unknown): ConnectorToolListing | null {
 }
 
 async function collectConnectorTools(cfg: AppConfig): Promise<Record<string, ConnectorToolListing[]>> {
-  const connected = await connectedServices(cfg).catch(() => null);
-  const candidates = connected ? Object.keys(connected) : [];
+  const candidates = await connectedServiceSlugs(cfg);
   const initialize = await relayMcp(cfg, {
     jsonrpc: "2.0",
     id: "omb-grants-initialize",
@@ -702,6 +698,12 @@ async function responseErrorFromBytes(status: number, bytes: Uint8Array): Promis
 }
 
 export async function connectionStatus(cfg: AppConfig, slugs: string[]) {
+  const status = await readConnectionStatus(cfg, slugs);
+  if (inventoryDiffers(connectorToolsIdentity(cfg), status, canonicalToolkitSlug)) connectionsChanged(cfg);
+  return status;
+}
+
+async function readConnectionStatus(cfg: AppConfig, slugs: string[]) {
   const canonicalSlugs = [...new Set(slugs.map(canonicalToolkitSlug))];
   const apiKey = projectApiKey(cfg);
   if (!apiKey) {
@@ -758,6 +760,7 @@ export async function removeService(cfg: AppConfig, slug: string, as?: BrokerAcc
   const apiKey = as ? null : projectApiKey(cfg);
   if (!apiKey) {
     const response = await brokerRequest(`/v1/connectors/${encodeURIComponent(toolkit)}`, { method: "DELETE" }, as);
+    connectionsChanged(cfg, as);
     if (!response.ok) await throwBrokerError(response, `Connected apps: HTTP ${response.status}`);
     return removalResponseSchema.parse(await response.json());
   }
@@ -771,16 +774,9 @@ export async function removeService(cfg: AppConfig, slug: string, as?: BrokerAcc
   const body = toolkitPageSchema.parse(await list.json());
   const id = body.items?.find((item) => item.slug && canonicalToolkitSlug(item.slug) === toolkit)?.connected_account?.id;
   if (!id) return { removed: 0 };
+  connectionsChanged(cfg);
   await deleteConnectedAccount(apiKey, id);
   return { removed: 1 };
-}
-
-async function deleteConnectedAccount(apiKey: string, id: string) {
-  const removed = await fetch(
-    `${apiBase()}/connected_accounts/${encodeURIComponent(id)}?revoke_on_delete=true`,
-    { method: "DELETE", headers: projectHeaders(apiKey), signal: AbortSignal.timeout(30_000) },
-  );
-  if (!removed.ok) throw new Error(await responseError(removed, `Composio disconnect: HTTP ${removed.status}`));
 }
 
 /** Disconnect exactly one account after proving it belongs to this user/toolkit. */
@@ -793,6 +789,7 @@ export async function removeAccount(cfg: AppConfig, slug: string, accountId: str
       `/v1/connectors/${encodeURIComponent(toolkit)}/accounts/${encodeURIComponent(accountId)}`,
       { method: "DELETE" },
     );
+    connectionsChanged(cfg);
     if (!response.ok) await throwBrokerError(response, `Connected apps: HTTP ${response.status}`);
     return removalResponseSchema.parse(await response.json());
   }
@@ -806,6 +803,7 @@ export async function removeAccount(cfg: AppConfig, slug: string, accountId: str
       && canonicalToolkitSlug(account.toolkit.slug) === toolkit
   );
   if (!owned) return { removed: 0 };
+  connectionsChanged(cfg);
   await deleteConnectedAccount(apiKey, accountId);
   return { removed: 1 };
 }
@@ -839,6 +837,7 @@ export async function authorizeService(cfg: AppConfig, slug: string, requestedAl
   const unavailable = managedConnectorUnavailableReason(as ? "managed" : connectionMode(cfg), toolkit);
   if (unavailable) throw inputError(unavailable, 409);
   const apiKey = as ? null : projectApiKey(cfg);
+  connectionsChanged(cfg, as);
   if (!apiKey) {
     const request: RequestInit = { method: "POST" };
     if (alias) request.body = JSON.stringify({ alias });
@@ -860,8 +859,8 @@ export async function authorizeService(cfg: AppConfig, slug: string, requestedAl
   const plan = planAccountLink(toolkit, serviceAccounts, alias, MULTI_ACCOUNT_CONFIG.max_accounts_per_toolkit, () => `omb-retry-${randomUUID()}`);
   if (!plan.ok) throw inputError(plan.error, plan.status);
   for (const id of plan.replace) await deleteConnectedAccount(apiKey, id);
-  const linkRequest: AccountLinkRequest = { toolkit };
-  if (plan.alias) linkRequest.alias = plan.alias;
+  await raiseAccountCap(apiKey, session);
+  const linkRequest: AccountLinkRequest = plan.alias ? { toolkit, alias: plan.alias } : { toolkit };
   const link = (sessionId: string) =>
     fetch(`${apiBase()}/tool_router/session/${encodeURIComponent(sessionId)}/link`, {
       method: "POST",
@@ -887,29 +886,6 @@ export async function authorizeService(cfg: AppConfig, slug: string, requestedAl
   }
   const body = linkResponseSchema.parse(await res.json());
   return { url: trustedAuthUrl(body.redirect_url, toolkit) };
-}
-
-export interface ToolkitCard {
-  slug: string;
-  label: string;
-  blurb: string;
-  logo: string | null;
-  /** Toolkits such as public search need no user authorization. */
-  noAuth?: boolean;
-  domain: string | null;
-  categories?: string[];
-}
-
-/** Composio lists meta.categories as `{ id, name }` objects (older payloads: plain strings). */
-export function toolkitCategories(raw: unknown): string[] | undefined {
-  if (!Array.isArray(raw)) return undefined;
-  const names = raw
-    .map((entry) => typeof entry === "string" ? entry : entry && typeof entry === "object" ? (entry as { name?: unknown }).name : undefined)
-    .filter((name): name is string => typeof name === "string")
-    .map((name) => name.trim().slice(0, 40))
-    .filter(Boolean);
-  const unique = [...new Set(names)].slice(0, 4);
-  return unique.length ? unique : undefined;
 }
 
 const CURATED: Array<ToolkitCard & { slug: CuratedConnectorSlug }> = [
@@ -939,139 +915,25 @@ const CURATED: Array<ToolkitCard & { slug: CuratedConnectorSlug }> = [
   { slug: "stripe", label: "Stripe", blurb: "Payments and customers", domain: "stripe.com", logo: null, categories: ["Finance"] },
 ];
 
-let toolkitCache: { at: number; cards: ToolkitCard[]; identity: string; pagination: CatalogPagination } | null = null;
-
-export type CatalogStopReason =
-  | "end"
-  | "total-reached"
-  | "page-stuck"
-  | "cursor-repeated"
-  | "http-error"
-  | "bad-page"
-  | "limit";
-
-export interface CatalogPagination {
-  items: number;
-  /** Upstream's own count of the full marketplace, when it reports one. */
-  totalItems?: number;
-  /** True when paging stopped before the reported total. */
-  stalled: boolean;
-  reason?: CatalogStopReason;
-  /** True only when the walk reached its natural end without stalling. */
-  complete: boolean;
-}
-
-export async function listToolkits(cfg: AppConfig): Promise<{ cards: ToolkitCard[]; source: "api" | "curated"; pagination?: CatalogPagination }> {
+export async function listToolkits(cfg: AppConfig): Promise<{ cards: ToolkitCard[]; source: "api" | "curated"; pagination?: CatalogPagination; fresh?: boolean }> {
   const backendKey = projectApiKey(cfg);
   const broker = backendKey ? null : brokerAccess();
+  const base = toolkitBase();
   const identity = backendKey
-    ? backendFingerprint("project-catalog", toolkitBase(), backendKey)
+    ? backendFingerprint("project-catalog", base, backendKey)
     : broker
       ? backendFingerprint("managed-catalog", broker.url, broker.token)
       : null;
-  if (identity && toolkitCache?.identity === identity && Date.now() - toolkitCache.at < 10 * 60_000) {
-    return { cards: toolkitCache.cards, source: "api", pagination: toolkitCache.pagination };
-  }
-  if (backendKey || broker) {
-    try {
-      const items: any[] = [];
-      const seenCursors = new Set<string>();
-      let cursor: string | undefined;
-      let lastReportedPage: number | undefined;
-      let reportedTotalItems: number | undefined;
-      let reportedTotalPages: number | undefined;
-      let stop: CatalogStopReason = "limit";
-      for (let page = 0; page < MAX_CONNECTED_ACCOUNT_PAGES; page += 1) {
-        const params = new URLSearchParams({ limit: "500", sort_by: "usage" });
-        if (cursor) params.set("cursor", cursor);
-        const res = backendKey
-          ? await fetch(`${toolkitBase()}/toolkits?${params}`, {
-              headers: { "x-api-key": backendKey },
-              signal: AbortSignal.timeout(15_000),
-            })
-          : await brokerRequest(cursor ? `/v1/catalog?cursor=${encodeURIComponent(cursor)}` : "/v1/catalog", {
-              signal: AbortSignal.timeout(15_000),
-            });
-        if (!res.ok) {
-          stop = "http-error";
-          break;
-        }
-        const json: any = await res.json();
-        const pageItems = json.items ?? json.data ?? [];
-        if (!Array.isArray(pageItems)) {
-          stop = "bad-page";
-          break;
-        }
-        items.push(...pageItems);
-        const pageTotalItems = Number(json.total_items);
-        if (Number.isFinite(pageTotalItems) && pageTotalItems > 0) reportedTotalItems = pageTotalItems;
-        // A broker that drops the cursor can replay a page while minting fresh cursors, so trust Composio's current_page movement.
-        const reportedPage = Number(json.current_page);
-        if (Number.isFinite(reportedPage)) {
-          if (lastReportedPage !== undefined && reportedPage <= lastReportedPage) {
-            stop = "page-stuck";
-            break;
-          }
-          lastReportedPage = reportedPage;
-        }
-        const pageTotalPages = Number(json.total_pages);
-        if (Number.isFinite(pageTotalPages) && pageTotalPages > 0) reportedTotalPages = pageTotalPages;
-        if (
-          lastReportedPage !== undefined &&
-          Number.isFinite(pageTotalPages) &&
-          pageTotalPages > 0 &&
-          lastReportedPage >= pageTotalPages
-        ) {
-          stop = "total-reached";
-          break;
-        }
-        const next = typeof json.next_cursor === "string" ? json.next_cursor.trim() : "";
-        if (!next) {
-          stop = "end";
-          break;
-        }
-        if (seenCursors.has(next)) {
-          stop = "cursor-repeated";
-          break;
-        }
-        seenCursors.add(next);
-        cursor = next;
-      }
-      if (items.length) {
-        const cards: ToolkitCard[] = items.map((t: any) => ({
-          slug: canonicalToolkitSlug(String(t.slug ?? t.key ?? t.name ?? "")),
-          label: t.name ?? t.slug ?? "",
-          blurb: (t.meta?.description ?? t.description ?? "").slice(0, 90),
-          logo: t.meta?.logo ?? t.logo ?? null,
-          noAuth: t.no_auth === true,
-          domain: null,
-          ...(toolkitCategories(t.meta?.categories) ? { categories: toolkitCategories(t.meta?.categories) } : {}),
-        }));
-        const uniqueCards = cards.filter(
-          (card, index) => card.slug && cards.findIndex((candidate) => candidate.slug === card.slug) === index,
-        );
-        const shortOfReportedTotal = reportedTotalItems !== undefined && uniqueCards.length < reportedTotalItems;
-        const pagingStoppedEarly = lastReportedPage !== undefined
-          && reportedTotalPages !== undefined
-          && lastReportedPage < reportedTotalPages;
-        const stalled = shortOfReportedTotal || pagingStoppedEarly;
-        const complete = (stop === "end" || stop === "total-reached") && !stalled;
-        const pagination: CatalogPagination = { items: uniqueCards.length, stalled, complete };
-        if (reportedTotalItems !== undefined) pagination.totalItems = reportedTotalItems;
-        if (pagination.stalled) pagination.reason = stop;
-        if (pagination.stalled) {
-          console.warn(
-            `[composio] marketplace catalog paging stopped early (${stop}) after ${uniqueCards.length} toolkits`
-              + (reportedTotalItems !== undefined ? ` of ~${reportedTotalItems}` : "")
-              + "; serving a partial marketplace",
-          );
-        }
-        toolkitCache = { at: Date.now(), cards: uniqueCards, identity: identity!, pagination };
-        return { cards: uniqueCards, source: "api", pagination };
-      }
-    } catch {}
-  }
-  return { cards: CURATED, source: "curated" };
+  if (!identity) return { cards: CURATED, source: "curated" };
+  const catalog = await catalogFor(identity, (cursor) => {
+    if (!backendKey) {
+      return brokerRequest(cursor ? `/v1/catalog?cursor=${encodeURIComponent(cursor)}` : "/v1/catalog", { signal: AbortSignal.timeout(15_000) }, broker);
+    }
+    const params = new URLSearchParams({ limit: "500", sort_by: "usage" });
+    if (cursor) params.set("cursor", cursor);
+    return fetch(`${base}/toolkits?${params}`, { headers: { "x-api-key": backendKey }, signal: AbortSignal.timeout(15_000) });
+  });
+  return catalog ? { ...catalog, source: "api" } : { cards: CURATED, source: "curated" };
 }
 
 export async function toolkitCard(cfg: AppConfig, slug: string): Promise<ToolkitCard> {

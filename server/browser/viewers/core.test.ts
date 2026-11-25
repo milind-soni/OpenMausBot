@@ -1,13 +1,15 @@
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { BrowserService } from "../service.ts";
+import type { DesktopDisplay } from "../desktop/displays.ts";
 import type { HoldLimits } from "../hold.ts";
 import { FakeBackend, FakeChrome, type FakeDocument } from "../testing/fake-chrome.ts";
 import { personUrl } from "../dispatch.ts";
+import { profileDir } from "../chrome/profile.ts";
 import { ACK_PACE_MS, SETTLE_MS, type ViewerOutput } from "./core.ts";
 import { fillPage, MIN_WINDOW_WIDTH, requestedSize, UNATTACHED_VIEWPORT, viewportFor } from "./viewport.ts";
 
@@ -32,12 +34,12 @@ const same = (expected: unknown) => (actual: unknown) => JSON.stringify(actual) 
 
 const PAGE: FakeDocument = { title: "Page", text: "hello", elements: [{ role: "textbox", name: "Name", selector: "#name", editable: true, box: [10, 10, 200, 30] }] };
 
-type WatchOptions = { owner?: string; size?: { width: number; height: number }; maxWidth?: number; maxHeight?: number; pace?: "hi" | "lo"; ack?: boolean; authPrompts?: boolean; pointer?: boolean };
+type WatchOptions = { owner?: string; size?: { width: number; height: number }; maxWidth?: number; maxHeight?: number; pace?: "hi" | "lo"; ack?: boolean; authPrompts?: boolean; pointer?: boolean; frames?: boolean };
 
-async function setup({ pageLimit = null, document = PAGE, holdLimits }: { pageLimit?: { width: number; height: number } | null; document?: FakeDocument; holdLimits?: HoldLimits } = {}) {
+async function setup({ pageLimit = null, document = PAGE, holdLimits, display = null }: { pageLimit?: { width: number; height: number } | null; document?: FakeDocument; holdLimits?: HoldLimits; display?: DesktopDisplay | null } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "omb-viewers-"));
   folders.push(dataDir);
-  const backend = new FakeBackend(() => new FakeChrome({ documents: () => ({ ...document, elements: document.elements.map((element) => ({ ...element })) }) }), { pageLimit });
+  const backend = new FakeBackend(() => new FakeChrome({ documents: () => ({ ...document, elements: document.elements.map((element) => ({ ...element })) }) }), { pageLimit, display });
   const service = new BrowserService({ dataDir, backend: () => backend, maxRunning: 4, idleMs: () => 600_000, takeoverMs: 200, ...(holdLimits ? { holdLimits } : {}) });
   services.push(service);
   const target = { session: "bot-a", key: "bot:a" };
@@ -45,7 +47,7 @@ async function setup({ pageLimit = null, document = PAGE, holdLimits }: { pageLi
   await call("agent_browser_open", { url: "https://example.com/" });
   const watch = async (options: WatchOptions = {}) => {
     const outputs: ViewerOutput[] = [];
-    const viewer = await service.attachViewer(target, { owner: options.owner ?? "local-owner", canOperate: true, maxWidth: options.maxWidth ?? 3200, maxHeight: options.maxHeight ?? 2000, pace: options.pace ?? "hi", authPrompts: options.authPrompts === true, ...(options.pointer === false ? { pointer: false } : {}), ...(options.size ? { size: options.size } : {}) }, (output) => {
+    const viewer = await service.attachViewer(target, { owner: options.owner ?? "local-owner", canOperate: true, maxWidth: options.maxWidth ?? 3200, maxHeight: options.maxHeight ?? 2000, pace: options.pace ?? "hi", authPrompts: options.authPrompts === true, ...(options.pointer === false ? { pointer: false } : {}), ...(options.frames === false ? { frames: false } : {}), ...(options.size ? { size: options.size } : {}) }, (output) => {
       outputs.push(output);
       if (output.type === "frame" && options.ack !== false) output.ack();
     });
@@ -53,7 +55,7 @@ async function setup({ pageLimit = null, document = PAGE, holdLimits }: { pageLi
   };
   const chrome = () => backend.chrome;
   const page = () => [...chrome().pages.values()].at(-1)!;
-  return { service, target, call, watch, chrome, page };
+  return { service, target, call, watch, chrome, page, dataDir };
 }
 
 describe("the page fills the panel", () => {
@@ -67,6 +69,35 @@ describe("the page fills the panel", () => {
     expect(chrome().viewport).toEqual({ width: 1280, height: 960 });
     await viewer.close();
     await until(() => chrome().viewport, same(UNATTACHED_VIEWPORT));
+  });
+
+  it("sends no pictures to a view whose person sees the window on a remote desktop, and keeps its hold and tabs", async () => {
+    const { watch, chrome, page } = await setup();
+    const pictured = await watch();
+    const desktop = await watch({ frames: false });
+    await until(() => pictured.outputs, (seen) => seen.some((output) => output.type === "frame"));
+    expect(desktop.outputs.some((output) => output.type === "control")).toBe(true);
+    expect(desktop.outputs.some((output) => output.type === "tabs")).toBe(true);
+    await desktop.viewer.input({ type: "takeControl" });
+    await until(() => desktop.viewer.controlState().controlling, (controlling) => controlling);
+    expect(desktop.outputs.filter((output) => output.type === "frame")).toEqual([]);
+    const casts = chrome().sentTo(page()).filter((sent) => sent.method === "Page.startScreencast").length;
+    await pictured.viewer.close();
+    expect(chrome().sentTo(page()).filter((sent) => sent.method === "Page.startScreencast").length).toBe(casts);
+    await desktop.viewer.close();
+  });
+
+  it("leaves a window on a private display as it is: the person sees that display, not a page sized to their panel", async () => {
+    const display: DesktopDisplay = { number: 21, socket: "/d21/rfb", env: { DISPLAY: ":21", XAUTHORITY: "/d21/Xauthority" }, size: { width: 1280, height: 800 }, wrap: { command: "/usr/bin/bwrap", args: ["--"] }, exited: new Promise(() => {}), release: async () => {} };
+    const { watch, chrome, page } = await setup({ display });
+    const before = { ...chrome().window };
+    const { viewer } = await watch({ size: { width: 1600, height: 1000 } });
+    await viewer.input({ type: "resize", width: 400, height: 750 });
+    await viewer.input({ type: "takeControl" });
+    await viewer.input({ type: "zoom", factor: 1.5 });
+    expect(chrome().window).toEqual(before);
+    expect(page().emulated ?? null).toBeNull();
+    await viewer.close();
   });
 
   it("gives a narrow panel a desktop page of its shape, never a phone's, and no taller than twice its width", async () => {
@@ -137,6 +168,39 @@ describe("the page fills the panel", () => {
     expect(chrome().window.height).toBeLessThanOrEqual(757 + 143);
   });
 
+  it("fits the window to the page's own size once a tall panel's emulation ends, though the page reports the emulated size a moment longer", async () => {
+    const { watch, chrome, page } = await setup({ pageLimit: { width: 1440, height: 757 } });
+    const { viewer } = await watch({ size: { width: 1600, height: 1000 } });
+    await viewer.input({ type: "resize", width: 400, height: 750 });
+    expect(page().emulated).toEqual({ width: 1280, height: 2400 });
+    chrome().lateClears = 2;
+    const before = chrome().sent.length;
+    await viewer.input({ type: "resize", width: 1280, height: 700 });
+    expect(page().emulated).toBeNull();
+    expect(chrome().viewport).toEqual({ width: 1280, height: 700 });
+    // One resize, from the window's own page: a measure of the emulated 2400 would ask for a window of no height.
+    expect(chrome().sent.slice(before).filter((sent) => sent.method === "Browser.setWindowBounds").map((sent) => sent.params.bounds)).toEqual([{ width: 1280, height: 843 }]);
+  });
+
+  it("applies a tall panel's emulation again when the window's resize lands after it and the frames show the window's size", async () => {
+    const { watch, chrome, page } = await setup({ pageLimit: { width: 1440, height: 757 } });
+    const { viewer, outputs } = await watch({ size: { width: 1600, height: 1000 } });
+    await viewer.input({ type: "resize", width: 400, height: 750 });
+    const drawn = () => { const frame = outputs.filter((output) => output.type === "frame" && !output.still).at(-1); return frame?.type === "frame" ? [frame.metadata.deviceWidth, frame.metadata.deviceHeight] : null; };
+    chrome().paint(page());
+    await until(drawn, same([1280, 2400]));
+    const emulations = () => chrome().sentTo(page()).filter((sent) => sent.method === "Emulation.setDeviceMetricsOverride").length;
+    const before = emulations();
+    chrome().landResize();
+    // The page still reports 1280x2400 and is drawn 1280x757: only its frames show it.
+    await until(() => page().viewLost, same(false));
+    expect(emulations()).toBe(before + 1);
+    expect(page().emulated).toEqual({ width: 1280, height: 2400 });
+    chrome().paint(page());
+    await until(drawn, same([1280, 2400]));
+    expect(emulations()).toBe(before + 1);
+  });
+
   it("resizes the real window, so a page narrower than any window comes from a preset only, emulated", async () => {
     const { watch, chrome, page } = await setup();
     const { viewer } = await watch({ size: { width: 1600, height: 1000 } });
@@ -151,6 +215,7 @@ describe("the page fills the panel", () => {
     expect(chrome().viewport).toEqual({ width: 1600, height: 1000 });
     expect(chrome().sentTo(page()).some((sent) => sent.method === "Emulation.clearDeviceMetricsOverride")).toBe(true);
     expect(viewportFor({ mode: "preset", preset: "phone", landscape: true }, null)).toEqual({ width: 844, height: 390 });
+    expect(viewportFor({ mode: "preset", preset: "fullHd" }, null)).toEqual({ width: 1920, height: 1080 });
   });
 
   it("ends a drag on a still of the final size, though Chromium sends no frame for it", async () => {
@@ -269,6 +334,50 @@ describe("a viewer's screencast", () => {
     const order = chrome().sent.slice(before).map((sent) => sent.method).filter((method) => ["Page.stopScreencast", "Page.captureScreenshot", "Page.startScreencast"].includes(method));
     expect(order.indexOf("Page.stopScreencast")).toBeLessThan(order.indexOf("Page.captureScreenshot"));
     expect(order.lastIndexOf("Page.startScreencast")).toBeGreaterThan(order.indexOf("Page.captureScreenshot"));
+  });
+});
+
+describe("the Extensions menu", () => {
+  const ID = "nngceckbapebfimnlniiiahkandclblb";
+  const install = (dataDir: string, key: string) => {
+    const dir = join(profileDir(dataDir, key), "Default", "Extensions", ID, "1.0_0");
+    mkdirSync(join(dir, "_locales", "en"), { recursive: true });
+    writeFileSync(join(dir, "manifest.json"), JSON.stringify({ name: "__MSG_extName__", default_locale: "en", options_ui: { page: "options.html" } }));
+    writeFileSync(join(dir, "_locales", "en", "messages.json"), JSON.stringify({ extName: { message: "Vault" } }));
+  };
+  const navigations = (chrome: { sent: Array<{ method: string; params?: unknown }> }) =>
+    chrome.sent.filter((sent) => sent.method === "Page.navigate").map((sent) => (sent.params as { url?: string }).url);
+
+  it("lists the profile's extensions and opens one's own page for the person holding the browser, never for anyone else", async () => {
+    const { watch, chrome, dataDir, target } = await setup();
+    install(dataDir, target.key);
+    const page = `chrome-extension://${ID}/options.html`;
+    const other = await watch({ owner: "phone-session" });
+    const holder = await watch();
+    await holder.viewer.input({ type: "takeControl" });
+    await other.viewer.input({ type: "extensions" });
+    await other.viewer.input({ type: "openExtension", id: ID });
+    expect(other.outputs.some((output) => output.type === "extensions")).toBe(false);
+    await holder.viewer.input({ type: "extensions" });
+    expect(holder.outputs.filter((output) => output.type === "extensions").at(-1)).toEqual({ type: "extensions", extensions: [{ id: ID, name: "Vault", url: page }] });
+    await holder.viewer.input({ type: "openExtension", id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" });
+    await holder.viewer.input({ type: "navigate", url: page });
+    await holder.viewer.input({ type: "navigate", url: "chrome://settings/passwords" });
+    expect(navigations(chrome())).not.toContain(page);
+    await holder.viewer.input({ type: "openExtension", id: ID });
+    expect(navigations(chrome()).at(-1)).toBe(page);
+    expect(navigations(chrome()).some((url) => url?.startsWith("chrome:"))).toBe(false);
+  });
+
+  it("keeps extension and chrome:// pages closed to the bot", async () => {
+    const { call, chrome, dataDir, target } = await setup();
+    install(dataDir, target.key);
+    for (const url of [`chrome-extension://${ID}/options.html`, "chrome://extensions"]) {
+      const result = await call("agent_browser_open", { url });
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toContain("Only http(s), about:blank and data: addresses open here");
+    }
+    expect(navigations(chrome()).some((url) => !url?.startsWith("https:"))).toBe(false);
   });
 });
 

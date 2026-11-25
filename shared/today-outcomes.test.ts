@@ -42,7 +42,6 @@ const CASES: ReadonlyArray<[string, OutcomeCategory | null]> = [
   ["PIPEDRIVE_ADD_A_PERSON", "lead"],
   ["APOLLO_PEOPLE_SEARCH", "lead"],
   ["HUNTER_EMAIL_FINDER", "lead"],
-  ["mcp__highlevel__HIGHLEVEL_CREATE_CONTACT", "lead"],
   ["HUBSPOT_LIST_CONTACTS", null],
   ["STRIPE_CREATE_REFUND", "other"],
   ["GOOGLECALENDAR_CREATE_EVENT", "other"],

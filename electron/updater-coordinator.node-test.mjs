@@ -1,58 +1,41 @@
 import assert from "node:assert/strict";
-import { EventEmitter } from "node:events";
 import test from "node:test";
 
-import { createUpdaterCoordinator } from "./updater-coordinator.mjs";
+import { deferred, downloadInto, elevatedHarness, errorStates, found, harness, settle, SUM } from "./updater-test-fixture.mjs";
+import { installDetail } from "./update-words.mjs";
 
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
-
-function harness(options) {
-  const updater = new EventEmitter();
-  // electron-updater has its own error listener; model that without routing it.
-  updater.on("error", () => {});
-  let state = { status: "idle" };
-  const states = [];
-  const coordinator = createUpdaterCoordinator(
-    updater,
-    (patch) => {
-      state = { ...state, ...patch };
-      states.push({ ...state });
-    },
-    options,
-  );
-  return { updater, coordinator, states, getState: () => state };
-}
-
-const settle = () => new Promise((resolve) => setImmediate(resolve));
-
-async function found(h, { manual = false, version = "2.0.0" } = {}) {
-  h.updater.checkForUpdates = async () => {
-    h.updater.emit("checking-for-update");
-    h.updater.emit("update-available", { version });
-  };
-  await h.coordinator.check(manual);
-}
-
-async function downloadInto(h, files = ["/tmp/OpenMausBot-2.0.0-amd64.deb"]) {
-  h.updater.downloadUpdate = () => {
-    h.updater.emit("update-downloaded", { version: "2.0.0" });
-    return Promise.resolve(files);
-  };
-  await found(h);
+test("elevated-install wording survives terminal handoff and its staged card", async () => {
+  const { h } = elevatedHarness(async () => ({ ok: false, reason: "refused", ...installDetail("native.update.noAdmin") }));
+  await downloadInto(h);
+  h.coordinator.install();
+  assert.equal(h.getState().messageKey, "native.update.installing");
+  assert.equal(h.getState().message, "Installing the update. Enter your password if asked.");
   await settle();
-}
+  assert.equal(h.getState().status, "handed-off");
+  assert.equal(h.getState().messageKey, "native.update.noAdmin");
+  assert.equal(h.getState().message, "This session could not ask for administrator rights.");
+  await h.coordinator.check();
+  assert.equal(h.getState().messageKey, "native.update.noAdmin");
+});
 
-function errorStates(states) {
-  return states.filter((entry) => entry.status === "error");
-}
+test("unclassified install details carry their words, while checksum classification still wins", async () => {
+  for (const [reason, key] of [["failed", "native.update.installFailed"], ["checksum", "native.update.checksumMismatch"]]) {
+    const { h, calls } = elevatedHarness(async () => ({ ok: false, reason, ...installDetail(key, reason === "failed" ? { reason: "E: lock." } : undefined) }), { handOffInstall: null });
+    await downloadInto(h);
+    h.coordinator.install();
+    await settle();
+    assert.equal(h.getState().status, "error");
+    if (reason === "checksum") {
+      assert.equal(h.getState().messageCode, "integrity");
+      assert.match(h.getState().message, /failed verification/);
+    } else {
+      assert.equal(h.getState().messageKey, key);
+      assert.equal(h.getState().message, "The install did not finish: E: lock.");
+      assert.deepEqual(h.getState().messageParams, { reason: "E: lock." });
+    }
+    assert.deepEqual(calls.handOff, []);
+  }
+});
 
 test("automatic check rejection is handled and returns to idle", async () => {
   const { updater, coordinator, getState } = harness();
@@ -717,28 +700,6 @@ test("carries the release notes with the version, as one capped string", async (
 });
 
 // ---- Ubuntu .deb: install behind a password prompt, then reopen ----------
-
-const SUM = "c2hhNTEy";
-function elevatedHarness(elevatedInstall, extra = {}) {
-  const calls = { elevated: [], handOff: [], relaunch: 0 };
-  const h = harness({
-    elevatedInstall: (files, info) => {
-      calls.elevated.push({ files, info });
-      return elevatedInstall(files, info);
-    },
-    relaunch: () => {
-      calls.relaunch += 1;
-    },
-    handOffInstall: (files) => {
-      calls.handOff.push(files);
-      return Promise.resolve({ command: "sudo apt-get install -y '/tmp/x.deb'", terminalOpened: true });
-    },
-    ...extra,
-  });
-  h.updater.quitAndInstall = () => assert.fail("a system package must not be installed by quitAndInstall");
-  h.updater.downloadedUpdateHelper = { downloadedFileInfo: { sha512: SUM } };
-  return { h, calls };
-}
 
 test("elevated install: one click installs the staged package and reopens", async () => {
   const { h, calls } = elevatedHarness(() => Promise.resolve({ ok: true }));

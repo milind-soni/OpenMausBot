@@ -233,6 +233,7 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       ["GET", `/api/threads/${ids.hrThread}/messages`],
       ["GET", `/api/threads/${ids.hrThread}/messages?around=${hrMessage}`],
       ["GET", `/api/threads/${ids.hrThread}/messages/${hrMessage}/image`],
+      ["GET", `/api/threads/${ids.hrThread}/messages/${hrMessage}/tool`],
       ["GET", `/api/threads/${ids.hrThread}/export`],
       ["GET", `/api/threads/${ids.hrThread}/export?format=json`],
       ["POST", `/api/threads/${ids.hrThread}/respond`, { requestId: "x", behavior: "deny" }],
@@ -427,8 +428,7 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       expect(created.status, JSON.stringify(created.body)).toBe(201);
       expect(created.body.bot.visibility).toBe("admins");
       expect((await api("POST", "/api/bots", { name: "Bad", visibility: { people: ["nope"] } }, BOSS)).status).toBe(400);
-      const manifest = await api("POST", "/api/teams/export", { name: "Copy" }, BOSS);
-      expect(manifest.status, JSON.stringify(manifest.body)).toBe(200);
+      const manifest = { body: { format: "openmaus.team", version: 2, team: { name: "Copy", members: [{ key: "helper", name: "Copy helper", appearance: { color: "blue" } }] } } };
       const imported = await fetch(`${BASE}/api/teams/import?visibility=${encodeURIComponent(JSON.stringify({ people: [ADA] }))}`, {
         method: "POST", headers: headers(BOSS), body: JSON.stringify(manifest.body),
       });
@@ -451,7 +451,6 @@ posixOnly("per-bot visibility on a shared workspace", () => {
   }, 90_000);
 
   it("sends a member every bot without its audience list or hidden teammates, whichever route answers", async () => {
-    expect((await api("PATCH", `/api/bots/${ids.hr}`, { peers: [ids.board, ids.pub] }, BOSS)).status).toBe(200);
     const task = await api("POST", `/api/bots/${ids.hr}/tasks`, { title: "Ada's thread" }, ADA);
     expect(task.status).toBe(201);
     const answers = [
@@ -468,12 +467,10 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       expect(bots.length, route).toBeGreaterThan(0);
       for (const bot of bots) {
         expect(bot.visibility, route).toBeUndefined();
-        if (bot.peers) expect(bot.peers, route).toEqual([ids.pub]);
       }
       expect(JSON.stringify(answer.body), route).not.toContain(ADA);
     }
-    expect((await api("PATCH", `/api/bots/${ids.hr}`, { pinned: false }, BOSS)).body.bot).toMatchObject({ visibility: { people: [ADA] }, peers: [ids.board, ids.pub] });
-    expect((await api("PATCH", `/api/bots/${ids.hr}`, { peers: null, acknowledgePeerScope: true }, BOSS)).status).toBe(200);
+    expect((await api("PATCH", `/api/bots/${ids.hr}`, { pinned: false }, BOSS)).body.bot).toMatchObject({ visibility: { people: [ADA] } });
   });
 
   it("keeps a room fewer people can see out of a visible bot's recall, and refuses to mix audiences in a room", async () => {
@@ -607,8 +604,8 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     expect(bobKey).toMatch(/^p_[\w-]{22}$/);
     expect(adaKey).not.toBe(bobKey);
     expect(bob.body.message.reactions).toEqual([
-      { emoji: "👍", by: adaKey, name: ADA, at: expect.any(Number) },
-      { emoji: "👍", by: bobKey, name: BOB, at: expect.any(Number) },
+      { emoji: "👍", by: adaKey, name: "Ada", at: expect.any(Number) },
+      { emoji: "👍", by: bobKey, name: "Bob", at: expect.any(Number) },
     ]);
     const changed = await react(ADA, "👎");
     expect(changed.body.message.reactions.map((reaction: any) => [reaction.by, reaction.emoji])).toEqual([[bobKey, "👍"], [adaKey, "👎"]]);
@@ -619,7 +616,7 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       return !bot.busy && reactions.length === 3 ? reactions : null;
     });
     const thread = (await api("GET", `/api/threads/${ids.pubThread}/messages`, undefined, BOSS)).body.messages;
-    expect(lines?.map((line: any) => [line.reaction, line.sender?.name]), JSON.stringify(thread.map((m: any) => [m.role, m.kind, m.text?.slice(0, 60), m.reaction]))).toEqual([["👍", ADA], ["👍", BOB], ["👎", ADA]]);
+    expect(lines?.map((line: any) => [line.reaction, line.sender?.name]), JSON.stringify(thread.map((m: any) => [m.role, m.kind, m.text?.slice(0, 60), m.reaction]))).toEqual([["👍", "Ada"], ["👍", "Bob"], ["👎", "Ada"]]);
   }, 90_000);
 
   it("keeps bots with different audiences from reaching each other", async () => {

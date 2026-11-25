@@ -115,7 +115,7 @@ beforeAll(async () => {
   scout = await create({ name: "Scout", reportsTo: CLEO.email });
   expect((await team.as(cleo, "PATCH", `/api/bots/${scout.id}`, { chiefOfStaff: true })).status).toBe(200);
   ledger = await create({ name: "Ledger", reportsTo: CLEO.email });
-  // Questions reach the person on "Ask me first"; at Full access, the default, the requesting bot decides them instead.
+  // Questions reach the person on "Ask for approval"; at Full access, the default, the requesting bot decides them instead.
   for (const bot of [scout, ledger]) expect((await team.as(cleo, "PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask", applyToAllThreads: true })).status).toBe(200);
   const opened = await team.as(cleo, "POST", `/api/bots/${scout.id}/tasks`, { title: "Cleo and Scout" });
   expect(opened.status, JSON.stringify(opened.body)).toBe(201);
@@ -186,7 +186,7 @@ it("takes Cleo's own words in Ledger's chat as the answer to the card Ledger wai
 }, hostTimeout(150_000));
 
 it("turns Ledger's NEEDS INPUT question into the same card with a reply field, in its chat and in Cleo's inbox, and her reply there answers Ledger", async () => {
-  script(scout.id, ...handOn("QC3"), { key: "QC3-L-ASKED", match: ["stopped on a question for", "[OpenMausBot question from @Ledger", "QC3-JOB"], reply: "QC3-L-ASKED" });
+  script(scout.id, ...handOn("QC3"), { key: "QC3-L-ASKED", match: ["stopped on a question for", "[From @Ledger (bot) · question on assignment", "QC3-JOB"], reply: "QC3-L-ASKED" });
   script(ledger.id,
     { key: "QC3-B2", match: ["QC3-BRIEF", "The person answered"], reply: "QC3-B2: Done, the new footer text is in." },
     { key: "QC3-B", match: ["QC3-BRIEF"], reply: `Checked: the footer text still uses the old template.\nNEEDS INPUT: ${OPEN}` });
@@ -215,7 +215,7 @@ it("turns Ledger's NEEDS INPUT question into the same card with a reply field, i
 }, hostTimeout(150_000));
 
 it("closes the open question as stopped when Cleo stops Ledger's work, in its chat and in her inbox", async () => {
-  script(scout.id, ...handOn("QC4"), { key: "QC4-L-ASKED", match: ["stopped on a question for", "[OpenMausBot question from @Ledger", "QC4-JOB"], reply: "QC4-L-ASKED" });
+  script(scout.id, ...handOn("QC4"), { key: "QC4-L-ASKED", match: ["stopped on a question for", "[From @Ledger (bot) · question on assignment", "QC4-JOB"], reply: "QC4-L-ASKED" });
   script(ledger.id, { key: "QC4-B", match: ["QC4-BRIEF"], reply: `Checked.\nNEEDS INPUT: ${OPEN}` });
   const sinceQC4 = Date.now();
   await say(scout, inbox, "QC4-JOB: Have Ledger check the welcome text.");

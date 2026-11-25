@@ -1,6 +1,11 @@
+import type { MemoryModelStatus } from "../../shared/memory-model";
 import { ApiError, api } from "@/state/store";
+import { intlLocale, t } from "@/lib/i18n";
+import { serverErrorText } from "@/lib/server-error";
+import { serverFetch } from "./relay-server";
 
 export const MEMORY_INDEX = "MEMORY.md";
+export const SOUL_PATH = "SOUL.md";
 
 export interface MemoryCapacity {
   lines: number;
@@ -73,7 +78,7 @@ export function fetchMemoryDoc(botId: string, path: string, mine = false): Promi
 }
 
 export async function saveMemoryDoc(botId: string, path: string, text: string, expectedHash: string | undefined, mine = false): Promise<SaveResult> {
-  const response = await fetch(`${memoryRoute(botId, mine)}/file`, {
+  const response = await serverFetch(`${memoryRoute(botId, mine)}/file`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ path, text, expectedHash }),
@@ -82,9 +87,36 @@ export async function saveMemoryDoc(botId: string, path: string, text: string, e
   if (response.status === 409 && typeof body.current === "string" && typeof body.currentHash === "string") {
     return { ok: false, conflict: true, current: body.current, currentHash: body.currentHash };
   }
-  if (!response.ok) throw new ApiError(typeof body.error === "string" ? body.error : `${response.status} ${response.statusText}`, response.status);
+  if (!response.ok) throw new ApiError(serverErrorText(body, typeof body.error === "string" ? body.error : `${response.status} ${response.statusText}`), response.status);
   const saved = body as unknown as MemoryDoc & { overview: MemoryOverview };
   return { ok: true, doc: { path: saved.path, text: saved.text, hash: saved.hash, exists: saved.exists }, overview: saved.overview };
+}
+
+/** One conversation's own notes; `scoped` when the bot saves that conversation's matters there rather than in MEMORY.md. */
+export interface ThreadNotesDoc extends MemoryDoc {
+  scoped: boolean;
+}
+
+export type TextSaveResult<D extends MemoryDoc> = { ok: true; doc: D } | { ok: false; conflict: true; current: string; currentHash: string };
+
+const threadNotesRoute = (botId: string, threadId: string) => `/api/bots/${encodeURIComponent(botId)}/memory/thread/${encodeURIComponent(threadId)}`;
+
+export function fetchThreadNotes(botId: string, threadId: string): Promise<ThreadNotesDoc> {
+  return api(threadNotesRoute(botId, threadId));
+}
+
+export async function saveThreadNotes(botId: string, threadId: string, text: string, expectedHash: string | undefined): Promise<TextSaveResult<ThreadNotesDoc>> {
+  const response = await serverFetch(threadNotesRoute(botId, threadId), {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text, expectedHash }),
+  });
+  const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (response.status === 409 && typeof body.current === "string" && typeof body.currentHash === "string") {
+    return { ok: false, conflict: true, current: body.current, currentHash: body.currentHash };
+  }
+  if (!response.ok) throw new ApiError(serverErrorText(body, typeof body.error === "string" ? body.error : `${response.status} ${response.statusText}`), response.status);
+  return { ok: true, doc: body as unknown as ThreadNotesDoc };
 }
 
 export function deleteMemoryDoc(botId: string, path: string, mine = false): Promise<{ overview: MemoryOverview }> {
@@ -98,6 +130,14 @@ export async function fetchMemoryJournal(botId: string, limit = 50): Promise<Mem
 
 export function revertMemoryChange(botId: string, entryId: string): Promise<MemoryDoc & { overview: MemoryOverview }> {
   return api(`/api/bots/${botId}/memory/journal/${encodeURIComponent(entryId)}/revert`, { method: "POST" });
+}
+
+export function fetchSoulChanges(botId: string): Promise<{ rows: MemoryJournalRow[]; revision: string }> {
+  return api(`/api/bots/${botId}/history?view=changes&limit=20`);
+}
+
+export function undoSoulChange(botId: string, id: string, expectedRevision: string): Promise<unknown> {
+  return api(`/api/bots/${botId}/history/rollback`, { method: "POST", body: JSON.stringify({ id, expectedRevision }) });
 }
 
 export interface TidyReport {
@@ -122,6 +162,7 @@ export interface CaptureReport {
 export interface UpkeepStatus {
   enabled: boolean;
   modelSteps: boolean;
+  memoryModel?: MemoryModelStatus;
   lastTidy?: TidyReport;
   lastCapture?: CaptureReport;
 }
@@ -130,8 +171,8 @@ export function noticedCount(report: CaptureReport | undefined): number {
   return report ? report.added + (report.topics ?? 0) : 0;
 }
 
-export function fetchUpkeepStatus(botId: string): Promise<UpkeepStatus> {
-  return api(`/api/bots/${botId}/memory/upkeep`);
+export function fetchUpkeepStatus(botId: string, signal?: AbortSignal): Promise<UpkeepStatus> {
+  return api(`/api/bots/${botId}/memory/upkeep`, { signal });
 }
 
 export interface LendingReview {
@@ -165,20 +206,20 @@ export function openMemoryLocation(botId: string, target: MemoryOpenTarget): Pro
 
 
 export function formatBytes(bytes: number): string {
-  return bytes < 1024 ? `${bytes} B` : `${Math.round(bytes / 102.4) / 10} KB`;
+  return bytes < 1024 ? `${bytes} B` : `${new Intl.NumberFormat(intlLocale(), { useGrouping: false }).format(Math.round(bytes / 102.4) / 10)} KB`;
 }
 
 export function relativeTime(at: number, now = Date.now()): string {
   const seconds = Math.max(0, Math.round((now - at) / 1000));
-  if (seconds < 45) return "just now";
+  if (seconds < 45) return t("remote.time.justNow");
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 60) return t("remote.time.minutes", { count: minutes });
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} hr ago`;
+  if (hours < 24) return t("time.hoursAgo", { count: hours });
   const days = Math.round(hours / 24);
-  if (days === 1) return "yesterday";
-  if (days < 7) return `${days} days ago`;
-  return new Date(at).toLocaleDateString([], { month: "short", day: "numeric" });
+  if (days === 1) return t("time.yesterday");
+  if (days < 7) return t("time.daysAgo", { count: days });
+  return new Date(at).toLocaleDateString(intlLocale(), { month: "short", day: "numeric" });
 }
 
 export type CapacityLevel = "ok" | "near" | "over";
@@ -200,8 +241,8 @@ export function capacityStatus(index: MemoryCapacity): CapacityStatus {
   if (index.truncated) {
     const missingLines = index.lines - index.loadedLines;
     warning = missingLines > 0
-      ? `${index.lines} lines saved, ${index.loadedLines} load into every conversation. ${missingLines} ${missingLines === 1 ? "line is" : "lines are"} not being loaded. Trim this file or move notes into a topic file.`
-      : `${formatBytes(index.bytes)} saved, ${formatBytes(index.loadedBytes)} load into every conversation. The rest is not being loaded. Trim this file or move notes into a topic file.`;
+      ? t(missingLines === 1 ? "memory.capacity.overLinesOne" : "memory.capacity.overLinesMany", { lines: index.lines, loaded: index.loadedLines, missing: missingLines })
+      : t("memory.capacity.overBytes", { bytes: formatBytes(index.bytes), loaded: formatBytes(index.loadedBytes) });
   }
   return { level, lineShare, byteShare, sentence, warning };
 }

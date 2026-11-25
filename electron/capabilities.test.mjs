@@ -7,6 +7,7 @@ const {
   linuxLocalControlSupport,
   linuxSession,
   localComputerReady,
+  macDriverUnsupported,
   nativeDesktopActions,
 } = require("./capabilities.cjs");
 const readyConnection = (mode = "embedded") => ({
@@ -19,12 +20,14 @@ describe("desktop capabilities", () => {
       appleMediaPermissions: false,
       applePrivacySettings: false,
       appleSpeech: false,
+      windowsSpeech: false,
     });
-    expect(nativeDesktopActions("win32")).toEqual(nativeDesktopActions("linux"));
+    expect(nativeDesktopActions("win32")).toEqual({ ...nativeDesktopActions("linux"), windowsSpeech: true });
     expect(nativeDesktopActions("darwin")).toEqual({
       appleMediaPermissions: true,
       applePrivacySettings: true,
       appleSpeech: true,
+      windowsSpeech: false,
     });
   });
 
@@ -126,6 +129,19 @@ describe("desktop capabilities", () => {
     expect(reasonOf("desktop-host-stopped")).toBe("cua-driver-unavailable");
   });
 
+  it.each([
+    ["win32", { available: true, engine: "windows-speech", onDevice: true }],
+    ["linux", { available: true, engine: "fish-audio", onDevice: false }],
+  ])("listens on %s, but not from a server's page", (platform, dictation) => {
+    expect(desktopCapabilities({ platform, env: { DISPLAY: ":0" } }).dictation).toEqual(dictation);
+    expect(desktopCapabilities({ platform, remote: true }).dictation).toEqual({
+      available: false,
+      engine: "none",
+      onDevice: false,
+      reasonCode: "remote-server",
+    });
+  });
+
   it.each(["freebsd"])("fails closed on %s", (platform) => {
     const capabilities = desktopCapabilities({
       platform,
@@ -203,6 +219,105 @@ describe("desktop capabilities", () => {
     });
   });
 
+  it("keeps Fedora's GNOME Wayland blocked and points it to a cloud desktop, not Ubuntu on Xorg", () => {
+    const wayland = { XDG_SESSION_TYPE: "wayland", WAYLAND_DISPLAY: "wayland-0" };
+    const fedora = linuxLocalControlSupport("linux", { ...wayland, XDG_CURRENT_DESKTOP: "GNOME", XDG_SESSION_DESKTOP: "gnome" });
+    expect(fedora).toMatchObject({ available: false, session: "wayland", reasonCode: "linux-wayland-seat-safety-blocked" });
+    expect(fedora.message).not.toMatch(/Ubuntu/);
+    expect(fedora.message).toMatch(/Fedora, use a cloud desktop/);
+    const ubuntu = linuxLocalControlSupport("linux", { ...wayland, XDG_CURRENT_DESKTOP: "ubuntu:GNOME" });
+    expect(ubuntu.message).toBe(
+      "Local control is not available on Wayland yet. Sign out and choose Ubuntu on Xorg to use This computer.",
+    );
+
+    const blocked = { mode: "unavailable", reasonCode: "linux-wayland-seat-safety-blocked" };
+    const capabilitiesFor = (env, remote = false) =>
+      desktopCapabilities({ platform: "linux", env: { ...wayland, ...env }, localConnection: blocked, remote }).localComputer;
+    expect(capabilitiesFor({ XDG_CURRENT_DESKTOP: "GNOME" }).ubuntuDesktop).toBe(false);
+    expect(capabilitiesFor({ XDG_CURRENT_DESKTOP: "ubuntu:GNOME" }).ubuntuDesktop).toBe(true);
+    expect(capabilitiesFor({ XDG_CURRENT_DESKTOP: "GNOME" }, true).ubuntuDesktop).toBeUndefined();
+    expect(capabilitiesFor({}).ubuntuDesktop).toBeUndefined();
+    expect(linuxLocalControlSupport("linux", wayland).message).toMatch(/Ubuntu on Xorg/);
+    expect(desktopCapabilities({ platform: "linux", env: { XDG_SESSION_TYPE: "x11", DISPLAY: ":0" } }).localComputer)
+      .not.toHaveProperty("ubuntuDesktop");
+  });
+
+  describe("Omarchy (Hyprland) detection matrix", () => {
+    const hyprland = {
+      XDG_SESSION_TYPE: "wayland",
+      WAYLAND_DISPLAY: "wayland-1",
+      XDG_CURRENT_DESKTOP: "Hyprland",
+      HYPRLAND_INSTANCE_SIGNATURE: "6f2a0c1e_1762560000_123456789",
+    };
+
+    it("allows This computer on Hyprland only while Cua's plugin is active", () => {
+      expect(linuxLocalControlSupport("linux", hyprland, { hyprlandPlugin: "active" })).toEqual({
+        available: true,
+        session: "wayland",
+        compositor: "hyprland",
+      });
+    });
+
+    it("gives one plain sentence on how to turn the plugin on when it is off", () => {
+      for (const hyprlandPlugin of ["inactive", undefined, "anything"]) {
+        const support = linuxLocalControlSupport("linux", hyprland, { hyprlandPlugin });
+        expect(support).toMatchObject({
+          available: false,
+          session: "wayland",
+          compositor: "hyprland",
+          reasonCode: "linux-hyprland-plugin-required",
+        });
+        expect(support.message).toMatch(/install and enable cua-hyprland-plugin.*cua\.ai\/docs\/cua-sdk\/guides\/omarchy/);
+      }
+    });
+
+    it("keeps every other Wayland desktop blocked, whatever a plugin probe said", () => {
+      for (const env of [
+        { ...hyprland, XDG_CURRENT_DESKTOP: "ubuntu:GNOME", HYPRLAND_INSTANCE_SIGNATURE: undefined },
+        { ...hyprland, XDG_CURRENT_DESKTOP: "KDE", HYPRLAND_INSTANCE_SIGNATURE: undefined },
+        { ...hyprland, XDG_CURRENT_DESKTOP: "sway", HYPRLAND_INSTANCE_SIGNATURE: undefined },
+        { ...hyprland, XDG_CURRENT_DESKTOP: "ubuntu:GNOME" },
+        { ...hyprland, HYPRLAND_INSTANCE_SIGNATURE: "" },
+      ]) {
+        expect(linuxLocalControlSupport("linux", env, { hyprlandPlugin: "active" }), JSON.stringify(env)).toMatchObject({
+          available: false,
+          session: "wayland",
+          reasonCode: "linux-wayland-seat-safety-blocked",
+        });
+      }
+    });
+
+    it("leaves X11 unchanged, even with Hyprland variables around", () => {
+      const x11 = { XDG_SESSION_TYPE: "x11", DISPLAY: ":0" };
+      expect(linuxLocalControlSupport("linux", x11)).toEqual({ available: true, session: "x11" });
+      expect(linuxLocalControlSupport("linux", { ...x11, HYPRLAND_INSTANCE_SIGNATURE: "a", XDG_CURRENT_DESKTOP: "Hyprland" }, { hyprlandPlugin: "inactive" }))
+        .toEqual({ available: true, session: "x11" });
+    });
+
+    it("reports a ready Omarchy runtime only with the full Hyprland contract", () => {
+      const connection = {
+        schemaVersion: 1,
+        mode: "linux-wayland-hyprland-supervised",
+        platform: "linux",
+        session: "wayland",
+        compositor: "hyprland",
+        enabled: true,
+        status: "ready",
+        driver: { path: "/usr/bin/cua-driver", version: "0.41.3", source: "system-package" },
+      };
+      expect(localComputerReady("linux", connection)).toBe(true);
+      expect(localComputerReady("linux", { ...connection, compositor: "gnome-mutter" })).toBe(false);
+      expect(localComputerReady("linux", { ...connection, session: "x11" })).toBe(false);
+      expect(localComputerReady("linux", { ...connection, status: "starting" })).toBe(false);
+      expect(desktopCapabilities({ platform: "linux", env: hyprland, localConnection: connection }).localComputer).toMatchObject({
+        available: true,
+        support: "limited",
+        compositor: "hyprland",
+        driverSource: "system-package",
+      });
+    });
+  });
+
   it("never treats an embedded-looking Linux connection as local control", () => {
     expect(localComputerReady("linux", { mode: "embedded" })).toBe(false);
     expect(localComputerReady("darwin", { mode: "unavailable" })).toBe(false);
@@ -222,7 +337,7 @@ describe("desktop capabilities", () => {
       status: "ready",
       driver: {
         path: "/home/test/.local/bin/cua-driver",
-        version: "0.19.3",
+        version: "0.41.3",
         source: "user-local",
       },
     };
@@ -237,7 +352,7 @@ describe("desktop capabilities", () => {
       support: "limited",
       enabled: true,
       status: "ready",
-      driverVersion: "0.19.3",
+      driverVersion: "0.41.3",
       driverSource: "user-local",
     });
     expect(localComputerReady("linux", { ...connection, session: "wayland" })).toBe(false);
@@ -269,6 +384,26 @@ describe("desktop capabilities", () => {
       support: "unsupported",
       session: "wayland",
       compositor: "gnome-mutter",
+    });
+  });
+});
+
+describe("Mac driver support", () => {
+  it("names macOS 14 and older as too old for the driver, before it is loaded", () => {
+    const tooOld = { reasonCode: "macos-version-unsupported", reason: "Local desktop control needs macOS 15 Sequoia or later." };
+    expect(macDriverUnsupported("darwin", "21.6.0")).toEqual(tooOld);
+    expect(macDriverUnsupported("darwin", "20.6.0")).toEqual(tooOld);
+    expect(macDriverUnsupported("darwin", "23.6.0")).toEqual(tooOld);
+    expect(macDriverUnsupported("darwin", "24.0.0")).toBeNull();
+    expect(macDriverUnsupported("darwin", "25.0.0")).toBeNull();
+    expect(macDriverUnsupported("win32", "10.0.19045")).toBeNull();
+    expect(macDriverUnsupported("darwin", "")).toBeNull();
+  });
+
+  it("keeps the too-old code for the page", () => {
+    const localConnection = { mode: "unavailable", ...macDriverUnsupported("darwin", "21.6.0") };
+    expect(desktopCapabilities({ platform: "darwin", localConnection }).localComputer).toMatchObject({
+      available: false, reasonCode: "macos-version-unsupported", message: "Local desktop control needs macOS 15 Sequoia or later.",
     });
   });
 });

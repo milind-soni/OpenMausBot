@@ -10,6 +10,7 @@ import { CAPTURE_MARKER } from "./memory-capture.ts";
 import { NO_TEXT_ENGINE } from "./memory-upkeep.ts";
 import { SKILL_REVIEW_MARKER } from "./skill-review.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { workerPort } from "./testing/worker-port.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const fake = (name: string) => join(SERVER_DIR, "testing", name);
@@ -40,7 +41,7 @@ interface Row {
  * whatever else the test puts in config.json. */
 async function boot(extraConfig: Record<string, unknown>) {
   for (const name of FAKES) chmodSync(fake(name), 0o755);
-  const port = 18800 + Math.floor(Math.random() * 10_000);
+  const port = workerPort(18800, 10_000);
   const base = `http://127.0.0.1:${port}`;
   const home = mkdtempSync(join(tmpdir(), "omb-helper-model-"));
   mkdirSync(join(home, ".openmausbot"), { recursive: true });
@@ -53,7 +54,7 @@ async function boot(extraConfig: Record<string, unknown>) {
   writeFileSync(join(home, ".openmausbot", "config.json"), JSON.stringify({
     instances: {
       claude: { driver: "claudeAgent", config: { cli: fake("fake-claude-cli.ts"), permissionMode: "bypassPermissions" } },
-      codex: { driver: "codex", config: { cli: fake("fake-codex-app-server.ts") } },
+      codex: { driver: "codex", environment: { FAKE_CODEX_COMPACT: "unsupported" }, config: { cli: fake("fake-codex-app-server.ts") } },
       pi: { driver: "piAgent", environment: { FAKE_PI_MODE: "tooluse" }, config: { cli: fake("fake-pi-cli.ts"), fullAuto: true } },
     },
     memory: { captureQuietMs: 1_000 },

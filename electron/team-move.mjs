@@ -31,6 +31,16 @@ function parseMove(value) {
   return value;
 }
 
+export const TEAM_MOVE_TEXT = Object.freeze({
+  notInTeam: () => "You're not in that team.",
+  notABot: () => "Choose one of your bots to move.",
+  movingElsewhere: ({ bot, team }) => `${bot} is moving to ${team}.`,
+});
+
+export function teamMoveRefusal(code, params = {}) {
+  return Object.assign(new Error(TEAM_MOVE_TEXT[code](params)), { refusal: { code, params } });
+}
+
 export function parseTeamMoves(value) {
   return { v: 1, moves: record(value) && Array.isArray(value.moves) ? value.moves.map(parseMove).filter(Boolean).slice(0, 50) : [] };
 }
@@ -68,7 +78,7 @@ export function createTeamMove(deps) {
     const shown = read().moves.filter((move) => !move.told).at(-1);
     if (!shown) return null;
     const phase = shown.phase === "done" ? "done" : shown.failing ? "failed" : "moving";
-    return { bot: { id: shown.bot.id, name: shown.name ?? shown.bot.name }, team: { id: shown.team.id, name: shown.team.name }, phase };
+    return { bot: { id: shown.bot.id, name: shown.name ?? shown.bot.name }, team: { id: shown.team.id, name: shown.team.name }, phase, ...(Array.isArray(shown.bots) ? { bots: shown.bots.length } : {}) };
   };
   const publish = () => { try { deps.onChange?.(view()); } catch {} };
   /** The move of this bot, changed as `change` says; the journal is written before anything acts on it. */
@@ -224,15 +234,15 @@ export function createTeamMove(deps) {
     kick,
     view,
     /** Starts moving a bot into a team; a bot already moving there goes on. */
-    start({ bot, team }) {
+    start({ bot, team, ...rest }) {
       const journal = read();
       const held = journal.moves.find((move) => move.bot.id === bot.id);
       if (held && held.phase !== "done" && !held.stopped) {
-        if (held.team.id !== team.id) throw new Error(`${held.bot.name} is moving to ${held.team.name}.`);
+        if (held.team.id !== team.id) throw teamMoveRefusal("movingElsewhere", { bot: held.bot.name, team: held.team.name });
         return kick();
       }
       const moves = journal.moves.filter((move) => move.bot.id !== bot.id).map((move) => (move.phase === "done" ? { ...move, told: true } : move));
-      deps.journal.write({ v: 1, moves: [...moves, { bot, team, phase: "copy", startedAt: now() }] });
+      deps.journal.write({ v: 1, moves: [...moves, { ...rest, bot, team, phase: "copy", startedAt: now() }] });
       publish();
       return kick();
     },

@@ -4,8 +4,10 @@ import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 
 import { removeTempDir } from "../../testing/cleanup.ts";
-import { LocalBackend } from "../backends.ts";
+import { LocalBackend, type LocalBackendOptions } from "../backends.ts";
 import { calibrateIdentity, chromeFingerprint, type CalibratedIdentity } from "../chrome/calibrate.ts";
+import { ProcessRegistry } from "../chrome/processes.ts";
+import { browserRoot } from "../chrome/profile.ts";
 import type { ScreenSpec } from "../chrome/flags.ts";
 import { sandboxDisabled } from "../chrome/host-setup.ts";
 import { CHROME, FIRST_LAUNCH_MS, HOST, testRoot } from "../cdp/testing/real-chrome.ts";
@@ -29,6 +31,8 @@ function identityOf(executablePath: string, sandbox: boolean): Promise<Calibrate
 export interface RealService {
   service: BrowserService;
   dataDir: string;
+  /** Every Chrome this service launched, as the engine's own registry records them (`registry: true`). */
+  registry: ProcessRegistry | null;
   call(target: BrowserTarget, name: string, args?: Record<string, unknown>): Promise<ToolResult>;
   /** The answer's text, pictures as [image]. */
   text(result: ToolResult): string;
@@ -39,12 +43,13 @@ export interface RealService {
   close(): Promise<void>;
 }
 
-export async function startService({ screen, egressPort, ...options }: Partial<BrowserServiceOptions> & { screen?: ScreenSpec; egressPort?: (key: string) => Promise<number | null> } = {}): Promise<RealService> {
+export async function startService({ screen, egressPort, display, displayFailed, registry: registered = false, ...options }: Partial<BrowserServiceOptions> & { screen?: ScreenSpec; egressPort?: (key: string) => Promise<number | null>; display?: LocalBackendOptions["display"]; displayFailed?: LocalBackendOptions["displayFailed"]; registry?: boolean } = {}): Promise<RealService> {
   if (!CHROME) throw new Error("No Chrome to test with.");
   const executablePath = CHROME;
   const sandbox = !sandboxDisabled(process.env);
   await identityOf(executablePath, sandbox);
   const dataDir = mkdtempSync(join(testRoot(), "omb-browser-service-"));
+  const registry = registered ? new ProcessRegistry(browserRoot(dataDir)) : null;
   const backend = new LocalBackend({
     dataDir,
     host: HOST,
@@ -54,6 +59,9 @@ export async function startService({ screen, egressPort, ...options }: Partial<B
     egressPort: egressPort ?? (async () => null),
     sandbox,
     handshakeTimeoutMs: FIRST_LAUNCH_MS,
+    ...(display ? { display } : {}),
+    ...(displayFailed ? { displayFailed } : {}),
+    ...(registry ? { registry } : {}),
   });
   const service = new BrowserService({ dataDir, backend: () => backend, maxRunning: 4, idleMs: () => 600_000, ...options });
   const call = (target: BrowserTarget, name: string, args: Record<string, unknown> = {}) =>
@@ -62,6 +70,7 @@ export async function startService({ screen, egressPort, ...options }: Partial<B
   return {
     service,
     dataDir,
+    registry,
     call,
     text,
     async read<T>(target: BrowserTarget, expression: string): Promise<T> {

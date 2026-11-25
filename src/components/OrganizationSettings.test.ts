@@ -103,18 +103,15 @@ describe("optional desktop Organisation settings", () => {
     expect(bridge.begin).not.toHaveBeenCalled();
   });
 
-  it("uses the default portal from one sign-in action and keeps custom setup advanced", async () => {
+  it("uses the default portal from one sign-in action and keeps custom setup in a fold", async () => {
     await ready();
     let view = render();
-    expect(view.html).toContain("https://admin.openmausbot.com");
     expect(view.html).toContain("Sign in with your organization");
-    expect(view.html).toContain("<summary");
-    expect(view.html).toContain("Advanced");
-    expect(view.html).not.toMatch(/<details[^>]*\bopen/);
-    expect(view.html).toContain("personal and local models");
-    expect(view.html).toContain("does not upload your chat history");
+    expect(view.html).toContain("Use another sign-in address");
+    expect(view.html).not.toContain("<details");
+    expect(view.html).toContain("Your chats are not uploaded.");
     expect(bridge.begin).not.toHaveBeenCalled();
-    const signIn = () => view.nodes.find(node => node.type === "button" && node.props.children === "Sign in with your organization")!.props.onClick!();
+    const signIn = () => view.nodes.find(node => node.type === "button" && (node.props as { "data-organization-sign-in"?: string })["data-organization-sign-in"] === "")!.props.onClick!();
     signIn(); signIn(); await flush();
     expect(bridge.begin).toHaveBeenCalledExactlyOnceWith({ portalOrigin: "https://admin.openmausbot.com" });
     expect(fetch).not.toHaveBeenCalled();
@@ -228,7 +225,7 @@ describe("optional desktop Organisation settings", () => {
     const cleanup = await ready();
     let resolveBegin!: (state: ManagedDesktopState) => void;
     vi.mocked(bridge.begin).mockImplementation(() => new Promise(resolve => { resolveBegin = resolve; }));
-    button("Sign in with your organization").props.onClick!();
+    render().nodes.find(node => (node.props as { "data-organization-sign-in"?: string })["data-organization-sign-in"] === "")!.props.onClick!();
     if (typeof cleanup === "function") cleanup();
     push(connected); resolveBegin(connecting); await flush();
     expect(unsubscribe).toHaveBeenCalledOnce();

@@ -21,7 +21,6 @@ import { t } from "@/lib/i18n";
 import { parseComputerHelp, transitionComputerControlLease } from "@/lib/computer-control";
 import {
   initialLocalVmWorkspaceSlots,
-  nativeViewOverlayIntersects,
   readyLocalVmViewerUrl,
   reconcileLocalVmWorkspaceSlots,
   releaseLocalVmWorkspaceControl,
@@ -36,6 +35,9 @@ import {
 import { z } from "zod";
 import { Select } from "./Select";
 import { productName } from "@/lib/brand";
+import { randomUuid } from "@/lib/random-uuid";
+import { useNativeViewObscured } from "@/lib/native-view-obscured";
+import { serverFetch } from "@/lib/relay-server";
 
 const SLOT_CONTEXTS = ["local-vm-workspace:left", "local-vm-workspace:right"] as const;
 
@@ -80,7 +82,7 @@ async function readComputerControl(botId: string): Promise<LocalVmWorkspaceContr
 }
 
 function bestEffortRelease(botId: string, controlLeaseId: string) {
-  void fetch(`/api/bots/${botId}/computer/control`, {
+  void serverFetch(`/api/bots/${botId}/computer/control`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ action: "release", controlLeaseId }),
@@ -120,113 +122,14 @@ function elementBounds(ref: RefObject<HTMLDivElement | null>): DesktopWorkspaceB
   };
 }
 
-const NATIVE_VIEW_OVERLAY_SELECTOR = [
-  '[aria-modal="true"]',
-  '[role="dialog"]',
-  '[role="menu"]',
-  "[popover]",
-  "[data-native-view-overlay]",
-  ".fixed",
-  ".absolute",
-].join(",");
-
-/**
- * Electron's native views always paint above the renderer, so any intersecting overlay or popover counts, portals
- * included.
- */
-function rendererOverlayIntersectsNativeView() {
-  const hosts = [...document.querySelectorAll<HTMLElement>("[data-native-view-host]")];
-  const hostRects = hosts
-    .map((host) => host.getBoundingClientRect())
-    .filter((rect) => rect.width > 0 && rect.height > 0);
-  if (hostRects.length === 0) return false;
-
-  const candidates = [...document.querySelectorAll<HTMLElement>(NATIVE_VIEW_OVERLAY_SELECTOR)]
-    .filter(
-      (candidate) =>
-        !hosts.some(
-          (host) => candidate === host || candidate.contains(host) || host.contains(candidate),
-        ),
-    )
-    .map((candidate) => {
-      const style = window.getComputedStyle(candidate);
-      const explicitlyOverlay =
-        candidate.matches(
-          '[aria-modal="true"], [role="dialog"], [role="menu"], [popover], [data-native-view-overlay]',
-        );
-      const zIndex = Number.parseInt(style.zIndex, 10);
-      return {
-        rect: candidate.getBoundingClientRect(),
-        explicit: explicitlyOverlay,
-        visible:
-          style.display !== "none" &&
-          style.visibility !== "hidden" &&
-          Number(style.opacity) !== 0,
-        zIndex: Number.isFinite(zIndex) ? zIndex : null,
-      };
-    });
-  return nativeViewOverlayIntersects(hostRects, candidates);
-}
-
-function useNativeViewObscured(explicit: boolean) {
-  const [domOverlay, setDomOverlay] = useState(false);
-  useEffect(() => {
-    let frame = 0;
-    const read = () => setDomOverlay(rendererOverlayIntersectsNativeView());
-    const scheduleRead = () => {
-      if (frame) return;
-      frame = requestAnimationFrame(() => {
-        frame = 0;
-        read();
-      });
-    };
-    read();
-    const observer = new MutationObserver(scheduleRead);
-    observer.observe(document.body, {
-      subtree: true,
-      childList: true,
-      attributes: true,
-      attributeFilter: ["class", "style", "aria-hidden", "aria-modal", "role", "open", "popover"],
-    });
-    const resizeObserver = new ResizeObserver(scheduleRead);
-    resizeObserver.observe(document.body);
-    for (const host of document.querySelectorAll<HTMLElement>("[data-native-view-host]")) {
-      resizeObserver.observe(host);
-    }
-    const overlayEvents = [
-      "toggle",
-      "animationstart",
-      "animationend",
-      "transitionstart",
-      "transitionend",
-    ] as const;
-    for (const eventName of overlayEvents) {
-      document.addEventListener(eventName, scheduleRead, true);
-    }
-    window.addEventListener("resize", scheduleRead);
-    window.addEventListener("scroll", scheduleRead, true);
-    return () => {
-      if (frame) cancelAnimationFrame(frame);
-      observer.disconnect();
-      resizeObserver.disconnect();
-      for (const eventName of overlayEvents) {
-        document.removeEventListener(eventName, scheduleRead, true);
-      }
-      window.removeEventListener("resize", scheduleRead);
-      window.removeEventListener("scroll", scheduleRead, true);
-    };
-  }, []);
-  return explicit || domOverlay;
-}
-
 function statusLabel(status: LocalVmWorkspaceStatus | null, nativeStatus: DesktopWorkspaceState["status"]) {
-  if (!status) return "Checking VM";
-  if (status.container === "missing") return "VM not created";
-  if (status.container === "stopped") return "VM stopped";
-  if (!status.ready) return "VM unavailable";
-  if (nativeStatus === "error") return "Viewer unavailable";
-  if (nativeStatus !== "ready") return "Connecting viewer";
-  return "Live · watch-only";
+  if (!status) return t("vm.workspace.status.checking");
+  if (status.container === "missing") return t("vm.workspace.status.missing");
+  if (status.container === "stopped") return t("vm.workspace.status.stopped");
+  if (!status.ready) return t("vm.workspace.status.unavailable");
+  if (nativeStatus === "error") return t("vm.workspace.status.viewerUnavailable");
+  if (nativeStatus !== "ready") return t("vm.workspace.status.connecting");
+  return t("vm.workspace.status.live");
 }
 
 interface LocalVmPaneProps {
@@ -345,7 +248,7 @@ function LocalVmPane({
         const next = await bridge.open({
           contextId,
           url: viewerUrl,
-          title: `${botName}'s Local VM`,
+          title: t("vm.workspace.windowTitle", { name: botName }),
           bounds,
         });
         if (!alive) {
@@ -424,7 +327,7 @@ function LocalVmPane({
       <div className="flex min-h-[68px] items-center gap-3 border-b border-hairline/40 px-3 py-2.5">
         <div className="min-w-0 flex-1">
           <label className="sr-only" htmlFor={`local-vm-slot-${index}`}>
-            Local VM for pane {index + 1}
+            {t("vm.workspace.paneLabel", { number: index + 1 })}
           </label>
           <Select size="sm" className="w-full"
             id={`local-vm-slot-${index}`}
@@ -552,7 +455,7 @@ export function LocalVmWorkspace({
   const [controlledBotId, setControlledBotId] = useState<string | null>(null);
   const controlledBotIdRef = useRef<string | null>(null);
   const controlLeaseIdRef = useRef<string | null>(null);
-  const controlLeaseId = controlLeaseIdRef.current ?? crypto.randomUUID();
+  const controlLeaseId = controlLeaseIdRef.current ?? randomUuid();
   controlLeaseIdRef.current = controlLeaseId;
   // A second discrete event can arrive before React commits the disabled buttons, so the mutation itself is guarded.
   const controlBusyRef = useRef(false);
@@ -679,7 +582,7 @@ export function LocalVmWorkspace({
       setControlledBotId(null);
       return true;
     } catch {
-      setControlError(`${productName()} could not hand control back. The view stayed open.`);
+      setControlError(t("vm.workspace.handBackFailed", { app: productName() }));
       return false;
     } finally {
       controlBusyRef.current = false;
@@ -724,7 +627,7 @@ export function LocalVmWorkspace({
         setControlledBotId(botId);
       } catch {
         setControlledBotId(controlledBotIdRef.current);
-        setControlError("Control could not switch safely. Any remaining hold stayed paused.");
+        setControlError(t("vm.workspace.switchFailed"));
       } finally {
         controlBusyRef.current = false;
         setControlPending(false);
@@ -769,7 +672,7 @@ export function LocalVmWorkspace({
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-[14px] font-semibold text-ink">{t("vm.workspace.viewTitle")}</h1>
           <p className="truncate text-[12px] text-ink-secondary">
-            Two live desktops · one active controller · watch-only by default
+            {t("vm.workspace.viewSubtitle")}
           </p>
         </div>
         <button
@@ -777,7 +680,7 @@ export function LocalVmWorkspace({
           onClick={() => void closeWorkspace()}
           disabled={controlPending}
           className="rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
-          aria-label="Close private desktop view"
+          aria-label={t("vm.workspace.closeView")}
         >
           <X size={18} />
         </button>

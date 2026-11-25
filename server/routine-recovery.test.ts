@@ -6,9 +6,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { RuntimeEvent } from "../shared/runtime-events.ts";
 import { TRIAL_CREDIT_REFUSED } from "../shared/trial-credit.ts";
 import {
-  classifyRoutineFailure, dispatchRefusal, retryNote, ROUTINE_BUSY_RECHECK_MS, ROUTINE_BUSY_WAIT_MS, weekRuns, type RoutineAlert,
+  classifyRoutineFailure, dispatchRefusal, nextScheduledRun, retryNote, ROUTINE_BUSY_RECHECK_MS, ROUTINE_BUSY_WAIT_MS, weekRuns, type RoutineAlert,
 } from "./routine-recovery.ts";
-import { RoutineManager, type RoutineManagerOptions, type RoutineRun } from "./routines.ts";
+import { RoutineManager, type Routine, type RoutineManagerOptions, type RoutineRun } from "./routines.ts";
+import { claudeLimitError } from "./drivers/claude-limits.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -114,6 +115,9 @@ describe("classifyRoutineFailure", () => {
     ["Provider settings changed while this thread was running", { stopReason: "interrupted" }, { kind: "final" }],
     ["The engine stopped without saying why (stop reason: refusal).", { stopReason: "refusal" }, { kind: "final" }],
     ["The model refused the request (HTTP 400): unsupported model", {}, { kind: "final" }],
+    // A model its engine has no route to fails the same way every time, raw or in the plain words the person sees.
+    ["Internal error: Unsupported package for chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017: unknown (session/prompt, service: session, provider.no-route)", { stopReason: "rpc_error" }, { kind: "final" }],
+    ["OpenCode can't use the model chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017 here, so choose another model for this bot.", { stopReason: "rpc_error" }, { kind: "final" }],
     [CAPPED, {}, { kind: "final" }],
     ["Model-call limit reached before a final answer", {}, { kind: "final" }],
     ["The bot repeated the same call 6 times, so it was stopped", { cause: "cap" }, { kind: "final" }],
@@ -151,7 +155,8 @@ describe("an unattended run that fails for a passing reason", () => {
     h.event("thread-1", { type: "item.completed", itemType: "assistant_text", text: "Half done" });
     h.fail("thread-1", ROUTING);
     expect(h.run(run.id)).toMatchObject({ status: "queued", retried: "provider", threadId: "thread-1", retryAt: START + 15 * SECOND,
-      attention: `Starting again shortly after a temporary error: ${ROUTING}` });
+      attention: `Starting again shortly after a temporary error: ${ROUTING}`,
+      attentionCode: "routines.server.retryAfter", attentionParams: { why: "routines.server.part.provider", failure: ROUTING } });
     expect(h.failed).toEqual([]);
 
     await h.advance(14 * SECOND);
@@ -293,7 +298,7 @@ describe("an unattended run whose bot is busy when it starts", () => {
     h.refuse(busy());
     const run = await h.start(h.routine().id);
     expect(h.run(run.id)).toMatchObject({ status: "queued", threadId: "thread-1", deferredAt: START, retryAt: START + ROUTINE_BUSY_RECHECK_MS,
-      attention: `Waiting to start: ${BUSY}` });
+      attention: `Waiting to start: ${BUSY}`, attentionCode: "routines.server.waitingToStart", attentionParams: { failure: BUSY } });
     expect(h.run(run.id).retried).toBeUndefined();
     expect(h.failed).toEqual([]);
     await h.advance(ROUTINE_BUSY_RECHECK_MS - SECOND);
@@ -399,7 +404,8 @@ describe("an unattended run only its owner can fix", () => {
     const run = await h.start(h.routine().id);
     h.fail("thread-1", limit, { stopReason: "quota", limitResetsAt: resetsAt });
     expect(h.run(run.id)).toMatchObject({ status: "queued", retried: "usage_limit", retryAt: resetsAt + MINUTE, threadId: "thread-1",
-      attention: expect.stringMatching(/^Waiting for the AI's usage limit to reset; this run starts again at /) });
+      attention: expect.stringMatching(/^Waiting for the AI's usage limit to reset; this run starts again at /),
+      attentionCode: "routines.server.limitWait", attentionParams: expect.objectContaining({ resetsAt: resetsAt + MINUTE }) });
     expect(h.failed).toEqual([]);
     expect(h.deferred).toEqual([expect.objectContaining({ alert: { detail: expect.stringMatching(/^This bot's AI reached its usage limit\. This run starts again at .+\.$/) } })]);
     expect(h.manager.wakeHold()).toEqual({ hold: false });
@@ -414,6 +420,57 @@ describe("an unattended run only its owner can fix", () => {
     expect(h.run(run.id)).toMatchObject({ status: "failed", error: limit });
     expect(h.failed[0]!.alert).toBeNull();
     expect(h.deferred).toHaveLength(1);
+  });
+
+  it("lets a recurring routine's next scheduled run do the work a usage limit stopped, when it comes within one interval of the reset", async () => {
+    const h = harness();
+    const limit = "This Claude account has reached its 5-hour limit, which resets soon. Until then, switch this bot to another AI or Claude account.";
+    const hourly = h.manager.create({ name: "Price check", prompt: "Check the price", botId: "maus-1", schedule: { type: "interval", everyMinutes: 60, anchorAt: START } });
+    const daily = h.manager.create({ name: "Brief", prompt: "Write the brief", botId: "maus-2", schedule: { type: "daily", time: "09:00", weekdays: [0, 1, 2, 3, 4, 5, 6] } });
+    await h.advance(60 * MINUTE);
+    const scheduled = [hourly, daily].map((routine) => h.runs().find((run) => run.routineId === routine.id)!);
+    for (const run of scheduled) {
+      expect(run).toMatchObject({ status: "running", triggerSource: "schedule" });
+      h.fail(run.threadId!, limit, { stopReason: "quota", limitResetsAt: START + 3 * 3_600_000 });
+      expect(h.run(run.id)).toMatchObject({ status: "failed", error: limit });
+    }
+    const action = "This bot's AI reached its usage limit. Its routines work again once it resets, or choose another AI for this bot now.";
+    expect(h.failed.map(({ run, alert }) => [run.id, alert])).toEqual(scheduled.map((run) => [run.id, { detail: action }]));
+    expect(h.deferred).toEqual([]);
+  });
+
+  it("still starts a run again at the reset when its routine's next run is further off, or it was started by hand, or runs once", async () => {
+    const h = harness();
+    const limit = "This Claude account has reached its 5-hour limit.";
+    const resetsAt = START + 3 * 3_600_000;
+    const mondays = h.manager.create({ name: "Weekly plan", prompt: "Plan the week", botId: "maus-1", schedule: { type: "daily", time: "09:00", weekdays: [1] } });
+    const once = h.manager.create({ name: "Reminder", prompt: "Remind me", botId: "maus-2", schedule: { type: "once", at: START + 30 * MINUTE } });
+    await h.advance(30 * MINUTE);
+    const oneTime = h.runs().find((run) => run.routineId === once.id)!;
+    h.fail(oneTime.threadId!, limit, { stopReason: "quota", limitResetsAt: resetsAt });
+    expect(h.run(oneTime.id)).toMatchObject({ status: "queued", retried: "usage_limit", retryAt: resetsAt + MINUTE });
+    await h.advance(30 * MINUTE);
+    const weekly = h.runs().find((run) => run.routineId === mondays.id)!;
+    expect(weekly).toMatchObject({ status: "running", triggerSource: "schedule" });
+    h.fail(weekly.threadId!, limit, { stopReason: "quota", limitResetsAt: resetsAt });
+    expect(h.run(weekly.id)).toMatchObject({ status: "queued", retried: "usage_limit", retryAt: resetsAt + MINUTE });
+    const hourly = h.manager.create({ name: "Price check", prompt: "Check the price", botId: "maus-3", schedule: { type: "interval", everyMinutes: 60, anchorAt: START } });
+    const manual = await h.start(hourly.id);
+    h.fail(manual.threadId!, limit, { stopReason: "quota", limitResetsAt: resetsAt });
+    expect(h.run(manual.id)).toMatchObject({ status: "queued", retried: "usage_limit", retryAt: resetsAt + MINUTE });
+    expect(h.failed).toEqual([]);
+  });
+
+  it("measures a cron routine's interval to the occurrence after its next one, and gives none for a run not its schedule started", () => {
+    const routine = (schedule: Routine["schedule"], nextRunAt: number) => ({ id: "routine-1", enabled: true, schedule, nextRunAt }) as Routine;
+    const weekdays = { type: "cron" as const, expression: "0 9 * * 1-5", timeZone: "UTC" };
+    const thursday = Date.UTC(2026, 7, 20, 9), friday = Date.UTC(2026, 7, 21, 9);
+    const scheduled = { routineId: "routine-1", triggerSource: "schedule" } as RoutineRun;
+    expect(nextScheduledRun(scheduled, [routine(weekdays, thursday)])).toEqual({ at: thursday, interval: 24 * 60 * MINUTE });
+    expect(nextScheduledRun(scheduled, [routine(weekdays, friday)])).toEqual({ at: friday, interval: 3 * 24 * 60 * MINUTE });
+    expect(nextScheduledRun({ ...scheduled, triggerSource: "manual" }, [routine(weekdays, thursday)])).toBeUndefined();
+    expect(nextScheduledRun({ ...scheduled, triggerSource: "startup" }, [routine(weekdays, thursday)])).toBeUndefined();
+    expect(nextScheduledRun(scheduled, [routine({ type: "once", at: thursday }, thursday)])).toBeUndefined();
   });
 
   it("fails a usage limit with no reset time, or one too far off, and tells the owner", async () => {
@@ -472,5 +529,21 @@ describe("weekRuns", () => {
     h.complete(run.threadId!);
     expect(h.manager.listRoutines()[0]).toMatchObject({ id: routine.id, weekRuns: { ok: 1, total: 1 } });
     expect(JSON.parse(readFileSync(h.options.file!, "utf8")).routines[0]).not.toHaveProperty("weekRuns");
+  });
+});
+
+describe("a coded engine error on a run", () => {
+  it("keeps its code while the stored line is whole, and drops it when the 500-character cut leaves params that cannot rebuild it", async () => {
+    for (const [said, coded] of [["Weekly limit reached.", true], ["x".repeat(500), false]] as const) {
+      const h = harness();
+      const limit = claudeLimitError(null, said, 0, "UTC");
+      const run = await h.start(h.routine().id);
+      h.fail("thread-1", limit.message, { text: limit.text });
+      const stored = h.run(run.id);
+      expect(stored.error).toBe(limit.message.slice(0, 500));
+      expect(stored.errorCode).toBe(coded ? "chat.notice.claudeLimitSaid" : undefined);
+      if (coded) expect(stored.errorParams).toEqual(limit.text!.params);
+      else expect(stored.errorParams).toBeUndefined();
+    }
   });
 });

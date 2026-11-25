@@ -5,6 +5,7 @@ import type { MapComputer, MapComputersPayload } from "../../shared/map-computer
 import type { TeamComputers } from "./team-canvas-computers";
 
 export const MAP_COMPUTERS_POLL_MS = 2_000;
+const NO_COMPUTERS: MapComputer[] = [];
 
 export interface ShownFrame {
   url: string;
@@ -123,7 +124,7 @@ export function useMapComputers(enabled: boolean) {
     };
     void poll();
     const timer = window.setInterval(poll, MAP_COMPUTERS_POLL_MS);
-    const stopListening = listenLiveFrames({
+    const stopListening = listenLiveFrames({ screens: true,
       onFrame: (frame) => {
         if (frame.kind !== "screen" || frame.surface !== "computer" || !frame.png) return;
         const computer = computerForBot(computersRef.current, frame.botId);
@@ -137,7 +138,7 @@ export function useMapComputers(enabled: boolean) {
     };
   }, [enabled, show]);
 
-  return { computers: payload?.computers ?? [], configured: payload?.configured ?? null, frames, error };
+  return { computers: payload?.computers ?? NO_COMPUTERS, configured: payload?.configured ?? null, frames, error, answered: payload !== null || error !== null };
 }
 
 /** "Show computers", remembered per workspace like the canvas layout; until chosen, on whenever there is a computer to

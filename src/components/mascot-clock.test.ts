@@ -107,6 +107,17 @@ describe("mascot clock", () => {
     expect(paintedAt.size).toBeLessThanOrEqual(63);
   });
 
+  it("asks for no frame once the last mascot has gone, with a timer already set", () => {
+    const fake = fakeEnvironment();
+    const clock = createMascotClock(fake.env);
+    const ticket = clock.add(() => 500);
+    fake.advance(20);
+    const asked = fake.stats.frameRequests;
+    ticket.remove();
+    fake.advance(1000);
+    expect(fake.stats.frameRequests).toBe(asked);
+  });
+
   it("asks for no frames while every mascot is still, and one frame when woken", () => {
     const fake = fakeEnvironment();
     const clock = createMascotClock(fake.env);
@@ -120,6 +131,22 @@ describe("mascot clock", () => {
     fake.advance(100);
     expect(draws).toBe(2);
     expect(fake.pendingFrames() + fake.pendingTimers()).toBe(0);
+  });
+
+  it("draws a mascot woken for a later frame on that frame, with the others on its grid", () => {
+    const fake = fakeEnvironment();
+    const clock = createMascotClock(fake.env);
+    const drawnAt: number[] = [];
+    const ticket = clock.add((now) => { drawnAt.push(now); return Infinity; });
+    fake.advance(110);
+    drawnAt.length = 0;
+    ticket.wake(nextFrameAt(110, 50));
+    fake.advance(39);
+    expect(drawnAt).toEqual([]);
+    fake.advance(20);
+    expect(drawnAt).toHaveLength(1);
+    expect(drawnAt[0]).toBeGreaterThanOrEqual(150 - 4);
+    expect(drawnAt[0]).toBeLessThan(150 + FULL_FRAME_MS);
   });
 
   it("sleeps on a timer between slow frames instead of polling every display frame", () => {

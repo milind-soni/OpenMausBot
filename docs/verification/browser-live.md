@@ -89,7 +89,7 @@ UI and harness, then removes its temporary data; the server log remains.
    account (fake values) for the test page's site. Pepper resumes and calls
    `fill_login`; the page's username and password boxes fill, the form is
    submitted, the tool result names only what was filled and where the page
-   went, and **Settings → Logins** lists the login by site without its
+   went, and **Settings → Vault** lists the login by site without its
    password. Open the same page under a subdomain: `fill_login` fills it
    too. Under another site, or plain http on a non-local address, it refuses
    and types nothing. Call `fill_login` with `submit: false`, then ask Pepper
@@ -100,7 +100,7 @@ UI and harness, then removes its temporary data; the server log remains.
    connect a service account limited to one vault holding a test Login item
    for the test page's site. Its row appears read-only, marked From
    1Password; `fill_login` fills it like a saved login. Pick another bot for
-   the vault under 1Password in Settings → Logins: Pepper no longer lists or
+   the vault under 1Password in Settings → Vault: Pepper no longer lists or
    fills it. Unit tests use a fake SDK and reach no network.
 
 11. Page dialogs: give the test page a button that calls `confirm()`, take control and press it. The question shows over
@@ -129,6 +129,17 @@ from the menu (new engine) still shows bands on purpose.
 `scripts/testing/browser-fill.e2e.test.ts` runs the agent-browser side against the pinned engine and
 `server/browser/viewers/viewers.e2e.test.ts` the new engine's (`OMB_CDP_CHROME`).
 
+`scripts/testing/browser-input.e2e.test.ts` drives input on the pinned engine through the real server: a person takes
+control, clicks a button and types a word with the action requests the panel sends, and a bot's click and fill tools
+change the page; a refused action leaves a `browser input:` line in the server log. Keys reach the page with their
+key, code, key code and modifiers (letters, Shift, arrows, Backspace, Escape, Tab, F2, Ctrl and Cmd shortcuts, in a
+field and in rich text), and a press on a `<select>` opens the view's own list (`selectPopup`) whose choice
+(`select_choose`) reaches the page. CI's `ui-smoke` job runs it.
+
+Input that does not reach a page is logged as `browser input: <who> <what> dropped reason=<code> engine=<engine>
+transport=<v1|v2|tools> session=<id>`, counted since the server started, and the counts go into a `@devs` report.
+The codes are listed in `server/browser/input-log.ts`. A line never carries page content, typed text or an address.
+
 Focused automated coverage:
 
 ```sh
@@ -139,8 +150,8 @@ pnpm exec vitest run server/browser-engine.test.ts server/browser-runtime.test.t
   src/lib/browser-profiles.test.ts src/components/BrowserProfilesManager.test.ts \
   src/components/browser/StreamSurface.test.ts server/routes/browser-viewers.test.ts \
   src/components/BrowserPanel.test.ts src/components/SignInRequestCard.test.ts \
-  server/sign-in-request.e2e.test.ts server/login-fill.test.ts server/login-store.test.ts \
-  server/totp.test.ts server/routes/logins.test.ts src/components/LoginsSettings.test.ts \
+  server/sign-in-request.e2e.test.ts server/login-fill.test.ts server/vault-store.test.ts \
+  server/totp.test.ts server/routes/logins.test.ts src/components/VaultSettings.test.ts \
   server/saved-login.e2e.test.ts server/onepassword.test.ts scripts/prepare-duckdb.test.mjs
 ```
 

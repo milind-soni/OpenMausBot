@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { redactSecretsInText } from "./redact.ts";
+import { tooLongRefusal } from "./too-long.ts";
+import { USER_ERROR, type UserErrorKey } from "./user-errors.ts";
 import { recallTerms } from "./message-db.ts";
 import { canonicalJson } from "../shared/package-format.ts";
 
@@ -76,7 +78,11 @@ const emptyFile = (): TeamMemoryFile => ({ version: 2, sections: Object.create(n
 const clean = (value: unknown, max: number): string => (typeof value === "string" ? redactSecretsInText(value).replace(/\s+/g, " ").trim().slice(0, max + 1) : "");
 export class TeamMemoryConflict extends Error {
   readonly status = 409;
-  constructor(message = "This department memory changed. Reload it before saving or approving.") { super(message); }
+  declare readonly errorKey?: UserErrorKey;
+  constructor(message?: string) {
+    super(message ?? USER_ERROR["serverError.department.memoryChanged"]);
+    if (message === undefined) this.errorKey = "serverError.department.memoryChanged";
+  }
 }
 export function teamMemoryRevision(entry: TeamMemoryEntry): string {
   const { revision: _revision, ...stored } = entry;
@@ -176,13 +182,14 @@ export class TeamMemory {
   static normalize(input: TeamMemoryInput): Required<TeamMemoryInput> {
     if (!TEAM_MEMORY_KINDS.includes(input.kind)) throw new Error(`kind must be one of ${TEAM_MEMORY_KINDS.join(", ")}`);
     const name = clean(input.name, TEAM_MEMORY_NAME_MAX);
-    if (!name || name.length > TEAM_MEMORY_NAME_MAX) throw new Error(`name is required and at most ${TEAM_MEMORY_NAME_MAX} characters`);
+    if (!name) throw new Error("name is required");
+    if (name.length > TEAM_MEMORY_NAME_MAX) throw new Error(tooLongRefusal("name", TEAM_MEMORY_NAME_MAX, "Use a short title, then send it again."));
     const detail = clean(input.detail, TEAM_MEMORY_DETAIL_MAX);
-    if (detail.length > TEAM_MEMORY_DETAIL_MAX) throw new Error(`detail is at most ${TEAM_MEMORY_DETAIL_MAX} characters`);
+    if (detail.length > TEAM_MEMORY_DETAIL_MAX) throw new Error(tooLongRefusal("detail", TEAM_MEMORY_DETAIL_MAX, "Keep the fact, its context and why it matters, then send it again."));
     const aliases = [...new Set((input.aliases ?? []).map((alias) => clean(alias, TEAM_MEMORY_NAME_MAX)).filter((alias) => alias && !sameName(alias, name)))].slice(0, TEAM_MEMORY_ALIASES_MAX);
-    if (aliases.some(alias => alias.length > TEAM_MEMORY_NAME_MAX)) throw new Error(`aliases are at most ${TEAM_MEMORY_NAME_MAX} characters`);
+    if (aliases.some(alias => alias.length > TEAM_MEMORY_NAME_MAX)) throw new Error(tooLongRefusal("one of the aliases", TEAM_MEMORY_NAME_MAX, "Use short names, then send it again."));
     const key = clean(input.key, 240) || `${input.kind}:${name.toLowerCase()}`;
-    if (key.length > 240) throw new Error("key is at most 240 characters");
+    if (key.length > 240) throw new Error(tooLongRefusal("key", 240, "Use a short stable key, then send it again."));
     return { kind: input.kind, name, detail, aliases, key };
   }
 

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { JsonValue } from "../../shared/json";
+import { t } from "./i18n";
 
 export interface LocalVmWorkspaceBot {
   id: string;
@@ -49,6 +50,8 @@ export interface NativeViewOverlayCandidate {
   explicit: boolean;
   visible: boolean;
   zIndex: number | null;
+  /** Whether the candidate paints above the host where they meet; undefined where the page cannot tell. */
+  above?: boolean;
 }
 
 /** Native views paint above renderer content, so hide them only under a visible overlay. */
@@ -64,6 +67,7 @@ export function nativeViewOverlayIntersects(
   return candidates.some(
     (candidate) =>
       candidate.visible &&
+      candidate.above !== false &&
       candidate.rect.width > 0 &&
       candidate.rect.height > 0 &&
       (candidate.explicit || (candidate.zIndex !== null && candidate.zIndex >= 10)) &&
@@ -88,7 +92,7 @@ export async function switchLocalVmWorkspaceControl(
 
   // Atomic on the server: a read followed by a take cannot prove ownership.
   const taken = await port.take(nextBotId);
-  if (!taken.held) throw new Error("The Local VM control hold was not acquired");
+  if (!taken.held) throw new Error(t("vm.workspace.holdNotAcquired"));
   if (taken.owned !== true) {
     return { status: "held-elsewhere", botId: nextBotId, snapshot: taken };
   }

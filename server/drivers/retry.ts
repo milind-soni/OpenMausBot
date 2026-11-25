@@ -34,12 +34,12 @@ export interface ErrorClassification {
 const TRANSIENT_PATTERNS: Array<{ pattern: RegExp; reason: TransientReason }> = [
   { pattern: /\b(?:429|rate.?limit|too many requests)\b/i, reason: "rate_limited" },
   { pattern: /\boverloaded\b|\bcapacity\b/i, reason: "overloaded" },
-  { pattern: /\b5\d{2}\b|\binternal server error\b|\bbad gateway\b|\bservice unavailable\b/i, reason: "server_error" },
+  { pattern: /\b5\d{2}\b|\binternal server error\b|\binternal service failure\b|\bServiceUnavailableError\b|\bbad gateway\b|\bservice unavailable\b/i, reason: "server_error" },
   // Codex's ChatGPT workspace routing lookup (codex-cli 0.160); only its "unauthorized" variant is a sign-in problem.
   { pattern: /\bworkspace routing discovery (?:failed|timed out)\b/i, reason: "server_error" },
   {
     pattern:
-      /\b(?:econnreset|econnrefused|epipe|etimedout|eai_again|connection reset|connection refused|socket hang up|network error|fetch failed)\b/i,
+      /\b(?:econnreset|econnrefused|epipe|etimedout|eai_again|unexpected_eof_while_reading|connection reset|connection refused|socket hang up|network error|fetch failed)\b/i,
     reason: "connection_reset",
   },
   { pattern: /\btimeout(ed)?\b|\btimed? out\b/i, reason: "timeout" },
@@ -50,6 +50,13 @@ const TRANSIENT_PATTERNS: Array<{ pattern: RegExp; reason: TransientReason }> = 
  * team's shared budget", "You're out of usage credits", "You're out of extra usage". */
 export const USAGE_LIMIT = /\busage limit\b|\bhit your (?:(?!rate\b)[\w'’-]+ ){0,3}(?:limit|budget)\b|\b(?:weekly|daily|monthly|subscription|usage|session|5-hour) limit reached\b|\bout of (?:usage(?: credits)?|extra usage|credits)\b/i;
 
+/** An engine that cannot run the model it was given, whatever the turn: OpenCode 2.2.5 answers session/prompt for a model
+ * it has no route to with `{code: -32603, message: "Internal error: Unsupported package for <provider>/<model>: …",
+ * data: {service: "session", errorName: "provider.no-route"}}`. */
+export const MODEL_NO_ROUTE = /\bunsupported package for\b|\bprovider\.no-route\b/i;
+/** The same failure in the plain words a person is shown, which stay as final as the raw ones. */
+const MODEL_NO_ROUTE_PLAIN = /\bcan't use (?:the|this bot's) model\b/i;
+
 const TERMINAL_PATTERNS: Array<{ pattern: RegExp; reason: TerminalReason }> = [
   {
     pattern: /\b(?:40[13]|unauthorized|forbidden|invalid api key|missing bearer|authentication required|not logged in|logged out)\b/i,
@@ -59,10 +66,13 @@ const TERMINAL_PATTERNS: Array<{ pattern: RegExp; reason: TerminalReason }> = [
   { pattern: USAGE_LIMIT, reason: "quota" },
   { pattern: /\b402\b|\bquota\b|\bbilling\b|\bsubscription\b/i, reason: "quota" },
   { pattern: /\bmodel not found\b|\bunknown model\b|\bdoes not exist for model\b|\bunsupported model\b/i, reason: "unknown_model" },
-  { pattern: /\b400\b|\b422\b|\binvalid request\b|\bmalformed\b|\bunexpected status\b/i, reason: "invalid_request" },
+  { pattern: MODEL_NO_ROUTE, reason: "unknown_model" },
+  { pattern: MODEL_NO_ROUTE_PLAIN, reason: "unknown_model" },
+  { pattern: /\b400\b|\b422\b|\binvalid request\b|\bmalformed\b/i, reason: "invalid_request" },
   { pattern: /\b404\b|\bno such thread\b|\bthread gone\b/i, reason: "not_found" },
   // A turn the user stopped must never come back as an auto-retry.
   { pattern: /\b(?:interrupted|cancelled by user)\b/i, reason: "interrupted" },
+  { pattern: /\bcertificate[ _]verify[ _]failed\b/i, reason: "unknown" },
 ];
 
 interface CliExit {
@@ -83,9 +93,99 @@ const messageOf = (err: FailureInput): string => {
   return [err.stderr ?? "", ""].join(" ").trim();
 };
 
+/** The three status-carrying forms the drivers' errors use (the STATUS pattern in engine-errors.ts):
+ * Grok Build's "(status 409 …)", the chat drivers' "xAI HTTP 409: …" and Claude Code's "API Error: 409 …".
+ * A bare number is not a status. The API Error form names the response's own status, so it matches wherever
+ * it appears: a status quoted inside the provider's message never wins over it.
+ * A status quoted from a nested backend error still must not shadow a transient failure the same string
+ * reports in a later clause: a CLI stderr tail, or a chained cause (messageOf joins it after "Error: ").
+ * Such a later status only decides when it opens its own report: the start of a line (a provider name
+ * may precede it), or right after the cause marker. A status quoted mid-clause ("proxy said HTTP 409")
+ * stays nested. */
+const HTTP_STATUS = /\(status (\d{3})\b[^)]*\)|\bHTTP (\d{3})\b|\bAPI Error:? (\d{3})\b/i;
+
+function opensOwnReport(
+  text: string,
+  match: RegExpExecArray,
+  gapStart: number,
+  lineStart: number,
+  lineHasMatch: boolean,
+): boolean {
+  const gap = text.slice(gapStart, match.index);
+  const causeAt = gap.lastIndexOf("Error: ");
+  if (causeAt !== -1 && /^[\w-]*\s*$/.test(gap.slice(causeAt + "Error: ".length))) return true;
+  if (lineHasMatch) return false;
+  const prefix = text.slice(lineStart, match.index).trim();
+  return prefix === "" || /^[A-Za-z][\w.-]*$/.test(prefix);
+}
+
+/** The transient verdict a status carries on its own, if any: 5xx reads server_error here because this runs
+ * before the body patterns, which would read the same number the same way — unless the report body says
+ * overloaded, which keeps that reason, matching the report on its own. The body is the report itself: its
+ * status form, the rest of its line, and the line after it, where a provider puts the detail. */
+function transientStatusVerdict(
+  status: number,
+  provider: { openAi?: boolean },
+  body = "",
+): ErrorClassification | undefined {
+  if (status === 429) return { transient: true, reason: "rate_limited" };
+  if (status === 408) return { transient: true, reason: "timeout" };
+  if (status === 409 && provider.openAi) return { transient: true, reason: "server_error" };
+  if (status >= 500 && status < 600) {
+    return { transient: true, reason: /\boverloaded\b|\bcapacity\b/i.test(body) ? "overloaded" : "server_error" };
+  }
+  return undefined;
+}
+
+/** A failure line that names its HTTP status is decided by the status, not by numbers in its body: a 409
+ * whose body says "max 500 tokens" is a request the provider will refuse again, not a server failure.
+ * 429 stays a rate limit and 408 stays a timeout; 5xx stays with the body patterns (so 529 still reads
+ * as overloaded). Any other 4xx is terminal, except a 409 from OpenAI: its SDK retries one by default,
+ * so it reads as a server error when the caller says the endpoint is OpenAI's. A terminal 4xx quoted
+ * from a nested backend error does not decide when a later clause reports a transient failure of its own. */
+function httpStatusVerdict(text: string, provider: { openAi?: boolean }): ErrorClassification | undefined {
+  const match = HTTP_STATUS.exec(text);
+  const status = Number(match?.[1] ?? match?.[2] ?? match?.[3]);
+  if (status === 429) return { transient: true, reason: "rate_limited" };
+  if (status === 408) return { transient: true, reason: "timeout" };
+  if (status === 409 && provider.openAi) return { transient: true, reason: "server_error" };
+  if (status >= 400 && status < 500) {
+    const rest = new RegExp(HTTP_STATUS.source, "gi");
+    rest.lastIndex = match!.index + match![0].length;
+    let prevEnd = rest.lastIndex;
+    let lineStart = text.lastIndexOf("\n", match!.index - 1) + 1;
+    let lineHasMatch = true;
+    let nextNewline = text.indexOf("\n", prevEnd);
+    let later: RegExpExecArray | null;
+    while ((later = rest.exec(text)) !== null) {
+      if (nextNewline !== -1 && nextNewline < prevEnd) nextNewline = text.indexOf("\n", prevEnd);
+      while (nextNewline !== -1 && nextNewline < later.index) {
+        lineStart = nextNewline + 1;
+        lineHasMatch = false;
+        nextNewline = text.indexOf("\n", lineStart);
+      }
+      if (opensOwnReport(text, later, prevEnd, lineStart, lineHasMatch)) {
+        const matchEnd = later.index + later[0].length;
+        const lineEnd = text.indexOf("\n", matchEnd);
+        const nextLineEnd = lineEnd === -1 ? -1 : text.indexOf("\n", lineEnd + 1);
+        const verdict = transientStatusVerdict(
+          Number(later[1] ?? later[2] ?? later[3]),
+          provider,
+          text.slice(later.index, nextLineEnd === -1 ? undefined : nextLineEnd),
+        );
+        if (verdict) return verdict;
+      }
+      prevEnd = later.index + later[0].length;
+      lineHasMatch = true;
+    }
+    return { transient: false, reason: "invalid_request" };
+  }
+  return undefined;
+}
+
 /** A nonzero exit with no error text is terminal (`terminal_exit`): the CLI already reported its own
  * failure. A signal kill (negative code) is never retried. */
-export function classifyError(err: FailureInput): ErrorClassification {
+export function classifyError(err: FailureInput, provider: { openAi?: boolean } = {}): ErrorClassification {
   const text = messageOf(err);
   // A surrounding HTTP 5xx/429 must not replay a provider safety block.
   if (isProviderSafetyBlock(text)) return { transient: false, reason: "provider_safety" };
@@ -95,6 +195,8 @@ export function classifyError(err: FailureInput): ErrorClassification {
     for (const { pattern, reason } of TERMINAL_PATTERNS) {
       if (pattern.test(text)) return { transient: false, reason };
     }
+    const statusVerdict = httpStatusVerdict(text, provider);
+    if (statusVerdict) return statusVerdict;
     for (const { pattern, reason } of TRANSIENT_PATTERNS) {
       if (pattern.test(text)) return { transient: true, reason };
     }
@@ -103,10 +205,21 @@ export function classifyError(err: FailureInput): ErrorClassification {
   for (const { pattern, reason } of TERMINAL_PATTERNS) {
     if (pattern.test(text)) return { transient: false, reason };
   }
+  const statusVerdict = httpStatusVerdict(text, provider);
+  if (statusVerdict) return statusVerdict;
   for (const { pattern, reason } of TRANSIENT_PATTERNS) {
     if (pattern.test(text)) return { transient: true, reason };
   }
   return { transient: false, reason: "unknown" };
+}
+
+/** Whether a turn whose CLI exited before its result may be sent again. Only work the provider never did is resent:
+ * a launch that ended before taking the prompt, or a transient failure before any model call answered or any text
+ * streamed. Once a call answered, the subscription has paid for it and the CLI already retried its own API calls. */
+export function mayResendTurn(turn: { endedBeforeTurn: boolean; exitCode: number | null; transient: boolean; streamed: boolean;
+  answered: boolean; attempt: number }): boolean {
+  if (turn.endedBeforeTurn) return true;
+  return turn.exitCode !== 0 && turn.transient && !turn.streamed && !turn.answered && turn.attempt < RETRY_MAX_ATTEMPTS - 1;
 }
 
 export function computeBackoff(attempt: number, random: () => number = Math.random): number {
@@ -125,13 +238,17 @@ export function interruptibleDelay(ms: number, signal?: AbortSignal): BackoffWai
   let timer: ReturnType<typeof setTimeout> | null = null;
   let onCancel: (() => void) | null = null;
   const promise = new Promise<"elapsed" | "cancelled">((resolve) => {
-    timer = setTimeout(() => resolve("elapsed"), Math.max(1, ms));
-    timer.unref?.();
-    if (signal?.aborted) return resolve("cancelled");
-    onCancel = () => {
-      clearTimeout(timer!);
-      resolve("cancelled");
+    const settle = (result: "elapsed" | "cancelled") => {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      if (onCancel) signal?.removeEventListener("abort", onCancel);
+      onCancel = null;
+      resolve(result);
     };
+    onCancel = () => settle("cancelled");
+    if (signal?.aborted) return settle("cancelled");
+    timer = setTimeout(() => settle("elapsed"), Math.max(1, ms));
+    timer.unref?.();
     signal?.addEventListener("abort", onCancel, { once: true });
   });
   return {

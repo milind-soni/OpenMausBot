@@ -104,7 +104,7 @@ describe("RoomMoreMenu, the Room panel's round ⋯", () => {
     expect(threads).toMatchObject({ label: "All threads", value: "3" });
     expect(threads.submenu!.map((entry) => [entry.label, Boolean(entry.active)])).toEqual([
       ["Launch plan", true],
-      ["New thread", false],
+      ["Untitled chat", false],
       ["Desk HQ", false],
     ]);
     threads.submenu![2]!.onSelect();

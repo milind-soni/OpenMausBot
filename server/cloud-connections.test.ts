@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { addressHere, answerConnection, KEY_PROVIDERS, launcherOf, listConnections, releaseConnection, runsHere, signInDigest } from "./cloud-connections.ts";
 import type { AppConfig } from "./config.ts";
-import type { HighLevelConnection } from "./highlevel/store.ts";
 import type { McpOAuthRecord } from "./mcp-oauth-store.ts";
 import type { StoredMcpServer } from "./mcp-registry.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
@@ -18,7 +17,6 @@ const stdio = (command: string, args: string[] = [], env: Record<string, string>
 const remote = (url: string, extra: Partial<StoredMcpServer> = {}): StoredMcpServer => ({ type: "http", url, headers: {}, enabled: true, ...extra } as StoredMcpServer);
 const record = (tokens: McpOAuthRecord["tokens"], state: McpOAuthRecord["state"] = "signed-in"): McpOAuthRecord =>
   ({ url: "https://mcp.linear.app/sse", state, clientId: "client", tokenEndpoint: "https://linear.app/token", ...(tokens ? { tokens } : {}) });
-const HIGHLEVEL: HighLevelConnection = { kind: "oauth", accessToken: "hl-access", refreshToken: "hl-refresh", expiresAt: 5, locationId: "loc_1", scopes: "", connectedAt: 1, state: "signed-in" };
 
 describe("which MCP servers need this computer", () => {
   it("a program by path, a file or folder of this computer, or an address only it reaches", () => {
@@ -47,7 +45,7 @@ describe("which MCP servers need this computer", () => {
 
 describe("what GET /api/cloud-connections names", () => {
   const sources = (config: AppConfig, extra: Partial<Parameters<typeof listConnections>[0]> = {}) => ({
-    config, mcpAuth: () => "none" as const, composio: null, highlevel: () => null, ...extra,
+    config, mcpAuth: () => "none" as const, composio: null, ...extra,
   });
 
   it("each connection by name, with what moves it, and never a secret", () => {
@@ -62,7 +60,7 @@ describe("what GET /api/cloud-connections names", () => {
     } as unknown as AppConfig;
     const listed = listConnections(sources(config, { mcpAuth: (name) => (name === "linear" ? "signed-in" : "none"),
       composio: { mode: "managed", account: "managed:abc", installationId: "11111111-2222-4333-8444-555555555555", shared: false },
-      highlevel: () => HIGHLEVEL }));
+      email: () => [{ address: "ana@example.test" }] }));
     expect(listed).toEqual([
       { id: "mcp:dodo", kind: "mcp", label: "dodo", detail: "npx dodopayments-mcp", launcher: "npx" },
       { id: "mcp:linear", kind: "mcp", label: "linear", detail: "mcp.linear.app", signIn: true },
@@ -70,11 +68,10 @@ describe("what GET /api/cloud-connections names", () => {
       { id: "key:openrouter", kind: "key", label: "OpenRouter", for: ["openrouter"] },
       { id: "key:anthropic", kind: "key", label: "Anthropic", for: ["claudeApi"] },
       { id: "composio", kind: "composio", label: "Connected apps", mode: "managed", account: "managed:abc", installationId: "11111111-2222-4333-8444-555555555555" },
-      { id: "highlevel", kind: "highlevel", label: "HighLevel", signIn: true },
+      { id: "email", kind: "email", label: "Email" },
     ]);
     const text = JSON.stringify(listed);
-    for (const secret of ["dodo_live_fake", "sk-or-fake", "sk-ant-fake", "sk_live_fake", "linear_fake", "voice-fake", "hl-access", "hl-refresh"]) expect(text).not.toContain(secret);
-    expect(listConnections(sources({} as AppConfig, { highlevel: () => ({ ...HIGHLEVEL, kind: "token", refreshToken: undefined }) }))).toEqual([{ id: "highlevel", kind: "highlevel", label: "HighLevel" }]);
+    for (const secret of ["dodo_live_fake", "sk-or-fake", "sk-ant-fake", "sk_live_fake", "linear_fake", "voice-fake"]) expect(text).not.toContain(secret);
   });
 
   it("an Anthropic key serves Claude (API key) alone there, never Claude bots that sign in with an account", () => {
@@ -91,33 +88,29 @@ describe("what the private port hands over, and lets go of", () => {
   const tokens = { access: "access-1", refresh: "refresh-1", expiresAt: 10 };
 
   it("a server with its secrets and its sign-in, and the digest of that sign-in", () => {
-    const answer = answerConnection("mcp:linear", { config, mcpSignIn: () => record(tokens), highlevel: () => null });
+    const answer = answerConnection("mcp:linear", { config, mcpSignIn: () => record(tokens) });
     expect(answer).toEqual({ ok: true, digest: signInDigest(tokens), connection: { mcp: { name: "linear", signIn: record(tokens),
       server: { type: "http", url: "https://mcp.linear.app/sse", headers: { Authorization: "Bearer h" }, oauth: { clientId: "client", clientSecret: "app-secret" }, enabled: true } } } });
     // A sign-in that needs signing in again, or a server that runs here, hands over no sign-in.
-    expect(answerConnection("mcp:linear", { config, mcpSignIn: () => record(undefined, "needs-sign-in"), highlevel: () => null })).not.toHaveProperty("digest");
-    const here = answerConnection("mcp:notes", { config, mcpSignIn: () => ({ ...record(tokens), url: "http://localhost:9/mcp" }), highlevel: () => null });
+    expect(answerConnection("mcp:linear", { config, mcpSignIn: () => record(undefined, "needs-sign-in") })).not.toHaveProperty("digest");
+    const here = answerConnection("mcp:notes", { config, mcpSignIn: () => ({ ...record(tokens), url: "http://localhost:9/mcp" }) });
     expect(here).toMatchObject({ ok: true, connection: { mcp: { name: "notes" } } });
     expect(here).not.toHaveProperty("digest");
     expect(JSON.stringify(here)).not.toContain("refresh-1");
   });
 
-  it("a key, the person's own Composio project and HighLevel, each as My Cloud's routes take them", () => {
-    const sources = { config, mcpSignIn: () => undefined, highlevel: () => HIGHLEVEL };
+  it("a key and the person's own Composio project, each as My Cloud's routes take them", () => {
+    const sources = { config, mcpSignIn: () => undefined };
     expect(answerConnection("key:openrouter", sources)).toEqual({ ok: true, connection: { config: { openrouter: { key: "sk-or-fake" } } } });
     expect(answerConnection("key:openai", sources)).toEqual({ ok: false, error: "This key is no longer saved on this computer." });
     expect(answerConnection("composio", sources)).toEqual({ ok: true, connection: { composio: { apiKey: "ck_fake", userId: "u_1" } } });
-    expect(answerConnection("highlevel", sources)).toMatchObject({ ok: true, connection: { highlevel: HIGHLEVEL }, digest: expect.stringMatching(/^[0-9a-f]{64}$/u) });
-    expect(answerConnection("highlevel", { ...sources, highlevel: () => ({ ...HIGHLEVEL, kind: "token" }) })).not.toHaveProperty("digest");
     expect(answerConnection("mcp:gone", sources)).toEqual({ ok: false, error: "This MCP server is no longer on this computer." });
   });
 
   it("lets go of a sign-in only while it is the one My Cloud took: one that refreshed since is said to have changed", () => {
     const forgot: string[] = [];
     let current = record(tokens);
-    let highlevel: HighLevelConnection | null = HIGHLEVEL;
-    const sources = { config, mcpSignIn: () => current, highlevel: () => highlevel,
-      forgetSignIn: (name: string) => { forgot.push(name); }, forgetHighLevel: () => { forgot.push("highlevel"); highlevel = null; } };
+    const sources = { config, mcpSignIn: () => current, forgetSignIn: (name: string) => { forgot.push(name); } };
     const moved = signInDigest(tokens);
     current = record({ ...tokens, access: "access-2", refresh: "refresh-2" });
     expect(releaseConnection("mcp:linear", moved, sources)).toEqual({ ok: true, release: { changed: true } });
@@ -125,10 +118,6 @@ describe("what the private port hands over, and lets go of", () => {
     current = record(tokens);
     expect(releaseConnection("mcp:linear", moved, sources)).toEqual({ ok: true, release: { released: true } });
     expect(forgot).toEqual(["linear"]);
-    const highlevelDigest = (answerConnection("highlevel", sources) as { digest: string }).digest;
-    expect(releaseConnection("highlevel", "0".repeat(64), sources)).toEqual({ ok: true, release: { changed: true } });
-    expect(releaseConnection("highlevel", highlevelDigest, sources)).toEqual({ ok: true, release: { released: true } });
-    expect(forgot).toEqual(["linear", "highlevel"]);
     expect(releaseConnection("key:openrouter", moved, sources)).toEqual({ ok: false, error: "Only a sign-in that moved is let go of." });
   });
 });

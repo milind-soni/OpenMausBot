@@ -35,8 +35,10 @@ export async function loadLocale(tag: string | undefined): Promise<string> {
 }
 
 function show(resolved: string): string {
+  const changed = resolved !== active || (locales[resolved] ?? en) !== activePack;
   activePack = locales[resolved] ?? en;
   active = resolved;
+  if (changed) for (const listener of localeListeners) listener();
   // Screen readers choose pronunciation from <html lang>, and index.html ships "en".
   const root = typeof document === "undefined" ? undefined : document?.documentElement;
   if (root) {
@@ -64,12 +66,41 @@ export function activeLocale(): string {
   return active;
 }
 
+const localeListeners = new Set<() => void>();
+
+/** Calls `listener` each time the page shows another language; for useActiveLocale. */
+export function subscribeLocale(listener: () => void): () => void {
+  localeListeners.add(listener);
+  return () => { localeListeners.delete(listener); };
+}
+
+export function intlLocale(system: string | undefined = globalThis.navigator?.language): string {
+  const tag = documentLanguage(active);
+  if (tag.includes("-") || !system) return tag;
+  let canonical: string | undefined;
+  try {
+    canonical = Intl.getCanonicalLocales(system)[0];
+  } catch {
+    return tag;
+  }
+  return canonical?.toLowerCase().split("-")[0] === tag ? canonical : tag;
+}
+
 let active = "en";
 let activePack: LocalePack = en;
 let switches = 0;
 
-export function tFromServer(key: string | undefined, fallback: string | undefined): string | undefined {
-  return key && Object.hasOwn(en, key) ? t(key as LocaleKey) : fallback;
+export function tFromServer(key: string | undefined, fallback: string, params?: Record<string, string | number>): string;
+export function tFromServer(key: string | undefined, fallback: string | undefined, params?: Record<string, string | number>): string | undefined;
+export function tFromServer(key: string | undefined, fallback: string | undefined, params?: Record<string, string | number>): string | undefined {
+  if (!key || !Object.hasOwn(en, key)) return fallback;
+  const template = activePack[key as LocaleKey] ?? en[key as LocaleKey];
+  const unfilled = [...template.matchAll(/\{(\w+)\}/g)].some(([, name]) => !params || !Object.hasOwn(params, name!));
+  return unfilled ? fallback : t(key as LocaleKey, params);
+}
+
+export function activePackComplete(): boolean {
+  return activePack !== en && Object.keys(en).every((key) => Object.hasOwn(activePack, key));
 }
 
 /** `{app}` is the product's name as a person reads it (productName) unless `params` names it. */

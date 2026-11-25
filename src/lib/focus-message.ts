@@ -1,7 +1,9 @@
 // Rows are `display: contents` wrappers with no box, so their last child is what gets scrolled and highlighted.
-import { useEffect } from "react";
-import { api, MESSAGE_PAGE_SIZE, useStore, type Action, type AppState, type Message } from "@/state/store";
+import { useEffect, type RefObject } from "react";
+import { api, MESSAGE_PAGE_SIZE, type Action, type AppState, type Message } from "@/state/store";
+import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import type { SearchHit } from "@/lib/search-hit";
+import { t } from "@/lib/i18n";
 
 const FLASH_CLASSES = ["ring-2", "ring-accent/70", "rounded-2xl", "transition-shadow"];
 
@@ -13,7 +15,8 @@ async function loadThroughMessage(
 ): Promise<void> {
   if (!owner.hasMore || owner.messages.some((message) => message.id === messageId)) return;
   const older: Message[] = [];
-  let before = owner.messages[0]?.id;
+  const heldFrom = owner.messages[0]?.id;
+  let before = heldFrom;
   let hasMore = true;
   let found = false;
   while (before && hasMore && !found) {
@@ -26,7 +29,7 @@ async function loadThroughMessage(
     hasMore = Boolean(page.hasMore) && messages.length > 0;
     before = messages[0]?.id;
   }
-  if (older.length) dispatch({ type: "olderMessages", threadId: owner.threadId, generation, messages: older, hasMore });
+  if (older.length) dispatch({ type: "olderMessages", threadId: owner.threadId, generation, before: heldFrom, messages: older, hasMore });
 }
 
 export async function landOnSearchHit(
@@ -38,7 +41,7 @@ export async function landOnSearchHit(
   const ownerId = hit.botId ?? hit.groupId;
   const bot = hit.botId ? state.bots.find((candidate) => candidate.id === hit.botId) : undefined;
   const group = hit.groupId ? state.groups.find((candidate) => candidate.id === hit.groupId) : undefined;
-  if (!ownerId || (!bot && !group)) throw new Error("That conversation is no longer available.");
+  if (!ownerId || (!bot && !group)) throw new Error(t("chat.conversationGone"));
 
   const switchAlone = bot && bot.threadId !== hit.threadId && !threadsShown ? bot : undefined;
   if (!switchAlone) dispatch({ type: "select", id: ownerId });
@@ -98,9 +101,8 @@ function matchRange(root: HTMLElement, text: string): Range | null {
   return null;
 }
 
-export function useFocusMessage(threadId: string, ready: boolean) {
-  const { state, dispatch } = useStore();
-  const focus = state.focusMessage;
+export function useFocusMessage(threadId: string, ready: boolean, rootRef?: RefObject<HTMLElement | null>) {
+  const focus = useStoreSelector((state) => state.focusMessage), dispatch = useStoreDispatch();
   useEffect(() => {
     if (!focus || focus.consumed || focus.threadId !== threadId || !ready) return;
     let tries = 0;
@@ -112,7 +114,7 @@ export function useFocusMessage(threadId: string, ready: boolean) {
     let highlight: Highlight | null = null;
     const attempt = () => {
       if (cancelled) return;
-      const wrapper = document.querySelector<HTMLElement>(`[data-mid="${CSS.escape(focus.messageId)}"]`);
+      const wrapper = (rootRef?.current ?? document).querySelector<HTMLElement>(`[data-mid="${CSS.escape(focus.messageId)}"]`);
       const row = wrapper?.lastElementChild as HTMLElement | null;
       target = focus.matchText ? row?.querySelector<HTMLElement>("[data-chat-bubble]") ?? row : row;
       if (!target) {

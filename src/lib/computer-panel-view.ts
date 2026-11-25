@@ -3,9 +3,10 @@ export type ComputerPanelView = "computer" | "android" | "browser" | "routines" 
 type PanelTabsContext = { advanced: boolean; androidConnected: boolean };
 
 export function computerPanelTabs({ advanced, androidConnected }: PanelTabsContext): ComputerPanelView[] {
+  const android = androidConnected ? (["android"] as const) : [];
   return advanced
-    ? ["computer", "routines", ...(androidConnected ? (["android"] as const) : []), "browser", "data"]
-    : ["computer", "browser", "data", "files"];
+    ? ["computer", "routines", ...android, "browser", "data"]
+    : ["computer", ...android, "browser", "data", "files"];
 }
 
 export function resolveComputerPanelView(view: ComputerPanelView, context: PanelTabsContext): ComputerPanelView {

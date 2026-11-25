@@ -2,8 +2,15 @@ const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const {
+  PLUGIN_REQUIRED_MESSAGE,
+  SYSTEM_DRIVER,
+  isHyprlandSession,
+  probeCuaHyprlandPlugin,
+  systemDriverPackageVersion,
+} = require("./cua-hyprland.cjs");
 
-const CERTIFIED_DRIVER_VERSION = "0.19.3";
+const CERTIFIED_DRIVER_VERSION = "0.41.3";
 const CERTIFIED_MANIFEST_SCHEMA = "1";
 const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 512 * 1024;
@@ -27,6 +34,8 @@ const SESSION_ENV_KEYS = new Set([
   "DBUS_SESSION_BUS_ADDRESS",
   "DISPLAY",
   "HOME",
+  // Hyprland's IPC and Cua's plugin sockets are found through it.
+  "HYPRLAND_INSTANCE_SIGNATURE",
   "LANG",
   "LANGUAGE",
   "LC_ALL",
@@ -523,14 +532,14 @@ function parseVersion(stdout) {
   return match?.[1] ?? null;
 }
 
-function validateManifest(manifest, binaryPath) {
+function validateManifest(manifest, binaryPath, expectedVersion = CERTIFIED_DRIVER_VERSION) {
   if (manifest.schema_version !== CERTIFIED_MANIFEST_SCHEMA) {
     throw commandFailure(
       "unsupported-manifest",
       `Cua Driver manifest schema ${String(manifest.schema_version)} is not supported.`,
     );
   }
-  if (manifest.binary_version !== CERTIFIED_DRIVER_VERSION) {
+  if (manifest.binary_version !== expectedVersion) {
     throw commandFailure(
       "unsupported-driver-version",
       `Cua Driver ${String(manifest.binary_version)} is not supported; install ${CERTIFIED_DRIVER_VERSION}.`,
@@ -609,6 +618,93 @@ function validateDoctor(report, { session = "x11" } = {}) {
   return { ok: true, probes, warnings: probes.filter((probe) => probe.status === "warn") };
 }
 
+/** A system driver may run ahead of the bundled one within the certified minor line; patch releases keep the daemon
+ * contract this app checks at every start. */
+function compatibleSystemDriverVersion(version) {
+  const parse = (value) => /^(\d+)\.(\d+)\.(\d+)$/.exec(String(value ?? ""))?.slice(1).map(Number);
+  const found = parse(version);
+  const certified = parse(CERTIFIED_DRIVER_VERSION);
+  return Boolean(found && found[0] === certified[0] && found[1] === certified[1] && found[2] >= certified[2]);
+}
+
+/**
+ * The one exception to "only the bundled driver runs": on Omarchy with Cua's Hyprland plugin active, prefer the
+ * cua-driver that Omarchy's own package installed. The plugin is built against the exact system Hyprland and ships
+ * beside that package's driver, so that pair matches; a bundled plugin would break on the next Hyprland update, and a
+ * bundled driver can lag the system plugin's input protocol. The trust decision stays narrow: only the fixed path
+ * /usr/bin/cua-driver, owned by root and not writable by anyone else, and only when pacman's database says the
+ * cua-driver-bin package owns it. That is the same root-owned package trust as the compositor itself. Never a PATH
+ * lookup, never a user-installed copy. Anything else falls back to the bundled driver.
+ */
+async function discoverSystemPackageDriver({
+  validate = validateDriverCandidate,
+  packageVersion = systemDriverPackageVersion,
+  statFile = (file) => fs.statSync(file),
+} = {}) {
+  let owner;
+  try {
+    owner = statFile(SYSTEM_DRIVER).uid;
+  } catch {
+    return unavailable("system-driver-missing", "Omarchy's cua-driver package is not installed.");
+  }
+  if (owner !== 0) {
+    return unavailable("system-driver-untrusted", "The system cua-driver is not owned by root.");
+  }
+  const validated = validate(SYSTEM_DRIVER);
+  if (validated.status !== "found") {
+    return unavailable("system-driver-untrusted", "The system cua-driver failed path validation.");
+  }
+  const version = await packageVersion(SYSTEM_DRIVER);
+  // A packaged symlink is followed only into a file the same package owns.
+  const target = validated.path === SYSTEM_DRIVER ? version : await packageVersion(validated.path);
+  if (!version || target !== version) {
+    return unavailable("system-driver-unowned", "pacman does not list cua-driver-bin as the owner of the system cua-driver.");
+  }
+  return { ...validated, source: "system-package", packageVersion: version };
+}
+
+async function checkDriver(discovered, { session, commandEnv, run, acceptVersion }) {
+  const versionResult = await run(discovered.path, ["--version"], { env: commandEnv });
+  const driverVersion = parseVersion(versionResult.stdout || versionResult.stderr);
+  if (versionResult.exitCode !== 0 || !acceptVersion(driverVersion)) {
+    return unavailable(
+      "unsupported-driver-version",
+      `Cua Driver ${driverVersion ?? "unknown"} is not supported; install ${CERTIFIED_DRIVER_VERSION}.`,
+      { path: discovered.path, source: discovered.source, driverVersion },
+    );
+  }
+
+  const manifestResult = await run(discovered.path, ["manifest"], { env: commandEnv });
+  if (manifestResult.exitCode !== 0) {
+    return unavailable("manifest-failed", "Cua Driver manifest validation failed.", {
+      path: discovered.path,
+      source: discovered.source,
+    });
+  }
+  const manifest = parseJsonObject(manifestResult.stdout, "Cua Driver manifest");
+  const mcp = validateManifest(manifest, discovered.path, driverVersion);
+
+  const doctorResult = await run(discovered.path, ["doctor", "--json"], { env: commandEnv });
+  const doctorReport = parseJsonObject(doctorResult.stdout, "Cua Driver doctor");
+  if (doctorResult.exitCode !== 0 && doctorReport.ok !== false) {
+    return unavailable("doctor-failed", "Cua Driver diagnostics failed.", {
+      path: discovered.path,
+      source: discovered.source,
+    });
+  }
+  const doctor = validateDoctor(doctorReport, { session });
+  return {
+    status: "ready",
+    path: discovered.path,
+    source: discovered.source,
+    fileIdentity: discovered.fileIdentity,
+    driverVersion,
+    manifestSchema: manifest.schema_version,
+    mcp,
+    doctor,
+  };
+}
+
 async function inspectLinuxCuaDriver({
   platform = process.platform,
   arch = process.arch,
@@ -620,6 +716,8 @@ async function inspectLinuxCuaDriver({
   currentUsername,
   lookupPrivateGroup,
   run = runCuaCommand,
+  probePlugin = probeCuaHyprlandPlugin,
+  discoverSystemDriver = discoverSystemPackageDriver,
 } = {}) {
   const declaredSession = String(env.XDG_SESSION_TYPE ?? "").toLowerCase();
   const session =
@@ -637,21 +735,32 @@ async function inspectLinuxCuaDriver({
       "Bundled Linux local control is currently available only on x64 Ubuntu.",
     );
   }
+  let compositor;
   if (session === "wayland") {
     const desktops = [env.XDG_CURRENT_DESKTOP, env.XDG_SESSION_DESKTOP]
       .flatMap((value) => String(value ?? "").toLowerCase().split(":"))
       .filter(Boolean);
-    if (!desktops.includes("gnome")) {
+    if (isHyprlandSession(env)) {
+      compositor = "hyprland";
+    } else if (desktops.includes("gnome")) {
+      compositor = "gnome-mutter";
+    } else {
       return unavailable(
         "wayland-compositor-unsupported",
-        "Wayland local control is currently limited to GNOME.",
+        "Wayland local control is currently limited to GNOME and Omarchy (Hyprland).",
       );
     }
     if (!env.WAYLAND_DISPLAY || !env.DBUS_SESSION_BUS_ADDRESS) {
       return unavailable(
         "wayland-session-unavailable",
-        "Local control requires an active GNOME Wayland desktop session.",
+        compositor === "hyprland"
+          ? "Local control requires an active Hyprland desktop session."
+          : "Local control requires an active GNOME Wayland desktop session.",
       );
+    }
+    // Checked again at every start: the plugin may have been disabled, or left stale by a Hyprland update.
+    if (compositor === "hyprland" && (await probePlugin({ env })) !== "active") {
+      return unavailable("linux-hyprland-plugin-required", PLUGIN_REQUIRED_MESSAGE, { compositor });
     }
   } else if (session !== "x11") {
     return unavailable(
@@ -661,6 +770,43 @@ async function inspectLinuxCuaDriver({
   }
   if (session === "x11" && !env.DISPLAY) {
     return unavailable("display-unavailable", "Local control requires an active Xorg display.");
+  }
+
+  const commandEnv = desktopCommandEnvironment(
+    env,
+    session === "wayland" ? { CUA_DRIVER_RS_ENABLE_WAYLAND: "1" } : {},
+  );
+  const located = (result) => ({ ...result, commandEnv, session, ...(compositor ? { compositor } : {}) });
+  const failed = (error, discovered) =>
+    unavailable(error?.code ?? "diagnostics-failed", error?.message ?? String(error), {
+      path: discovered.path,
+      source: discovered.source,
+      ...(error?.probes ? { probes: error.probes } : {}),
+    });
+
+  // An explicit CUA_DRIVER_PATH keeps its existing meaning; otherwise Omarchy's package-owned driver goes first.
+  if (compositor === "hyprland" && !env.CUA_DRIVER_PATH) {
+    const system = await discoverSystemDriver({
+      validate: (candidate) =>
+        validateDriverCandidate(candidate, { currentUid, currentGid, currentUsername, lookupPrivateGroup }),
+    });
+    if (system.status === "found") {
+      try {
+        const checked = await checkDriver(system, {
+          session,
+          commandEnv,
+          run,
+          acceptVersion: compatibleSystemDriverVersion,
+        });
+        // The package's own version must name the binary that answered, or the file is not what pacman installed.
+        const packaged = String(system.packageVersion).replace(/^\d+:/, "").split("-")[0];
+        if (checked.status === "ready" && packaged === checked.driverVersion) {
+          return located({ ...checked, packageVersion: system.packageVersion });
+        }
+      } catch {
+        // Fall back to the bundled driver below.
+      }
+    }
   }
 
   const discovered = discoverLinuxCuaDriver({
@@ -673,61 +819,16 @@ async function inspectLinuxCuaDriver({
     lookupPrivateGroup,
   });
   if (discovered.status !== "found") return discovered;
-  const commandEnv = desktopCommandEnvironment(
-    env,
-    session === "wayland" ? { CUA_DRIVER_RS_ENABLE_WAYLAND: "1" } : {},
-  );
-
   try {
-    const versionResult = await run(discovered.path, ["--version"], { env: commandEnv });
-    const driverVersion = parseVersion(versionResult.stdout || versionResult.stderr);
-    if (versionResult.exitCode !== 0 || driverVersion !== CERTIFIED_DRIVER_VERSION) {
-      return unavailable(
-        "unsupported-driver-version",
-        `Cua Driver ${driverVersion ?? "unknown"} is not supported; install ${CERTIFIED_DRIVER_VERSION}.`,
-        { path: discovered.path, source: discovered.source, driverVersion },
-      );
-    }
-
-    const manifestResult = await run(discovered.path, ["manifest"], { env: commandEnv });
-    if (manifestResult.exitCode !== 0) {
-      return unavailable("manifest-failed", "Cua Driver manifest validation failed.", {
-        path: discovered.path,
-        source: discovered.source,
-      });
-    }
-    const manifest = parseJsonObject(manifestResult.stdout, "Cua Driver manifest");
-    const mcp = validateManifest(manifest, discovered.path);
-
-    const doctorResult = await run(discovered.path, ["doctor", "--json"], { env: commandEnv });
-    const doctorReport = parseJsonObject(doctorResult.stdout, "Cua Driver doctor");
-    if (doctorResult.exitCode !== 0 && doctorReport.ok !== false) {
-      return unavailable("doctor-failed", "Cua Driver diagnostics failed.", {
-        path: discovered.path,
-        source: discovered.source,
-      });
-    }
-    const doctor = validateDoctor(doctorReport, { session });
-
-    return {
-      status: "ready",
-      path: discovered.path,
-      source: discovered.source,
-      fileIdentity: discovered.fileIdentity,
-      driverVersion,
-      manifestSchema: manifest.schema_version,
-      mcp,
-      doctor,
-      commandEnv,
+    const checked = await checkDriver(discovered, {
       session,
-      ...(session === "wayland" ? { compositor: "gnome-mutter" } : {}),
-    };
-  } catch (error) {
-    return unavailable(error?.code ?? "diagnostics-failed", error?.message ?? String(error), {
-      path: discovered.path,
-      source: discovered.source,
-      ...(error?.probes ? { probes: error.probes } : {}),
+      commandEnv,
+      run,
+      acceptVersion: (version) => version === CERTIFIED_DRIVER_VERSION,
     });
+    return checked.status === "ready" ? located(checked) : checked;
+  } catch (error) {
+    return failed(error, discovered);
   }
 }
 
@@ -735,6 +836,8 @@ module.exports = {
   CERTIFIED_DRIVER_VERSION,
   CERTIFIED_MANIFEST_SCHEMA,
   DRIVER_FILE_IDENTITY_KEYS,
+  compatibleSystemDriverVersion,
+  discoverSystemPackageDriver,
   captureDriverFileIdentity,
   desktopCommandEnvironment,
   discoverLinuxCuaDriver,

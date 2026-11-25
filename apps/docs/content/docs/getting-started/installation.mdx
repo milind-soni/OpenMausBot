@@ -1,6 +1,6 @@
 ---
 title: Installation
-description: Install OpenMausBot on macOS, Windows, or Ubuntu.
+description: Install MausBot on macOS, Windows, or Ubuntu.
 icon: Download
 ---
 
@@ -14,25 +14,30 @@ Choose your computer below. Each link always downloads the latest published buil
 | macOS Intel | [Download `.dmg`](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-intel.dmg) | Signed and notarized. |
 | Windows x64 | [Download installer](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-setup.exe) | Per-user installer; Windows signing is not yet available. |
 | Ubuntu 24.04 x64 | [Download `.deb`](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-amd64.deb) · [AppImage](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot.AppImage) | The `.deb` is recommended; the AppImage is portable. |
+| Fedora x64 | [Download `.rpm`](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-x86_64.rpm) | Community-supported; install with `sudo dnf install ./OpenMausBot-x86_64.rpm`. |
 
 <Callout type="warn" title="Windows SmartScreen">
   The Windows installer is not code-signed yet. Windows may show “Unknown publisher.” Verify that you downloaded it from the official OpenMausBot releases repository before choosing **More info → Run anyway**.
 </Callout>
 
+<Callout title="Windows install folder">
+  By default the Windows app installs to `%LOCALAPPDATA%\Programs\OpenMausBot`, and every update goes back to the folder the installer recorded. Keep it where the installer put it: a copy moved by hand (for example from C: to D:) is left behind, and the next update lands in the recorded folder again.
+</Callout>
+
 ## Install an agent CLI
 
-OpenMausBot needs at least one supported agent engine installed and signed in. Claude and Codex are the most common starting points.
+MausBot needs at least one supported agent engine installed and signed in. Claude and Codex are the most common starting points.
 
 1. Install the CLI from its official provider.
 2. Run it once in a terminal and complete sign-in.
-3. Restart OpenMausBot.
+3. Restart MausBot.
 4. Open the model picker. Available engines appear normally; unavailable engines explain what is missing.
 
 See [Agent engines](../providers/index.mdx) for the complete list and explicit path overrides.
 
-## Using OpenMausBot at work
+## Using MausBot at work
 
-If your company uses OpenMaus Admin, you can sign in with your organization to use the AI models it provides, alongside your own. It is optional. See [Use OpenMausBot at work](./organisation.mdx).
+If your company uses OpenMaus Admin, you can sign in with your organization to use the AI models it provides, alongside your own. It is optional. See [Use MausBot at work](./organisation.mdx).
 
 ## Build from source
 
@@ -55,4 +60,4 @@ pnpm dev:desktop
 
 ## Where data lives
 
-OpenMausBot stores its application data under `~/.openmausbot`. Electron window and browser data use the normal per-platform application data directory.
+MausBot stores its application data under `~/.openmausbot`. Workspaces you add are in `~/.openmausbot-profiles/`; once this computer's bots have moved to My Cloud, This Mac's (or This PC's) is there too, as `default`, and `~/.openmausbot` keeps the copy from before the move. On a server, see [Data and backups](/docs/self-hosting/data-and-backups) for the Docker and installer folders. Electron window and browser data use the normal per-platform application data directory.

@@ -1,4 +1,5 @@
 import * as boat from "../boat.ts";
+import { boatHealth } from "../boat-health.ts";
 import type { ComputerControl } from "../computer-control.ts";
 import type { MapComputer, MapComputersPayload } from "../../shared/map-computer.ts";
 import { createComputerFrames, mapComputerState, type ComputerFrames, type FrameMachine } from "../computer-frames.ts";
@@ -79,20 +80,23 @@ async function captureThumbnail(cfg: AppConfig, boxId: string, signal: AbortSign
   return { data, mime: "image/jpeg" };
 }
 
-/** GET /api/computers/frames?have=ID:VERSION,… → `{ configured, available, now, computers }`. Admin-only like every computer route. */
-export function createComputerFramesRoutes(deps: ComputerFramesRouteDeps, frames?: ComputerFrames): RouteHandler {
-  const { cfg, store, teamComputers, computerControl } = deps;
-  const teamFor = (owner: string) => teamComputers.list().find((computer) => teamComputerOwner(computer.id) === owner);
-  const working = (owner: string) => {
-    const team = teamFor(owner);
+function workingFor(deps: Pick<ComputerFramesRouteDeps, "teamComputers" | "teamComputerInUse" | "botHasActiveTurn">) {
+  return (owner: string) => {
+    const team = deps.teamComputers.list().find((computer) => teamComputerOwner(computer.id) === owner);
     return team ? deps.teamComputerInUse(team) : deps.botHasActiveTurn(owner);
   };
-  const cache = frames ?? createComputerFrames({
+}
+
+/** The Team map's cloud computers and frames, listed and captured only while a map watches. */
+export function createMapFrames(deps: ComputerFramesRouteDeps): ComputerFrames {
+  const { cfg, computerControl } = deps;
+  const working = workingFor(deps);
+  return createComputerFrames({
     listMachines: async () => {
       const inventory = await boat.listManagedBoats(cfg, deps.managedBoatOwners(), { adoptLegacy: false });
       if (!inventory.available) return null;
       return inventory.instances.flatMap((instance) => instance.ownerBotId && instance.state !== "removing"
-        ? [{ owner: instance.ownerBotId, boxId: instance.boxId, state: instance.state }] : []);
+        ? [{ owner: instance.ownerBotId, boxId: instance.boxId, state: boatHealth.notRespondingSince(instance.boxId) === null ? instance.state : "error" }] : []);
     },
     capture: (boxId, signal) => captureThumbnail(cfg, boxId, signal),
     turnFrame: (boxId) => {
@@ -103,6 +107,12 @@ export function createComputerFramesRoutes(deps: ComputerFramesRouteDeps, frames
     held: (owner) => computerControl.snapshot(owner).held,
     paused: () => deps.computerProviderConfigTransitions.has("box") || !boat.boatConfigured(cfg),
   });
+}
+
+/** GET /api/computers/frames?have=ID:VERSION,… → `{ configured, available, now, computers }`. Admin-only like every computer route. */
+export function createComputerFramesRoutes(deps: ComputerFramesRouteDeps, cache: ComputerFrames = createMapFrames(deps)): RouteHandler {
+  const { cfg, store, teamComputers } = deps;
+  const working = workingFor(deps);
   return async ({ res, url, path, method, json }) => {
     if (method !== "GET" || path !== "/api/computers/frames") return PASS;
     res.setHeader("cache-control", "private, no-store");

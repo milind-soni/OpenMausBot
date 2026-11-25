@@ -1,13 +1,14 @@
 // Owns two disposable fake-engine workspaces; accepts no live URL or home.
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "./control-omb.ts";
 import { waitForExit } from "../server/testing/cleanup.ts";
 import { escapeAttribute } from "../src/lib/composer-attachments.ts";
+import type { WorkspaceBackupExportStatus } from "../shared/workspace-backup.ts";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PASSWORD = "fixture-backup-password-only";
@@ -150,16 +151,33 @@ export async function verifyWorkspaceBackup(report: (event: unknown) => void = (
     assert.ok(original.messages.some((message: { text?: string }) => message.text?.includes("hello from fake claude")));
     const oldBytes = readFileSync(join(destination.info.dataDir, "bots.json"));
     const clientState = { "omb-skin": "default", "omb-drafts": JSON.stringify({ [bot.threadId]: "Keep draft" }), "omb-webhook-credentials": "private-source-webhook-url", "unrelated-auth-token": "must-not-transfer" };
-    const exported = await api(source, "POST", "/api/workspace-backup/export", { password: PASSWORD, clientState });
-    assert.equal(exported.status, 200, JSON.stringify(exported.body));
-    assert.equal(exported.body.summary.bots, before.bots.length);
-    assert.equal(Object.hasOwn(exported.body.summary, "includesCredentials"), false);
-    const download = await fetch(`${source.info.url}/api/workspace-backup/download/${exported.body.id}`);
+    const legacy = await api(source, "POST", "/api/workspace-backup/export", { password: PASSWORD, clientState });
+    assert.equal(legacy.status, 200, JSON.stringify(legacy.body));
+    assert.equal(legacy.body.summary.bots, before.bots.length);
+    assert.equal(Object.hasOwn(legacy.body.summary, "includesCredentials"), false);
+    const exportPath = `/api/workspace-backup/export-jobs/${randomUUID()}`;
+    const submitted = await fetch(`${source.info.url}${exportPath}`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ password: PASSWORD, clientState }), signal: AbortSignal.timeout(10_000),
+    });
+    assert.equal(submitted.status, 202);
+    await submitted.body?.cancel();
+    const deadline = Date.now() + 60_000;
+    let job: WorkspaceBackupExportStatus;
+    do {
+      const response = await api(source, "GET", exportPath);
+      assert.equal(response.status, 200);
+      job = response.body as WorkspaceBackupExportStatus;
+      if (job.state === "running") await new Promise((done) => setTimeout(done, 100));
+    } while (job.state === "running" && Date.now() < deadline);
+    assert.equal(job.state, "ready", JSON.stringify(job));
+    const download = await fetch(`${source.info.url}/api/workspace-backup/download/${job.id}`);
     assert.equal(download.status, 200);
     const encrypted = Buffer.from(await download.arrayBuffer());
-    assert.equal(encrypted.byteLength, exported.body.bytes);
+    assert.ok(encrypted.byteLength > 0);
+    assert.equal(encrypted.byteLength, Number(download.headers.get("content-length")));
     for (const privateText of [soul, "fixture-voice-key", "WORKSPACE_SKILL_MARKER", "Keep draft"]) assert.equal(encrypted.includes(Buffer.from(privateText)), false);
-    record({ command: "download encrypted workspace", bytes: encrypted.length, summary: exported.body.summary });
+    record({ command: "recover and download encrypted workspace", bytes: encrypted.length });
 
     const pairing = await api(destination, "POST", "/api/auth/pairing", { scopes: ["client"] });
     const paired = await api(destination, "POST", "/api/auth/pair", { code: pairing.body.code, label: "Fixture client" });

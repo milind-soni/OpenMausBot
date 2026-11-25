@@ -72,7 +72,7 @@ describe("the Set me up offer", () => {
     peer.take(peer.say("A teammate asked you to review this", peer.threadId, { peerAsk: { botId: "b2", name: "Kit" } }));
     expect(openSetupOffer(peer.store, peer.bot.id, peer.threadId)).toBeNull();
     expect(askForSetup(peer.store, peer.bot.id, peer.threadId, "en")).toEqual({
-      ok: false, status: 409, error: "This chat has already started. Type /setup and what you'd like this bot to do.",
+      ok: false, status: 409, error: "This chat has already started. Type /setup and what you'd like this bot to do.", errorKey: "serverError.setup.started",
     });
   });
 });
@@ -109,7 +109,7 @@ describe("pressing Set me up", () => {
     const s = setup();
     s.store.patchBot(s.bot.id, { soul: "Only water the garden." });
     expect(askForSetup(s.store, s.bot.id, s.threadId, "en")).toEqual({
-      ok: false, status: 409, error: "This bot already has instructions. To change its job, type /setup and what you'd like it to do.",
+      ok: false, status: 409, error: "This bot already has instructions. To change its job, type /setup and what you'd like it to do.", errorKey: "serverError.setup.hasInstructions",
     });
     const fresh = setup();
     fresh.take(fresh.say("hello"));
@@ -188,7 +188,7 @@ describe("the line after the press", () => {
   it("refuses someone else's press while another person's request waits; an owner or admin may clear it", () => {
     const s = setup();
     askForSetup(s.store, s.bot.id, s.threadId, "en", "member-a");
-    const refused = { ok: false, status: 409, error: "Someone else is setting this bot up." };
+    const refused = { ok: false, status: 409, error: "Someone else is setting this bot up.", errorKey: "serverError.setup.someoneElse" };
     expect(askForSetup(s.store, s.bot.id, s.threadId, "en", "member-b")).toEqual(refused);
     expect(askForSetup(s.store, s.bot.id, s.threadId, "en")).toEqual(refused);
     expect(askForSetup(s.store, s.bot.id, s.threadId, "en", "member-a")).toEqual({ ok: true, already: true });

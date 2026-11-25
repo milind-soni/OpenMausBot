@@ -313,3 +313,30 @@ test("an answer in flight when the child starts listening gets the grace", async
   });
   assert.equal(outcome.outcome, "ready");
 });
+
+test("the listening line ends the wait between probes once; later waits run their full interval", async () => {
+  const listening = listeningSignal();
+  const waits = [];
+  let attempts = 0;
+  const outcome = await pollServerIdentity({
+    port: 8799,
+    pid: () => 4242,
+    bootTimeoutMs: 60_000,
+    listened: listening.announced,
+    now: () => 0,
+    sleep: (ms) => new Promise((resolve) => {
+      const wait = { ms, done: false, finish: () => { wait.done = true; resolve(); } };
+      waits.push(wait);
+      if (waits.length === 1) listening.hear("openmausbot server on http://127.0.0.1:8799\n");
+      if (waits.length === 2) queueMicrotask(() => queueMicrotask(wait.finish));
+    }),
+    fetchImpl: async () => {
+      attempts += 1;
+      if (attempts < 3) throw new Error("refused");
+      return { ok: true, status: 200, json: async () => OUR_BODY() };
+    },
+  });
+  assert.equal(outcome.outcome, "ready");
+  assert.equal(attempts, 3);
+  assert.deepEqual(waits.map((wait) => wait.done), [false, true]);
+});

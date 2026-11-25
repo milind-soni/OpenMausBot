@@ -2,6 +2,42 @@
 // where the loopback token names the bot. Unrecognized argument shapes are denied: "this bot may call exactly these tools"
 // must hold even against a model that garbles the protocol.
 import { CONNECTOR_TOOL_NAME_PATTERN, type ConnectorToolGrant } from "../shared/wire.ts";
+import { EMAIL_SLUG } from "../shared/email.ts";
+
+/** The connected apps' sandbox: Composio's code tools. Code run there can reach any connected app, past a bot's per-app
+ * grants and scopes, so a bot with per-app grants runs it only at Full access, only by a direct call, and never while its
+ * scopes limit its apps (a read-only app holds even at Full access). */
+export const APP_SANDBOX_TOOLS: readonly string[] = ["COMPOSIO_REMOTE_WORKBENCH", "COMPOSIO_REMOTE_BASH_TOOL"];
+
+/** The service Composio's own tools are named for (COMPOSIO_REMOTE_WORKBENCH → composio). */
+export const APP_SANDBOX_SERVICE = "composio";
+
+/** A bot asked to run code in the apps' sandbox below Full access, with its apps limited, or inside a batch. */
+export const APP_SANDBOX_REFUSAL = "This call was not performed. A bot with its own connected-app grants runs code in the apps' "
+  + "sandbox only at Full access, and only by calling COMPOSIO_REMOTE_WORKBENCH or COMPOSIO_REMOTE_BASH_TOOL directly (never inside "
+  + "COMPOSIO_MULTI_EXECUTE_TOOL). It never runs while the bot's settings limit its connected apps, such as an app set to read only, "
+  + "because that code could reach past the limit. Use a direct app tool, or tell the person what this needs.";
+
+const OPAQUE_CODE_REFUSAL = "OpenMausBot cannot verify this code against this bot's tool grants. Use a direct app tool.";
+
+/** A tools/call frame that calls the apps' sandbox directly. */
+function appSandboxCall(frame: unknown): boolean {
+  if (!frame || typeof frame !== "object" || Array.isArray(frame)) return false;
+  const { method, params } = frame as { method?: unknown; params?: unknown };
+  const name = params && typeof params === "object" && !Array.isArray(params) ? (params as { name?: unknown }).name : undefined;
+  return method === "tools/call" && typeof name === "string" && APP_SANDBOX_TOOLS.includes(name);
+}
+
+/** Whether the apps' sandbox may be offered to a bot at all: a bot whose scopes limit its apps never gets it. */
+export const appSandboxAllowed = (bot: { connectorScopes?: unknown }): boolean => bot.connectorScopes === undefined;
+
+/** The relay's rule for the apps' sandbox: a direct call (`direct`) passes a bot's per-app grants only while the turn runs at
+ * Full access and the bot's scopes limit nothing, judged again each time it is asked (at dispatch too, with the bot as it is
+ * then). `refusal` is what the bot is told when the call stays refused. */
+export function appSandboxRule(frame: unknown, fullAccess: () => boolean): { direct: boolean; open(bot: { connectorScopes?: unknown }): boolean; refusal: string } {
+  const direct = appSandboxCall(frame);
+  return { direct, open: (bot) => direct && appSandboxAllowed(bot) && fullAccess(), refusal: direct ? APP_SANDBOX_REFUSAL : OPAQUE_CODE_REFUSAL };
+}
 
 /** The only Composio meta-tool whose arguments name target tools. */
 export const COMPOSIO_MULTI_EXECUTE_TOOL = "COMPOSIO_MULTI_EXECUTE_TOOL";
@@ -26,10 +62,12 @@ export interface ConnectorVerdict {
   rule: string;
 }
 
-/** Composio's upper-snake prefix before the first underscore, lowercased (GMAIL_SEND_EMAIL → gmail); no underscore, no service. */
+/** Composio's upper-snake prefix before the first underscore, lowercased (GMAIL_SEND_EMAIL → gmail); no underscore, no service.
+ * A leading underscore is part of the slug (`_1PASSWORD_GET_ITEM` → `_1password`). */
 export function serviceSlugFor(tool: string): string | null {
-  const underscore = tool.indexOf("_");
-  if (underscore <= 0) return null;
+  const start = tool.startsWith("_") ? 1 : 0;
+  const underscore = tool.indexOf("_", start);
+  if (underscore <= start) return null;
   return tool.slice(0, underscore).toLowerCase();
 }
 
@@ -127,6 +165,7 @@ export function evaluateConnectorTools(
 
 /** Never lists what the bot could have called instead: enumerating adjacent grants teaches the model to probe. */
 export function connectorRefusalText(denials: ConnectorDenial[]): string {
+  if (denials.length && denials.every((denial) => APP_SANDBOX_TOOLS.includes(denial.tool))) return APP_SANDBOX_REFUSAL;
   const named = denials.map((denial) => '"' + denial.tool + '"').join(", ");
   const one = denials.length === 1;
   return [
@@ -146,9 +185,19 @@ export function connectorUnrecognizedText(invoked: string, reason: string): stri
   ].join(" ");
 }
 
-export function connectorScopeRefusalText(call: ConnectorCall, reason: "app" | "write", bot: string, app: string, tool: string): string {
+export function connectorScopeRefusalText(call: ConnectorCall, reason: "app" | "write" | "account", bot: string, app: string, tool: string, allowed: readonly string[] = []): string {
   if (call.kind === "unrecognized") return connectorUnrecognizedText(call.invoked, call.reason);
+  if (reason === "account") {
+    return `OpenMausBot did not run this: ${bot} may use only account id ${allowed.map((id) => `"${id}"`).join(" or ")} in ${app}. `
+      + "Name one of those in the call's account field, or ask the user to allow another account under the bot's Access settings.";
+  }
   return reason === "app"
     ? `OpenMausBot did not run this: ${bot} has not been given access to ${app}. Ask the user to allow it under the bot's Access settings, and do not retry.`
     : `OpenMausBot did not run this: ${app} is read-only for ${bot}, and ${tool} would write to it. Ask the user before trying again.`;
+}
+
+/** Connected-app services a connectorTools grant names. The built-in Email app is never in the connected-apps inventory or
+ * catalog; its own tools check its grant when called. */
+export function connectedAppGrantSlugs(grants: Record<string, ConnectorToolGrant>): string[] {
+  return Object.keys(grants).filter((slug) => slug !== EMAIL_SLUG);
 }

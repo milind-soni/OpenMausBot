@@ -2,17 +2,24 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUp, Check, Copy, LoaderCircle } from "lucide-react";
 import { claudeSignInLink } from "@/components/ClaudeSignIn";
 import { chatgptPlanLink, deviceSignInProvider, type DeviceSignInStatus } from "@/components/DeviceSignIn";
+import { engineReady } from "@/components/EngineLibrary";
 import { needsSignIn } from "@/components/EngineSetup";
 import { openExternalLink } from "@/lib/app-links";
+import type { ConnectAiPlace } from "@/lib/analytics-allowlist";
+import { connectAiStep, useConnectAiPlace, useConnectAiSteps } from "@/lib/connect-ai-events";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { plainSignIn } from "@/lib/onboarding";
 import { engineSignedIn } from "@/lib/product-events";
-import { api, useStore, type InstanceInfo } from "@/state/store";
+import { api, ApiError, useStore, type InstanceInfo } from "@/state/store";
 import { deviceSignInLink, isDeviceSignInCode } from "../../../shared/device-sign-in";
 
 const POLL_MS = 2_000;
+const POLL_MAX_MS = 30_000;
+const POLL_STALLS = 3;
+const POLL_TIMEOUT_MS = 10_000;
 export const PILL = "ui-button ui-button-pill ui-button-lg ui-button-primary w-[288px] max-w-full";
+const QUIET_PILL = "ui-button ui-button-pill ui-button-lg w-[288px] max-w-full";
 
 type Slot =
   | { kind: "start" }
@@ -25,13 +32,15 @@ type Slot =
  * else through the Connect an AI dialog. */
 export function pillWay(instance: InstanceInfo | undefined): "install" | "sign-in" | "dialog" {
   if (!instance || !plainSignIn(instance)) return "dialog";
-  return needsSignIn(instance) ? "sign-in" : "install";
+  if (!needsSignIn(instance)) return "install";
+  // A sign-in that may need its redirect pasted back has no room in the pill.
+  return instance.authentication?.method === "callback-url" ? "dialog" : "sign-in";
 }
 
 /** One AI connected from the first screen's pill: installed (when the app installs it), signed in on the provider's
  * page, and the code pasted or shown in the same place. A finished sign-in refreshes the AIs, where the welcome's test
- * message takes over. */
-export function useSignInPill(instance: InstanceInfo | undefined) {
+ * message takes over. `place` names the first-run flow for usage analytics. */
+export function useSignInPill(instance: InstanceInfo | undefined, place: ConnectAiPlace | null = null) {
   const { refreshInstances, refreshModels } = useStore();
   const [slot, setSlot] = useState<Slot>({ kind: "start" });
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +71,7 @@ export function useSignInPill(instance: InstanceInfo | undefined) {
     try {
       await api(`${base}/install`, { method: "POST" });
       try { await refreshInstances(); } catch {}
+      try { await refreshModels(id); } catch {}
       if (live.current) setSlot({ kind: "start" });
     } catch (cause) { fail(cause); }
   };
@@ -69,6 +79,7 @@ export function useSignInPill(instance: InstanceInfo | undefined) {
   const start = async () => {
     setSlot({ kind: "busy" });
     setError(null);
+    if (place) connectAiStep("sign_in_started", place, { driverKind: instance?.driverKind ?? "" });
     try {
       const { auth }: { auth: DeviceSignInStatus } = await api(`${base}/auth/start`, { method: "POST" });
       if (auth.phase === "succeeded") return void await done();
@@ -107,21 +118,41 @@ export function useSignInPill(instance: InstanceInfo | undefined) {
   useEffect(() => {
     if (!polling) return;
     const controller = new AbortController();
-    const timer = window.setInterval(() => {
-      void api(`${base}/auth/status?flowId=${encodeURIComponent(polling)}`, { signal: controller.signal })
+    let timer: number | undefined;
+    let stalls = 0;
+    let cancelled = false;
+    const schedule = () => {
+      if (cancelled) return;
+      timer = window.setTimeout(check, Math.min(POLL_MS * 2 ** stalls, POLL_MAX_MS));
+    };
+    const check = () => {
+      void api(`${base}/auth/status?flowId=${encodeURIComponent(polling)}`, { signal: controller.signal, timeoutMs: POLL_TIMEOUT_MS })
         .then(({ auth }: { auth: DeviceSignInStatus }) => {
-          if (auth.phase === "succeeded") void done();
-          else if (auth.phase !== "waiting") fail(new Error(auth.message ?? t("engineSetup.device.failed")));
-          else if (isDeviceSignInCode(provider, auth.userCode)) {
+          if (cancelled) return;
+          if (auth.phase === "succeeded") return void done();
+          if (auth.phase !== "waiting") return fail(new Error(auth.message ?? t("engineSetup.device.failed")));
+          stalls = 0;
+          if (isDeviceSignInCode(provider, auth.userCode)) {
             const code = auth.userCode;
             setSlot((current) => current.kind === "code" && current.flowId === polling && current.code !== code
               ? { ...current, code, link: deviceSignInLink(provider, auth.authorizationUrl, code) } : current);
           }
+          schedule();
         })
-        .catch(() => {});
-    }, POLL_MS);
+        .catch((cause) => {
+          if (cancelled || controller.signal.aborted) return;
+          // The server named a real problem (a flow that is gone, a dead session): show its words at once. A
+          // request that never came back or a dropped connection only counts as a miss and slows the poll down.
+          if (cause instanceof ApiError && cause.status < 500) return fail(cause);
+          stalls += 1;
+          if (stalls >= POLL_STALLS) fail(new Error(t("engineSetup.device.unreachable")));
+          else schedule();
+        });
+    };
+    schedule();
     return () => {
-      window.clearInterval(timer);
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
       controller.abort();
     };
   }, [polling, base, done, provider]);
@@ -160,20 +191,28 @@ function PasteSlot({ name, onSubmit }: { name: string; onSubmit: (code: string) 
 }
 
 /** The first screen's 288×36 slot while an AI is still to connect: its one button, the field for the code a provider
- * shows, or the code to enter on the provider's page. */
-export function SignInPill({ pill, instance, waiting, onDialog }: {
+ * shows, or the code to enter on the provider's page. A `quiet` pill is one of the choices under the first, and one
+ * that already works (OpenCode's free backup) is used as it is once picked. */
+export function SignInPill({ pill, instance, name = instance?.displayName ?? "", quiet = false, setUp = false, waiting, onDialog, onPick }: {
   pill: PillState;
   instance: InstanceInfo | undefined;
+  name?: string;
+  quiet?: boolean;
+  /** Its command-line app isn't here yet: the pill says Set up, not Install or Connect. */
+  setUp?: boolean;
   /** The test message after a sign-in is under way: the pill waits with it. */
   waiting: boolean;
   onDialog: () => void;
+  /** The person picked this AI. */
+  onPick?: () => void;
 }) {
   const { slot, install, start, submit } = pill;
-  const name = instance?.displayName ?? "";
+  const step = useConnectAiSteps(useConnectAiPlace());
+  const look = quiet ? QUIET_PILL : PILL;
   if (waiting || slot.kind === "busy" || slot.kind === "waiting") {
     const link = slot.kind === "waiting" ? slot.link : null;
     return (
-      <button type="button" data-sign-in="waiting" className={PILL} aria-disabled={!link}
+      <button type="button" data-sign-in="waiting" className={look} aria-disabled={!link}
         onClick={() => link && void openExternalLink(link).catch(() => {})}>
         <LoaderCircle size={14} aria-hidden="true" className="shrink-0 animate-spin" />{t("onboarding.meet.waiting", { name })}
       </button>
@@ -181,13 +220,20 @@ export function SignInPill({ pill, instance, waiting, onDialog }: {
   }
   if (slot.kind === "paste") return <PasteSlot name={name} onSubmit={(code) => void submit(code)} />;
   if (slot.kind === "code") return <CodeSlot code={slot.code} />;
-  const way = pillWay(instance);
-  const label = way === "install" ? t("onboarding.meet.install", { name })
+  const way = instance && engineReady(instance) ? "use" : pillWay(instance);
+  const label = setUp && (way === "install" || way === "dialog") ? t("onboarding.meet.setUp", { name })
+    : way === "install" ? t("onboarding.meet.install", { name })
     : way === "sign-in" ? t("onboarding.meet.signIn", { name })
     : instance ? t("onboarding.meet.connectNamed", { name }) : t("onboarding.meet.connectAi");
   return (
-    <button type="button" data-primary="" data-sign-in={way} className={PILL}
-      onClick={() => (way === "install" ? void install() : way === "sign-in" ? void start() : onDialog())}>
+    <button type="button" data-primary={quiet ? undefined : ""} data-sign-in={way} className={look}
+      onClick={() => {
+        step("chosen", { driverKind: instance?.driverKind ?? "" });
+        onPick?.();
+        if (way === "install") void install();
+        else if (way === "sign-in") void start();
+        else if (way === "dialog") onDialog();
+      }}>
       {label}
     </button>
   );

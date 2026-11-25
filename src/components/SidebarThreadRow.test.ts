@@ -2,7 +2,7 @@ import { createElement, type ComponentProps, type MemoExoticComponent, type Reac
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
-import { formatUpdatedAt, nextSnoozeExpiry, orderedSidebarThreads, orderedThreadList, partitionHelperThreads, SidebarThreadRow, stampClock, threadByline, threadOpenerLabel, threadUpdatedLabel, visibleSidebarThreads } from "./SidebarThreadRow";
+import { formatUpdatedAt, mainThreadFirst, nextSnoozeExpiry, orderedSidebarThreads, orderedThreadList, partitionHelperThreads, SidebarThreadRow, stampClock, threadRowActions, threadByline, threadOpenerLabel, threadUpdatedLabel, visibleSidebarThreads } from "./SidebarThreadRow";
 
 type ThreadRowProps = ComponentProps<typeof SidebarThreadRow>;
 
@@ -37,7 +37,16 @@ vi.mock("react", async (importOriginal) => {
   };
 });
 
-beforeEach(() => rowHooks.begin(true));
+const interfaceMode = vi.hoisted(() => ({ advanced: true }));
+vi.mock("@/lib/interface-mode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/interface-mode")>()),
+  useAdvancedMode: () => interfaceMode.advanced,
+}));
+
+beforeEach(() => {
+  rowHooks.begin(true);
+  interfaceMode.advanced = true;
+});
 afterEach(() => setLocale("en"));
 
 describe("sidebar thread visibility", () => {
@@ -47,10 +56,59 @@ describe("sidebar thread visibility", () => {
     expect(visibleSidebarThreads(rows, "8").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "7", "8", "9"]);
     expect(visibleSidebarThreads(rows, "8", "", [], true)).toEqual(rows);
   });
+
+  it("keeps the bot's main thread listed whatever its state: snoozed, an idle burst lane, a thread its opener closed", () => {
+    const listed = (main: object) => visibleSidebarThreads([{ threadId: "open", title: "Open" }, { threadId: "main", title: "Main", ...main }], "open", "", [], false, [], "main").map((task) => task.threadId);
+    expect(listed({ snoozedUntil: Date.now() + 3_600_000 })).toEqual(["open", "main"]);
+    expect(listed({ openedBy: { botId: "maus", name: "Maus", burstId: "burst" } })).toEqual(["open", "main"]);
+    expect(listed({ openedBy: { botId: "atlas", name: "Atlas" }, closedBy: { botId: "atlas", name: "Atlas" } })).toEqual(["open", "main"]);
+    expect(visibleSidebarThreads([{ threadId: "open", title: "Open" }, { threadId: "main", title: "Main", snoozedUntil: Date.now() + 3_600_000 }], "open").map((task) => task.threadId)).toEqual(["open"]);
+  });
+
+  it("keeps the bot's main thread listed when it is older than the six recent rows", () => {
+    expect(visibleSidebarThreads(tasks, "0", "", [], false, [], "9").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "9"]);
+    expect(visibleSidebarThreads(tasks, "0").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5"]);
+  });
+
+  it("leaves a burst's parts to its card, unless one is open or needs the person", () => {
+    const openedBy = { botId: "b", name: "Bot", at: 1, burstId: "run-1" };
+    const parts = [{ threadId: "quiet", title: "Quiet", openedBy }, { threadId: "open", title: "Open", openedBy }, { threadId: "asks", title: "Asks", openedBy, unread: true }];
+    expect(visibleSidebarThreads(parts, "open").map((task) => task.threadId).sort()).toEqual(["asks", "open"]);
+    expect(visibleSidebarThreads(parts, "open", "", [], true)).toEqual(parts);
+  });
   it("searches folder names and historical thread titles without the recent-row limit", () => {
     expect(visibleSidebarThreads(tasks, "0", " RESEARCH ", [{ id: "research", name: "Research" }]).map((task) => task.threadId)).toEqual(["8", "9"]);
     expect(visibleSidebarThreads(tasks, "0", "thread 9").map((task) => task.threadId)).toEqual(["9"]);
     expect(visibleSidebarThreads(tasks, "0", "missing")).toEqual([]);
+  });
+  it("shows only each routine's newest run by default; older runs stay under Show all", () => {
+    const rows = [
+      { threadId: "chat", title: "Chat", createdAt: 50 },
+      ...[40, 30, 20].map((at) => ({ threadId: `daily-${at}`, title: "Daily brief", createdAt: at })),
+      { threadId: "weekly-10", title: "Weekly", createdAt: 10 },
+      { threadId: "daily-5", title: "Daily brief", createdAt: 5, unread: true },
+    ];
+    const runs = [...[40, 30, 20, 5].map((at) => ({ routineId: "daily", threadId: `daily-${at}`, createdAt: at })), { routineId: "weekly", threadId: "weekly-10", createdAt: 10 }, { routineId: "room", createdAt: 60 }];
+    expect(visibleSidebarThreads(rows, "chat", "", [], false, runs).map((task) => task.threadId)).toEqual(["chat", "daily-40", "weekly-10", "daily-5"]);
+    expect(visibleSidebarThreads(rows, "daily-20", "", [], false, runs).map((task) => task.threadId)).toEqual(["chat", "daily-40", "daily-20", "weekly-10", "daily-5"]);
+    expect(visibleSidebarThreads(rows, "chat", "", [], true, runs)).toEqual(rows);
+    expect(visibleSidebarThreads(rows, "chat", "daily", [], false, runs)).toHaveLength(4);
+    expect(visibleSidebarThreads(rows, "chat").map((task) => task.threadId)).toEqual(rows.map((task) => task.threadId));
+  });
+  it("picks a routine's newest run by when it started, not by when it last replied", () => {
+    // Run A started at 10 and finished at 50; run B started at 30 and finished at 35. A sorts first in the list.
+    const rows = [{ threadId: "run-a", title: "Daily brief", createdAt: 10, lastThreadOrderAt: 50 }, { threadId: "run-b", title: "Daily brief", createdAt: 30, lastThreadOrderAt: 35 }];
+    const runs = [{ routineId: "daily", threadId: "run-a", createdAt: 10 }, { routineId: "daily", threadId: "run-b", createdAt: 30 }];
+    expect(visibleSidebarThreads(rows, "", "", [], false, runs).map((task) => task.threadId)).toEqual(["run-b"]);
+    expect(visibleSidebarThreads([{ ...rows[0] }, { ...rows[1], archivedAt: 40 }], "", "", [], false, runs).map((task) => task.threadId)).toEqual(["run-a"]);
+  });
+  it("falls back to the next run when the newest run is closed or snoozed and needs nothing", () => {
+    const rows = [{ threadId: "run-a", title: "Daily brief", createdAt: 10 }, { threadId: "run-b", title: "Daily brief", createdAt: 30 }];
+    const runs = [{ routineId: "daily", threadId: "run-a", createdAt: 10 }, { routineId: "daily", threadId: "run-b", createdAt: 30 }];
+    const ids = (newest: Partial<Parameters<typeof visibleSidebarThreads>[0][number]>) => visibleSidebarThreads([rows[0], { ...rows[1], ...newest }], "", "", [], false, runs).map((task) => task.threadId);
+    expect(ids({ closedBy: { botId: "bot-a", name: "Ada", at: 1 } })).toEqual(["run-a"]);
+    expect(ids({ snoozedUntil: Date.now() + 60_000 })).toEqual(["run-a"]);
+    expect(ids({ closedBy: { botId: "bot-a", name: "Ada", at: 1 }, unread: true })).toEqual(["run-b"]);
   });
   it("keeps queued older threads visible", () => {
     const rows = tasks.map((task) => ({ ...task, queued: task.threadId === "9" }));
@@ -156,35 +214,6 @@ describe("snoozed threads", () => {
     const now = Date.now();
     expect(nextSnoozeExpiry([{ snoozedUntil: 0 }, { snoozedUntil: now - 1 }, { snoozedUntil: now + 3_600_000 }, { snoozedUntil: now + 60_000 }, {}], now)).toBe(now + 60_000);
     expect(nextSnoozeExpiry([{ snoozedUntil: 0 }, { snoozedUntil: now - 1 }], now)).toBeUndefined();
-  });
-});
-
-describe("threads a bot opened", () => {
-  const openedBy = { botId: "scout", name: "Scout", at: 5 };
-  const render = (task: ThreadRowProps["task"]) => renderToStaticMarkup(createElement(SidebarThreadRow, {
-    task, ownerId: "scout", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), locale: "en",
-  }));
-  it("says who opened the thread in plain words, and nothing for the person's own", () => {
-    expect(threadOpenerLabel({ openedBy })).toBe("opened by Scout");
-    expect(threadOpenerLabel({})).toBeNull();
-    expect(threadOpenerLabel({ openedBy: { ...openedBy, name: "  " } })).toBeNull();
-  });
-  it("shows the opener quietly under the title without changing the row's name or status", () => {
-    const markup = render({ threadId: "qa", title: "QA PR 245", openedBy, activity: "waiting-on-you" });
-    expect(markup).toContain("opened by Scout");
-    expect(markup).toContain('title="QA PR 245 · Waiting"');
-    expect(markup.indexOf("QA PR 245")).toBeLessThan(markup.indexOf("opened by Scout"));
-    expect(render({ threadId: "own", title: "Quick question" })).not.toContain("opened by");
-  });
-  it("gives a bot-opened thread the same waiting and unread signals as any other", () => {
-    const waiting = render({ threadId: "qa", title: "QA PR 245", openedBy, activity: "waiting-on-you", unread: true });
-    expect(waiting).toContain('title="QA PR 245 · Waiting · Unread"');
-    expect(waiting).toContain(">Waiting</span>");
-    expect(waiting).toContain('aria-label="Unread"');
-    expect(waiting).toContain("opened by Scout");
-    const rows = Array.from({ length: 9 }, (_, index) => ({ threadId: String(index), title: `Thread ${index}` }));
-    const opened = [...rows, { threadId: "qa", title: "QA PR 245", openedBy, activity: "waiting-on-you" as const, busy: false }];
-    expect(visibleSidebarThreads(opened, "0").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "qa"]);
   });
 });
 
@@ -322,7 +351,7 @@ describe("thread title direction", () => {
   it("renders the title with dir=auto and leaves the time a fixed column", () => {
     const arabic = "انسخ محتوى الذكاء الاصطناعي وصمم منشورات";
     const arabicClass = titleSpan(row(arabic), arabic);
-    const englishClass = titleSpan(row("New thread"), "New thread");
+    const englishClass = titleSpan(row("New thread"), "Untitled chat");
     const withByline = titleSpan(row("QA PR 245", { botId: "scout", name: "Scout", at: 1 }), "QA PR 245");
     for (const classes of [arabicClass, englishClass, withByline]) {
       expect(classes).toContain("min-w-0");
@@ -385,6 +414,15 @@ describe("orderedThreadList", () => {
     ]);
     expect(ordered.map((item) => item.threadId)).toEqual(["reply", "person"]);
     expect(ordered[0]).toMatchObject({ updatedAt: 100 });
+  });
+});
+
+describe("mainThreadFirst", () => {
+  it("leads with the bot's main thread, above a pinned one, and leaves a list without it as it is", () => {
+    const tasks = [{ threadId: "pinned", pinned: true }, { threadId: "new" }, { threadId: "main" }];
+    expect(mainThreadFirst(tasks, "main").map((task) => task.threadId)).toEqual(["main", "pinned", "new"]);
+    expect(mainThreadFirst(tasks, "gone")).toBe(tasks);
+    expect(mainThreadFirst(tasks)).toBe(tasks);
   });
 });
 
@@ -609,6 +647,13 @@ describe("Refresh permissions", () => {
 });
 
 describe("Regenerate title", () => {
+  it("is in every bot thread menu, with automatic titles on or off, and asks for that thread", () => {
+    const dispatch = vi.fn();
+    const settled = vi.fn();
+    threadRowActions("scout", dispatch).onRegenerateTitle({ threadId: "t1" }, settled);
+    expect(dispatch).toHaveBeenCalledWith({ type: "regenerateTaskTitle", botId: "scout", threadId: "t1", onSettled: settled });
+  });
+
   const openMenu = (tree: RowNode) => {
     (moreMenuButton(tree)!.props!.onClick as (event: unknown) => void)({ currentTarget: { getBoundingClientRect: () => ({ left: 100, bottom: 200 }) } });
   };
@@ -686,6 +731,32 @@ describe("Thread link", () => {
     expect(markup.indexOf("</button>")).toBeLessThan(markup.indexOf(">#42</a>"));
     expect(markup.indexOf(">#42</a>")).toBeLessThan(markup.indexOf("<time"));
   });
+
+  // The bot panel's taller rows align to the top; the time column is pushed down to the title line and the chip must be too.
+  it("lines the chip up with the title in the bot panel's taller rows", () => {
+    const now = Date.UTC(2026, 8, 25, 12, 0, 0);
+    const render = (panel: boolean) => renderToStaticMarkup(createElement(SidebarThreadRow, {
+      task: { threadId: "t", title: "Fix", updatedAt: now - 3_600_000, link: "https://github.com/o/r/pull/42" },
+      ownerId: "b", current: false, now, panel, preview: "Last line", onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), locale: "en",
+    }));
+    const chipClass = (markup: string) => /<a [^>]*class="([^"]*)"[^>]*>#42<\/a>/.exec(markup)?.[1].split(" ") ?? [];
+    expect(chipClass(render(true))).toContain("mt-2.5");
+    expect(chipClass(render(false))).not.toContain("mt-2.5");
+  });
+
+  it("hides the chip in Simple mode, in the sidebar and the bot panel", () => {
+    interfaceMode.advanced = false;
+    const now = Date.UTC(2026, 8, 25, 12, 0, 0);
+    for (const panel of [false, true]) {
+      const markup = renderToStaticMarkup(createElement(SidebarThreadRow, {
+        task: { threadId: "t", title: "Fix", updatedAt: now - 3_600_000, link: "https://github.com/o/r/pull/42" },
+        ownerId: "b", current: false, now, panel, preview: "Last line", onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), locale: "en",
+      }));
+      expect(markup).toContain("Fix");
+      expect(markup).not.toContain("#42");
+      expect(markup).not.toContain("<a ");
+    }
+  });
 });
 
 describe("helper threads a bot opened", () => {
@@ -693,22 +764,33 @@ describe("helper threads a bot opened", () => {
   const thread = (threadId: string, patch: Record<string, unknown> = {}) =>
     ({ threadId, title: threadId, createdAt: 1, updatedAt: 1, ...patch }) as any;
 
-  it("folds open bot-opened threads into a group and keeps the person's own threads", () => {
-    const tasks = [thread("mine"), thread("email", { openedBy: opener, busy: true }), thread("pricing", { openedBy: opener })];
+  it("folds idle bot-opened threads into a group and keeps the person's own threads", () => {
+    const tasks = [thread("mine"), thread("email", { openedBy: opener }), thread("pricing", { openedBy: opener })];
     const { own, helpers } = partitionHelperThreads(tasks, "mine");
     expect(own.map((task) => task.threadId)).toEqual(["mine"]);
     expect(helpers.map((task) => task.threadId)).toEqual(["email", "pricing"]);
   });
 
-  it("keeps a helper thread in view while it needs the person", () => {
+  it("never folds the bot's main thread away, whoever opened it", () => {
+    const tasks = [thread("mine"), thread("email", { openedBy: opener }), thread("pricing", { openedBy: opener })];
+    const { own, helpers } = partitionHelperThreads(tasks, "mine", "", [], "email");
+    expect(own.map((task) => task.threadId)).toEqual(["mine", "email"]);
+    expect(helpers.map((task) => task.threadId)).toEqual(["pricing"]);
+  });
+
+  it("keeps a helper thread in view while it needs the person or is doing something, as the phone lists it", () => {
     const tasks = [
       thread("open-now", { openedBy: opener }),
       thread("approval", { openedBy: opener, activity: "waiting-on-you" }),
       thread("reply", { openedBy: opener, unread: true }),
       thread("pinned", { openedBy: opener, pinned: true }),
+      thread("working", { openedBy: opener, busy: true }),
+      thread("thinking", { openedBy: opener, activity: "working" }),
+      thread("waiting", { openedBy: opener, waitingForTeammates: true }),
+      thread("queued", { openedBy: opener, queued: true }),
     ];
     const { own, helpers } = partitionHelperThreads(tasks, "open-now");
-    expect(own.map((task) => task.threadId)).toEqual(["open-now", "approval", "reply", "pinned"]);
+    expect(own.map((task) => task.threadId)).toEqual(["open-now", "approval", "reply", "pinned", "working", "thinking", "waiting", "queued"]);
     expect(helpers).toEqual([]);
   });
 
@@ -726,5 +808,57 @@ describe("helper threads a bot opened", () => {
   it("does not group search results", () => {
     const tasks = [thread("email", { openedBy: opener })];
     expect(partitionHelperThreads(tasks, "mine", "email")).toEqual({ own: tasks, helpers: [] });
+  });
+});
+
+describe("the thread menu", () => {
+  const openMenu = (tree: RowNode) => {
+    (moreMenuButton(tree)!.props!.onClick as (event: unknown) => void)({ currentTarget: { getBoundingClientRect: () => ({ left: 100, bottom: 200 }) } });
+  };
+  const every = {
+    onRegenerateTitle: vi.fn(), onMove: vi.fn(), onArchive: vi.fn(), onPin: vi.fn(), onSnooze: vi.fn(), onLink: vi.fn(),
+    onRefreshPermissions: vi.fn(), onMemory: vi.fn(), folders: [{ id: "f", name: "Folder" }],
+  } as Partial<ThreadRowProps>;
+  const labels = (tree: RowNode) => {
+    const found: string[] = [];
+    walk(tree, (element) => { if (element.type === "button" && element.props?.type === "button") found.push(textOf(element)); });
+    return found;
+  };
+
+  it("keeps Rename, Memory, Pin, Archive and Delete in Simple mode", () => {
+    vi.stubGlobal("window", { innerWidth: 1024, innerHeight: 768 });
+    vi.stubGlobal("document", { body: { nodeType: 1 } });
+    interfaceMode.advanced = false;
+    const task = { threadId: "t1", title: "Acme NDA", link: "https://example.com/pr/1" };
+    openMenu(renderRow(task, "scout", true, every));
+    const menu = labels(renderRow(task, "scout", false, every)).filter((label) => label !== "" && label !== task.title);
+    expect(menu).toEqual(["Rename thread", "Memory", "Pin", "Archive", "Delete thread"]);
+    vi.unstubAllGlobals();
+  });
+
+  it("adds Memory to Advanced mode's full menu", () => {
+    vi.stubGlobal("window", { innerWidth: 1024, innerHeight: 768 });
+    vi.stubGlobal("document", { body: { nodeType: 1 } });
+    const task = { threadId: "t1", title: "Acme NDA", link: "https://example.com/pr/1" };
+    openMenu(renderRow(task, "scout", true, every));
+    const menu = renderRow(task, "scout", false, every);
+    for (const label of ["Copy link", "Rename", "Memory", "Regenerate title", "Pin", "Remove link", "Archive", "Refresh permissions", "Delete"]) {
+      expect(buttonWithLabel(menu, label), label).toBeDefined();
+    }
+    vi.unstubAllGlobals();
+  });
+
+  it("opens the conversation, then its memory", () => {
+    vi.stubGlobal("window", { innerWidth: 1024, innerHeight: 768 });
+    vi.stubGlobal("document", { body: { nodeType: 1 } });
+    interfaceMode.advanced = false;
+    const order: string[] = [];
+    const extra = { onSelect: vi.fn(() => order.push("select")), onMemory: vi.fn(() => order.push("memory")) } as Partial<ThreadRowProps>;
+    const task = { threadId: "t2", title: "Supermouse lease" };
+    openMenu(renderRow(task, "scout", true, extra));
+    (buttonWithLabel(renderRow(task, "scout", false, extra), "Memory")!.props!.onClick as () => void)();
+    expect(order).toEqual(["select", "memory"]);
+    expect(extra.onMemory).toHaveBeenCalledWith(task);
+    vi.unstubAllGlobals();
   });
 });

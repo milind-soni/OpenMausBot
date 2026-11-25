@@ -1,14 +1,14 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:3db9d425-7d84-5aca-b7eb-104d225f8561",
+  "serialNumber": "urn:uuid:a00a7bc4-a648-5dbc-bc93-bfbf5a058daf",
   "version": 1,
   "metadata": {
     "component": {
       "type": "application",
-      "bom-ref": "pkg:generic/cua-driver-linux-x64@0.19.3",
+      "bom-ref": "pkg:generic/cua-driver-linux-x64@0.41.3",
       "name": "Cua Driver Linux x64 runtime",
-      "version": "0.19.3",
+      "version": "0.41.3",
       "licenses": [
         {
           "license": {
@@ -19,21 +19,21 @@
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://github.com/trycua/cua/releases/tag/cua-driver-rs-v0.19.3"
+          "url": "https://github.com/trycua/cua/releases/tag/cua-driver-rs-v0.41.3"
         },
         {
           "type": "vcs",
-          "url": "https://github.com/trycua/cua/commit/a1672e7b11951275ecfba3384264d4530185d0db"
+          "url": "https://github.com/trycua/cua/commit/bd0e299c67dec6397b3d41a259452b2ea13a1cd5"
         }
       ],
       "properties": [
         {
           "name": "openmausbot:archive:sha256",
-          "value": "3db9d4257d84bacaf7eb104d225f85613ce67edbb20d6eeb83c1384b6d8a5b10"
+          "value": "a00a7bc4a648adbcbc93bfbf5a058daf71ce8838ee172e33b197aaf649ecee14"
         },
         {
           "name": "openmausbot:cargo-lock:sha256",
-          "value": "c1a8df7f4bedd554f6fc90c852c3625c91a89b28d9f2c642d966279e9e372362"
+          "value": "02ee8ebd8415e097036870a7fd39ba379c5e0d212a116715ca0660e83116f447"
         },
         {
           "name": "openmausbot:target",
@@ -45,19 +45,19 @@
         },
         {
           "name": "openmausbot:registry-component-count",
-          "value": "330"
+          "value": "381"
         },
         {
           "name": "openmausbot:trycua-component-count",
-          "value": "8"
+          "value": "10"
         },
         {
           "name": "openmausbot:file:cua-driver:sha256",
-          "value": "ed5844fadf07b9b72c4a3b3802e1c47233c166d66d6198608d5991f807aab4ac"
+          "value": "83030028e7c9e3f4d753b3b27025135d44eb8d52f562cce0aaaf95777bc1b41f"
         },
         {
           "name": "openmausbot:file:cua-cursor-theme:sha256",
-          "value": "e589b2b7521bbfeaf9e2bfce668a38e80ed1b9790b1327b13d374fc331d8312a"
+          "value": "d39efb960d207e7328d7a9dd48e3b6565f74be073f9c2ca8dcba86a4d0f28312"
         }
       ]
     }
@@ -100,6 +100,86 @@
         {
           "name": "openmausbot:cargo:crate-sha256",
           "value": "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/aead@0.6.1",
+      "group": "crates.io",
+      "name": "aead",
+      "version": "0.6.1",
+      "purl": "pkg:cargo/aead@0.6.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "1973cfbc1a2daf9cf550e74e1f088c28e7f7d8c1e1418fb6c9dc5184b7e84c99"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "Traits for Authenticated Encryption with Associated Data (AEAD) algorithms,\nsuch as AES-GCM as ChaCha20Poly1305, which provide a high-level API\n",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/aead/0.6.1/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/RustCrypto/traits"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#aead@0.6.1"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "1973cfbc1a2daf9cf550e74e1f088c28e7f7d8c1e1418fb6c9dc5184b7e84c99"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/aes@0.8.4",
+      "group": "crates.io",
+      "name": "aes",
+      "version": "0.8.4",
+      "purl": "pkg:cargo/aes@0.8.4",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "b169f7a6d4742236a0a00c541b845991d0ac43e546831af1249753ab4c3aa3a0"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "Pure Rust implementation of the Advanced Encryption Standard (a.k.a. Rijndael)",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/aes/0.8.4/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/RustCrypto/block-ciphers"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#aes@0.8.4"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "b169f7a6d4742236a0a00c541b845991d0ac43e546831af1249753ab4c3aa3a0"
         }
       ]
     },
@@ -220,6 +300,46 @@
         {
           "name": "openmausbot:cargo:crate-sha256",
           "value": "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/ambient-authority@0.0.2",
+      "group": "crates.io",
+      "name": "ambient-authority",
+      "version": "0.0.2",
+      "purl": "pkg:cargo/ambient-authority@0.0.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "e9d4ee0d472d1cd2e28c97dfa124b3d8d992e10eb0a035f33f5d12e3a177ba3b"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT"
+        }
+      ],
+      "description": "Ambient Authority",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/ambient-authority/0.0.2/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/sunfishcode/ambient-authority"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#ambient-authority@0.0.2"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "e9d4ee0d472d1cd2e28c97dfa124b3d8d992e10eb0a035f33f5d12e3a177ba3b"
         }
       ]
     },
@@ -1345,6 +1465,86 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:cargo/block-buffer@0.12.1",
+      "group": "crates.io",
+      "name": "block-buffer",
+      "version": "0.12.1",
+      "purl": "pkg:cargo/block-buffer@0.12.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "d2f6c7dbe95a6ed67ad9f18e57daf93a2f034c524b99fd2b76d18fdfeb6660aa"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "Buffer types for block processing of data",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/block-buffer/0.12.1/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/RustCrypto/utils"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#block-buffer@0.12.1"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "d2f6c7dbe95a6ed67ad9f18e57daf93a2f034c524b99fd2b76d18fdfeb6660aa"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/block-padding@0.3.3",
+      "group": "crates.io",
+      "name": "block-padding",
+      "version": "0.3.3",
+      "purl": "pkg:cargo/block-padding@0.3.3",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "a8894febbff9f758034a5b8e12d87918f56dfc64a8e1fe757d65e29041538d93"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "Padding and unpadding of messages divided into blocks.",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/block-padding/0.3.3/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/RustCrypto/utils"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#block-padding@0.3.3"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "a8894febbff9f758034a5b8e12d87918f56dfc64a8e1fe757d65e29041538d93"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:cargo/blocking@1.6.2",
       "group": "crates.io",
       "name": "blocking",
@@ -1785,6 +1985,126 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:cargo/cap-fs-ext@4.0.3",
+      "group": "crates.io",
+      "name": "cap-fs-ext",
+      "version": "4.0.3",
+      "purl": "pkg:cargo/cap-fs-ext@4.0.3",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "56ff379b70af8e08307a8f65e7040c7301cb4a572538ade16b4984f0da77847f"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT"
+        }
+      ],
+      "description": "Extension traits for `Dir`, `File`, etc.",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/cap-fs-ext/4.0.3/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/bytecodealliance/cap-std"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#cap-fs-ext@4.0.3"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "56ff379b70af8e08307a8f65e7040c7301cb4a572538ade16b4984f0da77847f"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/cap-primitives@4.0.3",
+      "group": "crates.io",
+      "name": "cap-primitives",
+      "version": "4.0.3",
+      "purl": "pkg:cargo/cap-primitives@4.0.3",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "8b5f74729fd2f44701d1a8eb47e906cdb3ccd9ec0f02baad85a744b791940b18"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT"
+        }
+      ],
+      "description": "Capability-based primitives",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/cap-primitives/4.0.3/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/bytecodealliance/cap-std"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#cap-primitives@4.0.3"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "8b5f74729fd2f44701d1a8eb47e906cdb3ccd9ec0f02baad85a744b791940b18"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/cap-std@4.0.3",
+      "group": "crates.io",
+      "name": "cap-std",
+      "version": "4.0.3",
+      "purl": "pkg:cargo/cap-std@4.0.3",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c1ec78e242cfa2cfe276807ac2ecc00315a6c97786977414bcd1c3963b6c91b8"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT"
+        }
+      ],
+      "description": "Capability-based version of the Rust standard library",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/cap-std/4.0.3/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/bytecodealliance/cap-std"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#cap-std@4.0.3"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "c1ec78e242cfa2cfe276807ac2ecc00315a6c97786977414bcd1c3963b6c91b8"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:cargo/cargo_metadata@0.19.2",
       "group": "crates.io",
       "name": "cargo_metadata",
@@ -1860,6 +2180,46 @@
         {
           "name": "openmausbot:cargo:crate-sha256",
           "value": "e35af189006b9c0f00a064685c727031e3ed2d8020f7ba284d78cc2671bd36ea"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/cbc@0.1.2",
+      "group": "crates.io",
+      "name": "cbc",
+      "version": "0.1.2",
+      "purl": "pkg:cargo/cbc@0.1.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "26b52a9543ae338f279b96b0b9fed9c8093744685043739079ce85cd58f289a6"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "Cipher Block Chaining (CBC) block cipher mode of operation",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/cbc/0.1.2/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/RustCrypto/block-modes"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#cbc@0.1.2"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "26b52a9543ae338f279b96b0b9fed9c8093744685043739079ce85cd58f289a6"
         }
       ]
     },
@@ -1985,6 +2345,46 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:cargo/chacha20poly1305@0.11.0",
+      "group": "crates.io",
+      "name": "chacha20poly1305",
+      "version": "0.11.0",
+      "purl": "pkg:cargo/chacha20poly1305@0.11.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "9b89e1c441e926b9c82a8d023f6e1b7ae0adcfaa7d621814e4d60789bac751cb"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 OR MIT"
+        }
+      ],
+      "description": "Pure Rust implementation of the ChaCha20Poly1305 Authenticated Encryption\nwith Additional Data Cipher (RFC 8439) with optional architecture-specific\nhardware acceleration. Also contains implementations of the XChaCha20Poly1305\nextended nonce variant of ChaCha20Poly1305, and the reduced-round\nChaCha8Poly1305 and ChaCha12Poly1305 lightweight variants.\n",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/chacha20poly1305/0.11.0/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/RustCrypto/AEADs"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#chacha20poly1305@0.11.0"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "9b89e1c441e926b9c82a8d023f6e1b7ae0adcfaa7d621814e4d60789bac751cb"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:cargo/chrono@0.4.45",
       "group": "crates.io",
       "name": "chrono",
@@ -2065,6 +2465,206 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:cargo/ciborium@0.2.2",
+      "group": "crates.io",
+      "name": "ciborium",
+      "version": "0.2.2",
+      "purl": "pkg:cargo/ciborium@0.2.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "42e69ffd6f0917f5c029256a24d0161db17cea3997d185db0d35926308770f0e"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "description": "serde implementation of CBOR using ciborium-basic",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/ciborium/0.2.2/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/enarx/ciborium"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#ciborium@0.2.2"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "42e69ffd6f0917f5c029256a24d0161db17cea3997d185db0d35926308770f0e"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/ciborium-io@0.2.2",
+      "group": "crates.io",
+      "name": "ciborium-io",
+      "version": "0.2.2",
+      "purl": "pkg:cargo/ciborium-io@0.2.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "05afea1e0a06c9be33d539b876f1ce3692f4afea2cb41f740e7743225ed1c757"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "description": "Simplified Read/Write traits for no_std usage",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/ciborium-io/0.2.2/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/enarx/ciborium"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#ciborium-io@0.2.2"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "05afea1e0a06c9be33d539b876f1ce3692f4afea2cb41f740e7743225ed1c757"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/ciborium-ll@0.2.2",
+      "group": "crates.io",
+      "name": "ciborium-ll",
+      "version": "0.2.2",
+      "purl": "pkg:cargo/ciborium-ll@0.2.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "57663b653d948a338bfb3eeba9bb2fd5fcfaecb9e199e87e1eda4d9e8b240fd9"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "description": "Low-level CBOR codec primitives",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/ciborium-ll/0.2.2/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/enarx/ciborium"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#ciborium-ll@0.2.2"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "57663b653d948a338bfb3eeba9bb2fd5fcfaecb9e199e87e1eda4d9e8b240fd9"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/cipher@0.4.4",
+      "group": "crates.io",
+      "name": "cipher",
+      "version": "0.4.4",
+      "purl": "pkg:cargo/cipher@0.4.4",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "Traits for describing block ciphers and stream ciphers",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/cipher/0.4.4/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/RustCrypto/traits"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#cipher@0.4.4"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/cipher@0.5.2",
+      "group": "crates.io",
+      "name": "cipher",
+      "version": "0.5.2",
+      "purl": "pkg:cargo/cipher@0.5.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "e8cf2a2c93cd704877c0858356ed03480ff301ee950b43f1cbe4573b088bfa6c"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "Traits for describing block ciphers and stream ciphers",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/cipher/0.5.2/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/RustCrypto/traits"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#cipher@0.5.2"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "e8cf2a2c93cd704877c0858356ed03480ff301ee950b43f1cbe4573b088bfa6c"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:cargo/clipboard-rs@0.3.5",
       "group": "crates.io",
       "name": "clipboard-rs",
@@ -2100,6 +2700,46 @@
         {
           "name": "openmausbot:cargo:crate-sha256",
           "value": "d1c988a897ea030e32f0668c90b0192800e0c561b3d941fc366f9ad5a1bf26ba"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/cmov@0.5.4",
+      "group": "crates.io",
+      "name": "cmov",
+      "version": "0.5.4",
+      "purl": "pkg:cargo/cmov@0.5.4",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 OR MIT"
+        }
+      ],
+      "description": "Conditional move CPU intrinsics which are guaranteed on major platforms (ARM32/ARM64, x86/x86_64,\nRISC-V) to execute in constant-time and not be rewritten as branches by the compiler. Provides\nwrappers for the CMOV family of instructions on x86/x86_64 and CSEL on AArch64, along with a\nportable \"best-effort\" pure Rust fallback implementation.\n",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/cmov/0.5.4/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/RustCrypto/utils"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#cmov@0.5.4"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
         }
       ]
     },
@@ -2180,6 +2820,46 @@
         {
           "name": "openmausbot:cargo:crate-sha256",
           "value": "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/coset@0.4.2",
+      "group": "crates.io",
+      "name": "coset",
+      "version": "0.4.2",
+      "purl": "pkg:cargo/coset@0.4.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "1eb98d5e9155e2cf7cd942c8b3033097d4563b6fb0a00b9caecb74669555c058"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "description": "Set of types for supporting COSE",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/coset/0.4.2/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/google/coset"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#coset@0.4.2"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "1eb98d5e9155e2cf7cd942c8b3033097d4563b6fb0a00b9caecb74669555c058"
         }
       ]
     },
@@ -2425,11 +3105,112 @@
     },
     {
       "type": "library",
-      "bom-ref": "pkg:cargo/cua-driver@0.19.3",
+      "bom-ref": "pkg:cargo/crypto-common@0.2.2",
+      "group": "crates.io",
+      "name": "crypto-common",
+      "version": "0.2.2",
+      "purl": "pkg:cargo/crypto-common@0.2.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce6e4c961d6cd6c9a86db418387425e8bdeaf05b3c8bc1411e6dca4c252f1453"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "Common traits used by cryptographic algorithms",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/crypto-common/0.2.2/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/RustCrypto/traits"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#crypto-common@0.2.2"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "ce6e4c961d6cd6c9a86db418387425e8bdeaf05b3c8bc1411e6dca4c252f1453"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/ctutils@0.4.2",
+      "group": "crates.io",
+      "name": "ctutils",
+      "version": "0.4.2",
+      "purl": "pkg:cargo/ctutils@0.4.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "7d5515a3834141de9eafb9717ad39eea8247b5674e6066c404e8c4b365d2a29e"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 OR MIT"
+        }
+      ],
+      "description": "Constant-time utility library with selection and equality testing support targeting cryptographic\napplications. Supports `const fn` where appropriate. Built on the `cmov` crate which provides\narchitecture-specific predication intrinsics. Heavily inspired by the `subtle` crate.\n",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/ctutils/0.4.2/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/RustCrypto/utils"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#ctutils@0.4.2"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "7d5515a3834141de9eafb9717ad39eea8247b5674e6066c404e8c4b365d2a29e"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/cua-cursor-motion@0.41.3",
+      "group": "trycua",
+      "name": "cua-cursor-motion",
+      "version": "0.41.3",
+      "purl": "pkg:cargo/cua-cursor-motion@0.41.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/trycua/cua/tree/bd0e299c67dec6397b3d41a259452b2ea13a1cd5/libs/cua-driver/rust/crates/cua-cursor-motion"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/cua-driver@0.41.3",
       "group": "trycua",
       "name": "cua-driver",
-      "version": "0.19.3",
-      "purl": "pkg:cargo/cua-driver@0.19.3",
+      "version": "0.41.3",
+      "purl": "pkg:cargo/cua-driver@0.41.3",
       "licenses": [
         {
           "license": {
@@ -2440,17 +3221,17 @@
       "externalReferences": [
         {
           "type": "vcs",
-          "url": "https://github.com/trycua/cua/tree/a1672e7b11951275ecfba3384264d4530185d0db/libs/cua-driver/rust/crates/cua-driver"
+          "url": "https://github.com/trycua/cua/tree/bd0e299c67dec6397b3d41a259452b2ea13a1cd5/libs/cua-driver/rust/crates/cua-driver"
         }
       ]
     },
     {
       "type": "library",
-      "bom-ref": "pkg:cargo/cua-driver-contract@0.19.3",
+      "bom-ref": "pkg:cargo/cua-driver-contract@0.41.3",
       "group": "trycua",
       "name": "cua-driver-contract",
-      "version": "0.19.3",
-      "purl": "pkg:cargo/cua-driver-contract@0.19.3",
+      "version": "0.41.3",
+      "purl": "pkg:cargo/cua-driver-contract@0.41.3",
       "licenses": [
         {
           "license": {
@@ -2461,17 +3242,17 @@
       "externalReferences": [
         {
           "type": "vcs",
-          "url": "https://github.com/trycua/cua/tree/a1672e7b11951275ecfba3384264d4530185d0db/libs/cua-driver/rust/crates/cua-driver-contract"
+          "url": "https://github.com/trycua/cua/tree/bd0e299c67dec6397b3d41a259452b2ea13a1cd5/libs/cua-driver/rust/crates/cua-driver-contract"
         }
       ]
     },
     {
       "type": "library",
-      "bom-ref": "pkg:cargo/cua-driver-core@0.19.3",
+      "bom-ref": "pkg:cargo/cua-driver-core@0.41.3",
       "group": "trycua",
       "name": "cua-driver-core",
-      "version": "0.19.3",
-      "purl": "pkg:cargo/cua-driver-core@0.19.3",
+      "version": "0.41.3",
+      "purl": "pkg:cargo/cua-driver-core@0.41.3",
       "licenses": [
         {
           "license": {
@@ -2482,17 +3263,17 @@
       "externalReferences": [
         {
           "type": "vcs",
-          "url": "https://github.com/trycua/cua/tree/a1672e7b11951275ecfba3384264d4530185d0db/libs/cua-driver/rust/crates/cua-driver-core"
+          "url": "https://github.com/trycua/cua/tree/bd0e299c67dec6397b3d41a259452b2ea13a1cd5/libs/cua-driver/rust/crates/cua-driver-core"
         }
       ]
     },
     {
       "type": "library",
-      "bom-ref": "pkg:cargo/cua-driver-sdk@0.19.3",
+      "bom-ref": "pkg:cargo/cua-driver-sdk@0.41.3",
       "group": "trycua",
       "name": "cua-driver-sdk",
-      "version": "0.19.3",
-      "purl": "pkg:cargo/cua-driver-sdk@0.19.3",
+      "version": "0.41.3",
+      "purl": "pkg:cargo/cua-driver-sdk@0.41.3",
       "licenses": [
         {
           "license": {
@@ -2503,17 +3284,38 @@
       "externalReferences": [
         {
           "type": "vcs",
-          "url": "https://github.com/trycua/cua/tree/a1672e7b11951275ecfba3384264d4530185d0db/libs/cua-driver/rust/crates/cua-driver-sdk"
+          "url": "https://github.com/trycua/cua/tree/bd0e299c67dec6397b3d41a259452b2ea13a1cd5/libs/cua-driver/rust/crates/cua-driver-sdk"
         }
       ]
     },
     {
       "type": "library",
-      "bom-ref": "pkg:cargo/cursor-overlay@0.19.3",
+      "bom-ref": "pkg:cargo/cua-telemetry@0.12.1",
+      "group": "trycua",
+      "name": "cua-telemetry",
+      "version": "0.12.1",
+      "purl": "pkg:cargo/cua-telemetry@0.12.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/trycua/cua/tree/bd0e299c67dec6397b3d41a259452b2ea13a1cd5/libs/cua/crates/cua-telemetry"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/cursor-overlay@0.41.3",
       "group": "trycua",
       "name": "cursor-overlay",
-      "version": "0.19.3",
-      "purl": "pkg:cargo/cursor-overlay@0.19.3",
+      "version": "0.41.3",
+      "purl": "pkg:cargo/cursor-overlay@0.41.3",
       "licenses": [
         {
           "license": {
@@ -2524,17 +3326,17 @@
       "externalReferences": [
         {
           "type": "vcs",
-          "url": "https://github.com/trycua/cua/tree/a1672e7b11951275ecfba3384264d4530185d0db/libs/cua-driver/rust/crates/cursor-overlay"
+          "url": "https://github.com/trycua/cua/tree/bd0e299c67dec6397b3d41a259452b2ea13a1cd5/libs/cua-driver/rust/crates/cursor-overlay"
         }
       ]
     },
     {
       "type": "library",
-      "bom-ref": "pkg:cargo/cursor-theme-cli@0.19.3",
+      "bom-ref": "pkg:cargo/cursor-theme-cli@0.41.3",
       "group": "trycua",
       "name": "cursor-theme-cli",
-      "version": "0.19.3",
-      "purl": "pkg:cargo/cursor-theme-cli@0.19.3",
+      "version": "0.41.3",
+      "purl": "pkg:cargo/cursor-theme-cli@0.41.3",
       "licenses": [
         {
           "license": {
@@ -2545,7 +3347,7 @@
       "externalReferences": [
         {
           "type": "vcs",
-          "url": "https://github.com/trycua/cua/tree/a1672e7b11951275ecfba3384264d4530185d0db/libs/cua-driver/rust/crates/cursor-theme-cli"
+          "url": "https://github.com/trycua/cua/tree/bd0e299c67dec6397b3d41a259452b2ea13a1cd5/libs/cua-driver/rust/crates/cursor-theme-cli"
         }
       ]
     },
@@ -2586,6 +3388,46 @@
         {
           "name": "openmausbot:cargo:crate-sha256",
           "value": "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/deranged@0.5.8",
+      "group": "crates.io",
+      "name": "deranged",
+      "version": "0.5.8",
+      "purl": "pkg:cargo/deranged@0.5.8",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "Ranged integers",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/deranged/0.5.8/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/jhpratt/deranged"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#deranged@0.5.8"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
         }
       ]
     },
@@ -3791,6 +4633,86 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:cargo/fs-set-times@0.20.3",
+      "group": "crates.io",
+      "name": "fs-set-times",
+      "version": "0.20.3",
+      "purl": "pkg:cargo/fs-set-times@0.20.3",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "94e7099f6313ecacbe1256e8ff9d617b75d1bcb16a6fddef94866d225a01a14a"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT"
+        }
+      ],
+      "description": "Set filesystem timestamps",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/fs-set-times/0.20.3/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/bytecodealliance/fs-set-times"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#fs-set-times@0.20.3"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "94e7099f6313ecacbe1256e8ff9d617b75d1bcb16a6fddef94866d225a01a14a"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/fs2@0.4.3",
+      "group": "crates.io",
+      "name": "fs2",
+      "version": "0.4.3",
+      "purl": "pkg:cargo/fs2@0.4.3",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "Cross-platform file locks and file duplication.",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/fs2/0.4.3/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/danburkert/fs2-rs"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#fs2@0.4.3"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:cargo/funty@2.0.0",
       "group": "crates.io",
       "name": "funty",
@@ -4351,6 +5273,46 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:cargo/half@2.7.1",
+      "group": "crates.io",
+      "name": "half",
+      "version": "2.7.1",
+      "purl": "pkg:cargo/half@2.7.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "6ea2d84b969582b4b1864a92dc5d27cd2b77b622a8d79306834f1be5ba20d84b"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "Half-precision floating point f16 and bf16 types for Rust implementing the IEEE 754-2008 standard binary16 and bfloat16 types.",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/half/2.7.1/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/VoidStarKat/half-rs"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#half@2.7.1"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "6ea2d84b969582b4b1864a92dc5d27cd2b77b622a8d79306834f1be5ba20d84b"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:cargo/hash32@0.2.1",
       "group": "crates.io",
       "name": "hash32",
@@ -4631,6 +5593,86 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:cargo/hkdf@0.12.4",
+      "group": "crates.io",
+      "name": "hkdf",
+      "version": "0.12.4",
+      "purl": "pkg:cargo/hkdf@0.12.4",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "7b5f8eb2ad728638ea2c7d47a21db23b7b58a72ed6a38256b8a1849f15fbbdf7"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "HMAC-based Extract-and-Expand Key Derivation Function (HKDF)",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/hkdf/0.12.4/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/RustCrypto/KDFs/"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#hkdf@0.12.4"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "7b5f8eb2ad728638ea2c7d47a21db23b7b58a72ed6a38256b8a1849f15fbbdf7"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/hmac@0.12.1",
+      "group": "crates.io",
+      "name": "hmac",
+      "version": "0.12.1",
+      "purl": "pkg:cargo/hmac@0.12.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "Generic implementation of Hash-based Message Authentication Code (HMAC)",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/hmac/0.12.1/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/RustCrypto/MACs"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#hmac@0.12.1"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:cargo/http@1.4.0",
       "group": "crates.io",
       "name": "http",
@@ -4706,6 +5748,46 @@
         {
           "name": "openmausbot:cargo:crate-sha256",
           "value": "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/hybrid-array@0.4.14",
+      "group": "crates.io",
+      "name": "hybrid-array",
+      "version": "0.4.14",
+      "purl": "pkg:cargo/hybrid-array@0.4.14",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "707114b52a152fa7bdb290cd7cd5912d9467273b6d74e21b8d81aca1f8533f6b"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "Hybrid typenum-based and const generic array types designed to provide the\nflexibility of typenum-based expressions while also allowing interoperability\nand a transition path to const generics\n",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/hybrid-array/0.4.14/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/RustCrypto/hybrid-array"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#hybrid-array@0.4.14"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "707114b52a152fa7bdb290cd7cd5912d9467273b6d74e21b8d81aca1f8533f6b"
         }
       ]
     },
@@ -5190,6 +6272,86 @@
       ]
     },
     {
+      "type": "library",
+      "bom-ref": "pkg:cargo/inout@0.1.4",
+      "group": "crates.io",
+      "name": "inout",
+      "version": "0.1.4",
+      "purl": "pkg:cargo/inout@0.1.4",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "Custom reference types for code generic over in-place and buffer-to-buffer modes of operation.",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/inout/0.1.4/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/RustCrypto/utils"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#inout@0.1.4"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/inout@0.2.2",
+      "group": "crates.io",
+      "name": "inout",
+      "version": "0.2.2",
+      "purl": "pkg:cargo/inout@0.2.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "4250ce6452e92010fdf7268ccc5d14faa80bb12fc741938534c58f16804e03c7"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "Custom reference types for code generic over in-place and buffer-to-buffer modes of operation.",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/inout/0.2.2/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/RustCrypto/utils"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#inout@0.2.2"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "4250ce6452e92010fdf7268ccc5d14faa80bb12fc741938534c58f16804e03c7"
+        }
+      ]
+    },
+    {
       "type": "file",
       "bom-ref": "pkg:generic/inter@4.001",
       "group": "rsms",
@@ -5217,7 +6379,7 @@
         },
         {
           "type": "distribution",
-          "url": "https://github.com/trycua/cua/tree/a1672e7b11951275ecfba3384264d4530185d0db/libs/cua-driver/rust/crates/cursor-overlay/assets/Inter.ttf"
+          "url": "https://github.com/trycua/cua/tree/bd0e299c67dec6397b3d41a259452b2ea13a1cd5/libs/cua-driver/rust/crates/cursor-overlay/assets/Inter.ttf"
         }
       ],
       "properties": [
@@ -5228,6 +6390,126 @@
         {
           "name": "openmausbot:font:embedded-sha256",
           "value": "29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/io-extras@0.19.0",
+      "group": "crates.io",
+      "name": "io-extras",
+      "version": "0.19.0",
+      "purl": "pkg:cargo/io-extras@0.19.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "20fd6de4ccfcc187e38bc21cfa543cb5a302cb86a8b114eb7f0bf0dc9f8ac00f"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT"
+        }
+      ],
+      "description": "File/socket handle/descriptor utilities",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/io-extras/0.19.0/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/sunfishcode/io-extras"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#io-extras@0.19.0"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "20fd6de4ccfcc187e38bc21cfa543cb5a302cb86a8b114eb7f0bf0dc9f8ac00f"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/io-lifetimes@2.0.4",
+      "group": "crates.io",
+      "name": "io-lifetimes",
+      "version": "2.0.4",
+      "purl": "pkg:cargo/io-lifetimes@2.0.4",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "06432fb54d3be7964ecd3649233cddf80db2832f47fec34c01f65b3d9d774983"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT"
+        }
+      ],
+      "description": "A low-level I/O ownership and borrowing library",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/io-lifetimes/2.0.4/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/sunfishcode/io-lifetimes"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#io-lifetimes@2.0.4"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "06432fb54d3be7964ecd3649233cddf80db2832f47fec34c01f65b3d9d774983"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/io-lifetimes@3.0.1",
+      "group": "crates.io",
+      "name": "io-lifetimes",
+      "version": "3.0.1",
+      "purl": "pkg:cargo/io-lifetimes@3.0.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "2f0fb0570afe1fed943c5c3d4102d5358592d8625fda6a0007fdbe65a92fba96"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT"
+        }
+      ],
+      "description": "A low-level I/O ownership and borrowing library",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/io-lifetimes/3.0.1/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/sunfishcode/io-lifetimes"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#io-lifetimes@3.0.1"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "2f0fb0570afe1fed943c5c3d4102d5358592d8625fda6a0007fdbe65a92fba96"
         }
       ]
     },
@@ -5428,6 +6710,86 @@
         {
           "name": "openmausbot:cargo:crate-sha256",
           "value": "6dbd1086b01b9349fd4ef9a07433965af64c8ce8159abe633a189e4ff817bd13"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/keyring@4.1.6",
+      "group": "crates.io",
+      "name": "keyring",
+      "version": "4.1.6",
+      "purl": "pkg:cargo/keyring@4.1.6",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "72585bb6cc9bc370d1d545b7e23fcce71dfd4461c5e15275e3cf51bdfd9a980a"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "All-in-One Rust Keyring",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/keyring/4.1.6/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/open-source-cooperative/keyring-rs"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#keyring@4.1.6"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "72585bb6cc9bc370d1d545b7e23fcce71dfd4461c5e15275e3cf51bdfd9a980a"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/keyring-core@1.0.0",
+      "group": "crates.io",
+      "name": "keyring-core",
+      "version": "1.0.0",
+      "purl": "pkg:cargo/keyring-core@1.0.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "fb1e621458ca9c51aa110bd0339d4751a056b9576bf1253aee1aa560dda0fc9d"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "Cross-platform library for managing passwords/secrets",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/keyring-core/1.0.0/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/open-source-cooperative/keyring-core.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#keyring-core@1.0.0"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "fb1e621458ca9c51aa110bd0339d4751a056b9576bf1253aee1aa560dda0fc9d"
         }
       ]
     },
@@ -5748,6 +7110,46 @@
         {
           "name": "openmausbot:cargo:crate-sha256",
           "value": "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/maybe-owned@0.3.4",
+      "group": "crates.io",
+      "name": "maybe-owned",
+      "version": "0.3.4",
+      "purl": "pkg:cargo/maybe-owned@0.3.4",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "4facc753ae494aeb6e3c22f839b158aebd4f9270f55cd3c79906c45476c47ab4"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "provides a `MaybeOwned` (and `MaybeOwnedMut`) type similar to std's `Cow` but it implements `From<T>` and `From<&'a T>` and does not require `ToOwned`",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/maybe-owned/0.3.4/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/rustonaut/maybe-owned"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#maybe-owned@0.3.4"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "4facc753ae494aeb6e3c22f839b158aebd4f9270f55cd3c79906c45476c47ab4"
         }
       ]
     },
@@ -6433,6 +7835,46 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:cargo/num-conv@0.2.1",
+      "group": "crates.io",
+      "name": "num-conv",
+      "version": "0.2.1",
+      "purl": "pkg:cargo/num-conv@0.2.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c6673768db2d862beb9b39a78fdcb1a69439615d5794a1be50caa9bc92c81967"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "`num_conv` is a crate to convert between integer types without using `as` casts. This provides\nbetter certainty when refactoring, makes the exact behavior of code more explicit, and allows using\nturbofish syntax.\n",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/num-conv/0.2.1/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/jhpratt/num-conv"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#num-conv@0.2.1"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "c6673768db2d862beb9b39a78fdcb1a69439615d5794a1be50caa9bc92c81967"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:cargo/num-integer@0.1.46",
       "group": "crates.io",
       "name": "num-integer",
@@ -7113,11 +8555,11 @@
     },
     {
       "type": "library",
-      "bom-ref": "pkg:cargo/pip-preview@0.19.3",
+      "bom-ref": "pkg:cargo/pip-preview@0.41.3",
       "group": "trycua",
       "name": "pip-preview",
-      "version": "0.19.3",
-      "purl": "pkg:cargo/pip-preview@0.19.3",
+      "version": "0.41.3",
+      "purl": "pkg:cargo/pip-preview@0.41.3",
       "licenses": [
         {
           "license": {
@@ -7128,7 +8570,7 @@
       "externalReferences": [
         {
           "type": "vcs",
-          "url": "https://github.com/trycua/cua/tree/a1672e7b11951275ecfba3384264d4530185d0db/libs/cua-driver/rust/crates/pip-preview"
+          "url": "https://github.com/trycua/cua/tree/bd0e299c67dec6397b3d41a259452b2ea13a1cd5/libs/cua-driver/rust/crates/pip-preview"
         }
       ]
     },
@@ -7214,11 +8656,11 @@
     },
     {
       "type": "library",
-      "bom-ref": "pkg:cargo/platform-linux@0.19.3",
+      "bom-ref": "pkg:cargo/platform-linux@0.41.3",
       "group": "trycua",
       "name": "platform-linux",
-      "version": "0.19.3",
-      "purl": "pkg:cargo/platform-linux@0.19.3",
+      "version": "0.41.3",
+      "purl": "pkg:cargo/platform-linux@0.41.3",
       "licenses": [
         {
           "license": {
@@ -7229,7 +8671,7 @@
       "externalReferences": [
         {
           "type": "vcs",
-          "url": "https://github.com/trycua/cua/tree/a1672e7b11951275ecfba3384264d4530185d0db/libs/cua-driver/rust/crates/platform-linux"
+          "url": "https://github.com/trycua/cua/tree/bd0e299c67dec6397b3d41a259452b2ea13a1cd5/libs/cua-driver/rust/crates/platform-linux"
         }
       ]
     },
@@ -7315,6 +8757,46 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:cargo/poly1305@0.9.1",
+      "group": "crates.io",
+      "name": "poly1305",
+      "version": "0.9.1",
+      "purl": "pkg:cargo/poly1305@0.9.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "6e2d0073b297041425c7c3df6eb4792d598a15323fe63346852b092eca02904c"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 OR MIT"
+        }
+      ],
+      "description": "The Poly1305 universal hash function and message authentication code",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/poly1305/0.9.1/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/RustCrypto/universal-hashes"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#poly1305@0.9.1"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "6e2d0073b297041425c7c3df6eb4792d598a15323fe63346852b092eca02904c"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:cargo/postcard@1.1.3",
       "group": "crates.io",
       "name": "postcard",
@@ -7390,6 +8872,46 @@
         {
           "name": "openmausbot:cargo:crate-sha256",
           "value": "0103b1cef7ec0cf76490e969665504990193874ea05c85ff9bab8b911d0a0564"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/powerfmt@0.2.0",
+      "group": "crates.io",
+      "name": "powerfmt",
+      "version": "0.2.0",
+      "purl": "pkg:cargo/powerfmt@0.2.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "    `powerfmt` is a library that provides utilities for formatting values. This crate makes it\n    significantly easier to support filling to a minimum width with alignment, avoid heap\n    allocation, and avoid repetitive calculations.\n",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/powerfmt/0.2.0/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/jhpratt/powerfmt"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#powerfmt@0.2.0"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
         }
       ]
     },
@@ -7755,6 +9277,46 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:cargo/rand@0.9.5",
+      "group": "crates.io",
+      "name": "rand",
+      "version": "0.9.5",
+      "purl": "pkg:cargo/rand@0.9.5",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "b9ef1d0d795eb7d84685bca4f72f3649f064e6641543d3a8c415898726a57b41"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "Random number generators and other randomness functionality.\n",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/rand/0.9.5/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/rust-random/rand"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#rand@0.9.5"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "b9ef1d0d795eb7d84685bca4f72f3649f064e6641543d3a8c415898726a57b41"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:cargo/rand_chacha@0.3.1",
       "group": "crates.io",
       "name": "rand_chacha",
@@ -7790,6 +9352,46 @@
         {
           "name": "openmausbot:cargo:crate-sha256",
           "value": "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/rand_chacha@0.9.0",
+      "group": "crates.io",
+      "name": "rand_chacha",
+      "version": "0.9.0",
+      "purl": "pkg:cargo/rand_chacha@0.9.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "ChaCha random number generator\n",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/rand_chacha/0.9.0/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/rust-random/rand"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#rand_chacha@0.9.0"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
         }
       ]
     },
@@ -7870,6 +9472,46 @@
         {
           "name": "openmausbot:cargo:crate-sha256",
           "value": "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/rand_core@0.9.5",
+      "group": "crates.io",
+      "name": "rand_core",
+      "version": "0.9.5",
+      "purl": "pkg:cargo/rand_core@0.9.5",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "Core random number generator traits and tools for implementation.\n",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/rand_core/0.9.5/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/rust-random/rand"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#rand_core@0.9.5"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
         }
       ]
     },
@@ -8235,6 +9877,126 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:cargo/rquickjs@0.14.0",
+      "group": "crates.io",
+      "name": "rquickjs",
+      "version": "0.14.0",
+      "purl": "pkg:cargo/rquickjs@0.14.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "a0a22bf72f515cc4189dd7c63d016f6de92a11eee98ddf7dd64794198f6eb34e"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "description": "High level bindings to the QuickJS JavaScript engine",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/rquickjs/0.14.0/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/DelSkayn/rquickjs.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#rquickjs@0.14.0"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "a0a22bf72f515cc4189dd7c63d016f6de92a11eee98ddf7dd64794198f6eb34e"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/rquickjs-core@0.14.0",
+      "group": "crates.io",
+      "name": "rquickjs-core",
+      "version": "0.14.0",
+      "purl": "pkg:cargo/rquickjs-core@0.14.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "6657979a24d543e5fc66f32cef2f47ca82ce8eb55cec5f7d59a12b7b570bbf24"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "description": "High level bindings to the QuickJS JavaScript engine",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/rquickjs-core/0.14.0/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/DelSkayn/rquickjs.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#rquickjs-core@0.14.0"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "6657979a24d543e5fc66f32cef2f47ca82ce8eb55cec5f7d59a12b7b570bbf24"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/rquickjs-sys@0.14.0",
+      "group": "crates.io",
+      "name": "rquickjs-sys",
+      "version": "0.14.0",
+      "purl": "pkg:cargo/rquickjs-sys@0.14.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "cee271d0eeba64f0915b846cb7ae02e16faf3dfdffdca91731101d9d30fe3423"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "description": "QuickJS bindings for rquickjs",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/rquickjs-sys/0.14.0/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/DelSkayn/rquickjs.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#rquickjs-sys@0.14.0"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "cee271d0eeba64f0915b846cb7ae02e16faf3dfdffdca91731101d9d30fe3423"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:cargo/rustc_version@0.4.1",
       "group": "crates.io",
       "name": "rustc_version",
@@ -8315,15 +10077,55 @@
     },
     {
       "type": "library",
-      "bom-ref": "pkg:cargo/rustls@0.23.40",
+      "bom-ref": "pkg:cargo/rustix-linux-procfs@0.1.1",
       "group": "crates.io",
-      "name": "rustls",
-      "version": "0.23.40",
-      "purl": "pkg:cargo/rustls@0.23.40",
+      "name": "rustix-linux-procfs",
+      "version": "0.1.1",
+      "purl": "pkg:cargo/rustix-linux-procfs@0.1.1",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "ef86cd5876211988985292b91c96a8f2d298df24e75989a43a3c73f2d4d8168b"
+          "content": "2fc84bf7e9aa16c4f2c758f27412dc9841341e16aa682d9c7ac308fe3ee12056"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT"
+        }
+      ],
+      "description": "Utilities for opening Linux procfs files and directories",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/rustix-linux-procfs/0.1.1/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/sunfishcode/rustix-linux-procfs"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#rustix-linux-procfs@0.1.1"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "2fc84bf7e9aa16c4f2c758f27412dc9841341e16aa682d9c7ac308fe3ee12056"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/rustls@0.23.45",
+      "group": "crates.io",
+      "name": "rustls",
+      "version": "0.23.45",
+      "purl": "pkg:cargo/rustls@0.23.45",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
         }
       ],
       "licenses": [
@@ -8335,7 +10137,7 @@
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://crates.io/api/v1/crates/rustls/0.23.40/download"
+          "url": "https://crates.io/api/v1/crates/rustls/0.23.45/download"
         },
         {
           "type": "vcs",
@@ -8345,11 +10147,11 @@
       "properties": [
         {
           "name": "openmausbot:cargo:package-id",
-          "value": "registry+https://github.com/rust-lang/crates.io-index#rustls@0.23.40"
+          "value": "registry+https://github.com/rust-lang/crates.io-index#rustls@0.23.45"
         },
         {
           "name": "openmausbot:cargo:crate-sha256",
-          "value": "ef86cd5876211988985292b91c96a8f2d298df24e75989a43a3c73f2d4d8168b"
+          "value": "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
         }
       ]
     },
@@ -8395,15 +10197,15 @@
     },
     {
       "type": "library",
-      "bom-ref": "pkg:cargo/rustls-webpki@0.103.13",
+      "bom-ref": "pkg:cargo/rustls-webpki@0.103.16",
       "group": "crates.io",
       "name": "rustls-webpki",
-      "version": "0.103.13",
-      "purl": "pkg:cargo/rustls-webpki@0.103.13",
+      "version": "0.103.16",
+      "purl": "pkg:cargo/rustls-webpki@0.103.16",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
+          "content": "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
         }
       ],
       "licenses": [
@@ -8415,7 +10217,7 @@
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://crates.io/api/v1/crates/rustls-webpki/0.103.13/download"
+          "url": "https://crates.io/api/v1/crates/rustls-webpki/0.103.16/download"
         },
         {
           "type": "vcs",
@@ -8425,11 +10227,11 @@
       "properties": [
         {
           "name": "openmausbot:cargo:package-id",
-          "value": "registry+https://github.com/rust-lang/crates.io-index#rustls-webpki@0.103.13"
+          "value": "registry+https://github.com/rust-lang/crates.io-index#rustls-webpki@0.103.16"
         },
         {
           "name": "openmausbot:cargo:crate-sha256",
-          "value": "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
+          "value": "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
         }
       ]
     },
@@ -8590,6 +10392,46 @@
         {
           "name": "openmausbot:cargo:crate-sha256",
           "value": "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/secret-service@5.1.0",
+      "group": "crates.io",
+      "name": "secret-service",
+      "version": "5.1.0",
+      "purl": "pkg:cargo/secret-service@5.1.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "9a62d7f86047af0077255a29494136b9aaaf697c76ff70b8e49cded4e2623c14"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "Library to interface with Secret Service API",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/secret-service/5.1.0/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/hwchen/secret-service-rs.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#secret-service@5.1.0"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "9a62d7f86047af0077255a29494136b9aaaf697c76ff70b8e49cded4e2623c14"
         }
       ]
     },
@@ -10035,6 +11877,86 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:cargo/time@0.3.47",
+      "group": "crates.io",
+      "name": "time",
+      "version": "0.3.47",
+      "purl": "pkg:cargo/time@0.3.47",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "743bd48c283afc0388f9b8827b976905fb217ad9e647fae3a379a9283c4def2c"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "Date and time library. Fully interoperable with the standard library. Mostly compatible with #![no_std].",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/time/0.3.47/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/time-rs/time"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#time@0.3.47"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "743bd48c283afc0388f9b8827b976905fb217ad9e647fae3a379a9283c4def2c"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/time-core@0.1.8",
+      "group": "crates.io",
+      "name": "time-core",
+      "version": "0.1.8",
+      "purl": "pkg:cargo/time-core@0.1.8",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "7694e1cfe791f8d31026952abf09c69ca6f6fa4e1a1229e18988f06a04a12dca"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "This crate is an implementation detail and should not be relied upon directly.",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/time-core/0.1.8/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/time-rs/time"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#time-core@0.1.8"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "7694e1cfe791f8d31026952abf09c69ca6f6fa4e1a1229e18988f06a04a12dca"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:cargo/tiny-skia@0.11.4",
       "group": "crates.io",
       "name": "tiny-skia",
@@ -11235,6 +13157,46 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:cargo/universal-hash@0.6.1",
+      "group": "crates.io",
+      "name": "universal-hash",
+      "version": "0.6.1",
+      "purl": "pkg:cargo/universal-hash@0.6.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "f4987bdc12753382e0bec4a65c50738ffaabc998b9cdd1f952fb5f39b0048a96"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "Traits which describe the functionality of universal hash functions (UHFs)",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/universal-hash/0.6.1/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/RustCrypto/traits"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#universal-hash@0.6.1"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "f4987bdc12753382e0bec4a65c50738ffaabc998b9cdd1f952fb5f39b0048a96"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:cargo/unsafe-libyaml@0.2.11",
       "group": "crates.io",
       "name": "unsafe-libyaml",
@@ -11955,15 +13917,15 @@
     },
     {
       "type": "library",
-      "bom-ref": "pkg:cargo/webpki-roots@1.0.7",
+      "bom-ref": "pkg:cargo/webpki-roots@1.0.10",
       "group": "crates.io",
       "name": "webpki-roots",
-      "version": "1.0.7",
-      "purl": "pkg:cargo/webpki-roots@1.0.7",
+      "version": "1.0.10",
+      "purl": "pkg:cargo/webpki-roots@1.0.10",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "52f5ee44c96cf55f1b349600768e3ece3a8f26010c05265ab73f945bb1a2eb9d"
+          "content": "1c1c8e20c8a38fc7d65abfe74eb7280e4aa667e8eec8bc84996d2874810748d9"
         }
       ],
       "licenses": [
@@ -11975,7 +13937,7 @@
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://crates.io/api/v1/crates/webpki-roots/1.0.7/download"
+          "url": "https://crates.io/api/v1/crates/webpki-roots/1.0.10/download"
         },
         {
           "type": "vcs",
@@ -11985,11 +13947,11 @@
       "properties": [
         {
           "name": "openmausbot:cargo:package-id",
-          "value": "registry+https://github.com/rust-lang/crates.io-index#webpki-roots@1.0.7"
+          "value": "registry+https://github.com/rust-lang/crates.io-index#webpki-roots@1.0.10"
         },
         {
           "name": "openmausbot:cargo:crate-sha256",
-          "value": "52f5ee44c96cf55f1b349600768e3ece3a8f26010c05265ab73f945bb1a2eb9d"
+          "value": "1c1c8e20c8a38fc7d65abfe74eb7280e4aa667e8eec8bc84996d2874810748d9"
         }
       ]
     },
@@ -12715,6 +14677,46 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:cargo/zbus-secret-service-keyring-store@1.0.0",
+      "group": "crates.io",
+      "name": "zbus-secret-service-keyring-store",
+      "version": "1.0.0",
+      "purl": "pkg:cargo/zbus-secret-service-keyring-store@1.0.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "4ccede190ba363386a24e8021c7f3848393976609ec9f5d1f8c6c09ef37075b4"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "description": "ZBus Secret Service credential store for keyring",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/zbus-secret-service-keyring-store/1.0.0/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/open-source-cooperative/zbus-secret-service-keyring-store.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#zbus-secret-service-keyring-store@1.0.0"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "4ccede190ba363386a24e8021c7f3848393976609ec9f5d1f8c6c09ef37075b4"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:cargo/zerocopy@0.8.48",
       "group": "crates.io",
       "name": "zerocopy",
@@ -12750,6 +14752,46 @@
         {
           "name": "openmausbot:cargo:crate-sha256",
           "value": "eed437bf9d6692032087e337407a86f04cd8d6a16a37199ed57949d415bd68e9"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/zerocopy-derive@0.8.48",
+      "group": "crates.io",
+      "name": "zerocopy-derive",
+      "version": "0.8.48",
+      "purl": "pkg:cargo/zerocopy-derive@0.8.48",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "70e3cd084b1788766f53af483dd21f93881ff30d7320490ec3ef7526d203bad4"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-2-Clause OR Apache-2.0 OR MIT"
+        }
+      ],
+      "description": "Custom derive for traits from the zerocopy crate",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/zerocopy-derive/0.8.48/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/google/zerocopy"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#zerocopy-derive@0.8.48"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "70e3cd084b1788766f53af483dd21f93881ff30d7320490ec3ef7526d203bad4"
         }
       ]
     },
@@ -12870,6 +14912,46 @@
         {
           "name": "openmausbot:cargo:crate-sha256",
           "value": "b97154e67e32c85465826e8bcc1c59429aaaf107c1e4a9e53c8d8ccd5eff88d0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:cargo/zeroize_derive@1.5.0",
+      "group": "crates.io",
+      "name": "zeroize_derive",
+      "version": "1.5.0",
+      "purl": "pkg:cargo/zeroize_derive@1.5.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "3c50655cbb0fe3fc43170059e702f1ce5e19b84cec58dc87b037a09935c2f328"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 OR MIT"
+        }
+      ],
+      "description": "Custom derive support for zeroize",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://crates.io/api/v1/crates/zeroize_derive/1.5.0/download"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/RustCrypto/utils"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmausbot:cargo:package-id",
+          "value": "registry+https://github.com/rust-lang/crates.io-index#zeroize_derive@1.5.0"
+        },
+        {
+          "name": "openmausbot:cargo:crate-sha256",
+          "value": "3c50655cbb0fe3fc43170059e702f1ce5e19b84cec58dc87b037a09935c2f328"
         }
       ]
     },
@@ -13476,12 +15558,15 @@
   ],
   "dependencies": [
     {
-      "ref": "pkg:generic/cua-driver-linux-x64@0.19.3",
+      "ref": "pkg:generic/cua-driver-linux-x64@0.41.3",
       "dependsOn": [
         "pkg:cargo/adler2@2.0.1",
+        "pkg:cargo/aead@0.6.1",
+        "pkg:cargo/aes@0.8.4",
         "pkg:cargo/ahash@0.8.12",
         "pkg:cargo/aho-corasick@1.1.4",
         "pkg:cargo/allocator-api2@0.2.21",
+        "pkg:cargo/ambient-authority@0.0.2",
         "pkg:cargo/anyhow@1.0.102",
         "pkg:cargo/arrayref@0.3.9",
         "pkg:cargo/arrayvec@0.7.6",
@@ -13510,6 +15595,8 @@
         "pkg:cargo/bitflags@2.11.1",
         "pkg:cargo/bitvec@1.0.1",
         "pkg:cargo/block-buffer@0.10.4",
+        "pkg:cargo/block-buffer@0.12.1",
+        "pkg:cargo/block-padding@0.3.3",
         "pkg:cargo/blocking@1.6.2",
         "pkg:cargo/borrow-or-share@0.2.4",
         "pkg:cargo/bstr@1.13.0",
@@ -13521,29 +15608,46 @@
         "pkg:cargo/bytes@1.11.1",
         "pkg:cargo/calloop@0.14.4",
         "pkg:cargo/camino@1.2.4",
+        "pkg:cargo/cap-fs-ext@4.0.3",
+        "pkg:cargo/cap-primitives@4.0.3",
+        "pkg:cargo/cap-std@4.0.3",
         "pkg:cargo/cargo_metadata@0.19.2",
         "pkg:cargo/cargo-platform@0.1.9",
+        "pkg:cargo/cbc@0.1.2",
         "pkg:cargo/cc@1.2.62",
         "pkg:cargo/cfg-if@1.0.4",
         "pkg:cargo/chacha20@0.10.1",
+        "pkg:cargo/chacha20poly1305@0.11.0",
         "pkg:cargo/chrono-tz@0.10.4",
         "pkg:cargo/chrono@0.4.45",
+        "pkg:cargo/ciborium-io@0.2.2",
+        "pkg:cargo/ciborium-ll@0.2.2",
+        "pkg:cargo/ciborium@0.2.2",
+        "pkg:cargo/cipher@0.4.4",
+        "pkg:cargo/cipher@0.5.2",
         "pkg:cargo/clipboard-rs@0.3.5",
+        "pkg:cargo/cmov@0.5.4",
         "pkg:cargo/cobs@0.3.0",
         "pkg:cargo/concurrent-queue@2.5.0",
+        "pkg:cargo/coset@0.4.2",
         "pkg:cargo/cpufeatures@0.2.17",
         "pkg:cargo/cpufeatures@0.3.0",
         "pkg:cargo/crc32fast@1.5.0",
         "pkg:cargo/crossbeam-channel@0.5.15",
         "pkg:cargo/crossbeam-utils@0.8.21",
         "pkg:cargo/crypto-common@0.1.7",
-        "pkg:cargo/cua-driver-contract@0.19.3",
-        "pkg:cargo/cua-driver-core@0.19.3",
-        "pkg:cargo/cua-driver-sdk@0.19.3",
-        "pkg:cargo/cua-driver@0.19.3",
-        "pkg:cargo/cursor-overlay@0.19.3",
-        "pkg:cargo/cursor-theme-cli@0.19.3",
+        "pkg:cargo/crypto-common@0.2.2",
+        "pkg:cargo/ctutils@0.4.2",
+        "pkg:cargo/cua-cursor-motion@0.41.3",
+        "pkg:cargo/cua-driver-contract@0.41.3",
+        "pkg:cargo/cua-driver-core@0.41.3",
+        "pkg:cargo/cua-driver-sdk@0.41.3",
+        "pkg:cargo/cua-driver@0.41.3",
+        "pkg:cargo/cua-telemetry@0.12.1",
+        "pkg:cargo/cursor-overlay@0.41.3",
+        "pkg:cargo/cursor-theme-cli@0.41.3",
         "pkg:cargo/data-encoding@2.11.0",
+        "pkg:cargo/deranged@0.5.8",
         "pkg:cargo/digest@0.10.7",
         "pkg:cargo/dirs-sys@0.4.1",
         "pkg:cargo/dirs@5.0.1",
@@ -13574,6 +15678,8 @@
         "pkg:cargo/form_urlencoded@1.2.2",
         "pkg:cargo/fraction@0.15.4",
         "pkg:cargo/fs-err@2.11.0",
+        "pkg:cargo/fs-set-times@0.20.3",
+        "pkg:cargo/fs2@0.4.3",
         "pkg:cargo/funty@2.0.0",
         "pkg:cargo/futures-core@0.3.32",
         "pkg:cargo/futures-io@0.3.32",
@@ -13588,6 +15694,7 @@
         "pkg:cargo/getrandom@0.3.4",
         "pkg:cargo/getrandom@0.4.2",
         "pkg:cargo/globset@0.4.19",
+        "pkg:cargo/half@2.7.1",
         "pkg:cargo/hash32@0.2.1",
         "pkg:cargo/hashbrown@0.15.5",
         "pkg:cargo/hashbrown@0.16.1",
@@ -13595,8 +15702,11 @@
         "pkg:cargo/heapless@0.7.17",
         "pkg:cargo/heck@0.5.0",
         "pkg:cargo/hex@0.4.3",
+        "pkg:cargo/hkdf@0.12.4",
+        "pkg:cargo/hmac@0.12.1",
         "pkg:cargo/http@1.4.0",
         "pkg:cargo/httparse@1.10.1",
+        "pkg:cargo/hybrid-array@0.4.14",
         "pkg:cargo/iana-time-zone@0.1.65",
         "pkg:cargo/icu_collections@2.2.0",
         "pkg:cargo/icu_locale_core@2.2.0",
@@ -13609,11 +15719,18 @@
         "pkg:cargo/idna@1.1.0",
         "pkg:cargo/image@0.25.10",
         "pkg:cargo/indexmap@2.14.0",
+        "pkg:cargo/inout@0.1.4",
+        "pkg:cargo/inout@0.2.2",
+        "pkg:cargo/io-extras@0.19.0",
+        "pkg:cargo/io-lifetimes@2.0.4",
+        "pkg:cargo/io-lifetimes@3.0.1",
         "pkg:cargo/ipnet@2.12.0",
         "pkg:cargo/itoa@1.0.18",
         "pkg:cargo/jobserver@0.1.35",
         "pkg:cargo/jsonschema-regex@0.46.10",
         "pkg:cargo/jsonschema@0.46.10",
+        "pkg:cargo/keyring-core@1.0.0",
+        "pkg:cargo/keyring@4.1.6",
         "pkg:cargo/lazy_static@1.5.0",
         "pkg:cargo/libc@0.2.186",
         "pkg:cargo/linux-raw-sys@0.12.1",
@@ -13622,6 +15739,7 @@
         "pkg:cargo/log@0.4.29",
         "pkg:cargo/lru@0.18.1",
         "pkg:cargo/matchers@0.2.0",
+        "pkg:cargo/maybe-owned@0.3.4",
         "pkg:cargo/memchr@2.8.0",
         "pkg:cargo/memmap2@0.9.10",
         "pkg:cargo/memoffset@0.6.5",
@@ -13638,6 +15756,7 @@
         "pkg:cargo/num-bigint@0.4.8",
         "pkg:cargo/num-cmp@0.1.0",
         "pkg:cargo/num-complex@0.4.6",
+        "pkg:cargo/num-conv@0.2.1",
         "pkg:cargo/num-integer@0.1.46",
         "pkg:cargo/num-iter@0.1.46",
         "pkg:cargo/num-rational@0.4.2",
@@ -13656,14 +15775,16 @@
         "pkg:cargo/phf_shared@0.12.1",
         "pkg:cargo/phf@0.12.1",
         "pkg:cargo/pin-project-lite@0.2.17",
-        "pkg:cargo/pip-preview@0.19.3",
+        "pkg:cargo/pip-preview@0.41.3",
         "pkg:cargo/piper@0.2.5",
         "pkg:cargo/pkg-config@0.3.33",
-        "pkg:cargo/platform-linux@0.19.3",
+        "pkg:cargo/platform-linux@0.41.3",
         "pkg:cargo/png@0.18.1",
         "pkg:cargo/polling@3.11.0",
+        "pkg:cargo/poly1305@0.9.1",
         "pkg:cargo/postcard@1.1.3",
         "pkg:cargo/potential_utf@0.1.5",
+        "pkg:cargo/powerfmt@0.2.0",
         "pkg:cargo/ppv-lite86@0.2.21",
         "pkg:cargo/proc-macro-crate@3.5.0",
         "pkg:cargo/proc-macro2@1.0.106",
@@ -13672,10 +15793,13 @@
         "pkg:cargo/quote@1.0.45",
         "pkg:cargo/radium@0.7.0",
         "pkg:cargo/rand_chacha@0.3.1",
+        "pkg:cargo/rand_chacha@0.9.0",
         "pkg:cargo/rand_core@0.10.1",
         "pkg:cargo/rand_core@0.6.4",
+        "pkg:cargo/rand_core@0.9.5",
         "pkg:cargo/rand@0.10.2",
         "pkg:cargo/rand@0.8.6",
+        "pkg:cargo/rand@0.9.5",
         "pkg:cargo/ref-cast-impl@1.0.25",
         "pkg:cargo/ref-cast@1.0.25",
         "pkg:cargo/referencing@0.46.10",
@@ -13685,15 +15809,20 @@
         "pkg:cargo/regorus@0.10.1",
         "pkg:cargo/reis@0.7.0",
         "pkg:cargo/ring@0.17.14",
+        "pkg:cargo/rquickjs-core@0.14.0",
+        "pkg:cargo/rquickjs-sys@0.14.0",
+        "pkg:cargo/rquickjs@0.14.0",
         "pkg:cargo/rustc_version@0.4.1",
+        "pkg:cargo/rustix-linux-procfs@0.1.1",
         "pkg:cargo/rustix@1.1.4",
         "pkg:cargo/rustls-pki-types@1.14.1",
-        "pkg:cargo/rustls-webpki@0.103.13",
-        "pkg:cargo/rustls@0.23.40",
+        "pkg:cargo/rustls-webpki@0.103.16",
+        "pkg:cargo/rustls@0.23.45",
         "pkg:cargo/ryu@1.0.23",
         "pkg:cargo/schemars_derive@1.2.1",
         "pkg:cargo/schemars@1.2.1",
         "pkg:cargo/scopeguard@1.2.0",
+        "pkg:cargo/secret-service@5.1.0",
         "pkg:cargo/semver@1.0.28",
         "pkg:cargo/serde_core@1.0.228",
         "pkg:cargo/serde_derive_internals@0.29.1",
@@ -13730,6 +15859,8 @@
         "pkg:cargo/thiserror@1.0.69",
         "pkg:cargo/thiserror@2.0.18",
         "pkg:cargo/thread_local@1.1.9",
+        "pkg:cargo/time-core@0.1.8",
+        "pkg:cargo/time@0.3.47",
         "pkg:cargo/tiny-skia-path@0.11.4",
         "pkg:cargo/tiny-skia@0.11.4",
         "pkg:cargo/tinystr@0.8.3",
@@ -13760,6 +15891,7 @@
         "pkg:cargo/uniffi_meta@0.31.0",
         "pkg:cargo/uniffi_pipeline@0.31.0",
         "pkg:cargo/uniffi@0.31.0",
+        "pkg:cargo/universal-hash@0.6.1",
         "pkg:cargo/unsafe-libyaml@0.2.11",
         "pkg:cargo/untrusted@0.9.0",
         "pkg:cargo/ureq-proto@0.6.0",
@@ -13778,7 +15910,7 @@
         "pkg:cargo/wayland-protocols@0.32.12",
         "pkg:cargo/wayland-scanner@0.31.10",
         "pkg:cargo/wayland-sys@0.31.11",
-        "pkg:cargo/webpki-roots@1.0.7",
+        "pkg:cargo/webpki-roots@1.0.10",
         "pkg:cargo/winnow@0.7.15",
         "pkg:cargo/winnow@1.0.3",
         "pkg:cargo/wl-clipboard-rs@0.9.3",
@@ -13796,10 +15928,13 @@
         "pkg:cargo/zbus_xml@5.1.1",
         "pkg:cargo/zbus-lockstep-macros@0.5.2",
         "pkg:cargo/zbus-lockstep@0.5.2",
+        "pkg:cargo/zbus-secret-service-keyring-store@1.0.0",
         "pkg:cargo/zbus@5.16.0",
+        "pkg:cargo/zerocopy-derive@0.8.48",
         "pkg:cargo/zerocopy@0.8.48",
         "pkg:cargo/zerofrom-derive@0.1.7",
         "pkg:cargo/zerofrom@0.1.8",
+        "pkg:cargo/zeroize_derive@1.5.0",
         "pkg:cargo/zeroize@1.8.2",
         "pkg:cargo/zerotrie@0.2.4",
         "pkg:cargo/zerovec-derive@0.11.3",

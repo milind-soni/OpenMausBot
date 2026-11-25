@@ -83,6 +83,7 @@ describe("what the step says", () => {
     expect(toolsSummary({ ...FOUND, tools: [
       { name: "a", source: "claudeCode" }, { name: "b", source: "claudeCode" }, { name: "c", source: "claudeDesktop" }, { name: "d", source: "gemini" },
     ] })).toBe("4 MCP servers from Claude Code, Claude Desktop, and Gemini CLI");
+    expect(skillsSummary({ ...FOUND, skills: [{ name: "a", source: "hermes" }, { name: "b", source: "openclaw" }] })).toBe("2 from Hermes Agent and OpenClaw");
   });
 
   it("sums up in one line, with a note only for what was left out", () => {
@@ -105,7 +106,7 @@ describe("what the step says", () => {
         "deploy: switched off until you check what the scan found, in a bot's Skills settings.",
         "Skipped review: a different skill with that name is already here.",
         "Skipped github: a different MCP server with that name is already here.",
-        "Couldn't bring in lint and sentry. Try again later from Settings → Replay welcome tour.",
+        "Couldn't bring in lint and sentry. Try again later from Settings → Import & export → Bring things in → From your AI apps.",
         "Large or non-text files in skill folders were left out.",
         "e and f didn't fit: your list of MCP servers is full.",
         "Your organization doesn't allow g.",

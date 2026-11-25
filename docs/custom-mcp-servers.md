@@ -32,6 +32,13 @@ Compatible bots get it on their next task; no app restart is needed. On a
 Team Cloud everyone on the team can use a server an Admin adds; **Only for
 me**, offered for a server with one key, keeps that key as the Admin's own.
 
+A server you run as a command keeps running between a bot's tasks. A bot that
+changes the server's code reloads it with `mcp_server` action `restart`, which
+keeps the server's saved keys and sign-in; its next task starts the new code.
+Turning the server off and on does the same. Removing it deletes its saved
+keys, and a key the person entered on a card works once, so they would have to
+enter it again.
+
 Header and environment values are write-only: typed like passwords, never shown
 again, and a saved one left blank is kept. Tokens for URL servers go in
 headers, never in the address.
@@ -77,11 +84,69 @@ the saved entry remains available to reconnect. Existing custom Famulor entries
 at the official HTTP endpoint are recognized rather than replaced.
 
 Famulor asks for access to the workspace's assistants, calls, campaigns, leads and settings.
-Calls and campaigns can spend credits, so a bot asks before it starts one.
+Calls and campaigns can spend credits. A bot in Full access can start one without another confirmation.
 The card itself does not take an API key. To use a workspace key instead, add a custom MCP server
 at the same address with a header `Authorization` whose value is `Bearer fam_…`.
 
 See [Famulor](https://www.famulor.io). This is an optional connected tool, not a change to OMB's subscription billing.
+
+### Agentcard
+
+In Plugins, find **Agentcard** beside Whop and click **Connect**. The card uses
+Agentcard's official hosted MCP endpoint, `https://mcp.agentcard.sh/mcp`, and
+opens Agentcard's browser sign-in with your own Agentcard account. No API key
+is needed. After sign-in and tool discovery it enables the connection, and
+**Disconnect** and **Bot access** work as they do for Whop.
+
+OpenMausBot owns no cards, approvals or orders here. Agentcard keeps your cards
+and handles purchase approvals; OpenMausBot stores no card details. A bot that
+can use Agentcard can call all of its tools, including the ones that buy and
+the ones that show card details, so choose which bots get it under **Bot
+access**. Existing custom entries at the official HTTP endpoint are recognized
+rather than replaced.
+
+### Email, phone numbers and calls for your bots
+
+Four cards give bots their own email, numbers and calls on accounts you own,
+so each service bills you directly and OpenMausBot pays for none of it.
+
+| Card | Official endpoint | Connects with |
+| --- | --- | --- |
+| **AgentMail**, email inboxes | `https://mcp.agentmail.to/mcp` | Browser sign-in |
+| **AgentPhone**, US and Canadian numbers, texts and calls | `https://mcp.agentphone.ai/mcp` | Browser sign-in |
+| **Higgsfield**, AI images and videos | `https://mcp.higgsfield.ai/mcp` | Browser sign-in |
+| **Vapi**, phone calls | `https://mcp.vapi.ai/mcp` | A private API key from the Vapi dashboard |
+| **Telnyx**, numbers in many countries, texts and calls | `https://api.telnyx.com/v2/mcp` | An API key from the Telnyx portal |
+
+Vapi and Telnyx have no browser sign-in, so their cards take a pasted key. The
+key goes in the server's `Authorization: Bearer` header, never in its
+address, on a server that stays off until its tools load with that key; a
+refused key leaves it off and says why. Like every header value it is never
+shown again. **Disconnect** on a key card deletes the server and its key.
+
+Placing a call, buying a number and every Telnyx action (Telnyx reaches its
+whole API through one tool) follow **Sending on your behalf**, the same as
+sending a message. Choose which bots get each card under **Bot access**. To
+have a bot answer new mail, texts or calls, add a webhook for that bot in
+**Automations** and paste its address into the service.
+
+### BubblaV
+
+In Plugins, find **BubblaV** and click **Connect**. The card uses BubblaV's
+official hosted MCP endpoint, `https://www.bubblav.com/mcp`, and opens BubblaV's
+browser sign-in. Sign in (or create a free account), choose the one chatbot
+(website) the connection may reach, and choose **Full access** or **Read
+only**. No API key is needed. After sign-in and tool discovery it enables the
+connection, and **Disconnect** and **Bot access** work as they do for Whop.
+
+A bot that can use BubblaV reads that chatbot's reports, unanswered questions,
+conversations and leads. With **Full access** it can also add and delete
+knowledge and change the chatbot's instructions, widget, forms and webhook
+tools, so choose which bots get it under **Bot access**; **Read only** lists
+and runs only BubblaV's read-only tools. BubblaV saves the sign-in as an API
+key named **MCP Client** under **Settings → API Keys**, where revoking it ends
+the connection. The key lasts one year, then the card asks you to sign in
+again. See [BubblaV's OpenMausBot guide](https://docs.bubblav.com/user-guide/integrations/openmausbot).
 
 ### Servers that ask you to sign in
 
@@ -91,7 +156,13 @@ details (RFC 9728 protected-resource metadata, then the authorization
 server's own metadata), the server shows **Needs sign-in** and a **Sign in**
 button. Sign in opens the provider's page in your browser, which returns to
 OpenMausBot when you approve. The server then shows **Signed in**, and Test
-lists its tools.
+lists its tools. A server that lists its tools before you sign in but refuses
+tool calls the same way (an HTTP 401 pointing at those sign-in details) shows
+**Sign in** too. Test first calls a tool name no server has. If the server
+answers that without asking who is calling, as Gmail's MCP server does, Test
+calls one of the server's own tools once, with no arguments: only a tool the
+server marks read-only and not destructive, and that requires arguments, so it
+has nothing to work on. Background checks never do this.
 
 - **Which servers work.** The authorization server must support PKCE with
   S256. If it lets apps register themselves (dynamic client registration),
@@ -172,6 +243,17 @@ the server's address. Sign-in with a registered app always uses that port; if
 another program holds it, sign-in stops and says so. Changing the client ID
 or the scopes signs the server out; a new secret for the same app does not.
 
+When you sign in from a browser on another computer, a return to
+`127.0.0.1` lands on the wrong machine and only the paste-back step is left.
+If the provider lets the app register an https address instead, set
+**Redirect URI** in the app's entry in `config.json` to this server's public
+https address at `/mcp-oauth/callback` (for example
+`https://maus.example/mcp-oauth/callback`) — the same address the editor
+shows once it is set. The sign-in then returns straight to that page and
+says **Signed in**, with nothing to paste; a browser on this computer uses
+the same address. Only that exact address is accepted, over https, with no
+query, credentials or fragment.
+
 ### Example: give your bots web search
 
 A good first URL server is You.com's search server, because the free profile
@@ -211,8 +293,15 @@ already use** step (`server/setup-import.ts`). On the computer running
 OpenMausBot, and only for the desktop app's own window there, it reads the
 `mcpServers` of Claude Code (only the top-level key of `~/.claude.json`),
 Claude Desktop, Cursor (`~/.cursor/mcp.json`) and Gemini CLI
-(`~/.gemini/settings.json`), and the `[mcp_servers.*]` tables of Codex's
-`config.toml`. Each server goes through the import parser, switched off;
+(`~/.gemini/settings.json`), the `[mcp_servers.*]` tables of Codex's
+`config.toml`, the `mcp_servers:` of Hermes Agent's `config.yaml`
+(`$HERMES_HOME`, else `~/.hermes`, or `%LOCALAPPDATA%\hermes` on Windows) and
+the `mcp.servers` of OpenClaw's `openclaw.json` (`$OPENCLAW_CONFIG_PATH`, else
+`$OPENCLAW_STATE_DIR` or `~/.openclaw`; its JSON5 comments and trailing commas
+are accepted, and a config that still can't be read brings no tools).
+OpenClaw's `transport: "sse"` stays SSE; `streamable-http` comes in as HTTP.
+Neither tool's `.env`, `auth.json`, `mcp-tokens/`, `secrets.json`,
+`credentials/`, sessions, state databases or memory files are ever opened. Each server goes through the import parser, switched off;
 one already here by command or address is left alone, a different server
 under a name already taken is skipped and named in the result, a name
 OpenMausBot keeps for itself (`browser`, `computer`, `data`…) gets an `mcp-`
@@ -224,7 +313,9 @@ Claude bots already run them. Token variables (Codex `bearer_token_env_var`)
 are not resolved: add the token as a header when you test the server.
 
 The step also brings in the person's own skills (`~/.claude/skills`,
-`~/.codex/skills`). Each one is copied once, read-only except on Windows, into
+`~/.codex/skills`, Hermes Agent's `skills/` with its category folders, and
+OpenClaw's `skills/` and `workspace/skills/`). The skills Hermes ships itself,
+listed in its `skills/.bundled_manifest`, are left out. Each one is copied once, read-only except on Windows, into
 `<data>/imported-skills` (`server/imported-skills.ts`), and every bot uses
 that copy on every engine that works with files: the bot the tour sets up,
 and any bot made later with New bot, the API, a template, a Chief
@@ -246,9 +337,22 @@ and out of the tools' own folders outside their skills. A copy whose files
 change afterwards is left out until it is brought in again. A turn whose
 engine already loads the folder a skill came from leaves the copy out, so
 nothing is listed twice: Claude Code with **Also use my Claude Code skills**
-on, and Codex on the person's own `CODEX_HOME`. The copies travel with
-backups and Copy to My Cloud. The step never opens credential, session or
-history files, and it is skipped when there is nothing new.
+on, and Codex on the person's own `CODEX_HOME` (a ChatGPT plan's linked one
+included). The copies travel with backups and Copy to My Cloud. The step never
+opens credential, session or history files, and it is skipped when there is
+nothing new.
+
+Skills an engine loads by itself show in **Bot Settings → Skills** with a
+switch for that bot: for Codex, `$CODEX_HOME/skills`, `~/.agents/skills` and
+`/etc/codex/skills`. Switching one off passes Codex that skill's `SKILL.md`
+path for the bot's turns, so a same-named skill in the turn's own
+`.agents/skills` stays on, and `[[skills.config]]` entries in `config.toml`
+keep applying. A skill brought in from this computer and switched off is kept
+out the same way, from the folder it came from. If the bot's saved switches
+(`<data>/skill-state/<bot id>/native-skills.json`) are there but can't be read,
+every such skill counts as on (skills from this computer switched off for the
+bot stay off), turns run as usual and the server logs it once; the next switch
+writes a good file.
 
 Open a bot’s **Tools → Access → MCP servers** to narrow the enabled global
 servers offered to it. Existing bots keep all enabled global servers until you
@@ -353,6 +457,22 @@ An HTTP 401 tells the bot to send the message again (a sign-in is refreshed
 when a message starts) and, if that fails, to sign in again or check the
 server's header values in Plugins → MCP servers.
 
+### Which bot made a call, on a server that runs on a lent computer
+
+A server saved on a Cloud to run on a computer lent to it is started by that
+computer. Each tool call it gets names the bot and conversation that made it,
+in the call's `_meta`:
+
+```json
+{ "_meta": { "openmausbot/caller": { "botId": "…", "threadId": "…", "verified": false } } }
+```
+
+It is a hint for the server's own logs or per-bot settings, never proof of
+who called: the Cloud says it, the computer passes it on as it is, and
+OpenMausBot never uses it to allow or refuse anything. The Cloud sends it
+only to a desktop app new enough to pass it on, so an older one keeps running
+calls as before; a listing of the server's tools never carries it.
+
 ## What a Claude bot sees, and the "Also use my Claude Code MCP servers" switch
 
 A bot on the Claude engine gets the tools and instructions its owner gave it:
@@ -360,19 +480,19 @@ the servers above, its integrations (computer, browser, agents, phone), and
 its own project's `<cwd>/.mcp.json`. By default it does **not** inherit this
 machine's Claude Code setup — the MCP servers and claude.ai connectors in your
 user or local Claude config, your skills and agents, your hooks, and your
-personal `~/.claude/CLAUDE.md`. Those were being mounted into every turn of
-every bot (one measured desktop added 407 tools, ~10k tokens per model call)
-and were reachable by the bot. Codex bots, by contrast, have always read the
-MCP servers in `~/.codex/config.toml`, which is why the two engines looked
-different.
+personal `~/.claude/CLAUDE.md` and `~/.claude/rules`. Those were being mounted
+into every turn of every bot (one measured desktop added 407 tools, ~10k tokens
+per model call) and were reachable by the bot. Codex bots, by contrast, have
+always read the MCP servers in `~/.codex/config.toml`, which is why the two
+engines looked different.
 
 If you want Claude bots to see your own Claude Code MCP servers too, switch on
 **Also use my Claude Code MCP servers** at the top of Plugins → MCP servers.
 With it on, every Claude bot also loads the servers and connectors from your
 Claude Code config on every message; skills, hooks and the personal
-`CLAUDE.md` still stay out. More tools means more tokens per message, so keep
-it off unless you need those servers — the recommended way to give a bot a
-server is still this page or the bot project's `.mcp.json`.
+`CLAUDE.md` and rules still stay out. More tools means more tokens per
+message, so keep it off unless you need those servers — the recommended way
+to give a bot a server is still this page or the bot project's `.mcp.json`.
 
 **Also use my Claude Code skills**, just below it, gives Claude bots the skills
 in your own `~/.claude/skills` and nothing else from your setup. OpenMausBot
@@ -386,6 +506,20 @@ tool selection keeps working. In `config.json` it is
 removed when the switch goes off; a skill brought in from `~/.claude/skills`
 is left out of a Claude turn while the switch is on, since Claude already has
 the original.
+
+A project can ship skills for any AI agent in `agents/skills`, `.agents/skills`
+or `.claude/skills`. When a bot works in such a folder (or one below it, up to
+the git root; outside a repository, only the working folder itself counts), its
+**Skills** page lists them under **In this project**, and the bot uses them by
+itself, the way Claude Code loads `.claude/skills`. There is no switch. Claude
+Code loads `.claude/skills` and Codex loads `.agents/skills` themselves, and
+those show as the engine's own skills, each with the bot's own switch. A bot's
+prompt lists each project skill with its SKILL.md path and `/name` runs it,
+except one marked `user-invocable: false`, which only the model uses. A
+SKILL.md must be a plain file of a skill's size, and a skill folder linked to a
+place outside the project is skipped. The bot's own, library and brought-in skills keep
+their names, an engine without file tools gets none, and they never travel in a
+bot or team package.
 
 The switch drops the CLI flag `--strict-mcp-config` (Claude Code 1.0.60+)
 while keeping `--setting-sources project` (1.0.122+). The environment variable
@@ -451,10 +585,11 @@ The same registry lives in `~/.openmausbot/config.json`:
 }
 ```
 
-`type` is `http` (Streamable HTTP, the default) or `sse`. `oauth` is the
-optional sign-in app; `clientSecret` and `scopes` may be left out. If you edit the file
-by hand, restart OpenMausBot. Every bot whose engine can mount custom MCP
-servers gets the enabled tools on its next task.
+`type` is `http` (Streamable HTTP, the default) or `sse`. A command entry may
+say `"type": "stdio"`, as other MCP clients write it; it changes nothing.
+`oauth` is the optional sign-in app; `clientSecret` and `scopes` may be left
+out. If you edit the file by hand, restart OpenMausBot. Every bot whose
+engine can mount custom MCP servers gets the enabled tools on its next task.
 
 ## Rules that keep this safe
 

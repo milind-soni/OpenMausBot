@@ -92,11 +92,11 @@ describe("RoutineRunCard", () => {
 
   it("does not describe delegated work as a question or approval", () => {
     const markup = renderToStaticMarkup(createElement(RoutineRunCard, {
-      message: message("waiting", { summary: "Waiting for delegated work to finish." }),
+      message: message("waiting", { summary: "Waiting for work it handed on to finish." }),
       onOpen: vi.fn(),
     }));
 
-    expect(markup).toContain("Waiting for delegated work to finish.");
+    expect(markup).toContain("Waiting for work it handed on to finish.");
     expect(markup).toContain("Open run");
     expect(markup).not.toContain("Needs your input");
     expect(markup).not.toContain("Review");

@@ -99,6 +99,10 @@ describe("what is sent", () => {
     expect(hasSetupChoices("es")).toBe(true);
     expect(worthAsking({ ...nothing, languageCode: "es" }, null)).toBe(false);
     expect(hasSetupChoices("de")).toBe(false);
+    expect(hasSetupChoices("zh-tw")).toBe(true);
+    expect(setupChoices("zh-hant")).toEqual([
+      "研究與深入探討主題", "幫我留意各種事情", "電子郵件、行事曆和訊息", "預約、購物和跑腿", "資料、試算表和報告",
+    ]);
     expect(worthAsking({ ...nothing, languageCode: "de" }, null)).toBe(true);
   });
 
@@ -177,6 +181,22 @@ describe("the card's answers", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(late.greeting().setupChoices?.[0]).toBe("Research and digging into topics");
     expect(late.patches).toHaveLength(2);
+  });
+
+  it("count the 6 s from when the writing starts, not while it waits for a free slot behind other bots' background calls", async () => {
+    // The writer as side-jobs queues it: told it waits, started 8 s later, answering 2 s after that.
+    const started = vi.fn();
+    const s = setup({ reply: () => new Promise<string>((resolve) => {
+      const options = s.calls.at(-1)!.options as { waiting?(): void; started?(): void } | undefined;
+      options?.waiting?.();
+      setTimeout(() => { options?.started?.(); started(); setTimeout(() => resolve(REPLY), 2000); }, 8000);
+    }) });
+    s.suggestions.personalise(s.bot.id);
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(started).toHaveBeenCalledOnce();
+    expect(s.calls[0]!.options?.signal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(s.greeting().setupChoices).toEqual(JSON.parse(REPLY));
   });
 
   it("drop the answers when the person writes, closes the card or picks first", async () => {

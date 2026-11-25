@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ProviderInstance, RuntimeEvent, SendTurnInput } from "../../contracts.ts";
 import { TurnNotStartedError } from "../../contracts.ts";
+import { botBox } from "../../bot-box/box.ts";
 import { engineHomes } from "../../engine-homes/engine-homes.ts";
 import * as procs from "../../procs.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
@@ -85,6 +86,7 @@ const exited = (child: ChildProcess) => new Promise<void>((resolve) => {
 afterEach(async () => {
   for (const instance of instances.splice(0)) await instance.dispose();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   started.clear();
   for (const scratch of scratches.splice(0)) removeTempDir(scratch);
 });
@@ -113,6 +115,33 @@ describe("ACP threads sharing one agent process", () => {
     const g = await fixture({ shareProcess: false });
     await Promise.all([g.run("thread-a"), g.run("thread-b")]);
     expect(g.spawned).toHaveLength(2);
+  });
+
+  it("gives each folder in a process to one thread for the process's life, since the agent keeps MCP servers per folder", async () => {
+    const f = await fixture();
+    const shared = join(f.scratch, "project");
+    mkdirSync(shared, { recursive: true });
+    await Promise.all([f.run("thread-a", { cwd: shared }), f.run("thread-b", { cwd: shared })]);
+    expect(f.spawned).toHaveLength(2);
+    await f.run("thread-c", { cwd: shared });
+    expect(f.spawned).toHaveLength(3);
+    await f.run("thread-a", { cwd: shared });
+    await f.run("thread-d");
+    expect(f.spawned).toHaveLength(3);
+  });
+
+  it("in the bot box shares a process only among one bot's conversations, boxed with all of that bot's conversation folders", async () => {
+    vi.spyOn(botBox, "enabled").mockReturnValue(true);
+    const f = await fixture();
+    const folder = (bot: string, thread: string) => join(f.scratch, "task-workspaces", bot, thread);
+    for (const [bot, thread] of [["bot-a", "thread-a"], ["bot-a", "thread-b"], ["bot-b", "thread-c"]]) mkdirSync(folder(bot, thread), { recursive: true });
+    await f.run("thread-a", { cwd: folder("bot-a", "thread-a") });
+    await f.run("thread-b", { cwd: folder("bot-a", "thread-b") });
+    expect(f.spawned, "the second conversation of the same bot joins its process").toHaveLength(1);
+    await f.run("thread-c", { cwd: folder("bot-b", "thread-c") });
+    expect(f.spawned, "another bot's folders are not in that process's box").toHaveLength(2);
+    const boxes = vi.mocked(procs.spawnCli).mock.calls.filter((call) => call[3] === "bot").map((call) => call[2].box);
+    expect(boxes.every((box) => typeof box === "object" && box.botThreads === true)).toBe(true);
   });
 
   it("on a Team Cloud never shares a process between two audiences, whose engines have homes of their own", async () => {
@@ -199,6 +228,9 @@ describe("ACP threads sharing one agent process", () => {
   });
 
   it("starts a fresh process once a shared one is full", async () => {
+    // Every thread here stays idle in the shared process. The cap on idle engines follows the host's memory (4 on a
+    // 7 GB runner) and would close sessions before the process fills, so it is set above the seven threads.
+    vi.stubEnv("OMB_IDLE_ENGINES_MAX", "16");
     const f = await fixture();
     for (let i = 0; i < 7; i++) await f.run(`thread-${i}`);
     expect(f.spawned).toHaveLength(2);

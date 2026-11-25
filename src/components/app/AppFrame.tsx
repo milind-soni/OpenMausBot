@@ -4,7 +4,7 @@ import { useStore } from "@/state/store";
 import type { AppBlockedReason, AppDocument } from "../../../shared/app";
 import { RPC_HOST_REFUSED, type JsonRpcError } from "../../../shared/app-frame/bridge";
 import { callAppRpc, newAppSendId, postAppContext, sendAppMessage } from "./app-api";
-import { mountAppFrame } from "./app-frame-host";
+import { mountAppFrame, type AppSelection } from "./app-frame-host";
 import { appHostContext, appMaxHeight, appThemeContext } from "./app-host-context";
 
 export interface AppFrameHandle {
@@ -33,6 +33,12 @@ export interface AppFrameProps {
   fill?: boolean;
   /** The tallest the frame grows to its content, under the window's own limit. */
   maxHeight?: number;
+  /** Text the person selected in the page, in window coordinates, or null once it is gone. */
+  onSelection?(selection: AppSelection | null): void;
+  /** Whether the page, as rendered, opens with a heading of its own; null while it is still drawing itself. */
+  onHeading?(heading: boolean | null): void;
+  /** Takes the page's message instead of sending it. */
+  onDraft?(text: string): void;
 }
 
 const refusal = (message: string): JsonRpcError => ({ code: RPC_HOST_REFUSED, message });
@@ -60,6 +66,8 @@ export function AppFrame(props: AppFrameProps) {
       hostVersion: appVersion(),
       ...(import.meta.env?.DEV ? { log: (params: unknown) => console.info("[app]", params) } : {}),
       ...(fill ? { fill: true } : {}),
+      onSelection: (selection) => latest.current.onSelection?.(selection),
+      onHeading: (heading) => latest.current.onHeading?.(heading),
       adapter: {
         async callRpc(method, params) {
           const outcome = await callAppRpc({ botId, threadId, messageId, method, params });
@@ -73,6 +81,8 @@ export function AppFrame(props: AppFrameProps) {
           throw outcome.error;
         },
         async sendMessage(text) {
+          const draft = latest.current.onDraft;
+          if (draft) return draft(text);
           // A bot setting just changed is saved before the message starts a turn.
           await latest.current.flushBotPatches(botId);
           await sendAppMessage({ botId, threadId, messageId, text, sendId: newAppSendId() });
@@ -109,6 +119,7 @@ export function AppFrame(props: AppFrameProps) {
       window.removeEventListener("resize", later);
       if (timer !== undefined) clearTimeout(timer);
       if (latest.current.handle.current) latest.current.handle.current = null;
+      latest.current.onSelection?.(null);
       // The row is going: the frame waits out the View's teardown somewhere hidden.
       host.retire();
     };

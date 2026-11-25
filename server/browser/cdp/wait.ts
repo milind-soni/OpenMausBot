@@ -97,7 +97,8 @@ export class Lifecycle {
     if (params.frameId !== this.#mainFrameId) return;
     const loaderId = String(params.loaderId ?? "");
     const name = String(params.name ?? "");
-    if (name === "init" || loaderId !== this.#loaderId) this.#reset(loaderId);
+    if (name === "init" || this.#loaderId === null) this.#reset(loaderId);
+    if (loaderId !== this.#loaderId) return;
     this.#reached.add(name);
     this.#notify();
   }
@@ -136,7 +137,7 @@ async function elementPresent(context: WaitContext, target: { ref?: string; sele
   const ref = target.ref ?? (target.selector !== undefined ? parseRef(target.selector) : null);
   if (ref) {
     try {
-      return await callOnNode<boolean>(context.frames, context.refs.resolve(ref), CONNECTED);
+      return await callOnNode<boolean>(context.frames, context.refs.resolve(ref), CONNECTED, [], { readOnly: true });
     } catch (error) {
       if (error instanceof DriverError && error.code === "stale-ref") throw error;
       return false;

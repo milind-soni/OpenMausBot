@@ -18,7 +18,7 @@ export const X_CARD_SEARCH = "x twitter treg tweets posts";
 
 export function XIcon() {
   return (
-    <svg viewBox="0 0 40 40" className="size-10 shrink-0 rounded-[10px]" aria-hidden="true">
+    <svg viewBox="0 0 40 40" className="size-10 shrink-0 rounded-[8px]" aria-hidden="true">
       <rect width="40" height="40" rx="10" fill="#000" />
       <path transform="translate(9 9) scale(0.9167)" fill="#fff" d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
     </svg>

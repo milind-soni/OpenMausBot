@@ -1,17 +1,19 @@
 // Security: the invite link is convenience, not a second door; the one-time code still goes to the address itself.
 import { useCallback, useEffect, useState } from "react";
-import { Check, Copy, ExternalLink, Link2, Loader2, Plus, RefreshCw, X } from "lucide-react";
+import { Check, Copy, ExternalLink, Link2, Loader2, Plus, RefreshCw, Users, X } from "lucide-react";
 import { api } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { formatUsd, hasFiniteCost } from "@/lib/usage";
 import { readMembership, type Membership } from "../lib/membership";
-import { readSessionState, type SessionState } from "../lib/session";
+import type { SessionState } from "../lib/session";
+import { readSharedSessionState } from "../lib/shared-session";
 import { canPairDevices } from "./ServerPairingCard";
 import { normalizeAccessEntry, withEntry, withoutEntry, type SignInLists } from "./SignInAccessCard";
-import { Card, SettingRow } from "./SettingsPrimitives";
+import { Card } from "./SettingsPrimitives";
 import { Select } from "./Select";
+import { serverFetch } from "@/lib/relay-server";
 
 export type Role = "admin" | "member";
 
@@ -202,7 +204,7 @@ export function PeopleSection({ simple = false, startOpen = false }: { simple?: 
         api("/api/auth/sessions").catch(() => ({ sessions: [] })),
         api("/api/usage?groupBy=user").catch(() => ({ groups: [] })),
         api("/api/settings/custom-domain").catch(() => null),
-        fetch("/.well-known/openmausbot/environment").then((res) => (res.ok ? res.json() : null)).catch(() => null),
+        serverFetch("/.well-known/openmausbot/environment").then((res) => (res.ok ? res.json() : null)).catch(() => null),
       ]);
       const current: SignInLists = {
         admins: Array.isArray(config?.signIn?.admins) ? config.signIn.admins : [],
@@ -224,7 +226,7 @@ export function PeopleSection({ simple = false, startOpen = false }: { simple?: 
   }, []);
 
   useEffect(() => {
-    void readSessionState().then((state) => {
+    void readSharedSessionState().then((state) => {
       setSession(state);
       if (canPairDevices(state)) void load();
     });
@@ -297,11 +299,17 @@ export function PeopleSection({ simple = false, startOpen = false }: { simple?: 
   if (simple) {
     return (
       <div data-people-summary="">
-        <SettingRow title={t("people.title")} subtitle={t("settings.simple.people")}>
-          <button type="button" aria-expanded={open} className="ui-button" onClick={() => setOpen(!open)}>
+        {/* Drawn like the name row above it, a round mark then two lines, so the Account card has one text edge. */}
+        <div role="group" aria-label={t("people.title")} className="flex min-w-0 items-center gap-3 px-4 py-[13px]">
+          <span aria-hidden="true" className="flex size-11 shrink-0 items-center justify-center rounded-full bg-ink/[0.06] text-ink-secondary"><Users size={20} /></span>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[14px] leading-5 text-ink">{t("people.title")}</div>
+            <div className="text-[13px] leading-[18px] text-ink-secondary">{t("settings.simple.people")}</div>
+          </div>
+          <button type="button" aria-expanded={open} className="ui-button shrink-0" onClick={() => setOpen(!open)}>
             {open ? t("common.done") : t("settings.simple.people.invite")}
           </button>
-        </SettingRow>
+        </div>
         {open && <div className="px-3.5 pb-3.5 pt-1">{portal ?? content}</div>}
       </div>
     );

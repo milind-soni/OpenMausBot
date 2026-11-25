@@ -284,6 +284,26 @@ describe("a message sent while a one-to-one bot works", () => {
     expect(sends().slice(-2).map((action) => [action.text, action.followUp])).toEqual([["clicked", "steer"], ["ctrl-clicked", "queue"]]);
   });
 
+  it("keeps the person's choice when a failed send is retried, and again when the retry fails", () => {
+    fixture.instances = [steers];
+    render(createElement(Composer, { bot: working }));
+    const retry = () => [...host.querySelectorAll("button")].find((button) => button.textContent === "Retry")!;
+    type(textarea(), "a new task for later");
+    press(textarea(), { ctrlKey: true });
+    const failed = sends().at(-1);
+    expect(failed.followUp).toBe("queue");
+    type(textarea(), "a newer draft");
+    flushSync(() => failed.onError());
+
+    flushSync(() => retry().click());
+    const retried = sends().at(-1);
+    expect(retried).toMatchObject({ type: "send", sendId: failed.sendId, text: "a new task for later", followUp: "queue" });
+
+    flushSync(() => retried.onError());
+    flushSync(() => retry().click());
+    expect(sends().at(-1)).toMatchObject({ sendId: failed.sendId, followUp: "queue" });
+  });
+
   it("follows the setting: Enter queues and Ctrl/⌘ steers once the person picks queue", () => {
     fixture.instances = [steers];
     setFollowUpDefault("queue");
@@ -315,9 +335,9 @@ describe("a message sent while a one-to-one bot works", () => {
     type(textarea(), "start again with this");
     const choices = openChoices();
     expect(choices.map((choice) => choice.textContent)).toEqual([
-      "Steer nowInterrupt what Pepper is doingEnter",
+      "Steer nowSteer it into the running turnEnter",
       "QueueRun after the current turnCtrl+Enter",
-      "Restart turnStart the turn over with this message",
+      "Restart turnStart the turn over with this message. Also stops work it handed to other bots",
     ]);
     flushSync(() => choices[2]!.click());
     expect(sends().at(-1)).toMatchObject({ type: "send", text: "start again with this", followUp: "restart" });
@@ -334,20 +354,34 @@ describe("a message sent while a one-to-one bot works", () => {
     type(textarea(), "c");
     expect(openChoices().map((choice) => choice.textContent)).toEqual([
       "QueueRun after the current turnEnter",
-      "Restart turnStart the turn over with this message",
+      "Restart turnStart the turn over with this message. Also stops work it handed to other bots",
     ]);
   });
 
-  it("leaves an idle bot and a room's queue as they were", () => {
+  it("leaves an idle bot as it was", () => {
     fixture.instances = [steers];
     render(createElement(Composer, { bot }));
     type(textarea(), "idle");
     press(textarea(), { ctrlKey: true });
     expect(chooser()).toBeNull();
+    expect(sends().map((action) => [action.type, "followUp" in action])).toEqual([["send", false]]);
+  });
+
+  it("lets a busy room follow the same setting with Enter and Ctrl+Enter, without the send menu", () => {
+    fixture.instances = [steers];
     render(createElement(Composer, { group: { ...room, busyBotId: "bot" }, members: [bot] }));
-    type(textarea(), "room");
+    type(textarea(), "steer");
+    press(textarea());
+    type(textarea(), "queue");
     press(textarea(), { ctrlKey: true });
     expect(chooser()).toBeNull();
-    expect(sends().map((action) => [action.type, "followUp" in action])).toEqual([["send", false], ["sendGroup", false]]);
+    expect(sends().map((action) => [action.type, (action as { followUp?: string }).followUp])).toEqual([["sendGroup", "steer"], ["sendGroup", "queue"]]);
+    fixture.instances = [cannotSteer];
+    render(createElement(Composer, { group: { ...room, busyBotId: "bot" }, members: [bot] }));
+    type(textarea(), "held");
+    press(textarea());
+    // A speaking engine that cannot steer: no follow-up at all, so the room queues the line as it always has.
+    expect(sends().at(-1)).toMatchObject({ type: "sendGroup", text: "held" });
+    expect(sends().at(-1)).not.toHaveProperty("followUp");
   });
 });

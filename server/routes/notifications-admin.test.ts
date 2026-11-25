@@ -9,7 +9,7 @@ import { json, readBody } from "../harness/http.ts";
 import { closeMessageDb, insertNotificationLog, recentNotificationLog } from "../message-db.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { SessionRecord } from "../sessions.ts";
-import { createNotificationRoutes, readThreadNotifications } from "./notifications.ts";
+import { createNotificationRoutes, notificationListedFor, readThreadNotifications } from "./notifications.ts";
 import { dispatchRoutes } from "./table.ts";
 
 const session: SessionRecord = { id: "fixture", tokenHash: "0".repeat(64), label: "Fixture", scopes: ["client"],
@@ -56,7 +56,7 @@ async function serve(auth: RequestAuth) {
 describe.each(callers)("$label notification feed", ({ auth, admin }) => {
   it("automatically reads spend alerts in a conversation only for admins", () => {
     const frames: Record<string, unknown>[] = [];
-    readThreadNotifications("shared", (frame) => frames.push(frame), auth);
+    readThreadNotifications("shared", (frame) => frames.push(frame), notificationListedFor()(auth));
     expect(recentNotificationLog().filter((entry) => entry.read).map((entry) => entry.id).sort())
       .toEqual(admin ? ["done", "spend"] : ["done"]);
     expect(frames.map((frame) => ({ ...frame, ids: (frame.ids as string[]).sort() })))

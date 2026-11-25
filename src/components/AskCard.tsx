@@ -4,12 +4,13 @@ import { botButton, type BotButton } from "@/lib/bot-button";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { MausColor } from "@/lib/mascot";
+import { imeComposing } from "@/lib/send-key";
 import type { Bot } from "@/state/store";
 import { BotAvatar } from "./Avatar";
-import { ELEVATED_CARD } from "./elevated";
+import { ELEVATED_CARD, ELEVATED_FLOAT } from "./elevated";
 
 /** The bot a card asks for: its face and name lead the card. */
-export type Asker = Pick<Bot, "name" | "color"> & Partial<Pick<Bot, "avatarUrl" | "avatarCrop" | "avatarZoom" | "avatarFocusX" | "avatarFocusY" | "mascotBody" | "mascotFaceColor">>;
+export type Asker = Pick<Bot, "name" | "color"> & Partial<Pick<Bot, "avatarUrl" | "avatarCrop" | "avatarZoom" | "avatarFocusX" | "avatarFocusY" | "mascotBody" | "mascotFaceColor" | "mascotBodyColor" | "mascotMaterial">>;
 
 export function AskHeader({ asker, line, origin }: { asker: Asker; line: string; origin?: { label: string; hint: string; open(): void } }) {
   return (
@@ -26,10 +27,28 @@ export function AskHeader({ asker, line, origin }: { asker: Asker; line: string;
   );
 }
 
+/** A card's place row: a small icon chip and what the card is about, such as Browser or Computer. */
+export type AskKicker = { icon: ReactNode; label: string; meta?: ReactNode };
+
+export function AskKickerRow({ kicker }: { kicker: AskKicker }) {
+  return (
+    <div data-ask-kicker="" className="flex min-w-0 items-center gap-2 text-[13px] leading-5">
+      <span aria-hidden="true" className="flex size-5 shrink-0 items-center justify-center rounded-md bg-ink/[0.06] text-ink-secondary ring-[0.5px] ring-inset ring-ink/[0.06] [&>svg]:size-3">
+        {kicker.icon}
+      </span>
+      <span dir="auto" className="min-w-0 truncate font-medium text-ink">{kicker.label}</span>
+      {kicker.meta && <span className="ms-auto shrink-0 text-[12px] tabular-nums text-ink-tertiary">{kicker.meta}</span>}
+    </div>
+  );
+}
+
 export function AskCard({
   header,
+  kicker,
   icon,
   title,
+  subtitle,
+  media,
   meta,
   explanation,
   onDismiss,
@@ -39,11 +58,18 @@ export function AskCard({
   children,
   footer,
   onKeyDown,
+  stays = false,
 }: {
   /** An AskHeader: who asks, above the question. */
   header?: ReactNode;
+  /** The place row above the title; a card with one wears the roomier shell and a semibold title. */
+  kicker?: AskKicker;
   icon?: ReactNode;
   title: ReactNode;
+  /** One line under the title, in the secondary colour. */
+  subtitle?: ReactNode;
+  /** A picture that runs the card's full width, under the title. */
+  media?: ReactNode;
   meta?: ReactNode;
   explanation?: ReactNode;
   onDismiss?: () => void;
@@ -53,20 +79,25 @@ export function AskCard({
   children?: ReactNode;
   footer?: ReactNode;
   onKeyDown?: (event: KeyboardEvent<HTMLDivElement>) => void;
+  /** Work rests on this card and the person's answer alone moves it: it stays in view however far the chat scrolls. */
+  stays?: boolean;
 }) {
   return (
     <div
       role="group"
       aria-label={ariaLabel}
       data-tour={tour}
-      data-ask-card="pending"
+      data-ask-card="pending" data-look="ask-card"
       onKeyDown={onKeyDown}
-      className={cn("w-full max-w-[560px] rounded-[20px] px-4 pb-3.5 pt-3 text-start", ELEVATED_CARD)}
+      data-shell={kicker ? "kicker" : undefined}
+      className={cn("w-full max-w-[560px] rounded-[18px] text-start", kicker ? "overflow-hidden px-4 pb-4 pt-3.5" : "px-4 pb-3.5 pt-3",
+        stays ? `sticky top-[var(--glass-top,60px)] bottom-[72px] z-10 ${ELEVATED_FLOAT}` : ELEVATED_CARD)}
     >
       {header && <div className="mb-1.5 pe-6">{header}</div>}
+      {kicker && <div className="mb-2"><AskKickerRow kicker={kicker} /></div>}
       <div className="flex min-w-0 items-start gap-2">
         {icon && <span aria-hidden="true" className="mt-[3px] flex shrink-0 text-ink-secondary">{icon}</span>}
-        <div className="min-w-0 flex-1 break-words text-[15px] font-medium leading-[22px] text-ink">
+        <div className={cn("min-w-0 flex-1 break-words text-[15px]", kicker ? "font-semibold" : "font-medium", "leading-[22px] text-ink")}>
           <bdi dir="auto">{title}</bdi>
         </div>
         {meta && <span className="mt-0.5 shrink-0 text-[12px] tabular-nums text-ink-tertiary">{meta}</span>}
@@ -85,7 +116,9 @@ export function AskCard({
           </button>
         )}
       </div>
+      {subtitle && <div dir="auto" className="mt-0.5 break-words text-[14px] leading-5 text-ink-secondary">{subtitle}</div>}
       {explanation && <div className="mt-1 text-[14px] leading-5 text-ink-secondary">{explanation}</div>}
+      {media && <div className="-mx-4 mt-4">{media}</div>}
       {children && <div className="mt-3">{children}</div>}
       {footer && <div className="mt-3 flex flex-wrap items-center justify-end gap-2">{footer}</div>}
     </div>
@@ -195,7 +228,7 @@ export function AskReply({ label, placeholder, color, onSend, sending = false, v
         disabled={sending}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+          if (event.key !== "Enter" || event.shiftKey || imeComposing(event.nativeEvent)) return;
           event.preventDefault();
           send();
         }}
@@ -242,7 +275,7 @@ export function AskSettledLine({
     <div
       role="group"
       aria-label={ariaLabel}
-      data-ask-card="settled"
+      data-ask-card="settled" data-look="ask-card"
       data-tone={tone}
       className="w-full max-w-[560px] text-start text-[13px] leading-[18px] text-ink-tertiary"
     >
@@ -273,7 +306,7 @@ const ASK_SHAPE =
 /** A card's answers: at least 36px tall, 44 on a touch screen, and a label that wraps rather than being cut. */
 export const ASK_BUTTON_SHAPE =
   "inline-flex min-h-9 shrink-0 items-center justify-center gap-1.5 rounded-full px-4 py-1.5 text-center text-[14px] font-medium leading-5 transition-colors [&>svg]:shrink-0 disabled:cursor-not-allowed pointer-coarse:min-h-11";
-const ASK_ICON_SHAPE = "inline-flex size-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed pointer-coarse:size-9";
+export const ASK_ICON_SHAPE = "inline-flex size-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed pointer-coarse:size-9";
 const ASK_LOOK = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-40";
 const ASK_CONTROL = `${ASK_SHAPE} ${ASK_LOOK}`;
 const ASK_PRIMARY_LOOK = `${ASK_LOOK} ui-button-primary bg-accent text-accent-ink hover:brightness-110`;
@@ -285,12 +318,15 @@ export function askPrimary(color: MausColor | undefined, shape = ASK_BUTTON_SHAP
   return botButton(color, shape, ASK_PRIMARY_LOOK);
 }
 
+/** The one answer a place card waits for (Take over, Connect): the dark pill, whoever asks. */
+export const ASK_DARK_PRIMARY = `${ASK_BUTTON_SHAPE} ${ASK_LOOK} ui-button-primary bg-ink text-app enabled:hover:bg-ink/90`;
+
 /** A card's other answers: Deny, Cancel, Not now. */
 export const ASK_SECONDARY_BUTTON = `${ASK_BUTTON_SHAPE} ${ASK_LOOK} bg-ink/[0.07] text-ink enabled:hover:bg-ink/[0.11] enabled:active:bg-ink/[0.15]`;
 /** An extra option that should not compete with the answer: Always allow, Details. */
 export const ASK_QUIET_ANSWER = `${ASK_BUTTON_SHAPE} ${ASK_LOOK} text-ink-secondary enabled:hover:bg-ink/[0.06] enabled:hover:text-ink enabled:active:bg-ink/[0.1]`;
 
-const ASK_CHOICE = `flex min-h-10 w-full items-center gap-2.5 rounded-[14px] px-3.5 py-2 text-start text-[14px] leading-5 text-ink ring-[0.5px] ring-ink/[0.14] transition-colors ${ASK_LOOK} disabled:cursor-default pointer-coarse:min-h-11`;
+const ASK_CHOICE = `flex min-h-10 w-full items-center gap-2.5 rounded-[12px] px-3.5 py-2 text-start text-[14px] leading-5 text-ink ring-[0.5px] ring-ink/[0.14] transition-colors ${ASK_LOOK} disabled:cursor-default pointer-coarse:min-h-11`;
 
 export const ASK_CHIP = `${ASK_CONTROL} max-w-full border`;
 export const ASK_CHIP_IDLE = "border-transparent bg-ink/[0.07] text-ink hover:bg-ink/[0.12]";

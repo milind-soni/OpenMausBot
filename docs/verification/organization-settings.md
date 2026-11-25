@@ -219,7 +219,7 @@ from `index.ts` each failed a test, then was restored.
 
 Copy only; no behaviour, identifier, menu id, IPC channel, query parameter or
 locale key changed. The app now says **Organization** (US spelling, as Admin
-does), **Settings → Servers** / **Server → Connect to a server…** for saved
+does), **Settings → Servers** / **Server → Connect to another computer…** for saved
 remote servers, **Settings → Installations** for the fleet screen, "this
 installation" for the whole app and its data, and "folder" for bot and task
 folders. The Anthropic Console's "workspace API key" and ChatGPT's "workspace

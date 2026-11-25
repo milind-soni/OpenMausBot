@@ -17,7 +17,7 @@ that with `show_html` and the page's `app_id`; the same card refreshes.
 | A quick answer or one chart | No page. Use the Data tools (`data_sql`, `data_show`) or a markdown table. |
 | A small summary to look at here | A chat page (`show_html`) with pre-aggregated rows embedded as CSV. |
 | To explore bigger data, or a link to share | Query with the Data tools, export the slice with `data_export` (`format: "parquet"`) into a folder beside `index.html`, show the folder in the chat with `show_html` `path`, and `publish_page` it when the person wants a link: the same card gains it. |
-| "Keep it up to date" | The shared page, plus a schedule (`trigger`, `action=create`, `when=schedule`) whose instructions re-run the export, set `CONFIG.updated`, and publish the same folder again. Publishing the same path keeps the same link. |
+| "Keep it up to date", "live" | The folder page with `live: true` on `show_html` (and on `publish_page` for a link), plus a schedule (`trigger`, `action=create`, `when=schedule`) whose instructions only re-run the export into the same folder and set `CONFIG.updated`. A live chat card reloads within seconds of the folder changing; a live link is published again by itself (at most once a minute) and open copies reload. Without `live`, the schedule must publish the same folder again; the same path keeps the same link. |
 
 Publish only when the person asks to share. A published page is public: never put secrets, personal details or rows they didn't ask to share in it.
 

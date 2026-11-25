@@ -1,3 +1,4 @@
+import nativeText from "./native-text.cjs";
 import skins from "./skin-overlay.cjs";
 import { createTalkPanel } from "./talk-panel.mjs";
 import { createTalkServer } from "./talk-server.mjs";
@@ -11,24 +12,26 @@ export { isTalkPanel } from "./talk-panel.mjs";
  * is ready. `speech`: speech.mjs's start/stop/finish/busy. `packaged`: asks go to `localRequest`, this computer's own
  * server; in development to `devUrl`, whose Vite /api proxy reaches `pnpm dev:server`.
  */
-export function installTalk({ ipcMain, localOnly, localOrHome, BrowserWindow, appleSpeech, speech, packaged, devUrl, nativeImage, iconPath, openLink, reveal, log, fetch = globalThis.fetch }) {
+export function installTalk({ ipcMain, localOnly, localOrHome, BrowserWindow, appleSpeech, windowsSpeech = false, speech, packaged, devUrl, nativeImage, iconPath, openLink, reveal, log, fetch = globalThis.fetch, t = nativeText.englishText.t }) {
   const callPresence = createCallPresence();
+  // The page's microphone listens through the Mac's or Windows' own speech helper; the talk shortcut stays Mac only.
+  const nativeSpeech = appleSpeech || windowsSpeech;
   let shortcut = null, session = null, panel = null, theme = null;
 
   ipcMain.handle("speech:start", localOnly("speech:start", (event, options) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win) return;
-    if (!appleSpeech) {
+    if (!nativeSpeech) {
       win.webContents.send("speech:end", { code: 2, reason: "unsupported-platform" });
       return;
     }
     speech.start(win, options);
   }));
   ipcMain.handle("speech:stop", localOnly("speech:stop", (event) => {
-    if (appleSpeech) speech.stop(BrowserWindow.fromWebContents(event.sender));
+    if (nativeSpeech) speech.stop(BrowserWindow.fromWebContents(event.sender));
   }));
   ipcMain.handle("speech:finish", localOnly("speech:finish", (event) => {
-    if (appleSpeech) speech.finish(BrowserWindow.fromWebContents(event.sender));
+    if (nativeSpeech) speech.finish(BrowserWindow.fromWebContents(event.sender));
   }));
   ipcMain.handle("talk-shortcut:state", localOnly("talk-shortcut:state", () => shortcut?.state() ?? TALK_SHORTCUT_UNAVAILABLE));
   ipcMain.handle("talk-shortcut:set", localOnly("talk-shortcut:set", (_event, change) => shortcut?.set({
@@ -51,7 +54,7 @@ export function installTalk({ ipcMain, localOnly, localOrHome, BrowserWindow, ap
     start({ globalShortcut, screen, prefs, remote, away, starting, localRequest, dataDir }) {
       const request = (route, init) => (packaged ? localRequest(route, init) : fetch(new URL(route, devUrl), init));
       try {
-        panel = createTalkPanel({ BrowserWindow, screen, nativeImage, iconPath, theme, onOpen: logged("open", () => session.open()), onDismiss: logged("dismiss", () => session.dismiss()) });
+        panel = createTalkPanel({ t, BrowserWindow, screen, nativeImage, iconPath, theme, onOpen: logged("open", () => session.open()), onDismiss: logged("dismiss", () => session.dismiss()) });
         session = createTalkSession({
           speech,
           server: createTalkServer({ request, prefs, starting, serverKey: () => (packaged ? dataDir() : devUrl) ?? "local" }),
@@ -76,6 +79,7 @@ export function installTalk({ ipcMain, localOnly, localOrHome, BrowserWindow, ap
     },
     /** Listening, or an ask on its way that has not been answered yet. */
     busy: () => session?.busy() ?? false,
+    relabel: () => panel?.relabel(),
     close() {
       logged("close", () => session?.close())();
       logged("close", () => shortcut?.close())();

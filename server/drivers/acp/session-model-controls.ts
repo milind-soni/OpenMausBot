@@ -1,3 +1,4 @@
+import { type ServerText } from "../../../shared/server-text.ts";
 import type { ModelCatalog, ModelVariantOption, SendTurnInput } from "../../contracts.ts";
 import { decodeInjectId } from "../local-inject.ts";
 import { acpModelOption, acpVariantOption, offeredModels } from "./config-options.ts";
@@ -67,6 +68,19 @@ export class SessionModelControls {
     return selected === model || (selected === null && this.input.selection?.unsetIds?.includes(model) === true);
   }
 
+  usageLimit(resolve: (model: string | undefined) => { limit: "engine" | "model"; limitModels?: string[] }) {
+    const model = this.modelOf(this.input.state()) ?? this.input.model();
+    const facts = resolve(model);
+    if (facts.limit !== "model") return facts;
+    const models = facts.limitModels?.length ? facts.limitModels : model ? [model] : [];
+    return {
+      ...facts,
+      ...(models.length ? { limitModels: [...new Set(models.map((id) =>
+        id === this.input.model() ? this.input.reportedModel() ?? id : id,
+      ))] } : {}),
+    };
+  }
+
   variant(value: string | undefined): NonNullable<ReturnType<typeof acpVariantOption>> {
     if (!this.input.variants) throw new Error(`${this.input.displayName} does not support model variants`);
     const option = acpVariantOption(this.input.state());
@@ -117,6 +131,7 @@ export interface SessionModelPick {
   staleProcess: boolean;
   /** Tell the person the session runs another model than the one picked; once per session for each such swap. */
   notice: string | null;
+  noticeText?: ServerText;
 }
 
 /** The model this turn asks the live session for, before the setter runs: a legacy id the driver maps
@@ -139,7 +154,7 @@ export function pickSessionModel(
   const { session, requested, catalog } = input;
   let { turn, variant, reportedModel } = input;
   const offered = offeredModels(session.sessionConfigResult, input.configId);
-  const normalized = support.normalizeSessionSelection?.(turn, offered) ?? turn;
+  const normalized = support.normalizeSessionSelection?.(turn, offered, catalog) ?? turn;
   if (normalized !== turn) {
     turn = normalized;
     variant = turn.variant;
@@ -150,6 +165,7 @@ export function pickSessionModel(
   const staleProcess = Boolean(support.fallbackModel && wanted && !input.launchedThisTurn && offered.length
     && !offered.includes(wanted) && catalog.options.some((option) => option.id === wanted || option.id === requested.model));
   let notice: string | null = null;
+  let noticeText: ServerText | undefined;
   // A local injected model is never swapped for the account's fallback.
   if (support.fallbackModel && offered.length && !decodeInjectId(requested.model)
       && !staleProcess && (!wanted || !offered.includes(wanted))) {
@@ -158,6 +174,7 @@ export function pickSessionModel(
       const noticeKey = wanted ? `${wanted}\n${fallback}` : null;
       if (noticeKey && session.fallbackNotice !== noticeKey) {
         session.fallbackNotice = noticeKey;
+        noticeText = { key: "chat.notice.acpModelFallback", params: { displayName: support.displayName, wanted: wanted!, fallback } };
         notice = `${support.displayName} no longer offers ${wanted}, so this conversation uses ${fallback}. ` +
           "Choose another model for this bot to stop seeing this.";
       }
@@ -166,5 +183,5 @@ export function pickSessionModel(
       variant = undefined;
     }
   }
-  return { turn, variant, reportedModel, accountModels, staleProcess, notice };
+  return { turn, variant, reportedModel, accountModels, staleProcess, notice, ...(noticeText ? { noticeText } : {}) };
 }

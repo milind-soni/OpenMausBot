@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { audienceBrowserSuffix } from "../browser/audience.ts";
 import { audienceHome, audienceHomeKey, audienceHomes, homedSpawn } from "./layout.ts";
+import { chatgptAccountHome } from "../drivers/codex-account-home.ts";
 
 const linux = describe.skipIf(process.platform === "win32");
 const serverHome = "/data", dataDir = "/data/.openmausbot";
@@ -51,6 +52,26 @@ linux("an audience's engine home", () => {
     // The same folder in two audiences lands in each one's own home.
     const other = homedSpawn({ HOME: serverHome, CODEX_HOME: plan }, { dataDir, serverHome, home: owner });
     expect(other.env.CODEX_HOME!.slice(owner.length)).toBe(homed.env.CODEX_HOME!.slice(bob.length));
+  });
+
+  it("keeps two ChatGPT accounts' Codex homes apart in one audience, each with its own login", () => {
+    const work = chatgptAccountHome("chatgpt-work", dataDir), spare = chatgptAccountHome("chatgpt-spare", dataDir);
+    const [a, b] = [work, spare].map((CODEX_HOME) => homedSpawn({ HOME: serverHome, CODEX_HOME }, { dataDir, serverHome, home: bob }));
+    expect(a!.env.CODEX_HOME).not.toBe(b!.env.CODEX_HOME);
+    expect(a!.shared).toContainEqual({ source: `${work}/auth.json`, target: `${a!.env.CODEX_HOME}/auth.json` });
+    expect(b!.shared).toContainEqual({ source: `${spare}/auth.json`, target: `${b!.env.CODEX_HOME}/auth.json` });
+    expect(a!.shared.some((file) => file.source.startsWith(`${spare}/`) || file.target.startsWith(`${b!.env.CODEX_HOME}/`))).toBe(false);
+  });
+
+  it("follows a Pi agent folder the environment names, with its login, and keeps ~/.pi/agent's otherwise", () => {
+    expect(homedSpawn({ HOME: serverHome }, { dataDir, serverHome, home: bob }).shared)
+      .toContainEqual({ source: "/data/.pi/agent/auth.json", target: `${bob}/.pi/agent/auth.json` });
+    const own = join(dataDir, "providers", "pi-own", "abc", "agent");
+    const homed = homedSpawn({ HOME: serverHome, PI_CODING_AGENT_DIR: own }, { dataDir, serverHome, home: bob });
+    expect(homed.env.PI_CODING_AGENT_DIR).toMatch(new RegExp(`^${bob}/\\.omb-folders/PI_CODING_AGENT_DIR-[0-9a-f]{12}$`));
+    expect(homed.folders).toContain(homed.env.PI_CODING_AGENT_DIR);
+    expect(homed.shared).toContainEqual({ source: `${own}/auth.json`, target: `${homed.env.PI_CODING_AGENT_DIR}/auth.json` });
+    expect(homedSpawn({ HOME: serverHome, PI_CODING_AGENT_DIR: "/data/.pi-work" }, { dataDir, serverHome, home: bob }).env.PI_CODING_AGENT_DIR).toBe(`${bob}/.pi-work`);
   });
 
   it("an environment already in an engine home is the server's again, so nothing is moved twice", () => {

@@ -1,9 +1,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
-export function handoffDir(): string {
-  return join(process.env.OMB_DATA_DIR || join(homedir(), ".openmausbot"), "handoffs");
+import { defaultDataDir, type DataHomes } from "./data-dir.ts";
+
+export function handoffDir(env: Record<string, string | undefined> = process.env, homes: DataHomes = {}): string {
+  return resolve(defaultDataDir(env, homes.under, homes.realHome), "handoffs");
 }
 
 export interface HandoffInput {
@@ -14,6 +15,8 @@ export interface HandoffInput {
   hasUsage?: boolean;
   failure?: string;
   toolCalls: number;
+  task: string;
+  updates?: string[];
   messages: Array<{
     role: string;
     content?: unknown;
@@ -36,12 +39,11 @@ export function writeTurnHandoff(input: HandoffInput): string | null {
     if (input.hasUsage && input.usage) L.push(`- Tokens this turn: ${input.usage.input} in / ${input.usage.output} out`);
     L.push(`- Stop reason: ${input.failure ?? "unknown"}`);
     L.push(`- Written at: ${new Date().toISOString()}`, "");
-    L.push("## Original task (first user message)", "```");
-    const firstUser = input.messages.find((m) => m.role === "user");
-    const firstText = firstUser && typeof firstUser.content === "string"
-      ? firstUser.content
-      : JSON.stringify(firstUser?.content ?? null);
-    L.push(String(firstText).slice(0, 8000), "```", "");
+    L.push("## Current task", "```", input.task.slice(0, 8000), "```", "");
+    if (input.updates?.length) {
+      L.push("## Updates delivered during this turn (in order)", "");
+      for (const update of input.updates) L.push("```", update.slice(0, 8000), "```", "");
+    }
     L.push("## Work performed (tool calls in order)", "");
     let n = 0;
     for (const m of input.messages) {

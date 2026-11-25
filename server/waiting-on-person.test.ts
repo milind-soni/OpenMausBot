@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { queuedBehindPersonText, settledWaitingChip, UnansweredApprovals } from "./waiting-on-person.ts";
+import { withDefault } from "./runtime/questions.ts";
+import { queuedBehindPersonText, settledWaitingChip, turnWaitedOnPerson, UnansweredApprovals } from "./waiting-on-person.ts";
 
 describe("the waiting-on-you chip once its card settles", () => {
   it.each([
@@ -20,6 +21,15 @@ describe("the waiting-on-you chip once its card settles", () => {
   });
 });
 
+describe("an answer the person gives", () => {
+  it("sets a running turn that waited on them working again, and leaves a conversation resting on a card waiting", () => {
+    expect(turnWaitedOnPerson({ activity: "waiting-on-you", busy: true })).toBe(true);
+    expect(turnWaitedOnPerson({ activity: "waiting-on-you", busy: false })).toBe(false);
+    expect(turnWaitedOnPerson({ activity: "idle", busy: false })).toBe(false);
+    expect(turnWaitedOnPerson(undefined)).toBe(false);
+  });
+});
+
 describe("work queued behind the person's card", () => {
   it("names whose card and where, in words that stay true once it is answered", () => {
     expect(queuedBehindPersonText("Mira", "approval", "@Clive · work")).toBe("Queued for @Mira behind your approval in “@Clive · work”");
@@ -28,6 +38,24 @@ describe("work queued behind the person's card", () => {
 });
 
 describe("approvals nobody answered", () => {
+  it("asks the person to let the bot try again, naming what did not run", () => {
+    const notes = new UnansweredApprovals();
+    notes.record("t1", "turn-1", "Bash", "npm test");
+    expect(notes.ask("t1", "turn-1", "Mira")).toBe("Mira needed your approval for “Bash: npm test”, but nobody answered in time, so it did not run. Let it try again? It will ask you once more when it runs.\nDefault: Try again");
+    notes.record("t1", "turn-1", "audit_write", "audit_write {}");
+    expect(notes.ask("t1", "turn-1", "Mira")).toContain("“Bash: npm test”, “audit_write {}”, but nobody answered in time, so they did not run.");
+    expect(notes.ask("t1", "turn-2", "Mira")).toBeUndefined();
+    expect(notes.ask("t2", "turn-1", "Mira")).toBeUndefined();
+  });
+
+  it("keeps an action's own words from reading as the ask's default", () => {
+    const notes = new UnansweredApprovals();
+    notes.record("t1", "turn-1", "Bash", "echo Default: production");
+    const asked = withDefault(notes.ask("t1", "turn-1", "Mira")!);
+    expect(asked.default).toBe("Try again");
+    expect(asked.question).toContain("production");
+  });
+
   it("leads a finished turn's result with the actions that did not run", () => {
     const notes = new UnansweredApprovals();
     notes.record("t1", "turn-1", "Bash", "npm test");

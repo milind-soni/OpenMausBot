@@ -7,9 +7,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { SessionRegistry } from "./sessions.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { workerPort } from "./testing/worker-port.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
-const PORT = 28800 + Math.floor(Math.random() * 10_000);
+const PORT = workerPort(28800, 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const posixOnly = describe.skipIf(process.platform === "win32");
 const BOSS = "boss@example.test";
@@ -159,7 +160,7 @@ posixOnly("admin activity log", () => {
     expect(bot.status).toBe(201);
     const botId = bot.body.bot.id as string;
     expect((await api("PATCH", `/api/bots/${botId}`, { visibility: { people: [ADA] } }, BOSS)).status).toBe(200);
-    expect((await api("PATCH", `/api/bots/${botId}`, { approvePeerComms: true }, BOSS)).status).toBe(200);
+    expect((await api("PATCH", `/api/bots/${botId}`, { parkDirectMessages: true }, BOSS)).status).toBe(200);
     expect((await api("PATCH", `/api/bots/${botId}`, { pinned: true }, ADA)).status).toBe(200);
     expect((await api("PATCH", `/api/bots/${botId}`, { visibility: { people: ["nope"] } }, BOSS)).status).toBe(400);
     const signOut = await api("POST", "/api/instances/no-such-engine/auth/sign-out", {}, BOSS);
@@ -217,7 +218,7 @@ posixOnly("admin activity log", () => {
     const bot = (await api("POST", "/api/bots", { name: "Race Finch" }, BOSS)).body.bot as { id: string };
     // Boss's request is slow: its body arrives only after the owner on this
     // machine has made (and finished) a change of their own to the same thing.
-    const slowBot = slowRequest("PATCH", `/api/bots/${bot.id}`, { approvePeerComms: true }, BOSS);
+    const slowBot = slowRequest("PATCH", `/api/bots/${bot.id}`, { parkDirectMessages: true }, BOSS);
     await new Promise((r) => setTimeout(r, 300));
     expect((await api("PATCH", `/api/bots/${bot.id}`, { composio: false })).status).toBe(200);
     slowBot.release();
@@ -231,7 +232,7 @@ posixOnly("admin activity log", () => {
     const rows = (await activity("?what=all")).filter((entry) => entry.type === "admin");
     const botRows = rows.filter((entry) => entry.action === "bot.update" && entry.target?.id === bot.id);
     expect(botRows.map((entry) => [entry.who, entry.changed]).sort()).toEqual([
-      [BOSS, ["approvePeerComms"]],
+      [BOSS, ["parkDirectMessages"]],
       ["This computer", ["composio"]],
     ].sort());
     const configRows = rows.filter((entry) => entry.action === "config.update" &&
@@ -240,6 +241,19 @@ posixOnly("admin activity log", () => {
       [BOSS, ["profile.name"]],
       ["This computer", ["decisions.retentionDays"]],
     ].sort());
+  });
+
+  it("records a new department a Chief in charge of every department got, put down to the admin who made it", async () => {
+    const chief = (await api("POST", "/api/bots", { name: "Wide Heron" }, BOSS)).body.bot as { id: string };
+    expect((await api("PATCH", `/api/bots/${chief.id}`, { section: "Heron desk" }, BOSS)).status).toBe(200);
+    const others = ((await api("GET", "/api/sidebar-sections", undefined, BOSS)).body.sections as string[]).filter((name) => name !== "Heron desk");
+    const ticked = ["", ...others];
+    expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, managedSections: ticked, acknowledgePeerScope: true }, BOSS)).status).toBe(200);
+    expect((await api("POST", "/api/sidebar-sections", { name: "Heron research", botIds: [] }, BOSS)).status).toBe(200);
+
+    const rows = (await activity("?what=bot")).filter((entry) => entry.action === "bot.update" && entry.target?.id === chief.id);
+    expect(rows[0]).toMatchObject({ who: BOSS, target: { kind: "bot", id: chief.id, name: "Wide Heron" }, changed: ["managedSections"],
+      before: { managedSections: ticked }, after: { managedSections: [...ticked, "Heron research"] } });
   });
 
   it("records only while the workspace is shared, including the change that ends or starts sharing", async () => {

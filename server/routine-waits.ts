@@ -57,6 +57,6 @@ export function settleAsk(run: RoutineRun, event: Resolved | undefined, now: num
 }
 
 /** Time the run has worked: waiting on the person never counts toward its limit. */
-export function activeMs(run: RoutineRun, now: number): number {
+export function activeMs(run: Pick<RoutineRun, "startedAt" | "waitedMs" | "asked">, now: number): number {
   return now - (run.startedAt ?? now) - (run.waitedMs ?? 0) - (run.asked ? Math.max(0, now - run.asked.since) : 0);
 }

@@ -1,16 +1,19 @@
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
+import type { MemoryModelRun, MemoryModelStatus } from "../shared/memory-model.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import { CaptureBuffer, captureItemLimit, capturePrompt, captureSize, newCandidates, parseCandidates, statedInConversation, worthCapturing, type Candidate, type CaptureBatch, type CaptureTurn } from "./memory-capture.ts";
 import { DREAM_FIRST_LOOKBACK_MS, DREAM_MIN_CONVERSATIONS, dreamPrompt, parseDream, type DreamConversation } from "./memory-dream.ts";
-import { factIdentity, lineFactIdentity, notebookIdentities } from "./memory-entries.ts";
+import { checkDreamFacts } from "./memory-fact-checks.ts";
+import { factIdentity, isExpired, lineFactIdentity, notebookIdentities, parseMemoryEntries } from "./memory-entries.ts";
 import { mergeTopicText } from "./memory-topics.ts";
 import { isForgotten } from "./profile-learned.ts";
 import { applyMoves, MAX_MOVES, organizeCandidates, organizePrompt, parseMoves } from "./memory-organize.ts";
 import { recordMemoryChange } from "./memory-journal.ts";
 import { applyTidy, contradictionCandidates, contradictionPrompt, parseContradictions, planChanges, planTidy, type Contradiction } from "./memory-tidy.ts";
+import type { SideJobTextOptions } from "./side-jobs.ts";
 import { appendMemoryArchive, ARCHIVE_TOPIC, ensureWorkspace, listMemoryTopics, memoryDate, memoryEntry, memoryTopicIndex, readMemoryText, updateMemory, workspaceDir, writeMemoryFile, writeMemoryTopic } from "./workspace.ts";
 
 export { dreamConversations } from "./memory-dream.ts";
@@ -32,7 +35,8 @@ export const MAX_PENDING_THREADS = 50;
 export const TOPIC_MAX_BYTES = 64 * 1024;
 
 export interface UpkeepEngine {
-  generateText?: (prompt: string, options?: { signal?: AbortSignal }) => Promise<string>;
+  memoryModel?: MemoryModelStatus;
+  generateText?: (prompt: string, options?: SideJobTextOptions) => Promise<string>;
 }
 
 export interface UpkeepBot {
@@ -106,6 +110,7 @@ interface UpkeepState {
     core?: string[];
     topicCursor?: string;
     lastDream?: DreamReport;
+    lastModel?: MemoryModelRun;
     /** The last time a dream's model call answered: the next dream reads the chats after it. */
     dreamedTo?: number;
   }>;
@@ -213,7 +218,7 @@ function readRaw(botId: string, relative: string): string | null {
   }
 }
 
-async function askModel(engine: UpkeepEngine, prompt: string, timeoutMs = MODEL_TIMEOUT_MS): Promise<string | null> {
+async function askModel(engine: UpkeepEngine, prompt: string, timeoutMs = MODEL_TIMEOUT_MS, onMemoryModel?: SideJobTextOptions["onMemoryModel"]): Promise<string | null> {
   if (!engine.generateText) return null;
   const expiry = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -221,12 +226,14 @@ async function askModel(engine: UpkeepEngine, prompt: string, timeoutMs = MODEL_
     timer = setTimeout(() => {
       const error = new DOMException("The background model call timed out.", "TimeoutError");
       expiry.abort(error);
+      const selection = engine.memoryModel;
+      if (selection?.model) onMemoryModel?.({ instanceId: selection.instanceId, model: selection.model, state: "failed", reason: "timeout" });
       reject(error);
     }, timeoutMs);
     timer.unref?.();
   });
   try {
-    const answer = await Promise.race([engine.generateText(prompt, { signal: expiry.signal }), expired]);
+    const answer = await Promise.race([engine.generateText(prompt, { signal: expiry.signal, timeoutMs, ...(onMemoryModel ? { onMemoryModel } : {}) }), expired]);
     return typeof answer === "string" ? answer : null;
   } catch {
     return null;
@@ -261,7 +268,7 @@ export interface MemoryUpkeep {
   dream(botId: string): Promise<DreamReport>;
   /** The last dream's ideas while they are fresh, with how many chats it read. */
   ideas(botId: string): { ideas: string[]; conversations: number };
-  status(botId: string): { lastTidy?: TidyReport; lastCapture?: CaptureReport; lastDream?: DreamReport; modelSteps: boolean };
+  status(botId: string): { lastTidy?: TidyReport; lastCapture?: CaptureReport; lastDream?: DreamReport; modelSteps: boolean; memoryModel?: MemoryModelStatus };
   tick(): Promise<void>;
   start(): void;
   stop(): void;
@@ -321,7 +328,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     return promise.finally(end);
   }
 
-  const record = (botId: string, patch: { lastTidy?: TidyReport; lastCapture?: CaptureReport; topicCursor?: string; lastDream?: DreamReport; dreamedTo?: number; core?: string[] }) => {
+  const record = (botId: string, patch: UpkeepState["bots"][string]) => {
     // a capture or tidy that was out when its bot was deleted leaves nothing behind
     if (!deps.bot(botId)) return;
     const state = loaded();
@@ -332,6 +339,13 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
       return;
     }
     for (const batch of open) batch.dirty = true;
+  };
+
+  const ask = (botId: string, engine: UpkeepEngine, prompt: string, timeoutMs?: number) => {
+    const started = generation;
+    return askModel(engine, prompt, timeoutMs, engine.memoryModel?.model ? (lastModel) => {
+      if (!cancelled(started) && upkeepEnabled(deps.bot(botId))) record(botId, { lastModel });
+    } : undefined);
   };
 
   const track = <T>(promise: Promise<T>): Promise<T> => {
@@ -436,7 +450,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     }
     ensureWorkspace(id);
     const today = memoryDate(now());
-    const answer = await askModel(engine, capturePrompt({
+    const answer = await ask(id, engine, capturePrompt({
       botName: bot.name,
       conversations: conversations.map((conversation) => conversation.turns),
       notebook: readRaw(id, "MEMORY.md") ?? "",
@@ -559,7 +573,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     const first = readRaw(botId, "MEMORY.md") ?? "";
     const candidates = organizeCandidates(first, today, core);
     if (!candidates.length) return 0;
-    const answer = await askModel(engine, organizePrompt(candidates, memoryTopicIndex(botId)));
+    const answer = await ask(botId, engine, organizePrompt(candidates, memoryTopicIndex(botId), today));
     if (answer === null || cancelled(started) || !upkeepEnabled(deps.bot(botId))) return 0;
     const before = readRaw(botId, "MEMORY.md") ?? "";
     if (before !== first) return 0;
@@ -572,18 +586,21 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     if (!moves.length) return 0;
     return writing(botId, () => {
       const { byTopic } = applyMoves(before, moves);
-      const written = new Set<string>();
+      const sourceLines = before.split("\n");
+      const written = new Set<number>();
       const existing = new Map(listMemoryTopics(botId).map((topic) => [topic.name.toLowerCase(), topic.name]));
-      let count = 0;
       for (const [wanted, group] of byTopic) {
         const name = existing.get(wanted) ?? wanted;
         const path = `memory/${name}`;
         const current = readRaw(botId, path);
         const seen = notebookIdentities(current ?? "");
         const lines = group.lines.filter((line) => !seen.has(lineFactIdentity(line)));
+        const after = lines.length
+          ? mergeTopicText(current, { title: name.replace(/\.md$/, "").replace(/-/g, " "), aliases: group.aliases, lines })
+          : current ?? "";
         if (lines.length) {
           try {
-            writeMemoryTopic(botId, name, mergeTopicText(current, { title: name.replace(/\.md$/, "").replace(/-/g, " "), aliases: group.aliases, lines }));
+            writeMemoryTopic(botId, name, after);
           } catch (error) {
             log(`memory upkeep: could not write ${path}; kept its entries in MEMORY.md: ${(error as Error).message}`);
             continue;
@@ -591,13 +608,29 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
           recordMemoryChange(botId, { path, actor: "upkeep", via: "organize", before: current, after: readRaw(botId, path) });
         }
         existing.set(name.toLowerCase(), name);
-        written.add(wanted);
-        count += group.lines.length;
+        const savedLines = after.split("\n");
+        const parsedEntries = parseMemoryEntries(after);
+        const datedLines = new Set<number>();
+        for (const saved of parsedEntries) for (let line = saved.line; line < saved.end; line++) datedLines.add(line);
+        const undated = new Set(savedLines.filter((_, line) => !datedLines.has(line)).map(lineFactIdentity));
+        const savedEntries = parsedEntries.filter((entry) => !entry.struck && !isExpired(entry, today));
+        for (const { topic, entry } of moves) {
+          if (topic !== wanted) continue;
+          const details = sourceLines.slice(entry.line + 1, entry.end).join("\n");
+          const plainNote = entry.end === entry.line + 1 && entry.until === null && undated.has(factIdentity(entry.body));
+          if (plainNote || savedEntries.some((saved) =>
+            factIdentity(saved.body) === factIdentity(entry.body)
+              && saved.until === entry.until
+              && savedLines.slice(saved.line + 1, saved.end).join("\n") === details)) {
+            written.add(entry.line);
+          }
+        }
       }
       if (!written.size) return 0;
-      const { text } = applyMoves(before, moves.filter((move) => written.has(move.topic)));
+      const { text } = applyMoves(before, moves.filter((move) => written.has(move.entry.line)));
       writeMemoryFile(botId, text);
       recordMemoryChange(botId, { path: "MEMORY.md", actor: "upkeep", via: "organize", before, after: readRaw(botId, "MEMORY.md") });
+      const count = written.size;
       log(`memory upkeep: moved ${count} entr${count === 1 ? "y" : "ies"} from MEMORY.md into topic files for ${deps.bot(botId)?.name ?? botId}`);
       return count;
     });
@@ -628,7 +661,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     if (!engine?.generateText) note = NO_TEXT_ENGINE;
     else if (candidates.length < MIN_ENTRIES_FOR_CONTRADICTIONS) note = `Contradictions are checked from ${MIN_ENTRIES_FOR_CONTRADICTIONS} notes on.`;
     else {
-      const answer = await askModel(engine, contradictionPrompt(candidates));
+      const answer = await ask(botId, engine, contradictionPrompt(candidates));
       if (answer === null) note = "The contradiction check did not answer in time.";
       else {
         contradictions = parseContradictions(answer, candidates.length);
@@ -674,7 +707,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
         else {
           topicChecks++;
           topicCursor = topic.name;
-          const answer = await askModel(engine, contradictionPrompt(topicCandidates), remaining);
+          const answer = await ask(botId, engine, contradictionPrompt(topicCandidates), remaining);
           if (cancelled(started) || !upkeepEnabled(deps.bot(botId))) return stopped;
           if (readRaw(botId, path) !== topicBefore) {
             topicsDeferred++;
@@ -754,7 +787,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     const today = memoryDate(now());
     const first = readRaw(botId, "MEMORY.md") ?? "";
     const notebook = contradictionCandidates(first, today);
-    const answer = await askModel(engine, dreamPrompt({ botName: bot.name, today, conversations, notebook, topics: memoryTopicIndex(botId) }), DREAM_TIMEOUT_MS);
+    const answer = await ask(botId, engine, dreamPrompt({ botName: bot.name, today, conversations, notebook, topics: memoryTopicIndex(botId) }), DREAM_TIMEOUT_MS);
     if (cancelled(started) || !upkeepEnabled(deps.bot(botId))) return report("Memory upkeep was stopped, switched off or paused during the dream; no changes were made.", conversations.length);
     if (answer === null) {
       const late = report("The dream did not answer in time.", conversations.length);
@@ -762,6 +795,8 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
       return late;
     }
     const dreamt = parseDream(answer, conversations.length, notebook.length);
+    dreamt.learned = dreamt.learned.filter((item) => checkDreamFacts(item.text, item.from, item.evidence, conversations) && !isForgotten(item.text));
+    dreamt.outdated = dreamt.outdated.filter((item) => checkDreamFacts(item.now, item.from, item.evidence, conversations) && !isForgotten(item.now));
     const source = `dream across ${conversations.length} chats`;
     // Re-read inside the write: if the notes changed after the prompt, its line numbers are stale.
     const written = writing(botId, () => {
@@ -882,8 +917,12 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
       return last && now().getTime() - last.at < IDEAS_FOR_MS ? { ideas: last.ideas, conversations: last.conversations } : { ideas: [], conversations: 0 };
     },
     status(botId) {
-      const { lastTidy, lastCapture, lastDream } = loaded().bots[botId] ?? {};
-      return { ...(lastTidy ? { lastTidy } : {}), ...(lastCapture ? { lastCapture } : {}), ...(lastDream ? { lastDream } : {}), modelSteps: Boolean(deps.engine(botId)?.generateText) };
+      const { lastTidy, lastCapture, lastDream, lastModel } = loaded().bots[botId] ?? {};
+      const engine = deps.engine(botId);
+      const selection = engine?.memoryModel;
+      const last = selection?.instanceId === lastModel?.instanceId && selection?.model === lastModel?.model ? lastModel : undefined;
+      return { ...(lastTidy ? { lastTidy } : {}), ...(lastCapture ? { lastCapture } : {}), ...(lastDream ? { lastDream } : {}),
+        modelSteps: Boolean(engine?.generateText), ...(selection ? { memoryModel: { ...selection, ...(last ? { last } : {}) } } : {}) };
     },
     tick,
     start() {
@@ -901,7 +940,9 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
           log(`memory upkeep: could not queue turns saved at the last shutdown: ${(error as Error).message}`);
         }
       }
-      const started = ++generation;
+      // stop() already ended the last generation; a capture that began before the first start (a chat answered while
+      // the engines are still being read at boot) is kept.
+      const started = generation;
       const scheduledTick = () => { if (started === generation) void tick(); };
       timer = setInterval(scheduledTick, TIDY_CHECK_MS);
       timer.unref?.();

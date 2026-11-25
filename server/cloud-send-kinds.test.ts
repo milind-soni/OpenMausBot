@@ -104,6 +104,34 @@ describe("My Cloud takes a routine", () => {
   });
 });
 
+describe("My Cloud takes an app event", () => {
+  const appEvents = (service: { available: true } | { available: false; reason: "self-hosted" | "unavailable" }) => {
+    const adopted: string[] = [];
+    return { adopted, list: () => [], remove: async () => false, service: () => service,
+      adopt: async (record: { id: string }) => { adopted.push(record.id); return record as never; } };
+  };
+  const event = { id: "t1", botId: "b1", name: "Reply to email", prompt: "Draft a reply.", app: "gmail", event: "GMAIL_NEW_GMAIL_MESSAGE", config: {}, enabled: true };
+
+  it("refuses it for good while connected apps are not set up there, so the move goes on without it", async () => {
+    for (const reason of ["unavailable", "self-hosted"] as const) {
+      const there = appEvents({ available: false, reason });
+      const answer = await take(deps(HERE, { appEvents: () => there as never }), itemKey.moved("app-event", "t1"), event);
+      expect(answer).toMatchObject({ status: 409, body: { final: true } });
+      expect(answer.body.error).toMatch(/stays on the computer it came from/u);
+      expect(there.adopted).toEqual([]);
+    }
+  });
+
+  it("takes it where connected apps are set up, and a refusal that may pass is not final", async () => {
+    const there = appEvents({ available: true });
+    expect((await take(deps(HERE, { appEvents: () => there as never }), itemKey.moved("app-event", "t1"), event)).status).toBe(200);
+    expect(there.adopted).toEqual(["t1"]);
+    const notYet = await take(deps(HERE), itemKey.moved("app-event", "t1"), event);
+    expect(notYet.status).toBe(503);
+    expect(notYet.body.final).toBeUndefined();
+  });
+});
+
 describe("My Cloud takes a webhook and a call", () => {
   it("a webhook gets an address and a secret of its own there and starts off; taken again, it keeps them and its switch", async () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-kinds-"));
@@ -150,6 +178,18 @@ describe("My Cloud sets a bot's move-only fields", () => {
     expect(d.patched.at(-1)![1]).toEqual({ hidden: true, chiefOfStaff: false });
     expect((await take(d, "bot:b1", { soul: "not a move field" })).status).toBe(400);
     expect((await take(d, "bot:nobody", { pinned: true })).status).toBe(409);
+  });
+
+  it("this computer answers a bot's record with its own name, which a MausBot that moves is named for when the place it goes keeps its own (email 1a1c22b6)", async () => {
+    const before = process.env.OMB_ENVIRONMENT_LABEL;
+    process.env.OMB_ENVIRONMENT_LABEL = "Amits-MacBook-Pro.local";
+    try {
+      const answer = await ask(deps("/data"), "GET", `?key=${encodeURIComponent("bot:b1")}`);
+      expect(answer).toMatchObject({ status: 200, body: { computer: "Amits-MacBook-Pro" } });
+      expect((await ask(deps("/data"), "PUT", "", { v: 1, key: "bot:b1", dataDir: HERE, record: { pinned: true }, computer: "x".repeat(121) })).status).toBe(400);
+    } finally {
+      if (before === undefined) delete process.env.OMB_ENVIRONMENT_LABEL; else process.env.OMB_ENVIRONMENT_LABEL = before;
+    }
   });
 });
 

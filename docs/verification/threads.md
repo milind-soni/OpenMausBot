@@ -65,12 +65,16 @@ switching and Stop can be exercised without a real provider or account.
     The header stays uncluttered; **Other activity** appears below it only when
     there is sibling activity, including when the sidebar is closed. Open a
     sibling from its activity entry, then click the bot's row: it returns to
-    the conversation you last wrote in (the bot's main thread). Open another
+    the bot's main thread (the one you set as main, else its oldest open
+    conversation), not to the conversation you last wrote in. Open another
     bot, let a reply land in the sibling it was left on, and check that the
     sibling has its own activity entry under that bot. Follow a notification,
     a thread chip or a search hit to a third thread of that bot: the sibling
     keeps its unread entry, and the third thread is read once open. An
-    `openmausbot://bot/<id>` link opens the main thread.
+    `openmausbot://bot/<id>` link opens the main thread. A row or tile with a
+    mark on it opens the thread the mark is about (waiting on you, then unread,
+    then work under way, a thread another bot opened included); a second click
+    returns to the main thread.
 13. Stop a running job through its activity entry while a sibling is queued;
     verify only the chosen job stops and the queued message starts normally.
     Reload and confirm Show threads remains off. Turn it back on to recover
@@ -89,7 +93,7 @@ switching and Stop can be exercised without a real provider or account.
     returns. Timed snoozes also return when due without a new server snapshot.
     Pinned, selected, unread, queued, and working threads remain reachable.
     Snooze is a display preference, not a pause or cancellation of work.
-16. Open **Active Threads** while a channel is working. Its entry should name
+16. Open the **Inbox** row, then **Active Threads** in its panel, while a channel is working. Its entry should name
     the channel and open that channel's exact thread, not a member's direct
     chat. Direct-chat and channel activity can appear together.
 17. In compact/quiet rows, idle message previews disappear but working,

@@ -80,13 +80,19 @@ export function isBrowserControlAccess(method: string, path: string): boolean {
 /** Every request the iOS app makes, and nothing else. Paths arrive undecoded
  * and are anchored at both ends, so an encoded traversal fails to match. */
 const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
-  // Configured-or-not booleans, never keys; the write side is refused below.
+  // Configured-or-not booleans, never keys.
   { method: "GET", path: /^\/api\/config$/ },
+  // The harness takes only provider keys from a paired device; every other setting stays on the host.
+  { method: "PUT", path: /^\/api\/config$/ },
+  { method: "POST", path: /^\/api\/keys\/test$/ },
   { method: "GET", path: /^\/api\/events$/ },
   { method: "GET", path: /^\/api\/instances$/ },
   // The harness refuses it while any Claude turn runs. Instance ids may carry
   // dots, so a dots-only segment is refused outright.
   { method: "POST", path: /^\/api\/instances\/(?!\.+\/)[\w.-]+\/claude-update$/ },
+  // Engine sign-in. The harness refuses browser-based methods from a paired device. Dots-only ids are refused as above.
+  { method: "POST", path: /^\/api\/instances\/(?!\.+\/)[\w.-]+\/auth\/(?:start|complete|cancel|sign-out)$/ },
+  { method: "GET", path: /^\/api\/instances\/(?!\.+\/)[\w.-]+\/auth\/status$/ },
   { method: "GET", path: /^\/api\/team-map$/ },
   // Sidecar-owned: the proxy answers it locally.
   { method: "GET", path: /^\/api\/companion\/endpoints$/ },
@@ -94,6 +100,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "GET", path: /^\/api\/bots$/ },
   { method: "POST", path: /^\/api\/bots$/ },
   { method: "PATCH", path: /^\/api\/bots\/[\w-]+$/ },
+  // The desktop's own delete. A paired phone can remove one bot it can see,
+  // including through a public tunnel. The harness still refuses the default bot.
+  { method: "DELETE", path: /^\/api\/bots\/[\w-]+$/ },
   // Display order only; the harness accepts just the bots the device can see.
   { method: "PUT", path: /^\/api\/bots\/order$/ },
   // Can only file visible bots; cannot alter execution policy.
@@ -110,6 +119,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // A credential value crosses only as an HPKE envelope, bound to the
   // authenticated device and the exact pending card.
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/provide$/ },
+  // A typed custom secret: the harness checks thread visibility and that only
+  // the conversation's own person may answer it.
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/save$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/active-branch$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/compact$/ },
   // Set me up under a new bot's greeting and the x on its chip: no more than a typed /setup.
@@ -126,6 +138,14 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // Names and on/off only. The MCP settings list, which carries commands and
   // addresses, stays closed.
   { method: "GET", path: /^\/api\/bots\/[\w-]+\/mcp-servers$/ },
+  // Read-only: a bot's skills by name, with what each is for and whether it is on. Adding, editing and switching them
+  // stay on the host.
+  { method: "GET", path: /^\/api\/bots\/[\w-]+\/skills$/ },
+  // The bot's Data, read-only: the sheet and tables, a page of rows (a POST
+  // only for its body), a chart card's picture. Running SQL stays on the host.
+  { method: "GET", path: /^\/api\/bots\/[\w-]+\/data$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/data\/page$/ },
+  { method: "GET", path: /^\/api\/bots\/[\w-]+\/data\/cards\/c_\d+\/image$/ },
   // Team memory edits are content, not execution policy. The section rides as
   // a query string.
   { method: "GET", path: /^\/api\/team-memory$/ },
@@ -162,9 +182,10 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
 
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages$/ },
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/image$/ },
+  { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/tool$/ },
   // An app row's document is transcript data, scoped to its thread. `rpc` reaches only the app's own MCP
   // server, under the bot's tool selection and approval rules; `context` is bounded text.
-  { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/app$/ },
+  { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/app(?:\/download)?$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/apps\/[\w-]+\/rpc$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/apps\/[\w-]+\/context$/ },
   MESSAGE_FILE_ROUTE,
@@ -178,6 +199,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "POST", path: /^\/api\/attachments$/ },
   // The harness honors Range on voice notes so a phone player can seek.
   { method: "GET", path: /^\/api\/attachments\/[\w-]+\.(?:png|jpe?g|gif|webp|mp3|wav)$/i },
+  // Discarding a file before it is sent. The harness records which device uploaded each file and deletes only that
+  // device's own, and only while no message uses it.
+  { method: "DELETE", path: /^\/api\/attachments\/[\w-]+\.[A-Za-z0-9]{1,10}$/ },
   // Raw upload, capped and stored under a generated filename by the harness.
   { method: "POST", path: /^\/api\/files$/ },
 
@@ -199,6 +223,13 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "DELETE", path: /^\/api\/phones\/self$/ },
   { method: "GET", path: /^\/api\/phones\/self\/jobs$/ },
   { method: "POST", path: /^\/api\/phones\/self\/jobs\/[\w-]+\/(?:lease|result)$/ },
+  // The phone's closed-app alert registration: its own device token, never another phone's.
+  { method: "PUT", path: /^\/api\/push\/device$/ },
+  { method: "GET", path: /^\/api\/push\/device$/ },
+  { method: "DELETE", path: /^\/api\/push\/device$/ },
+  { method: "PUT", path: /^\/api\/push\/activity$/ },
+  { method: "GET", path: /^\/api\/push\/activity$/ },
+  { method: "DELETE", path: /^\/api\/push\/activity$/ },
 
   // The harness records only the owner's activation; a guest's is answered and
   // dropped.
@@ -211,6 +242,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "DELETE", path: /^\/api\/routines\/[\w-]+$/ },
   { method: "POST", path: /^\/api\/routines\/[\w-]+\/run$/ },
   { method: "POST", path: /^\/api\/routine-runs\/[\w-]+\/(?:cancel|seen)$/ },
+  // The stopped turn's "Continue when your limit resets": a one-time automation in an existing
+  // conversation, less than POST /api/routines already allows.
+  { method: "POST", path: /^\/api\/limit-resets\/continue$/ },
 
   // Opaque ids and aliases only. Account removal is allowed (the handler proves
   // ownership first); the whole-service DELETE stays with the host.
@@ -247,7 +281,7 @@ const EXPLAINED: ReadonlyArray<{ path: RegExp; error: string }> = [
     // Losing the phone must not mean losing the ability to lock it out.
     error: "Remote access settings are managed on the host computer",
   },
-  { path: /^\/api\/config$/, error: "API keys can only be changed on your computer" },
+  { path: /^\/api\/config$/, error: "this setting is changed on your computer" },
   { path: /^\/api\/local-computer(\/|$)/, error: "the Local VM is set up on your computer" },
   {
     // Creating one exposes an endpoint to the internet.

@@ -2,9 +2,12 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   accessSync,
+  closeSync,
   constants,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -122,8 +125,8 @@ function verifyCompliance(licenses, label) {
   const html = readFileSync(path.join(licenses, "THIRD_PARTY_LICENSES.html"), "utf8");
   const sbom = JSON.parse(readFileSync(path.join(licenses, "SBOM.cdx.json"), "utf8"));
   const components = sbom.components ?? [];
-  if (components.length !== 339) {
-    fail(`${label} SBOM must contain 330 registry packages, 8 Cua packages, and Inter`);
+  if (components.length !== 392) {
+    fail(`${label} SBOM must contain 381 registry packages, 10 Cua packages, and Inter`);
   }
   const componentRefs = new Set();
   for (const component of components) {
@@ -137,17 +140,19 @@ function verifyCompliance(licenses, label) {
   const registry = components.filter((component) => component.group === "crates.io");
   const trycua = components.filter((component) => component.group === "trycua");
   const fonts = components.filter((component) => component.group === "rsms");
-  if (registry.length !== 330 || trycua.length !== 8 || fonts.length !== 1) {
+  if (registry.length !== 381 || trycua.length !== 10 || fonts.length !== 1) {
     fail(`${label} SBOM component groups do not match the reviewed runtime graph`);
   }
   const trycuaNames = trycua.map((component) => component.name).sort();
   if (
     JSON.stringify(trycuaNames) !==
     JSON.stringify([
+      "cua-cursor-motion",
       "cua-driver",
       "cua-driver-contract",
       "cua-driver-core",
       "cua-driver-sdk",
+      "cua-telemetry",
       "cursor-overlay",
       "cursor-theme-cli",
       "pip-preview",
@@ -179,8 +184,8 @@ function verifyCompliance(licenses, label) {
   const attributed = new Set(
     [...html.matchAll(/<tr data-package-id="([^"]+)">/g)].map((match) => match[1]),
   );
-  if (attributed.size !== 330) {
-    fail(`${label} license report does not cover the reviewed 330 registry packages`);
+  if (attributed.size !== 381) {
+    fail(`${label} license report does not cover the reviewed 381 registry packages`);
   }
   for (const packageId of attributed) {
     if (!registryIds.has(packageId)) {
@@ -206,7 +211,7 @@ function verifyCompliance(licenses, label) {
     fail(`${label} MPL component set changed`);
   }
   const rootDependency = sbom.dependencies?.find(
-    (dependency) => dependency.ref === "pkg:generic/cua-driver-linux-x64@0.19.3",
+    (dependency) => dependency.ref === "pkg:generic/cua-driver-linux-x64@0.41.3",
   );
   const rootReferences = rootDependency?.dependsOn;
   const uniqueRootReferences = new Set(rootReferences ?? []);
@@ -259,8 +264,8 @@ function verifyCuaResources(resources, label, {
   requireContained(cuaRoot, driver);
   requireContained(cuaRoot, cursorTheme);
   const expectedHashes = new Map([
-    [driver, "ed5844fadf07b9b72c4a3b3802e1c47233c166d66d6198608d5991f807aab4ac"],
-    [cursorTheme, "e589b2b7521bbfeaf9e2bfce668a38e80ed1b9790b1327b13d374fc331d8312a"],
+    [driver, "83030028e7c9e3f4d753b3b27025135d44eb8d52f562cce0aaaf95777bc1b41f"],
+    [cursorTheme, "d39efb960d207e7328d7a9dd48e3b6565f74be073f9c2ca8dcba86a4d0f28312"],
   ]);
   for (const [file, expected] of expectedHashes) {
     const actual = sha256(file);
@@ -278,7 +283,7 @@ function verifyCuaResources(resources, label, {
     env: commandEnvironment,
     timeout: 5_000,
   }).trim();
-  if (version !== "cua-driver 0.19.3") fail(`${label} CUA version is ${JSON.stringify(version)}`);
+  if (version !== "cua-driver 0.41.3") fail(`${label} CUA version is ${JSON.stringify(version)}`);
   const manifest = JSON.parse(
     execFileSync(driver, ["manifest"], {
       encoding: "utf8",
@@ -296,7 +301,7 @@ function verifyCuaResources(resources, label, {
   }
   if (
     manifest.schema_version !== "1" ||
-    manifest.binary_version !== "0.19.3" ||
+    manifest.binary_version !== "0.41.3" ||
     invocationPath !== realpathSync(driver) ||
     JSON.stringify(manifest.mcp_invocation?.args) !== JSON.stringify(["mcp"])
   ) {
@@ -311,18 +316,18 @@ function verifyCuaResources(resources, label, {
   const release = JSON.parse(readFileSync(path.join(cuaRoot, "release.json"), "utf8"));
   const expectedRelease = {
     schemaVersion: 1,
-    version: "0.19.3",
+    version: "0.41.3",
     platform: "linux",
     arch: "x64",
     archive: {
-      name: "cua-driver-rs-0.19.3-linux-x86_64-binary.tar.gz",
+      name: "cua-driver-rs-0.41.3-linux-x86_64-binary.tar.gz",
       url:
-        "https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.19.3/" +
-        "cua-driver-rs-0.19.3-linux-x86_64-binary.tar.gz",
-      size: 27_248_614,
-      sha256: "3db9d4257d84bacaf7eb104d225f85613ce67edbb20d6eeb83c1384b6d8a5b10",
+        "https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.41.3/" +
+        "cua-driver-rs-0.41.3-linux-x86_64-binary.tar.gz",
+      size: 38_375_345,
+      sha256: "a00a7bc4a648adbcbc93bfbf5a058daf71ce8838ee172e33b197aaf649ecee14",
     },
-    sourceCommit: "a1672e7b11951275ecfba3384264d4530185d0db",
+    sourceCommit: "bd0e299c67dec6397b3d41a259452b2ea13a1cd5",
     files: {
       "cua-driver": { sha256: expectedHashes.get(driver), mode: "0755" },
       "cua-cursor-theme": { sha256: expectedHashes.get(cursorTheme), mode: "0755" },
@@ -395,6 +400,7 @@ function verifyCloudflaredResources(resources, label, { directoryMode = 0o755 } 
 
 const appImage = exactlyOne(".AppImage");
 const deb = exactlyOne(".deb");
+const rpm = exactlyOne(".rpm");
 const unpacked = path.join(releaseDir, "linux-unpacked");
 const executable = path.join(unpacked, "openmausbot");
 const resources = path.join(unpacked, "resources");
@@ -429,23 +435,22 @@ for (const expected of [
   if (!fields.includes(expected)) fail(`DEB metadata is missing ${JSON.stringify(expected)}`);
 }
 
-const extracted = mkdtempSync(path.join(tmpdir(), "omb-deb-verify-"));
-try {
-  execFileSync("dpkg-deb", ["--extract", deb, extracted]);
-  const debAppRoot = path.join(extracted, "opt", "OpenMausBot");
-  requireDirectoryMode(debAppRoot, 0o755);
-  const debResources = path.join(debAppRoot, "resources");
+// The DEB and RPM install the same tree under /opt; check what each extracted.
+function verifySystemPackage(extracted, label, packageType) {
+  const appRoot = path.join(extracted, "opt", "OpenMausBot");
+  requireDirectoryMode(appRoot, 0o755);
+  const packageResources = path.join(appRoot, "resources");
   // Routes the in-app updater to the package-manager hand-off.
-  requirePackageType(debResources, "DEB", "deb");
-  requireUpdaterTarget(debResources, "DEB");
-  const debHashes = verifyCuaResources(debResources, "DEB");
-  const debCloudflaredHash = verifyCloudflaredResources(debResources, "DEB");
-  if (debCloudflaredHash !== unpackedCloudflaredHash) {
-    fail(`DEB and linux-unpacked cloudflared hashes differ`);
+  requirePackageType(packageResources, label, packageType);
+  requireUpdaterTarget(packageResources, label);
+  const packageHashes = verifyCuaResources(packageResources, label);
+  const packageCloudflaredHash = verifyCloudflaredResources(packageResources, label);
+  if (packageCloudflaredHash !== unpackedCloudflaredHash) {
+    fail(`${label} and linux-unpacked cloudflared hashes differ`);
   }
   for (const [unpackedFile, expected] of unpackedCuaHashes) {
-    const packaged = path.join(debResources, "cua-linux-x64", path.basename(unpackedFile));
-    if (debHashes.get(packaged) !== expected) fail(`DEB and linux-unpacked CUA hashes differ`);
+    const packaged = path.join(packageResources, "cua-linux-x64", path.basename(unpackedFile));
+    if (packageHashes.get(packaged) !== expected) fail(`${label} and linux-unpacked CUA hashes differ`);
   }
   const desktopFile = path.join(
     extracted,
@@ -474,11 +479,65 @@ try {
     "StartupWMClass=com.openmausbot.app",
     "Categories=Utility;",
   ]) {
-    if (!desktop.includes(expected)) fail(`desktop entry is missing ${JSON.stringify(expected)}`);
+    if (!desktop.includes(expected)) fail(`${label} desktop entry is missing ${JSON.stringify(expected)}`);
   }
   execFileSync("desktop-file-validate", [desktopFile], { stdio: "inherit" });
+}
+
+const extracted = mkdtempSync(path.join(tmpdir(), "omb-deb-verify-"));
+try {
+  execFileSync("dpkg-deb", ["--extract", deb, extracted]);
+  verifySystemPackage(extracted, "DEB", "deb");
 } finally {
   rmSync(extracted, { recursive: true, force: true });
+}
+
+const rpmFields = execFileSync(
+  "rpm",
+  ["-qp", "--queryformat", "Name: %{NAME}\nArch: %{ARCH}\nVersion: %{VERSION}\n", rpm],
+  { encoding: "utf8" },
+);
+for (const expected of [
+  "Name: openmausbot",
+  "Arch: x86_64",
+  `Version: ${JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).version}`,
+]) {
+  if (!rpmFields.includes(expected)) fail(`RPM metadata is missing ${JSON.stringify(expected)}`);
+}
+// rpm runs these as %post and %postun; without them the Chromium sandbox
+// stays unprivileged and an upgrade would drop the browser policy.
+const rpmScripts = new Map(
+  execFileSync("rpm", ["-qp", "--scripts", rpm], { encoding: "utf8" })
+    .split(/^(?=\w+ scriptlet)/m)
+    .map((section) => [section.slice(0, section.indexOf(" ")), section]),
+);
+for (const [scriptlet, line] of [
+  ["postinstall", "repair_chromium_sandbox \"$APP_ROOT/chrome-sandbox\""],
+  ["postuninstall", "profile=$APPARMOR_DIR/openmausbot-browser"],
+]) {
+  if (!rpmScripts.get(scriptlet)?.includes(line)) {
+    fail(`RPM ${scriptlet} scriptlet does not run the Linux package hook`);
+  }
+}
+
+const rpmExtracted = mkdtempSync(path.join(tmpdir(), "omb-rpm-verify-"));
+try {
+  const archive = path.join(rpmExtracted, "payload.cpio");
+  const archiveFd = openSync(archive, "w");
+  try {
+    execFileSync("rpm2cpio", [rpm], { stdio: ["ignore", archiveFd, "inherit"] });
+  } finally {
+    closeSync(archiveFd);
+  }
+  const payload = path.join(rpmExtracted, "payload");
+  mkdirSync(payload);
+  execFileSync("cpio", ["-idm", "--quiet", "--no-absolute-filenames", "-F", archive], {
+    cwd: payload,
+    stdio: ["ignore", "ignore", "inherit"],
+  });
+  verifySystemPackage(payload, "RPM", "rpm");
+} finally {
+  rmSync(rpmExtracted, { recursive: true, force: true });
 }
 
 const appImageExtracted = mkdtempSync(path.join(tmpdir(), "omb-appimage-verify-"));
@@ -528,4 +587,6 @@ try {
   rmSync(appImageExtracted, { recursive: true, force: true });
 }
 
-console.log(`[verify-linux-package] OK\n- ${path.basename(appImage)}\n- ${path.basename(deb)}`);
+console.log(
+  `[verify-linux-package] OK\n- ${path.basename(appImage)}\n- ${path.basename(deb)}\n- ${path.basename(rpm)}`,
+);

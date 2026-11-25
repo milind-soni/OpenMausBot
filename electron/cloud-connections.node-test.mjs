@@ -5,7 +5,7 @@ import { adoptComposioId, collectConnections, ConnectionMoveError, parseConnecti
 
 const COMPUTER = { environmentId: "env-desktop-1", label: "Milind's MacBook" };
 const INSTALLATION = "0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e";
-const D1 = "1".repeat(64), D2 = "2".repeat(64), D3 = "3".repeat(64);
+const D1 = "1".repeat(64), D2 = "2".repeat(64);
 const linearSignIn = (refresh) => ({ url: "https://mcp.linear.app/sse", state: "signed-in", tokens: { access: `a-${refresh}`, refresh } });
 
 /** This computer's server: its list, and the private port's answers, each ask recorded. */
@@ -26,7 +26,7 @@ function computer({ connections, answers = {}, release = () => ({ released: true
 }
 
 /** My Cloud's own routes over the owner session, each call recorded; `reply` answers anything not set up here. */
-function cloud({ connections = [], engines = [], commands = ["npx", "node"], reply = () => ({ status: 200, body: {} }), readyAfter = 0 } = {}) {
+function cloud({ connections = [], engines = [], commands = ["npx", "node"], reply = () => ({ status: 200, body: {} }), readyAfter = 0, vaultKeys = false } = {}) {
   const calls = [];
   let reads = 0;
   return {
@@ -35,7 +35,7 @@ function cloud({ connections = [], engines = [], commands = ["npx", "node"], rep
       calls.push([method, route, body]);
       if (method === "GET" && route === "/api/cloud-connections") {
         reads++;
-        return { ok: true, status: 200, body: { computer: { environmentId: "env-cloud", label: "omb-u-1" }, connections, engines: reads > readyAfter ? engines : [], commands } };
+        return { ok: true, status: 200, body: { computer: { environmentId: "env-cloud", label: "omb-u-1" }, connections, engines: reads > readyAfter ? engines : [], commands, ...(vaultKeys ? { vaultKeys } : {}) } };
       }
       const answer = reply(method, route, body) ?? { status: 200, body: {} };
       return { ok: answer.status >= 200 && answer.status < 300, ...answer };
@@ -45,17 +45,17 @@ function cloud({ connections = [], engines = [], commands = ["npx", "node"], rep
 
 const writes = (target) => target.calls.filter(([method]) => method !== "GET").map(([method, route]) => `${method} ${route}`);
 
-test("moves keys first, then MCP servers with their secrets, HighLevel and connected apps, each over My Cloud's own routes", async () => {
+test("moves keys first, then MCP servers with their secrets, mailboxes and connected apps, each over My Cloud's own routes", async () => {
   const local = computer({
     connections: [
       { id: "mcp:dodo", kind: "mcp", label: "dodo", launcher: "npx" },
       { id: "composio", kind: "composio", label: "Connected apps", mode: "managed", account: "managed:aaa" },
-      { id: "highlevel", kind: "highlevel", label: "HighLevel" },
+      { id: "email", kind: "email", label: "Email" },
       { id: "key:openrouter", kind: "key", label: "OpenRouter", for: ["openrouter"] },
     ],
     answers: {
       "mcp:dodo": { connection: { mcp: { name: "dodo", server: { command: "npx", args: ["-y", "dodo"], env: { KEY: "k" }, enabled: true } } } },
-      highlevel: { connection: { highlevel: { kind: "token", accessToken: "pit-1", locationId: "loc" } } },
+      email: { connection: { email: [{ address: "ana@example.test" }] } },
       "key:openrouter": { connection: { config: { openrouter: { key: "sk-or" } } } },
     },
     connected: { gmail: { connected: true }, slack: { connected: false } },
@@ -65,13 +65,14 @@ test("moves keys first, then MCP servers with their secrets, HighLevel and conne
   const progress = [];
   const result = await sendConnections(await collectConnections(local), target, { local, onProgress: (step) => progress.push(step) });
   assert.deepEqual(result.failed, []);
-  assert.deepEqual(writes(target), ["PUT /api/cloud-connections/held-keys", "PATCH /api/config", "POST /api/mcp/servers", "PATCH /api/mcp/servers/dodo", "PUT /api/cloud-connections/highlevel", "POST /api/cloud-connections/connected-apps"]);
+  assert.deepEqual(writes(target), ["PUT /api/cloud-connections/held-keys", "PATCH /api/config", "POST /api/mcp/servers", "PATCH /api/mcp/servers/dodo", "PUT /api/cloud-connections/email", "POST /api/cloud-connections/connected-apps"]);
   assert.deepEqual(result.held, [], "a Cloud with no trial credit to keep runs the key at once");
   assert.deepEqual(target.calls.find(([, route]) => route === "/api/mcp/servers")[2], { name: "dodo", command: "npx", args: ["-y", "dodo"], env: { KEY: "k" } });
   assert.deepEqual(target.calls.find(([, route]) => route === "/api/cloud-connections/connected-apps")[2], { share: "c".repeat(64), apps: ["gmail"] });
   assert.deepEqual(local.asked.find((what) => what.kind === "composio-share"), { kind: "composio-share", for: INSTALLATION });
-  assert.deepEqual(result.moved.map((item) => item.id), ["key:openrouter", "mcp:dodo", "highlevel", "composio"]);
-  assert.deepEqual(progress.map((step) => `${step.done}/${step.total} ${step.label}`), ["1/4 OpenRouter", "2/4 dodo", "3/4 HighLevel", "4/4 Connected apps"]);
+  assert.deepEqual(target.calls.find(([, route]) => route === "/api/cloud-connections/email")[2], { accounts: [{ address: "ana@example.test" }] });
+  assert.deepEqual(result.moved.map((item) => item.id), ["key:openrouter", "mcp:dodo", "email", "composio"]);
+  assert.deepEqual(progress.map((step) => `${step.done}/${step.total} ${step.label}`), ["1/4 OpenRouter", "2/4 dodo", "3/4 Email", "4/4 Connected apps"]);
 });
 
 test("a trial's Cloud keeps a moved key saved but unused while its Claude credit lasts, asked before the key is saved, and the move goes on without waiting for it", async () => {
@@ -115,8 +116,29 @@ test("a server that needs this computer goes marked as running on it, and a serv
   assert.deepEqual(added, [["notes", COMPUTER], ["fetch", COMPUTER], ["lent", { environmentId: "env-other", label: "Studio iMac" }]]);
   assert.deepEqual(body("/api/mcp/servers/docs"), { type: "http", url: "https://docs.example/mcp", headers: {}, enabled: true, runsOn: null });
   assert.equal(target.calls.some(([method, route]) => method === "PATCH" && route === "/api/mcp/servers/fetch"), false, "a server switched off here stays off there");
-  assert.deepEqual(result.runsHere, [{ id: "mcp:notes", label: "notes" }, { id: "mcp:fetch", label: "fetch", needs: "uvx" }, { id: "mcp:lent", label: "lent" }]);
+  assert.deepEqual(result.runsHere, [{ id: "mcp:notes", label: "notes" }, { id: "mcp:fetch", label: "fetch", needs: "uvx", off: true }, { id: "mcp:lent", label: "lent" }]);
   assert.deepEqual(result.moved.map((item) => item.id), ["mcp:docs"]);
+});
+
+test("a server's Vault keys go with it as pointers, and only to a Cloud that can read them", async () => {
+  const item = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const connections = [{ id: "mcp:stripe", kind: "mcp", label: "stripe", launcher: "npx" }];
+  const answers = { "mcp:stripe": { connection: { mcp: { name: "stripe", server: { command: "npx", args: ["x"], env: { KEY: `vault:${item}` }, enabled: false }, keys: [item] } } } };
+  const here = computer({ connections, answers });
+  const collected = await collectConnections(here);
+
+  const newer = cloud({ vaultKeys: true });
+  assert.deepEqual((await sendConnections(collected, newer, { local: here, waitMs: 0 })).failed, []);
+  const added = newer.calls.find(([method, route]) => method === "POST" && route === "/api/mcp/servers");
+  assert.deepEqual(added[2].vaultKeys, [item]);
+  assert.equal(added[2].env.KEY, `vault:${item}`);
+
+  const older = cloud({});
+  const stayed = await sendConnections(collected, older, { local: here, waitMs: 0 });
+  assert.equal(stayed.failed.length, 1);
+  assert.match(stayed.failed[0].message, /update/u);
+  assert.equal(stayed.failed[0].final, false);
+  assert.deepEqual(writes(older), []);
 });
 
 test("a sign-in moves and this computer lets go of it; one that refreshed meanwhile goes again first", async () => {
@@ -142,25 +164,25 @@ test("a sign-in moves and this computer lets go of it; one that refreshed meanwh
 });
 
 test("My Cloud keeps a sign-in of its own; with release off the result lists what this computer still holds, for later", async () => {
-  const connections = [{ id: "mcp:linear", kind: "mcp", label: "linear", signIn: true }, { id: "highlevel", kind: "highlevel", label: "HighLevel", signIn: true }];
+  const connections = [{ id: "mcp:linear", kind: "mcp", label: "linear", signIn: true }];
   const answers = {
     "mcp:linear": { connection: { mcp: { name: "linear", server: { type: "http", url: "https://mcp.linear.app/sse", headers: {}, enabled: true }, signIn: linearSignIn("r1") } }, digest: D1 },
-    highlevel: { connection: { highlevel: { kind: "oauth", accessToken: "a", refreshToken: "r", locationId: "loc" } }, digest: D3 },
   };
   const keeps = computer({ connections, answers });
-  const own = cloud({ connections: [{ id: "mcp:linear", kind: "mcp", label: "linear" }], reply: (method, route) => (route.includes("sign-in") || route.endsWith("/highlevel") ? { status: 200, body: { kept: true } } : undefined) });
+  const own = cloud({ connections: [{ id: "mcp:linear", kind: "mcp", label: "linear" }], reply: (method, route) => (route.includes("sign-in") ? { status: 200, body: { kept: true } } : undefined) });
   const kept = await sendConnections(await collectConnections(keeps), own, { local: keeps });
-  assert.deepEqual(kept.kept.map((item) => item.id), ["mcp:linear", "highlevel"]);
+  assert.deepEqual(kept.kept.map((item) => item.id), ["mcp:linear"]);
   assert.deepEqual(kept.moved.map((item) => item.id), ["mcp:linear"], "its definition went; its sign-in there is its own");
   assert.equal(keeps.asked.some((what) => what.kind === "connection-release"), false);
 
   const holds = computer({ connections, answers });
-  const takes = cloud({ reply: (method, route) => (route.includes("sign-in") || route.endsWith("/highlevel") ? { status: 200, body: { adopted: true } } : undefined) });
+  const takes = cloud({ reply: (method, route) => (route.includes("sign-in") ? { status: 200, body: { adopted: true } } : undefined) });
   const held = await sendConnections(await collectConnections(holds), takes, { local: holds, release: false });
-  assert.deepEqual(held.release, [{ id: "mcp:linear", label: "linear", digest: D1 }, { id: "highlevel", label: "HighLevel", digest: D3 }]);
+  assert.deepEqual(held.release, [{ id: "mcp:linear", label: "linear", digest: D1 }]);
   assert.equal(holds.asked.some((what) => what.kind === "connection-release"), false);
-  assert.deepEqual(await releaseConnections(held.release, { local: holds, target: takes }), []);
-  assert.deepEqual(holds.asked.filter((what) => what.kind === "connection-release").map((what) => what.id), ["mcp:linear", "highlevel"]);
+  // A held entry of a connection kind this app does not know is dropped, never asked about.
+  assert.deepEqual(await releaseConnections([...held.release, { id: "highlevel", label: "HighLevel", digest: D2 }], { local: holds, target: takes }), []);
+  assert.deepEqual(holds.asked.filter((what) => what.kind === "connection-release").map((what) => what.id), ["mcp:linear"]);
 });
 
 test("one connection failing never stops the others; a refusal trying again can't fix is final", async () => {

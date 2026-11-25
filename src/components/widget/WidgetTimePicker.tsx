@@ -2,7 +2,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Keyb
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, Clock, X } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { t } from "@/lib/i18n";
+import { intlLocale, t } from "@/lib/i18n";
 import { widgetNumber, widgetString, type WidgetNode } from "../../../shared/widget";
 import { useWidgetField, WIDGET_BARE, WIDGET_FIELD, WIDGET_FIELD_ACTION } from "./WidgetControls";
 
@@ -39,13 +39,14 @@ export function widgetTimeSlots(node: WidgetNode, held = ""): string[] {
   return slots;
 }
 
-let format: Intl.DateTimeFormat | undefined;
+let format: { locale: string; clock: Intl.DateTimeFormat } | undefined;
 
 export function widgetTimeLabel(time: string): string {
   const minutes = minutesOf(time);
   if (minutes === undefined) return time;
-  format ??= new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
-  return format.format(new Date(2000, 0, 1, Math.floor(minutes / 60), minutes % 60));
+  const locale = intlLocale();
+  if (format?.locale !== locale) format = { locale, clock: new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit" }) };
+  return format.clock.format(new Date(2000, 0, 1, Math.floor(minutes / 60), minutes % 60));
 }
 
 function nearNow(slots: string[]): number {
@@ -223,7 +224,7 @@ export function WidgetTimePicker({ node, bare }: { node: WidgetNode; bare: boole
           ref={list}
           id={listId}
           role="listbox"
-          aria-label={t("widget.time.options", { label: control["aria-label"] })}
+          aria-label={t("widget.time.options", { label: control["aria-label"] })} data-look="popover"
           // preventDefault on mousedown keeps the focus on the trigger.
           onMouseDown={(event) => event.preventDefault()}
           style={{ position: "fixed", ...place, visibility: place ? undefined : "hidden" }}

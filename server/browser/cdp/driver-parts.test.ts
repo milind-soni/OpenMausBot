@@ -170,6 +170,21 @@ describe("small rules", () => {
     expect(Buffer.byteLength(safeFileName(`${"é".repeat(300)}.txt`))).toBeLessThanOrEqual(255);
   });
 
+  it.each(["CON", "con.txt", "AUX.csv", "NUL .txt", "COM1.log", "LPT².txt", "CONIN$"])("makes reserved Windows download name %s usable", (name) => {
+    expect(safeFileName(name)).toBe(`_${name}`);
+  });
+
+  it("truncates long download names at complete Unicode characters", () => {
+    const name = safeFileName(`${"a".repeat(252)}🙂.txt`);
+    expect(name).toBe("a".repeat(252));
+    expect(Buffer.from(name, "utf8").toString("utf8")).toBe(name);
+  });
+
+  it("removes trailing dots or spaces introduced by the byte limit", () => {
+    expect(safeFileName(`${"a".repeat(254)}.txt`)).toBe("a".repeat(254));
+    expect(safeFileName(`${"a".repeat(254)} remainder.txt`)).toBe("a".repeat(254));
+  });
+
   it("reports addresses without their queries, and names human checks by their frames", () => {
     expect(reportableUrl("https://shop.example/api/cart?token=secret#x")).toBe("https://shop.example/api/cart");
     expect(reportableUrl("data:text/html,<p>hi")).toBe("data:…");

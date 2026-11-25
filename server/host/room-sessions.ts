@@ -51,7 +51,7 @@ export interface RoomDispatchInput {
 export interface RoomDispatch {
   mode: "legacy" | "start" | "resume";
   text: string;
-  send: { sessionReset?: true; resumeCursor?: string; recoveryText?: string };
+  send: { sessionReset?: true; resumeCursor?: string; recoveryText?: string; ephemeral?: true };
 }
 
 export interface RoomSessions {
@@ -259,7 +259,7 @@ export function createRoomSessions(deps: RoomSessionsDeps): RoomSessions {
 
   function decide(input: RoomDispatchInput, full: string, today: RoomDispatch["send"]): RoomDispatch {
     const { threadId, botId, instance, window } = input;
-    const legacy = (): RoomDispatch => ({ mode: "legacy", text: full, send: today });
+    const legacy = (): RoomDispatch => ({ mode: "legacy", text: full, send: { ...today, ephemeral: true } });
     if (!roomSessionsEnabled(deps.settings(), deps.env)) {
       clear();
       return legacy();
@@ -374,7 +374,7 @@ export function createRoomSessions(deps: RoomSessionsDeps): RoomSessions {
           drop(input.threadId, input.botId);
         } catch { /* nothing more to let go of */ }
         console.warn(`room sessions: sent the whole window instead on thread ${input.threadId} (${error instanceof Error ? error.message : String(error)})`);
-        return { mode: "legacy", text: full, send: today };
+        return { mode: "legacy", text: full, send: { ...today, ephemeral: true } };
       }
     },
     bindTurn(threadId, claimId, turnId) {

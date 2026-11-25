@@ -1,7 +1,7 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AcpHost, type AcpInbound } from "./host.ts";
 
@@ -18,10 +18,10 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 10));
 function hostWith(key: string | null) {
   const { child, written, say } = fakeChild();
   const refused: any[] = [];
-  const host = new AcpHost(child, key, { source: "test.acp", logMessage: (msg) => msg, keepStderr: true, unrouted: (msg) => refused.push(msg) });
+  const host = new AcpHost(child, key, { source: "test.acp", logMessage: (msg) => msg, unrouted: (msg) => refused.push(msg) });
   const heard = new Map<string, any[]>();
   const link = (threadId: string, sessionId: string | null) => {
-    const linked = host.link(threadId);
+    const linked = host.link(threadId, `/work/${threadId}`);
     linked.sessionId = sessionId;
     const inbox: any[] = [];
     heard.set(threadId, inbox);
@@ -30,6 +30,23 @@ function hostWith(key: string | null) {
   };
   return { host, written, say, refused, heard, link };
 }
+
+describe("an ACP process's exit", () => {
+  it("hands each listening thread the code and signal, with the last stderr lines kept masked", async () => {
+    const { child } = fakeChild();
+    const host = new AcpHost(child, null, { source: "test.acp", logMessage: (msg) => msg, unrouted: () => {} });
+    const exits: Array<[number | null, NodeJS.Signals | null, string]> = [];
+    const linked = host.link("a", "/work/a");
+    linked.inbound = { request: () => {}, notification: () => {}, error: () => {}, busy: () => false, exit: (code, signal) => exits.push([code, signal, host.stderrTail.text]) };
+    const stderr = child.stderr as unknown as PassThrough;
+    stderr.write("starting\nOpen https://accounts.google.com/o/oauth2/v2/auth?state=private-state\n");
+    stderr.write("fatal: out of cheese");
+    await flush();
+    child.emit("close", null, "SIGABRT");
+    expect(exits).toEqual([[null, "SIGABRT", expect.stringMatching(/^starting \| Open https:\/\/accounts\.google\.com\/o\/oauth2\/v2\/auth\?«redacted \d+ chars» \| fatal: out of cheese$/u)]]);
+    expect(exits[0]![2]).not.toContain("private-state");
+  });
+});
 
 describe("one ACP process for several threads", () => {
   it("gives each thread only its own session's traffic, and refuses a request for a session no thread holds", async () => {
@@ -70,5 +87,26 @@ describe("one ACP process for several threads", () => {
     h.say({ jsonrpc: "2.0", method: "session/update", params: { update: {} } });
     await flush();
     expect(h.heard.get("only")).toHaveLength(2);
+  });
+});
+
+describe("a prompt's silence timer across a sleep", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("does not count the time the computer slept as the agent's silence", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const h = hostWith(null);
+    const link = h.link("a", "s-a");
+    let failure: Error | null = null;
+    void link.request("session/prompt", { sessionId: "s-a" }, undefined, undefined, 5 * 60_000).catch((error: Error) => { failure = error; });
+    await vi.advanceTimersByTimeAsync(4 * 60_000);
+    // Asleep for half an hour: the wall clock moves on, the timer does not fire until the computer wakes.
+    vi.setSystemTime(Date.now() + 30 * 60_000);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(failure).toBeNull();
+    await vi.advanceTimersByTimeAsync(4 * 60_000);
+    expect(failure).toBeNull();
+    await vi.advanceTimersByTimeAsync(60_000 + 1);
+    expect(failure).toMatchObject({ acpPromptStall: true });
   });
 });

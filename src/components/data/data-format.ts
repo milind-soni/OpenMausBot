@@ -1,4 +1,5 @@
 import type { DataCard, DataColumn, DataPage } from "../../../shared/data-surface";
+import { intlLocale } from "@/lib/i18n";
 
 export type Cell = DataPage["rows"][number][number];
 
@@ -39,8 +40,8 @@ export function rowObjects(columns: DataColumn[], rows: Cell[][]): Array<Record<
 }
 
 export function tsv(columns: string[], rows: Cell[][]): string {
-  const clean = (text: string) => text.replace(/[\t\r\n]+/g, " ");
-  return [columns.map(clean).join("\t"), ...rows.map((row) => row.map((cell) => clean(cellText(cell))).join("\t"))].join("\n");
+  const quote = (text: string) => /["\t\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  return [columns.map(quote).join("\t"), ...rows.map((row) => row.map((cell) => quote(cellText(cell))).join("\t"))].join("\n");
 }
 
 export function markdownTable(columns: string[], rows: Cell[][]): string {
@@ -62,5 +63,5 @@ export function cardsLatestFirst(cards: DataCard[]): DataCard[] {
 }
 
 export function formatCount(value: number | undefined | null): string {
-  return typeof value === "number" && Number.isFinite(value) ? value.toLocaleString() : "";
+  return typeof value === "number" && Number.isFinite(value) ? value.toLocaleString(intlLocale()) : "";
 }

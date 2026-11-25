@@ -4,11 +4,11 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const opened = vi.hoisted(() => ({ props: null as null | { readyBotId?: string; onClose?: () => void; onCreated?: (bot: { id: string }) => void }, dispatch: vi.fn() }));
+const opened = vi.hoisted(() => ({ props: null as null | { readyBotId?: string; onClose?: () => void; onCreated?: (bot: { id: string }) => void }, dispatch: vi.fn(), state: { config: null, bots: [] } as { config: { botLimit?: number } | null; bots: object[] } }));
 vi.mock("./lazy-screens", () => ({
   NewBotDialog: (props: NonNullable<typeof opened.props>) => { opened.props = props; return null; },
 }));
-vi.mock("@/state/store", () => ({ useStore: () => ({ dispatch: opened.dispatch }) }));
+vi.mock("@/state/store", () => ({ useStore: () => ({ dispatch: opened.dispatch, state: opened.state }) }));
 
 const { ReadyBotGallery } = await import("./ReadyBotGallery");
 const { READY_BOTS } = await import("@/lib/ready-bots");
@@ -30,6 +30,7 @@ beforeEach(() => {
   document.body.append(host);
   root = createRoot(host);
   opened.props = null;
+  opened.state = { config: null, bots: [] };
   opened.dispatch.mockReset();
   onDialog.mockClear();
   onAdded.mockClear();
@@ -44,6 +45,14 @@ describe("ready-made bots gallery", () => {
     expect(new Set(labels).size).toBe(READY_BOTS.length);
     expect(host.textContent).toContain("Try: “Add my monstera: living room, bright indirect light”");
     expect(host.textContent).toContain("Includes a paused routine");
+  });
+
+  it("says on each card of the checked-work pair which bot it works with", () => {
+    render();
+    const card = (id: string) => host.querySelector(`[data-ready-bot="${id}"]`)!.textContent;
+    expect(card("editor")).toContain("Pairs with Vera, Checker");
+    expect(card("checker")).toContain("Pairs with Nib, Writer and editor");
+    expect(card("writer")).not.toContain("Pairs with");
   });
 
   it("narrows to a category and back to all", () => {
@@ -86,5 +95,16 @@ describe("ready-made bots gallery", () => {
     flushSync(() => opened.props!.onClose!());
     expect(onDialog).toHaveBeenLastCalledWith(false);
     expect(onAdded).not.toHaveBeenCalled();
+  });
+
+  it("at Starter's limit opens the upgrade popup instead of a form to fill in", async () => {
+    const { botLimitShown, closeBotLimit } = await import("@/lib/bot-limit");
+    opened.state = { config: { botLimit: 5 }, bots: Array.from({ length: 5 }, () => ({})) };
+    render();
+    flushSync(() => button("Add Fern, Plant care log").click());
+    expect(opened.props).toBeNull();
+    expect(onDialog).not.toHaveBeenCalled();
+    expect(botLimitShown()).toBe(true);
+    closeBotLimit();
   });
 });

@@ -1,5 +1,6 @@
 // agent-browser 0.37.0's core profile advertises 29 tools at ~12.5k tokens, mostly fifteen launch/session parameters
 // repeated on every tool, and every result arrives twice (text plus a 3-5x larger structuredContent that Codex keeps in history).
+import { BrowserHostError, loaderMissingLibrary } from "./browser/chrome/host-setup.ts";
 import { trimResultText } from "./mcp-trim.ts";
 
 /** A model must never set these: `session` reaches another bot's browser, `extraArgs`/`caCert`/`headed`/`webgpu`/`webmcp`
@@ -22,10 +23,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+export function verifiedBrowserNavigation(args: unknown, observation: unknown): boolean {
+  if (!isRecord(observation) || observation.isError === true || !Array.isArray(observation.content)) return false;
+  const structured = observation.structuredContent;
+  const response = isRecord(structured) ? structured.response : undefined;
+  const data = isRecord(response) ? response.data : undefined;
+  const url = isRecord(args) ? args.url : undefined;
+  if (typeof url === "string" && /^https?:\/\//i.test(url.trim()) &&
+      isRecord(data) && data.origin === "about:blank") return false;
+  return observation.content.some((item) => isRecord(item) && item.type === "text" &&
+    typeof item.text === "string" && item.text.trim().length > 0);
+}
+
 /** agent-browser 0.37.0 fetches a `url` given to agent_browser_read with its own HTTP client, around the browser and its
  * egress gate, and ignores every proxy setting; without one it reads the open tab. */
 const READ_TOOL = "agent_browser_read";
 export const READ_OPEN_PAGE_ONLY = "agent_browser_read reads the page open in this browser. Open the address with agent_browser_open first, then call agent_browser_read without url.";
+/** agent-browser's own description ("Fetch a URL … Omit url to read the active tab.") offers the `url` hidden below. */
+const READ_DESCRIPTION = "Read the page open in this browser as agent-readable text. To read another address, open it with agent_browser_open first.";
 
 export function readsAroundBrowser(params: unknown): boolean {
   return isRecord(params) && params.name === READ_TOOL && isRecord(params.arguments) && params.arguments.url !== undefined;
@@ -43,7 +58,8 @@ export function slimBrowserToolList(result: unknown): unknown {
     const required = Array.isArray(schema.required)
       ? schema.required.filter((name) => typeof name !== "string" || !hidden(name))
       : schema.required;
-    return { ...tool, inputSchema: { ...schema, ...(properties === undefined ? {} : { properties }), ...(required === undefined ? {} : { required }) } };
+    return { ...tool, ...(tool.name === READ_TOOL ? { description: READ_DESCRIPTION } : {}),
+      inputSchema: { ...schema, ...(properties === undefined ? {} : { properties }), ...(required === undefined ? {} : { required }) } };
   });
   return { ...result, tools };
 }
@@ -145,17 +161,41 @@ export function describePageChange(before: PageState, after: PageState): string 
   ].filter(Boolean).join(" ") + title;
 }
 
+/** agent-browser's own error when the Chrome it launched dies before DevTools is up. */
+const LAUNCH_FAILURE = "Chrome exited early (exit code:";
+/** agent-browser prints that launch's stderr after this line ("Chrome stderr:" or "Chrome stderr (last N lines):"). */
+const CHROME_STDERR = /^Chrome stderr(?: \(last \d+ lines\))?:$/m;
+const MAX_LIBRARY_NAME = 120;
+
+/** The library a failed Chrome launch's own stderr names, not one a page's text merely quotes. */
+function launchMissingLibrary(text: string): string | undefined {
+  if (!text.trimStart().startsWith(LAUNCH_FAILURE)) return undefined;
+  const stderr = CHROME_STDERR.exec(text);
+  const library = stderr ? loaderMissingLibrary(text.slice(stderr.index)) : undefined;
+  return library && library.length > MAX_LIBRARY_NAME ? `${library.slice(0, MAX_LIBRARY_NAME)}…` : library;
+}
+
 export function shapeBrowserToolResult(result: unknown, options: { toolName?: string; budget?: number } = {}): unknown {
   if (!isRecord(result) || !Array.isArray(result.content)) return result;
   const budget = options.budget ?? DEFAULT_BROWSER_RESULT_BUDGET;
   let textParts = 0;
+  let library: string | undefined;
   const content = (result.content as unknown[]).map((part) => {
     if (!isRecord(part) || part.type !== "text" || typeof part.text !== "string") return part;
     textParts++;
+    if (result.isError === true && process.platform === "linux") library ??= launchMissingLibrary(part.text);
     const outcome = trimResultText({ text: withoutLifecycle(part.text), budget, toolName: options.toolName });
     return { ...part, text: outcome.trimmed ? outcome.text + BROWSER_NARROWING_HINT : outcome.text };
   });
   if (!textParts) return { ...result, content };
+  // agent-browser launches Chrome itself, so a host missing system libraries
+  // only shows the loader's words; say how to install them, as our own launch does.
+  // The advice leads the first text part: some MCP clients show only that one,
+  // and a long stderr can be cut off at the end.
+  if (library) {
+    const first = content.find((part): part is { text: string } => isRecord(part) && part.type === "text" && typeof part.text === "string");
+    if (first) first.text = `${new BrowserHostError("libraries", [library]).message}\n\n${first.text}`;
+  }
   return { ...Object.fromEntries(Object.entries(result).filter(([key]) => key !== "structuredContent")), content };
 }
 

@@ -1,3 +1,4 @@
+import nativeText from "./native-text.cjs";
 import { fileURLToPath } from "node:url";
 
 export const TALK_PANEL = Object.freeze({ width: 400, margin: 24, minHeight: 56, maxHeight: 240, fadeMs: 180 });
@@ -76,8 +77,9 @@ const LABELS=${labels};
 const card=document.getElementById("card"),label=document.getElementById("label"),text=document.getElementById("text");
 function render(view){
   document.body.className=["on",view.state,view.theme].filter(Boolean).join(" ");
-  label.textContent=LABELS[view.state]||"";
-  text.textContent=view.text||(view.state==="listening"?"Let go to send":"");
+  label.textContent=(view.labels||LABELS)[view.state]||"";
+  document.getElementById("close").setAttribute("aria-label",view.dismiss||"Dismiss");
+  text.textContent=view.text||(view.state==="listening"?(view.release||"Let go to send"):"");
   return Math.ceil(card.getBoundingClientRect().height);
 }
 function fadeOut(){document.body.classList.remove("on")}
@@ -93,7 +95,7 @@ function mascotPng(nativeImage, iconPath) {
   return icon.resize({ width: 2 * MASCOT_PX, height: 2 * MASCOT_PX, quality: "best" }).toPNG().toString("base64");
 }
 
-export function createTalkPanel({ BrowserWindow, screen, nativeImage, iconPath, onOpen, onDismiss, theme: initialTheme = null }) {
+export function createTalkPanel({ BrowserWindow, screen, nativeImage, iconPath, onOpen, onDismiss, theme: initialTheme = null, t = nativeText.englishText.t }) {
   let win = null;
   let loaded = false;
   let shown = false;
@@ -161,7 +163,8 @@ export function createTalkPanel({ BrowserWindow, screen, nativeImage, iconPath, 
   async function paint() {
     const target = win;
     const ticket = ++latest;
-    const payload = JSON.stringify({ state: view.state, text: replyPreview(view.text), ...(theme ? { theme } : {}) });
+    const labels = { ...TALK_LABELS, listening: t("native.talk.listening"), sending: t("native.talk.sending"), thinking: t("native.talk.thinking"), "needs-you": t("native.talk.needsYou"), "still-working": t("native.talk.stillWorking") };
+    const payload = JSON.stringify({ state: view.state, text: view.textCode ? t(view.textCode) : replyPreview(view.text), labels, dismiss: t("native.talk.dismiss"), release: t("native.talk.releaseToSend"), ...(theme ? { theme } : {}) });
     let height;
     try {
       height = await target.webContents.executeJavaScript(`render(${payload})`);
@@ -179,6 +182,7 @@ export function createTalkPanel({ BrowserWindow, screen, nativeImage, iconPath, 
   const repaint = () => void paint().catch(() => {});
 
   return {
+    relabel() { if (win && loaded && view) repaint(); },
     render(next) {
       view = next;
       if (!win) {

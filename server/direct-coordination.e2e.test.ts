@@ -78,7 +78,7 @@ it("sends cross-bot work onward without resuming either sender", () => fixture(a
   const sentThread = (botId: string) => JSON.parse(sendOf(botId).content[0].text).receipts[0].threadId;
   await expect.poll(async () => (await f.api("/api/bots?messages=0")).bots
     .find((bot: any) => bot.id === f.specialist.id)?.busy, { timeout: 15_000 }).toBe(true);
-  await f.api(`/api/bots/${f.lead.id}`, { peers: [] }, "PATCH");
+  await f.api(`/api/bots/${f.lead.id}`, { visibility: "admins" }, "PATCH");
   writeFileSync(gate, "finish detached work");
   await expect.poll(() => f.evidence().filter((turn: any) => turn.botId === f.specialist.id).length, { timeout: 15_000 }).toBe(1);
   const bots = (await f.api("/api/bots")).bots;
@@ -117,7 +117,7 @@ it("marks a failed one-way send so restart recovery cannot duplicate its notice"
   // The failed send reports an incident to Clive, the lead's Chief; answering it must not send the task again.
   f.plan[f.chief.id] = { steps: [{ arguments: {
     bot_ids: [f.lead.id], message: "Try the task", thread: "new", reply: "none",
-  } }], reply: "Sent", byPrompt: [{ promptIncludes: "[Incident report from OpenMausBot", plan: { reply: "Noted the failed send" } }] };
+  } }], reply: "Sent", byPrompt: [{ promptIncludes: "[From OpenMausBot · incident report", plan: { reply: "Noted the failed send" } }] };
   f.plan[f.lead.id] = { fail: true };
   await f.start();
   expect((await f.wait()).status).toBe("settled");
@@ -205,42 +205,30 @@ it("coordinates a lead and its specialist from ordinary chat, returns to Clive, 
   expect(tools).toContain("coordinate_bots");
   expect(tools).toContain("assignment_status");
   for (const alias of ["delegate_bot", "ask_bot", "send_to_bot", "check_delegation", "wait_delegation"]) expect(tools).not.toContain(alias);
-  expect(leadTools.find((tool: any) => tool.name === "start_thread").inputSchema.properties.bot_id.enum).toEqual([f.lead.id]);
   const chiefTools = f.evidence()[0].evidence[0].result.tools;
   const selfThread = chiefTools.find((tool: any) => tool.name === "start_thread");
   expect(selfThread.description).toContain("separate job on yourself");
-  expect(selfThread.inputSchema.properties.bot_id.enum).toEqual([f.chief.id]);
+  expect(selfThread.inputSchema.properties.bot_id).toBeUndefined();
   expect(bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.threadId === receipt.threadRef.threadId).openedBy)
     .toMatchObject({ botId: f.chief.id, name: "Clive" });
   expect(turn.system).toContain("only an actual coordinate_bots result proves that teammate participated");
 }), 45_000);
 
-it("announces a settled delegation and its resume in the parent thread", () => fixture(async f => {
+it("shows a settled delegation and its resume in the parent thread, and notifies once, with the answer", () => fixture(async f => {
   const stream = await openSse(`${f.session.info.url}/api/events`);
   try {
     await f.start();
     expect((await f.wait()).status).toBe("settled");
-    // f.wait() resolves through the control CLI poll, independent of the SSE reader: until() proves both settles are stored first.
-    await Promise.all([
-      stream.until(frame => frame.kind === "notify"
-        && frame.notification?.kind === "delegation-settled"
-        && frame.notification.botId === f.chief.id),
-      stream.until(frame => frame.kind === "notify"
-        && frame.notification?.kind === "delegation-settled"
-        && frame.notification.botId === f.lead.id),
-    ]);
-    const settles = () => stream.frames.filter(frame => frame.kind === "notify" && frame.notification?.kind === "delegation-settled");
-    const chiefFrames = settles().filter(frame => frame.notification.botId === f.chief.id);
-    expect(chiefFrames).toHaveLength(1);
-    expect(chiefFrames[0].notification).toMatchObject({
-      threadId: f.chief.activeTaskId,
-      title: "Clive resumed with results",
-      body: "Results in from Engineering lead",
-    });
-    const leadFrames = settles().filter(frame => frame.notification.botId === f.lead.id);
-    expect(leadFrames).toHaveLength(1);
-    expect(leadFrames[0].notification.threadId).not.toBe(f.lead.activeTaskId);
-    expect(settles().some(frame => frame.notification.botId === f.specialist.id)).toBe(false);
+    // f.wait() resolves through the control CLI poll, independent of the SSE reader: until() proves the "done" is stored first.
+    await stream.until(frame => frame.kind === "notify" && frame.notification?.kind === "done" && frame.notification.botId === f.chief.id);
+    // The results coming back to the bot that asked notify nobody: its answer, the one "done", is what the person needs.
+    const notes = stream.frames.filter(frame => frame.kind === "notify").map(frame => frame.notification);
+    expect(notes.map(note => [note.kind, note.botId]), JSON.stringify(notes)).toEqual([["done", f.chief.id]]);
+    expect(notes[0]).toMatchObject({ threadId: f.chief.activeTaskId, title: "Clive finished" });
+    const { bots } = await f.api("/api/bots?messages=0");
+    const work = bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.openedBy?.botId === f.chief.id);
+    expect(work.unread, "no unread mark, on the desktop or the phone's To review, for a teammate's own step").toBeFalsy();
+    expect(bots.find((bot: any) => bot.id === f.chief.id).tasks.find((task: any) => task.threadId === f.chief.activeTaskId).unread, "the person's own conversation still is").toBe(true);
     expect(stream.frames.some(frame => frame.kind === "notify" && frame.notification?.kind === "done"
       && (frame.notification.botId === f.lead.id || frame.notification.botId === f.specialist.id))).toBe(false);
     const chips = (await f.messages(f.chief.activeTaskId))
@@ -313,13 +301,14 @@ it.each(["resume", "stop", "failed resume", "failed root"] as const)("keeps a gu
       await api("POST", `${route}/interrupt`, { ...target, expectedExecutionId: null }, 409);
       expect(await api("POST", `${route}/interrupt`, target)).toEqual({ ok: true, outcome: "stopped" });
       await api("POST", `${route}/interrupt`, target, 409);
-      expect(f.nodes().find((node: any) => node.botId === f.lead.id).status).toBe("running");
+      // Stop means stop: the teammate working for the request ends with it.
+      expect(f.nodes().find((node: any) => node.botId === f.lead.id).status).toBe("cancelled");
     }
     writeFileSync(gate, "finish only the isolated teammate");
     const childWait = await f.cli("wait", "--bot", f.lead.id, "--task", child.threadId, "--timeout", "20");
     evidence.push({ command: ["wait", "--bot", f.lead.id, "--task", child.threadId, "--timeout", "20"], result: childWait });
     expect(childWait.status).toBe("settled");
-    await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id).status).toBe("completed");
+    await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id).status).toBe(action === "stop" ? "cancelled" : "completed");
     const finalWait = await f.wait();
     evidence.push({ command: ["wait", "--bot", f.chief.id, "--task", threadId, "--timeout", "30"], result: finalWait });
     expect(action === "failed resume" ? ["settled", "failed"] : ["settled"]).toContain(finalWait.status);
@@ -384,6 +373,124 @@ it("opens a fresh thread on a teammate with coordinate_bots thread \"new\" and g
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.tool?.name === "Engineering lead replied" && message.tool.output === "NEW_THREAD_RESULT verified")).toBe(true);
 }), 45_000);
 
+it("closes a thread \"new\" opened once its result is back, and opens it again for a follow-up sent to it", () => fixture(async f => {
+  const gate = join(f.session.info.dataDir, "follow-up.gate");
+  const opening = [
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "FRESH_BRIEF verify the CSV export yourself", thread: "new" } }], reply: "Opened a fresh thread" },
+    { reply: "The fresh thread reported back" },
+  ];
+  f.plan[f.chief.id] = { turns: opening };
+  f.plan[f.lead.id] = { turns: [{ reply: "FRESH_RESULT verified" }, { gateFile: gate, reply: "FRESH_RESULT checked again" }] };
+  const leadTask = async (threadId: string) => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.threadId === threadId);
+  const leadNodes = () => f.nodes().filter((node: any) => node.botId === f.lead.id);
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  const [child] = leadNodes();
+  const closed = await leadTask(child.threadId);
+  expect(closed.openedBy).not.toHaveProperty("kind");
+  expect(closed.openedBy.oneShot).toBe(true);
+  expect(closed.closedBy).toMatchObject({ botId: f.chief.id, name: "Clive" });
+  expect(closed.archivedAt).toBe(closed.closedBy.at);
+  expect((await f.messages(child.threadId)).map((message: any) => message.text).filter(Boolean).join("\n")).toContain("FRESH_RESULT verified");
+  expect(await leadTask(f.lead.activeTaskId)).not.toHaveProperty("closedBy");
+
+  f.plan[f.chief.id] = { turns: [...opening,
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "FRESH_FOLLOW_UP check it once more", thread: child.threadId } }], reply: "Sent the follow-up" },
+    { reply: "The follow-up reported back" },
+  ] };
+  f.save();
+  await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Ask them to check once more in that thread.");
+  await expect.poll(() => leadNodes().at(-1)?.status, { timeout: 15_000 }).toBe("running");
+  expect(leadNodes().map((node: any) => node.threadId)).toEqual([child.threadId, child.threadId]);
+  expect(await leadTask(child.threadId)).not.toHaveProperty("closedBy");
+  expect(await leadTask(child.threadId)).not.toHaveProperty("archivedAt");
+  writeFileSync(gate, "go");
+  expect((await f.wait()).status).toBe("settled");
+  await expect.poll(async () => (await leadTask(child.threadId)).closedBy, { timeout: 15_000 }).toMatchObject({ botId: f.chief.id });
+  expect((await leadTask(child.threadId)).archivedAt).toBeGreaterThan(closed.archivedAt);
+}), 90_000);
+
+it("reruns an identical brief with rework=true in the archived thread \"new\" opened, which leaves the archive while it runs", () => fixture(async f => {
+  const brief = "REWORK_BRIEF run the export check";
+  const gate = join(f.session.info.dataDir, "rework.gate");
+  const opening = [
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: brief, thread: "new" } }], reply: "Opened a fresh thread" },
+    { reply: "The fresh thread reported back" },
+  ];
+  f.plan[f.chief.id] = { turns: opening };
+  f.plan[f.lead.id] = { turns: [{ reply: "REWORK_RESULT first" }, { gateFile: gate, reply: "REWORK_RESULT second" }] };
+  const leadTask = async (threadId: string) => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.threadId === threadId);
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  const child = f.nodes().find((node: any) => node.botId === f.lead.id);
+  await expect.poll(async () => (await leadTask(child.threadId)).archivedAt, { timeout: 15_000 }).toBeTypeOf("number");
+
+  f.plan[f.chief.id] = { turns: [...opening,
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: brief, thread: child.threadId, rework: true } }], reply: "Sent it again" },
+    { reply: "The rework reported back" },
+  ] };
+  f.save();
+  await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Have them run it once more in that thread.");
+  await expect.poll(() => f.nodes().filter((node: any) => node.botId === f.lead.id).at(-1)?.status, { timeout: 15_000 }).toBe("running");
+  const [sent] = f.evidence().filter((turn: any) => turn.botId === f.chief.id).at(-1).evidence.filter((entry: any) => entry.step).map((entry: any) => entry.response.result);
+  expect(sent.isError).toBeFalsy();
+  expect(JSON.parse(sent.content[0].text).receipts[0]).toMatchObject({ outcome: "queued", threadId: child.threadId });
+  const reopened = await leadTask(child.threadId);
+  expect(reopened).not.toHaveProperty("archivedAt");
+  expect(reopened).not.toHaveProperty("closedBy");
+  writeFileSync(gate, "go");
+  expect((await f.wait()).status).toBe("settled");
+  await expect.poll(async () => (await leadTask(child.threadId)).archivedAt, { timeout: 15_000 }).toBeTypeOf("number");
+  expect((await f.messages(child.threadId)).map((message: any) => message.text).filter(Boolean).join("\n")).toContain("REWORK_RESULT second");
+}), 90_000);
+
+it("lets the opener list and close a thread \"new\" opened after it was archived", () => fixture(async f => {
+  f.plan[f.chief.id] = { steps: [{ arguments: { bot_ids: [f.lead.id], message: "LISTED_BRIEF verify the CSV export yourself", thread: "new" } }],
+    reply: "Opened a fresh thread", resumeReply: "The fresh thread reported back" };
+  f.plan[f.lead.id] = { reply: "LISTED_RESULT verified" };
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  const child = f.nodes().find((node: any) => node.botId === f.lead.id);
+  await expect.poll(async () => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks
+    .find((task: any) => task.threadId === child.threadId).archivedAt, { timeout: 15_000 }).toBeTypeOf("number");
+  f.plan[f.chief.id] = { steps: [
+    { tool: "list_threads", arguments: {} },
+    { tool: "close_thread", arguments: { thread_id: child.threadId } },
+  ], reply: "Checked the finished thread" };
+  f.save();
+  await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Find the finished engineering thread and close it.");
+  expect((await f.wait()).status).toBe("settled");
+  const [listed, closed] = f.evidence().at(-1).evidence.filter((entry: any) => entry.step).map((entry: any) => entry.response.result);
+  const { title } = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.threadId === child.threadId);
+  expect(listed.content[0].text).toContain(`- #${title} (on @Engineering lead, closed, archived: no longer in the person's sidebar) [thread id: ${child.threadId}]`);
+  expect(closed.isError).toBeFalsy();
+  expect(closed.content[0].text).toBe(`#${title} on @Engineering lead was already closed by @Clive, so nothing changed. It is archived: it is no longer in the person's sidebar.`);
+}), 60_000);
+
+it("keeps a thread \"new\" opened open when a person wrote in it before its result came back", () => fixture(async f => {
+  const gate = join(f.session.info.dataDir, "person-wrote.gate");
+  f.plan[f.chief.id] = { turns: [
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "JOINED_BRIEF verify the CSV export yourself", thread: "new" } }], reply: "Opened a fresh thread" },
+    { reply: "The fresh thread reported back" },
+  ] };
+  f.plan[f.lead.id] = { turns: [{ gateFile: gate, reply: "JOINED_RESULT verified" }, { reply: "JOINED_RESULT noted" }] };
+  const leadTask = async (threadId: string) => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.threadId === threadId);
+  const stream = await openSse(`${f.session.info.url}/api/events`);
+  await f.start();
+  await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id)?.status, { timeout: 15_000 }).toBe("running");
+  const child = f.nodes().find((node: any) => node.botId === f.lead.id);
+  await f.api(`/api/bots/${f.lead.id}/messages`, { text: "Also check the header row while you are there.", threadId: child.threadId });
+  await expect.poll(async () => (await f.messages(child.threadId)).some((message: any) => message.role === "user" && !message.peerAsk && message.text === "Also check the header row while you are there."), { timeout: 15_000 }).toBe(true);
+  writeFileSync(gate, "go");
+  expect((await f.wait()).status).toBe("settled");
+  await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((message: any) => message.tool?.output === "JOINED_RESULT verified"), { timeout: 15_000 }).toBe(true);
+  await expect.poll(async () => (await leadTask(child.threadId)).busy, { timeout: 15_000 }).toBeFalsy();
+  stream.close();
+  expect(stream.frames.some(frame => frame.kind === "bot" && frame.bot?.id === f.lead.id
+    && frame.bot.tasks?.find((task: any) => task.threadId === child.threadId)?.closedBy)).toBe(false);
+  expect(await leadTask(child.threadId)).not.toHaveProperty("closedBy");
+}), 90_000);
+
 it("names a fresh teammate thread with coordinate_bots title", () => fixture(async f => {
   f.plan[f.chief.id] = { steps: [{ arguments: { bot_ids: [f.lead.id], message: "TITLED_BRIEF verify the CSV export yourself", thread: "new", title: "CSV export: verify" } }],
     reply: "Opened a titled thread", resumeReply: "The titled thread reported back" };
@@ -425,6 +532,24 @@ it("lets the opener find and close the completed task", () => fixture(async f =>
   expect((await f.messages(child.threadId)).some((message: any) => message.text === "Implemented and reviewer confirmed checks")).toBe(true);
 }), 45_000);
 
+it("lets a bot rename only the thread it is working in", () => fixture(async f => {
+  f.plan[f.chief.id] = {
+    steps: [{ tool: "rename_thread", arguments: { title: "Acme: carousel design" } }],
+    reply: "Renamed this thread",
+  };
+  f.save();
+  const before = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id).tasks.find((task: any) => task.threadId === f.chief.activeTaskId).title;
+  await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Terminei o design e a skill de carrossel pra cliente Acme, pode dar um nome melhor a esta conversa?");
+  expect((await f.wait()).status).toBe("settled");
+  const step = f.evidence().at(-1).evidence.find((entry: any) => entry.step?.tool === "rename_thread");
+  expect(step.response.result.isError).toBeFalsy();
+  expect(step.response.result.content[0].text).toContain("#Acme: carousel design");
+  const chief = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id);
+  const renamed = chief.tasks.find((task: any) => task.threadId === f.chief.activeTaskId);
+  expect(renamed.title).toBe("Acme: carousel design");
+  expect(renamed.title).not.toBe(before);
+}), 45_000);
+
 it("does not treat self-opened work or an abandoned human branch as new human authority", () => fixture(async f => {
   await f.api("/api/config", { threads: { maxConcurrentPerBot: 1 } }, "PUT");
   const room = (await f.cli("new-channel", "--name", "Updates", "--members", f.chief.id, "--section", "Leadership")).channel;
@@ -464,8 +589,7 @@ it("does not treat self-opened work or an abandoned human branch as new human au
   await f.api(`/api/bots/${f.chief.id}/secret-cards/${secret.id}/dismiss`, { threadId: child.threadId });
   await providerFinished(4);
   expect((await childWait()).status).toBe("settled");
-  const continuation = f.evidence().at(-1);
-  expect(continuation.evidence[0].result.tools.find((tool: any) => tool.name === "start_thread").inputSchema.properties.bot_id.enum).toEqual([f.chief.id]);
+  expect(f.evidence().at(-1).evidence[0].result.tools.find((tool: any) => tool.name === "start_thread").inputSchema.properties.bot_id).toBeUndefined();
   expect((await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id).tasks).toHaveLength(2);
   await f.cli("send", "--bot", f.chief.id, "--task", child.threadId, "--text", "Now I want you to post one new update.");
   await providerFinished(5);
@@ -543,6 +667,7 @@ it("continues one recipient thread for every follow-up from the same conversatio
   expect(first.title).toBe("@Clive · work");
   expect(first.openedBy).toMatchObject({ botId: f.chief.id, name: "Clive", kind: "work", threadId: f.chief.activeTaskId });
   expect(first.closedBy).toMatchObject({ botId: f.chief.id });
+  expect(first).not.toHaveProperty("archivedAt");
   await send("Now ask them to add the header row.");
   await send("Now ask them to document it.");
   const tasks = await leadTasks();
@@ -625,6 +750,36 @@ it("runs two assignments to one teammate from one turn in its thread, one after 
   const transcript = (await f.messages(work.threadId)).map((message: any) => message.text).filter(Boolean).join("\n");
   expect(transcript).toContain("Implement the CSV export");
   expect(transcript).toContain("Benchmark the exporter");
+}), 60_000);
+
+it("starts a later send in a parallel work thread while the teammate's standing thread is busy, instead of queueing it", () => fixture(async f => {
+  const gate = join(f.session.info.dataDir, "first-assignment.gate");
+  f.plan[f.lead.id] = { gateFile: gate, reply: "Done" };
+  f.plan[f.chief.id] = { turns: [
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Implement the CSV export", reply: "none" } }], reply: "Assigned the build" },
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Export the invoices", reply: "none" } }], reply: "Assigned the invoices" },
+  ] };
+  f.save();
+  const leadNodes = () => f.nodes().filter((node: any) => node.botId === f.lead.id);
+  try {
+    await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Ask Engineering to build the CSV export.");
+    expect((await f.wait()).status).toBe("settled");
+    await expect.poll(() => leadNodes()[0]?.status, { timeout: 15_000 }).toBe("running");
+    await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Now ask them to export the invoices.");
+    expect((await f.wait()).status).toBe("settled");
+    await expect.poll(() => leadNodes()[1]?.status, { timeout: 15_000 }).toBe("running");
+    const [first, second] = leadNodes();
+    expect(first.status, "the first assignment still runs").toBe("running");
+    expect(second.threadId).not.toBe(first.threadId);
+    writeFileSync(gate, "go");
+    await expect.poll(() => leadNodes().map((node: any) => node.status), { timeout: 15_000 }).toEqual(["completed", "completed"]);
+    const work = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks.filter((task: any) => task.openedBy?.kind === "work");
+    expect(work.map((task: any) => task.threadId).sort()).toEqual([first.threadId, second.threadId].sort());
+    for (const task of work) expect(task).toMatchObject({ title: "@Clive · work", openedBy: { botId: f.chief.id, threadId: f.chief.activeTaskId } });
+    expect(sendReceipts(f, f.chief.id).map((receipt: any) => receipt.threadId)).toEqual([first.threadId, second.threadId]);
+  } finally {
+    writeFileSync(gate, "go");
+  }
 }), 60_000);
 
 it("gives another conversation of the same Chief its own thread with the teammate", () => fixture(async f => {
@@ -831,7 +986,7 @@ it("runs a teammate's hand-off to the Chief in the Chief's work thread for that 
   await expect.poll(() => f.nodes().every((node: any) => node.status === "completed"), { timeout: 10_000 }).toBe(true);
 }), 60_000);
 
-it("stops a waiting source without reaching into the teammate already working", () => fixture(async f => {
+it("stops a waiting source and the teammate already working for it, with no late result and no pill", () => fixture(async f => {
   const childGate = join(f.session.info.dataDir, "child-ready");
   f.plan[f.lead.id] = { gateFile: childGate, reply: "Finished after the source was stopped" };
   await f.start();
@@ -839,21 +994,16 @@ it("stops a waiting source without reaching into the teammate already working", 
   await assigningTurnEnded(f);
   await f.api(`/api/bots/${f.chief.id}/interrupt`, { threadId: f.chief.activeTaskId });
 
-  await expect.poll(() => f.nodes().find((node: any) => !node.parentId)?.status).toBe("cancelled");
-  expect(f.nodes().find((node: any) => node.parentId).status).toBe("running");
+  await expect.poll(() => f.nodes().map((node: any) => [Boolean(node.parentId), node.status])).toEqual([[false, "cancelled"], [true, "cancelled"]]);
   writeFileSync(childGate, "finish after the source was stopped");
   expect((await f.wait()).status).toBe("settled");
-  const chip = (await f.messages(f.chief.activeTaskId)).find((message: any) => message.tool?.name?.startsWith("Stopped here"));
-  expect(chip.tool.name).toContain("Engineering lead");
-  expect(chip.threadRef).toMatchObject({ botId: f.lead.id, threadId: f.nodes().find((node: any) => node.parentId).threadId });
-
-  await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 20_000 }).toBe("completed");
-  expect(f.nodes().find((node: any) => node.parentId).result).toContain("Finished after the source was stopped");
-  await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((message: any) => message.tool?.name === "Engineering lead replied")).toBe(true);
-  const replied = (await f.messages(f.chief.activeTaskId)).find((message: any) => message.tool?.name === "Engineering lead replied");
-  expect(replied.tool.output).toContain("Finished after the source was stopped");
+  await new Promise(resolve => setTimeout(resolve, 1_000));
+  const rows = await f.messages(f.chief.activeTaskId);
+  expect(rows.some((message: any) => message.tool?.name?.startsWith("Stopped here"))).toBe(false);
+  expect(rows.some((message: any) => message.tool?.output?.includes("Finished after the source was stopped"))).toBe(false);
+  expect(f.nodes().find((node: any) => node.parentId).status).toBe("cancelled");
   expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id)).toHaveLength(1);
-  expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "The requested CSV export is implemented and verified")).toBe(false);
+  expect(rows.some((message: any) => message.text === "The requested CSV export is implemented and verified")).toBe(false);
 }), 60_000);
 
 it("deleting the waiting source cancels its tree and never recreates the deleted conversation", () => fixture(async f => {
@@ -887,7 +1037,7 @@ it("withholds direct results when the sender's peers list cuts the teammate off 
   f.plan[f.lead.id] = { readyFile: ready, gateFile: gate, reply: "PRIVATE_ENGINEERING_RESULT" };
   await f.start();
   await expect.poll(() => existsSync(ready), { timeout: 15_000 }).toBe(true);
-  await f.api(`/api/bots/${f.chief.id}`, { peers: [] }, "PATCH");
+  await f.api(`/api/bots/${f.chief.id}`, { visibility: "admins" }, "PATCH");
   writeFileSync(gate, "finish the private work after the teammate was cut off");
   expect((await f.wait()).status).toBe("settled");
   const resumed = f.evidence().find((turn: any) => turn.botId === f.chief.id && turn.resumed);
@@ -912,7 +1062,7 @@ it("retains returned direct reports for follow-up turns but rechecks reach befor
   await f.api(`/api/bots/${f.chief.id}/messages/${followup.id}/edit`, { threadId: f.chief.activeTaskId, text: "Check the earlier engineering report" });
   expect((await f.wait()).status).toBe("settled");
   expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id).at(-1).prompt.message.content).toContain("PRIVATE_ENGINEERING_FACT_8347");
-  await f.api(`/api/bots/${f.chief.id}`, { peers: [] }, "PATCH");
+  await f.api(`/api/bots/${f.chief.id}`, { visibility: "admins" }, "PATCH");
   f.plan[f.chief.id] = { reply: "Access removed", expectContextIncludes: ["Teammate result withheld"] };
   f.save();
   const edited = (await f.messages(f.chief.activeTaskId)).findLast((message: any) => message.role === "user");
@@ -975,7 +1125,12 @@ it("gives a teammate each request once, never also as a bare assistant line", ()
 /** The Engineering lead on a loopback OpenAI-compatible engine where `answer` replies to every chat request. */
 async function onLoopbackEngine(f: any, answer: (res: ServerResponse) => void): Promise<() => Promise<void>> {
   const llm = createServer(async (req, res) => {
-    for await (const _ of req) {}
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    // The chat engine asks a local server whether it is Ollama (/api/version); this one is not, and that is no model call.
+    if (req.url?.endsWith("/api/version")) { res.statusCode = 404; res.end(); return; }
+    // Naming the work thread the hand-off opened is a one-shot of its own, not a step of the turn: it gets no title.
+    if (body.includes("Reply with only a short title")) { res.statusCode = 404; res.end(); return; }
     if (req.url?.endsWith("/models")) { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ data: [{ id: "loop-model" }] })); return; }
     answer(res);
   });
@@ -990,7 +1145,7 @@ it("continues a teammate's step cap in place and stops it once it makes no progr
   let calls = 0;
   const close = await onLoopbackEngine(f, res => {
     // Never a final answer: one more tool call, every round.
-    const call = { tool_calls: [{ index: 0, id: `call_${++calls}`, type: "function", function: { name: "missing_tool", arguments: "{}" } }] };
+    const call = { tool_calls: [{ index: 0, id: `call_${++calls}`, type: "function", function: { name: "missing_tool", arguments: JSON.stringify({ attempt: calls }) } }] };
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: call, finish_reason: "tool_calls" }] })}\n\ndata: [DONE]\n\n`);
   });
@@ -1001,8 +1156,8 @@ it("continues a teammate's step cap in place and stops it once it makes no progr
     expect(leads).toHaveLength(1);
     const child = leads[0];
     expect(child).toMatchObject({ status: "failed", outcome: "stalled", executions: 2,
-      result: expect.stringMatching(/^Stopped after 64 steps without a final answer\./) });
-    expect(child.outcomeDetail).toMatch(/^Stopped after 2 continuations without progress: Stopped after 64 steps without a final answer\./);
+      result: expect.stringMatching(/^Stopped after 200 tool calls without a final answer\./) });
+    expect(child.outcomeDetail).toMatch(/^Stopped after 2 continuations without progress: Stopped after 200 tool calls without a final answer\./);
     expect(child.result).not.toContain("assign what is left");
     expect(f.eventsOf(child.id).filter((kind: string) => kind === "continued")).toHaveLength(1);
     expect(f.eventsOf(child.id)).toContain("stalled");
@@ -1010,11 +1165,11 @@ it("continues a teammate's step cap in place and stops it once it makes no progr
     expect(resumed.prompt.message.content).toContain("Stopped after 2 continuations without progress");
     expect(resumed.prompt.message.content).not.toContain("assign what is left");
     const chip = (await f.messages(f.chief.activeTaskId)).find((message: any) => message.roomRequest?.phase === "result");
-    expect(chip.tool.name).toContain("Engineering lead — failed: Stopped after 64 steps without a final answer");
+    expect(chip.tool.name).toContain("Engineering lead — failed: Stopped after 200 tool calls without a final answer");
     expect((await f.messages(f.chief.activeTaskId)).filter((message: any) => message.roomRequest?.phase === "result")).toHaveLength(1);
     const lead = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id);
     expect(lead.tasks.map((task: any) => task.title).filter((title: string) => title.startsWith("Continue:"))).toEqual([]);
-    expect(calls).toBe(128);
+    expect(calls).toBe(402);
   } finally { await close(); }
 }), 90_000);
 
@@ -1069,3 +1224,74 @@ it("tells the Chief a teammate's turn stopped because its engine's settings chan
   expect(resumed.prompt.message.content).toContain("Turn interrupted — provider settings changed.");
   expect(resumed.prompt.message.content).not.toContain("The coordinated turn was interrupted");
 }), 45_000);
+
+// Each title reply is keyed to the job it names, so a thread named from the wrong message would show it.
+const titledHandoffs = () => {
+  const routes = join(mkdtempSync(join(tmpdir(), "omb-handed-title-")), "routes.json");
+  writeFileSync(routes, JSON.stringify({
+    "Message:\nImplement the CSV export": "CSV export build",
+    "Message:\nAdd the header row": "Header row follow-up",
+    "Message:\nSpec the PDF export": "PDF export spec",
+    "Message:\nRun the release QA": "Named by the model",
+  }));
+  return { FAKE_CLAUDE_TEXT_ROUTES: routes };
+};
+
+it("names a thread a teammate opened from the job it was handed, once, unless the sender named it", () => fixture(async f => {
+  f.plan[f.lead.id] = { turns: [{ reply: "Export implemented" }, { reply: "Header row added" }] };
+  f.plan[f.specialist.id] = { turns: [{ reply: "PDF spec written" }, { reply: "QA passed" }] };
+  f.plan[f.chief.id] = { turns: [
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Implement the CSV export" } }], reply: "Assigned the build" },
+    { reply: "The export is implemented" },
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Add the header row to that export" } }], reply: "Assigned the header row" },
+    { reply: "The header row is in" },
+    { steps: [
+      { arguments: { bot_ids: [f.specialist.id], message: "Spec the PDF export", thread: "new", reply: "none" } },
+      { arguments: { bot_ids: [f.specialist.id], message: "Run the release QA", thread: "new", title: "Release QA", reply: "none" } },
+    ], reply: "Sent both" },
+  ] };
+  f.save();
+  const send = async (text: string) => {
+    await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", text);
+    expect((await f.wait()).status).toBe("settled");
+  };
+  const tasksOf = async (botId: string) => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === botId).tasks;
+  await send("Ask Engineering to build the CSV export.");
+  const work = (await tasksOf(f.lead.id)).find((task: any) => task.openedBy?.kind === "work");
+  await expect.poll(async () => (await tasksOf(f.lead.id)).find((task: any) => task.threadId === work.threadId)?.title, { timeout: 15_000 })
+    .toBe("@Clive · CSV export build");
+  await send("Now ask them to add the header row.");
+  await send("Now have Reviewer spec the PDF export and run the release QA.");
+  await expect.poll(async () => (await tasksOf(f.specialist.id)).map((task: any) => task.title), { timeout: 15_000 })
+    .toEqual(expect.arrayContaining(["PDF export spec", "Release QA"]));
+  expect((await tasksOf(f.lead.id)).find((task: any) => task.threadId === work.threadId).title).toBe("@Clive · CSV export build");
+  expect((await tasksOf(f.specialist.id)).map((task: any) => task.title)).not.toContain("Named by the model");
+}, titledHandoffs()), 90_000);
+
+// The small model's word is the fixture's: what matters here is what the runtime does with it.
+const withStatusAnswer = (answer: string) => {
+  const routes = join(mkdtempSync(join(tmpdir(), "omb-status-reply-")), "routes.json");
+  writeFileSync(routes, JSON.stringify({ "<teammate_reply>": answer }));
+  return { FAKE_CLAUDE_TEXT_ROUTES: routes };
+};
+
+it("spends no requester turn on a reply that only acknowledged, and the reply stays in its thread", () => fixture(async f => {
+  f.plan[f.chief.id] = { steps: [{ arguments: { bot_ids: [f.lead.id], message: "FYI: the mailbox moved." } }], reply: "I told the lead.", resumeReply: "This is just a confirmation, no action needed." };
+  f.plan[f.lead.id] = { reply: "Noted, thanks." };
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id)).toHaveLength(1);
+  const messages = await f.messages(f.chief.activeTaskId);
+  expect(messages.some((message: any) => message.text === "This is just a confirmation, no action needed.")).toBe(false);
+  expect(messages.find((message: any) => message.roomRequest?.phase === "result")?.tool?.output).toBe("Noted, thanks.");
+  expect(f.nodes().every((node: any) => node.status === "completed")).toBe(true);
+}, withStatusAnswer("ACK")));
+
+it("wakes the requester for a reply that carries something, in any language", () => fixture(async f => {
+  f.plan[f.chief.id] = { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Hast du die IMAP-Zugangsdaten?" } }], reply: "Ich habe gefragt.", resumeReply: "Es sind keine hinterlegt." };
+  f.plan[f.lead.id] = { reply: "Nein, ich habe nichts gespeichert." };
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id)).toHaveLength(2);
+  expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "Es sind keine hinterlegt.")).toBe(true);
+}, withStatusAnswer("NEEDS")));

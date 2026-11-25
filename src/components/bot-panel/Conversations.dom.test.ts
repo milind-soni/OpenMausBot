@@ -4,12 +4,15 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, Message, Task } from "@/state/store";
+import { setAdvancedMode } from "@/lib/interface-mode";
 
 const fixture = vi.hoisted(() => ({
   dispatch: vi.fn(),
   wide: true,
   api: vi.fn(),
+  admin: true as boolean | null,
 }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return {
@@ -94,6 +97,38 @@ afterEach(() => {
 });
 
 describe("a bot's conversations in its panel", () => {
+  it("offers the public web conversation link alongside the app link in Advanced mode, and copies its exact address", async () => {
+    setAdvancedMode(true);
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const previous = fixture.api.getMockImplementation()!;
+    fixture.api.mockImplementation((path: string) => path === "/api/settings/custom-domain"
+      ? Promise.resolve({ publicUrl: "https://chat.example/" }) : previous(path));
+    try {
+      render(research());
+      click(host.querySelector('[aria-label="Actions for Translate the launch post"]'));
+      await vi.waitFor(() => expect(document.querySelector("[data-thread-overlay]")?.textContent).toContain("Copy link (HTTPS)"));
+      const buttons = [...document.querySelector("[data-thread-overlay]")!.querySelectorAll("button")];
+      expect(buttons.some((button) => button.textContent === "Copy link")).toBe(true);
+      click(buttons.find((button) => button.textContent === "Copy link (HTTPS)")!);
+      expect(writeText).toHaveBeenCalledWith("https://chat.example/?thread=launch&bot=research");
+    } finally { vi.unstubAllGlobals(); setAdvancedMode(false); }
+  });
+
+  it("keeps the app link available in Advanced mode when the public-address request fails", async () => {
+    setAdvancedMode(true);
+    const previous = fixture.api.getMockImplementation()!;
+    fixture.api.mockImplementation((path: string) => path === "/api/settings/custom-domain"
+      ? Promise.reject(new Error("not permitted")) : previous(path));
+    render(research());
+    click(host.querySelector('[aria-label="Actions for Translate the launch post"]'));
+    await Promise.resolve();
+    const menu = document.querySelector("[data-thread-overlay]")!;
+    expect([...menu.querySelectorAll("button")].some((button) => button.textContent === "Copy link")).toBe(true);
+    expect(menu.textContent).not.toContain("Copy link (HTTPS)");
+    setAdvancedMode(false);
+  });
+
   it("lists three, newest first, with the open one marked, and Show N more opens the rest", () => {
     render(research());
     expect(CONVERSATIONS_SHOWN).toBe(3);
@@ -117,6 +152,23 @@ describe("a bot's conversations in its panel", () => {
     expect(more()!.textContent).toBe("Show 6 more");
   });
 
+  it("lists the main thread first, above a pinned one, however old it is, folded or not", () => {
+    render(research({ mainThreadId: "gift" }));
+    expect(listed()).toEqual(["gift", "hiring", "launch", "who"]);
+    click(more());
+    expect(listed().slice(0, 3)).toEqual(["gift", "hiring", "launch"]);
+    expect(listed()).toHaveLength(10);
+    render(research({ mainThreadId: "hiring" }));
+    expect(listed().slice(0, 2)).toEqual(["hiring", "launch"]);
+  });
+
+  it("keeps the main thread listed, with its mark, when it is older than the first three", () => {
+    render(research({ mainThreadId: "gift" }));
+    expect(listed()).toEqual(["gift", "hiring", "launch", "who"]);
+    expect(row("gift").querySelector('[aria-label="Main thread"]')).not.toBeNull();
+    expect(more()!.textContent).toBe("Show 6 more");
+  });
+
   it("offers only New conversation while the open one is the bot's only conversation", () => {
     render(research({ tasks: [task("who", "Who am I?", 2)] }));
     expect(host.querySelector("[data-conversations-new]")).not.toBeNull();
@@ -131,12 +183,12 @@ describe("a bot's conversations in its panel", () => {
     expect(list).toEqual(expect.arrayContaining(["[&_.font-semibold]:font-medium", "[&_time]:text-[12px]", "[&_time]:text-ink-tertiary", "[&_span.bg-accent]:size-2"]));
   });
 
-  it("puts New conversation first, as a labelled button beside search", () => {
+  it("puts New conversation first, as a labelled button, with search on the section's label line", () => {
     render(research());
     const add = host.querySelector("[data-conversations-new]")!;
     expect(add.textContent).toBe("New conversation");
     expect(add.compareDocumentPosition(host.querySelector("[data-conversation]")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(add.nextElementSibling).toBe(host.querySelector("[data-conversations-search]"));
+    expect(host.querySelector("[data-conversations-search]")!.compareDocumentPosition(add) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("shows no Show more when every conversation fits", () => {
@@ -156,6 +208,20 @@ describe("a bot's conversations in its panel", () => {
     click(more());
     expect(row("pricing").querySelector("[data-thread-working]")!.textContent).toMatch(/^Working·1m 1[23]s$/);
     expect(host.querySelectorAll("[data-thread-working]")).toHaveLength(1);
+  });
+
+  it("marks the bot's main thread with the same star as the sidebar's thread list, and no other row", () => {
+    render(research({ mainThreadId: "launch" }));
+    const star = row("launch").querySelector('[role="img"][aria-label="Main thread"]');
+    expect(star?.getAttribute("title")).toBe("Main thread");
+    expect(star?.querySelector("svg")).not.toBeNull();
+    expect(star?.textContent).toBe("Main");
+    expect(row("who").querySelector('[aria-label="Main thread"]')).toBeNull();
+    render(research({ mainThreadId: "who" }));
+    expect(row("who").querySelector('[aria-label="Main thread"]')).not.toBeNull();
+    expect(row("launch").querySelector('[aria-label="Main thread"]')).toBeNull();
+    render(research());
+    expect(host.querySelector('[aria-label="Main thread"]')).toBeNull();
   });
 
   it("shows each listed conversation's last line, fetching only the listed ones that are not open", async () => {
@@ -225,14 +291,74 @@ describe("a bot's conversations in its panel", () => {
     expect(fixture.dispatch.mock.calls).toEqual([[{ type: "newTask", botId: "research" }]]);
   });
 
-  it("pins, renames and deletes through the thread menu the sidebar uses", () => {
+  it("pins, archives, renames and deletes through the thread menu the sidebar uses", () => {
     render(research());
-    click(row("launch").querySelector('[aria-label="Actions for Translate the launch post"]'));
-    const menu = document.querySelector('[data-thread-overlay][aria-label="Actions for Translate the launch post"]')!;
-    const items = [...menu.querySelectorAll("button")].map((button) => button.textContent);
-    expect(items).toEqual(expect.arrayContaining(["Copy link", "Rename thread", "Pin", "Delete thread"]));
-    expect(items).not.toContain("Archive");
-    click([...menu.querySelectorAll("button")].find((button) => button.textContent === "Pin")!);
+    const menuFor = (title: string) => {
+      click(host.querySelector(`[aria-label="Actions for ${title}"]`));
+      return [...document.querySelector(`[data-thread-overlay][aria-label="Actions for ${title}"]`)!.querySelectorAll("button")];
+    };
+    const items = menuFor("Translate the launch post");
+    expect(items.map((button) => button.textContent)).toEqual(["Rename thread", "Memory", "Pin", "Set as main thread", "Archive", "Delete thread"]);
+    click(items.find((button) => button.textContent === "Pin")!);
     expect(fixture.dispatch.mock.calls).toEqual([[{ type: "updateTask", botId: "research", threadId: "launch", patch: { pinned: true } }]]);
+    fixture.dispatch.mockReset();
+    click(menuFor("Translate the launch post").find((button) => button.textContent === "Archive")!);
+    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "updateTask", botId: "research", threadId: "launch", patch: { archivedAt: expect.any(Number) } }]]);
+  });
+
+  it("sets the row's own thread as the main one from its menu, and not the one that already is, an archived one, or for a member", () => {
+    const toggle = (title: string) => click(host.querySelector(`[aria-label="Actions for ${title}"]`));
+    const item = (title: string) => [...document.querySelector(`[data-thread-overlay][aria-label="Actions for ${title}"]`)!.querySelectorAll("button")]
+      .find((button) => button.textContent === "Set as main thread");
+    const archived = [...tasks, task("old", "Old notes", 11, { archivedAt: now })];
+    render(research({ mainThreadId: "launch", threadId: "old", tasks: archived }));
+    toggle("Who am I?");
+    click(item("Who am I?")!);
+    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "updateBot", botId: "research", patch: { mainThreadChoice: "who" } }]]);
+    toggle("Translate the launch post");
+    const already = item("Translate the launch post")!;
+    expect([already.disabled, already.title]).toEqual([true, "This is already the main thread"]);
+    toggle("Translate the launch post");
+    toggle("Old notes");
+    expect(item("Old notes")).toBeUndefined();
+    toggle("Old notes");
+    fixture.admin = false;
+    render(research({ mainThreadId: "launch", threadId: "deck" }));
+    toggle("Who am I?");
+    expect(item("Who am I?")).toBeUndefined();
+    fixture.admin = true;
+  });
+
+  it("keeps the search open when archiving leaves one conversation listed", () => {
+    const two = [task("who", "Who am I?", 2), task("deck", "Summarise the board deck", 4)];
+    render(research({ tasks: two }));
+    click(host.querySelector("[data-conversations-search]"));
+    type(host.querySelector<HTMLInputElement>("[data-conversations-query]")!, "deck");
+    render(research({ tasks: [two[0]!, { ...two[1]!, archivedAt: now - 1000 }] }));
+    expect(host.querySelector("[data-conversations-query]")).not.toBeNull();
+    expect(host.querySelector("[data-conversations-search]")).not.toBeNull();
+    expect(host.textContent).toContain("Nothing matches “deck”");
+  });
+
+  it("keeps the open conversation listed when it is archived and the only one left", () => {
+    const two = [task("who", "Who am I?", 2, { archivedAt: now - 1000 }), task("deck", "Summarise the board deck", 4, { archivedAt: now - 2000 })];
+    render(research({ tasks: two }));
+    expect(listed()).toEqual(["who"]);
+    expect(host.querySelector("[data-conversations-archived]")!.textContent).toBe("Archived (1)");
+  });
+
+  it("lists archived conversations under Archived (N), where they can be unarchived", () => {
+    render(research({ tasks: tasks.map((task) => task.threadId === "launch" || task.threadId === "deck" ? { ...task, archivedAt: now - 1000 } : task) }));
+    expect(listed()).toEqual(["hiring", "who", "pricing"]);
+    const archivedToggle = host.querySelector("[data-conversations-archived]")!;
+    expect(archivedToggle.textContent).toBe("Archived (2)");
+    expect(archivedToggle.getAttribute("aria-expanded")).toBe("false");
+    click(archivedToggle);
+    expect(listed()).toEqual(["hiring", "who", "pricing", "launch", "deck"]);
+    click(host.querySelector('[aria-label="Actions for Summarise the board deck"]'));
+    const unarchive = [...document.querySelector('[data-thread-overlay][aria-label="Actions for Summarise the board deck"]')!.querySelectorAll("button")]
+      .find((button) => button.textContent === "Unarchive")!;
+    click(unarchive);
+    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "updateTask", botId: "research", threadId: "deck", patch: { archivedAt: null } }]]);
   });
 });

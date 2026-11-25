@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import type { SendTurnInput, TurnImageInput } from "../contracts.ts";
+
 /** omp's RPC v2 splits a frame over 1 MiB into base64 `rpc_chunk` pieces (`chunkId`/`count`/
  *  `byteLength` per frame, sequential `index`, `data` per piece). Any inconsistency drops the sequence. */
 export class PiRpcChunks {
@@ -108,5 +111,35 @@ export function piLineReader(onLine: (line: string) => boolean | void): (chunk: 
       buf = "";
       dropping = true;
     }
+  };
+}
+
+type PiPromptImage = {
+  type: "image";
+  data: string;
+  mimeType: TurnImageInput["mime"];
+};
+
+/** pi's prompt frame carries each attached image as base64. */
+export function readPiPromptImages(turn: SendTurnInput): PiPromptImage[] {
+  return (turn.images ?? []).map((image) => ({
+    type: "image",
+    data: readFileSync(image.path).toString("base64"),
+    mimeType: image.mime,
+  }));
+}
+
+/** Native logs go into bug reports: keep the RPC shape and size, never image bytes. */
+export function piNativeLogMessage(message: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(message.images)) return message;
+  return {
+    ...message,
+    images: message.images.map((image) => {
+      if (!image || typeof image !== "object") return image;
+      const value = image as Record<string, unknown>;
+      return typeof value.data === "string"
+        ? { ...value, data: `[image data: ${value.data.length} base64 chars]` }
+        : value;
+    }),
   };
 }

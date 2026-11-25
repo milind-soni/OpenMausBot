@@ -19,7 +19,7 @@ export type PageId =
   | "overview" | "prompt" | "history";
 
 /** The pages Simple mode draws; a link to any other page lands where its section does. */
-export const SIMPLE_PAGES = ["settings", "apps", "routines", "memory", "skills", "folder", "browser", "where"] as const satisfies readonly PageId[];
+export const SIMPLE_PAGES = ["settings", "apps", "routines", "visibility", "memory", "skills", "folder", "browser", "where"] as const satisfies readonly PageId[];
 export type SimplePageId = (typeof SIMPLE_PAGES)[number];
 
 export function isSimplePage(page: PageId): page is SimplePageId {
@@ -41,7 +41,7 @@ export const PAGES: Record<PageId, PageMeta> = {
   approvals: { title: "botPanel.page.approvals", home: "details" },
   routines: { title: "botSettings.simple.routines", home: "details" },
   apps: { title: "botPanel.appsRow", home: "details", intro: "botPanel.apps.intro" },
-  memory: { title: "botPanel.memoryRow", home: "library", intro: "botPanel.memory.intro" },
+  memory: { title: "botPanel.memoryRow", home: "library" },
   skills: { title: "botSettings.simple.skills", home: "library", intro: "botSettings.simple.skillsHint" },
   browser: { title: "settings.sites.title", home: "computer" },
   folder: { title: "computer.files.folder", home: "library", intro: "botPanel.folder.intro" },
@@ -78,6 +78,7 @@ const SECTION_TARGET: Record<BotSettingsSection, PanelTarget> = {
   soul: { tab: "details", page: "settings", anchor: "instructions", editInstructions: true },
   skills: { tab: "library", page: "skills" },
   memory: { tab: "library", page: "memory" },
+  library: { tab: "library" },
   routines: { tab: "details", page: "routines" },
   access: { tab: "computer" },
   model: { tab: "details", anchor: "model" },

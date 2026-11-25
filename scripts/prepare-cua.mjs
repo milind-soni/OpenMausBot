@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { build } from "esbuild";
+import { probeCuaVersion } from "./cua-binary-version.mjs";
 import { resolveCuaMacArches } from "./cua-mac-arches.mjs";
 import { LIPO_ARCH, writeThinMachO } from "./mac-thin.mjs";
 
@@ -24,9 +25,9 @@ const dependencyRoot = join(sdkRoot, "..", "..");
 const sdkPackage = JSON.parse(await readFile(join(sdkRoot, "package.json"), "utf8"));
 const expectedVersion = String(sdkPackage.version);
 const release = {
-  version: "0.28.2",
-  file: "cua-driver-rs-0.28.2-darwin-universal-binary.tar.gz",
-  sha256: "386db225a3080714a0f9f935525e61efaf46709587ef8b94dd2df81aeb2f6daa",
+  version: "0.45.4",
+  file: "cua-driver-rs-0.45.4-darwin-universal-binary.tar.gz",
+  sha256: "7dff49530847419828770a1737788cd50642026c0d679a9a4ef383259db94ac5",
 };
 if (expectedVersion !== release.version) {
   throw new Error(
@@ -34,20 +35,13 @@ if (expectedVersion !== release.version) {
   );
 }
 
-async function binaryVersion(candidate) {
-  if (!candidate || !existsSync(candidate)) return null;
-  try {
-    const { stdout } = await run(candidate, ["--version"], { timeout: 5000 });
-    return stdout.match(/cua-driver\s+([\d.]+)/)?.[1] ?? null;
-  } catch {
-    return null;
-  }
-}
+/** What the executable says, or why it says nothing (`why`), in the words of the failure itself. */
+const reported = ({ version, why }) => (version ? `it reports ${version}` : why);
 
 async function officialBinary() {
   const cache = join(root, "node_modules", ".cache", "openmausbot", `cua-driver-${release.version}`);
   const cachedBinary = join(cache, "cua-driver");
-  if ((await binaryVersion(cachedBinary)) === expectedVersion) return cachedBinary;
+  if (existsSync(cachedBinary) && (await probeCuaVersion(cachedBinary, { attempts: 1 })).version === expectedVersion) return cachedBinary;
 
   await rm(cache, { recursive: true, force: true });
   await mkdir(cache, { recursive: true });
@@ -64,19 +58,18 @@ async function officialBinary() {
   await writeFile(archive, bytes);
   await run("/usr/bin/tar", ["-xzf", archive, "-C", cache, "cua-driver"]);
   await chmod(cachedBinary, 0o755);
-  if ((await binaryVersion(cachedBinary)) !== expectedVersion) {
-    throw new Error(`downloaded CUA Driver does not report version ${expectedVersion}`);
+  const probe = await probeCuaVersion(cachedBinary);
+  if (probe.version !== expectedVersion) {
+    throw new Error(`downloaded CUA Driver passed its sha256 check but did not report version ${expectedVersion}: ${reported(probe)}`);
   }
   return cachedBinary;
 }
 
 let binary;
 if (process.env.CUA_DRIVER_PATH) {
-  const suppliedVersion = await binaryVersion(process.env.CUA_DRIVER_PATH);
-  if (suppliedVersion !== expectedVersion) {
-    throw new Error(
-      `CUA_DRIVER_PATH must point to cua-driver ${expectedVersion}; found ${suppliedVersion ?? "an unreadable binary"}`,
-    );
+  const supplied = await probeCuaVersion(process.env.CUA_DRIVER_PATH);
+  if (supplied.version !== expectedVersion) {
+    throw new Error(`CUA_DRIVER_PATH must point to cua-driver ${expectedVersion}; ${reported(supplied)}`);
   }
   binary = process.env.CUA_DRIVER_PATH;
 } else {
@@ -92,7 +85,7 @@ if (process.env.CUA_DRIVER_PATH) {
     }
   };
   binary =
-    (await binaryVersion(installed)) === expectedVersion && (await installedUniversal())
+    existsSync(installed) && (await probeCuaVersion(installed, { attempts: 1 })).version === expectedVersion && (await installedUniversal())
       ? installed
       : await officialBinary();
 }

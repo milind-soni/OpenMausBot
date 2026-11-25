@@ -3,14 +3,16 @@ import { useState } from "react";
 
 import type { Automation } from "@/lib/automations";
 import { copyText } from "@/lib/copy-text";
+import { t } from "@/lib/i18n";
 import type { RoutineRun } from "@/lib/routines";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { loadWebhookCredentials, removeWebhookCredential, saveWebhookCredential, webhookCredentialStore } from "@/lib/webhook-credentials";
 import type { WebhookCredential } from "@/lib/webhooks";
-import { api, openBotThread, useStore } from "@/state/store";
+import { api, openBotThread } from "@/state/store";
+import { useStoreRef } from "@/state/store-ref";
 
 export function useAutomationActions() {
-  const { state, dispatch } = useStore();
+  const store = useStoreRef(), dispatch = store.dispatch;
   const showThreads = useShowThreads();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -72,15 +74,21 @@ export function useAutomationActions() {
       dispatch({ type: "webhookPatched", webhook: response.webhook });
       saveWebhookCredential(webhookCredentialStore(), webhookId, credential);
     }
-    if (await copyText(credential.url) !== "copied") throw new Error("Couldn't copy the address");
+    if (await copyText(credential.url) !== "copied") throw new Error(t("automations.address.copyAddressFailed"));
     setCopied(webhookId);
     setTimeout(() => setCopied((current) => (current === webhookId ? null : current)), 1_800);
   });
 
   const openRun = (automation: Automation, run: RoutineRun | undefined) => {
-    const bot = state.bots.find((candidate) => candidate.id === automation.botId);
+    const bot = store.state().bots.find((candidate) => candidate.id === automation.botId);
     if (bot && run?.threadId) openBotThread(dispatch, bot, run.threadId, showThreads);
   };
 
-  return { busy, error, errorFor, setError, copied, toggle, runNow, remove, copyAddress, openRun };
+  /** Stops a run that waits on the person, for when the question it waits on was settled somewhere else. */
+  const cancelRun = (automation: Automation, run: RoutineRun) => attempt(`cancel:${automation.id}`, async () => {
+    const response = await api(`/api/routine-runs/${run.id}/cancel`, { method: "POST" });
+    if (response.run) dispatch({ type: "routineRunPatched", run: response.run });
+  });
+
+  return { busy, error, errorFor, setError, copied, toggle, runNow, remove, copyAddress, openRun, cancelRun };
 }

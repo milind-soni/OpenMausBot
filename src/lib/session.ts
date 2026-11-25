@@ -1,3 +1,8 @@
+import { t } from "./i18n";
+import { serverErrorText } from "./server-error";
+import { forgetSharedSession } from "./session-reuse";
+import { serverFetch } from "./relay-server";
+
 export interface EnvironmentDescriptor {
   environmentId: string;
   label: string;
@@ -11,7 +16,7 @@ export interface TeamSession { id: string; name: string; role: string }
 
 export type SessionState =
   | { kind: "loopback"; trust?: "service" }
-  | { kind: "session"; id: string; label: string; email?: string; scopes: string[]; expiresAt: number; cloudGuest?: true; openedThreads?: string[]; reactor?: string; team?: TeamSession }
+  | { kind: "session"; id: string; label: string; email?: string; scopes: string[]; expiresAt: number; cloudGuest?: true; openedThreads?: string[]; reactor?: string; team?: TeamSession; teamSignIn?: string }
   | { kind: "unauthenticated"; error: string }
   | { kind: "unreachable"; error: string };
 
@@ -28,7 +33,17 @@ export function profileForSession(profile: SessionProfile | undefined, sessionSt
   return profile?.email?.trim().toLowerCase() === email.trim().toLowerCase() ? profile : { email };
 }
 
-export async function readSessionState(fetchImpl: typeof fetch = fetch): Promise<SessionState> {
+const TEAM_SIGN_IN_KEY = "omb.team-sign-in";
+/** A team session's page on MausBot Cloud, kept by this browser for this server, so the page its session ended on can offer
+ * the way back. Nothing that signs anyone in: an address the signed-in session was told. */
+export function rememberTeamSignIn(url: string | undefined): void {
+  try { if (url) globalThis.localStorage?.setItem(TEAM_SIGN_IN_KEY, url); } catch {}
+}
+export function rememberedTeamSignIn(): string | null {
+  try { return globalThis.localStorage?.getItem(TEAM_SIGN_IN_KEY) ?? null; } catch { return null; }
+}
+
+export async function readSessionState(fetchImpl: typeof serverFetch = serverFetch): Promise<SessionState> {
   let res: Response;
   try {
     res = await fetchImpl("/api/auth/session", { credentials: "same-origin" });
@@ -50,6 +65,7 @@ export async function readSessionState(fetchImpl: typeof fetch = fetch): Promise
       scopes: Array.isArray(record.scopes) ? record.scopes.filter((s): s is string => typeof s === "string") : [],
       expiresAt: typeof record.expiresAt === "number" ? record.expiresAt : 0,
       ...(typeof record.reactor === "string" ? { reactor: record.reactor } : {}),
+      ...(typeof record.teamSignIn === "string" ? { teamSignIn: record.teamSignIn } : {}),
       ...(teamSessionOf(record.team) ? { team: teamSessionOf(record.team)!, openedThreads: Array.isArray(record.openedThreads) ? record.openedThreads.filter((id): id is string => typeof id === "string") : [] } : {}),
       ...(record.cloudGuest === true ? {
         cloudGuest: true as const,
@@ -79,7 +95,7 @@ export function isOwnerOrAdmin(state: SessionState | null): boolean {
 export function takePairingCodeFromLocation(): string | null {
   const m = /[#&]code=([^&]+)/.exec(location.hash);
   if (!m) return null;
-  history.replaceState(null, "", location.pathname + location.search);
+  history.replaceState(history.state ?? null, "", location.pathname + location.search);
   return decodeURIComponent(m[1]);
 }
 
@@ -87,7 +103,7 @@ export function takePairingCodeFromLocation(): string | null {
 export function takeBrowserSignInFromLocation(): string | null {
   if (!/[#&]signin=/.test(location.hash)) return null;
   const m = /[#&]signin=(omb_pair_[A-Za-z0-9_-]{43})(?:&|$)/.exec(location.hash);
-  history.replaceState(null, "", location.pathname + location.search);
+  history.replaceState(history.state ?? null, "", location.pathname + location.search);
   return m ? m[1] : null;
 }
 
@@ -100,7 +116,7 @@ export function takeInvitedEmailFromLocation(): string | null {
   if (!email) return null;
   params.delete("email");
   const search = params.toString();
-  history.replaceState(null, "", location.pathname + (search ? `?${search}` : "") + location.hash);
+  history.replaceState(history.state ?? null, "", location.pathname + (search ? `?${search}` : "") + location.hash);
   return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) ? email : null;
 }
 
@@ -115,9 +131,14 @@ export function newAttemptId(): string {
   return typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
 }
 
+function refusalText(body: unknown, res: Response): string {
+  const error = Reflect.get(Object(body), "error");
+  return serverErrorText(body, typeof error === "string" ? error : `${res.status} ${res.statusText}`);
+}
+
 export async function pairWithCode(
   input: { code: string; label: string; attemptId?: string; browser?: boolean },
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof serverFetch = serverFetch,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   let res: Response;
   try {
@@ -128,15 +149,16 @@ export async function pairWithCode(
       body: JSON.stringify({ code: input.code, label: input.label, cookie: true, attemptId: input.attemptId ?? newAttemptId(), ...(input.browser ? { browser: true } : {}) }),
     });
   } catch (error) {
-    return { ok: false, error: `could not reach the server (${error instanceof Error ? error.message : String(error)})` };
+    return { ok: false, error: t("pair.unreachable", { error: error instanceof Error ? error.message : String(error) }) };
+  } finally {
+    forgetSharedSession();
   }
   const body: unknown = await res.json().catch(() => ({}));
   if (res.ok) return { ok: true };
-  const error = Reflect.get(Object(body), "error");
-  return { ok: false, error: typeof error === "string" ? error : `${res.status} ${res.statusText}` };
+  return { ok: false, error: refusalText(body, res) };
 }
 
-export async function previewBrowserSignIn(credential: string, fetchImpl: typeof fetch = fetch): Promise<{ owner: string } | null> {
+export async function previewBrowserSignIn(credential: string, fetchImpl: typeof serverFetch = serverFetch): Promise<{ owner: string; team?: string } | null> {
   try {
     const res = await fetchImpl("/api/auth/pair", {
       method: "POST",
@@ -144,14 +166,15 @@ export async function previewBrowserSignIn(credential: string, fetchImpl: typeof
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ code: credential, browser: true, preview: true }),
     });
-    const owner: unknown = Reflect.get(Object(await res.json().catch(() => ({}))), "owner");
-    return res.ok && typeof owner === "string" && owner ? { owner } : null;
+    const body = Object(await res.json().catch(() => ({})));
+    const owner: unknown = Reflect.get(body, "owner"), team: unknown = Reflect.get(body, "team");
+    return res.ok && typeof owner === "string" && owner ? { owner, ...(typeof team === "string" && team.trim() ? { team: team.trim() } : {}) } : null;
   } catch {
     return null;
   }
 }
 
-export function signInWithBrowserGrant(credential: string, attemptId: string, fetchImpl: typeof fetch = fetch): Promise<{ ok: true } | { ok: false; error: string }> {
+export function signInWithBrowserGrant(credential: string, attemptId: string, fetchImpl: typeof serverFetch = serverFetch): Promise<{ ok: true } | { ok: false; error: string }> {
   return pairWithCode({ code: credential, label: defaultDeviceLabel(), attemptId, browser: true }, fetchImpl);
 }
 
@@ -160,24 +183,25 @@ export function cloudOwnerOf(session: unknown): string | null {
   return record.cloudHome === true && typeof record.owner === "string" && record.owner ? record.owner : null;
 }
 
-async function postAuth(path: string, body: Record<string, unknown>, fetchImpl: typeof fetch): Promise<{ ok: true } | { ok: false; error: string }> {
+async function postAuth(path: string, body: Record<string, unknown>, fetchImpl: typeof serverFetch): Promise<{ ok: true } | { ok: false; error: string }> {
   let res: Response;
   try {
     res = await fetchImpl(path, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   } catch (error) {
-    return { ok: false, error: `could not reach the server (${error instanceof Error ? error.message : String(error)})` };
+    return { ok: false, error: t("pair.unreachable", { error: error instanceof Error ? error.message : String(error) }) };
+  } finally {
+    forgetSharedSession();
   }
   const parsed: unknown = await res.json().catch(() => ({}));
   if (res.ok) return { ok: true };
-  const error = Reflect.get(Object(parsed), "error");
-  return { ok: false, error: typeof error === "string" ? error : `${res.status} ${res.statusText}` };
+  return { ok: false, error: refusalText(parsed, res) };
 }
 
-export function startEmailSignIn(email: string, fetchImpl: typeof fetch = fetch): Promise<{ ok: true } | { ok: false; error: string }> {
+export function startEmailSignIn(email: string, fetchImpl: typeof serverFetch = serverFetch): Promise<{ ok: true } | { ok: false; error: string }> {
   return postAuth("/api/auth/email/start", { email }, fetchImpl);
 }
 
-export function verifyEmailSignIn(input: { email: string; code: string; label: string }, fetchImpl: typeof fetch = fetch): Promise<{ ok: true } | { ok: false; error: string }> {
+export function verifyEmailSignIn(input: { email: string; code: string; label: string }, fetchImpl: typeof serverFetch = serverFetch): Promise<{ ok: true } | { ok: false; error: string }> {
   return postAuth("/api/auth/email/verify", { email: input.email, code: input.code, label: input.label }, fetchImpl);
 }
 

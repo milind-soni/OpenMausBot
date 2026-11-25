@@ -24,6 +24,7 @@ vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 const { initialState } = await import("@/state/store");
 const { EventDetails } = await import("./RoutineCalendarPage");
 const { ChatView } = await import("./ChatView");
+const drawChatView = (ChatView as unknown as { type: (props: import("react").ComponentProps<typeof ChatView>) => import("react").ReactNode }).type;
 
 const bot: Bot = {
   id: "runner", threadId: "execution", name: "Runner", title: "", description: "", color: "green",
@@ -100,20 +101,21 @@ describe("routine results navigation", () => {
     expect(fixture.dispatch.mock.calls).toEqual([
       [{ type: "select", id: bot.id }],
       [{ type: "switchTask", botId: bot.id, threadId: "original-source" }],
+      [{ type: "revealThread", threadId: "original-source" }],
     ]);
     expect(onClose).toHaveBeenCalledOnce();
   });
 
   it("uses the definition's destination only for a definition-only view", () => {
     details(null).buttons.get("Open results thread")!.onClick!();
-    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "switchTask", botId: bot.id, threadId: "new-results" });
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: bot.id, threadId: "new-results" });
   });
 
   it("opens the bot's main thread for a definition with no thread of its own, never for a run", () => {
     const { resultsThreadId: _chosen, ...unchosen } = routine;
     fixture.state!.bots = [{ ...bot, mainThreadId: "original-source" }];
     details(null, unchosen).buttons.get("Open results thread")!.onClick!();
-    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "switchTask", botId: bot.id, threadId: "original-source" });
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: bot.id, threadId: "original-source" });
     expect(details({ ...run, sourceThreadId: undefined }, unchosen).buttons.has("Open results thread")).toBe(false);
   });
 
@@ -127,17 +129,19 @@ describe("routine results navigation", () => {
     expect(fixture.dispatch.mock.calls).toEqual([
       [{ type: "select", id: group.id }],
       [{ type: "switchGroupTask", groupId: group.id, threadId: "original-room-source" }],
+      [{ type: "revealThread", threadId: "original-room-source" }],
     ]);
   });
 
   it("returns from an execution chat to its group-owned source task", () => {
     fixture.state!.routineRuns = [{ ...run, sourceThreadId: "original-room-source" }];
-    const buttons = buttonsFrom(() => ChatView({ bot }));
+    const buttons = buttonsFrom(() => drawChatView({ bot }));
     expect(buttons.has("Back to results")).toBe(true);
     buttons.get("Back to results")!.onClick!();
     expect(fixture.dispatch.mock.calls).toEqual([
       [{ type: "select", id: group.id }],
       [{ type: "switchGroupTask", groupId: group.id, threadId: "original-room-source" }],
+      [{ type: "revealThread", threadId: "original-room-source" }],
     ]);
   });
 
@@ -145,7 +149,7 @@ describe("routine results navigation", () => {
     fixture.showThreads = false;
     const { buttons } = details();
     buttons.get("Open results thread")!.onClick!();
-    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "switchTask", botId: bot.id, threadId: "original-source" }]]);
+    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "switchTask", botId: bot.id, threadId: "original-source" }], [{ type: "revealThread", threadId: "original-source" }]]);
     fixture.dispatch.mockClear();
     fixture.state!.bots = [{ ...bot, threadId: "new-results" }];
     details().buttons.get("Open thread")!.onClick!();
@@ -161,6 +165,13 @@ describe("routine results navigation", () => {
 
   it("omits Back to results when the execution's recorded destination was deleted", () => {
     fixture.state!.routineRuns = [{ ...run, resultsThreadId: "deleted-destination" }];
-    expect(buttonsFrom(() => ChatView({ bot })).has("Back to results")).toBe(false);
+    expect(buttonsFrom(() => drawChatView({ bot })).has("Back to results")).toBe(false);
+  });
+
+  it("shows no run banner when the run worked inside the conversation its results go to", () => {
+    fixture.state!.routineRuns = [{ ...run, resultsThreadId: "execution", sourceThreadId: "execution" }];
+    const buttons = buttonsFrom(() => drawChatView({ bot }));
+    expect(buttons.has("Back to results")).toBe(false);
+    expect(buttons.has("Run logs")).toBe(false);
   });
 });

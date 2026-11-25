@@ -3,18 +3,22 @@ import { ChevronDown, ImagePlus, Loader2, Trash2 } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { bodyName, colorName, festivalName } from "@/lib/mascot-names";
 import type { LocaleKey } from "@/locales";
 import { colorSwatch, MAUS_COLOR_LABEL, MAUS_COLOR_NAMES, PICKABLE_STATES, type MausState } from "@/lib/mascot";
-import type { Bot } from "@/state/store";
-import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../../shared/mascot-bodies";
-import { HALLOWEEN_BODIES, HALLOWEEN_BODY_IDS } from "../../../shared/halloween-bodies";
-import { isHalloweenBody, type BotBodyId } from "../../../shared/bot-body";
-import { useHalloweenDressed, wornBody } from "@/lib/halloween-dress";
+import { type Bot } from "@/state/store";
+import { mayRename, useTeamPeople } from "@/state/team-people";
+import { EVERYDAY_BODY_IDS, FESTIVAL_IDS, FESTIVALS, isCarvedBody, type BotBodyId } from "../../../shared/bot-body";
+import { useFestivalDress, wornBody } from "@/lib/festival-dress";
 import { MausAvatar } from "../Avatar";
 import { AvatarImageGenerator } from "../AvatarImageGenerator";
 import { AvatarFraming, OrganizationAvatarIcons, RESET_MASCOT_PATCH, useAvatarImage, type AvatarPatch } from "../avatar-editing";
 import { Segmented } from "./rows";
 import { MascotFaceColorPicker } from "../MascotFaceColorPicker";
+import { MascotMaterialPicker } from "../MascotMaterialPicker";
+import { MascotBodyColorSwatch } from "../MascotBodyColorSwatch";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
+import { useBotsApartFromTurns } from "@/state/apart-from-turns";
 
 export type AvatarEditorTab = "bot" | "generate" | "upload";
 
@@ -56,7 +60,7 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
   onClose: () => void;
 }) {
   const image = useAvatarImage(bot, onPatch);
-  const { fileRef, crop, uploading, generating, setSavingConnection, busy, error, upload, removeImage, generate } = image;
+  const { fileRef, crop, uploading, generating, busy, error, upload, removeImage, generate } = image;
   const showsImage = crop !== "mascot" && Boolean(bot.avatarUrl);
   const [tab, setTab] = useState<AvatarEditorTab>(showsImage ? "upload" : "bot");
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -66,17 +70,21 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
   }, []);
   const pickMascot = (patch: AvatarPatch) => onPatch(crop === "mascot" ? patch : { ...patch, avatarCrop: "mascot" });
   const body = bot.mascotBody ?? "cursor";
-  const dressed = useHalloweenDressed();
-  const costume = wornBody(bot.mascotBody, bot.color, dressed);
-  const [moreLooks, setMoreLooks] = useState(() => dressed || isHalloweenBody(body) || Boolean(bot.mascotExpression && bot.mascotExpression !== "idle"));
-  const dressedAs = costume !== body && isHalloweenBody(costume) ? HALLOWEEN_BODIES[costume].name : null;
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), bots = useBotsApartFromTurns(), dispatch = useStoreDispatch();
+  const team = useTeamPeople();
+  const othersToMatch = bots.filter((other) => other.id !== bot.id && (other.mascotBody ?? "cursor") !== body
+    && (team ? mayRename(other, team) : !state.config?.team));
+  const festival = useFestivalDress();
+  const costume = wornBody(bot.mascotBody, bot.color, festival);
+  const [moreLooks, setMoreLooks] = useState(() => Boolean(festival) || isCarvedBody(body) || Boolean(bot.mascotExpression && bot.mascotExpression !== "idle"));
+  const dressedAs = festival && costume !== body && isCarvedBody(costume) ? bodyName(costume) : null;
   const bodyButton = (id: BotBodyId, name: string) => (
     <button
       key={id}
       type="button"
       disabled={busy}
       aria-pressed={!showsImage && body === id}
-      aria-label={`Use the ${name} body`}
+      aria-label={t("mascot.useBody", { name })}
       title={name}
       onClick={() => pickMascot({ mascotBody: id })}
       className={cn(
@@ -84,7 +92,7 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
         !showsImage && body === id ? "bg-ink/[0.08] ring-[1.5px] ring-inset ring-ink/25" : "hover:bg-ink/[0.05]",
       )}
     >
-      <MausAvatar color={bot.color} faceColor={bot.mascotFaceColor} bodyId={id} size={40} animated={false} trackPointer={false} />
+      <MausAvatar color={bot.color} faceColor={bot.mascotFaceColor} material={bot.mascotMaterial} bodyColor={bot.mascotBodyColor} bodyId={id} size={40} animated={false} trackPointer={false} />
     </button>
   );
 
@@ -99,7 +107,7 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
     <div
       role="dialog"
       aria-label={t("botPanel.avatar.edit")}
-      data-panel-avatar-editor
+      data-panel-avatar-editor data-look="popover"
       onKeyDown={onKeyDown}
       className="popover-surface absolute inset-x-[-5px] top-[80px] z-30 overflow-hidden rounded-2xl border border-ink/[0.08] bg-menu text-left shadow-2xl shadow-black/50"
     >
@@ -135,27 +143,49 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
         {tab === "bot" && (
           <>
             <div className="grid grid-cols-5 gap-1.5">
-              {MASCOT_BODY_IDS.map((id) => bodyButton(id, MASCOT_BODIES[id].name))}
+              {EVERYDAY_BODY_IDS.map((id) => bodyButton(id, bodyName(id)))}
             </div>
+            {!showsImage && othersToMatch.length > 0 && (
+              <button
+                type="button"
+                data-avatar-body-everywhere
+                disabled={busy}
+                onClick={() => {
+                  for (const other of othersToMatch) dispatch({ type: "updateBot", botId: other.id, patch: { mascotBody: body } });
+                }}
+                className="mx-auto mt-2 flex rounded-full px-2.5 py-1 text-[12px] text-ink-secondary hover:bg-ink/[0.04] hover:text-ink disabled:opacity-50"
+              >
+                {t("botPanel.avatar.bodyEverywhere", { count: othersToMatch.length })}
+              </button>
+            )}
             <div className="flex flex-wrap justify-center gap-2 px-1 pb-1 pt-3.5">
               {MAUS_COLOR_NAMES.map((color) => (
                 <button
                   key={color}
                   type="button"
                   disabled={busy}
-                  aria-pressed={bot.color === color}
-                  aria-label={`Use ${color} mascot color`}
+                  aria-pressed={!bot.mascotBodyColor && bot.color === color}
+                  aria-label={t("mascot.useColor", { color: colorName(color) })}
                   title={t(MAUS_COLOR_LABEL[color])}
-                  onClick={() => pickMascot({ color })}
+                  onClick={() => pickMascot({ color, ...(bot.mascotBodyColor ? { mascotBodyColor: null } : {}) })}
                   className={cn(
                     "size-6 rounded-full disabled:opacity-50",
-                    bot.color === color && "ring-2 ring-ink/80 ring-offset-2 ring-offset-menu",
+                    !bot.mascotBodyColor && bot.color === color && "ring-2 ring-ink/80 ring-offset-2 ring-offset-menu",
                   )}
                   style={{ background: colorSwatch(color) }}
                 />
               ))}
+              <MascotBodyColorSwatch
+                bot={bot}
+                disabled={busy}
+                onPatch={pickMascot}
+                className="size-6"
+                selectedClassName="ring-2 ring-ink/80 ring-offset-2 ring-offset-menu"
+                holeClassName="bg-menu"
+              />
             </div>
             <MascotFaceColorPicker bot={bot} disabled={busy} onPatch={pickMascot} />
+            <MascotMaterialPicker bot={bot} disabled={busy} onPatch={pickMascot} />
             <button
               type="button"
               data-avatar-more
@@ -168,13 +198,19 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
             </button>
             {moreLooks && (
               <div data-avatar-more-looks>
-                <div className="flex flex-wrap items-baseline gap-x-2 px-1 pb-1.5 pt-2 text-[12px] text-ink-tertiary">
-                  <span>{t("botPanel.avatar.halloween")}</span>
-                  {dressedAs && <span data-avatar-costume>{t("botPanel.avatar.costume", { name: dressedAs })}</span>}
-                </div>
-                <div className="grid grid-cols-5 gap-1.5" data-halloween-bodies>
-                  {HALLOWEEN_BODY_IDS.map((id) => bodyButton(id, HALLOWEEN_BODIES[id].name))}
-                </div>
+                {FESTIVAL_IDS.map((id) => (
+                  <div key={id}>
+                    <div className="flex flex-wrap items-baseline gap-x-2 px-1 pb-1.5 pt-2 text-[12px] text-ink-tertiary">
+                      <span>{festivalName(id)}</span>
+                      {id === festival && dressedAs && (
+                        <span data-avatar-costume>{t("botPanel.avatar.costume", { name: dressedAs, skin: festivalName(id) })}</span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-5 gap-1.5" data-festival-bodies={id}>
+                      {FESTIVALS[id].bodies.map((bodyId) => bodyButton(bodyId, bodyName(bodyId)))}
+                    </div>
+                  </div>
+                ))}
                 <div className="flex flex-wrap items-center justify-center gap-1.5 pt-2.5" role="group" aria-label={t("botPanel.avatar.face")}>
                   <span className="mr-0.5 text-[12px] text-ink-tertiary">{t("botPanel.avatar.face")}</span>
                   {PICKABLE_STATES.map((expression) => (
@@ -206,7 +242,6 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
               disabled={uploading}
               generating={generating}
               onGenerate={generate}
-              onSavingChange={setSavingConnection}
             />
           </div>
         )}
@@ -252,7 +287,7 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
                   type="button"
                   onClick={removeImage}
                   disabled={busy}
-                  aria-label="Remove custom avatar image"
+                  aria-label={t("botIdentity.removeAvatar")}
                   title={t("botPanel.avatar.remove")}
                   className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-control hover:text-danger disabled:opacity-50"
                 >

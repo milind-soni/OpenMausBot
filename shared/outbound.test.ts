@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { OUTBOUND_DEFAULT_CAP, connectorCallsIn, isOutboundTool, isReadOnlyTool, normalizeOutboundPolicy, outboundCallsIn } from "./outbound.ts";
+import { connectorCallsIn, effectiveOutboundPolicy, isOutboundTool, isReadOnlyTool, normalizeOutboundPolicy, outboundCallsIn, trimOutboundPolicy } from "./outbound.ts";
 
 describe("isOutboundTool", () => {
   it("flags tools that send, reply, post, publish, invite, share, or move money", () => {
@@ -25,6 +25,20 @@ describe("isOutboundTool", () => {
       "mcp__x__post",
       "mcp__other__x_post",
       "TWITTER_X_POST",
+      // Placing a phone call reaches a person; buying a number moves money.
+      "mcp__vapi__create_call",
+      "mcp__agentphone__make_call",
+      "mcp__agentphone__make_conversation_call",
+      "mcp__agentphone__buy_number",
+      "TWILIO_MAKE_CALL",
+      "mcp__telnyx__dial",
+      "mcp__shop__purchase_item",
+      // A raw API call can place a call, send a text or buy a number.
+      "mcp__telnyx__invoke_api_endpoint",
+      "mcp__telnyx-2__invoke_api_endpoint",
+      // Publishing an app puts it on the public web.
+      "mcp__agents__publish_app",
+      "publish_app",
     ]) {
       expect(isOutboundTool(name), name).toBe(true);
     }
@@ -52,6 +66,14 @@ describe("isOutboundTool", () => {
       "agents_x_post",
       "x_post",
       "mcp__agents__x_user_posts",
+      "mcp__vapi__get_call",
+      "mcp__vapi__list_calls",
+      "mcp__vapi__create_assistant",
+      "mcp__agentphone__end_call",
+      "mcp__agentphone__list_numbers",
+      "mcp__telnyx__list_api_endpoints",
+      "mcp__telnyx__get_api_endpoint_schema",
+      "mcp__agents__check_app_hosting",
       "Bash",
       "Read",
       "Edit",
@@ -68,6 +90,9 @@ describe("isReadOnlyTool", () => {
       "mcp__linear__list_comments",
       "mcp__linear__get_issue",
       "GMAIL_SEARCH_MESSAGES",
+      "mcp__agents__check_app_hosting",
+      "_1PASSWORD_GET_ITEM",
+      "_1PASSWORD_LIST_ITEMS",
     ]) expect(isReadOnlyTool(name), name).toBe(true);
 
     for (const name of [
@@ -76,27 +101,69 @@ describe("isReadOnlyTool", () => {
       "mcp__linear__create_comment",
       "mcp__computer__click",
       "Bash",
+      "_1PASSWORD_CREATE_ITEM",
     ]) expect(isReadOnlyTool(name), name).toBe(false);
   });
 });
 
 describe("normalizeOutboundPolicy", () => {
-  it("accepts ask and allow with a whole-number daily cap", () => {
-    expect(normalizeOutboundPolicy({ policy: "ask" })).toEqual({ policy: "ask", dailyCap: OUTBOUND_DEFAULT_CAP });
-    expect(normalizeOutboundPolicy({ policy: "allow", dailyCap: 10 })).toEqual({ policy: "allow", dailyCap: 10 });
+  it("accepts ask and allow, with no limit of any kind", () => {
+    expect(normalizeOutboundPolicy({ policy: "ask" })).toEqual({ policy: "ask" });
+    expect(normalizeOutboundPolicy({ policy: "allow" })).toEqual({ policy: "allow" });
+  });
+
+  it("accepts a rule an older app saved or sends with a daily cap, whatever the cap, and drops it", () => {
+    for (const dailyCap of [10, 0, 2.5, 100_000, "25", null]) {
+      expect(normalizeOutboundPolicy({ policy: "allow", dailyCap })).toEqual({ policy: "allow" });
+    }
+    expect(normalizeOutboundPolicy({ policy: "ask", dailyCap: 25 })).toEqual({ policy: "ask" });
   });
 
   it("refuses anything else", () => {
     expect(normalizeOutboundPolicy({ policy: "yes" })).toBeNull();
-    expect(normalizeOutboundPolicy({ policy: "allow", dailyCap: 0 })).toBeNull();
-    expect(normalizeOutboundPolicy({ policy: "allow", dailyCap: 2.5 })).toBeNull();
-    expect(normalizeOutboundPolicy({ policy: "allow", dailyCap: 100_000 })).toBeNull();
+    expect(normalizeOutboundPolicy({ dailyCap: 10 })).toBeNull();
     expect(normalizeOutboundPolicy("allow")).toBeNull();
     expect(normalizeOutboundPolicy(null)).toBeNull();
   });
 });
 
+describe("effectiveOutboundPolicy", () => {
+  it("sends without asking at Full access when the bot has no rule of its own", () => {
+    expect(effectiveOutboundPolicy(undefined, true)).toEqual({ policy: "allow" });
+    expect(effectiveOutboundPolicy(undefined, false)).toEqual({ policy: "ask" });
+  });
+
+  it("keeps a stored rule at every level", () => {
+    expect(effectiveOutboundPolicy({ policy: "ask" }, true)).toEqual({ policy: "ask" });
+    expect(effectiveOutboundPolicy({ policy: "allow" }, false)).toEqual({ policy: "allow" });
+  });
+});
+
+describe("trimOutboundPolicy", () => {
+  it("drops a stored daily cap and says so, once", () => {
+    const bot = { outbound: { policy: "allow", dailyCap: 25 } as never };
+    expect(trimOutboundPolicy(bot)).toBe(true);
+    expect(bot.outbound).toEqual({ policy: "allow" });
+    expect(trimOutboundPolicy(bot)).toBe(false);
+  });
+
+  it("leaves no rule, a current rule and a malformed rule as they are", () => {
+    for (const outbound of [undefined, { policy: "ask" }, { policy: "yes", dailyCap: 25 }] as never[]) {
+      const bot = { outbound };
+      expect(trimOutboundPolicy(bot)).toBe(false);
+      expect(bot.outbound).toBe(outbound);
+    }
+  });
+});
+
 describe("connectorCallsIn", () => {
+  it("keeps the account a multi-execute item names", () => {
+    const calls = connectorCallsIn("COMPOSIO_MULTI_EXECUTE_TOOL", {
+      tools: [{ tool_slug: "GMAIL_SEND_EMAIL", arguments: {}, account: " work " }, { tool_slug: "GMAIL_FETCH_EMAILS", arguments: {} }],
+    });
+    expect(calls).toEqual([{ slug: "GMAIL_SEND_EMAIL", arguments: {}, account: "work" }, { slug: "GMAIL_FETCH_EMAILS", arguments: {} }]);
+  });
+
   // Composio's session exposes a handful of meta tools; the app tools run
   // inside them. The gate has to see through the wrapper or it sees nothing.
   it("returns a direct app tool as itself", () => {

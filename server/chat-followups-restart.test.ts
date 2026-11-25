@@ -120,6 +120,9 @@ it("survives a real server crash: queued sends keep receipts, cancellation and u
     writeFileSync(join(dataDir, `${bot.threadId}.gate`), "finish the first task");
     expect(await runControlOmb(["wait", "--bot", bot.id, "--task", bot.threadId, "--url", url])).toMatchObject({ status: "settled" });
     const holder = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Hold the slot" }, 201)).task;
+    // The bot's main thread is never at capacity, and it stays on the first conversation: make the holder main so the
+    // first one waits for the slot.
+    await api("PATCH", `/api/bots/${bot.id}`, { mainThreadChoice: holder.threadId });
     await api("POST", `/api/bots/${bot.id}/messages`, { text: "Hold the slot", threadId: holder.threadId }, 202);
     await expect.poll(() => prompts(holder.threadId).length, { timeout: 15_000 }).toBe(1);
     const attachments = join(dataDir, "attachments");
@@ -232,7 +235,7 @@ it("survives a real server crash: queued sends keep receipts, cancellation and u
     const interrupted = await messages(later.threadId);
     expect(interrupted.filter((message) => message.queueId === claimed.queueId)).toEqual([
       expect.objectContaining({ role: "user", text: uncertainBody.text, sendId: uncertainBody.sendId }),
-      expect.objectContaining({ kind: "activity", tool: { name: expect.stringContaining("Review the result"), ok: false } }),
+      expect.objectContaining({ kind: "activity", tool: { name: expect.stringContaining("Review the result"), ok: false, nameCode: "chat.notice.followupInterrupted" } }),
     ]);
     expect((await api("POST", `/api/bots/${uncertain.id}/messages`, uncertainBody, 202)).message.queueId).toBe(claimed.queueId);
     expect(prompts(later.threadId)).toHaveLength(1);

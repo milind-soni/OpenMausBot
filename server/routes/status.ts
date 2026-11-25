@@ -1,14 +1,15 @@
-import { DEFAULT_OUTBOUND_POLICY } from "../../shared/outbound.ts";
 import { readBotActivity } from "../activity.ts";
-import { activityCsv, activityEntries, parseActivityWhat, readAdminActivityRange } from "../admin-activity.ts";
+import { activityCsv, activityEntries, flushAdminActivity, parseActivityWhat, readAdminActivityRange } from "../admin-activity.ts";
 import { loadBrand } from "../brand.ts";
 import { browserEngineStatus, ensureChrome, installAgentBrowserBinary, resolveAgentBrowserBinary } from "../browser-engine.ts";
 import { DATA_DIR, EVENTS_DIR, NATIVE_DIR, instanceConfigs, type AppConfig } from "../config.ts";
 import { boundRetentionDays, decisionsCsv, readDecisionRange, readDecisions, type DecisionRow } from "../decision-log.ts";
+import { doctorSummary } from "../doctor/start.ts";
+import { flushNativeLog } from "../drivers/native.ts";
 import { editionForMembers, editionStatus, entitled } from "../enterprise.ts";
+import { reportableServerVersion } from "../environment.ts";
 import { fleetAvailable, fleetRequest, fleetSocketPath } from "../fleet-client.ts";
 import { noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
-import type { OutboundCounts } from "../outbound-counts.ts";
 import { loadPlanUsage, planAccountsFromInstances } from "../plan-usage.ts";
 import { tregProviderApi } from "../included-services.ts";
 import { checkProviderKey, PROVIDER_KEY_KINDS, providerBaseUrl, type ProviderKeyKind } from "../provider-key-check.ts";
@@ -17,13 +18,13 @@ import type { Store } from "../store.ts";
 import { readThreadEvents } from "../thread-events.ts";
 import { parseUsageRange } from "../usage-ledger.ts";
 import type { ConfigStatus } from "./config.ts";
-import type { RequestAuth } from "../request-auth.ts";
+import type { PrivateRecords } from "../host/private-records.ts";
+import { fromPairedDevice, type RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface StatusRouteDeps {
   store: Pick<Store, "bot" | "bots" | "tasks" | "groupByThread">;
   cfg: AppConfig;
-  outboundCounts: Pick<OutboundCounts, "today">;
   staticDir: string | null;
   sharedWorkspaceFullAccessEnabled(): boolean;
   adminActivityRecording(): boolean;
@@ -33,28 +34,31 @@ export interface StatusRouteDeps {
   browserEngineInstallError: { set(error: string | null): void };
   /** On a Team Cloud: false for someone else's private chat, whose words never reach this session's lists. */
   threadShown?(auth: RequestAuth): (threadId: string) => boolean;
+  /** On a Team Cloud: the decision and admin rows as this reader may see them (host/private-records.ts). */
+  records?: Pick<PrivateRecords, "decisionRow" | "adminActionShown">;
+  /** Whether bots run in the bot box: the MausBot connector reads it on a server its owner runs, on or off and nothing more. */
+  boxOn?(): boolean;
 }
 
-/** A decision in a conversation the reader may not see keeps its when, which bot, which tool and what was decided (the
- * activity a team's admin sees), never its words or where. */
-function readable(rows: DecisionRow[], shown: (threadId: string) => boolean): DecisionRow[] {
-  return rows.map((row) => shown(row.threadId) ? row : { ...row, threadId: "", summary: undefined, rule: undefined, requestId: undefined });
-}
 
 export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
   const {
-    store, cfg, outboundCounts, staticDir: STATIC_DIR, sharedWorkspaceFullAccessEnabled, adminActivityRecording,
+    store, cfg, staticDir: STATIC_DIR, sharedWorkspaceFullAccessEnabled, adminActivityRecording,
     configStatus, broadcast, browserEngineInstall, browserEngineInstallError,
   } = deps;
+  const version = reportableServerVersion();
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     let m: RegExpMatchArray | null = null;
     const shown = deps.threadShown?.(auth) ?? (() => true);
+    const decision = deps.records?.decisionRow(auth) ?? ((row: DecisionRow) => row);
     // The packaged app's port fallback: the forked child proves it is ours by echoing its pid.
     if (method === "GET" && path === "/api/health") {
-      return json(res, 200, { app: "openmausbot", pid: process.pid, static: Boolean(STATIC_DIR), capabilities: {
+      // The data checks of this version's first start (server/doctor/start.ts): counts and check names only.
+      const doctor = doctorSummary();
+      return json(res, 200, { app: "openmausbot", ...(version ? { version } : {}), pid: process.pid, static: Boolean(STATIC_DIR), capabilities: {
         guardedMessages: 1, guardedRequests: 1, guardedFullAccess: 1, guardedOnBehalfOf: 1,
         ...(sharedWorkspaceFullAccessEnabled() ? { sharedWorkspaceFullAccess: 1 } : {}),
-      } });
+      }, ...(deps.boxOn ? { box: deps.boxOn() ? "on" : "off" } : {}), ...(doctor ? { doctor } : {}) });
     }
     // JSON-only, so a form posted from another local page cannot start the install. One install at a time.
     if (method === "POST" && path === "/api/browser-engine/install") {
@@ -125,6 +129,7 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
         return json(res, 400, { error: "limit must be a positive whole number" });
       }
       const limit = parsedLimit;
+      flushNativeLog(threadId);
       return json(res, 200, readThreadEvents({ eventsDir: EVENTS_DIR, nativeDir: NATIVE_DIR, threadId, limit }));
     }
 
@@ -142,6 +147,9 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
     if (method === "POST" && path === "/api/keys/test") {
       const body = await readBody(req, 8192);
       const provider = body?.provider;
+      // A phone tests the key it pasted, at the address the computer already uses: never a saved key, never its own URL.
+      const pairedDevice = fromPairedDevice(req, auth);
+      if (pairedDevice && typeof body?.key !== "string") return json(res, 400, { error: "Paste a key to test." });
       if (provider === "treg") {
         if (body?.key !== undefined && typeof body.key !== "string") return json(res, 400, { error: "key must be a string" });
         const key = typeof body?.key === "string" ? body.key.trim() : cfg.treg?.key?.trim() || "";
@@ -154,14 +162,14 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
         return json(res, 400, { error: `provider must be one of ${PROVIDER_KEY_KINDS.join(", ")}` });
       }
       const kind = provider as ProviderKeyKind;
-      const saved = { anthropic: cfg.anthropic, openai: cfg.openai, openrouter: cfg.openrouter, openaiCompat: cfg.openaiCompat, mistral: cfg.mistral, cerebras: cfg.cerebras, groq: cfg.groq, greenference: cfg.greenference, meta: cfg.meta, xai: cfg.xai }[kind];
+      const saved = { anthropic: cfg.anthropic, openai: cfg.openai, openrouter: cfg.openrouter, openaiCompat: cfg.openaiCompat, mistral: cfg.mistral, cerebras: cfg.cerebras, groq: cfg.groq, greenference: cfg.greenference, modelgo: cfg.modelgo, meta: cfg.meta, xai: cfg.xai }[kind];
       if (body?.key !== undefined && typeof body.key !== "string") {
         return json(res, 400, { error: "key must be a string" });
       }
       const key = typeof body?.key === "string" ? body.key.trim() : saved?.key?.trim() || "";
       if (!key) return json(res, 400, { error: "No key to test. Paste one or save one first." });
       if (key.length > 512) return json(res, 400, { error: "That does not look like an API key." });
-      const url = typeof body?.url === "string" && body.url.trim() ? body.url.trim() : (saved && "url" in saved ? saved.url : undefined);
+      const url = !pairedDevice && typeof body?.url === "string" && body.url.trim() ? body.url.trim() : (saved && "url" in saved ? saved.url : undefined);
       res.setHeader("cache-control", "no-store");
       const verdict = await checkProviderKey({ provider: kind, key, url });
       if (kind !== "anthropic") {
@@ -178,7 +186,7 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
       if (parsedLimit !== undefined && (!Number.isInteger(parsedLimit) || parsedLimit <= 0)) {
         return json(res, 400, { error: "limit must be a positive whole number" });
       }
-      return json(res, 200, { decisions: readable(readDecisions(DATA_DIR, parsedLimit ?? 200), shown) });
+      return json(res, 200, { decisions: readDecisions(DATA_DIR, parsedLimit ?? 200).map(decision) });
     }
     if (method === "GET" && (path === "/api/admin-activity" || path === "/api/admin-activity.csv")) {
       const fromParam = url.searchParams.get("from") || new Date(Date.now() - 29 * 24 * 60 * 60_000).toISOString().slice(0, 10);
@@ -186,7 +194,8 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
       if (!range) return json(res, 400, { error: "from and to must be dates (YYYY-MM-DD), from no later than to, at most a year apart" });
       const what = parseActivityWhat(url.searchParams.get("what"));
       if (!what) return json(res, 400, { error: "what must be all, approvals, decisions, config, people, session, webhook, mcp, engine, bot, budget or visibility" });
-      const entries = activityEntries(readable(readDecisionRange(DATA_DIR, range), shown), readAdminActivityRange(DATA_DIR, range), {
+      await flushAdminActivity(DATA_DIR); // rows are appended in the background; a change already answered is listed
+      const entries = activityEntries(readDecisionRange(DATA_DIR, range).map(decision), readAdminActivityRange(DATA_DIR, range).filter(deps.records?.adminActionShown(auth) ?? (() => true)), {
         what,
         who: (url.searchParams.get("who") ?? "").slice(0, 200),
       });
@@ -221,7 +230,7 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
         "content-disposition": `attachment; filename="decisions-${stamp(range.from)}-${stamp(range.to)}.csv"`,
         "cache-control": "no-store",
       });
-      res.end(decisionsCsv(readable(readDecisionRange(DATA_DIR, range), shown)));
+      res.end(decisionsCsv(readDecisionRange(DATA_DIR, range).map(decision)));
       return;
     }
 
@@ -238,13 +247,6 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
       return json(res, 200, {
         rows: readBotActivity({ dataDir: DATA_DIR, eventsDir: EVENTS_DIR, botId: bot.id, threadIds, limit: parsedLimit ?? 300 }),
       });
-    }
-
-    m = path.match(/^\/api\/bots\/([\w-]+)\/outbound$/);
-    if (m && method === "GET") {
-      const bot = store.bot(m[1]);
-      if (!bot) return json(res, 404, { error: "no such bot" });
-      return json(res, 200, { policy: bot.outbound ?? DEFAULT_OUTBOUND_POLICY, today: outboundCounts.today(bot.id) });
     }
     return PASS;
   };

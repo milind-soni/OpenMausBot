@@ -1,7 +1,11 @@
+import { botShowsUnread } from "./bot-unread";
+import { t } from "./i18n";
+
 export type SidebarAttentionBot = {
   unread?: boolean;
   busy?: boolean;
   activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead" | "parked.computer";
+  tasks?: Parameters<typeof botShowsUnread>[0]["tasks"];
 };
 
 export type SidebarAttentionGroup = {
@@ -22,7 +26,7 @@ export function sidebarSectionAttention(
 ): SidebarSectionAttention {
   return {
     unread:
-      bots.filter((bot) => Boolean(bot.unread)).length +
+      bots.filter(botShowsUnread).length +
       groups.filter((group) => Boolean(group.unread)).length,
     waiting: bots.filter((bot) => bot.activity === "waiting-on-you").length,
     working:
@@ -37,13 +41,13 @@ export function sidebarSectionAttention(
 export function sidebarAttentionLabel(attention: SidebarSectionAttention): string {
   const parts: string[] = [];
   if (attention.waiting > 0) {
-    parts.push(`${attention.waiting} waiting for you`);
+    parts.push(t("sidebar.attention.waiting", { count: attention.waiting }));
   }
   if (attention.unread > 0) {
-    parts.push(`${attention.unread} unread`);
+    parts.push(t("sidebar.attention.unread", { count: attention.unread }));
   }
   if (attention.working > 0) {
-    parts.push(`${attention.working} working`);
+    parts.push(t("sidebar.attention.working", { count: attention.working }));
   }
   return parts.join(", ");
 }

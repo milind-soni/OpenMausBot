@@ -1,4 +1,6 @@
-export function pasteMenuItem(params, clipboard, webContents) {
+import nativeText from "./native-text.cjs";
+
+export function pasteMenuItem(params, clipboard, webContents, t = nativeText.englishText.t) {
   let attachment = false;
   if (params.isEditable && !params.editFlags.canPaste) {
     try {
@@ -9,7 +11,7 @@ export function pasteMenuItem(params, clipboard, webContents) {
     } catch {}
   }
   return {
-    label: "Paste",
+    label: t("native.role.paste"),
     enabled: params.isEditable && (params.editFlags.canPaste || attachment),
     // macOS controls enabled state for native roles, so only the attachment fallback invokes paste explicitly.
     ...(attachment ? { click: () => webContents.paste() } : { role: "paste" }),

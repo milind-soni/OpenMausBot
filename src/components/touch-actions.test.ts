@@ -14,8 +14,8 @@ const styles = readFileSync(stylesPath, "utf8");
 
 // Keyed by file and a class-string snippet, so a stale entry fails instead of silently widening.
 const notActions: Array<{ file: string; snippet: string; why: string }> = [
-  { file: "components/ChatView.tsx", snippet: "self-end pb-1 text-[11px] tabular-nums", why: "message timestamp, informational" },
-  { file: "components/GroupView.tsx", snippet: "self-end pb-1 text-[11px] tabular-nums", why: "message timestamp, informational" },
+  { file: "components/ChatView.tsx", snippet: "self-end pb-1 text-[12px] font-medium leading-4 tabular-nums", why: "message timestamp, informational" },
+  { file: "components/RoomTextMessage.tsx", snippet: "self-end pb-1 text-[12px] font-medium leading-4 tabular-nums", why: "message timestamp, informational" },
   { file: "components/ScreenFrame.tsx", snippet: "group-hover/image:opacity-100", why: "aria-hidden zoom hint; the whole image is the tap target" },
   { file: "components/AttachmentPreview.tsx", snippet: "group-hover/image:opacity-100", why: "zoom hint; the whole image is the tap target" },
   { file: "components/remote-desktop-panel.tsx", snippet: "bg-black/65 py-2", why: "caption; the whole preview is the tap target" },
@@ -24,8 +24,13 @@ const notActions: Array<{ file: string; snippet: string; why: string }> = [
   { file: "components/ComputerPanel.tsx", snippet: "opacity-80", why: "already visible at 80% without hover" },
   { file: "components/bot-panel/PanelHero.tsx", snippet: "whitespace-nowrap rounded-md border border-hairline bg-menu", why: "\"Edit avatar\" tooltip; the avatar button itself is the tap target" },
   { file: "components/ChatView.tsx", snippet: "-ml-2.5 w-0 shrink-0 text-ink-secondary", why: "decorative chevron in the Simple bot pill; the whole pill is the tap target" },
+  { file: "components/ChatHeadPill.tsx", snippet: "-ml-2 flex w-0 shrink-0 overflow-hidden opacity-0", why: "decorative chevron in the Simple bot badge; the whole badge is the tap target" },
   { file: "components/RoomHeader.tsx", snippet: "-ml-1 w-0 shrink-0 text-ink-secondary", why: "decorative chevron on the Simple room name; the whole name is the tap target" },
-  { file: "components/ChatHeadPill.tsx", snippet: "-ml-2 flex w-0 shrink-0 overflow-hidden", why: "decorative chevron in the Simple bot pill; the whole pill is the tap target" },
+  { file: "components/SidebarConnectApps.tsx", snippet: "opacity-60 grayscale", why: "decorative app logos, already visible at 60% without hover; the whole Apps row is the tap target" },
+  { file: "components/SidebarThreadLabels.tsx", snippet: "pointer-events-none absolute end-1 flex size-6", why: "hiding a thread on a touch screen goes through the bot panel's thread list; a ✕ on every sub-row would crowd the sidebar" },
+  { file: "components/SidebarThreadLabels.tsx", snippet: "group-hover/label:[mask-image", why: "the title fading under the hover ✕; nothing to tap" },
+  { file: "components/SidebarThreadLabels.tsx", snippet: "transition-opacity duration-[120ms] group-hover/label:opacity-0", why: "the status mark making room for the hover ✕; nothing to tap" },
+  { file: "components/BotPlaceMark.tsx", snippet: "text-ink-secondary opacity-0 transition-opacity duration-150", why: "where a bot lives, not a control: on a touch screen it shows only while it says something (working, asleep, can't be reached), since a device icon on every phone row is noise; a screen reader hears it on every row" },
   { file: "components/PlacesRail.tsx", snippet: "h-2 opacity-0 group-hover/tile:opacity-100", why: "decorative pill beside a rail tile on hover; the tile is the tap target and has its own focus ring" },
 ];
 

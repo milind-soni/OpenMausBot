@@ -6,14 +6,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { APP_LIMITS, APP_MIME, type AppPayload } from "../shared/app.ts";
 import { createChatApps, type ChatApps } from "./chat-apps.ts";
-import { APP_WRITE_DECLINED, createChatAppsMcp, type ChatAppsMcp, type ChatAppsMcpStore } from "./chat-apps-mcp.ts";
+import { APP_WRITE_DECLINED, createChatAppsMcp, type ChatAppsMcp, type ChatAppsMcpOAuth, type ChatAppsMcpStore } from "./chat-apps-mcp.ts";
 import { createAgentCard } from "./chat-widgets.ts";
 import type { McpServerSpec } from "./contracts.ts";
-import { probeMcpServer } from "./mcp-probe.ts";
+import { McpOAuthManager, withMcpSignIn } from "./mcp-oauth.ts";
+import { probeMcpServer, SIGN_IN_CHECK_TOOL } from "./mcp-probe.ts";
 import type { McpRpcRequest } from "./routes/chat-apps.ts";
 import type { BotRecord, Message } from "./store.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
+import { startFakeOAuth } from "./testing/fake-oauth-server.ts";
 
 const FAKE_APP = fileURLToPath(new URL("./testing/fake-stdio-app-server.ts", import.meta.url));
 const THREAD = "thread-scout";
@@ -33,7 +35,7 @@ const REPORT = {
 const cleanup: Array<() => Promise<void> | void> = [];
 afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await step(); });
 
-function setup(options: { servers?: Record<string, Record<string, unknown>>; scope?: BotRecord["toolScope"]; approval?: "ask" | "full"; needsSignIn?: string[]; probe?: typeof probeMcpServer } = {}) {
+function setup(options: { keys?: Parameters<typeof createChatAppsMcp>[0]["keys"]; servers?: Record<string, Record<string, unknown>>; scope?: BotRecord["toolScope"]; approval?: "ask" | "full"; needsSignIn?: string[]; probe?: typeof probeMcpServer; oauth?: ChatAppsMcpOAuth; startupProbes?: boolean; probeAs?: (server: { bot?: string }) => { id?: string; cwd?: string } } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "omb-chat-apps-mcp-"));
   cleanup.push(() => removeTempDir(dataDir));
   const threads = new Map<string, Message[]>();
@@ -69,9 +71,11 @@ function setup(options: { servers?: Record<string, Record<string, unknown>>; sco
       const { enabled: _enabled, apps: _apps, ...spec } = server;
       return [name, ("url" in spec ? { headers: {}, ...spec } : { args: [], env: {}, ...spec }) as McpServerSpec];
     })),
-    oauth: { authState: (name) => (options.needsSignIn?.includes(name) ? "needs-sign-in" : "none"), accessToken: async () => null },
-    startupProbes: false,
+    oauth: options.oauth ?? { authState: (name) => (options.needsSignIn?.includes(name) ? "needs-sign-in" : "none"), accessToken: async () => null, requireSignIn: () => {} },
+    startupProbes: options.startupProbes ?? false,
     ...(options.probe ? { probe: options.probe } : {}),
+    ...(options.probeAs ? { probeAs: options.probeAs } : {}),
+    ...(options.keys ? { keys: options.keys } : {}),
     log: (line) => lines.push(line),
   });
   cleanup.push(() => { mcp.close(); apps.close(); });
@@ -120,9 +124,18 @@ describe("recordMcpAppCall", () => {
       bot: { id: bot.id, name: bot.name, color: "blue" }, threadId: THREAD, input: { tool: "mcp_app" } })).toEqual({ ok: false, status: 400, error: "MCP apps are not available on this computer." });
   }, 30_000);
 
-  it("writes no row for a room, an unmounted server, one outside the bot's scope, or one whose apps are off (rule 17)", async () => {
+  it("shows a room member's app in the room as that bot's row, view-only for everyone", async () => {
+    const { record, row, apps } = setup();
+    expect(await record(REPORT, ROOM)).toEqual({ ok: true, messageId: "m1" });
+    expect(row("m1", ROOM)).toMatchObject({ role: "bot", kind: "app", from: { botId: "bot-scout", name: "Scout", color: "blue" }, app: { source: "mcp", title: "Show board" } });
+    const doc = apps.appDocument(ROOM, "m1")!;
+    expect(doc.srcdoc).toContain("<h1>Fake board</h1>");
+    expect(doc).toMatchObject({ room: true, toolResult: REPORT.result, can: { serverTools: false, serverResources: false, message: false, modelContext: false, openLinks: true } });
+    expect(doc).not.toHaveProperty("blocked");
+  }, 30_000);
+
+  it("writes no row for an unmounted server, one outside the bot's scope, or one whose apps are off (rule 17)", async () => {
     const base = setup();
-    expect(await base.record(REPORT, ROOM)).toMatchObject({ ok: false, status: 409 });
     expect(await base.record({ ...REPORT, server: "elsewhere" })).toMatchObject({ ok: false, status: 404 });
     expect(await base.record({ ...REPORT, definition: { ...REPORT.definition, _meta: {} } })).toMatchObject({ ok: false, status: 400 });
     expect(await base.record({ ...REPORT, result: { content: "x" } })).toMatchObject({ ok: false, status: 400 });
@@ -202,6 +215,33 @@ describe("rpc", () => {
     expect(await rpc("m1", "tools/call", { name: "wipe_board", arguments: {} })).toMatchObject({ status: 200 });
   }, 30_000);
 
+  it("keeps a change the card made itself on its row, so a reopened conversation shows it done (#4532)", async () => {
+    const { record, rpc, row } = setup({ approval: "full" });
+    await record();
+    // looking and the app's own plumbing are not changes
+    await rpc("m1", "tools/call", { name: "show_board", arguments: { cards: 5 } });
+    await rpc("m1", "tools/call", { name: "save_board", arguments: { state: "s" } });
+    expect(row("m1").app.done).toBeUndefined();
+    expect(await rpc("m1", "tools/call", { name: "paint_board", arguments: { color: "blue" } })).toMatchObject({ status: 200 });
+    expect(row("m1").app.done).toEqual({ tool: "Paint board", text: "Painted blue", at: expect.any(Number) });
+    // the row keeps everything else it had
+    expect(row("m1").app).toMatchObject({ source: "mcp", mcp: { server: "board", tool: "show_board" } });
+  }, 30_000);
+
+  it("keeps no secret from the result in the note", async () => {
+    const { record, rpc, row } = setup({ approval: "full" });
+    await record();
+    await rpc("m1", "tools/call", { name: "paint_board", arguments: { color: "ghp_abcdefghijklmnopqrstuvwxyz0123456789" } });
+    expect(JSON.stringify(row("m1").app.done)).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
+  }, 30_000);
+
+  it("records nothing when the change is declined", async () => {
+    const { record, rpc, row } = setup();
+    await record();
+    expect(await rpc("m1", "tools/call", { name: "paint_board", arguments: { color: "red" } })).toMatchObject({ status: 403 });
+    expect(row("m1").app.done).toBeUndefined();
+  }, 30_000);
+
   it("refuses a tool the server lacks, one its view may not call, one outside the selection, and bad arguments", async () => {
     const { record, rpc } = setup({ scope: { allow: ["mcp:board:show_board", "mcp:board:peek_board"] } });
     await record();
@@ -274,6 +314,17 @@ describe("mounts and probes", () => {
     expect(probe).toHaveBeenCalledTimes(1);
   });
 
+  it("starts a command server for its background probe the way the bots' turns start it, never beside the server", async () => {
+    const probe = vi.fn(async () => ({ ok: false as const, error: "offline" }));
+    const probeAs = vi.fn((server: { bot?: string }) => (server.bot ? { id: server.bot, cwd: `/data/workspaces/${server.bot}` } : {}));
+    const { mcp, servers } = setup({ probe, probeAs, servers: { board: { ...board(), enabled: true }, own: { ...board(), enabled: true, bot: "bot-scout" } } });
+    expect(mcp.turnMounts({ board: board(), own: board() })).toEqual({});
+    await vi.waitFor(() => expect(probe).toHaveBeenCalledTimes(2));
+    // `asBot` is what makes the probe ask for the bot box (server/mcp-probe.ts); without it the command runs unboxed.
+    expect(probe.mock.calls.map((call) => (call as unknown as [unknown, unknown, unknown, { asBot?: unknown }])[3].asBot)).toEqual([{}, { id: "bot-scout", cwd: "/data/workspaces/bot-scout" }]);
+    expect(Object.keys(servers)).toEqual(["board", "own"]);
+  });
+
   it("tells Settings which stored servers have been seen to offer an app", () => {
     const { mcp, servers } = setup({ probe: vi.fn(async () => ({ ok: false as const, error: "offline" })) });
     servers.board = { ...board(), enabled: true };
@@ -327,4 +378,104 @@ describe("mounts and probes", () => {
     mcp.forgetServer("draw");
     expect(mcp.catalog.get("draw", draw)).toBeUndefined();
   }, 30_000);
+});
+
+describe("a server whose key is kept in the Vault", () => {
+  it("is probed with the value read then, and not at all when its key is off", async () => {
+    const probe = vi.fn<typeof probeMcpServer>(async () => ({ ok: false as const, error: "offline" }));
+    const pointer = "vault:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const server = { type: "http", url: "https://mcp.example.test/mcp", headers: { Authorization: `Bearer ${pointer}` }, enabled: true };
+    let open = true;
+    const keys = {
+      warm: vi.fn(async () => {}),
+      resolve: vi.fn((_name: string, target: Record<string, unknown>) => (open ? { ok: true, server: { ...target, headers: { Authorization: "Bearer sk_fake-probe" } } } : { ok: false, reason: "removed", why: "gone" })),
+    };
+    const { mcp, lines } = setup({ servers: { board: server }, probe, keys: keys as never });
+    mcp.serverChanged("board");
+    await vi.waitFor(() => expect(probe).toHaveBeenCalled());
+    expect((probe.mock.calls[0]![0] as unknown as { headers: Record<string, string> }).headers).toEqual({ Authorization: "Bearer sk_fake-probe" });
+    expect(JSON.stringify(lines)).not.toContain("sk_fake-probe");
+    probe.mockClear();
+    open = false;
+    mcp.serverChanged("board");
+    await vi.waitFor(() => expect(keys.resolve).toHaveBeenCalledTimes(2));
+    await new Promise<void>((done) => { setTimeout(done, 20); });
+    expect(probe).not.toHaveBeenCalled();
+  });
+});
+
+describe("a server that lists tools before anyone signs in", () => {
+  const buy = { name: "buy", description: "Buy something" };
+
+  async function agentcardShaped() {
+    const issuer = await startFakeOAuth();
+    const fake = await startFakeHttpMcp({ guard: "tools/call", acceptBearer: issuer.isValid, wwwAuthenticate: issuer.challenge, tools: [buy] });
+    cleanup.push(() => fake.close(), () => issuer.close());
+    return fake;
+  }
+
+  /** Starts the app with the saved servers, lets the 20 second startup probe fire, and returns the sign-in book it used. */
+  async function startupProbe(servers: Record<string, Record<string, unknown>>) {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    cleanup.push(() => { vi.useRealTimers(); });
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-mcp-oauth-"));
+    cleanup.push(() => removeTempDir(dataDir));
+    const oauth = new McpOAuthManager({ file: join(dataDir, "mcp-oauth.json") });
+    cleanup.push(() => oauth.dispose());
+    const probe = vi.fn(probeMcpServer);
+    setup({ servers, oauth, probe, startupProbes: true });
+    await vi.advanceTimersByTimeAsync(20_000);
+    await vi.waitFor(() => expect(probe).toHaveBeenCalled(), { timeout: 10_000 });
+    await vi.waitFor(() => expect(probe.mock.results.length).toBeGreaterThan(0));
+    const result = await probe.mock.results[0]!.value;
+    await new Promise((resolve) => setImmediate(resolve));
+    return { oauth, result };
+  }
+
+  it("marks an installed server that was never signed in, and drops it from bots' turns", async () => {
+    const fake = await agentcardShaped();
+    const agentcard = { type: "http", url: fake.url, enabled: true };
+    const { oauth, result } = await startupProbe({ agentcard });
+    expect(result).toMatchObject({ ok: false, auth: "required" });
+    expect(oauth.authState("agentcard", fake.url)).toBe("needs-sign-in");
+    expect(await withMcpSignIn({ agentcard: { type: "http", url: fake.url, headers: {} } }, oauth)).toEqual({});
+    expect(fake.calls).toEqual([]);
+  });
+
+  it("never signs a signed-in server out when its Bearer is refused in the background", async () => {
+    const issuer = await startFakeOAuth();
+    const fake = await startFakeHttpMcp({ guard: "every-request", acceptBearer: () => false, wwwAuthenticate: issuer.challenge, tools: [buy] });
+    cleanup.push(() => fake.close(), () => issuer.close());
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-mcp-oauth-"));
+    cleanup.push(() => removeTempDir(dataDir));
+    const oauth = new McpOAuthManager({ file: join(dataDir, "mcp-oauth.json") });
+    cleanup.push(() => oauth.dispose());
+    oauth.adopt("agentcard", fake.url, { url: fake.url, state: "signed-in", tokens: { access: "at_refused", expiresAt: Date.now() + 3_600_000 } });
+    const probe = vi.fn(probeMcpServer);
+    const { mcp } = setup({ servers: { agentcard: { type: "http", url: fake.url, enabled: true } }, oauth, probe });
+    mcp.serverChanged("agentcard");
+    await vi.waitFor(() => expect(probe).toHaveBeenCalled());
+    expect(await probe.mock.results[0]!.value).toMatchObject({ ok: false, auth: "required" });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(oauth.authState("agentcard", fake.url)).toBe("signed-in");
+    expect(await oauth.accessToken("agentcard", fake.url)).toBe("at_refused");
+  });
+
+  it("leaves a server that carries a key alone", async () => {
+    const issuer = await startFakeOAuth();
+    const fake = await startFakeHttpMcp({ requireHeader: { name: "x-api-key", value: "right" }, wwwAuthenticate: issuer.challenge, tools: [buy] });
+    cleanup.push(() => fake.close(), () => issuer.close());
+    const keyed = { type: "http", url: fake.url, headers: { "X-Api-Key": "wrong" }, enabled: true };
+    const { oauth, result } = await startupProbe({ keyed });
+    expect(result).toMatchObject({ ok: false, auth: "required" });
+    expect(oauth.authState("keyed", fake.url)).toBe("none");
+  });
+
+  it("leaves an anonymous server alone when it answers the check with a JSON-RPC error", async () => {
+    const fake = await startFakeHttpMcp({ tools: [buy], callError: () => ({ code: -32602, message: `Tool ${SIGN_IN_CHECK_TOOL} not found` }) });
+    cleanup.push(() => fake.close());
+    const { oauth, result } = await startupProbe({ open: { type: "http", url: fake.url, enabled: true } });
+    expect(result).toMatchObject({ ok: true });
+    expect(oauth.authState("open", fake.url)).toBe("none");
+  });
 });

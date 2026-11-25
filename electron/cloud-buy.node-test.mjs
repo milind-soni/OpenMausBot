@@ -3,8 +3,9 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { inflateSync } from "node:zlib";
-import { CLOUD_COLORS, CLOUD_COLOR_HEX, cleanCloudColor, cleanCloudName, cloudLinkOpensSheet, colorDotIcons, colorDotPng, createCloudLook, createCloudReadyNotice,
+import { CLOUD_COLORS, CLOUD_COLOR_HEX, cleanCloudColor, cleanCloudName, cloudLinkOpensSheet, colorDotIcons, createCloudLook, createCloudReadyNotice,
   installCloudBuy, lookFile } from "./cloud-buy.mjs";
+import { colorDotPng } from "./color-dot.mjs";
 import environments from "./environments.cjs";
 
 const origin = "https://omb-u-1a2b3c4d5e6f.fly.dev";
@@ -65,7 +66,7 @@ test("the name and colour chosen while setting up are kept for that account unti
   const look = createCloudLook({ store: lookFile(() => "/user/cloud-home-look.json", fs), accountId: () => account, homeEntry: () => entry, saveEntry: (at, value) => saved.push([at, value]) });
   assert.deepEqual(look.current(), { name: "My Cloud", color: "blue" }); assert.equal(look.pending(), null);
   assert.deepEqual(look.save("  Studio ", "teal"), { name: "Studio", color: "teal" });
-  assert.deepEqual(JSON.parse(files.get("/user/cloud-home-look.json")), { accountId: "acct-1", name: "Studio", color: "teal" });
+  assert.deepEqual(JSON.parse(files.get("/user/cloud-home-look.json")), { accountId: "acct-1", name: "Studio", color: "teal", listed: null });
   assert.deepEqual(look.pending(), { name: "Studio", color: "teal" });
   for (const [name, color] of [["", "teal"], ["x".repeat(29), "teal"], ["Studio", "#00ff00"]]) assert.throws(() => look.save(name, color), /up to 28 characters/);
   const again = createCloudLook({ store: lookFile(() => "/user/cloud-home-look.json", fs), accountId: () => account, homeEntry: () => entry, saveEntry: () => {} });

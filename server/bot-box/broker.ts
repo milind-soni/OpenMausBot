@@ -8,6 +8,9 @@ import { createServer, request as httpRequest, type IncomingMessage, type Server
 import { request as httpsRequest } from "node:https";
 import type { Socket } from "node:net";
 
+import { MAX_REFUSABLE_CALL_BYTES, refusedCallAnswer } from "./broker-mcp-refusal.ts";
+import type { McpServerApp } from "../mcp-server-app.ts";
+
 export const BROKER_TOKEN_PREFIX = "omb_t0_";
 /** A token minted for a process lives this long at most; the process's exit ends it sooner. */
 export const BROKER_PROCESS_TTL_MS = 24 * 60 * 60_000;
@@ -21,6 +24,24 @@ export interface BrokerGrant {
   upstream: string;
   /** Headers the broker adds (the real key); the same names from the client are dropped. */
   headers: Record<string, string>;
+  /** On an MCP server's grant for a turn: its name, so a tool call it refuses with HTTP 401 is answered in words (broker-mcp-refusal.ts). */
+  mcpServer?: string;
+  /** With `mcpServer`: the connected app that refusal points the bot to instead. */
+  mcpApp?: McpServerApp;
+  /** A grant that answers its requests itself once the token is checked (the github grant, broker-github.ts): it adds
+   * its credential per request and checks what is sent. `headers` and `upstream` are then only its description. */
+  serve?(request: BrokerServeRequest): void;
+}
+
+/** What a grant's own `serve` gets: the request below `/b/<token>/<grant>`, and that prefix (for a Location header). */
+export interface BrokerServeRequest {
+  req: IncomingMessage;
+  res: ServerResponse;
+  path: string;
+  query: string;
+  prefix: string;
+  /** The broker's upstream request function (a test seam), or none for node's own. */
+  request?: typeof httpRequest;
 }
 
 export interface BrokerToken {
@@ -34,10 +55,27 @@ export interface BrokerToken {
 interface Stored { hash: Buffer; botId: string | null; threadId: string | null; expiresAt: number; grants: Record<string, BrokerGrant>; bound: "process" | "thread" }
 
 /** Credential headers a client may send; the broker never forwards them. */
-const CREDENTIAL_HEADERS = new Set(["authorization", "x-api-key", "x-goog-api-key", "proxy-authorization", "cookie"]);
+/** The header a client sends its token in at `/g/<grant>`, where the token is kept out of the address (git writes the
+ * address it fetched from into its own records: merge messages, FETCH_HEAD, error text). */
+export const BROKER_TOKEN_HEADER = "x-omb-broker";
+const CREDENTIAL_HEADERS = new Set(["authorization", "x-api-key", "x-goog-api-key", "proxy-authorization", "cookie", BROKER_TOKEN_HEADER]);
 const HOP_BY_HOP = new Set(["connection", "keep-alive", "transfer-encoding", "te", "trailer", "upgrade", "proxy-connection", "host"]);
 const TOKEN = /^omb_t0_[a-f0-9]{48}$/;
 const GRANT = /^[a-z][a-z0-9_-]{0,63}$/;
+
+/** A client's request headers as the broker forwards them: no hop-by-hop header and no credential the client sent. */
+export function forwardableHeaders(headers: IncomingMessage["headers"]): Record<string, string | string[]> {
+  const out: Record<string, string | string[]> = {};
+  for (const [name, value] of Object.entries(headers)) if (value !== undefined && !HOP_BY_HOP.has(name) && !CREDENTIAL_HEADERS.has(name)) out[name] = value;
+  return out;
+}
+
+/** An upstream's answer headers as the broker relays them: no hop-by-hop header. */
+export function relayableHeaders(headers: IncomingMessage["headers"]): Record<string, string | string[]> {
+  const out: Record<string, string | string[]> = {};
+  for (const [name, value] of Object.entries(headers)) if (value !== undefined && !HOP_BY_HOP.has(name)) out[name] = value;
+  return out;
+}
 
 export interface CredentialBrokerOptions {
   socketPath: string;
@@ -64,6 +102,11 @@ export interface CredentialBroker {
 
 export function brokerUrl(port: number, token: string, grant: string): string {
   return `http://127.0.0.1:${port}/b/${token}/${grant}`;
+}
+
+/** The address of `grant` with the token in BROKER_TOKEN_HEADER instead of the address. */
+export function brokerHeaderUrl(port: number, grant: string): string {
+  return `http://127.0.0.1:${port}/g/${grant}`;
 }
 
 /** Where a request for `/b/<token>/<grant><path><query>` goes: the grant's upstream exactly as it was given when the
@@ -94,7 +137,7 @@ export function openCredentialBroker(options: CredentialBrokerOptions): Promise<
     for (const name of Object.keys(input.grants)) if (!GRANT.test(name)) throw new Error(`Not a grant name: ${name.slice(0, 40)}`);
     const token = `${BROKER_TOKEN_PREFIX}${randomBytes(24).toString("hex")}`;
     const expiresAt = now() + (input.ttlMs ?? (bound === "process" ? BROKER_PROCESS_TTL_MS : BROKER_THREAD_TTL_MS));
-    const grants = Object.fromEntries(Object.entries(input.grants).map(([name, grant]) => [name, { upstream: grant.upstream, headers: { ...grant.headers } }]));
+    const grants = Object.fromEntries(Object.entries(input.grants).map(([name, grant]) => [name, { upstream: grant.upstream, headers: { ...grant.headers }, ...(grant.mcpServer ? { mcpServer: grant.mcpServer } : {}), ...(grant.mcpApp ? { mcpApp: { ...grant.mcpApp } } : {}), ...(grant.serve ? { serve: grant.serve } : {}) }]));
     tokens.set(hashToken(token).toString("hex"), { hash: hashToken(token), botId: input.botId ?? null, threadId: input.threadId ?? null, expiresAt, grants, bound });
     return { token, botId: input.botId ?? null, threadId: input.threadId ?? null, expiresAt, grants };
   };
@@ -111,33 +154,55 @@ export function openCredentialBroker(options: CredentialBrokerOptions): Promise<
   const requestFn = options.request;
 
   const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {
-    const socket = req.socket;
-    if (!sockets.has(socket)) { sockets.add(socket); socket.once("close", () => sockets.delete(socket)); }
     const refuse = (status: number, error: string) => { res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }).end(JSON.stringify({ error })); req.resume(); };
-    const match = /^\/b\/([^/]+)\/([^/?]+)(\/[^?]*)?(\?.*)?$/.exec(req.url ?? "");
-    if (!match) return refuse(404, "not_found");
-    const [, token = "", grant = "", path = "", query = ""] = match;
+    const inPath = /^\/b\/([^/]+)\/([^/?]+)(\/[^?]*)?(\?.*)?$/.exec(req.url ?? "");
+    const inHeader = inPath ? null : /^\/g\/([^/?]+)(\/[^?]*)?(\?.*)?$/.exec(req.url ?? "");
+    if (!inPath && !inHeader) return refuse(404, "not_found");
+    const presented = req.headers[BROKER_TOKEN_HEADER];
+    const [, token = "", grant = "", path = "", query = ""] = inPath ?? [inHeader![0], typeof presented === "string" ? presented.trim() : "", ...inHeader!.slice(1)];
+    const prefix = inPath ? `/b/${token}/${grant}` : `/g/${grant}`;
     const verdict = lookup(token, grant);
     if (!verdict.ok) return refuse(verdict.status, verdict.error);
+    if (verdict.grant.serve) {
+      stats.forwarded += 1;
+      return verdict.grant.serve({ req, res, path, query, prefix, ...(requestFn ? { request: requestFn } : {}) });
+    }
     const upstream = upstreamUrl(verdict.grant.upstream, path, query);
     if (!upstream) return refuse(502, "bad_upstream");
-    const headers: Record<string, string | string[]> = {};
-    for (const [name, value] of Object.entries(req.headers)) if (value !== undefined && !HOP_BY_HOP.has(name) && !CREDENTIAL_HEADERS.has(name)) headers[name] = value;
+    const headers = forwardableHeaders(req.headers);
     for (const [name, value] of Object.entries(verdict.grant.headers)) headers[name.toLowerCase()] = value;
     headers.host = upstream.host;
     const send = requestFn ?? (upstream.protocol === "https:" ? httpsRequest : httpRequest);
-    const forwarded = send({ protocol: upstream.protocol, host: upstream.hostname, port: upstream.port || (upstream.protocol === "https:" ? 443 : 80), method: req.method, path: `${upstream.pathname}${upstream.search}`, headers }, (answer) => {
-      const out: Record<string, string | string[]> = {};
-      for (const [name, value] of Object.entries(answer.headers)) if (value !== undefined && !HOP_BY_HOP.has(name)) out[name] = value;
-      res.writeHead(answer.statusCode ?? 502, out);
+    const relay = (answer: IncomingMessage) => {
+      res.writeHead(answer.statusCode ?? 502, relayableHeaders(answer.headers));
       answer.pipe(res);
+    };
+    const mcpServer = req.method === "POST" ? verdict.grant.mcpServer : undefined;
+    const sent: Buffer[] = [];
+    let sentBytes = 0;
+    if (mcpServer) req.on("data", (chunk: Buffer) => { sentBytes += chunk.length; if (sentBytes <= MAX_REFUSABLE_CALL_BYTES) sent.push(chunk); });
+    const forwarded = send({ protocol: upstream.protocol, host: upstream.hostname, port: upstream.port || (upstream.protocol === "https:" ? 443 : 80), method: req.method, path: `${upstream.pathname}${upstream.search}`, headers }, (answer) => {
+      if (!mcpServer || answer.statusCode !== 401) return relay(answer);
+      const decide = () => {
+        const sentCredentials = Object.values(verdict.grant.headers).some((value) => value !== "");
+        const refusal = sentBytes <= MAX_REFUSABLE_CALL_BYTES ? refusedCallAnswer(mcpServer, sentCredentials, Buffer.concat(sent).toString("utf8"), verdict.grant.mcpApp) : null;
+        if (refusal === null) return relay(answer);
+        answer.resume();
+        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }).end(refusal);
+      };
+      if (req.readableEnded) decide(); else req.once("end", decide);
     });
     stats.forwarded += 1;
     forwarded.on("error", () => { if (!res.headersSent) res.writeHead(502, { "content-type": "application/json" }).end(JSON.stringify({ error: "upstream_unreachable" })); else res.destroy(); });
     req.pipe(forwarded);
     res.on("close", () => forwarded.destroy());
   });
-  server.on("upgrade", (_req, socket) => { stats.refused += 1; socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"); });
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+  });
+  // Node removes its own error listener from a socket it hands to `upgrade`.
+  server.on("upgrade", (_req, socket) => { stats.refused += 1; socket.on("error", () => socket.destroy()); socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"); });
 
   return new Promise((done, fail) => {
     server.once("error", fail);

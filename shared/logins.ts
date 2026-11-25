@@ -5,10 +5,13 @@
  * secrets.
  */
 import { getDomain } from "tldts";
+import { browserMatesOf } from "./browser-mates.ts";
+
+export { browserMatesOf };
 
 /** Where a login came from: the sign-in card's Save, Settings, or the person's
- * 1Password vault (read-only here). */
-export type LoginSource = "card" | "settings" | "1password";
+ * 1Password, Bitwarden or Bitwarden Secrets Manager (read-only here). */
+export type LoginSource = "card" | "settings" | "1password" | "bitwarden" | "bitwarden-secrets";
 
 /** Which bots may use a login: every bot, or the ones named. */
 export type LoginBots = "all" | string[];
@@ -37,6 +40,14 @@ export interface LoginSummary extends LoginPlace {
   bots: LoginBots;
   createdAt: number;
   lastUsedAt?: number;
+  /** A 1Password login's item, and whether its bots are its own choice rather than its vault's. */
+  onePassword?: OnePasswordItemRef;
+}
+
+/** One 1Password item: `<vault id>:<item id>`, and whether it has bots of its own instead of its vault's. */
+export interface OnePasswordItemRef {
+  item: string;
+  ownBots: boolean;
 }
 
 /** A 1Password vault the service account reads, and the bots that may use its
@@ -58,6 +69,46 @@ export interface OnePasswordStatus {
   items?: number;
   error?: string;
 }
+
+/** Bitwarden, connected through its command line tool with an account's API key and master password, none of which
+ * leaves the server. `server`: the Bitwarden server's host; `account`: the address the account signs in with. */
+export interface BitwardenStatus {
+  connected: boolean;
+  server?: string;
+  account?: string;
+  /** How many logins and secrets it lists. */
+  items?: number;
+  error?: string;
+}
+
+/** What an admin connects Bitwarden with: the server's https address, the account's personal API key and its master
+ * password. Sent once, kept sealed on the server, never sent back. */
+export interface BitwardenCredentials {
+  serverUrl: string;
+  clientId: string;
+  clientSecret: string;
+  password: string;
+}
+
+/** Bitwarden Secrets Manager, connected with a machine account's access token, which never leaves the server.
+ * `server`: the Bitwarden server's host. */
+export interface BitwardenSecretsStatus {
+  connected: boolean;
+  server?: string;
+  /** How many logins and secrets it lists. */
+  items?: number;
+  error?: string;
+}
+
+/** What an admin connects Bitwarden Secrets Manager with: the server's https address and a machine account's access
+ * token. Sent once, kept sealed on the server, never sent back. */
+export interface BitwardenSecretsCredentials {
+  serverUrl: string;
+  accessToken: string;
+}
+
+/** The Bitwarden servers an admin picks from; anything else is a self-hosted (or Vaultwarden) address. */
+export const BITWARDEN_SERVERS = ["https://vault.bitwarden.com", "https://vault.bitwarden.eu"] as const;
 
 /** The longest username or password a form takes. */
 export const LOGIN_FIELD_MAX = 512;
@@ -134,9 +185,17 @@ export function loginOriginCheck(pageUrl: string, login: LoginPlace): { ok: true
   return loginMatchesHost(login, page.pageHost) ? page : { ok: false, pageHost: page.pageHost, reason: "host" };
 }
 
-/** Whether a bot may use a login. */
-export function loginUsableBy(login: { bots: LoginBots }, botId: string): boolean {
-  return login.bots === "all" || login.bots.includes(botId);
+/** The bots a login is kept to that it is still not filled for, because they share a browser with a bot it isn't kept to. */
+export function loginHeldBackFor(login: { bots: LoginBots }, bots: ReadonlyArray<{ id: string; browserProfile?: string | null }>): string[] {
+  const kept = login.bots;
+  if (kept === "all") return [];
+  return kept.filter((id) => browserMatesOf(bots, id).some((mate) => !kept.includes(mate)));
+}
+
+/** Whether a bot may use a login; given several (bots that sign in through one browser), whether every one of them may. */
+export function loginUsableBy(login: { bots: LoginBots }, botIds: string | readonly string[]): boolean {
+  const bots = login.bots;
+  return bots === "all" || (typeof botIds === "string" ? [botIds] : botIds).every((id) => bots.includes(id));
 }
 
 /** A login as a bot hears of it: its site, or its hosts when it is kept to

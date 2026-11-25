@@ -1,19 +1,21 @@
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import { Provider } from '@/components/provider';
+import { appName, siteUrl } from '@/lib/shared';
 import './global.css';
 
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://docs.openmausbot.com'),
+  metadataBase: new URL(siteUrl),
   title: {
-    default: 'OpenMausBot Docs',
-    template: '%s · OpenMausBot Docs',
+    default: appName,
+    template: `%s · ${appName}`,
   },
-  description: 'Install, configure, and extend your local-first team of AI agents.',
+  description: 'MausBot docs: install, configure and extend your local-first team of AI agents. MausBot is free and open source (Apache 2.0).',
   openGraph: {
-    title: 'OpenMausBot Docs',
+    title: appName,
+    siteName: appName,
     description: 'Your own team of AI agents, in a chat app.',
     type: 'website',
   },

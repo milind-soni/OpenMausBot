@@ -19,8 +19,10 @@ through `POST /api/threads/ID/messages/ID/reactions` answers `delivery:
 "started"`, records `{ emoji: "👍", by: "user" }` on that message, and adds a
 user line `{ text: "👍", reaction: "👍", replyToId }` that the bot's next turn
 answers ("Sent it to Sam."). The engine's prompt for that turn says the person
-reacted 👍 to its earlier message, that 👍 means yes, and quotes the message
-as untrusted data. A second 👍 with `on: true`, or taking the 👍 back and
+reacted 👍 to its earlier message, that 👍 means yes, go ahead when that
+message asked something or offered to do something, and only "got it" (no new
+work) when it just told them something, and quotes the message as untrusted
+data. A second 👍 with `on: true`, or taking the 👍 back and
 setting it again, delivers nothing: the bot already has that answer. A ❤️ on
 the reply answers `delivery: "noted"`, starts no turn, and opens the next typed
 turn's prompt with `(User reacted ❤️ to your message “Sent it to Sam.”.)`.

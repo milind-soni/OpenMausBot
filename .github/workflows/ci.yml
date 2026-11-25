@@ -54,7 +54,7 @@ jobs:
       && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner
       && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
       && github.event.pull_request.user.login == github.repository_owner)
-      && 'typecheck + lint + Linux tests (Boat)' || 'typecheck + lint' }}
+      && 'preflight + Linux tests (Boat)' || 'preflight' }}
     runs-on: >-
       ${{ vars.BOAT_CI == 'on' && contains(fromJSON('["push", "pull_request", "merge_group"]'), github.event_name)
       && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner
@@ -100,16 +100,22 @@ jobs:
         run: pnpm exec vitest run scripts/ci-scope.test.ts scripts/ci-linux-lanes.test.ts scripts/ci-workflow.test.ts scripts/testing/verification-docs.test.ts
       - name: Validate locale catalogs
         run: pnpm i18n:check
+      - name: Validate the model manifest
+        # Installs download this file from main within hours of a change, so a bad edit must not land.
+        env:
+          MANIFEST_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: node scripts/check-model-manifest.mjs --against "$MANIFEST_BASE"
+      - run: pnpm check:contrast
       - run: pnpm lint
-      # A pull request that changes only docs, tests under scripts/ or the
-      # control plane cannot change what these three check.
-      - if: steps.scope.outputs.build == 'true'
-        run: pnpm typecheck
-      - if: steps.scope.outputs.build == 'true'
-        run: pnpm check:electron
-      - name: production UI build
-        if: steps.scope.outputs.build == 'true'
-        run: pnpm exec vite build
+      - name: Validate the announcements file
+        # Installs download it from main within the hour (docs/announcements.md), so a bad edit must not land.
+        env:
+          ANNOUNCEMENTS_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: node scripts/check-announcements.mjs --against "$ANNOUNCEMENTS_BASE"
+      - name: Source guards
+        # The tests that only read the source: seconds here, and they stay in the shards. On Nov 3-4 2026 one of them was
+        # red on main for 11 hours, and each PR heard about it after about 70 minutes, once its shards had found a runner.
+        run: pnpm exec vitest run src/locales/ scripts/testing/file-size-ratchet.test.ts scripts/testing/index-route-ratchet.test.ts scripts/testing/store-read-ratchet.test.ts scripts/testing/tighten-ratchets.test.ts scripts/testing/comment-history.test.ts scripts/testing/lazy-server-modules.test.ts scripts/testing/duration-sequencer.test.ts scripts/testing/host-e2e.test.ts scripts/testing/ci-retry-list.test.ts src/lib/copy-text.guard.test.ts src/components/Select.guard.test.ts --reporter=default --reporter=github-actions
       # The rest runs only on a Boat VM, where ci-scope moved the Linux jobs' work into this job.
       - name: Remove what Boat installs and GitHub's runners lack
         if: steps.scope.outputs.linux_lanes
@@ -147,6 +153,40 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  build:
+    needs: static
+    if: contains(needs.static.outputs.jobs, '"build"')
+    # The slow checks, about three minutes, beside the shards rather than ahead
+    # of them. A pull request that changes only docs, tests under scripts/ or
+    # the control plane cannot change what they check.
+    name: typecheck + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm check:electron
+      - name: production UI build
+        run: pnpm exec vite build
+      - name: The bots' browsers' kernel memory limit, on a real kernel, as root
+        # A Cloud home's root supervisor puts the bots' Chrome under a cgroup v2 memory limit (server/browser/memory-cgroup.ts):
+        # here a memory-hungry child started through the real launcher must be killed by the kernel while the unprivileged
+        # "server" beside it keeps answering. Root without CAP_SYS_ADMIN, as the supervisor runs after its setpriv drop;
+        # OMB_CGROUP_TEST=require fails rather than skips.
+        run: |
+          scratch="$(mktemp -d)"
+          sudo setpriv --inh-caps=-sys_admin,-setpcap --bounding-set=-sys_admin,-setpcap -- \
+            env "PATH=$PATH" HOME="$scratch" OMB_DATA_DIR="$scratch/data" TMPDIR="$scratch" OMB_CGROUP_TEST=require \
+            "$(command -v pnpm)" exec vitest run server/browser/memory-cgroup.linux.test.ts --reporter=verbose --silent=false
+
   vitest:
     # Admit the expensive runner fan-out only after the quick checks pass.
     # A failing preflight still fails the required gates; nothing is waived.
@@ -168,11 +208,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.static.outputs.vitest_matrix) }}
-    runs-on: ${{ matrix.os }}
+    # The Linux shards stay on Ubuntu 24.04 while `ubuntu-latest` (still the
+    # matrix's name for them, in job names and release-ci) is 26.04. On 26.04
+    # an unprivileged bubblewrap works, so every Cloud-role e2e fixture starts
+    # boxed and the real-box *.linux tests run for the first time; on 24.04
+    # the box does not start, so they run unboxed or skip, as they always
+    # have here. Move to 26.04 once those suites pass with a real box.
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     # scripts/testing/duration-sequencer.ts splits each platform's files by
-    # their recorded seconds on that platform, about 17 minutes a Linux shard
-    # and 10 to 15 a Windows one. The cap catches a hang, not normal suite
-    # growth; Windows runners are about 1.45x slower and vary more.
+    # their recorded seconds on that platform, about 6 minutes a Linux shard
+    # (four files at once); a Windows shard runs two files at once. The cap
+    # catches a hang, not normal suite growth; Windows runners are about 1.45x
+    # slower and vary more.
     timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 25 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -197,6 +244,7 @@ jobs:
           OMB_VITEST_RETRY_LOG: ${{ runner.temp }}/vitest-retries.jsonl
           OMB_VITEST_E2E: ${{ matrix.e2e }}
           OMB_VITEST_SUBSET: ${{ matrix.files }}
+          OMB_VITEST_WORKERS: ${{ matrix.workers }}
         run: pnpm exec vitest run ${{ matrix.files }} --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=default --reporter=github-actions
       - name: Report flaky tests that needed a retry
         # Known flakes (scripts/testing/ci-retry-list.json) get two retries in
@@ -208,8 +256,9 @@ jobs:
         run: node scripts/testing/ci-retry-summary.mjs
       - name: Broker and Electron unit tests
         if: matrix.node_tests
-        # About half a minute; node --test has no overall deadline, so a file
-        # that never exits would otherwise hold the job to its cap.
+        # About two minutes on macOS and Windows, which the duration sequencer
+        # counts against this shard; node --test has no overall deadline, so a
+        # file that never exits would otherwise hold the job to its cap.
         timeout-minutes: 5
         run: pnpm broker:test && pnpm test:electron
 
@@ -346,7 +395,7 @@ jobs:
   gate:
     # One aggregation, not three queued runners doing the same check.
     name: CI
-    needs: [static, vitest, behavior-evals, packaged-server, windows-cua, electron-smokes]
+    needs: [static, build, vitest, behavior-evals, packaged-server, windows-cua, electron-smokes]
     # Still report failed/skipped dependencies, but don't keep a superseded
     # workflow alive just to schedule its summary jobs.
     if: ${{ !cancelled() }}
@@ -446,6 +495,37 @@ jobs:
       - run: pnpm control-plane:test
       - run: pnpm control-plane:dry-run
 
+  relay:
+    needs: static
+    if: contains(needs.static.outputs.jobs, '"relay"')
+    # relay/ is its own pnpm root with its own lockfile, so this installs only the relay's dependencies. The nightly run
+    # fuzzes the pre-auth path for ten minutes, a pull request for twenty seconds.
+    name: relay typecheck + tests + fuzz + audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: relay
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+        with:
+          package_json_file: relay/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: relay/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Audit the production dependencies
+        run: pnpm audit --prod --audit-level high
+      - run: pnpm check
+      - run: pnpm test
+        env:
+          RELAY_FUZZ_MS: ${{ github.event_name == 'schedule' && '600000' || '20000' }}
+
   deploy-composio-broker:
     # Only deploys on push to upstream main. PRs run the control-plane tests
     # but do not deploy: the wiring is exercised end-to-end only by a merged
@@ -527,7 +607,7 @@ jobs:
         env:
           OMB_UI_E2E: "1"
           OMB_UI_EVIDENCE_DIR: .omb-scratch/verify-evidence
-        run: pnpm exec vitest run scripts/testing/control-omb-ui.e2e.test.ts scripts/testing/bot-tools-ui.e2e.test.ts scripts/testing/thinking-timer-ui.e2e.test.ts scripts/testing/team-share-ui.e2e.test.ts scripts/testing/org-library-ui.e2e.test.ts scripts/testing/presets-ui.e2e.test.ts scripts/testing/browser-evidence.e2e.test.ts scripts/testing/browser-fill.e2e.test.ts scripts/testing/rich-table-composer-ui.e2e.test.ts scripts/testing/computer-panel-focus-ui.e2e.test.ts scripts/testing/mobile-code-blocks-ui.e2e.test.ts
+        run: pnpm exec vitest run scripts/testing/control-omb-ui.e2e.test.ts scripts/testing/bot-tools-ui.e2e.test.ts scripts/testing/thinking-timer-ui.e2e.test.ts scripts/testing/team-share-ui.e2e.test.ts scripts/testing/org-library-ui.e2e.test.ts scripts/testing/browser-evidence.e2e.test.ts scripts/testing/browser-fill.e2e.test.ts scripts/testing/browser-input.e2e.test.ts scripts/testing/rich-table-composer-ui.e2e.test.ts scripts/testing/computer-panel-focus-ui.e2e.test.ts scripts/testing/mobile-code-blocks-ui.e2e.test.ts scripts/testing/inline-page-height-ui.e2e.test.ts scripts/testing/room-pages-ui.e2e.test.ts scripts/testing/room-feed-ui.e2e.test.ts
       - name: Upload the renderer screenshot
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
@@ -538,6 +618,8 @@ jobs:
             .omb-scratch/verify-evidence/thinking-timer-anchored.png
             .omb-scratch/verify-evidence/share-team-dialog.png
             .omb-scratch/verify-evidence/mobile-code-blocks/
+            .omb-scratch/verify-evidence/inline-page-height/
+            .omb-scratch/verify-evidence/room-pages-*.png
           if-no-files-found: warn
           retention-days: 7
 
@@ -598,7 +680,7 @@ jobs:
       - name: Install package validation and native smoke tools
         run: >-
           sudo apt-get update && sudo apt-get install -y
-          at-spi2-core dbus-x11 desktop-file-utils libxi6 libxkbcommon0 squashfs-tools x11-utils xdotool xvfb
+          at-spi2-core cpio dbus-x11 desktop-file-utils libxi6 libxkbcommon0 openbox rpm squashfs-tools x11-utils xdotool xvfb
       - run: pnpm install --frozen-lockfile
       - name: Stage the pinned CUA runtime
         run: pnpm build:cua:linux
@@ -678,11 +760,19 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Let Chrome build its sandbox on this runner, and give it a display
         # Ubuntu 24.04 restricts unprivileged user namespaces; Chrome's own
-        # documented fix for 23.10+. The sandbox itself stays on.
+        # documented fix for 23.10+. The sandbox itself stays on. Xvnc and
+        # bubblewrap run the desktop view's suite (server/browser/desktop): its
+        # own private displays, and Chrome's lock-down policy for each display's
+        # Chrome alone, which the suite proves from Chrome's own address bar.
         if: runner.os == 'Linux'
+        # Ubuntu 25.04+ also confines what bubblewrap starts (AppArmor's
+        # bwrap-userns-restrict: its children get no capabilities, so Chrome
+        # cannot build its own sandbox under bwrap and exits with SIGTRAP).
+        # A Cloud is Debian with no AppArmor, so the suite runs as there.
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          sudo apt-get update && sudo apt-get install -y xvfb
+          sudo apt-get update && sudo apt-get install -y xvfb tigervnc-standalone-server bubblewrap
+          if [ -f /etc/apparmor.d/bwrap-userns-restrict ]; then sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict; fi
       - name: Keep the runner's Google Chrome as it is for the whole run
         # The macOS image's Chrome is older than Google's release, and about
         # 30 s after Chrome first runs it starts its bundled GoogleUpdater,
@@ -698,10 +788,20 @@ jobs:
         # The headed-identity case needs a display, which Linux runners get from Xvfb.
         env:
           OMB_CDP_E2E: "1"
+          # The desktop view's suite keeps pictures of its private display here; a failed run uploads them.
+          DESKTOP_E2E_SHOTS: ${{ runner.temp }}/desktop-e2e-pictures
         shell: bash
         run: |
-          run=(pnpm exec vitest run server/browser/cdp/s4- server/browser/checklist.e2e server/browser/passkey-wall.e2e server/browser/viewers/viewers.e2e server/browser/viewers/stream-v2.e2e --reporter=verbose --silent=false --reporter=github-actions)
+          run=(pnpm exec vitest run server/browser/cdp/s4- server/browser/checklist.e2e server/browser/passkey-wall.e2e server/browser/viewers/viewers.e2e server/browser/viewers/stream-v2.e2e server/browser/desktop/desktop.e2e --reporter=verbose --silent=false --reporter=github-actions)
           if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a "${run[@]}"; else "${run[@]}"; fi
+      - name: Upload the desktop view's pictures on failure
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure() && runner.os == 'Linux'
+        with:
+          name: desktop-e2e-pictures-${{ matrix.os }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/desktop-e2e-pictures/
+          if-no-files-found: warn
+          retention-days: 7
       - name: The runner's Google Chrome did not change during the run
         if: ${{ !cancelled() && runner.os == 'macOS' }}
         run: test "$(defaults read "/Applications/Google Chrome.app/Contents/Info.plist" CFBundleShortVersionString)" = "$(cat "$RUNNER_TEMP/chrome-version")"

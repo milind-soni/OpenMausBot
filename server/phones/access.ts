@@ -1,3 +1,5 @@
+import type { ServerTextParams } from "../../shared/server-text.ts";
+import { noticeSummary } from "../chat-notices.ts";
 // Per-bot checks for phone tool calls: the phone's grant decides which apps exist, the bot's grant decides read or write.
 import { PHONE_SLUG, ALL_PHONE_APPS, isPhoneToolName, isPhoneWrite, phoneToolCapability, type PhoneApps, type PhoneCapability, type PhonePlatform } from "../../shared/phone-apps.ts";
 import { connectorScopeRefusalText } from "../connector-verdict.ts";
@@ -18,6 +20,8 @@ export function phoneAppsFor(bot: PhoneBot): PhoneApps {
 export interface PhoneDecisionRow {
   tool: string;
   summary?: string;
+  summaryCode?: string;
+  summaryParams?: ServerTextParams;
   decision: "auto-approved" | "auto-denied";
   rule: string;
 }
@@ -44,7 +48,7 @@ export function phoneAccess(bot: PhoneBot, allowed: Readonly<Partial<Record<Phon
     return {
       ok: false,
       text: `${bot.name} can't use ${Cap} on this phone: it is not allowed in the MausBot app on the phone.`,
-      rows: [{ tool: name, summary: `${Cap} is not allowed on the phone`, decision: "auto-denied", rule: `phone:${cap}:not-allowed-on-phone` }],
+      rows: [{ tool: name, ...noticeSummary(`chat.notice.phone.denied.${cap}`), decision: "auto-denied", rule: `phone:${cap}:not-allowed-on-phone` }],
     };
   }
   const grant = phoneAppsFor(bot)[cap];
@@ -55,7 +59,7 @@ export function phoneAccess(bot: PhoneBot, allowed: Readonly<Partial<Record<Phon
   if (grant === "read" && isPhoneWrite(name)) {
     return { ok: false, text: connectorScopeRefusalText(call, "write", bot.name, `Phone ${Cap}`, describeAction(name)), rows: [{ tool: name, decision: "auto-denied", rule: `scope:${PHONE_SLUG}:${cap}:write` }] };
   }
-  return { ok: true, rows: [{ tool: name, summary: `allowed ${name}`, decision: "auto-approved", rule: `scope:${PHONE_SLUG}:${cap}` }] };
+  return { ok: true, rows: [{ tool: name, ...noticeSummary("chat.notice.phone.allowed", { tool: name }), decision: "auto-approved", rule: `scope:${PHONE_SLUG}:${cap}` }] };
 }
 
 /** The system prompt part: each phone, its platform and the apps this bot may use on it. Empty when there is nothing to use. */

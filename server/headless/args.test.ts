@@ -40,10 +40,29 @@ describe("parseCommand", () => {
   });
 
   it("knows which verbs change something", () => {
-    for (const verb of ["send", "run", "interrupt", "team apply", "engine set"]) expect(MUTATING_VERBS.has(verb), verb).toBe(true);
-    for (const verb of ["doctor", "bots", "wait", "messages", "export", "events", "team export", "engine list"]) expect(MUTATING_VERBS.has(verb), verb).toBe(false);
-    expect([...HEADLESS_VERBS].sort()).toEqual(["bots", "channels", "connect", "doctor", "edit", "engine", "events", "export", "interrupt", "mcp",
-      "messages", "models", "new-bot", "new-channel", "run", "send", "send-channel", "set-model", "team", "wait"]);
+    for (const verb of ["send", "run", "interrupt", "team apply", "engine set", "token create", "token revoke", "bots delete", "bots pause", "stop",
+      "threads clear", "threads delete", "computers start", "computers sleep"]) expect(MUTATING_VERBS.has(verb), verb).toBe(true);
+    for (const verb of ["doctor", "bots", "bots list", "bots get", "status", "whoami", "threads list", "computers list", "wait", "messages", "export", "events", "team export", "engine list"]) {
+      expect(MUTATING_VERBS.has(verb), verb).toBe(false);
+    }
+    expect([...HEADLESS_VERBS].sort()).toEqual(["bots", "channels", "computers", "connect", "doctor", "edit", "engine", "events", "export", "interrupt", "login",
+      "logout", "mcp", "messages", "models", "new-bot", "new-channel", "run", "send", "send-channel", "servers", "set-model", "status", "stop", "team",
+      "threads", "token", "use", "wait", "whoami"]);
+  });
+
+  it("keeps bare bots a list, and reads a bots, threads or computers action", () => {
+    expect(parseCommand(["bots", "--json"])).toMatchObject({ verb: "bots", flags: { json: true } });
+    expect(parseCommand(["bots", "delete", "QA 1", "QA 2", "--dry-run"])).toMatchObject({ verb: "bots delete", positionals: ["QA 1", "QA 2"], flags: { "dry-run": true } });
+    expect(parseCommand(["bots", "pause", "--team", "Support"])).toMatchObject({ verb: "bots pause", flags: { team: "Support" } });
+    expect(parseCommand(["stop", "--all", "-y"])).toMatchObject({ verb: "stop", flags: { all: true, yes: true } });
+    expect(usage(() => parseCommand(["threads"]))).toMatchObject({ exitCode: 2, message: "threads needs one of: list, clear, delete" });
+    expect(usage(() => parseCommand(["bots", "pause", "x", "--yes"]))).toMatchObject({ exitCode: 2 });
+    // no flag skips a permission or approval of any kind
+    for (const verb of ["stop", "bots delete", "threads clear", "login"]) {
+      for (const skip of ["--yolo", "--skip-permissions", "--dangerously-skip-permissions", "--token"]) {
+        expect(usage(() => parseCommand([...verb.split(" "), "x", skip])), `${verb} ${skip}`).toMatchObject({ exitCode: 2 });
+      }
+    }
   });
 });
 
@@ -55,6 +74,9 @@ describe("durations, sizes, counts and choices", () => {
     expect(parseDuration("2h", "--timeout")).toBe(7_200_000);
     expect(parseDuration("0", "--wait-idle", { min: 0 })).toBe(0);
     for (const bad of ["0", "25h", "soon", "-5", "5d"]) expect(usage(() => parseDuration(bad, "--timeout")).message).toBe("--timeout must be a duration from 1s to 24h, such as 90, 90s, 5m or 2h");
+    expect(parseDuration("90d", "--expires", { max: 3_650 * 86_400_000 })).toBe(90 * 86_400_000);
+    expect(usage(() => parseDuration("30m", "--expires", { min: 3_600_000, max: 3_650 * 86_400_000 })).message)
+      .toBe("--expires must be a duration from 1h to 3650d, such as 12h, 30d or 90d");
   });
 
   it("reads sizes, counts and one-of choices", () => {

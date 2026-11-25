@@ -36,7 +36,7 @@ describe("typed capability fields for the cloud computer", () => {
     }));
     expect(mounted.adapter.capabilities.computerMcp).toBe(true);
     expect(mounted.adapter.capabilities.dataMcp).toBe(true);
-    expect(mounted.adapter.capabilities.highlevelMcp).toBe(true);
+    expect(mounted.adapter.capabilities.emailMcp).toBe(true);
     expect(mounted.adapter.capabilities.deviceMcp).toBe(true);
     expect(onBoat(mounted)).toBe(true);
     const bare = await keep(OpenAICompatDriver.create({
@@ -45,7 +45,7 @@ describe("typed capability fields for the cloud computer", () => {
     }));
     expect(bare.adapter.capabilities.computerMcp).toBe(false);
     expect(bare.adapter.capabilities.dataMcp).toBe(false);
-    expect(bare.adapter.capabilities.highlevelMcp).toBe(false);
+    expect(bare.adapter.capabilities.emailMcp).toBe(false);
     expect(bare.adapter.capabilities.deviceMcp).toBe(false);
     expect(onBoat(bare)).toBe(false);
     expect(cloudPlaceRefusal({ computerMcp: bare.adapter.capabilities.computerMcp, name: "Caps Compat Bare" }, "works-on", "Scout")?.message)

@@ -23,7 +23,7 @@ export const session = (email: string) => ({ kind: "session", scopes: ["client"]
 type Task = { threadId: string; title: string; archivedAt?: number; activity?: string; routineRunId?: string };
 type Bot = Partial<Omit<BotRecord, "tasks">> & { id: string; name: string; threadId: string; tasks: Task[] };
 
-export function teamInbox(options: { team?: boolean; representative?: TeamMessagesDeps["inbox"]["representative"]; noChiefFor?: string[]; handed?: Record<string, string> } = {}) {
+export function teamInbox(options: { team?: boolean; representative?: TeamMessagesDeps["inbox"]["representative"]; noChiefFor?: string[]; handed?: Record<string, string>; confined?: string[] } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "omb-team-inbox-"));
   const listeners = new Set<(change: StoreChange) => void>();
   const emit = (change: StoreChange) => { for (const listener of listeners) listener(change); };
@@ -53,9 +53,10 @@ export function teamInbox(options: { team?: boolean; representative?: TeamMessag
     groupByThread: (threadId: string) => groups.find((group) => group.threadId === threadId),
     tasks: (botId: string) => bots.find((bot) => bot.id === botId)?.tasks ?? [],
     taskByThread: (botId: string, threadId: string) => bots.find((bot) => bot.id === botId)?.tasks.find((task) => task.threadId === threadId),
-    createTask: (botId: string, title: string) => {
+    createTask: (botId: string, title: string, ...rest: unknown[]) => {
       const task = { threadId: `made-${++made}`, title };
       bots.find((bot) => bot.id === botId)!.tasks.push(task);
+      (rest[6] as ((made: { threadId: string }) => void) | undefined)?.(task);
       return task;
     },
     appendMessage: (threadId: string, message: Omit<Message, "id" | "at">) => {
@@ -92,6 +93,7 @@ export function teamInbox(options: { team?: boolean; representative?: TeamMessag
     dataDir,
     now: tick,
     store: store as never,
+    confined: (threadId) => (options.confined ?? []).includes(threadId),
     people: { everyone: () => people.map(({ email, role, leftAt }) => ({ email, role, firstSeenAt: 1, lastSeenAt: 1, ...(leftAt ? { leftAt } : {}) })) },
     personName: (person) => people.find((one) => key(one.email) === person)?.name,
     audienceOf,

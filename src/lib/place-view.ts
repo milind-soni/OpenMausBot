@@ -6,17 +6,26 @@ import { engineSignedOut } from "@/lib/failed-turn";
 import { browserAvailable, builtInBrowserEnabled, type FeatureFlagConfig } from "@/lib/feature-flags";
 import { writeComputerPanelView } from "@/lib/computer-panel-view";
 import { useAdvancedMode } from "@/lib/interface-mode";
+import { pageOnRemoteServer } from "@/lib/local-computer";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { openBotSettings } from "@/components/bot-panel/panel-link";
 import { openKeySettings } from "@/components/keys/key-focus";
 import type { Action, Bot, ConfigStatus, InstanceInfo } from "@/state/store";
 import type { LocaleKey } from "@/locales";
 import {
-  placeRowView, placeView, type Place, type PlaceActionId, type PlaceFacts, type PlaceRow, type PlaceTranslate, type PlaceView, type ServerKind,
+  cloudLimitFromBody, cloudRefusal, placeRowView, placeView, type Place, type PlaceActionId, type PlaceFacts, type PlaceRow, type PlaceTranslate, type PlaceView,
+  type ServerKind,
 } from "../../shared/place-view";
 import { canUseMcpServer } from "../../shared/tool-scope";
 
 export const placeTranslate: PlaceTranslate = (key, params) => t(key as LocaleKey, params);
+
+/** A cloud desktop's failed start, read from the server's error: its words, its status and the Admin's limit. */
+export function panelCloudRefusal(error: unknown, message: string, included: boolean): NonNullable<PlaceFacts["refusal"]> {
+  const { status, body } = Object(error) as { status?: unknown; body?: { cloudLimit?: unknown } };
+  const limit = cloudLimitFromBody(body?.cloudLimit);
+  return cloudRefusal({ message, status: Number(status ?? 0) || undefined, ...(limit ? { limit } : {}) }, included);
+}
 
 export interface PlaceSeat {
   server: ServerKind;
@@ -25,8 +34,10 @@ export interface PlaceSeat {
   mode: "simple" | "advanced";
 }
 
-export function serverKind(config: Pick<ConfigStatus, "cloudHome"> | null | undefined, platform: DesktopCapabilities["host"]["platform"]): ServerKind {
+export function serverKind(config: Pick<ConfigStatus, "cloudHome"> | null | undefined, capabilities: DesktopCapabilities): ServerKind {
   if (config?.cloudHome) return "my-cloud";
+  if (pageOnRemoteServer(capabilities)) return "remote";
+  const { platform } = capabilities.host;
   return platform === "darwin" ? "mac" : platform === "win32" ? "pc" : "linux";
 }
 
@@ -103,11 +114,11 @@ export function useCloudPlanPaid(): boolean {
   return Boolean(bridge) && cloudPlanView(account).kind === "paid";
 }
 
-export function usePlaceSeat(config: Pick<ConfigStatus, "cloudHome"> | null | undefined, platform: DesktopCapabilities["host"]["platform"]): PlaceSeat {
+export function usePlaceSeat(config: Pick<ConfigStatus, "cloudHome"> | null | undefined, capabilities: DesktopCapabilities): PlaceSeat {
   const plan = useCloudPlanPaid();
   const ownerOrAdmin = useOwnerOrAdmin();
   const advanced = useAdvancedMode();
-  return { server: serverKind(config, platform), plan, role: ownerOrAdmin === false ? "user" : "admin", mode: advanced ? "advanced" : "simple" };
+  return { server: serverKind(config, capabilities), plan, role: ownerOrAdmin === false ? "user" : "admin", mode: advanced ? "advanced" : "simple" };
 }
 
 export function openPlaceAction(

@@ -5,11 +5,12 @@ import { expect, it } from "vitest";
 import { launchVerificationServer } from "../scripts/control-omb.ts";
 import { fixtureApi } from "../scripts/testing/preview-fixture.ts";
 import { openSse } from "./testing/sse.ts";
+import { isTitleCall } from "./testing/title-call.ts";
 
 it("saving and replacing a workspace key reaches an existing bot's next request without leaking keys", async () => {
   const received: string[] = [];
   let reply = 0;
-  const provider = createServer((req, res) => {
+  const provider = createServer(async (req, res) => {
     if (req.url === "/v1/models") {
       // Deliberately public: this must never be presented as authenticated.
       res.setHeader("content-type", "application/json");
@@ -17,9 +18,11 @@ it("saving and replacing a workspace key reaches an existing bot's next request 
       return;
     }
     if (req.url !== "/v1/chat/completions") { res.writeHead(404).end(); return; }
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    if (isTitleCall(body)) { res.writeHead(500).end(); return; }
     const key = req.headers.authorization ?? "";
     received.push(key);
-    req.resume();
     if (!["Bearer fixture-first-key", "Bearer fixture-replacement-key"].includes(key)) {
       res.writeHead(401, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: { message: "Invalid fixture credential" } }));
@@ -39,6 +42,10 @@ it("saving and replacing a workspace key reaches an existing bot's next request 
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ provider: "openaiCompat" }),
     });
     expect(missing.status).toBe(400);
+    for (const url of ["http://127.example.test/v1", "http://127.0.0.1.example.test/v1"]) {
+      expect(await api("POST", "/api/keys/test", { provider: "openaiCompat", key: "fixture-key", url }))
+        .toEqual({ ok: false, reason: "unexpected" });
+    }
     const status = await api("PUT", "/api/config", {
       openaiCompat: { url: `http://127.0.0.1:${address.port}/v1`, key: "fixture-first-key" },
       instances: { openaiCompat: { driver: "openai-compat" } },
@@ -90,6 +97,9 @@ it("saving and replacing a workspace key reaches an existing bot's next request 
     await new Promise<void>((resolve) => provider.close(() => resolve()));
   }
 });
+
+/** An OpenAI-compatible model with no listed efforts offers the manual levels. */
+const EFFORTS = ["low", "medium", "high", "xhigh", "max"].map((id) => ({ id, label: id }));
 
 it("switching the workspace endpoint moves discovery and existing chats without changing a private connection", async () => {
   const received: Array<{ provider: string; path: string; key: string }> = [];
@@ -160,8 +170,7 @@ it("switching the workspace endpoint moves discovery and existing chats without 
     expect(received.filter((request) => request.provider === "first").map((request) => request.key))
       .not.toContain("Bearer fixture-second-key");
     expect(instances.find((instance: { instanceId: string }) => instance.instanceId === "openaiCompat").models.options)
-      .toEqual([{ id: "fixture-shared-model", label: "fixture-shared-model", custom: true },
-        { id: "fixture-second-model", label: "fixture-second-model", custom: true }]);
+      .toEqual(["fixture-shared-model", "fixture-second-model"].map((id) => ({ id, label: id, custom: true, variants: EFFORTS })));
     await send(bot, "second provider reply");
     expect(received).toContainEqual({ provider: "second", path: "/v1/chat/completions", key: "Bearer fixture-second-key" });
 

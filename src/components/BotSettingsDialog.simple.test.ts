@@ -6,7 +6,9 @@ import type { Routine } from "@/lib/routines";
 import type { MemoryDoc } from "@/lib/memory";
 import type { Bot, BotSettingsSection, InstanceInfo } from "@/state/store";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN } from "../../shared/bot-avatar";
+import { EVERYDAY_BODY_IDS } from "../../shared/bot-body";
 import type { ManagedSkill } from "./bot-settings/SkillsSection";
+import type { McpServerSummary } from "@/lib/mcp-servers";
 import type { BotApps } from "./bot-settings/useBotApps";
 
 // Hook-by-call-order harness: component state survives between renders, effects never run, and handlers are read off
@@ -36,12 +38,14 @@ const fixture = vi.hoisted(() => {
       refresh: (() => Promise.resolve()) as () => Promise<void>,
       putAssignments: (() => Promise.resolve()) as (name: string, remove?: boolean) => Promise<void>,
     },
-    memory: { docs: null as MemoryDoc[] | null, error: false, mine: false, setDoc: (() => {}) as (doc: MemoryDoc) => void, reload: () => Promise.resolve() },
+    memory: { docs: null as MemoryDoc[] | null, thread: null as (MemoryDoc & { scoped: boolean }) | null, error: false, mine: false, setDoc: (() => {}) as (doc: MemoryDoc) => void, reload: () => Promise.resolve() },
     saveMemory: (() => Promise.resolve({ ok: true })) as (...args: unknown[]) => Promise<unknown>,
     openExternal: (() => Promise.resolve()) as (url: string) => Promise<void>,
     derived: {} as Record<string, unknown>,
     apps: { phase: "ready", apps: [], connectedSlugs: [] } as BotApps,
     places: {} as Record<string, [boolean, boolean, string]>,
+    mcp: { servers: null as McpServerSummary[] | null, error: false },
+    slackUrl: null as string | null,
   };
 });
 vi.mock("react", async (original) => ({
@@ -59,6 +63,10 @@ vi.mock("@/lib/interface-mode", () => ({
   useAdvancedMode: () => fixture.advanced,
   setAdvancedMode: (enabled: boolean) => fixture.setAdvanced(enabled),
 }));
+vi.mock("@/lib/mcp-servers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/mcp-servers")>()),
+  useMcpServers: () => ({ ...fixture.mcp, refresh: () => Promise.resolve(fixture.mcp.servers ?? []) }),
+}));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.ownerOrAdmin }));
 vi.mock("@/lib/app-links", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/app-links")>()),
@@ -70,7 +78,7 @@ vi.mock("@/lib/memory", async (importOriginal) => ({
 }));
 // The server renderer cannot portal; the dialog's props are what these tests read.
 vi.mock("./ConfirmDialog", () => ({ ConfirmDialog: () => null }));
-vi.mock("./bot-settings/useSlackManagement", () => ({ useSlackManagementUrl: () => null }));
+vi.mock("./bot-settings/useSlackManagement", () => ({ useSlackManagementUrl: () => fixture.slackUrl }));
 vi.mock("./bot-settings/useBotSettingsDerived", () => ({ useBotSettingsDerived: () => fixture.derived }));
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./DesktopCapabilities")>()),
@@ -122,6 +130,8 @@ const { SettingsPage } = await import("./bot-panel/SettingsPage");
 const { LibraryTab } = await import("./bot-panel/LibraryTab");
 const { ApprovalChip } = await import("./ComposerPlusMenu");
 const { callMode, setCallMode } = await import("@/lib/call-mode");
+const { CloudBackendPicker } = await import("./CloudBackendPicker");
+const { CloudPreference } = await import("./bot-settings/AccessSection");
 const { ComputerTab, WherePage } = await import("./bot-panel/ComputerTab");
 const { PageBody, AppsPage, RoutinesPage, MemoryPage, SkillsPage, FolderPage, BrowserPage } = await import("./bot-panel/pages");
 const { BrowserLogins } = await import("./bot-panel/browser-logins");
@@ -131,7 +141,7 @@ const { PageHeader } = await import("./bot-panel/rows");
 const { ChatShareMenu } = await import("./ChatMoreMenu");
 const { SoulField } = await import("./SoulField");
 const { LocalComputerAutoWarning } = await import("./LocalComputerAutoWarning");
-const { ModelPicker } = await import("./ModelPicker");
+const { EffortRow, ModelPicker } = await import("./ModelPicker");
 const { ThreadModelsLine } = await import("./ThreadModelsLine");
 const { ModelSection } = await import("./bot-settings/ModelSection");
 const { RoutineList } = await import("./routines/RoutineList");
@@ -140,7 +150,12 @@ const { SignedInSites } = await import("./SignedInSites");
 const { AvatarImageGenerator } = await import("./AvatarImageGenerator");
 const { AvatarFraming } = await import("./avatar-editing");
 const { MascotFaceColorPicker } = await import("./MascotFaceColorPicker");
+const { MascotMaterialPicker } = await import("./MascotMaterialPicker");
+const { MascotBodyColorSwatch } = await import("./MascotBodyColorSwatch");
 const { Switch } = await import("./SettingsPrimitives");
+const { OrgSkillsCard } = await import("./bot-settings/OrgSkillsCard");
+const { PackageProvenance } = await import("./bot-settings/PackageProvenance");
+const { AdvancedSettingsRow } = await import("./bot-panel/AdvancedSettingsRow");
 
 afterAll(() => vi.unstubAllGlobals());
 
@@ -209,7 +224,7 @@ const click = (node: Node) => (node.props.onClick as () => void)();
 const change = (node: Node, value: string) => (node.props.onChange as (event: unknown) => void)({ target: { value } });
 const submit = (node: Node) => (node.props.onSubmit as (event: unknown) => void)({ preventDefault: () => {} });
 const key = (node: Node, name: string) => {
-  const event = { key: name, defaultPrevented: false, target: null, preventDefault: vi.fn(), stopPropagation: vi.fn() };
+  const event = { key: name, nativeEvent: { isComposing: false, keyCode: 0 }, defaultPrevented: false, target: null, preventDefault: vi.fn(), stopPropagation: vi.fn() };
   (node.props.onKeyDown as (event: unknown) => void)(event);
   return event;
 };
@@ -240,6 +255,7 @@ beforeEach(() => {
   fixture.advanced = false;
   fixture.setAdvanced = vi.fn();
   fixture.ownerOrAdmin = false;
+  fixture.slackUrl = null;
   fresh();
   fixture.index = 0;
   fixture.dispatch = vi.fn();
@@ -251,7 +267,7 @@ beforeEach(() => {
     skills: [], loading: false, working: "", error: "", reviewing: null, toggle: vi.fn(() => Promise.resolve()),
     setWorking: vi.fn(), setError: vi.fn(), refresh: vi.fn(() => Promise.resolve()), putAssignments: vi.fn(() => Promise.resolve()),
   };
-  fixture.memory = { docs: null, error: false, mine: false, setDoc: vi.fn(), reload: vi.fn(() => Promise.resolve()) };
+  fixture.memory = { docs: null, thread: null, error: false, mine: false, setDoc: vi.fn(), reload: vi.fn(() => Promise.resolve()) };
   patch.mockReset();
   onOpen.mockReset();
   onClose.mockReset();
@@ -262,6 +278,7 @@ beforeEach(() => {
     canUseConnectedApps: true, connectedAppsConfigured: true, connectedAppsEnabled: true, browserEnabled: true,
   };
   fixture.apps = { phase: "ready", apps: [], connectedSlugs: [] };
+  fixture.mcp = { servers: [], error: false };
   fixture.places = {
     cloud: [true, true, "Cloud desktop"], vm: [true, true, "Private desktop"], local: [true, true, "Your screen"], browser: [true, true, "Web pages only"],
   };
@@ -388,9 +405,9 @@ describe("the bot panel in Simple mode", () => {
     expect(sectionTarget("soul")).toMatchObject({ page: "settings", anchor: "instructions" });
   });
 
-  // App tool grants (PluginsPanel) and the working folder (the files pane) name a Simple page; MCP and tool
-  // selection name none, so they land where Access does.
-  it.each([["apps", "apps"], ["folder", "folder"], ["mcp", undefined], ["tools", undefined]] as const)("lands an Access link naming %s on %s", (page, landing) => {
+  // App tool grants (PluginsPanel) and the working folder (the files pane) name a Simple page; MCP servers live on the
+  // apps page, and tool selection names none, so it lands where Access does.
+  it.each([["apps", "apps"], ["folder", "folder"], ["mcp", "apps"], ["tools", undefined]] as const)("lands an Access link naming %s on %s", (page, landing) => {
     try {
       openBotSettings(fixture.dispatch, "access", { page });
       const rendered = panel(makeBot(), "access");
@@ -404,7 +421,7 @@ describe("the bot panel in Simple mode", () => {
     expect(shown(panel(makeBot(), "access"))).toEqual({ tab: "computer", page: undefined });
   });
 
-  it("shows no switch on any tab or on Bot settings: memory, upkeep, browser, record steps and Work until done live elsewhere", () => {
+  it("shows no switch on any tab, and on Bot settings only Notifications and Bot API's: memory, upkeep, browser, record steps and Work until done live elsewhere", () => {
     const bot = makeBot();
     expect(switches(panel(bot).html)).toBe(0);
     expect(panel(bot).html).not.toContain('aria-label="Work until done"');
@@ -415,7 +432,10 @@ describe("the bot panel in Simple mode", () => {
       for (const text of ["Memory", "Upkeep", "Record"]) expect(rendered.html).not.toContain(`>${text}<`);
     }
     click(find(panel(bot), "data-panel-gear"));
-    expect(switches(panel(bot).html)).toBe(0);
+    const settings = panel(bot).html;
+    expect(switches(settings)).toBe(2);
+    expect(settings).toContain('aria-label="Notifications"');
+    expect(settings).toContain('aria-label="Let apps talk to this bot"');
   });
 });
 
@@ -493,12 +513,13 @@ describe("the hero", () => {
 describe("the avatar editor", () => {
   const editor = (bot: Bot) => capture(() => AvatarEditorCard({ bot, activeState: "idle", onPatch: patch, onClose }));
 
-  it("shows the ten bodies and twelve colors, with the Halloween bodies and the faces behind More looks", () => {
+  it("shows the shapes and objects and twelve colors, with the festival bodies and the faces behind More looks", () => {
     const bot = makeBot();
     const rendered = editor(bot);
-    expect(rendered.html.match(/aria-label="Use the \w+ body"/g)).toHaveLength(10);
+    expect(rendered.html.match(/aria-label="Use the [\w ]+ body"/g)).toHaveLength(EVERYDAY_BODY_IDS.length);
     expect(rendered.html.match(/aria-label="Use \w+ mascot color"/g)).toHaveLength(12);
     expect(rendered.html).not.toContain(">Halloween<");
+    expect(rendered.html).not.toContain(">Diwali<");
     expect(has(rendered, "data-avatar-face", "idle")).toBe(false);
     expect(find(rendered, "aria-label", "Use the Cursor body").props["aria-pressed"]).toBe(true);
     click(find(rendered, "aria-label", "Use the Blob body"));
@@ -518,18 +539,23 @@ describe("the avatar editor", () => {
     click(more);
     const open = editor(bot);
     expect(find(open, "data-avatar-more").props["aria-expanded"]).toBe(true);
-    expect(open.html.match(/aria-label="Use the \w+ body"/g)).toHaveLength(20);
+    expect(open.html.match(/aria-label="Use the [\w ]+ body"/g)).toHaveLength(EVERYDAY_BODY_IDS.length + 20);
     expect(open.html).toContain(">Halloween<");
+    expect(open.html).toContain(">Diwali<");
     click(find(open, "aria-label", "Use the Pumpkin body"));
     expect(patch).toHaveBeenLastCalledWith({ mascotBody: "pumpkin" });
+    click(find(open, "aria-label", "Use the Kaju katli body"));
+    expect(patch).toHaveBeenLastCalledWith({ mascotBody: "katli" });
     expect(find(open, "data-avatar-face", "idle").props["aria-pressed"]).toBe(true);
     click(find(open, "data-avatar-face", "proud"));
     expect(patch).toHaveBeenLastCalledWith({ mascotExpression: "proud" });
     expect(open.html).toContain(">Proud<");
   });
 
-  it("opens More looks at once for a Halloween body or a chosen face", () => {
+  it("opens More looks at once for a festival body or a chosen face", () => {
     expect(find(editor(makeBot({ mascotBody: "pumpkin" })), "data-avatar-more").props["aria-expanded"]).toBe(true);
+    fresh();
+    expect(find(editor(makeBot({ mascotBody: "laddu" })), "data-avatar-more").props["aria-expanded"]).toBe(true);
     fresh();
     expect(find(editor(makeBot({ mascotExpression: "proud" })), "data-avatar-more").props["aria-expanded"]).toBe(true);
     fresh();
@@ -545,7 +571,28 @@ describe("the avatar editor", () => {
 
   it("resets the mascot as the Advanced card does", () => {
     click(find(editor(makeBot()), "data-avatar-reset"));
-    expect(patch).toHaveBeenLastCalledWith({ avatarCrop: "mascot", color: "green", mascotExpression: null, mascotBody: "cursor", mascotFaceColor: null });
+    expect(patch).toHaveBeenLastCalledWith({ avatarCrop: "mascot", color: "green", mascotExpression: null, mascotBody: "cursor", mascotFaceColor: null, mascotBodyColor: null, mascotMaterial: null });
+  });
+
+  it("picks a custom body color after the swatches, and a named swatch clears it", () => {
+    const plain = ofType(editor(makeBot()), MascotBodyColorSwatch)!.props as Parameters<typeof MascotBodyColorSwatch>[0];
+    const unset = capture(() => MascotBodyColorSwatch(plain));
+    const ring = find(unset, "data-avatar-body-color");
+    expect(ring.props["aria-pressed"]).toBe(false);
+    expect(ring.props["aria-label"]).toBe("Pick a custom body color");
+    const input = find(unset, "type", "color");
+    expect(input.props.value).toBe("#009957");
+    (input.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "#12AB9F" } });
+    expect(patch).toHaveBeenLastCalledWith({ mascotBodyColor: "#12ab9f" });
+
+    fresh();
+    const tinted = editor(makeBot({ mascotBodyColor: "#12ab9f" }));
+    expect(find(tinted, "aria-label", "Use green mascot color").props["aria-pressed"]).toBe(false);
+    const set = capture(() => MascotBodyColorSwatch(ofType(tinted, MascotBodyColorSwatch)!.props as Parameters<typeof MascotBodyColorSwatch>[0]));
+    expect(find(set, "data-avatar-body-color").props["aria-pressed"]).toBe(true);
+    expect(find(set, "type", "color").props.value).toBe("#12ab9f");
+    click(find(tinted, "aria-label", "Use green mascot color"));
+    expect(patch).toHaveBeenLastCalledWith({ color: "green", mascotBodyColor: null });
   });
 
   it("edits facial feature color without changing body color or expression", () => {
@@ -555,6 +602,31 @@ describe("the avatar editor", () => {
     expect(choices.options.map((option) => option.value)).toEqual(["white", "black"]);
     choices.onChange("white");
     expect(patch).toHaveBeenLastCalledWith({ mascotFaceColor: "white" });
+  });
+
+  it("offers Fluffy only on an engine-drawn body, and Flat clears it", () => {
+    const fur = (bot: Bot) => {
+      const props = ofType(editor(bot), MascotMaterialPicker)!.props as Parameters<typeof MascotMaterialPicker>[0];
+      return capture(() => MascotMaterialPicker(props));
+    };
+    expect(fur(makeBot()).html).toBe("");
+    fresh();
+    expect(fur(makeBot({ mascotBody: "cursor" })).html).toBe("");
+    fresh();
+    const bare = fur(makeBot({ mascotBody: "blob" }));
+    expect(bare.html).toContain(">Finish<");
+    const choices = segment(bare, "data-avatar-material");
+    expect(choices.value).toBe("off");
+    expect(choices.options.map((option) => [option.value, option.label])).toEqual([
+      ["off", "Flat"], ["fluffy", "Fluffy"],
+    ]);
+    choices.onChange("fluffy");
+    expect(patch).toHaveBeenLastCalledWith({ mascotMaterial: "fluffy" });
+    fresh();
+    const furred = segment(fur(makeBot({ mascotBody: "obj-mug", mascotMaterial: "fluffy" })), "data-avatar-material");
+    expect(furred.value).toBe("fluffy");
+    furred.onChange("off");
+    expect(patch).toHaveBeenLastCalledWith({ mascotMaterial: null });
   });
 
   it("generates with the shared generator, and uploads with shape and framing", () => {
@@ -593,11 +665,11 @@ describe("the avatar editor", () => {
 
 
 describe("the Details tab", () => {
-  it("holds the model, the conversations, routines and this conversation's rows, in that order, with no switch or Thinking row", () => {
+  it("holds the model, the conversations, this conversation's rows and routines, in that order, with no switch or Thinking row", () => {
     const rendered = botTab(makeBot());
     expect(ofType(rendered, ModelPicker)!.props).toMatchObject({ bot: expect.objectContaining({ id: "scout" }), threadId: "thread-scout", contained: true });
     expect(ofType(rendered, BotConversations)!.props.bot).toMatchObject({ id: "scout" });
-    const order = ['data-panel-row="model"', 'data-panel-card="conversations"', 'data-panel-empty="routines"', 'data-panel-item="find"', 'data-panel-item="activity"']
+    const order = ['data-panel-row="model"', 'data-panel-card="conversations"', 'data-panel-item="find"', 'data-panel-item="activity"', 'data-panel-empty="routines"']
       .map((marker) => rendered.html.indexOf(marker));
     expect(order.every((index) => index > -1)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
@@ -609,13 +681,118 @@ describe("the Details tab", () => {
     expect(switches(rendered.html)).toBe(0);
   });
 
-  it("says what routines are while the bot has none, with Add a routine, and lists them once it has some", () => {
+  describe("the Model and Reasoning rows", () => {
+    const opus = { instanceId: "claude", model: "claude-opus-5-5" };
+    const thread = (modelSelection?: Bot["modelSelection"]) => makeBot({
+      modelSelection: { ...opus, effort: "low" },
+      tasks: [{ threadId: "thread-scout", title: "Main", createdAt: 1, ...(modelSelection ? { modelSelection, followsBotModel: false } : {}) }],
+    });
+    const pickHigh = (bot: Bot) => {
+      const row = ofType(botTab(bot), EffortRow)!;
+      const select = capture(() => EffortRow(row.props as Parameters<typeof EffortRow>[0])).nodes
+        .find((node) => node.props["aria-label"] === "Reasoning effort")!;
+      change(select, "high");
+      return (fixture.dispatch as ReturnType<typeof vi.fn>).mock.lastCall![0] as Record<string, unknown>;
+    };
+    beforeEach(() => {
+      fixture.storeState = { ...fixture.storeState, instances: [engine()] };
+    });
+
+    it("shows the open conversation's model, not the bot's default", () => {
+      const own = { instanceId: "claude", model: "claude-haiku-4-5", effort: "max" as const };
+      const rendered = botTab(thread(own));
+      const picker = ofType(rendered, ModelPicker)!;
+      expect((picker.props.bot as Bot).modelSelection).toEqual(own);
+      expect(picker.key).toMatch(/thread-scout$/);
+      const row = ofType(rendered, EffortRow)!;
+      expect(capture(() => EffortRow(row.props as Parameters<typeof EffortRow>[0])).html).toMatch(/<option value="max" selected="">/);
+    });
+
+    it("sets an owner's reasoning level on the open conversation and as the bot's default, as the Model row does", () => {
+      fixture.ownerOrAdmin = true;
+      expect(pickHigh(thread())).toEqual({
+        type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true, selection: { ...opus, effort: "high" },
+      });
+      const haiku = { instanceId: "claude", model: "claude-haiku-4-5" };
+      expect(pickHigh(thread({ ...haiku, effort: "low" }))).toEqual({
+        type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true, selection: { ...haiku, effort: "high" },
+      });
+    });
+
+    it("keeps an owner's pick in a conversation on another engine to that conversation when the bot's approval level would first drop to Ask", () => {
+      fixture.ownerOrAdmin = true;
+      fixture.storeState = { ...fixture.storeState, instances: [engine(), engine({ instanceId: "codex", driverKind: "codex" })] };
+      const codex = { instanceId: "codex", model: "gpt-5.6" };
+      const onCodex = (approvalMode: Bot["approvalMode"]) => ({ ...thread({ ...codex, effort: "low" }), approvalMode });
+      expect(pickHigh(onCodex("edits"))).toEqual({ type: "setModel", botId: "scout", threadId: "thread-scout", selection: { ...codex, effort: "high" } });
+      expect(pickHigh(onCodex("full"))).toEqual({
+        type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true, selection: { ...codex, effort: "high" },
+      });
+    });
+
+    it.each([false, null] as const)("sets a guest's reasoning level on the open conversation only, whatever its model (owner: %s)", (ownerOrAdmin) => {
+      fixture.ownerOrAdmin = ownerOrAdmin;
+      expect(pickHigh(thread())).toEqual({ type: "setModel", botId: "scout", threadId: "thread-scout", selection: { ...opus, effort: "high" } });
+      const haiku = { instanceId: "claude", model: "claude-haiku-4-5" };
+      expect(pickHigh(thread({ ...haiku, effort: "low" }))).toEqual({
+        type: "setModel", botId: "scout", threadId: "thread-scout", selection: { ...haiku, effort: "high" },
+      });
+    });
+
+    describe("while a blank chat is open", () => {
+      const blank = (held: unknown[] = []) => {
+        fixture.storeState = { ...fixture.storeState, newChat: { session: 1, botId: "scout", held } };
+      };
+
+      it.each([true, false, null] as const)("sets the reasoning level on the blank chat, not the conversation it covers (owner: %s)", (ownerOrAdmin) => {
+        fixture.ownerOrAdmin = ownerOrAdmin;
+        blank();
+        const haiku = { instanceId: "claude", model: "claude-haiku-4-5", effort: "max" as const };
+        expect(pickHigh(thread(haiku))).toEqual({ type: "setModel", botId: "scout", threadId: "new-chat-scout",
+          ...(ownerOrAdmin ? { updateBotDefault: true } : {}), selection: { ...opus, effort: "high" } });
+      });
+
+      it("shows the blank chat's choices in both rows, and a held level as picked", () => {
+        blank([{ type: "setModel", botId: "scout", threadId: "new-chat-scout", selection: { ...opus, effort: "high" } }]);
+        const rendered = botTab(thread({ instanceId: "claude", model: "claude-haiku-4-5", effort: "max" }));
+        const picker = ofType(rendered, ModelPicker)!;
+        expect(picker.props.threadId).toBe("new-chat-scout");
+        expect(picker.key).toMatch(/new-chat-scout$/);
+        expect((picker.props.bot as Bot).modelSelection).toEqual({ ...opus, effort: "high" });
+        const row = ofType(rendered, EffortRow)!;
+        expect(row.props.threadId).toBe("new-chat-scout");
+        expect(capture(() => EffortRow(row.props as Parameters<typeof EffortRow>[0])).html).toMatch(/<option value="high" selected="">/);
+      });
+
+      it("hands a model-variant engine's row the blank chat too", () => {
+        fixture.storeState = { ...fixture.storeState, instances: [engine({ capabilities: { modelVariants: true },
+          models: { default: opus.model, options: [{ id: opus.model, label: "Opus", variants: [{ id: "deep", label: "Deep" }] }] } } as Partial<InstanceInfo>)] };
+        blank();
+        const row = ofType(botTab(thread({ ...opus, variant: "deep" })), EffortRow)!;
+        const variants = capture(() => EffortRow(row.props as Parameters<typeof EffortRow>[0])).nodes[0]!;
+        expect(variants.props.threadId).toBe("new-chat-scout");
+        expect((variants.props.bot as Bot).modelSelection).toEqual({ ...opus, effort: "low" });
+        expect(variants.props.updateBotDefault).toBe(false);
+        fixture.ownerOrAdmin = true;
+        const owned = ofType(botTab(thread({ ...opus, variant: "deep" })), EffortRow)!;
+        expect(capture(() => EffortRow(owned.props as Parameters<typeof EffortRow>[0])).nodes[0]!.props.updateBotDefault).toBe(true);
+      });
+
+      it("leaves another bot's blank chat alone", () => {
+        fixture.storeState = { ...fixture.storeState, newChat: { session: 1, botId: "pepper", held: [] } };
+        expect(pickHigh(thread())).toEqual({ type: "setModel", botId: "scout", threadId: "thread-scout", selection: { ...opus, effort: "high" } });
+      });
+    });
+  });
+
+  it("offers Add a routine, which says what routines are, and Automations while the bot has none, and lists them once it has some", () => {
     const empty = botTab(makeBot());
     expect(empty.html).toContain('data-panel-empty="routines"');
-    expect(empty.html).toContain(">Routines are recurring tasks this bot runs on a schedule. Ask it in chat to set one up.<");
+    expect(empty.html).toContain('title="Jobs this bot runs on a schedule, like a news roundup every morning."');
+    expect(empty.html).toMatch(/data-panel-automations=""[^>]*>Automations<svg/);
     expect(empty.html.match(/data-panel-page="routines"/g)).toHaveLength(1);
     const add = find(empty, "data-panel-page", "routines");
-    expect(add.props.children).toBe("Add a routine");
+    expect(empty.html).toMatch(/data-panel-page="routines"[^>]*>.*<span class="truncate">Add a routine<\/span><\/button>/);
     click(add);
     expect(onOpen).toHaveBeenLastCalledWith("routines");
     fixture.derived.botRoutines = [routine()];
@@ -634,25 +811,114 @@ describe("the Details tab", () => {
     expect(rowValue(botTab(makeBot()), "routines")).toBe("None");
   });
 
-  it("lists Find and Activity for this conversation as rows that run them, leaving Copy and Download to Share", () => {
+  it("lists Find, Activity and the Inspector for this conversation as rows that run them, leaving Copy and Download to Share", () => {
     const rendered = botTab(makeBot());
-    expect([...rendered.html.matchAll(/data-panel-item="(\w+)"/g)].map((match) => match[1])).toEqual(["find", "activity"]);
+    expect([...rendered.html.matchAll(/data-panel-item="([\w-]+)"/g)].map((match) => match[1])).toEqual(["find", "start-fresh", "activity", "inspector"]);
     expect(rendered.html).toContain(">Find in conversation<");
     const run = (key: string) => (rendered.nodes.find((node) => (node.props.item as { key?: string } | undefined)?.key === key)!.props.item as { onSelect: () => void }).onSelect();
     run("activity");
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "toggleActivity" });
+    run("inspector");
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "toggleInspector" });
   });
 });
 
 describe("the Bot settings page", () => {
-  it("holds Instructions, Before it acts, Backup AIs, Call mode, Apps, Job and Hide, with every title on one edge", () => {
+  it.each(["整理文件。", "整理檔案。"])("migrates the full SOUL while retaining only %s as the description", (first) => {
+    const description = `${first}${"遵守安全要求。".repeat(80)}`;
+    const rendered = capture(() => SoulField({ bot: makeBot({ description, soul: "" }), onPatch: patch }));
+    const migrate = rendered.nodes.find((node) => node.type === "button" && node.props.children === "Move instructions into SOUL.md");
+    expect(migrate).toBeDefined();
+    click(migrate!);
+    expect(patch).toHaveBeenCalledExactlyOnceWith({ soul: description, description: first });
+  });
+
+  it("holds Instructions, Before it acts, Backup AIs, Call mode, Reply style, Notifications, Apps, Job and Hide, with every title on one edge", () => {
     const rendered = settingsPage(makeBot({ defaultBot: {} }));
-    const order = ['data-panel-edit="soul"', 'data-panel-row="approval"', 'data-panel-row="backups"', 'data-panel-row="call-mode"', 'data-panel-page="apps"', 'data-panel-row="job"', 'data-panel-row="default-bot-hide"']
+    const order = ['data-panel-edit="soul"', 'data-panel-row="approval"', 'data-panel-row="backups"', 'data-panel-row="call-mode"', 'data-panel-row="reply-style"',
+      'data-panel-row="notifications"', 'data-panel-page="apps"', 'data-panel-row="job"', 'data-panel-row="default-bot-hide"']
       .map((marker) => rendered.html.indexOf(marker));
     expect(order.every((index) => index > -1)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(switches(rendered.html)).toBe(0);
-    expect(rendered.html.match(/pl-\[38px\]/g)).toHaveLength(4);
+    expect(switches(rendered.html)).toBe(2);
+    expect(rendered.html).toContain('aria-label="Let apps talk to this bot"');
+    expect(rendered.html.match(/pl-\[38px\]/g)).toHaveLength(5);
+    for (const gone of ['data-panel-row="always-allow"', 'data-panel-row="slack"', 'data-panel-page="visibility"']) expect(rendered.html, gone).not.toContain(gone);
+  });
+
+  it("lists what the bot may do without asking under Before it acts, each with a button that takes it off", () => {
+    const rendered = settingsPage(makeBot({ alwaysAllow: ["Bash(git status)", "mcp__linear__list_issues"] }));
+    const html = rendered.html;
+    expect(html.indexOf('data-panel-row="always-allow"')).toBeGreaterThan(html.indexOf('data-panel-row="approval"'));
+    expect(html.indexOf('data-panel-row="always-allow"')).toBeLessThan(html.indexOf('data-panel-row="backups"'));
+    expect(html).toContain(">Always allowed<");
+    expect(html).toContain(">Bash(git status)<");
+    click(find(rendered, "data-panel-action", "always-allow:Bash(git status)"));
+    expect(patch).toHaveBeenLastCalledWith({ alwaysAllow: ["mcp__linear__list_issues"] });
+  });
+
+  it("chooses the reply style from two pills, the hint in each one's tooltip", () => {
+    const style = segment(settingsPage(makeBot()), "data-reply-style");
+    expect(style.options.map((option) => [option.value, option.label])).toEqual([["default", "Default"], ["conversational", "Conversational"]]);
+    expect(style.value).toBe("default");
+    style.onChange("conversational");
+    expect(patch).toHaveBeenLastCalledWith({ replyStyle: "conversational" });
+    expect(segment(settingsPage(makeBot({ replyStyle: "conversational" })), "data-reply-style").value).toBe("conversational");
+  });
+
+  it("turns this bot's notifications off and on, asking the system for permission only when turning them on", async () => {
+    const notify = await import("@/lib/notify");
+    const permission = vi.spyOn(notify, "requestNotificationPermission").mockResolvedValue("granted");
+    try {
+      const row = (bot: Bot) => find(settingsPage(bot), "data-panel-row", "notifications");
+      expect(row(makeBot()).props.checked).toBe(true);
+      (row(makeBot()).props.onChange as () => void)();
+      expect(patch).toHaveBeenLastCalledWith({ notifications: false });
+      expect(permission).not.toHaveBeenCalled();
+      (row(makeBot({ notifications: false })).props.onChange as () => void)();
+      expect(patch).toHaveBeenLastCalledWith({ notifications: true });
+      expect(permission).toHaveBeenCalledOnce();
+    } finally {
+      permission.mockRestore();
+    }
+  });
+
+  it("opens Who can see it for an owner or admin of a self-hosted web workspace, once its config is in, and for nobody on a team", () => {
+    fixture.ownerOrAdmin = true;
+    const visibilityPage = () => renderToStaticMarkup(createElement(PageBody, { page: "visibility", bot: makeBot(), derived: derived() }));
+    expect(has(settingsPage(makeBot()), "data-panel-page", "visibility")).toBe(false);
+    expect(visibilityPage()).toBe("");
+    fixture.storeState = { ...fixture.storeState, config: {} };
+    const rendered = settingsPage(makeBot({ visibility: "admins" }));
+    expect(rowValue(rendered, "visibility")).toBe("Admins only");
+    click(find(rendered, "data-panel-page", "visibility"));
+    expect(onOpen).toHaveBeenLastCalledWith("visibility");
+    expect(rowValue(settingsPage(makeBot()), "visibility")).toBe("Everyone who can sign in");
+    expect(visibilityPage()).toContain("data-bot-visibility");
+    fixture.storeState = { ...fixture.storeState, config: { team: { name: "Acme" } } };
+    expect(has(settingsPage(makeBot()), "data-panel-page", "visibility")).toBe(false);
+    expect(visibilityPage()).toBe("");
+    fixture.storeState = { ...fixture.storeState, config: {} };
+    fixture.ownerOrAdmin = false;
+    expect(has(settingsPage(makeBot()), "data-panel-page", "visibility")).toBe(false);
+  });
+
+  it("links to the bot's own Slack app once it has one", () => {
+    fixture.slackUrl = "https://admin.example.test/bots/scout/slack";
+    const html = settingsPage(makeBot()).html;
+    expect(html).toMatch(/data-panel-row="slack" href="https:\/\/admin\.example\.test\/bots\/scout\/slack" target="_blank" rel="noopener noreferrer"/);
+    expect(html).toContain(">Slack<");
+    expect(html.indexOf('data-panel-row="slack"')).toBeGreaterThan(html.indexOf('data-panel-row="job"'));
+  });
+
+  it("says Sending on your behalf and app access live in Advanced mode, and opens them there", () => {
+    const html = settingsPage(makeBot()).html;
+    expect(html).toContain('data-panel-row="advanced"');
+    expect(html).toContain("Sending on your behalf and app access are set there.");
+    expect(html.indexOf('data-panel-row="advanced"')).toBeGreaterThan(html.indexOf('data-panel-row="job"'));
+    click(find(capture(() => AdvancedSettingsRow()), "data-panel-row", "advanced"));
+    expect(fixture.setAdvanced).toHaveBeenCalledExactlyOnceWith(true);
+    expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "toggleSettings", open: true, section: "permissions" });
   });
 
   it("shows the first line of the instructions, or how to start, and edits them in place with Done", () => {
@@ -675,10 +941,10 @@ describe("the Bot settings page", () => {
     expect(has(drifted, "data-panel-done", "soul")).toBe(false);
   });
 
-  it("offers Ask me first and Just do it with no hint text, and writes either for every conversation", () => {
+  it("offers Ask for approval and Full access, as Advanced mode names them, with no hint text, and writes either for every conversation", () => {
     const rendered = settingsPage(makeBot());
     const acts = segment(rendered, "data-approval-choice");
-    expect(acts.options.map((option) => [option.value, option.label])).toEqual([["ask", "Ask me first"], ["full", "Just do it"]]);
+    expect(acts.options.map((option) => [option.value, option.label])).toEqual([["ask", "Ask for approval"], ["full", "Full access"]]);
     expect(acts.value).toBe("ask");
     for (const hint of ["Checks before changes", "Acts without checking", "Acts, then tells you"]) expect(rendered.html).not.toContain(`>${hint}<`);
     acts.onChange("ask");
@@ -693,12 +959,12 @@ describe("the Bot settings page", () => {
     expect(patch).not.toHaveBeenCalled();
   });
 
-  it.each([["auto", "Decide for me", undefined], ["edits", "Auto-accept edits", undefined], ["custom", "Custom", "Change this in Advanced mode"]] as const)(
+  it.each([["auto", "Approve for me", undefined], ["edits", "Auto-accept edits", undefined], ["custom", "Custom", "Change this in Advanced mode"]] as const)(
     "shows a bot in %s mode as a third, selected pill it cannot pick again, beside the two choices", (mode, label, tooltip) => {
       fixture.derived.approvalMode = mode;
       const rendered = settingsPage(makeBot());
       const acts = segment(rendered, "data-approval-choice");
-      expect(acts.options.map((option) => [option.value, option.label, Boolean(option.disabled)])).toEqual([["ask", "Ask me first", false], ["full", "Just do it", false], [mode, label, true]]);
+      expect(acts.options.map((option) => [option.value, option.label, Boolean(option.disabled)])).toEqual([["ask", "Ask for approval", false], ["full", "Full access", false], [mode, label, true]]);
       expect((acts.options[2] as { tooltip?: string }).tooltip).toBe(tooltip);
       expect(pressed(rendered.html, "data-approval-choice")).toEqual([mode]);
       acts.onChange(mode);
@@ -757,6 +1023,16 @@ describe("the Bot settings page", () => {
     expect(rowValue(settingsPage(makeBot()), "apps")).toBe("Gmail, Slack");
   });
 
+  it("lists the MCP servers the bot can use after its apps, and None yet when there are neither", () => {
+    fixture.mcp.servers = [{ name: "dodopayments-remote", enabled: true }, { name: "linear", enabled: true }, { name: "paused", enabled: false }];
+    expect(rowValue(settingsPage(makeBot()), "apps")).toBe("dodopayments-remote, linear");
+    expect(rowValue(settingsPage(makeBot({ mcpServers: ["linear"] })), "apps")).toBe("linear");
+    fixture.apps = { phase: "ready", connectedSlugs: ["gmail"], apps: [app("gmail", "write")] };
+    expect(rowValue(settingsPage(makeBot({ mcpServers: ["linear"] })), "apps")).toBe("Gmail, linear");
+    fixture.apps = { phase: "ready", apps: [], connectedSlugs: [] };
+    expect(rowValue(settingsPage(makeBot({ mcpServers: [] })), "apps")).toBe("None yet");
+  });
+
   it("edits the bot's job: saved on blur, Enter leaves the field, Escape puts it back", () => {
     const bot = makeBot();
     const job = () => find(settingsPage(bot), "data-panel-job");
@@ -786,17 +1062,17 @@ describe("the Library tab", () => {
     expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
 
-  it("values What it remembers by the notes in MEMORY.md, says Off when memory is off, and opens the memory page", () => {
+  it("shows no count on What it remembers, only Nothing yet when it is empty or Off, and opens the memory page", () => {
     expect(rowValue(library(makeBot()), "memory")).toBeUndefined();
     fixture.memory.docs = [memoryDoc("# Notes\n- Likes short replies\n- Uses Resolve\n- Works nights\n")];
     const rendered = library(makeBot());
-    expect(rowValue(rendered, "memory")).toBe("3 notes");
+    expect(rowValue(rendered, "memory")).toBeUndefined();
     click(find(rendered, "data-panel-page", "memory"));
     expect(onOpen).toHaveBeenLastCalledWith("memory");
-    fixture.memory.docs = [memoryDoc("- One thing\n")];
-    expect(rowValue(library(makeBot()), "memory")).toBe("1 note");
     fixture.memory.docs = [memoryDoc("# Empty\n")];
     expect(rowValue(library(makeBot()), "memory")).toBe("Nothing yet");
+    fixture.memory.thread = { ...memoryDoc("- Acme NDA: two years\n"), path: "memory/threads/t1.md", scoped: true };
+    expect(rowValue(library(makeBot()), "memory")).toBeUndefined();
     expect(rowValue(library(makeBot({ memoryEnabled: false })), "memory")).toBe("Off");
   });
 
@@ -871,10 +1147,34 @@ describe("the Where it works page", () => {
     .map((node) => [node.props["data-panel-choice"], node.props.title, Boolean(node.props.disabled), node.props.checked]);
   const choose = (rendered: Rendered, value: string) => click(find(rendered, "data-panel-choice", value));
 
-  it("offers Let it choose, this computer, the bot's browser and the Cloud desktop, with the chosen one checked", () => {
+  it.each([undefined, "cloud"] as const)("offers the hosted desktop backend for an existing bot kept on %s", (computer) => {
+    fixture.storeState = { ...fixture.storeState, config: { vps: { sshAlias: "fixture-vps" } } };
+    const bot = makeBot({ computer, cloudBackend: "box" });
+    const preference = ofType(where(bot), CloudPreference);
+    expect(preference).toBeDefined();
+    expect(preference!.props).toMatchObject({ bot, patch });
+    expect(where(bot).html).toContain("Self-hosted VPS");
+    const picker = ofType(capture(() => CloudPreference({ bot, patch })), CloudBackendPicker)!;
+    (picker.props.onChange as (backend: string) => void)("vps");
+    expect(patch).toHaveBeenLastCalledWith({ cloudBackend: "vps" });
+    (picker.props.onChange as (backend: string) => void)("box");
+    expect(patch).toHaveBeenLastCalledWith({ cloudBackend: "box" });
+  });
+
+  it.each(["local", "browser", "vm", "off"] as const)("does not offer a hosted backend for a bot kept on %s", (computer) => {
+    expect(where(makeBot({ computer })).html).not.toContain("Self-hosted VPS");
+  });
+
+  it("does not offer a hosted backend on a Cloud home", () => {
+    fixture.storeState = { ...fixture.storeState, config: { cloudHome: true } };
+    expect(where(makeBot()).html).not.toContain("Self-hosted VPS");
+  });
+
+  it("offers Let it choose, this computer, the bot's browser, the Cloud desktop and the private desktop, with the chosen one checked", () => {
     // The tests run on no platform in particular, so this computer is a PC; a Mac says This Mac.
     expect(choices(where(makeBot()))).toEqual([
       ["auto", "Let it choose", false, true], ["local", "This PC", false, false], ["browser", "Browser", false, false], ["cloud", "Cloud desktop", false, false],
+      ["vm", "Private desktop", false, false],
     ]);
     expect(where(makeBot()).html).toContain('role="radiogroup"');
   });
@@ -887,6 +1187,8 @@ describe("the Where it works page", () => {
     expect(patch).toHaveBeenLastCalledWith({ computer: "local" });
     choose(rendered, "browser");
     expect(patch).toHaveBeenLastCalledWith({ computer: "browser", browser: true });
+    choose(rendered, "vm");
+    expect(patch).toHaveBeenLastCalledWith({ computer: "vm" });
     choose(where(makeBot({ computer: "cloud" })), "auto");
     expect(patch).toHaveBeenLastCalledWith({ computer: null });
     patch.mockReset();
@@ -894,10 +1196,10 @@ describe("the Where it works page", () => {
     expect(patch).not.toHaveBeenCalled();
   });
 
-  it.each([["vm", "Private desktop"], ["off", "Off"]] as const)("shows a bot kept on %s as a last, checked choice it cannot pick again", (place, label) => {
-    const rendered = where(makeBot({ computer: place }));
-    expect(choices(rendered).at(-1)).toEqual([place, label, true, true]);
-    choose(rendered, place);
+  it("shows a bot kept Off as a last, checked choice it cannot pick again", () => {
+    const rendered = where(makeBot({ computer: "off" }));
+    expect(choices(rendered).at(-1)).toEqual(["off", "Off", true, true]);
+    choose(rendered, "off");
     expect(patch).not.toHaveBeenCalled();
     choose(rendered, "auto");
     expect(patch).toHaveBeenLastCalledWith({ computer: null });
@@ -907,7 +1209,10 @@ describe("the Where it works page", () => {
     fixture.places.cloud = [true, false, "Not ready"];
     expect(find(where(makeBot()), "data-panel-choice", "cloud").props).toMatchObject({ disabled: true, hint: "Not ready." });
     fixture.places.cloud = [false, false, "Not offered"];
+    fixture.places.vm = [false, false, "Not offered"];
     expect(choices(where(makeBot())).map(([value]) => value)).toEqual(["auto", "local", "browser"]);
+    // A bot already kept on the private desktop still shows it, checked.
+    expect(choices(where(makeBot({ computer: "vm" }))).at(-1)).toEqual(["vm", "Private desktop", true, true]);
     fixture.places.local = [false, false, "Not offered"];
     fixture.places.browser = [false, false, "Not offered"];
     expect(choices(where(makeBot())).map(([value]) => value)).toEqual(["auto"]);
@@ -999,6 +1304,45 @@ describe("the drill-in pages", () => {
     expect(switches(cannot.html)).toBe(0);
   });
 
+  it("lists the MCP servers under the apps with a switch each, that writes the explicit list like Access", () => {
+    fixture.mcp.servers = [{ name: "dodopayments-remote", enabled: true }, { name: "linear", enabled: true }];
+    const rendered = body("apps");
+    expect(rendered.html).toContain("MCP servers");
+    expect(find(rendered, "aria-label", "Scout can use dodopayments-remote").props.checked).toBe(true);
+    click(find(rendered, "aria-label", "Scout can use dodopayments-remote"));
+    expect(patch).toHaveBeenLastCalledWith({ mcpServers: ["linear"] });
+
+    const narrowed = body("apps", makeBot({ mcpServers: ["linear"] }));
+    expect(find(narrowed, "aria-label", "Scout can use dodopayments-remote").props.checked).toBe(false);
+    click(find(narrowed, "aria-label", "Scout can use dodopayments-remote"));
+    expect(patch).toHaveBeenLastCalledWith({ mcpServers: ["linear", "dodopayments-remote"] });
+  });
+
+  it("shows a server that is off everywhere or for this bot as a disabled switch with why, and ignores it while busy", () => {
+    fixture.mcp.servers = [{ name: "paused", enabled: false }, { name: "linear", enabled: true, offFor: ["scout"] }];
+    const rendered = body("apps");
+    expect(find(rendered, "aria-label", "Scout can use paused").props).toMatchObject({ checked: false, disabled: true });
+    expect(rendered.html).toContain("Switched off in Apps");
+    expect(rendered.html).toContain("Off for Scout, because it doesn&#x27;t start for them.");
+    expect(find(rendered, "aria-label", "Scout can use linear").props.disabled).toBe(false);
+
+    const busy = body("apps", makeBot({ busy: true }));
+    expect(find(busy, "aria-label", "Scout can use linear").props.disabled).toBe(true);
+    click(find(busy, "aria-label", "Scout can use linear"));
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it("draws no MCP card while loading or when the bot has no server, and says so when the list cannot load", () => {
+    fixture.mcp = { servers: null, error: false };
+    expect(body("apps").html).not.toContain("MCP servers");
+    fixture.mcp = { servers: [{ name: "theirs", enabled: true, bot: "other" }], error: false };
+    expect(body("apps").html).not.toContain("MCP servers");
+    fixture.mcp = { servers: null, error: true };
+    const failed = body("apps");
+    expect(failed.html).toContain("Could not refresh MCP servers.");
+    expect(switches(failed.html)).toBe(0);
+  });
+
   it("lists routines with switches, adds one locked to this bot, and says to ask in chat; no logs page, no schedules link", () => {
     const morning = routine();
     fixture.derived.botRoutines = [morning];
@@ -1015,41 +1359,29 @@ describe("the drill-in pages", () => {
     expect(ofType(body("routines"), RoutineEditor)!.props).toMatchObject({ lockedBotId: "scout", routine: undefined });
   });
 
-  it("lists what MEMORY.md remembers, forgets one line through the memory file route, and adds one", async () => {
+  it("is MEMORY.md as plain text, with this conversation's notes above it when it keeps them, and nothing else", () => {
     fixture.memory.docs = [memoryDoc("# Notes\n- Likes short replies\n\n- Uses Resolve Studio\n")];
     const rendered = body("memory");
-    expect(rendered.html).toContain("Likes short replies");
-    expect(rendered.html).toContain("Uses Resolve Studio");
-    expect(rendered.html).not.toContain("# Notes");
+    expect(rendered.html).toContain("# Notes\n- Likes short replies\n\n- Uses Resolve Studio");
+    expect(rendered.html).toContain('data-memory-scope="everywhere"');
+    expect(rendered.html).not.toContain('data-memory-scope="thread"');
     expect(switches(rendered.html)).toBe(0);
-    for (const text of ["Tidy now", "Upkeep", "Obsidian", "Daily logs", "Journal"]) expect(rendered.html).not.toContain(text);
-    click(rendered.nodes.filter((node) => node.props.label === "Forget")[0]!);
-    await Promise.resolve();
-    expect(fixture.saveMemory).toHaveBeenLastCalledWith("scout", "MEMORY.md", "# Notes\n\n- Uses Resolve Studio\n", "h1", false);
-    await Promise.resolve();
-    expect(fixture.memory.setDoc).toHaveBeenLastCalledWith(expect.objectContaining({ text: "# Notes\n\n- Uses Resolve Studio\n", hash: "h2" }));
-
-    (find(body("memory"), "data-panel-form", "memory-add").props.onChange as (value: string) => void)("  Prefers the free version ");
-    (find(body("memory"), "data-panel-form", "memory-add").props.onSubmit as () => void)();
-    await Promise.resolve();
-    expect(fixture.saveMemory).toHaveBeenLastCalledWith("scout", "MEMORY.md", "# Notes\n- Likes short replies\n\n- Uses Resolve Studio\n- Prefers the free version\n", "h1", false);
+    for (const text of ["Memory upkeep", "Tidy now", "Obsidian", "Daily logs", "Journal", "Edit as text", "Full window"]) expect(rendered.html).not.toContain(text);
+    expect(has(rendered, "data-panel-form", "memory-add")).toBe(false);
+    fixture.memory.thread = { ...memoryDoc("- Acme NDA: two years\n"), path: "memory/threads/t1.md", scoped: true };
+    const scoped = body("memory").html;
+    expect(scoped.indexOf("This thread")).toBeGreaterThan(-1);
+    expect(scoped.indexOf("This thread")).toBeLessThan(scoped.indexOf("Everywhere"));
+    expect(scoped).toContain("- Acme NDA: two years");
   });
 
-  it("says when memory is off, empty or unreadable, and re-reads on a conflict", async () => {
+  it("says when memory is off, empty or unreadable", () => {
     expect(body("memory", makeBot({ memoryEnabled: false })).html).toContain("Memory is off for Scout.");
-    expect(has(body("memory", makeBot({ memoryEnabled: false })), "data-panel-form", "memory-add")).toBe(false);
+    expect(body("memory", makeBot({ memoryEnabled: false })).html).not.toContain("textarea");
     fixture.memory.docs = [memoryDoc("")];
-    expect(body("memory").html).toContain("Nothing remembered yet.");
+    expect(body("memory").html).toContain("Nothing remembered here yet. Write anything you want it to know.");
     fixture.memory = { ...fixture.memory, docs: null, error: true };
     expect(body("memory").html).toContain("Couldn&#x27;t read the memory file just now.");
-
-    fixture.memory = { ...fixture.memory, docs: [memoryDoc("- Old\n")], error: false };
-    fixture.saveMemory = vi.fn(() => Promise.resolve({ ok: false, conflict: true, current: "- New\n", currentHash: "h3" }));
-    click(find(body("memory"), "label", "Forget"));
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(fixture.memory.reload).toHaveBeenCalled();
-    expect(body("memory").html).toContain("Scout changed this file while you were editing.");
   });
 
   it("switches skills, removes one, adds one from a link and browses the library or skills.sh", async () => {
@@ -1068,7 +1400,12 @@ describe("the drill-in pages", () => {
     await Promise.resolve();
     expect(fixture.skills.refresh).toHaveBeenCalled();
     click(find(rendered, "data-panel-action", "remove-skill:triage"));
-    expect(fixture.skills.putAssignments).toHaveBeenCalledWith("triage", true);
+    expect(fixture.api).toHaveBeenCalledWith("/api/bots/scout/skills/triage", { method: "DELETE" });
+    expect(fixture.skills.putAssignments).not.toHaveBeenCalled();
+    fixture.skills.skills = [skill("pdf", true, "imported"), skill("engine-notes", true, "native")];
+    expect(has(body("skills"), "data-panel-action", "remove-skill:pdf")).toBe(false);
+    expect(has(body("skills"), "data-panel-action", "remove-skill:engine-notes")).toBe(false);
+    fixture.skills.skills = [shared, off];
 
     (find(rendered, "data-panel-form", "skill-import").props.onChange as (value: string) => void)("owner/repo");
     (find(body("skills"), "data-panel-form", "skill-import").props.onSubmit as () => void)();
@@ -1087,6 +1424,14 @@ describe("the drill-in pages", () => {
     expect(row(body("skills"), "skill:summarise").props.disabled).toBe(true);
     fixture.skills.skills = [];
     expect(body("skills").html).toContain("No skills yet.");
+  });
+
+  it("offers the organization's skills on the skills page, and says on Bot settings where an installed bot came from", async () => {
+    const offered = ofType(body("skills"), OrgSkillsCard)!;
+    expect(offered.props.bot).toMatchObject({ id: "scout" });
+    (offered.props.onAdded as () => void)();
+    expect(fixture.skills.refresh).toHaveBeenCalled();
+    expect(ofType(settingsPage(makeBot()), PackageProvenance)?.props.bot).toMatchObject({ id: "scout" });
   });
 
   it("keeps the bot's own private folder, or a folder chosen with the native picker, saved through the bot route", async () => {
@@ -1232,4 +1577,34 @@ describe("the panel's switches", () => {
     expect(html).toContain("background-color:#377FE6");
     expect(Switch).toBeDefined();
   });
+});
+
+describe("the hero while an input method is composing", () => {
+  const hero = (bot: Bot) => capture(() => PanelHero({ bot, activeState: "idle", patch, editorOpen: false, onToggleEditor: vi.fn() }));
+  const composingKey = (node: Node, name: string, nativeEvent: { isComposing: boolean; keyCode: number }) => {
+    const event = { key: name, nativeEvent, preventDefault: vi.fn(), stopPropagation: vi.fn() };
+    (node.props.onKeyDown as (event: unknown) => void)(event);
+    return event;
+  };
+
+  for (const [field, open, input] of [
+    ["name", "data-panel-rename", "data-panel-rename-input"],
+    ["label", "data-panel-label", "data-panel-label-input"],
+  ] as const) {
+    it(`keeps the ${field} field open, and the panel where it is, when Enter or Escape belongs to the input method`, () => {
+      const bot = makeBot();
+      click(find(hero(bot), open));
+      change(find(hero(bot), input), "Ni");
+      for (const nativeEvent of [{ isComposing: true, keyCode: 13 }, { isComposing: false, keyCode: 229 }]) {
+        for (const name of ["Enter", "Escape"]) {
+          const event = composingKey(find(hero(bot), input), name, nativeEvent);
+          expect(event.preventDefault).not.toHaveBeenCalled();
+          // The panel goes back a page on an Escape that reaches it.
+          expect(event.stopPropagation).toHaveBeenCalled();
+        }
+      }
+      expect(patch).not.toHaveBeenCalled();
+      expect(find(hero(bot), input).props.value).toBe("Ni");
+    });
+  }
 });

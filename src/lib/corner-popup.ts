@@ -4,12 +4,12 @@ import type { UpdaterState } from "@/lib/updater";
 import type { AppState } from "@/state/store";
 
 export function cornerPopupWaits(state: AppState, updater: UpdaterState | null,
-  { quiet = false, idle = false, viewer }: { quiet?: boolean; idle?: boolean; viewer?: WelcomeViewer | null } = {}): boolean {
+  { quiet = false, idle = false, viewer, duringFirstChat = false }: { quiet?: boolean; idle?: boolean; viewer?: WelcomeViewer | null; duringFirstChat?: boolean } = {}): boolean {
   const busy = idle && (state.bots.some(bot => bot.busy || bot.tasks?.some(task => task.busy))
     || state.groups.some(group => group.working || group.busyBotId));
   const setup = state.welcomeOpen || state.tourOpen
     || welcomeDue(state.config, { remoteClient: false, legacyDone: emailGateDone(), ...(viewer ? { hosted: viewer.hosted, canSave: viewer.canSave, cloudHome: viewer.cloudHome } : {}) });
-  return !state.connected || !state.config || setup || busy || quiet || firstChatQuiet(state)
+  return !state.connected || !state.config || setup || busy || quiet || (!duringFirstChat && firstChatQuiet(state))
     || state.appSettingsOpen || state.settingsOpen || state.pluginsOpen || state.shortcutsOpen
     || Boolean(updater && (!["idle", "checking"].includes(updater.status) || updater.updated));
 }

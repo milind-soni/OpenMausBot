@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   BotAvatar,
+  InitialsAvatar,
   MausAvatar,
   resolveBotAvatarOutcome,
   type BotAvatarProps,
@@ -24,9 +25,16 @@ describe("MausAvatar body", () => {
     expect(render({})).toContain(MASCOT_BODIES.cursor.fit);
   });
 
-  it("wears the body it is given", () => {
-    const markup = render({ bodyId: "star" });
-    expect(markup).toContain(MASCOT_BODIES.star.fit);
+  it("draws every shape but the cursor with the Open Bot Avatar engine", () => {
+    expect(render({ bodyId: "star" })).toContain('data-object-body="star"');
+    expect(render({ bodyId: "circle" })).toContain('data-object-body="circle"');
+    expect(render({})).not.toContain("data-object-body");
+  });
+
+  it("paints the cursor in a gradient of its custom colour", () => {
+    const stops = (markup: string) => [...markup.matchAll(/stop-color="([^"]+)"/g)].map((m) => m[1]);
+    expect(stops(render({ bodyColor: "#123456" }))).toContain("#123456");
+    expect(stops(render({ bodyColor: "not a colour" }))).not.toContain("not a colour");
   });
 
   it("falls back to the cursor for an unknown body", () => {
@@ -37,8 +45,8 @@ describe("MausAvatar body", () => {
     );
   });
 
-  it("paints the body with the per-bot gradient, never a flat black fill", () => {
-    const markup = render({ bodyId: "circle" });
+  it("paints the cursor with the per-bot gradient, never a flat black fill", () => {
+    const markup = render({});
     expect(markup).not.toContain('fill="#000000"');
     expect(markup).not.toContain("{{GRADIENT}}");
     expect(markup).toContain("url(#");
@@ -48,7 +56,7 @@ describe("MausAvatar body", () => {
 describe("mascot facial feature colors", () => {
   it.each(["white", "black"] as const)("uses %s for both eyes and mouth on every body type", (mascotFaceColor) => {
     const ink = mascotFaceColor === "white" ? "#ffffff" : "#000000";
-    for (const mascotBody of ["cursor", "star", "pumpkin", "vampire"] as const) {
+    for (const mascotBody of ["cursor", "pumpkin", "vampire"] as const) {
       for (const color of ["green", "chrome"] as const) {
         const markup = renderBot({ color, mascotBody, mascotFaceColor });
         expect(markup).toContain(`fill="${ink}"`);
@@ -58,10 +66,12 @@ describe("mascot facial feature colors", () => {
     }
   });
 
-  it("keeps default inks when an override is reset or comes from an older profile", () => {
+  it("cuts the features out of the body when no colour is set", () => {
     expect(renderBot({ color: "chrome", mascotFaceColor: null })).toContain('stroke="#1E2833"');
-    expect(renderBot({ mascotBody: "pumpkin" })).toContain('stroke="#0d0a10"');
-    expect(renderBot({})).toContain('stroke="#ffffff"');
+    for (const markup of [renderBot({ mascotBody: "ghost" }), renderBot({})]) {
+      expect(markup).toContain("<mask");
+      expect(markup).not.toMatch(/stroke="#(?:ffffff|0d0a10)"/);
+    }
   });
 
   it("does not paint features over an uploaded image", () => {
@@ -109,6 +119,21 @@ describe("BotAvatar's two avatar outcomes", () => {
     const markup = renderBot({ avatarUrl: undefined, avatarCrop: "circle" });
     expect(markup).not.toContain("<img");
     expect(markup).toContain("<svg");
+  });
+});
+
+describe("theme hooks on faces", () => {
+  it("marks a bot's picture, its gradient, carved and object mascots, and leaves a decorative mascot unmarked", () => {
+    expect(renderBot({ avatarUrl: "/api/attachments/a.png", avatarCrop: "circle" })).toMatch(/<span data-avatar="picture" data-avatar-kind="bot"/);
+    expect(renderBot({})).toMatch(/<span data-avatar="mascot" data-avatar-kind="bot"/);
+    expect(renderBot({ mascotBody: "ghost" })).toMatch(/<span data-avatar="mascot" data-avatar-kind="bot"/);
+    expect(renderBot({ mascotBody: "obj-ghost" })).toMatch(/<span data-avatar="mascot" data-avatar-kind="bot"/);
+    expect(render({})).not.toContain("data-avatar");
+  });
+
+  it("marks the person's picture and their initials", () => {
+    expect(renderToStaticMarkup(createElement(InitialsAvatar, { initials: "AL", avatarUrl: "/api/attachments/me.png" }))).toMatch(/<img data-avatar="picture" data-avatar-kind="person"/);
+    expect(renderToStaticMarkup(createElement(InitialsAvatar, { initials: "AL" }))).toMatch(/<div data-avatar="initials" data-avatar-kind="person"/);
   });
 });
 

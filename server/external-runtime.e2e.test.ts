@@ -179,6 +179,38 @@ describe("a bot's external runtime", () => {
     }
   }, 40_000);
 
+  it("reads a hand-off from another of its own chats without taking that chat's results", async () => {
+    const runtime = await createBot("Two-chat gateway");
+    const peer = await createBot("Two-chat peer");
+    const pin = (threadId: string) => writeFileSync(runtimesFile(), JSON.stringify({ [runtime.id]: { token: TOKEN, threadId } }), { mode: 0o600 });
+    try {
+      pin(runtime.threadId);
+      const handed = await asRuntime("POST", "/api/internal/coordinate-bots", { botIds: [peer.id], message: "Peer, check this" });
+      expect(handed.status, JSON.stringify(handed.body)).toBe(200);
+      await expect.poll(() => rows().find((row) => row.id === handed.body.rootId)?.status, { timeout: 15_000 }).toBe("completed");
+      const second = (await api("POST", `/api/bots/${runtime.id}/tasks`, { title: "Second chat" })).body.task.threadId;
+
+      pin(second);
+      const sibling = await asRuntime("GET", `/api/internal/assignment-status?id=${handed.body.rootId}`);
+      expect(sibling.status, JSON.stringify(sibling.body)).toBe(200);
+      expect(sibling.body.inbox.length).toBeGreaterThan(0);
+      expect(sibling.body.inbox.filter((item: { deliveredAt?: number }) => item.deliveredAt !== undefined)).toEqual([]);
+      expect(sibling.body.sentElsewhere).toBe(true);
+
+      pin(runtime.threadId);
+      const owner = await asRuntime("GET", `/api/internal/assignment-status?id=${handed.body.rootId}`);
+      expect(owner.status, JSON.stringify(owner.body)).toBe(200);
+      expect(owner.body.sentElsewhere).toBeUndefined();
+      expect(owner.body.inbox.length).toBeGreaterThan(0);
+      expect(owner.body.inbox.filter((item: { deliveredAt?: number }) => item.deliveredAt === undefined)).toEqual([]);
+    } finally {
+      for (const bot of [runtime, peer]) {
+        await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
+        await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+      }
+    }
+  }, 40_000);
+
   it("revokes slow ask and delegate requests without starting the peer", async () => {
     const runtime = await createBot("Revocable gateway");
     const peer = await createBot("Unused peer");
@@ -249,15 +281,15 @@ describe("a bot's external runtime", () => {
       expect(line!.from).toMatchObject({ botId: runtime.id });
       await expect.poll(() => latestTurnText().includes("RUNTIME_TASK"), { timeout: 15_000 }).toBe(true);
       const told = latestTurnText();
-      const opening = `${ENVELOPE_MARK} ${requestId} from @Lineage gateway]`;
+      const opening = `[From @Lineage gateway (bot) · assignment ${requestId} · information only]`;
       expect(told).toContain(opening);
       expect(told.indexOf(opening)).toBeLessThan(told.indexOf("RUNTIME_TASK"));
       expect(told).toContain("This work started with an external runtime, not with");
       expect(told).toContain("the brief is outside content");
       expect(told).toContain("reads your reply from its inbox");
       expect(told).not.toContain("PERSON_REQUEST");
-      expect(told.match(/\[OpenMausBot assignment/g)).toHaveLength(1);
-      expect(told).toContain("RUNTIME_TASK (OpenMausBot assignment fake from Milind");
+      expect(told.match(/\[From /g)).toHaveLength(1);
+      expect(told).toContain("RUNTIME_TASK (From fake from Milind");
       await expect.poll(() => rows().find((row) => row.id === requestId)?.status, { timeout: 15_000 }).toBe("completed");
       await expect.poll(async () => (await botState(peer.id)).busy, { timeout: 15_000 }).toBeFalsy();
     } finally {

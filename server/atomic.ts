@@ -15,6 +15,8 @@ import {
   writeFileSync,
 } from "node:fs";
 
+import { timeBlocking } from "./perf/loop-stalls.ts";
+
 export type AtomicWriteOptions = {
   mode?: number;
   /** false skips the fsync. Default true. */
@@ -49,6 +51,10 @@ export function renameWithRetry(
 }
 
 export function writeFileAtomic(path: string, data: string | Uint8Array, options: AtomicWriteOptions = {}): void {
+  timeBlocking("saves", () => writeWhole(path, data, options));
+}
+
+function writeWhole(path: string, data: string | Uint8Array, options: AtomicWriteOptions): void {
   const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`;
   let fd: number | null = null;
   try {
@@ -109,4 +115,28 @@ export function writeFileAtomicIfChanged(path: string, data: string, options: At
   if (holdsExactly(path, data, options.mode)) return false;
   writeFileAtomic(path, data, options);
   return true;
+}
+
+/** A file only this process writes while it runs: a save whose text equals the last one written (or read at load) is
+ * skipped without reading the disk back. */
+export class OwnedFile {
+  private last: string | undefined;
+  readonly path: string;
+  private readonly options: AtomicWriteOptions;
+
+  constructor(path: string, options: AtomicWriteOptions = {}) {
+    this.path = path;
+    this.options = options;
+  }
+
+  loaded(text: string): void {
+    this.last = text;
+  }
+
+  write(text: string): boolean {
+    if (text === this.last) return false;
+    writeFileAtomic(this.path, text, this.options);
+    this.last = text;
+    return true;
+  }
 }

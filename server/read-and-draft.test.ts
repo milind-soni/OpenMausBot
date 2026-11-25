@@ -28,11 +28,16 @@ describe("what a read-and-draft run may do through the connected-apps relay", ()
   it("reads Gmail and Calendar, describes tools, and nothing else", () => {
     const never = () => false;
     expect(refusedConnectorCall(call("GMAIL_FETCH_EMAILS"), never)).toBeNull();
+    expect(refusedConnectorCall(call("OUTLOOK_LIST_MESSAGES"), never)).toBeNull();
+    expect(refusedConnectorCall(call("OUTLOOK_GET_MESSAGE"), never)).toBeNull();
     expect(refusedConnectorCall(call("GOOGLECALENDAR_EVENTS_LIST"), never)).toBeNull();
     expect(refusedConnectorCall({ method: "tools/call", params: { name: "COMPOSIO_SEARCH_TOOLS", arguments: {} } }, never)).toBeNull();
     expect(refusedConnectorCall({ method: "initialize" }, never)).toBeNull();
     expect(refusedConnectorCall(call("GMAIL_SEND_EMAIL"), never)).toBe("GMAIL_SEND_EMAIL");
     expect(refusedConnectorCall(call("GMAIL_DELETE_MESSAGE"), never)).toBe("GMAIL_DELETE_MESSAGE");
+    expect(refusedConnectorCall(call("OUTLOOK_SEND_EMAIL"), never)).toBe("OUTLOOK_SEND_EMAIL");
+    expect(refusedConnectorCall(call("OUTLOOK_DELETE_MESSAGE"), never)).toBe("OUTLOOK_DELETE_MESSAGE");
+    expect(refusedConnectorCall(call("OUTLOOK_REPLY_EMAIL"), never)).toBe("OUTLOOK_REPLY_EMAIL");
     expect(refusedConnectorCall(call("GOOGLECALENDAR_CREATE_EVENT"), never)).toBe("GOOGLECALENDAR_CREATE_EVENT");
     expect(refusedConnectorCall(call("SLACK_FETCH_CONVERSATION_HISTORY"), never)).toBe("SLACK_FETCH_CONVERSATION_HISTORY");
     expect(refusedConnectorCall({ method: "tools/call", params: { name: "COMPOSIO_REMOTE_WORKBENCH", arguments: { code: "x" } } }, never)).toBe("COMPOSIO_PROXY_EXECUTE");

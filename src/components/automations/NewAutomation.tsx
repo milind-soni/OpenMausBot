@@ -4,8 +4,10 @@ import { AppWindow, CalendarClock, Send, Share2, X } from "lucide-react";
 import { useModalDialog } from "@/hooks/use-modal-dialog";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { useStore, type Bot } from "@/state/store";
+import { imeComposing } from "@/lib/send-key";
+import { type Bot } from "@/state/store";
 import { Select } from "../Select";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 export type SetUpKind = "schedule" | "webhook" | "app";
 
@@ -24,7 +26,7 @@ export function NewAutomation({ initialText = "", onClose, onSetUpYourself }: {
   /** The bot this box would have asked, so the editor starts with it chosen. */
   onSetUpYourself: (kind: SetUpKind, botId: string) => void;
 }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ bots: s.bots, selectedId: s.selectedId }), sameFields), dispatch = useStoreDispatch();
   const bots = state.bots.filter((bot) => !bot.hidden);
   const [text, setText] = useState(initialText);
   const [botId, setBotId] = useState(() => defaultBot(bots, state.selectedId)?.id ?? "");
@@ -71,7 +73,7 @@ export function NewAutomation({ initialText = "", onClose, onSetUpYourself }: {
         ) : (
           <>
             <textarea autoFocus value={text} onChange={(event) => setText(event.target.value)} rows={3} aria-label={t("automations.newBox.title")} placeholder={t("automations.newBox.placeholder")}
-              onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); } }}
+              onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !imeComposing(event.nativeEvent)) { event.preventDefault(); send(); } }}
               className="mt-4 w-full resize-none rounded-xl border border-hairline/60 bg-inset px-3.5 py-3 text-[14px] leading-relaxed text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/70" />
             {bots.length === 0 && <p className="mt-2 text-[13px] text-warning">{t("automations.newBox.noBots")}</p>}
             {bots.length > 1 && (

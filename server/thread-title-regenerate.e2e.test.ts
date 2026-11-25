@@ -48,7 +48,6 @@ beforeAll(async () => {
   titleFile = join(home, "title.txt");
   titleDump = join(home, "title-dump.json");
   writeFileSync(join(data, "config.json"), JSON.stringify({
-    features: { llmThreadTitles: true },
     instances: {
       titled: {
         driver: "claudeAgent", displayName: "Titled fixture", config: { cli: FAKE_CLAUDE },
@@ -93,10 +92,6 @@ afterAll(async () => {
 describe("Regenerate title", { timeout: 60_000 }, () => {
   let botId = "";
   let threadId = "";
-
-  it("offers itself through the config only while generated titles are on", async () => {
-    expect((await api("GET", "/api/config")).body.features.llmThreadTitles).toBe(true);
-  });
 
   it("names a renamed thread from its recent conversation, without tool output", async () => {
     const bot = (await api("POST", "/api/bots", {
@@ -147,14 +142,5 @@ describe("Regenerate title", { timeout: 60_000 }, () => {
     expect(empty.status).toBe(409);
     expect(empty.body.error).toMatch(/no messages/);
     expect((await api("POST", `/api/bots/${botId}/tasks/no-such-thread/title`)).status).toBe(404);
-  });
-
-  it("is refused once generated titles are switched off", async () => {
-    expect((await api("PATCH", "/api/config", { features: { llmThreadTitles: false } })).status).toBe(200);
-    expect((await api("GET", "/api/config")).body.features.llmThreadTitles).toBe(false);
-    writeFileSync(titleFile, "Anything at all");
-    const off = await api("POST", `/api/bots/${botId}/tasks/${threadId}/title`);
-    expect(off.status).toBe(409);
-    expect(await taskTitle(botId, threadId)).toBe("Session expiry login hang");
   });
 });

@@ -1,4 +1,5 @@
 import type { AppConfig } from "./config.ts";
+import { usableLiveKey } from "./live-config.ts";
 
 /** Security: a hint is the last four characters of a key long enough that four reveal nothing useful, and only admins
  * receive one; withoutKeyHints() takes every hint off what a client session is sent. */
@@ -17,12 +18,15 @@ export function nestedKeyStatus(cfg: AppConfig) {
   return {
     ttsKey: keyStatus(cfg.tts?.key),
     fishAudioKey: keyStatus(cfg.tts?.fishKey),
+    geminiTtsKey: keyStatus(cfg.tts?.geminiKey),
     jevApiKey: keyStatus(cfg.decider?.key),
     openrouterDeciderKey: keyStatus(cfg.decider?.openrouterKey),
     workersAiToken: keyStatus(cfg.decider?.workersAiToken),
+    customDeciderKey: keyStatus(cfg.decider?.customKey),
     openaiImageApiKey: keyStatus(cfg.imageGen?.key),
     customImageApiKey: keyStatus(cfg.imageGen?.customApiKey),
-    openaiLiveKey: keyStatus(cfg.live?.key),
+    geminiImageApiKey: keyStatus(cfg.imageGen?.geminiKey),
+    openaiLiveKey: keyStatus(usableLiveKey(cfg.live)),
   };
 }
 

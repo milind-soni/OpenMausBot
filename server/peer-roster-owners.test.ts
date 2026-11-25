@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
-import { escalationDeliverable } from "./escalations.ts";
 import { chiefForBot } from "./incidents.ts";
 import { canManage, canReach, hasAuthority, reachablePeers } from "./peer-roster.ts";
 
@@ -37,11 +36,9 @@ describe("one Chief per person on a Team Cloud", () => {
     expect(canManage(bot("bob-chief"), bot("fox"))).toBe(true);
   });
 
-  it("gets its own person's incidents and escalations, never another person's", () => {
+  it("gets its own person's incidents, never another person's", () => {
     expect(chiefForBot(team, bot("fox"))?.id).toBe("bob-chief");
     expect(chiefForBot(team, bot("lead"))?.id).toBe("ada-chief");
-    expect(escalationDeliverable(bot("ada-chief"), bot("fox"))).toBe(false);
-    expect(escalationDeliverable(bot("ada-chief"), bot("lead"))).toBe(true);
     // A person with no Chief: their bot's notices go to them, not to someone else's Chief.
     expect(chiefForBot(team, { id: "x", name: "X", section: "Product A", createdBy: "cleo@acme.test" })).toBeNull();
   });

@@ -10,7 +10,10 @@ import { parseToolScope } from "../shared/tool-scope.ts";
 
 import { bridgedCallName } from "./agents-bridge-names.ts";
 import { TOOL_BRIDGE_ENV } from "./drivers/agents-bridge.ts";
-import { claudeCliSupports, parseClaudeCliVersion } from "./drivers/claude.ts";
+import { decodeInjectId } from "./drivers/local-inject.ts";
+import { onThisNetwork } from "./drivers/openai-compat.ts";
+import { claudeCliSupports, parseClaudeCliVersion, resolveClaudeConfigDir } from "./drivers/claude.ts";
+import { claudeToolSearchOn, claudeToolSearchSetting } from "./drivers/claude-tool-search.ts";
 import { AGENTS_NODE_FLAG, SPAWNED_PROXIES } from "./proxy-paths.ts";
 
 export { TOOL_BRIDGE_ENV };
@@ -25,12 +28,22 @@ export const AGENTS_PROXY_ENV = { ...AGENTS_NODE_FLAG, [TOOL_BRIDGE_ENV]: "0" } 
 type BridgeConfig = { features?: { agentsToolBridge?: boolean; claudeUserMcp?: boolean } };
 
 /** The workspace switch: `{"features": {"agentsToolBridge": true}}` in ~/.openmausbot/config.json, or
- * OMB_AGENTS_TOOL_BRIDGE set to exactly "1" or "0", which wins over the saved setting. */
+ * OMB_AGENTS_TOOL_BRIDGE set to exactly "1" or "0", which wins over the saved setting. Either way a Claude turn whose tool
+ * search is on is not bridged (agentsToolBridgeRefusal); ENABLE_TOOL_SEARCH=false in the instance's environment restores it. */
 export function agentsToolBridgeEnabled(cfg: BridgeConfig, env: NodeJS.ProcessEnv = process.env): boolean {
   const override = env[TOOL_BRIDGE_ENV];
   if (override === "1") return true;
   if (override === "0") return false;
   return cfg.features?.agentsToolBridge === true;
+}
+
+/** A model on this machine or network reads the whole list on every turn, out of a small window and at laptop speed:
+ * about 15,000 tokens before the person has said anything. OMB_AGENTS_TOOL_BRIDGE=0 still wins. */
+function runsLocalModel(bot: { modelSelection?: { model?: unknown } } | null | undefined, engine: BridgeEngine | null | undefined): boolean {
+  const model = bot?.modelSelection?.model;
+  if (typeof model === "string" && decodeInjectId(model)) return true;
+  const url = (engine?.config as { url?: unknown } | undefined)?.url;
+  return engine?.driverKind === "openai-compat" && typeof url === "string" && onThisNetwork(url);
 }
 
 /** The engine a turn runs on, as far as the decision reads it. */
@@ -69,7 +82,7 @@ export interface EngineHost {
   managedPolicyFiles: readonly string[];
 }
 
-const CHAT_RUNTIME_DRIVERS: ReadonlySet<string> = new Set(["cerebras", "greenference", "grok", "groq", "meta", "minimax", "mistral", "openai-compat"]);
+const CHAT_RUNTIME_DRIVERS: ReadonlySet<string> = new Set(["cerebras", "greenference", "modelgo", "grok", "groq", "meta", "minimax", "mistral", "openai-compat"]);
 
 /** Whether text may name the agents server: it contains `mcp__agents` (a server merely starting so counts
  * too) or `mcp__` then a wildcard. Security: plain substring tests; no pattern is ever built from config text. */
@@ -260,18 +273,31 @@ export function engineBridgeRefusal(
   return "this engine keeps its own tool permissions";
 }
 
+/** Whether a Claude turn on `engine` runs with tool search, so the agents server sends only a few tools whole and the rest as
+ * names (claudeAgentsMount): fewer bytes than the bridge's own two tools and its prompt sentence, and every tool keeps its
+ * own name. Read as the driver reads it, from the launch folder's settings, the person's own and the environment. */
+function claudeDefersAgentsTools(engine: BridgeEngine | null | undefined, env: NodeJS.ProcessEnv, host: EngineHost = { home: homedir(), managedPolicyFiles: [] }): boolean {
+  if (engine?.driverKind !== "claudeAgent") return false;
+  const configDir = (engine.config as { configDir?: unknown } | undefined)?.configDir;
+  const turnEnv: NodeJS.ProcessEnv = { ...env, ...engine.environment, HOME: host.home };
+  if (typeof configDir === "string" && configDir.trim()) turnEnv.CLAUDE_CONFIG_DIR = resolveClaudeConfigDir(configDir, turnEnv);
+  return claudeToolSearchOn(claudeToolSearchSetting(engine.cwd ?? host.home, turnEnv));
+}
+
 /** Why a turn of `bot` on `engine` is not bridged, or null: the one decision. Security: anything thrown
  * means no bridge, and the log names only the error's class and code, never its message (it may hold a
  * path or file content). */
 export function agentsToolBridgeRefusal(
   cfg: BridgeConfig,
-  bot: { toolScope?: unknown } | null | undefined,
+  bot: { toolScope?: unknown; modelSelection?: { model?: unknown } } | null | undefined,
   engine: BridgeEngine | null | undefined,
   env: NodeJS.ProcessEnv = process.env,
   host?: EngineHost,
 ): string | null {
   try {
-    if (!agentsToolBridgeEnabled(cfg, env)) return "the switch is off";
+    const localModel = runsLocalModel(bot, engine);
+    if (!agentsToolBridgeEnabled(cfg, env) && (env[TOOL_BRIDGE_ENV] === "0" || !localModel)) return "the switch is off";
+    if (!localModel && claudeDefersAgentsTools(engine, env, host)) return "Claude Code defers the agents tools on this turn";
     // Security: selection gates match the name in the call, so any selection, even one that permits
     // everything or cannot be read, means no bridge.
     const selection = bot ? parseToolScope(bot.toolScope) : undefined;
@@ -299,7 +325,7 @@ function logWord(read: () => unknown, absent = false): string | null {
 /** The decision as the agents proxy's environment entry: "1" or "0", never left out. */
 export function agentsToolBridgeEnv(
   cfg: BridgeConfig,
-  bot: { toolScope?: unknown } | null | undefined,
+  bot: { toolScope?: unknown; modelSelection?: { model?: unknown } } | null | undefined,
   engine: BridgeEngine | null | undefined,
   env: NodeJS.ProcessEnv = process.env,
   host?: EngineHost,
@@ -319,7 +345,7 @@ export function bridgedAgents<Agents extends { env: Record<string, string> }>(
   threadId: string,
   agents: Agents | undefined,
   cfg: BridgeConfig,
-  bot: { toolScope?: unknown } | null | undefined,
+  bot: { toolScope?: unknown; modelSelection?: { model?: unknown } } | null | undefined,
   engine: BridgeEngine | null | undefined,
   env?: NodeJS.ProcessEnv,
   host?: EngineHost,
@@ -340,7 +366,7 @@ export function applyAgentsBridge<Agents extends { env: Record<string, string> }
   threadId: string,
   integrations: { agents?: Agents },
   cfg: BridgeConfig,
-  bot: { toolScope?: unknown } | null | undefined,
+  bot: { toolScope?: unknown; modelSelection?: { model?: unknown } } | null | undefined,
   engine: BridgeEngine | null | undefined,
   env?: NodeJS.ProcessEnv,
   host?: EngineHost,

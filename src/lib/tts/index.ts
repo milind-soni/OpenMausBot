@@ -2,6 +2,10 @@
 
 import { localSystemVoiceActive, remoteSystemVoice, resolveLocalSystemVoice } from "@/lib/local-voice";
 import { recordBlockTiming, recordPrepared, recordSpeakEnter } from "../voice-latency-probe";
+import { t, tFromServer } from "@/lib/i18n";
+import { serverErrorText } from "@/lib/server-error";
+import type { ServerErrorBody } from "../../../shared/server-text";
+import { serverFetch } from "../relay-server";
 
 export type SpeechStatus = "idle" | "preparing" | "speaking";
 
@@ -39,8 +43,8 @@ export interface SpeechStream {
   fail(error: string): void;
 }
 
-type TtsPrepareBody = { ready?: boolean; utterances?: string[]; error?: string };
-type TtsErrorBody = { error?: string };
+type TtsErrorBody = Partial<ServerErrorBody>;
+type TtsPrepareBody = TtsErrorBody & { ready?: boolean; utterances?: string[] };
 
 const IDLE: SpeechSnapshot = { status: "idle" };
 const PREFETCH_WINDOW = 3;
@@ -212,16 +216,22 @@ export class Speaker {
         (error: unknown) => ({ error }),
       );
     };
+    // Renders not yet played, oldest first; the block playing now still holds its place in the window.
+    const queued: Promise<Rendered>[] = [];
+    let started = 0;
+    const fill = () => {
+      while (queued.length < PREFETCH_WINDOW && started < pending.length) {
+        queued.push(render(pending[started]!, started));
+        started += 1;
+      }
+    };
     const run = async (): Promise<void> => {
-      const inFlight: Promise<Rendered>[] = [];
-      let index = 0;
+      let at = 0;
       let playedAll = false;
       for (;;) {
-        while (inFlight.length < PREFETCH_WINDOW && index + inFlight.length < pending.length) {
-          const block = index + inFlight.length;
-          inFlight.push(render(pending[block]!, block));
-        }
-        if (!inFlight.length) {
+        fill();
+        const next = queued[0];
+        if (!next) {
           if (closed || !live()) {
             playedAll = closed;
             break;
@@ -230,10 +240,7 @@ export class Speaker {
           wake = null;
           continue;
         }
-        const current = inFlight.shift()!;
-        const at = index;
-        index += 1;
-        const rendered = await current;
+        const rendered = await next;
         if ("error" in rendered) {
           if (live()) {
             this.set({ ...IDLE, error: rendered.error instanceof Error ? rendered.error.message : String(rendered.error) });
@@ -248,10 +255,12 @@ export class Speaker {
         this.set({ status: "speaking", botId: opts.botId, messageId: opts.messageId, caption: pending[at]! });
         const played = await this.play(rendered.blob, live, opts.messageId, at);
         if (!played || !live()) {
-          if (live()) this.set({ ...IDLE, error: "The generated voice clip couldn't be played." });
+          if (live()) this.set({ ...IDLE, error: t("voice.error.clip") });
           controller.abort();
           return;
         }
+        queued.shift();
+        at += 1;
       }
       if (playedAll && live() && !finished) this.set(IDLE);
       if (this.request === controller) this.request = null;
@@ -259,11 +268,13 @@ export class Speaker {
     const kick = () => {
       if (finished) return;
       wake?.();
-      if (running || (!pending.length && !closed)) return;
-      // A microtask lets one batch of pushes fill the prefetch window before
-      // the first render starts, the way the whole-text path always did.
+      if (running) {
+        if (live()) fill();
+        return;
+      }
+      if (!pending.length && !closed) return;
       running = true;
-      void Promise.resolve().then(run).finally(() => {
+      void run().finally(() => {
         running = false;
         finish();
       });
@@ -346,33 +357,33 @@ export class Speaker {
       utterance.onend = () => finish(true);
       utterance.onerror = (event) => {
         const interrupted = event.error === "canceled" || event.error === "interrupted";
-        finish(false, interrupted ? undefined : "This Mac could not play its selected voice.");
+        finish(false, interrupted ? undefined : t("voice.error.macPlay"));
       };
       try {
         synth.speak(utterance);
       } catch {
-        finish(false, "This Mac could not start its selected voice.");
+        finish(false, t("voice.error.macStart"));
       }
     });
   }
 
   private async prepare(text: string, voiceId: string | undefined, signal: AbortSignal): Promise<string[]> {
-    const res = await fetch("/api/tts/prepare", {
+    const res = await serverFetch("/api/tts/prepare", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ text, voiceId }),
       signal,
     });
     const body: TtsPrepareBody = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error ?? `the voice service returned ${res.status}`);
+    if (!res.ok) throw new Error(serverErrorText(body, body.error ?? t("voice.error.service", { status: res.status })));
     if (!body.ready) {
-      throw new Error("Set up a voice provider in an agent profile on this computer, then pick a voice for the agent.");
+      throw new Error(t("voice.error.notReady"));
     }
     return body.utterances ?? [];
   }
 
   private async render(text: string, voiceId: string | undefined, signal: AbortSignal): Promise<Blob> {
-    const res = await fetch("/api/tts/speak", {
+    const res = await serverFetch("/api/tts/speak", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ text, voiceId }),
@@ -380,7 +391,9 @@ export class Speaker {
     });
     if (!res.ok) {
       const body: TtsErrorBody = await res.json().catch(() => ({}));
-      throw new Error(body.error ?? `the voice service returned ${res.status}`);
+      // OpenAI readout names its refusal with a voice.openai.error.* key; any other key that isn't a serverError.* is not ours to show.
+      const voiceKey = body.errorKey?.startsWith("voice.openai.error.") ? body.errorKey : undefined;
+      throw new Error(serverErrorText(body, tFromServer(voiceKey, body.error) ?? t("voice.error.service", { status: res.status })));
     }
     return res.blob();
   }

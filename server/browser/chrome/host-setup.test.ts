@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { removeTempDir } from "../../testing/cleanup.ts";
-import { appArmorProfile, BrowserHostError, diagnoseLaunchFailure, missingLibraries, sandboxBlocked, sandboxDisabled, USERNS_RESTRICTION } from "./host-setup.ts";
+import { appArmorProfile, BrowserHostError, diagnoseLaunchFailure, hostSetupOf, LIBRARIES_COMMAND, missingLibraries, SANDBOX_STEPS_URL, sandboxBlocked, sandboxDisabled, USERNS_RESTRICTION } from "./host-setup.ts";
 
 const folders: string[] = [];
 afterAll(async () => { for (const folder of folders) await removeTempDir(folder); });
@@ -18,13 +18,44 @@ describe("host setup", () => {
   });
 
   it("names the sandbox when Chrome says it has none, and never turns it off by itself", async () => {
-    const diagnosis = await diagnoseLaunchFailure({ executable: "/opt/chrome", output: "[0101/000000.000:FATAL:zygote_host_impl_linux.cc] No usable sandbox! ...", platform: "darwin" });
+    const diagnosis = await diagnoseLaunchFailure({ executable: "/opt/chrome", output: "[0101/000000.000:FATAL:zygote_host_impl_linux.cc] No usable sandbox! ...", platform: "darwin", exists: () => false });
     expect(diagnosis).toBeInstanceOf(BrowserHostError);
     expect(diagnosis?.kind).toBe("sandbox");
-    expect(diagnosis?.message).toMatch(/openmausbot browser setup/);
+    expect(diagnosis?.message).toContain(SANDBOX_STEPS_URL);
+    expect(diagnosis?.message).not.toMatch(/browser setup/);
+    // The linked steps exist, and the viewer offers the same link and command.
+    expect(readFileSync(new URL("../../../docs/deploy-vps.md", import.meta.url), "utf8")).toMatch(/^### Ubuntu 24\.04 browser sandbox$/m);
+    expect(SANDBOX_STEPS_URL.endsWith("/docs/deploy-vps.md#ubuntu-2404-browser-sandbox")).toBe(true);
+    const viewer = readFileSync(new URL("../../../src/lib/browser-stream-client.ts", import.meta.url), "utf8");
+    expect(viewer).toContain(`"${SANDBOX_STEPS_URL}"`);
+    expect(viewer).toContain(`"${LIBRARIES_COMMAND}"`);
+    expect(LIBRARIES_COMMAND).toBe("sudo openmausbot browser install --with-deps");
+    expect(new BrowserHostError("libraries", ["libnss3.so"]).message).toContain(LIBRARIES_COMMAND);
     expect(await diagnoseLaunchFailure({ executable: "/opt/chrome", output: "something else", platform: "darwin" })).toBeNull();
     expect(sandboxDisabled({})).toBe(false);
     expect(sandboxDisabled({ OMB_BROWSER_SANDBOX: "0" })).toBe(true);
+  });
+
+  it("tells a container's operator how to run the browser without Chrome's sandbox, which cannot start there", async () => {
+    const outputs = [
+      // What Chrome prints as root, as in most containers (Railway, Docker's default user).
+      "[1:1:1115/103658.971532:ERROR:content/browser/zygote_host/zygote_host_impl_linux.cc:101] Running as root without --no-sandbox is not supported. See https://crbug.com/638180.",
+      "[0101/000000.000:FATAL:zygote_host_impl_linux.cc] No usable sandbox! ...",
+      "Failed to move to new namespace: PID namespaces supported, Network namespace supported, but failed: errno = Operation not permitted",
+    ];
+    const inContainer = (path: string) => path === "/.dockerenv";
+    for (const output of outputs) {
+      const diagnosis = await diagnoseLaunchFailure({ executable: "/opt/chrome", output, platform: "darwin", exists: inContainer });
+      expect(diagnosis?.kind).toBe("container");
+      expect(diagnosis?.message).toBe("Chrome's sandbox can't start in this container. The operator can set OMB_BROWSER_SANDBOX=0 to run the browser without it and rely on the container's isolation, then restart OpenMausBot.");
+    }
+    // Root needs no container marker; a sandbox the host blocks elsewhere keeps the AppArmor steps.
+    expect((await diagnoseLaunchFailure({ executable: "/opt/chrome", output: outputs[0]!, platform: "darwin", exists: () => false }))?.kind).toBe("container");
+    expect((await diagnoseLaunchFailure({ executable: "/opt/chrome", output: outputs[1]!, platform: "darwin", exists: () => false }))?.kind).toBe("sandbox");
+    // The diagnosis is found behind the errors that carry it to a viewer.
+    const host = new BrowserHostError("container");
+    expect(hostSetupOf(new Error("Chrome could not be started", { cause: new Error("launch", { cause: host }) }))).toBe(host);
+    expect(hostSetupOf(new Error("Chrome could not be started"))).toBeNull();
   });
 
   it.skipIf(process.platform === "win32")("asks the browser's own loader which libraries are missing, in the environment the browser launched with", async () => {

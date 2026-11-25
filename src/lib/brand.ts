@@ -1,3 +1,4 @@
+import { serverFetch } from "./relay-server";
 export interface Brand {
   name: string;
   tagline?: string;
@@ -107,7 +108,7 @@ function isBrandStatus(value: unknown): value is BrandStatus {
   return Boolean(v) && typeof v === "object" && typeof Reflect.get(Object(v), "name") === "string";
 }
 
-export async function bootstrapBrand(fetchImpl: typeof fetch = fetch, timeoutMs = 1500): Promise<BrandStatus> {
+export async function bootstrapBrand(fetchImpl: typeof serverFetch = serverFetch, timeoutMs = 1500): Promise<BrandStatus> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {

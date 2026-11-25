@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative } from "node:path";
 import { promisify } from "node:util";
 
-import { BROWSER_UPLOAD_MAX_BYTES, FILE_MAX_BYTES } from "../shared/upload-limits.ts";
+import { BROWSER_UPLOAD_MAX_BYTES, FILE_MAX_BYTES, limitMegabytes } from "../shared/upload-limits.ts";
 import { safeFileName } from "./browser/cdp/downloads.ts";
 import { inSecretFolder, SECRET_FILE_REFUSAL } from "./secret-folder.ts";
 
@@ -93,7 +93,7 @@ function openUpload(source: string): { input: number; size: number } {
     if (process.platform === "linux" && readlinkSync(`/proc/self/fd/${input}`) !== source) throw new BrowserUploadRefusal(`${source} changed while staging the upload.`);
     const file = fstatSync(input, { bigint: true });
     if (!file.isFile()) throw new BrowserUploadRefusal(`${source} is not a file.`);
-    if (file.size > BigInt(FILE_MAX_BYTES)) throw new BrowserUploadRefusal("Uploads are limited to 25 MiB per file.");
+    if (file.size > BigInt(FILE_MAX_BYTES)) throw new BrowserUploadRefusal(`Uploads are limited to ${limitMegabytes(FILE_MAX_BYTES)} MiB per file.`);
     return { input, size: Number(file.size) };
   } catch (error) {
     closeSync(input);

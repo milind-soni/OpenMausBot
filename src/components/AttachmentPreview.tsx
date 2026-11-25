@@ -15,6 +15,7 @@ import {
   ChevronRight,
   Download,
   ExternalLink,
+  Eye,
   FileText,
   FolderOpen,
   ImageOff,
@@ -32,7 +33,12 @@ import {
 } from "@/lib/composer-attachments";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { revealBridge, revealHostPath, revealProblemText, REVEALABLE_PATH } from "@/lib/reveal-host-path";
+import { serverErrorText } from "@/lib/server-error";
+import { CopyImageButton } from "./CopyImageButton";
 import { FilePreviewButton } from "./FilePreviewButton";
+import { chipNameAction, SaveIconButton, useHtmlPreview } from "./HtmlFilePreview";
+import { ImageLoading } from "./ImageLoading"; import { openLinkedFolder } from "./RevealOriginalMenu"; import { serverFetch } from "@/lib/relay-server";
 
 export interface PreviewImage {
   src: string;
@@ -198,7 +204,7 @@ export function messageImagePreviewUrl(
 
 export async function messageImageOutsideWorkspace(src: string): Promise<boolean> {
   try {
-    const response = await fetch(src, { cache: "no-store" });
+    const response = await serverFetch(src, { cache: "no-store" });
     if (response.ok) {
       await response.body?.cancel();
       return false;
@@ -219,20 +225,20 @@ export async function requestMessageFile(
   filePath: string,
   message: MessageAttachmentContext,
   signal: AbortSignal,
-  folder?: { entry?: string; list?: boolean },
+  options?: { entry?: string; list?: boolean; mediaLink?: boolean },
 ): Promise<Response> {
-  const response = await fetch(`/api/threads/${encodeURIComponent(message.threadId)}/messages/${encodeURIComponent(message.messageId)}/file`, {
+  const response = await serverFetch(`/api/threads/${encodeURIComponent(message.threadId)}/messages/${encodeURIComponent(message.messageId)}/file`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       path: filePath,
-      ...(folder?.entry !== undefined ? { entry: folder.entry } : folder?.list ? { listFolder: true } : {}),
+      ...(options?.entry !== undefined ? { entry: options.entry } : options?.list ? { listFolder: true } : options?.mediaLink ? { media: true } : {}),
     }),
     signal,
   });
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { error?: string; code?: string } | null;
-    throw Object.assign(new Error(body?.error ?? t("attach.downloadFailed")), { code: body?.code });
+    throw Object.assign(new Error(serverErrorText(body, body?.error ?? t("attach.downloadFailed"))), { code: body?.code, status: response.status });
   }
   return response;
 }
@@ -248,7 +254,7 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
   const [folder, setFolder] = useState<MessageFolderListing | null>(null);
   const [reason, setReason] = useState("");
   const [savedTo, setSavedTo] = useState("");
-  const [outsideWorkspace, setOutsideWorkspace] = useState(false);
+  const [failureCode, setFailureCode] = useState<unknown>(undefined);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const request = useRef<AbortController | null>(null);
   const saving = useRef(false);
@@ -269,7 +275,7 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
     saving.current = false;
     setReason("");
     setSavedTo("");
-    setOutsideWorkspace(false);
+    setFailureCode(undefined);
     setFolder(null);
     setState("idle");
   }, [filePath, entry, message?.messageId, message?.threadId]);
@@ -287,7 +293,7 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
       resetTimer.current = null;
     }
     setReason("");
-    setOutsideWorkspace(false);
+    setFailureCode(undefined);
     setState("saving");
     request.current?.abort();
     const controller = new AbortController();
@@ -297,8 +303,8 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
       if (response.headers.get("x-openmausbot-folder") === "1") {
         const listing = await response.json() as MessageFolderListing;
         if (!mounted.current || controller.signal.aborted) return;
-        setFolder(listing);
         setState("idle");
+        if (!(await openLinkedFolder(filePath)) && !controller.signal.aborted) setFolder(listing); // Security: only a path this message's route just authorized reaches the desktop bridge.
         return;
       }
       const blob = await response.blob();
@@ -335,7 +341,7 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
     } catch (error) {
       if (!mounted.current || controller.signal.aborted) return;
       setReason(error instanceof Error ? error.message : t("attach.saveFailed"));
-      setOutsideWorkspace((error as { code?: unknown } | null)?.code === "outside_workspace");
+      setFailureCode((error as { code?: unknown } | null)?.code);
       setState("failed");
     } finally {
       if (request.current === controller) {
@@ -345,7 +351,8 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
     }
   }, [filePath, entry, message?.messageId, message?.threadId, name]);
 
-  return { state, reason, savedTo, outsideWorkspace, folder, save };
+  const outsideWorkspace = failureCode === "outside_workspace"; // Retrying can't move a file into the folder or make it smaller.
+  return { state, reason, savedTo, outsideWorkspace, retryable: state === "failed" && !outsideWorkspace && failureCode !== "file_too_large", folder, save };
 }
 
 export function saveFailureText(save: { reason: string; outsideWorkspace: boolean }): string {
@@ -410,31 +417,21 @@ export function MessageFolderFiles({ folderPath, listing, message }: {
   );
 }
 
-const REVEALABLE_PATH = /^(?:\/(?!\/)|[a-zA-Z]:[\\/])/;
-function revealBridge(): NonNullable<Window["ogb"]>["revealInFolder"] {
-  const ogb = typeof window === "undefined" ? undefined : window.ogb;
-  return ogb?.remoteClient?.active ? undefined : ogb?.revealInFolder;
-}
-
-export function OutsideWorkspaceFile({ filePath }: { filePath: string }) {
+export function OutsideWorkspaceFile({ filePath, standalone = false }: { filePath: string; standalone?: boolean }) {
   const [problem, setProblem] = useState("");
   const reveal = revealBridge();
   if (!reveal || !REVEALABLE_PATH.test(filePath)) {
     return (
-      <code title={t("attach.outsideWorkspacePath")} className="select-all break-all text-ink">
+      <code title={t("attach.outsideWorkspacePath")} className="select-all whitespace-pre-wrap break-all text-ink">
         {filePath}
       </code>
     );
   }
   const show = async () => {
     setProblem("");
-    try {
-      const result = await reveal(filePath);
-      if (result === "missing") setProblem(t("attach.revealMissing"));
-      else if (result !== "shown") setProblem(t("attach.revealFailed"));
-    } catch {
-      setProblem(t("attach.revealFailed"));
-    }
+    const result = await revealHostPath(filePath);
+    const text = revealProblemText(result);
+    if (text) setProblem(text);
   };
   return (
     <>
@@ -442,9 +439,9 @@ export function OutsideWorkspaceFile({ filePath }: { filePath: string }) {
         type="button"
         onClick={() => void show()}
         title={filePath}
-        className="inline-flex items-center gap-1 text-accent underline decoration-accent/40 hover:decoration-accent"
+        className={standalone ? "ui-button touch:min-h-10" : "inline-flex items-center gap-1 text-accent underline decoration-accent/40 hover:decoration-accent"}
       >
-        <FolderOpen size={12} className="shrink-0" aria-hidden="true" />
+        <FolderOpen size={standalone ? 14 : 12} className="shrink-0" aria-hidden="true" />
         {t("attach.showInFolder")}
       </button>
       {problem && <span role="alert" className="text-danger">{problem}</span>}
@@ -556,13 +553,11 @@ export function AttachmentPreviewDialog({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            <CopyImageButton key={current.src} src={current.src} name={current.name} />
             {current.downloadUrl && (
               <a
                 href={current.downloadUrl}
-                download={current.downloadName ?? canonicalDownloadFilename({
-                  fallback: current.name,
-                  source: current.downloadUrl,
-                })}
+                download={current.downloadName ?? canonicalDownloadFilename({ fallback: current.name, source: current.downloadUrl })}
                 className="flex size-9 items-center justify-center rounded-lg text-white/65 hover:bg-white/10 hover:text-white"
                 aria-label={t("attach.downloadAria", { name: current.name })}
                 title={t("attach.download")}
@@ -595,20 +590,20 @@ export function AttachmentPreviewDialog({
           {!loaded && !failed && (
             <div className="absolute inset-4 flex animate-pulse items-center justify-center rounded-xl bg-white/[0.055] sm:inset-8" role="status">
               <span className="flex items-center gap-2 text-[13px] text-white/55">
-                <LoaderCircle size={17} className="animate-spin" /> Loading image…
+                <LoaderCircle size={17} className="animate-spin" /> {t("attach.imageLoading")}
               </span>
             </div>
           )}
           {failed ? (
             <div className="flex flex-col items-center gap-3 text-white/60" role="alert">
               <ImageOff size={34} />
-              <span className="text-[13px]">This image could not be loaded.</span>
+              <span className="text-[13px]">{t("attach.imageFailed")}</span>
               <button
                 type="button"
                 onClick={retry}
                 className="flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/10 px-3 py-1.5 text-[12px] text-white hover:bg-white/15"
               >
-                <RotateCcw size={13} /> Retry
+                <RotateCcw size={13} /> {t("chat.retry")}
               </button>
             </div>
           ) : (
@@ -676,12 +671,7 @@ export function AttachmentThumbnail({
       style={ratio ? { aspectRatio: String(ratio) } : undefined}
       className={cn("group/image relative block aspect-[4/3] min-w-0 overflow-hidden rounded-xl border border-hairline/40 bg-inset", className)}
     >
-      {state === "loading" && (
-        <span className="absolute inset-0 flex animate-pulse items-center justify-center bg-raised/65" role="status">
-          <LoaderCircle size={17} className="animate-spin text-ink-tertiary" />
-          <span className="sr-only">Loading {image.name}</span>
-        </span>
-      )}
+      {state === "loading" && <ImageLoading name={image.name} className="absolute inset-0 bg-raised/65" />}
       {state === "failed" ? (
         <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-3 text-center text-ink-secondary" role="alert">
           <ImageOff size={22} />
@@ -879,14 +869,11 @@ export function MarkdownImagePreview({
         ) : visibleSource ? (
           <AttachmentThumbnail key={image.src} image={image} onPreview={() => setOpen(true)} className="max-h-96" eager explainRefusal={localMessageImage} />
         ) : (
-          <span className="flex aspect-[4/3] max-h-96 animate-pulse items-center justify-center rounded-xl border border-hairline/40 bg-inset" role="status">
-            <LoaderCircle size={17} className="animate-spin text-ink-tertiary" />
-            <span className="sr-only">Loading {name}</span>
-          </span>
+          <ImageLoading name={name} className="aspect-[4/3] max-h-96 rounded-xl border border-hairline/40 bg-inset" />
         )}
         {openUrl && (
           <a href={openUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex text-[11px] text-accent hover:underline">
-            Open original
+            {t("attach.openOriginal")}
           </a>
         )}
       </span>
@@ -895,17 +882,17 @@ export function MarkdownImagePreview({
   );
 }
 
-export function AttachedFileChip({ file, message, linked = false, compact = false, className }: {
-  file: TranscriptFileAttachment;
+export function AttachedFileChip({ file, message, linked = false, compact = false, className, note }: {
+  file: TranscriptFileAttachment & { shownPath?: string };
   message?: MessageAttachmentContext;
   linked?: boolean;
   compact?: boolean;
-  className?: string;
+  className?: string; note?: string; // note: a quiet word after the name, such as the conversation it came from
 }) {
   const save = useLocalFileSave(file.path, file.name, message);
+  const preview = useHtmlPreview(file.path, file.name, message, file.shownPath);
   const failed = save.state === "failed";
-  const retryable = failed && !save.outsideWorkspace;
-  if (compact) return <CompactFileChip file={file} message={message} linked={linked} save={save} className={className} />;
+  if (compact) return <CompactFileChip file={file} message={message} linked={linked} save={save} preview={preview} className={className} />;
   if (!message || (!file.private && !linked)) {
     return (
       <div title={t("attach.legacyFile", { name: file.name })} className={cn("flex max-w-[280px] items-center gap-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset/70 px-2.5 py-2 text-[12px] text-ink-secondary", className)}>
@@ -923,28 +910,23 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
       <div className="flex items-center pe-1">
         <button
           type="button"
-          onClick={() => void save.save()}
-          disabled={save.state === "saving"}
-          aria-label={
-            retryable
-              ? t("attach.retrySaveAria", { name: file.name })
-              : t("attach.saveAria", { name: file.name })
-          }
+          {...chipNameAction(preview, save, file.name, save.retryable)}
           className="flex min-h-10 min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-left transition-colors hover:bg-raised/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 disabled:cursor-wait disabled:hover:bg-transparent"
         >
           <FileText size={14} className="shrink-0" aria-hidden="true" />
-          <span className="min-w-0 flex-1 truncate text-ink">{file.name}</span>
-          {save.state === "saving" ? (
+          <span className="min-w-0 flex-1 truncate text-ink">{file.name}</span>{note && <span className="min-w-0 max-w-[45%] shrink truncate text-[11px] text-ink-tertiary">{note}</span>}
+          {preview.opens ? <Eye size={13} className="shrink-0" /> : save.state === "saving" ? (
             <LoaderCircle size={13} className="shrink-0 animate-spin" />
           ) : save.state === "saved" ? (
             <Check size={13} className="shrink-0 text-success" />
           ) : failed ? (
-            retryable && <RotateCcw size={13} className="shrink-0 text-danger" />
+            save.retryable && <RotateCcw size={13} className="shrink-0 text-danger" />
           ) : (
             <Download size={13} className="shrink-0" />
           )}
         </button>
-        <FilePreviewButton path={file.path} name={file.name} message={message} />
+        {preview.opens ? <SaveIconButton name={file.name} save={save} retryable={save.retryable} /> : <FilePreviewButton path={file.path} shownPath={file.shownPath} name={file.name} message={message} />}
+        {preview.dialog}
       </div>
       {save.state !== "idle" && (
         <div
@@ -961,7 +943,7 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
               : saveFailureText(save)}
           {failed && save.outsideWorkspace && (
             <div className="mt-1 flex flex-wrap items-center gap-x-1.5">
-              <OutsideWorkspaceFile filePath={file.path} />
+              <OutsideWorkspaceFile filePath={file.shownPath ?? file.path} />
             </div>
           )}
         </div>
@@ -972,20 +954,20 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
 
 const FILE_CHIP = "inline-flex h-7 max-w-[16rem] items-center rounded-full bg-ink/[0.06] text-[13px] leading-none text-ink-secondary";
 
-function CompactFileChip({ file, message, linked, save, className }: {
-  file: TranscriptFileAttachment;
+function CompactFileChip({ file, message, linked, save, preview, className }: {
+  file: TranscriptFileAttachment & { shownPath?: string };
   message?: MessageAttachmentContext;
   linked: boolean;
   save: ReturnType<typeof useLocalFileSave>;
+  preview: ReturnType<typeof useHtmlPreview>;
   className?: string;
 }) {
   const failed = save.state === "failed";
-  const retryable = failed && !save.outsideWorkspace;
   const name = <span dir="auto" className="min-w-0 truncate text-ink [unicode-bidi:isolate]">{file.name}</span>;
   if (!message || (!file.private && !linked)) {
     return (
       <span title={t("attach.legacyFile", { name: file.name })} className={cn(FILE_CHIP, "gap-1.5 px-2.5", className)}>
-        <FileText size={14} strokeWidth={1.75} className="shrink-0" aria-hidden="true" />
+        <FileText size={14} className="shrink-0" aria-hidden="true" />
         {name}
         <span className="shrink-0 text-[12px]">{t("attach.unavailable")}</span>
       </span>
@@ -999,30 +981,29 @@ function CompactFileChip({ file, message, linked, save, className }: {
       >
         <button
           type="button"
-          onClick={() => void save.save()}
-          disabled={save.state === "saving"}
-          aria-label={retryable ? t("attach.retrySaveAria", { name: file.name }) : t("attach.saveAria", { name: file.name })}
+          {...chipNameAction(preview, save, file.name, save.retryable)}
           className="inline-flex h-7 min-w-0 items-center gap-1.5 rounded-full ps-2.5 pe-2 transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-wait"
         >
-          <FileText size={14} strokeWidth={1.75} className="shrink-0" aria-hidden="true" />
+          <FileText size={14} className="shrink-0" aria-hidden="true" />
           {name}
-          {save.state === "saving" ? (
+          {preview.opens ? <Eye size={13} className="shrink-0" aria-hidden="true" /> : save.state === "saving" ? (
             <LoaderCircle size={13} className="shrink-0 animate-spin" aria-hidden="true" />
           ) : save.state === "saved" ? (
             <Check size={13} className="shrink-0 text-success" aria-hidden="true" />
           ) : failed ? (
-            retryable && <RotateCcw size={13} className="shrink-0 text-danger" aria-hidden="true" />
+            save.retryable && <RotateCcw size={13} className="shrink-0 text-danger" aria-hidden="true" />
           ) : (
-            <Download size={13} strokeWidth={1.75} className="shrink-0" aria-hidden="true" />
+            <Download size={13} className="shrink-0" aria-hidden="true" />
           )}
         </button>
-        <FilePreviewButton path={file.path} name={file.name} message={message} />
+        {preview.opens ? <SaveIconButton name={file.name} save={save} retryable={save.retryable} /> : <FilePreviewButton path={file.path} shownPath={file.shownPath} name={file.name} message={message} />}
+        {preview.dialog}
       </span>
       {save.state !== "idle" && save.state !== "saved" && (
         <span role={failed ? "alert" : "status"} className={cn("px-2.5 text-[12px]", failed ? "text-danger" : "text-ink-secondary")}>
           {save.state === "saving" ? t("attach.downloading") : saveFailureText(save)}
           {failed && save.outsideWorkspace && (
-            <span className="ms-1.5 inline-flex flex-wrap items-center gap-x-1.5"><OutsideWorkspaceFile filePath={file.path} /></span>
+            <span className="ms-1.5 inline-flex flex-wrap items-center gap-x-1.5"><OutsideWorkspaceFile filePath={file.shownPath ?? file.path} /></span>
           )}
         </span>
       )}

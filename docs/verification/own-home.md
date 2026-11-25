@@ -80,8 +80,12 @@ node --test electron/two-places.node-test.mjs
 
 The person's app tells each of their own places (this computer, a server that
 says it is theirs alone, My Cloud while awake) the names of the bots their other
-places have, and nothing more: no address, id or message, and never a team's
-place or one others sign in to (`PUT /api/places/elsewhere`, owner only).
+places have, and nothing more: no address, id or message. A team's place, or
+one others sign in to, is never told anything (`PUT /api/places/elsewhere`, owner
+only). A team the person's verified session says they are in is named to their own
+places, by name with the bots they see there once they have opened it, so a bot
+there says "Sales lives in Acme" and that it can ask there or move to Acme; a team
+they left is no longer named.
 `server/places-elsewhere.e2e.test.ts` checks, over the same fixture:
 
 - before the app said anything, `coordinate_bots` to a name nowhere here answers

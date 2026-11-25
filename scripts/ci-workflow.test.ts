@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { EVALS_LANE, PACKAGED_SERVER_LANE, vitestLane } from "./ci-linux-lanes.mjs";
@@ -7,7 +7,7 @@ import { SELECTABLE_JOBS, vitestMatrix } from "./ci-scope.mjs";
 import { interpolate } from "./testing/github-expression.ts";
 
 const workflow = parse(readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"));
-const requiredRuntimeJobs = ["vitest", "behavior-evals", "packaged-server", "windows-cua", "electron-smokes"];
+const requiredRuntimeJobs = ["build", "vitest", "behavior-evals", "packaged-server", "windows-cua", "electron-smokes"];
 
 function runGate(needs: Record<string, unknown>) {
   // Execute the actual gate, not a duplicate of its success/failure logic.
@@ -49,6 +49,12 @@ describe("CI concurrency", () => {
     );
   });
 
+  it("validates the model manifest before anything lands on main", () => {
+    const step = workflow.jobs.static.steps.find((candidate: { name?: string }) => candidate.name === "Validate the model manifest");
+    expect(step.run).toContain("scripts/check-model-manifest.mjs");
+    expect(workflow.on.pull_request).toBeDefined();
+  });
+
   it("runs the full lane every night", () => {
     expect(workflow.on.schedule).toEqual([{ cron: expect.stringMatching(/^\d+ \d+ \* \* \*$/) }]);
   });
@@ -81,6 +87,8 @@ describe("CI concurrency", () => {
     expect(workflow.permissions).toEqual({ contents: "read" });
     expect(workflow.jobs.vitest.strategy.matrix).toBe("${{ fromJSON(needs.static.outputs.vitest_matrix) }}");
     expect(workflow.jobs.vitest["timeout-minutes"]).toBe("${{ matrix.os == 'ubuntu-latest' && 25 || 30 }}");
+    // Ubuntu 26.04 (today's ubuntu-latest) lets bubblewrap box the Cloud e2e fixtures; the Linux shards keep 24.04.
+    expect(workflow.jobs.vitest["runs-on"]).toBe("${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}");
   });
 
   it("runs each selected platform's own shards, and its e2e files, from ci-scope's matrix", () => {
@@ -91,6 +99,7 @@ describe("CI concurrency", () => {
     expect(run.run).toContain("pnpm exec vitest run ${{ matrix.files }} --shard=${{ matrix.shard }}/${{ matrix.shards }} ");
     expect(run.env?.OMB_VITEST_E2E).toBe("${{ matrix.e2e }}");
     expect(run.env?.OMB_VITEST_SUBSET).toBe("${{ matrix.files }}");
+    expect(run.env?.OMB_VITEST_WORKERS).toBe("${{ matrix.workers }}");
     const { include } = vitestMatrix(["macos-latest", "ubuntu-latest", "windows-latest"]);
     for (const os of ["macos-latest", "ubuntu-latest", "windows-latest"]) {
       const shards = include.filter((entry) => entry.os === os);
@@ -201,6 +210,22 @@ describe("CI concurrency", () => {
     }
   });
 
+  it("fails a broken source guard in static, before any runner is asked for", () => {
+    const steps = workflow.jobs.static.steps as { name?: string; run?: string; if?: string }[];
+    const guards = steps.find((step) => step.name === "Source guards")!;
+    expect(guards.if).toBeUndefined();
+    const named = guards.run!.split(" ").filter((word) => /\.test\.ts$|\/$/.test(word));
+    // A name vitest cannot match would silently drop that guard.
+    for (const path of named) expect(existsSync(new URL(`../${path}`, import.meta.url)), path).toBe(true);
+    expect(named).toContain("src/locales/");
+    expect(named).toContain("scripts/testing/file-size-ratchet.test.ts");
+    // Before the slow checks, so a failed guard reports within a minute: typecheck and the build wait for static.
+    expect(steps.some((step) => step.run === "pnpm typecheck")).toBe(false);
+    expect(workflow.jobs.build.needs).toBe("static");
+    // Every test the guards run stays in the suite: vitest's include has them, so the shards still deal them out.
+    expect(workflow.jobs.vitest.needs).toBe("static");
+  });
+
   it.each(requiredRuntimeJobs)("accepts %s skipped only when static left it out", (job) => {
     const others = SELECTABLE_JOBS.filter((name) => name !== job);
     expect(runGate(gateNeeds(others)).status).toBe(0);
@@ -237,13 +262,17 @@ describe("CI concurrency", () => {
       vitest_matrix: "${{ steps.scope.outputs.vitest_matrix }}",
       packaged_server_os: "${{ steps.scope.outputs.packaged_server_os }}",
     });
-    // Only these three static steps depend on the scope's build flag; the rest always run, or run only on Boat.
-    const built = (workflow.jobs.static.steps as { if?: string; run?: string }[]).filter((step) => step.if?.includes("outputs.build"));
-    expect(built.map((step) => [step.if, step.run])).toEqual([
-      ["steps.scope.outputs.build == 'true'", "pnpm typecheck"],
-      ["steps.scope.outputs.build == 'true'", "pnpm check:electron"],
-      ["steps.scope.outputs.build == 'true'", "pnpm exec vite build"],
-    ]);
+    // The build job runs where the scope selects it, and static holds only what is quick and always runs.
+    expect(workflow.jobs.build.if).toBe(`contains(needs.static.outputs.jobs, '"build"')`);
+    const buildRuns = (workflow.jobs.build.steps as { run?: string }[]).map((step) => step.run).filter(Boolean);
+    expect(buildRuns.slice(0, 4)).toEqual(["pnpm install --frozen-lockfile", "pnpm typecheck", "pnpm check:electron", "pnpm exec vite build"]);
+    // Then the one test that needs root on a real kernel (the browsers' memory limit), which fails rather than skips there.
+    expect(buildRuns).toHaveLength(5);
+    expect(buildRuns[4]).toMatch(/sudo setpriv .*--bounding-set=-sys_admin.*OMB_CGROUP_TEST=require .*vitest run server\/browser\/memory-cgroup\.linux\.test\.ts/s);
+    for (const run of ["pnpm typecheck", "pnpm check:electron", "pnpm exec vite build"]) {
+      expect((workflow.jobs.static.steps as { run?: string }[]).some((step) => step.run === run), run).toBe(false);
+    }
+    expect((workflow.jobs.static.steps as { if?: string }[]).some((step) => step.if?.includes("outputs.build"))).toBe(false);
     expect(workflow.jobs.static.steps.some((step: { run?: string }) =>
       step.run === "pnpm exec vitest run scripts/ci-scope.test.ts scripts/ci-linux-lanes.test.ts scripts/ci-workflow.test.ts scripts/testing/verification-docs.test.ts",
     )).toBe(true);
@@ -316,8 +345,8 @@ describe("CI on Boat", () => {
     name: interpolate(workflow.jobs.static.name, context),
     timeout: interpolate(String(workflow.jobs.static["timeout-minutes"]), context),
   });
-  const boat = { runsOn: "boat-xlarge", name: "typecheck + lint + Linux tests (Boat)", timeout: 45 };
-  const github = (timeout: number) => ({ runsOn: "ubuntu-latest", name: "typecheck + lint", timeout });
+  const boat = { runsOn: "boat-xlarge", name: "preflight + Linux tests (Boat)", timeout: 45 };
+  const github = (timeout: number) => ({ runsOn: "ubuntu-latest", name: "preflight", timeout });
 
   it.each([
     ["the owner's pull request", {}],
@@ -345,7 +374,7 @@ describe("CI on Boat", () => {
 
   it("does the Linux work in the static job only where ci-scope moved it there, without Boat's extra rights or desktop", () => {
     const steps = workflow.jobs.static.steps as Step[];
-    const boatOnly = steps.slice(steps.findIndex((step) => step.name === "production UI build") + 1);
+    const boatOnly = steps.slice(steps.findIndex((step) => step.name === "Remove what Boat installs and GitHub's runners lack"));
     expect(boatOnly.map((step) => step.if)).toEqual([
       "steps.scope.outputs.linux_lanes", "steps.scope.outputs.linux_lanes", "steps.scope.outputs.linux_lanes",
       "${{ !cancelled() && steps.scope.outputs.linux_lanes }}", "failure() && steps.scope.outputs.linux_lanes",

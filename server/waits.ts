@@ -7,6 +7,7 @@ import { z } from "zod";
 import { WAIT_HOURS, type WaitKind } from "../shared/waits.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
+import { startDueTimer, type DueTimer } from "./due-timer.ts";
 import {
   expandHome,
   fetchPageText,
@@ -20,7 +21,7 @@ import {
   type ProcessEntry,
 } from "./wait-probes.ts";
 
-export const WAIT_LIMITS = { perBot: 10, total: 50 } as const;
+export const WAIT_LIMITS = { perBot: 10, total: 50, perAssignment: 1 } as const;
 export const WAIT_TICK_MS = 5_000, URL_CHECK_MS = 60_000, URL_BACKOFF_MAX_MS = 15 * 60_000;
 /** A sleeping Cloud wakes this often while a wait is open, to check it; checks pause in between. */
 export const WAIT_WAKE_MS = 30 * 60_000;
@@ -42,15 +43,20 @@ export type WaitCondition =
 export interface WaitNotice { status: "fired" | "expired" | "stopped"; text: string }
 export interface WaitRecord {
   id: string; botId: string; threadId: string; label: string; condition: WaitCondition; followUp?: string;
+  assignmentId?: string;
   createdAt: number; expiresAt: number; nextCheckAt: number; errors: number; cardMessageId?: string;
   /** Decided and saved first; posted once its chat is free. */
   ending?: WaitNotice;
 }
-export interface NewWait { botId: string; threadId: string; label: string; condition: NewWaitCondition; followUp?: string; hours?: number }
+export interface NewWait {
+  botId: string; threadId: string; label: string; condition: NewWaitCondition; followUp?: string; hours?: number; assignmentId?: string;
+  /** Asked again right before the wait is stored, after the checks `create` awaits; a refusal text stores nothing, so work stopped meanwhile leaves no wait behind. Never saved. */
+  stillAllowed?: () => string | null;
+}
 export type CreateWaitResult =
   | { state: "created"; wait: WaitRecord; note?: string }
   | { state: "already"; text: string }
-  | { state: "refused"; status: 400 | 409; error: string };
+  | { state: "refused"; status: 400 | 403 | 409; error: string };
 export interface WaitProbes { page(url: string): Promise<PageResult>; stamp(path: string): Promise<FileStamp | null>; processes(): Promise<ProcessEntry[]> }
 export interface WaitManagerOptions {
   file?: string; now?: () => number; probes?: Partial<WaitProbes>;
@@ -80,6 +86,7 @@ const recordSchema = z.object({
   label: z.string(),
   condition: conditionSchema,
   followUp: z.string().optional(),
+  assignmentId: z.string().optional(),
   createdAt: z.number(),
   expiresAt: z.number(),
   nextCheckAt: z.number(),
@@ -142,7 +149,7 @@ export class WaitManager {
   private readonly probes: WaitProbes;
   private readonly options: WaitManagerOptions;
   private waits: WaitRecord[] = [];
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private timer: DueTimer | null = null;
   private running = false;
   private stopped = false;
   private ticking = false;
@@ -172,6 +179,11 @@ export class WaitManager {
     }
   }
 
+  /**
+   * Makes a wait once its first check shows the condition is not met yet. Limits are checked before
+   * and after that check. The work that asked for the wait must still be authorized after the probe,
+   * before returning an already-met result or persisting a wait.
+   */
   async create(input: NewWait): Promise<CreateWaitResult> {
     const full = this.limitRefusal(input);
     if (full) return full;
@@ -180,6 +192,8 @@ export class WaitManager {
     if (verdict.gone) return { state: "refused", status: 400, error: `${(condition as { botName: string }).botName} no longer exists. Use a name or id from list_bots.` };
     if (verdict.unlisted) return { state: "refused", status: 400, error: NO_PROCESS_LIST };
     if (verdict.page && !verdict.page.ok && verdict.page.refused) return { state: "refused", status: 400, error: verdict.page.error };
+    const ended = input.stillAllowed?.();
+    if (ended) return { state: "refused", status: 403, error: ended };
     if (verdict.met) return { state: "already", text: `${describeCondition(condition)} already. Nothing was set up: tell the person now.` };
     const crowded = this.limitRefusal(input);
     if (crowded) return crowded;
@@ -191,6 +205,7 @@ export class WaitManager {
       label: input.label,
       condition,
       ...(input.followUp ? { followUp: input.followUp } : {}),
+      ...(input.assignmentId ? { assignmentId: input.assignmentId } : {}),
       createdAt: now,
       expiresAt: now + (input.hours ?? WAIT_HOURS.default) * 3_600_000,
       nextCheckAt: now + interval(condition.kind, 0),
@@ -211,7 +226,11 @@ export class WaitManager {
     return { state: "created", wait: cloneWait(wait), ...(note ? { note } : {}) };
   }
 
-  private limitRefusal({ botId, threadId }: Pick<NewWait, "botId" | "threadId">): CreateWaitResult | null {
+  private limitRefusal({ botId, threadId, assignmentId }: Pick<NewWait, "botId" | "threadId" | "assignmentId">): CreateWaitResult | null {
+    const handed = assignmentId ? this.waits.filter((w) => w.assignmentId === assignmentId && !w.ending) : [];
+    if (handed.length >= WAIT_LIMITS.perAssignment) {
+      return { state: "refused", status: 409, error: `Work handed to you keeps one wait at a time, and this work already has one:\n${waitList(handed)}\nFinish this turn; it tells you here when it happens.` };
+    }
     const mine = this.waits.filter((w) => w.botId === botId && !w.ending);
     if (mine.length >= WAIT_LIMITS.perBot) {
       const here = mine.filter((w) => w.threadId === threadId), others = mine.length - here.length;
@@ -287,18 +306,18 @@ export class WaitManager {
   start(): void {
     this.stopped = false;
     if (this.timer) return;
-    this.runTick();
-    this.timer = setInterval(() => this.runTick(), WAIT_TICK_MS);
-    this.timer.unref?.();
-  }
-
-  private runTick(): void {
-    this.tick().catch((error) => console.error("wait tick failed", error));
+    this.timer = startDueTimer({
+      run: () => this.tick(),
+      next: () => this.waits.reduce<number | null>((at, w) => Math.min(at ?? Infinity, w.ending ? this.now() : Math.min(w.nextCheckAt, w.expiresAt)), null),
+      now: this.now,
+      retryMs: WAIT_TICK_MS,
+      onError: (error) => console.error("wait tick failed", error),
+    });
   }
 
   stop(): void {
     this.stopped = true;
-    if (this.timer) clearInterval(this.timer);
+    this.timer?.stop();
     this.timer = null;
   }
 
@@ -427,6 +446,7 @@ export class WaitManager {
     try {
       mutate();
       this.save();
+      this.timer?.poke();
     } catch (error) {
       identity.forEach((w, i) => {
         for (const key of Object.keys(w)) delete (w as unknown as Record<string, unknown>)[key];

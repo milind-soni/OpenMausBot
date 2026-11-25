@@ -22,9 +22,11 @@ vi.mock("@/lib/mcp-servers", () => ({ updateMcpServers: vi.fn() }));
 
 import { McpServersPanel } from "./McpServersPanel";
 
-const famulor = { name: "famulor", type: "http", url: "https://app.famulor.io/mcp", headerKeys: [], enabled: false, auth: "needs-sign-in" };
+const famulor = { name: "famulor", type: "http", url: "https://app.famulor.io/mcp", headerKeys: [] as string[], enabled: false, auth: "needs-sign-in" as const };
 
-function FamulorCard() { return McpServersPanel({ nativeCard: "famulor" }); }
+function FamulorCard() {
+  return McpServersPanel({ hostedCards: { shown: (id) => id === "famulor", onConnections: () => {} } });
+}
 
 let host: HTMLDivElement;
 let root: Root;
@@ -69,7 +71,7 @@ describe("Connecting Famulor from its card", () => {
   it("says it is loading Famulor's tools while the test runs, then shows why it failed in one line", async () => {
     await connect();
     expect(testRequest).not.toBeNull();
-    expect(card().querySelector('[role="status"]')?.textContent).toContain(t("famulor.loadingTools"));
+    expect(card().querySelector('[role="status"]')?.textContent).toContain(t("hostedMcp.loadingTools", { service: "Famulor" }));
     expect(card().textContent).not.toContain("Waiting");
     expect(button("Cancel")).toBeTruthy();
 
@@ -78,7 +80,7 @@ describe("Connecting Famulor from its card", () => {
 
     const alerts = [...card().querySelectorAll('[role="alert"]')].map((element) => element.textContent);
     expect(alerts).toEqual([
-      t("famulor.testFailed", { reason: "The server did not answer in time." }),
+      t("hostedMcp.testFailed", { service: "Famulor", reason: "The server did not answer in time." }),
     ]);
     expect(fixture.api.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "PATCH")).toBe(false);
     expect(button("Connect")).toBeTruthy();
@@ -89,7 +91,7 @@ describe("Connecting Famulor from its card", () => {
     await act(async () => { testRequest!.resolve(Promise.reject(new Error("Two MCP connection tests are already running."))); });
     await settle();
     expect(card().querySelector('[role="alert"]')?.textContent)
-      .toBe(t("famulor.testFailed", { reason: "Two MCP connection tests are already running." }));
+      .toBe(t("hostedMcp.testFailed", { service: "Famulor", reason: "Two MCP connection tests are already running." }));
   });
 
   it("ends a reason that has no period of its own, like a proxy's 504", async () => {
@@ -97,7 +99,7 @@ describe("Connecting Famulor from its card", () => {
     await act(async () => { testRequest!.resolve(Promise.reject(new Error("504 Gateway Timeout"))); });
     await settle();
     expect(card().querySelector('[role="alert"]')?.textContent)
-      .toBe(t("famulor.testFailed", { reason: "504 Gateway Timeout." }));
+      .toBe(t("hostedMcp.testFailed", { service: "Famulor", reason: "504 Gateway Timeout." }));
   });
 
   it("closes the test request when the person cancels", async () => {
@@ -107,5 +109,41 @@ describe("Connecting Famulor from its card", () => {
     await settle();
     expect(testRequest?.signal?.aborted).toBe(true);
     expect(card().querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("says calls can spend credits and that Full access starts one without another confirmation", () => {
+    const text = card().textContent ?? "";
+    expect(text).toContain("No API key needed");
+    expect(text).toContain("Calls and campaigns can cost credits. Bots in Full access can start them without another confirmation.");
+  });
+});
+
+describe("Two Famulor servers", () => {
+  it("disconnects the signed-in listing when a disconnected duplicate is listed first", async () => {
+    const off = { ...famulor, name: "famulor", enabled: false, auth: "needs-sign-in" as const };
+    const on = { ...famulor, name: "famulor-2", enabled: true, auth: "signed-in" as const };
+    let listed = [off, on];
+    fixture.api.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === "/api/mcp/servers" && !init?.method) return Promise.resolve({ servers: listed });
+      if (path === "/api/mcp/servers/famulor-2" && init?.method === "PATCH") {
+        listed = listed.map((server) => server.name === "famulor-2" ? { ...server, enabled: false } : server);
+        return Promise.resolve({ servers: listed });
+      }
+      if (path === "/api/mcp/servers/famulor-2/sign-out" && init?.method === "POST") {
+        listed = listed.map((server) => server.name === "famulor-2" ? { ...server, auth: "needs-sign-in" as const } : server);
+        return Promise.resolve({ servers: listed });
+      }
+      return Promise.reject(new Error(`unexpected ${init?.method ?? "GET"} ${path}`));
+    });
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    await act(async () => root.render(createElement(FamulorCard)));
+    await settle();
+    expect(card().querySelector('[aria-label="Connected"]')).not.toBeNull();
+    expect(button("Disconnect")).toBeTruthy();
+    await act(async () => button("Disconnect").click());
+    await settle();
+    expect(fixture.api.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "PATCH").map(([path]) => path))
+      .toEqual(["/api/mcp/servers/famulor-2"]);
   });
 });

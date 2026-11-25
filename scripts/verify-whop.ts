@@ -1,4 +1,4 @@
-// Real registry, OAuth and renderer; no real Whop account or financial calls.
+// Real registry, OAuth and renderer; no real Whop or Agentcard account, and no financial calls.
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -7,6 +7,8 @@ import { fixtureApi, mountPreview, type MountedPreview } from "./testing/preview
 import { startFakeOAuth } from "../server/testing/fake-oauth-server.ts";
 import { startFakeHttpMcp } from "../server/testing/fake-http-mcp-server.ts";
 
+// Node cannot import the app's table (it pulls in a PNG), so the official addresses are named here too.
+const OFFICIAL = { whop: "https://mcp.whop.com/mcp", agentcard: "https://mcp.agentcard.sh/mcp" };
 const fixture = await launchVerificationServer();
 const oauth = await startFakeOAuth();
 const mcp = await startFakeHttpMcp({ acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge,
@@ -45,13 +47,13 @@ try {
       let raw = "";
       for await (const chunk of req) raw += chunk;
       // Only the fixture substitutes transport: production always saves the official URL.
-      if (raw) { const body = JSON.parse(raw); if (body.url === "https://mcp.whop.com/mcp") body.url = mcp.url; raw = JSON.stringify(body); }
+      if (raw) { const body = JSON.parse(raw); if (Object.values(OFFICIAL).includes(body.url)) body.url = mcp.url; raw = JSON.stringify(body); }
       const response = await fetch(`${fixture.info.url}${path}`, { method: req.method,
         headers: { "content-type": "application/json", cookie: req.headers.cookie ?? "", "x-forwarded-for": "192.0.2.10" },
         ...(raw ? { body: raw } : {}),
       });
       const body = await response.json();
-      for (const server of body.servers ?? []) if (server.url === mcp.url) server.url = "https://mcp.whop.com/mcp";
+      for (const server of body.servers ?? []) if (server.url === mcp.url) server.url = server.name.startsWith("agentcard") ? OFFICIAL.agentcard : OFFICIAL.whop;
       if (req.method === "POST" && path.endsWith("/sign-in") && response.ok) {
         authorizationUrl = body.auth.authorizationUrl;
         body.auth.authorizationUrl = "https://oauth.example.test/authorize";
@@ -100,7 +102,7 @@ try {
   oauth.options.deny = false;
   await connect();
   await complete();
-  await row.getByText("Connected", { exact: true }).waitFor();
+  await row.getByLabel("Connected", { exact: true }).waitFor();
   const connected = (await status()).find((server: any) => server.name === "whop-2");
   assert.equal(connected.auth, "signed-in");
   assert.equal(connected.enabled, true);
@@ -113,14 +115,14 @@ try {
   mkdirSync(output, { recursive: true });
   await page.screenshot({ path: join(output, "connected.png"), fullPage: true });
   await page.locator('[data-apps-filter="connected"]').click();
-  await row.getByText("Connected", { exact: true }).waitFor();
-  assert.equal(await page.locator('[data-apps-filter="connected"]').innerText(), "Connected 1");
+  await row.getByLabel("Connected", { exact: true }).waitFor();
+  assert.equal(await page.locator('[data-apps-filter="connected"]').innerText(), "1 connected");
   assert.equal(await page.locator('[data-app-tile="gmail"]').count(), 0);
   await row.getByRole("button", { name: "Disconnect Whop", exact: true }).click();
   await row.waitFor({ state: "hidden" });
   await page.locator('[data-apps-filter="all"]').click();
   await connect(); await complete();
-  await row.getByText("Connected", { exact: true }).waitFor();
+  await row.getByLabel("Connected", { exact: true }).waitFor();
   await page.reload();
   await row.getByRole("button", { name: "Disconnect Whop", exact: true }).waitFor();
   assert.equal(await page.locator("[data-whop-setup]").count(), 0);
@@ -133,17 +135,34 @@ try {
   // A successful login alone must not claim the tool connection is ready.
   failTest = true;
   await connect(); await complete();
-  await page.getByText("Signed in, but Whop’s tools could not be loaded. Please connect again to retry.", { exact: true }).waitFor();
+  await page.getByText("Signed in, but Whop’s tools could not be loaded: Synthetic discovery failure. Please connect again to retry.", { exact: true }).waitFor();
   assert.equal((await status()).find((server: any) => server.name === "whop-2").enabled, false);
   await connect(); await complete();
-  await row.getByText("Connected", { exact: true }).waitFor();
+  await row.getByLabel("Connected", { exact: true }).waitFor();
   const search = page.getByRole("textbox", { name: "Search apps", exact: true });
   await search.fill("whop");
   assert.equal(await row.isVisible(), true);
   assert.equal(await page.locator('[data-app-tile="gmail"]').count(), 0);
   await search.fill("gmail");
   assert.equal(await row.isVisible(), false);
+  await search.fill("agentcard");
+  assert.equal(await row.isVisible(), false);
+  assert.equal(await page.locator('[data-app-tile="agentcard"]').isVisible(), true);
   await search.fill("");
+  const agentcard = page.locator('[data-app-tile="agentcard"]');
+  assert.equal(await agentcard.locator("img").count(), 0, "Agentcard draws a glyph, never a logo");
+  await agentcard.getByRole("button", { name: "Connect Agentcard", exact: true }).click();
+  await complete();
+  await agentcard.getByLabel("Connected", { exact: true }).waitFor();
+  const agentcardServer = (await status()).find((server: any) => server.name === "agentcard");
+  assert.equal(agentcardServer.auth, "signed-in");
+  assert.equal(agentcardServer.enabled, true);
+  assert.equal(await page.locator('[data-apps-filter="connected"]').innerText(), "2 connected");
+  assert.equal(await row.getByLabel("Connected", { exact: true }).count(), 1, "Whop stays connected beside Agentcard");
+  await agentcard.getByRole("button", { name: "Disconnect Agentcard", exact: true }).click();
+  await agentcard.getByRole("button", { name: "Connect Agentcard", exact: true }).waitFor();
+  assert.equal((await status()).find((server: any) => server.name === "agentcard").enabled, false);
+  assert.equal(await row.getByLabel("Connected", { exact: true }).count(), 1);
   await page.setViewportSize({ width: 390, height: 844 });
   await row.scrollIntoViewIfNeeded();
   await page.screenshot({ path: join(output, "narrow.png"), fullPage: true });

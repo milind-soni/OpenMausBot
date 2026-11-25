@@ -2,13 +2,24 @@
 import { PROVIDER_CREDENTIAL_ENV, stripWorkspaceCredentialEnv } from "./config.ts";
 import { clientInstall } from "./contracts.ts";
 import type { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
+import { notThisCli } from "./drivers/acp/version-probe.ts";
 import { augmentedPath } from "./env-path.ts";
 import { describeSpawnFailure, execCli } from "./procs.ts";
 
-export async function testCliBinary(
-  cli: string,
-  driver: (typeof BUILT_IN_DRIVERS)[number] | undefined,
-): Promise<{ ok: boolean; version?: string; message?: string; install?: (typeof BUILT_IN_DRIVERS)[number]["install"] }> {
+type CliTestResult = { ok: boolean; version?: string; message?: string; install?: (typeof BUILT_IN_DRIVERS)[number]["install"] };
+
+export async function testCliBinary(cli: string, driver: (typeof BUILT_IN_DRIVERS)[number] | undefined): Promise<CliTestResult> {
+  if (driver?.driverKind === "antigravityAgent") {
+    const antigravity = await import("./drivers/antigravity-runtime.ts");
+    if (antigravity.isAntigravityNativeAlias(cli) || antigravity.isAntigravityPinnedAlias(cli)) {
+      const appInstalled = await antigravity.resolveAntigravityRuntime(cli, cliProbeEnvironment()).catch(() => null);
+      return { ok: true, ...(appInstalled?.version ? { version: appInstalled.version } : {}) };
+    }
+  }
+  return runVersion(cli, driver);
+}
+
+function runVersion(cli: string, driver: (typeof BUILT_IN_DRIVERS)[number] | undefined): Promise<CliTestResult> {
   return new Promise((resolve) => {
     execCli(
       cli,
@@ -25,18 +36,22 @@ export async function testCliBinary(
           const e = err as NodeJS.ErrnoException & { killed?: boolean };
           // Node's err.code is an errno string only for spawn failures; a non-zero exit gives the status, a timeout null with killed.
           const exceededBuffer = e.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
-          const isSpawnError = typeof e.code === "string" && !exceededBuffer;
+          const spawnFailure = typeof e.code === "string" && !exceededBuffer ? describeSpawnFailure(e, cli) : undefined;
           const message = exceededBuffer
             ? "CLI test produced more than 64 KiB of output"
-            : isSpawnError
-              ? describeSpawnFailure(e, cli).message
+            : spawnFailure
+              ? spawnFailure.message
               : e.killed
               ? "CLI test timed out after 10s"
               : `CLI exited with error ${String(e.code)}: ${(stderrOf(err) || "").slice(0, 200) || err.message.split("\n")[0]}`;
-          resolve({ ok: false, message, ...(driver?.install && isSpawnError ? { install: clientInstall(driver.install) } : {}) });
+          resolve({ ok: false, message, ...(driver?.install && spawnFailure?.setup ? { install: clientInstall(driver.install) } : {}) });
           return;
         }
-        resolve({ ok: true, version: stdout.trim().split("\n")[0] });
+        const version = stdout.trim().split("\n")[0];
+        // An install command pasted as the path runs curl, which answers --version too: that is not this engine.
+        const expected = driver?.metadata.cliVersion;
+        if (expected && !expected.test(version)) return resolve({ ok: false, message: notThisCli(cli, driver.metadata.displayName) });
+        resolve({ ok: true, version });
       },
     );
   });

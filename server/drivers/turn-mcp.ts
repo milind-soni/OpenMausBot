@@ -33,7 +33,7 @@ export function turnStdioMcpServers(turn: SendTurnInput, options: { schemaProfil
   add(OWN_APPS_SERVER, turn.integrations?.composioOwn);
   add("browser", turn.integrations?.browser);
   add("data", turn.integrations?.data);
-  add("highlevel", turn.integrations?.highlevel);
+  add("email", turn.integrations?.email);
   add("device", turn.integrations?.device);
   // Cua connections expose Cua Driver's own MCP server; a cloud turn runs on its boat, so none is mounted.
   add("computer", turn.integrations?.localComputer);
@@ -84,7 +84,7 @@ type NameValue = Array<{ name: string; value: string }>;
 export type AcpMcpServer = { name: string; command: string; args: string[]; env: NameValue }
   | { type: "http"; name: string; url: string; headers: NameValue };
 
-const HARNESS_KINDS = ["browser", "computer", "data", "highlevel", "device"] as const;
+const HARNESS_KINDS = ["browser", "computer", "data", "email", "device"] as const;
 
 /** OpenMausBot's own server behind a stdio proxy, as its HTTP endpoint on this server; null for any other server (the
  * person's, or one wrapped in a tool-selection gate). */
@@ -113,9 +113,17 @@ export function ownMcpOverHttp(server: TurnStdioMcpServer): { url: string; heade
  * provider takes in all. */
 export function acpMcpServers(turn: SendTurnInput, options: { http?: boolean; engine?: string; toolBudget?: number } = {}): AcpMcpServer[] {
   const schemaProfile = toolSchemaProfileFor({ engine: options.engine })?.id;
-  return turnStdioMcpServers(turn, { schemaProfile, toolBudget: options.toolBudget }).map((server) => {
-    const own = options.http ? ownMcpOverHttp(server) : null;
-    const pairs = (record: Record<string, string>) => Object.entries(record).map(([name, value]) => ({ name, value: String(value) }));
-    return own ? { type: "http", name: server.name, url: own.url, headers: pairs(own.headers) } : { ...server, env: pairs(server.env) };
+  const servers: AcpMcpServer[] = turnStdioMcpServers(turn, { schemaProfile, toolBudget: options.toolBudget }).map((server) => ({ ...server, env: pairs(server.env) }));
+  return options.http ? acpOwnServersOverHttp(servers) : servers;
+}
+
+/** `servers` with each of OpenMausBot's own stdio proxies as its endpoint on this server; every other server as it was. */
+export function acpOwnServersOverHttp(servers: AcpMcpServer[]): AcpMcpServer[] {
+  return servers.map((server) => {
+    if (!("command" in server)) return server;
+    const own = ownMcpOverHttp({ ...server, env: Object.fromEntries(server.env.map(({ name, value }) => [name, value])) });
+    return own ? { type: "http", name: server.name, url: own.url, headers: pairs(own.headers) } : server;
   });
 }
+
+const pairs = (record: Record<string, string>): NameValue => Object.entries(record).map(([name, value]) => ({ name, value: String(value) }));

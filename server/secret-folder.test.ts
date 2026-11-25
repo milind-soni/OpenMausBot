@@ -54,6 +54,10 @@ describe("a bot's private secret files", () => {
 
   it("are never published, read by the extract helper, or uploaded to a page", async () => {
     await expect(readPageBundle(secret, [workspace])).rejects.toMatchObject({ status: 403, message: SECRET_FILE_REFUSAL });
+    writeFileSync(join(workspace, ".env"), "x");
+    const whole = await readPageBundle(workspace, [workspace]);
+    expect(whole.files.map((file) => file.path).sort()).toEqual(["index.html", "notes.txt"]);
+    expect(whole.skipped).toEqual([{ path: ".env", why: "hidden" }]);
     await expect(botFileSource(secret, async () => ({ roots: [workspace], vmWorkspace: null }))).rejects.toMatchObject({ status: 403 });
     expect(uploadableFiles([secret], [workspace])).toEqual({ error: SECRET_FILE_REFUSAL });
     expect(uploadableFiles([join(workspace, "notes.txt")], [workspace])).toMatchObject({ files: [expect.stringContaining("notes.txt")] });

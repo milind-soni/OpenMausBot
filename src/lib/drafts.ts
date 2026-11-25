@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, useSyncExternalStore, type SetStateAction } from "react";
+import type { FollowUp } from "../../shared/follow-up.js";
 import { isAttachment, type Attachment } from "./composer-attachments.js";
 
 const KEY = "omb-drafts";
@@ -23,6 +24,9 @@ export interface FailedComposerSend {
   replyToId?: string;
   threadId: string;
   channelMode?: "chat" | "goal";
+  /** Bot ids picked from the @ list. */
+  mentions?: string[];
+  followUp?: FollowUp;
 }
 type FailedComposerSendInput = Omit<FailedComposerSend, "id">;
 export interface ComposerSendSnapshot extends FailedComposerSendInput {
@@ -214,7 +218,8 @@ export function useReplyDraft<T extends { id: string }>(
   useEffect(() => {
     setReplyState((current) => {
       if (current.threadId === threadId && current.message) return current;
-      return { threadId, message: resolveReplyMessage(threadId, messages) };
+      const message = resolveReplyMessage(threadId, messages);
+      return message || current.message ? { threadId, message } : current;
     });
   }, [messages, threadId]);
 
@@ -425,6 +430,8 @@ export function recoverFailedComposerSend(sent: ComposerSendSnapshot): "restored
       replyToId: sent.replyToId,
       threadId: sent.threadId,
       channelMode: sent.channelMode,
+      mentions: sent.mentions,
+      followUp: sent.followUp,
     });
     return "outbox";
   }

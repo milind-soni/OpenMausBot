@@ -4,11 +4,19 @@
 
 export interface RankableAi {
   driverKind: string;
+  /** A custom endpoint someone configured is a bring-your-own engine, not the provider's own plan. */
+  access?: string;
   snapshot?: { freeFallback?: boolean };
 }
 
 /** What a test message through an AI showed: `untestable` is an AI with no one-off call to send one, trusted as before. */
 export type AiTestState = "testing" | "passed" | "failed" | "untestable";
+/** Why a test message failed, as a word from a fixed list: never the provider's text. */
+export const AI_TEST_REASONS = [
+  "signed_out", "timeout", "empty", "credits", "usage_limit", "rate_limit", "overloaded", "server", "tool_schema", "tool_count",
+  "model_no_route", "refused", "other",
+] as const;
+export type AiTestReason = (typeof AI_TEST_REASONS)[number];
 
 const TIERS: Readonly<Record<string, number>> = {
   claudeAgent: 0,
@@ -27,7 +35,10 @@ export function freeFallback(instance: RankableAi): boolean {
 }
 
 function tier(instance: RankableAi): number {
-  return freeFallback(instance) ? FREE_FALLBACK : TIERS[instance.driverKind] ?? OTHER;
+  if (freeFallback(instance)) return FREE_FALLBACK;
+  // Same driver, but not the provider's own plan: a new bot still starts on the plan someone already has.
+  if (instance.access === "custom") return OTHER;
+  return TIERS[instance.driverKind] ?? OTHER;
 }
 
 /** A new list, best first; AIs of one kind keep the order they came in. */

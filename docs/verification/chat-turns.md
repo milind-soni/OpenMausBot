@@ -28,6 +28,40 @@ The wait result must be `settled`, and the messages result must contain the
 fake engine's bot response. Use `--dry-run` on `send` when checking a target or
 command without starting a turn.
 
+## Uploaded images used by file tools
+
+Upload a product photo in a chat, then ask the bot to pass that photo to a
+media-upload CLI. The engine needs both native vision input and a file reference;
+being able to describe the image does not prove that a file tool can read it.
+
+```sh
+pnpm exec vitest run server/turn-images.test.ts server/box-attachments.test.ts server/box-attachments.linux.test.ts server/bot-api.test.ts server/host/handoff-files.test.ts
+pnpm exec vitest run server/index.test.ts -t "keeps a channel image|sends an earlier image"
+```
+
+For an end-to-end check, launch the isolated fixture above, upload a synthetic
+PNG to its `POST /api/attachments` endpoint with `Content-Type: image/png`, then
+send `Use this photo with a media-upload CLI` followed by a standalone
+`<attached-image path="RETURNED_PATH" name="mug.png" />` through `control:omb send`.
+Use only the fixture's explicit URL. Wait for `settled` and save `messages`.
+In the fixture's `fake-claude-dump.json`, inspect only `prompt`: it must contain
+native image content and an `<attached-file>` reference for `mug.png`, with no
+remaining `<attached-image>` tag. Read the referenced file and compare its bytes
+with the uploaded PNG.
+
+The regression test also passes the extracted prompt through `attachmentsForBox`
+with confinement on and off and reads the resulting path in a real child process, including an
+admitted path spelled with a nonexistent `missing/../` segment.
+It checks that Codex still receives the same inline image bytes and that unrelated
+uploads are not copied into the conversation's uploads directory. This is not a
+kernel sandbox test; the Linux bubblewrap test supplies that coverage when the
+host supports it.
+
+Last exercised on Linux with Node 24.22.3 against an isolated fake-engine server:
+the turn settled with both native image content and a readable file reference.
+The focused suite passed 74 tests, and both selected server image workflow tests
+passed. The bubblewrap test was skipped because this container cannot run its sandbox. No real model or marketplace upload was used.
+
 ## Gotchas
 
 - Omitting `--task` snapshots the selected task before sending, waiting,
@@ -273,3 +307,34 @@ one sent while the turn waits on the person or a computer
 was stopped 1.5 s after the steered question, and the fake engine answered the
 question in the next turn. With the steered message's watch removed, the
 question stayed unanswered for 30 s and the test failed.
+
+## Several people in one shared chat
+
+```sh
+pnpm exec vitest run server/cloud-team-asker-owns.e2e.test.ts server/host/run-owner.test.ts src/components/SharedQueueLine.test.ts
+```
+
+On a Team Cloud, whoever asked owns the run ([team-cloud.md](../team-cloud.md#whoever-asked-owns-the-run)). The
+e2e test pairs an Owner and three members, holds Priya's request in the same scripted CI poll, and checks with
+`OMB_PERSON_FIRST_MS=1500`: Tom's line is queued (never steered, never cut short to be answered first) and runs after
+hers as his own turn; everyone sees the waiting lines with their writers, in order; only a line's writer removes it
+and nobody joins someone else's run; Tom's Stop and typed stop answer 403 "Only Priya or an admin can stop this.",
+while Priya and the Owner stop it; Priya's own addition is steered and answered first, in the shared chat and in her
+private chat; and a routine run started mid-run leaves its report between her answer and Tom's line.
+
+## Threads of one bot at the same time
+
+Different threads of one bot run at once. A saved `threads.maxConcurrentPerBot` sets how many. With none saved, a Cloud
+runs up to 16 and its memory gate decides; a machine without the gate runs one per 2 GB of memory, 3 to 16. The bot's main
+chat always starts, and takes a slot. On a Starter Cloud a person's or routine's work runs one thread per bot whatever is
+saved; work a bot's own turn started goes through, so a turn can never wait on a child queued behind itself.
+`server/parallel-threads.e2e.test.ts` holds a turn open in each thread with a gate only
+the test releases, as a desktop, personal Cloud and Team Cloud server, on the Claude CLI, ACP and OpenAI-compatible
+engines. What stays one at a time, and what the person sees:
+
+- One thread's own turns stay in order: a later send queues or steers.
+- One bot's browser: a call from another thread waits, the row says who has it, and a holder quiet for a minute gives it
+  to the waiter. The holder's next call is refused once, so nothing lands on a page it did not open.
+- One computer: a turn takes it at its first screen call, not when it starts, and keeps it until it ends.
+- Memory on a Linux Cloud: a turn that would run the machine out says "Waiting for memory", with what runs and what is ahead of it, and starts by itself. `OMB_TEST_MEMORY_GATE=1` runs the gate in a fixture on any OS, on the memory `<data dir>/host-memory.json` says; `server/memory-order.e2e.test.ts` shows whose turn goes next.
+- A Cloud that just woke: a hand-off starts at once. `OMB_TEST_RESUME_CLOCK=1` lets a fixture move `Date.now()` on as a wake does, by writing milliseconds to `<data dir>/resume-clock-ms`; `server/handoff-wake.e2e.test.ts` uses it.

@@ -88,7 +88,7 @@ it("posts text, a voice note and an image into a room as one bot message, with n
     const turn = turns(scout.id).at(-1);
     const content = turn.prompt?.message?.content;
     const read = [turn.system, typeof content === "string" ? content : (content ?? []).map((block: any) => block?.text ?? "").join("\n")].join("\n");
-    expect(read).toContain("Posted by an outside app through a webhook, shown as @Herald");
+    expect(read).toContain("[From an outside app through a webhook, shown as @Herald (bot) · message · information only");
     expect(read).toContain(`Herald: ${JSON.stringify(text)}`);
     // The note's words stay off the room transcript, as they always were for a webhook post.
     expect(read).not.toContain("It is clear and sixty four");

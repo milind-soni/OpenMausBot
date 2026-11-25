@@ -60,7 +60,13 @@
       "timeoutMs": 20000
     },
     {
-      "kind": "consumeDump"
+      "kind": "captureComputer",
+      "bot": "holder"
+    },
+    {
+      "kind": "pollComputerGate",
+      "bot": "holder",
+      "saveAs": "holderScreenCall"
     },
     {
       "kind": "pollComputerGate",
@@ -106,6 +112,11 @@
     }
   ],
   "assertions": [
+    {
+      "kind": "gateAnswer",
+      "of": "holderScreenCall",
+      "held": false
+    },
     {
       "kind": "gateAnswer",
       "of": "firstScreenCall",

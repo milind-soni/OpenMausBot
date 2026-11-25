@@ -4,12 +4,14 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer } from "../scripts/control-omb.ts";
 import { fixtureApi } from "../scripts/testing/preview-fixture.ts";
+import { hostTimeout } from "./testing/host-timeout.ts";
 import { openSse } from "./testing/sse.ts";
+import { isTitleCall } from "./testing/title-call.ts";
 
 it("Mistral keys persist, rotate, clear and reach real HTTP turns without leaking into public state", async () => {
   const received: string[] = [];
   let reply = 0;
-  const provider = createServer((req, res) => {
+  const provider = createServer(async (req, res) => {
     if (req.url === "/v1/models") {
       // Deliberately public: this must never be presented as authenticated.
       res.setHeader("content-type", "application/json");
@@ -17,9 +19,11 @@ it("Mistral keys persist, rotate, clear and reach real HTTP turns without leakin
       return;
     }
     if (req.url !== "/v1/chat/completions") { res.writeHead(404).end(); return; }
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    if (isTitleCall(body)) { res.writeHead(500).end(); return; }
     const key = req.headers.authorization ?? "";
     received.push(key);
-    req.resume();
     if (!["Bearer fixture-first-key", "Bearer fixture-replacement-key"].includes(key)) {
       res.writeHead(401, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: { message: "Invalid fixture credential" } }));
@@ -91,4 +95,4 @@ it("Mistral keys persist, rotate, clear and reach real HTTP turns without leakin
     await fixture.close();
     await new Promise<void>((resolve) => provider.close(() => resolve()));
   }
-});
+}, hostTimeout(60_000));

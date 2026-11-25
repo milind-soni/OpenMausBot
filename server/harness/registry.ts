@@ -2,10 +2,22 @@
 import { findCliCandidates } from "../env-path.ts";
 import { installNpmEngine, npmAvailable, serverInstallFor, standaloneLookupPath } from "../engine-install.ts";
 import { installStandaloneEngine, isAppStandaloneCopy, type StandaloneInstalled } from "../engine-standalone.ts";
-import { withEngineMemory } from "../engine-memory.ts";
+import { pinnedNpmVersion } from "../engine-versions.ts";
+import { withBotMemoryCap } from "../bot-memory-cap.ts";
+import { engineMemory as memoryGate, withEngineMemory } from "../engine-memory.ts";
 import { withEngineHomes } from "../engine-homes/engine-homes.ts";
+import { withLocalContext } from "../drivers/local-inject.ts";
 import { engineStatusFile, snapshotFrom } from "./engine-status-file.ts";
+import {
+  CALM_FAILURES_BELIEVED, cliPresent, heldSnapshot, inconclusiveFailure, PERSON_CHECK_MS, PROBE_QUEUE_WAIT_MS, PROBE_RETRY_MS, PROMPT_RETRIES, PROMPT_RETRY_MS,
+  STATUS_STALE_MS, turnActivity,
+} from "./probe-hold.ts";
+import { noteProbeUnsettled } from "../cli-program.ts";
 import { withUnaskedStops } from "./unasked-stop.ts";
+import { withTurnScope } from "../crash-guard.ts";
+import { withWslNotice } from "./wsl-launch.ts";
+import { modelManifest, startModelManifestRefresh } from "../model-manifest/manifest.ts";
+import { machinePressure } from "../machine-pressure.ts";
 export { engineMemory } from "../engine-memory.ts";
 import { clientInstall } from "../contracts.ts";
 import type {
@@ -19,6 +31,11 @@ import type {
   ProviderSnapshot,
   StandaloneRelease,
 } from "../contracts.ts";
+
+/** The server's own registry, where turns wait for room (a Cloud home, a self-hosted Linux server): checks that can wait
+ * wait for a calmer machine and for the engine's turns, and run one at a time on a small one. Off on the desktop app. */
+export const probeGate = () => ({ pressed: machinePressure.pressed, small: machinePressure.small, turnsProve: memoryGate.enabled,
+  log: (line: string) => console.warn(line) });
 
 export interface ShadowInstance {
   instanceId: InstanceId;
@@ -40,6 +57,20 @@ function withServerInstall(install: AnyProviderDriver["install"], npmPresent: bo
   const server = serverInstallFor(install, npmPresent);
   const platform = process.platform === "darwin" || process.platform === "linux" || process.platform === "win32" ? process.platform : undefined;
   return { ...clientInstall(install), platform, ...(server ? { server } : {}), ...(appCopy ? { signInCommand: undefined, appCopy: true } : {}) };
+}
+
+/** How Settings signs this engine in, when the app can: what its provider card shows, and what list_models tells a bot. */
+export function signInOf(inst: ProviderInstance) {
+  return inst.startAuthentication
+    ? {
+        method: inst.authenticationMethod ?? (inst.getAuthentication && inst.completeAuthentication
+          ? "paste-code" as const // a link to open, then a code pasted back (Claude)
+          : inst.getAuthentication
+            ? "device-code" as const // a code to enter at the provider's page (Codex)
+            : "callback-url" as const), // a link and a callback URL (managed engines)
+        signOut: inst.signOut !== undefined,
+      }
+    : undefined;
 }
 
 type InstallStandalone = (release: StandaloneRelease, options: { baseDir?: string }) => Promise<StandaloneInstalled>;
@@ -65,14 +96,18 @@ function cliOfRaw(raw: unknown): string | undefined {
 export const SNAPSHOT_DEADLINE_MS = 60_000;
 /** How long a finished status read answers later reads, so a start-up's model lists and engine-list reads probe each CLI once. */
 export const SNAPSHOT_REUSE_MS = 3_000;
+/** How long the engine list people see answers from earlier reads before one is read again in the background. */
+export const ENGINE_LIST_REUSE_MS = 60_000;
 const SNAPSHOT_DEADLINE_REASON = "This engine did not report its status within a minute. Check that its CLI starts in a terminal.";
+/** A status read cut off by SNAPSHOT_DEADLINE_MS: it could not finish, which says nothing about the engine. */
+class SnapshotDeadlineError extends Error {}
 
 function withinDeadline(read: () => Promise<ProviderSnapshot>): Promise<ProviderSnapshot> {
   let deadline: NodeJS.Timeout | undefined;
   return Promise.race([
     read(),
     new Promise<never>((_resolve, reject) => {
-      deadline = setTimeout(() => reject(new Error(SNAPSHOT_DEADLINE_REASON)), SNAPSHOT_DEADLINE_MS);
+      deadline = setTimeout(() => reject(new SnapshotDeadlineError(SNAPSHOT_DEADLINE_REASON)), SNAPSHOT_DEADLINE_MS);
       deadline.unref?.();
     }),
   ]).finally(() => clearTimeout(deadline));
@@ -98,6 +133,9 @@ export function enginesByUse(selections: ReadonlyArray<{ instanceId: InstanceId 
 
 type SharedRead = { generation: number; settledAt?: number; read: Promise<ProviderSnapshot> };
 
+/** Engines that rebuild their model list from the manifest without starting a CLI, so a downloaded change applies at once. */
+const MANIFEST_REBUILT_DRIVERS = new Set(["claudeAgent", "grokAgent", "kimiAgent"]);
+
 export class ProviderRegistry {
   private byId = new Map<InstanceId, RegistryEntry>();
   private cliByInstance = new Map<InstanceId, string>();
@@ -107,16 +145,45 @@ export class ProviderRegistry {
   /** Engines the start-up read has not probed yet; null outside that read. */
   private unread: Set<InstanceId> | null = null;
   private snapshotGeneration = 0;
+  private manifestWatched = false;
+  private readonly signedInListeners = new Set<(instanceId: InstanceId) => void>();
+  /** Per instance object: settings that reload an engine make a new one, so its status is read afresh. */
+  private readsOf = new WeakMap<ProviderInstance, { snapshot: ProviderSnapshot; at: number; generation: number }>();
   private driversByKind: Map<string, AnyProviderDriver>;
   private readonly enginesBaseDir: string | undefined;
   private readonly npmPresent: () => boolean;
   private readonly status: ReturnType<typeof engineStatusFile> | null;
   private readonly installStandalone: InstallStandalone;
+  /** Whether the machine is too busy now for a check that can wait (machine-pressure.ts); never, unless given. */
+  private readonly pressed: () => boolean;
+  /** A machine where status checks that start a CLI run one at a time; none is, unless given. */
+  private readonly small: () => boolean;
+  private readonly cliPresent: (cli: string) => boolean;
+  /** Engines whose last check could not finish: how many times in a row, and the check again that is due. */
+  /** `calm`: checks in a row that could not finish while the machine was not pressed; `since`: the first of them; `prompt`:
+   * prompt checks again spent after the person's own change. */
+  private readonly retries = new Map<InstanceId, { attempt: number; timer?: NodeJS.Timeout; signOut?: true; calm: number; since: number; prompt: number }>();
+  /** When the last change that may alter an engine's status was made (forgetSnapshots: an install, a sign-in, a key). */
+  private changedAt = -Infinity;
+  /** Engines whose checks failed to finish CALM_FAILURES_BELIEVED times on a calm machine: one more such check is believed
+   * at once, until a check answers. */
+  private readonly calmBroken = new Set<InstanceId>();
+  private readonly turns = new Map<InstanceId, { activity: ReturnType<typeof turnActivity>; off: () => void }>();
+  private probeQueue: Promise<void> = Promise.resolve();
+  /** Whether a turn under way puts off its engine's checks that can wait (where turns wait for room); off unless given. */
+  private readonly turnsProve: boolean;
+  private readonly log: (line: string) => void;
 
   constructor(
     drivers: readonly AnyProviderDriver[],
-    options: { enginesBaseDir?: string; npmAvailable?: () => boolean; statusFile?: string; installStandalone?: InstallStandalone } = {},
+    options: { enginesBaseDir?: string; npmAvailable?: () => boolean; statusFile?: string; installStandalone?: InstallStandalone;
+      pressed?: () => boolean; small?: () => boolean; cliPresent?: (cli: string) => boolean; turnsProve?: boolean; log?: (line: string) => void } = {},
   ) {
+    this.pressed = options.pressed ?? (() => false);
+    this.small = options.small ?? (() => false);
+    this.turnsProve = options.turnsProve === true;
+    this.log = options.log ?? (() => {});
+    this.cliPresent = options.cliPresent ?? ((cli) => cliPresent(cli));
     this.enginesBaseDir = options.enginesBaseDir;
     this.npmPresent = options.npmAvailable ?? npmAvailable;
     this.status = options.statusFile ? engineStatusFile(options.statusFile) : null;
@@ -124,7 +191,19 @@ export class ProviderRegistry {
     this.driversByKind = new Map(drivers.map((d) => [d.driverKind, d]));
   }
 
+  private watchModelManifest(): void {
+    if (this.manifestWatched) return;
+    this.manifestWatched = true;
+    modelManifest().onChange(() => {
+      for (const instance of this.instances()) {
+        if (MANIFEST_REBUILT_DRIVERS.has(instance.driverKind)) void this.refreshModels(instance.instanceId).catch(() => {});
+      }
+    });
+    startModelManifestRefresh();
+  }
+
   async load(configs: InstanceConfigMap, decorate?: (instance: ProviderInstance) => ProviderInstance) {
+    this.watchModelManifest();
     const slots = [...this.byId.keys()];
     const loaded = await Promise.all(
       Object.entries(configs).map(async ([instanceId, entry]) => {
@@ -168,14 +247,15 @@ export class ProviderRegistry {
       // The RAW config: decodeConfig fills in the driver default, which would flag every instance as overridden.
       const rawCli = cliOfRaw(entry.config);
       if (rawCli) this.cliByInstance.set(instanceId, rawCli);
-      const live = withUnaskedStops(withEngineHomes(withEngineMemory(await driver.create({
+      const live = withLocalContext(withUnaskedStops(withEngineHomes(withBotMemoryCap(withEngineMemory(withTurnScope(await driver.create({
         instanceId,
         displayName: entry.displayName ?? driver.metadata.displayName,
         environment: entry.environment ?? {},
         enabled: entry.enabled ?? true,
         config,
-      }))));
+      })))))));
       this.shareSnapshot(live);
+      this.watchTurns(instanceId, live);
       return { instanceId, live: decorate ? decorate(live) : live };
     } catch (e) {
       return {
@@ -204,16 +284,74 @@ export class ProviderRegistry {
     instance.snapshot = () => {
       if (held && held.generation === this.snapshotGeneration
         && (held.settledAt === undefined || Date.now() - held.settledAt < SNAPSHOT_REUSE_MS)) return held.read;
-      const current: SharedRead = { generation: this.snapshotGeneration, read: withinDeadline(read) };
+      const current: SharedRead = { generation: this.snapshotGeneration, read: this.probeSlot(instance.instanceId, () => withinDeadline(read)) };
       held = current;
       current.read.then(() => { current.settledAt = Date.now(); }, () => { if (held === current) held = undefined; });
       return current.read;
     };
   }
 
+  /** On a small machine, a status read that starts a CLI waits for the one before it (at most PROBE_QUEUE_WAIT_MS), so a
+   * starved Cloud never runs several engines' checks at once; elsewhere, and for engines without a CLI, it starts now. */
+  private probeSlot(instanceId: InstanceId, run: () => Promise<ProviderSnapshot>): Promise<ProviderSnapshot> {
+    if (!this.cliTarget(instanceId)?.cli || !this.small()) return run();
+    const read = settledOrAfter(this.probeQueue, PROBE_QUEUE_WAIT_MS).then(run);
+    this.probeQueue = read.then(() => undefined, () => undefined);
+    return read;
+  }
+
+  /** A turn of this engine that is under way proves it runs: its own events say which. */
+  private watchTurns(instanceId: InstanceId, live: ProviderInstance): void {
+    this.turns.get(instanceId)?.off();
+    this.turns.delete(instanceId);
+    if (!this.turnsProve) return;
+    const activity = turnActivity();
+    let off: unknown;
+    try { off = live.adapter.onEvent((event) => activity.note(event)); } catch {}
+    this.turns.set(instanceId, { activity, off: typeof off === "function" ? off as () => void : () => {} });
+  }
+
+  /** A check that can wait does, while the machine is pressed or the engine has a turn under way. */
+  probeDeferred(instanceId: InstanceId): boolean {
+    return this.turns.get(instanceId)?.activity.running() === true || this.pressed();
+  }
+
+  /** After a check that could not finish: one more, later, backing off; a turn or a pressed machine puts it off again. */
+  private retryEntry(instanceId: InstanceId) {
+    const entry = this.retries.get(instanceId) ?? { attempt: 0, calm: 0, since: Date.now(), prompt: 0 };
+    this.retries.set(instanceId, entry);
+    return entry;
+  }
+
+  /** Put off by a pressed machine or a turn only up to a point: never past the back-off's last step, nor once the status is
+   * STATUS_STALE_MS old. After the person's own change the check is tried again promptly, pressed or not, a few times. */
+  private retryLater(instance: ProviderInstance, signOut = false): void {
+    const entry = this.retryEntry(instance.instanceId);
+    if (signOut) entry.signOut = true;
+    if (entry.timer) return;
+    const prompt = Date.now() - this.changedAt < PERSON_CHECK_MS && entry.prompt < PROMPT_RETRIES;
+    if (prompt) entry.prompt += 1;
+    entry.timer = setTimeout(() => {
+      entry.timer = undefined;
+      if (this.retries.get(instance.instanceId) !== entry || this.byId.get(instance.instanceId)?.live !== instance) return;
+      entry.attempt += 1;
+      const due = prompt || entry.signOut === true || entry.attempt >= PROBE_RETRY_MS.length - 1 || Date.now() - entry.since >= STATUS_STALE_MS;
+      if (!due && this.probeDeferred(instance.instanceId)) this.retryLater(instance);
+      else void this.read(instance);
+    }, prompt ? PROMPT_RETRY_MS : PROBE_RETRY_MS[Math.min(entry.attempt, PROBE_RETRY_MS.length - 1)]);
+    entry.timer.unref?.();
+  }
+
+  private stopRetry(instanceId: InstanceId): void {
+    const entry = this.retries.get(instanceId);
+    if (entry?.timer) clearTimeout(entry.timer);
+    this.retries.delete(instanceId);
+  }
+
   /** Every engine's next status read probes its CLI again: an install, update, sign-in or key change may alter what it reports. */
   forgetSnapshots(): void {
     this.snapshotGeneration += 1;
+    this.changedAt = Date.now();
     this.seeds.clear();
   }
 
@@ -242,7 +380,9 @@ export class ProviderRegistry {
       }
       afterFirst();
       await Promise.all([withoutCli, this.engineRead(...live)]);
-      const gone = [...seeded].filter(([id, seed]) => seed.state === "available" && this.lastSnapshots.get(id)?.state === "unavailable");
+      // Also one whose check could not finish and kept the last status (probe-hold.ts), unless the machine is pressed now.
+      const gone = [...seeded].filter(([id, seed]) => seed.state === "available"
+        && (this.lastSnapshots.get(id)?.state === "unavailable" || (this.retries.has(id) && !this.probeDeferred(id))));
       if (gone.length) {
         this.forgetSnapshots();
         for (const [id] of gone) this.unread?.add(id);
@@ -282,6 +422,13 @@ export class ProviderRegistry {
 
   lastSnapshot(instanceId: InstanceId): ProviderSnapshot | undefined {
     return this.byId.get(instanceId)?.live ? this.lastSnapshots.get(instanceId) : undefined;
+  }
+
+  /** How this engine is installed and signed in, from what its provider card is built from; no status read. */
+  connection(instanceId: InstanceId) {
+    const entry = this.byId.get(instanceId);
+    const driver = entry && this.driversByKind.get(entry.shadow?.driverKind ?? entry.live!.driverKind);
+    return { install: clientInstall(driver?.install), signIn: entry?.live && signInOf(entry.live), account: driver?.metadata.signInAccount };
   }
 
   access(instanceId: InstanceId): EngineAccess | undefined {
@@ -338,7 +485,7 @@ export class ProviderRegistry {
         return (await this.appCopyAdvice(instanceId, driver, installed)) ?? true;
       }
       if (!server?.package) return false;
-      await installNpmEngine(server.package, { baseDir: this.enginesBaseDir, cli: cliDefaultOf(driver) });
+      await installNpmEngine(server.package, { baseDir: this.enginesBaseDir, cli: cliDefaultOf(driver), version: driver ? pinnedNpmVersion(driver.driverKind) : undefined });
       return true;
     } finally {
       this.forgetSnapshots();
@@ -375,18 +522,42 @@ export class ProviderRegistry {
   private async appCopyAdvice(instanceId: InstanceId, driver: AnyProviderDriver, installed: StandaloneInstalled): Promise<{ useCli: string } | null> {
     const live = this.get(instanceId);
     const cli = cliDefaultOf(driver);
-    // A CLI the person set with Set CLI is theirs to change; only the default name gets pointed elsewhere.
+    // A CLI the person set with Set CLI is theirs to change, unless it runs another program altogether (an install
+    // command pasted as the path); otherwise only the default name gets pointed elsewhere.
     const configured = this.cliByInstance.get(instanceId);
-    if (configured !== undefined && configured !== cli) return null;
-    if (!live || !cli || !installed.executablePath || this.appStandaloneCopy(driver, cli)) return null;
+    const theirs = configured !== undefined && configured !== cli;
+    if (!live || !cli || !installed.executablePath || (!theirs && this.appStandaloneCopy(driver, cli))) return null;
     this.forgetSnapshots();
-    let state: ProviderSnapshot["state"];
+    let snapshot: ProviderSnapshot;
     try {
-      state = (await live.snapshot()).state;
+      snapshot = await live.snapshot();
     } catch {
-      state = "unavailable";
+      snapshot = { state: "unavailable" };
     }
-    return state === "available" ? null : { useCli: installed.executablePath };
+    if (snapshot.state === "available" || (theirs && snapshot.notEngineCli !== true)) return null;
+    return { useCli: installed.executablePath };
+  }
+
+  /** Set by the instance routes: points an engine whose saved CLI path runs another program at its own installed CLI, as
+   * Set CLI would, and reloads it. */
+  private cliHealer: ((instanceId: InstanceId, cli: string) => Promise<unknown>) | null = null;
+  private healing = new Set<InstanceId>();
+  onWrongCli(heal: (instanceId: InstanceId, cli: string) => Promise<unknown>): void {
+    this.cliHealer = heal;
+  }
+
+  /** A saved CLI path that answered as another program, while the engine's own CLI is installed (the app's copy, or one
+   * on PATH): the engine runs its own instead, with nobody having to Reset the path. */
+  private healWrongCli(instanceId: InstanceId, snapshot: ProviderSnapshot): void {
+    const driver = this.driversByKind.get(this.byId.get(instanceId)?.live?.driverKind ?? "");
+    const cli = cliDefaultOf(driver);
+    const saved = this.cliByInstance.get(instanceId);
+    if (snapshot.notEngineCli !== true || !this.cliHealer || !cli || saved === undefined || saved === cli || this.healing.has(instanceId)) return;
+    const own = findCliCandidates(cli, driver?.install?.standalone ? standaloneLookupPath(this.enginesBaseDir) : undefined)[0];
+    // The path found is the one already saved: it is that one that answers as another program.
+    if (!own || own === saved) return;
+    this.healing.add(instanceId);
+    void this.cliHealer(instanceId, own).catch(() => {}).finally(() => this.healing.delete(instanceId));
   }
 
   /** Whether this engine's CLI runs the app's own standalone copy, looked up the way its spawns look it up. */
@@ -395,27 +566,86 @@ export class ProviderRegistry {
     return isAppStandaloneCopy(cli, this.enginesBaseDir, standaloneLookupPath(this.enginesBaseDir));
   }
 
-  describe(options: { known?: boolean } = {}) {
+  /** `reuse`: answer from a status read since the last forgetSnapshots(); one older than `ms` is read again in the background
+   * and `changed` runs when that read differs. One older than `maxAgeMs` is not reused: its engine is read first. */
+  describe(options: { known?: boolean; reuse?: { ms: number; maxAgeMs?: number; changed(): void } } = {}) {
     return this.describeWith((instance) => {
       const seed = options.known && this.unread?.has(instance.instanceId) ? this.seeds.get(instance.instanceId) : undefined;
-      return seed ? Promise.resolve(seed) : this.read(instance);
+      if (seed) return Promise.resolve(seed);
+      const last = options.reuse && this.readsOf.get(instance);
+      if (!options.reuse || !last || last.generation !== this.snapshotGeneration) return this.read(instance);
+      // A check that can wait does not run during a turn of this engine or while the machine is pressed: the last answer
+      // stands, until it is STATUS_STALE_MS old.
+      const waits = Date.now() - last.at < STATUS_STALE_MS && this.probeDeferred(instance.instanceId);
+      if (options.reuse.maxAgeMs !== undefined && Date.now() - last.at >= options.reuse.maxAgeMs && !waits) return this.read(instance);
+      if (waits) return Promise.resolve(last.snapshot);
+      if (Date.now() - last.at >= options.reuse.ms) {
+        const { changed } = options.reuse;
+        void this.read(instance).then((snapshot) => { if (JSON.stringify(snapshot) !== JSON.stringify(last.snapshot)) changed(); });
+      }
+      return Promise.resolve(last.snapshot);
     });
   }
 
   private async read(instance: ProviderInstance): Promise<ProviderSnapshot> {
     let snapshot: ProviderSnapshot;
+    let answered = true, inconclusive = false;
+    const generation = this.snapshotGeneration;
     try {
       snapshot = await instance.snapshot();
+      inconclusive = snapshot.state === "unavailable" && snapshot.busy === true;
     } catch (e) {
-      snapshot = { state: "unavailable", reason: e instanceof Error ? e.message : String(e) };
+      answered = false;
+      inconclusive = e instanceof SnapshotDeadlineError || inconclusiveFailure(e);
+      snapshot = { state: "unavailable", reason: e instanceof Error ? e.message : String(e), ...(inconclusive ? { busy: true as const } : {}) };
     }
+    const before = this.lastSnapshots.get(instance.instanceId) ?? this.seeds.get(instance.instanceId);
+    // Signed out, read on a pressed machine just after being signed in: checked once more (pressed or not) before it is
+    // believed. Believed at once after a sign-in change (forgetSnapshots since this engine's last read), and the second time.
+    const lastRead = this.readsOf.get(instance), signOutHeld = this.retries.get(instance.instanceId)?.signOut === true;
+    const holdSignOut = !inconclusive && !signOutHeld && before?.authenticated === true && snapshot.state === "available" && snapshot.authenticated === false
+      && (lastRead === undefined || lastRead.generation === generation) && this.pressed();
+    if (holdSignOut) inconclusive = true;
+    // A check that keeps failing to finish on a calm machine is an answer: the engine hangs or is killed, it is not starved.
+    const calm = (this.retries.get(instance.instanceId)?.calm ?? 0) + (inconclusive && !holdSignOut && !this.pressed() ? 1 : 0);
+    const believed = inconclusive && !holdSignOut && (calm >= CALM_FAILURES_BELIEVED || (calm > 0 && this.calmBroken.has(instance.instanceId)));
+    if (!inconclusive) this.calmBroken.delete(instance.instanceId);
+    if (believed) {
+      inconclusive = false;
+      this.calmBroken.add(instance.instanceId);
+      const { busy: _busy, ...failed } = snapshot;
+      snapshot = { ...failed, state: "unavailable" };
+      this.log(`engines: ${instance.instanceId}'s status check failed to finish ${calm} times in a row on a calm machine; taken as its answer`);
+    } else if (inconclusive) {
+      const cli = this.cliTarget(instance.instanceId)?.cli;
+      snapshot = heldSnapshot(before, snapshot, () => (cli ? this.cliPresent(cli) : null));
+      this.log(`engines: ${instance.instanceId}'s status check gave no clear answer; ${snapshot === before ? "keeping its last status"
+        : snapshot.unverified ? "its program is there, taken as installed until a check answers" : snapshot.busy ? "status unknown" : "its program is not there"}`);
+    }
+    if (answered || inconclusive) this.readsOf.set(instance, { snapshot, at: Date.now(), generation });
     // Only while this is still the live instance: a reload may have replaced it during the read.
     if (this.byId.get(instance.instanceId)?.live === instance) {
+      if (inconclusive) {
+        this.retryEntry(instance.instanceId).calm = calm;
+        this.retryLater(instance, holdSignOut);
+      } else this.stopRetry(instance.instanceId);
+      const cli = this.cliTarget(instance.instanceId)?.cli;
+      if (cli) noteProbeUnsettled(cli, inconclusive && !holdSignOut);
       this.lastSnapshots.set(instance.instanceId, snapshot);
       this.unread?.delete(instance.instanceId);
       this.saveStatus();
+      if (!inconclusive) this.healWrongCli(instance.instanceId, snapshot);
+      if (before?.authenticated === false && snapshot.state === "available" && snapshot.authenticated === true) {
+        for (const listener of this.signedInListeners) listener(instance.instanceId);
+      }
     }
     return snapshot;
+  }
+
+  /** `listener` hears of each engine whose status read turns from signed out to signed in, however the sign-in happened:
+   * in the app, in the engine's own browser callback, or in a terminal. */
+  onSignedIn(listener: (instanceId: InstanceId) => void): void {
+    this.signedInListeners.add(listener);
   }
 
   private saveStatus(): void {
@@ -456,13 +686,15 @@ export class ProviderRegistry {
           };
         }
         const inst = entry.live;
-        const snapshot = await statusOf(inst);
+        const cli = this.cliByInstance.get(inst.instanceId);
+        const snapshot = withWslNotice(await statusOf(inst), cli);
         return {
           instanceId: inst.instanceId,
           driverKind: inst.driverKind,
           displayName: inst.displayName ?? inst.driverKind,
           snapshot,
           models: inst.models,
+          ...(inst.modelsUnconfirmed ? { modelsUnconfirmed: true, ...(inst.modelsUnreadable ? { modelsUnreadable: inst.modelsUnreadable } : {}) } : {}),
           capabilities: {
             computerMcp: inst.adapter.capabilities.computerMcp === true,
             agentsMcp: inst.adapter.capabilities.agentsMcp === true,
@@ -470,7 +702,7 @@ export class ProviderRegistry {
             phoneMcp: inst.adapter.capabilities.phoneMcp === true,
             deviceMcp: inst.adapter.capabilities.deviceMcp === true,
             dataMcp: inst.adapter.capabilities.dataMcp === true,
-            highlevelMcp: inst.adapter.capabilities.highlevelMcp === true,
+            emailMcp: inst.adapter.capabilities.emailMcp === true,
             browserMcp: inst.adapter.capabilities.browserMcp === true,
             images: inst.adapter.capabilities.images === true,
             effortLevels: inst.adapter.capabilities.effortLevels,
@@ -481,18 +713,9 @@ export class ProviderRegistry {
             backgroundText: inst.generateText !== undefined || inst.generateMemoryText !== undefined,
           },
           access: driver?.metadata.access ?? "subscription",
-          install: withServerInstall(driver?.install, npmPresent, this.appStandaloneCopy(driver, this.cliByInstance.get(inst.instanceId) ?? cliDefaultOf(driver))),
-          authentication: inst.startAuthentication
-            ? {
-                method: inst.authenticationMethod ?? (inst.getAuthentication && inst.completeAuthentication
-                  ? "paste-code" as const // a link to open, then a code pasted back (Claude)
-                  : inst.getAuthentication
-                    ? "device-code" as const // a code to enter at the provider's page (Codex)
-                    : "browser" as const), // a link and a callback URL (managed engines)
-                signOut: inst.signOut !== undefined,
-              }
-            : undefined,
-          cli: this.cliByInstance.get(inst.instanceId),
+          install: withServerInstall(driver?.install, npmPresent, this.appStandaloneCopy(driver, cli ?? cliDefaultOf(driver))),
+          authentication: signInOf(inst),
+          cli,
           cliDefault: cliDefaultOf(driver),
           cliCandidates: candidatesFor(driver),
         };
@@ -501,6 +724,9 @@ export class ProviderRegistry {
   }
 
   async disposeAll() {
+    for (const instanceId of this.retries.keys()) this.stopRetry(instanceId);
+    for (const { off } of this.turns.values()) off();
+    this.turns.clear();
     await Promise.allSettled(this.instances().map((i) => i.dispose()));
     this.byId.clear();
     this.cliByInstance.clear();
@@ -510,6 +736,9 @@ export class ProviderRegistry {
 
   async dispose(instanceId: InstanceId) {
     const entry = this.byId.get(instanceId);
+    this.stopRetry(instanceId);
+    this.turns.get(instanceId)?.off();
+    this.turns.delete(instanceId);
     this.byId.delete(instanceId);
     this.cliByInstance.delete(instanceId);
     this.lastSnapshots.delete(instanceId);

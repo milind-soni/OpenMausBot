@@ -2,23 +2,33 @@
 // boxes reach through unix sockets (egress-gate.ts, harness-gate.ts), and wraps each bot spawn (server/procs.ts spawnCli
 // with owner "bot") in bubblewrap by the plan (plan.ts). Nothing here changes a spawn when the box is off: the command,
 // its arguments and its environment go through untouched, so every host that is not a Cloud home behaves as before.
-import { existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { randomBytes } from "node:crypto";
+import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
 
 import { engineInstallRoots } from "../engine-roots.ts";
+import { homeProgramDirs, resetPathCache } from "../env-path.ts";
 import { SERVER_ROOT, resolveProxy } from "../proxy-paths.ts";
 import { bridgedCommand, type BridgeTools } from "./bridge.ts";
+import { GITHUB_GRANT, boxGithubGit } from "../github/git-access.ts";
 import { brokerRewrite } from "./broker-env.ts";
 import { openCredentialBroker, type BrokerGrant, type CredentialBroker } from "./broker.ts";
 import { detectBox, type BoxDetection, type BoxKind } from "./detect.ts";
 import { openBoxEgressGate, type BoxEgressGate } from "./egress-gate.ts";
 import { boxEnvironment } from "./env.ts";
 import { openHarnessGate, type HarnessGate } from "./harness-gate.ts";
+import { distrustHomePrograms } from "./program-trust.ts";
+import { procHidepid } from "./hidepid.ts";
 import { DENIED_SYSCALLS, seccompBytes, seccompSupported } from "./seccomp.ts";
-import { bwrapArgs, planBox, taskWorkspaceIds, type BoxBridge, type BoxPlan, type BoxRequest, type BoxSetup } from "./plan.ts";
+import { RELAY_SOCKET_NAME, TEAM_FOLDER_KEPT, boxUploadsConversation, boxUploadsDir, teamFolderOf, under, bwrapArgs, inBoxSocket, planBox, taskWorkspaceIds, type BoxAudience, type BoxBridge, type BoxPlan, type BoxRequest, type BoxSetup } from "./plan.ts";
+import { openBoxRelay, type BoxRelay } from "./relay.ts";
+import { signInMasks } from "./sign-in-masks.ts";
+import { CACHE_ROOT_SWITCH, ensureToolCacheRoot, toolCacheEnvironment, toolCacheRoot, toolCachesOn } from "./tool-caches.ts";
 
 /** The loopback port inside a box that reaches the egress gate. The harness gate sits at the server's own port. */
 export const BOX_EGRESS_PORT = 3128;
+/** What the box sets on an isolated network: the egress proxy, and the local hosts that skip it. */
+export const BOX_PROXY_ENV = ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"] as const, BOX_NO_PROXY_ENV = ["NO_PROXY", "no_proxy"] as const;
 /** The loopback port inside a box that reaches the credential broker. */
 export const BOX_BROKER_PORT = 18080;
 /** The descriptor the box reads its seccomp filter from: the first after stdio. */
@@ -40,6 +50,10 @@ export interface WrappedSpawn {
   extraFds: number[];
 }
 
+/** On a Team Cloud, the audience side of a conversation's boxes (server/host/team-box-scope.ts): null for a conversation
+ * it does not place. `sharedProcess`: the box is for a process the bot's conversations share (BoxRequest.botThreads). */
+export type BoxAudienceScope = (input: { threadId: string; botId: string | null; sharedProcess: boolean }) => BoxAudience | null;
+
 /** What the box runtime offers the broker's callers: mint a conversation-bound grant (an MCP server's headers). */
 export interface BoxBroker {
   port: number;
@@ -60,6 +74,10 @@ export interface RunnerOptions {
   seccompFile?: string | null;
   /** The broker to mint per-process tokens with; none leaves keys in the environment. */
   broker?: { port: number; mintForProcess(input: { botId?: string | null; threadId?: string | null; grants: Record<string, BrokerGrant> }): { token: string }; revoke(token: string): void } | null;
+  /** Point the tools' download caches at the cache folder in the box's HOME (tool-caches.ts); off leaves the environment as is. */
+  toolCaches?: boolean;
+  /** Makes and marks a HOME's cache folder (tool-caches.ts ensureToolCacheRoot); a test passes its own. */
+  cacheRoot?: (root: string) => boolean | null;
 }
 
 /** Wraps spawns for one setup (the server's, or a self-check fixture's). */
@@ -67,8 +85,44 @@ export class BoxRunner {
   private readonly options: RunnerOptions;
   /** Paths a conversation's turns may write besides the bot's own folder (a member's or a room's memory layer on a Team Cloud). */
   private readonly lent = new Map<string, readonly string[]>();
+  private audiences: BoxAudienceScope | null = null;
 
+  /** Each HOME's cache folder: the server's (true) or the person's own (false), asked once per folder. */
+  private readonly cacheRoots = new Map<string, boolean>();
   constructor(options: RunnerOptions) { this.options = options; }
+
+  /** Whether the tools' caches of a box whose HOME is `home` go into its cache folder: only one the server made. Made on
+   * the first spawn for that HOME, never at start. */
+  private cacheRootOurs(home: string): boolean {
+    const root = toolCacheRoot(home);
+    const known = this.cacheRoots.get(root);
+    if (known !== undefined) return known;
+    const ours = (this.options.cacheRoot ?? ensureToolCacheRoot)(root);
+    if (ours === null) return false;
+    this.cacheRoots.set(root, ours);
+    if (!ours) console.log(`bot box: ${root} was not made by the server, so the tools' caches of that HOME stay where each tool puts them (${CACHE_ROOT_SWITCH})`);
+    return ours;
+  }
+
+  /** A Team Cloud's audience rule for every box from now on; null takes it away. */
+  scopeAudiences(scope: BoxAudienceScope | null): void { this.audiences = scope; }
+
+  /** The conversation and bot a spawn is for: its conversation folder's, else the conversation it runs in (a Team
+   * Cloud's engine homes say) with the bot whose own folder it works in or names. */
+  private conversation(request: BoxRequest): { botId: string | null; threadId: string | null; folder: boolean } {
+    const ids = request.cwd ? taskWorkspaceIds(request.cwd, this.options.setup.dataDir) : null;
+    if (ids) return { ...ids, folder: true };
+    if (!request.cwd && request.conversationBot) return { botId: request.conversationBot, threadId: request.threadId ?? null, folder: false };
+    const inWorkspaces = request.cwd ? relative(join(this.options.setup.dataDir, "workspaces"), resolve(request.cwd)).split(sep)[0] : undefined;
+    const botId = request.botId ?? (inWorkspaces && /^[A-Za-z0-9_-]{1,128}$/.test(inWorkspaces) ? inWorkspaces : null) ?? request.conversationBot ?? null;
+    return { botId, threadId: request.threadId ?? null, folder: false };
+  }
+
+  /** What the audience rule gives this box, or null off a team (and for a spawn of no conversation). */
+  audienceFor(request: BoxRequest): BoxAudience | null {
+    const { botId, threadId, folder } = this.conversation(request);
+    return this.audiences && threadId ? this.audiences({ threadId, botId, sharedProcess: Boolean(request.botThreads) && folder }) : null;
+  }
 
   get setup(): BoxSetup { return this.options.setup; }
 
@@ -82,44 +136,77 @@ export class BoxRunner {
   }
 
   wrap(given: BoxRequest): WrappedSpawn {
-    const ids = given.cwd ? taskWorkspaceIds(given.cwd, this.options.setup.dataDir) : null;
-    const lent = ids ? this.lentTo(ids.botId, ids.threadId) : [];
-    const request: BoxRequest = lent.length ? { ...given, rw: [...(given.rw ?? []), ...lent] } : given;
+    const uploads = boxUploadsConversation(given, resolve(this.options.setup.dataDir));
+    const { botId, threadId } = this.conversation(given);
+    const lent = botId && threadId ? this.lentTo(botId, threadId) : [];
+    const audience = this.audienceFor(given);
+    // Made before the box starts, so an upload a later turn adds shows up in a box that is still running.
+    if (uploads) try { mkdirSync(boxUploadsDir(this.options.setup.dataDir, uploads.botId, uploads.threadId), { recursive: true, mode: 0o700 }); } catch (error) {
+      // The bind stays optional, but an upload named later would then be unreadable in this box: say so.
+      console.error(`bot box: could not make the uploads folder, so uploads stay unreadable in this box: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    // A room's turn in the bot's own folder: the team's notes and skills are bound read-only only where they exist, so
+    // they are made first, or the turn could make them.
+    const team = audience?.teamReadOnly && given.cwd ? teamFolderOf(botId, resolve(given.cwd), this.options.setup.dataDir) : null;
+    if (team && under(resolve(given.cwd!), team) && existsSync(team)) {
+      for (const name of TEAM_FOLDER_KEPT) if (name !== "MEMORY.md") try { mkdirSync(join(team, name), { recursive: true, mode: 0o700 }); } catch {}
+    }
+    const request: BoxRequest = { ...given, ...(lent.length ? { rw: [...(given.rw ?? []), ...lent] } : {}), ...(audience ? { audience } : {}) };
     const extraFds: number[] = [];
     const seccomp = this.options.seccompFile && !this.options.setup.mutate?.has("no-seccomp") ? this.options.seccompFile : null;
-    if (seccomp) extraFds.push(openSync(seccomp, "r"));
-    const plan = planBox({ ...this.options.setup, seccompFd: seccomp ? BOX_SECCOMP_FD : undefined }, request);
+    const signIns = request.home ? undefined : signInMasks({ home: this.options.setup.home, dataDir: this.options.setup.dataDir, env: request.env, engine: request.engine });
+    const plan = planBox({ ...this.options.setup, seccompFd: seccomp ? BOX_SECCOMP_FD : undefined }, request, signIns);
     const mutate = this.options.setup.mutate;
     const env = mutate?.has("env-all")
       ? Object.fromEntries(Object.entries(request.env).filter((entry): entry is [string, string] => entry[1] !== undefined))
       : boxEnvironment(request.env, this.options.denyEnv, new Set(request.allowEnv ?? []));
+    // The server's own PATH leaves out the programs in HOME (program-trust.ts); inside the box they are the bot's own.
+    const homePrograms = homeProgramDirs(resolve(request.home ?? this.options.setup.home)).filter((dir) => !(env.PATH ?? "").split(":").includes(dir));
+    if (homePrograms.length) env.PATH = [...(env.PATH ? [env.PATH] : []), ...homePrograms].join(":");
+    // After the allow-list, so a value the person gave for this spawn is the one kept.
+    const boxHome = request.home ?? this.options.setup.home;
+    if (this.options.toolCaches && this.cacheRootOurs(boxHome)) Object.assign(env, toolCacheEnvironment(boxHome, env, request.env));
     if (plan.net === "isolated") {
       const proxy = `http://127.0.0.1:${this.options.egressPort ?? BOX_EGRESS_PORT}`;
-      for (const name of ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"]) env[name] = proxy;
+      for (const name of BOX_PROXY_ENV) env[name] = proxy;
       // Node's env proxy matches an IPv6 host only bracketed; curl and the engines take the plain forms.
-      for (const name of ["NO_PROXY", "no_proxy"]) env[name] = "127.0.0.1,localhost,::1,[::1]";
+      for (const name of BOX_NO_PROXY_ENV) env[name] = "127.0.0.1,localhost,::1,[::1]";
     }
     const bridges = plan.net === "isolated" ? this.options.setup.bridges : [];
-    const inner = bridgedCommand(this.options.bridge, bridges, request.command, request.args);
+    const relay = plan.net === "isolated" && request.relay ? inBoxSocket(RELAY_SOCKET_NAME) : undefined;
+    const inner = bridgedCommand(this.options.bridge, bridges, request.command, request.args, relay);
     const brokered = this.broker(env, plan, request);
-    const vouched = (request.allowEnv ?? []).filter((name) => /(?:KEY|TOKEN|SECRET)$/.test(name) && brokered.env[name] !== undefined && brokered.env[name] === request.env[name]);
-    const unbrokered = [...new Set([...brokered.unbrokered, ...vouched])];
-    return { command: this.options.bwrap, args: [...bwrapArgs(plan), "--", inner.command, ...inner.args], env: brokered.env, plan, token: brokered.token, release: brokered.release, unbrokered, extraFds };
+    try {
+      const vouched = (request.allowEnv ?? []).filter((name) => /(?:KEY|TOKEN|SECRET)$/.test(name) && brokered.env[name] !== undefined && brokered.env[name] === request.env[name]);
+      const unbrokered = [...new Set([...brokered.unbrokered, ...vouched])];
+      if (seccomp) extraFds.push(openSync(seccomp, "r"));
+      return { command: this.options.bwrap, args: [...bwrapArgs(plan), "--", inner.command, ...inner.args], env: brokered.env, plan, token: brokered.token, release: brokered.release, unbrokered, extraFds };
+    } catch (error) {
+      for (const fd of extraFds) { try { closeSync(fd); } catch {} }
+      brokered.release();
+      throw error;
+    }
   }
 
-  /** Keys become a per-process token when the broker is on and the box has its own network (the bridge to the broker). */
+  /** Keys become a per-process token when the broker is on and the box has its own network (the bridge to the broker).
+   * With a GitHub sign-in for the spawn's conversation, the same token also carries the github grant, and git is pointed
+   * at it (server/github/git-access.ts). */
   private broker(env: Record<string, string>, plan: BoxPlan, request: BoxRequest): { env: Record<string, string>; token: string | null; release(): void; unbrokered: string[] } {
     const broker = this.options.broker;
     if (!broker || plan.net !== "isolated") return { env, token: null, release: () => {}, unbrokered: [] };
     const ids = request.cwd ? taskWorkspaceIds(request.cwd, this.options.setup.dataDir) : null;
     // The token is minted first (its value goes in the environment), then granted exactly what the rewrite took out.
-    const minted = broker.mintForProcess({ botId: plan.botId, threadId: ids?.threadId ?? null, grants: {} });
+    // A process the bot's conversations share belongs to none of them.
+    const threadId = request.botThreads ? null : ids?.threadId ?? null;
+    const minted = broker.mintForProcess({ botId: plan.botId, threadId, grants: {} });
     const rewrite = brokerRewrite(env, minted.token, broker.port);
     broker.revoke(minted.token);
-    if (!Object.keys(rewrite.grants).length) return { env, token: null, release: () => {}, unbrokered: rewrite.unbrokered };
-    const granted = broker.mintForProcess({ botId: plan.botId, threadId: ids?.threadId ?? null, grants: rewrite.grants });
+    const github = boxGithubGit(request.botThreads ? null : this.conversation(request).threadId, [request.cwd, request.conversationFolder].filter((folder): folder is string => Boolean(folder)));
+    if (!Object.keys(rewrite.grants).length && !github) return { env, token: null, release: () => {}, unbrokered: rewrite.unbrokered };
+    const granted = broker.mintForProcess({ botId: plan.botId, threadId, grants: { ...rewrite.grants, ...(github ? { [GITHUB_GRANT]: github.grant } : {}) } });
     const again = brokerRewrite(env, granted.token, broker.port);
-    return { env: again.env, token: granted.token, release: () => broker.revoke(granted.token), unbrokered: again.unbrokered };
+    const out = github ? { ...again.env, ...github.env({ port: broker.port, token: granted.token }) } : again.env;
+    return { env: out, token: granted.token, release: () => broker.revoke(granted.token), unbrokered: again.unbrokered };
   }
 }
 
@@ -146,11 +233,6 @@ export function writeSeccompFile(dir: string): string | null {
   const file = join(dir, "seccomp.bpf");
   writeFileSync(file, seccompBytes(), { mode: 0o600 });
   return file;
-}
-
-/** Whether the host's /proc hides other users' processes (the Cloud supervisor remounts it so at boot). */
-export function procHidepid(mounts: () => string = () => readFileSync("/proc/mounts", "utf8")): boolean {
-  try { return /^proc \/proc proc [^\n]*\bhidepid=(?:2|invisible)\b/m.test(mounts()); } catch { return false; }
 }
 
 /** Whether Fly's local API socket folder is root's alone (no bits for group or others). */
@@ -190,6 +272,7 @@ export class BotBox {
   private boxed = 0;
   private unbrokered = new Set<string>();
   private started: StartOptions | null = null;
+  private audiences: BoxAudienceScope | null = null;
 
   /** Detects, and when the box is on opens the gates. Safe to call once; returns what it decided. */
   async start(options: StartOptions): Promise<BoxDetection> {
@@ -220,8 +303,13 @@ export class BotBox {
       setup: { dataDir: options.dataDir, home: options.home, codeRoots: options.codeRoots ?? defaultCodeRoots(), engineRoots: options.engineRoots ?? engineInstallRoots(options.dataDir), bridges },
       denyEnv: options.denyEnv, seccompFile: this.seccompFile,
       broker: { port: BOX_BROKER_PORT, mintForProcess: this.credentials.mintForProcess, revoke: this.credentials.revoke },
+      toolCaches: toolCachesOn(env),
     });
+    this.runner.scopeAudiences(this.audiences);
+    distrustHomePrograms(options.home, [options.dataDir], ["workspaces", "task-workspaces", "engine-homes", "team-files"].map((name) => join(options.dataDir, name)));
+    resetPathCache();
     log(`bot box: on (bubblewrap, ${this.detection.tools.socat ? "socat" : "node"} bridges, credential broker, seccomp ${this.seccompFile ? "on" : "unsupported here"})`);
+    if (toolCachesOn(env)) log(`bot box: tool caches go to the cache folder in each box's HOME (${CACHE_ROOT_SWITCH})`);
     return this.detection;
   }
 
@@ -248,6 +336,12 @@ export class BotBox {
 
   enabled(): boolean { return this.runner !== null; }
 
+  /** A relay for one boxed spawn (BoxRequest.relay), or null when bot spawns are not boxed here. */
+  async openRelay(): Promise<BoxRelay | null> {
+    if (!this.runner) return null;
+    return openBoxRelay(join(this.runner.setup.dataDir, "box", `relay-${randomBytes(6).toString("hex")}.sock`));
+  }
+
   /** The box a bot's Chrome runs in: the system read-only, private /tmp and /run, the host's network (the browser's own
    * gate filters it), `ro` paths, and nothing of HOME or the data folder; the launcher binds the one profile it starts
    * Chrome on. bubblewrap's options before `--`; null when turns are not boxed here. */
@@ -259,6 +353,22 @@ export class BotBox {
     const home = resolve(setup.home), dataDir = resolve(setup.dataDir);
     const mounts = plan.mounts.filter((mount) => !(mount.kind === "bind" && mount.target === home) && !(mount.kind === "tmpfs" && mount.target === dataDir));
     return { bwrap: this.detection.tools.bwrap, options: bwrapArgs({ ...plan, mounts }), seccomp };
+  }
+
+  /** On a Team Cloud: the audience rule for every box (server/host/team-box-scope.ts). Kept for a box started later. */
+  scopeAudiences(scope: BoxAudienceScope | null): void { this.audiences = scope; this.runner?.scopeAudiences(scope); }
+
+  /** What a process the bot's conversations share is boxed with, as a key: the conversations its box puts back on a
+   * Team Cloud, so a conversation made after it started gets a process whose box has its folder. Null elsewhere. */
+  sharedThreadsKey(request: Pick<BoxRequest, "cwd" | "threadId" | "conversationBot">): string | null {
+    const audience = this.runner?.audienceFor({ command: "", args: [], env: {}, ...request, botThreads: true });
+    return audience?.threads ? JSON.stringify([audience.threads.rw, audience.threads.ro, audience.teamFiles?.write ?? null]) : null;
+  }
+
+  /** What the audience rule gives one box now, as a key: what a process kept between turns is started again on. */
+  audienceKey(request: Pick<BoxRequest, "cwd" | "threadId" | "conversationBot">): string | null {
+    const audience = this.runner?.audienceFor({ command: "", args: [], env: {}, ...request });
+    return audience ? JSON.stringify([audience.teamReadOnly, audience.teamFiles?.write ?? null]) : null;
   }
 
   /** More read-write folders for one conversation's boxes (a memory layer); nothing without a runner. */
@@ -293,6 +403,8 @@ export class BotBox {
     this.credentials = null;
     this.seccompFile = null;
     this.runner = null;
+    distrustHomePrograms(null);
+    resetPathCache();
   }
 }
 

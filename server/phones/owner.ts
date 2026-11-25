@@ -74,6 +74,8 @@ export function desktopLendingTurn(base: DesktopTurn, deps: DesktopOwnerDeps): C
       if (by.kind === "loopback") return undefined;
       return by.kind === "session" && by.person ? by.person : NOT_THE_OWNER;
     },
+    // Off a Cloud the work a conversation was opened with is vouched for by its origin, as a bot's ask is, not by who opened it.
+    botOpened: false,
     reportsFromOthers: base.thread.some((line) => {
       if (line.webhookPost === true) return true;
       const routine = routineOf(line);

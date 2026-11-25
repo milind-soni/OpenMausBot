@@ -58,6 +58,20 @@ describe("secretRef", () => {
     });
   });
 
+  it("mints a ref with no card behind it under the same rules: one use, this bot and conversation, an hour", () => {
+    const vault = new SecretVault(clock);
+    const first = vault.mintRef(ATLAS, "Notion key", "ntn_canary_value");
+    const second = vault.mintRef(ATLAS, "Notion key", "ntn_canary_value");
+    expect(second).not.toBe(first);
+    expect(vault.redeem({ env: { K: first } }, { botId: "pixel", threadId: "thread-1" }, MCP, "env").ok).toBe(false);
+    const used = vault.redeem({ env: { K: first } }, ATLAS, MCP, "env");
+    expect(used.ok && used.value).toEqual({ env: { K: "ntn_canary_value" } });
+    if (used.ok) used.commit();
+    expect(vault.redeem({ env: { K: first } }, ATLAS, MCP, "env").ok).toBe(false);
+    now += SECRET_REF_TTL_MS;
+    expect(vault.redeem({ env: { K: second } }, ATLAS, MCP, "env").ok).toBe(false);
+  });
+
   it("names an unknown ref, a ref outside the allowed fields and a secret file path plainly", () => {
     const vault = new SecretVault(clock);
     const ref = vault.saveRef(ATLAS, "card-1", "Notion key", "ntn_canary_value");
@@ -138,6 +152,24 @@ posix("secret files", () => {
     vault.sweep([join(root, "workspaces", "atlas")], savedAt, exists);
     expect(existsSync(join(base, "thread-1"))).toBe(false);
     expect(vault.savedFor("card-1")).toBeNull();
+  });
+
+  it("writes a Vault item's file once per conversation, replacing it, and keeps it a day from its last write", () => {
+    const vault = new SecretVault(clock);
+    const shown = vault.mintFile(ATLAS, "item-1", "sk_old", home());
+    const file = join(root, "workspaces", "atlas", SECRET_FOLDER, "thread-1", "vault-item-1");
+    expect(shown).toBe(file);
+    now += SECRET_FILE_TTL_MS / 2;
+    expect(vault.mintFile(ATLAS, "item-1", "sk_new", home())).toBe(file);
+    expect(readFileSync(file, "utf8")).toBe("sk_new");
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    const noCard = () => null;
+    now += SECRET_FILE_TTL_MS - 1;
+    vault.sweep([join(root, "workspaces", "atlas")], noCard, () => true);
+    expect(existsSync(file)).toBe(true);
+    now += 1;
+    vault.sweep([join(root, "workspaces", "atlas")], noCard, () => true);
+    expect(existsSync(file)).toBe(false);
   });
 
   it("removes a link planted in the secrets folder without following it", () => {

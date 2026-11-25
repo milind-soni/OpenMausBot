@@ -11,6 +11,7 @@ import { endCloudHowTo, useWorkspacePlace, type WorkspacePlace } from "./Desktop
 import { SidebarConnectApps } from "./SidebarConnectApps";
 import { SidebarBottomButtons, SidebarFooterNav } from "./SidebarFooterNav";
 import { phoneSettingsAction, SidebarPhoneButton } from "./SidebarPhoneButton";
+import { StorageNotice } from "./StorageNotice";
 import { SidebarProfileMenu, useSimpleAccount, type ArchivedBots } from "./SidebarProfileMenu";
 import { UpdateIndicator } from "./UpdateIndicator";
 
@@ -38,11 +39,12 @@ function SimpleSidebarFooter({ owner, archived }: { owner: string | null; archiv
       <CloudRoomCard />
       <CloudUsageCard />
       <SidebarPlaceStatus place={place} className="mb-2 px-1" />
+      <StorageNotice className="mb-2 px-1" />
       <AccountMoveStatus kind={move.kind} place={move.place} retry={move.retry} onOpen={openAccount} className="ps-1" />
       <div className="flex items-center gap-2 not-first:mt-2">
         <SidebarProfileMenu simple={account} />
         <SidebarConnectApps />
-        <UpdateIndicator className="size-9" />
+        <UpdateIndicator />
       </div>
     </div>
   );
@@ -73,6 +75,7 @@ export function SidebarFooter({ density, simple = false, owner = null, archived,
         <>
           <CloudRoomCard />
           <CloudUsageCard />
+          <StorageNotice className="px-2" />
           <div className="flex items-center gap-1 not-first:mt-3">
             <div className="min-w-0 flex-1">
               <SidebarProfileMenu />

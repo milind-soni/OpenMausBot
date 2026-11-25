@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
-import { api, useStore, type Bot } from "@/state/store";
+import { api, type Bot } from "@/state/store";
 import type { BotOverview } from "@/lib/bot-overview-types";
 import { ConfirmDialog } from "../ConfirmDialog";
 import type { HistoryRow } from "./HistorySection";
 import type { PromptPreviewData } from "./PromptPreview";
+import { t } from "@/lib/i18n";
+import { sameFields, useStoreActions, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 /**
  * Reads the bot's overview and prompt preview while `want` asks for them. By default every change to the bot's facts
@@ -13,7 +15,7 @@ import type { PromptPreviewData } from "./PromptPreview";
  * there would save, record a history row and read once per keystroke.
  */
 export function useBotOverview(bot: Bot, want: { overview: boolean; prompt: boolean; followEdits?: boolean }) {
-  const { state, flushBotPatches } = useStore();
+  const state = useStoreSelector((s) => ({ routines: s.routines, webhooks: s.webhooks }), sameFields), { flushBotPatches } = useStoreActions();
   const [overview, setOverview] = useState<BotOverview | null>(null);
   const [overviewError, setOverviewError] = useState(false);
   const [prompt, setPrompt] = useState<PromptPreviewData | null>(null);
@@ -30,8 +32,6 @@ export function useBotOverview(bot: Bot, want: { overview: boolean; prompt: bool
         bot.cloudBackend,
         bot.cwd,
         bot.autoApprove,
-        bot.approvePeerComms,
-        bot.peers,
         bot.section,
         bot.composio,
         bot.browser,
@@ -49,8 +49,6 @@ export function useBotOverview(bot: Bot, want: { overview: boolean; prompt: bool
       bot.cloudBackend,
       bot.cwd,
       bot.autoApprove,
-      bot.approvePeerComms,
-      bot.peers,
       bot.section,
       bot.composio,
       bot.browser,
@@ -107,7 +105,7 @@ export function useBotOverview(bot: Bot, want: { overview: boolean; prompt: bool
 }
 
 export function useBotHistory(bot: Bot, active: boolean) {
-  const { dispatch, flushBotPatches } = useStore();
+  const dispatch = useStoreDispatch(), { flushBotPatches } = useStoreActions();
   const [rows, setRows] = useState<HistoryRow[] | null>(null);
   const [error, setError] = useState(false);
   const [revision, setRevision] = useState<string | null>(null);
@@ -147,7 +145,7 @@ export function useBotHistory(bot: Bot, active: boolean) {
         body: JSON.stringify(target),
       });
     } catch (e: unknown) {
-      dispatch({ type: "error", message: e instanceof Error ? e.message : "Couldn't undo that change." });
+      dispatch({ type: "error", message: e instanceof Error ? e.message : t("botOverview.undoFailed") });
     } finally {
       await load();
       setRollingBack(false);
@@ -169,9 +167,9 @@ export function HistoryRollbackDialog({ history, returnFocusRef }: {
   return (
     <ConfirmDialog
       open={rollbackTarget !== null}
-      title="Restore previous instructions?"
-      body="Replaces current SOUL with the version before this change. Current version stays in History."
-      confirmLabel="Restore instructions"
+      title={t("botOverview.restoreSoul.title")}
+      body={t("botOverview.restoreSoul.body")}
+      confirmLabel={t("botOverview.restoreSoul.confirm")}
       tone="neutral"
       returnFocusRef={returnFocusRef}
       onCancel={() => setRollbackTarget(null)}

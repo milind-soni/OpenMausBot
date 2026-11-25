@@ -33,12 +33,14 @@ export function initialDesktopCapabilities(): DesktopCapabilities {
   const platform = typeof window === "undefined" ? undefined : window.ogb?.platform;
   if (!platform) return browserCapabilities;
   const isMac = platform === "darwin";
+  const isWindows = platform === "win32";
+  const fishListening = platform === "linux";
   const dictation: DesktopCapabilities["dictation"] = {
-    available: isMac,
-    engine: isMac ? "apple-speech" : "none",
-    onDevice: isMac,
+    available: isMac || isWindows || fishListening,
+    engine: isMac ? "apple-speech" : isWindows ? "windows-speech" : fishListening ? "fish-audio" : "none",
+    onDevice: isMac || isWindows,
   };
-  if (!isMac) dictation.reasonCode = "unsupported-platform";
+  if (!dictation.available) dictation.reasonCode = "unsupported-platform";
   return {
     ...browserCapabilities,
     host: {
@@ -75,4 +77,10 @@ export function cacheDesktopCapabilities(capabilities: DesktopCapabilities): Des
   cacheRevision += 1;
   cached = capabilities;
   return capabilities;
+}
+
+/** The desktop bridge that saves a switch with its approval reset to Ask. A paired desktop has none: its own app runs no
+ * server behind that bridge, so the host takes the switch over HTTP. */
+export function askResetBridge() {
+  return typeof window === "undefined" || window.ogb?.remoteClient?.active ? undefined : window.ogb?.approvals;
 }

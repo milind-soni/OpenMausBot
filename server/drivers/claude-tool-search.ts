@@ -11,11 +11,13 @@
 // over its own process environment, so a value in the project's or the person's .claude settings
 // would beat one set on the process; settings passed with --settings beat both.
 //
-// OpenMausBot's own small servers stay loaded (`alwaysLoad` in claude.ts): `ogb` (approvals and
-// questions) and `agents` (bots, rooms, jobs), plus the browser when the turn plans to browse.
+// OpenMausBot's own servers stay `alwaysLoad` (claude.ts), so the CLI connects them before the first request:
+// `ogb` (approvals and questions), `agents` (bots, rooms, jobs) and the browser when the turn plans to browse. With
+// tool search on, `agents` sends only a few tools whole and marks the rest deferred (agents-claude-defer.ts).
 import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { DEFER_TOOLS_ENV } from "./agents-claude-defer.ts";
 
 /** Only a regular file this small is read: a FIFO would hold the server's one thread. */
 const FILE_MAX_BYTES = 1024 * 1024;
@@ -115,4 +117,22 @@ export function claudeToolSearchSetting(cwd: string, env: NodeJS.ProcessEnv): st
     if (value !== undefined) return claudeToolSearchValue(value);
   }
   return claudeToolSearchValue(env.ENABLE_TOOL_SEARCH);
+}
+
+/** Claude Code 2.1.321's reading of a turn's ENABLE_TOOL_SEARCH: off for auto:N with N of 100 or more, and for a
+ * false-like word; on for anything else. */
+export function claudeToolSearchOn(value: string): boolean {
+  if (value.startsWith("auto:")) {
+    const percent = claudeInteger(value.slice("auto:".length));
+    return Number.isNaN(percent) || percent < 100;
+  }
+  return !["0", "false", "no", "off"].includes(value.trim().toLowerCase());
+}
+
+/** The agents server as a Claude turn mounts it: always connected before the first request, and with tool search on,
+ * all but a few of its tools deferred. */
+export function claudeAgentsMount<Server extends { env?: Record<string, string> }>(server: Server, toolSearch: string): Server & { alwaysLoad: true } {
+  return claudeToolSearchOn(toolSearch)
+    ? { ...server, env: { ...server.env, [DEFER_TOOLS_ENV]: "1" }, alwaysLoad: true }
+    : { ...server, alwaysLoad: true };
 }

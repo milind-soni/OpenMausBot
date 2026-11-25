@@ -24,6 +24,9 @@ export interface CloudAccountState {
   machine?: import("./cloud-home.mjs").CloudMachine;
   /** Connected: the teams this account is in, each with its Cloud; absent while it is in none. */
   teams?: import("./cloud-home.mjs").CloudTeam[];
+  /** Connected, with no Cloud of the account's own: the team it was invited into, which opens first, before any plan is
+   * offered (the Admin's `landing`). */
+  landing?: { teamId: string };
   /** Connected to an Admin that lists every Cloud of the person's (contract v1 `clouds`): each of them, My Cloud first.
    * Absent from an older Admin, whose `machine` and `teams` say everything. */
   clouds?: import("./cloud-list.mjs").CloudListEntry[];
@@ -56,6 +59,11 @@ export interface CloudAccountState {
   checkout?: { plan: string; startedAt: number; signIn?: true; link?: true; done?: true };
   /** This app talks to the staging Admin (OMB_CLOUD_STAGING=1): test payments, test Clouds. */
   staging?: true;
+  /** Unavailable: the saved sign-in can't be read (`restore-failed`, offered after a few tries) or removed
+   * (`signout-storage-failed`); `resetSaved()` clears it so the person can sign in again. */
+  reset?: true;
+  /** Signed in for this run only: the sign-in couldn't be saved on this computer after the person cleared the old one. */
+  unsaved?: true;
   /** Connected: opening My Cloud waits for it to wake. */
   waking?: true;
   /** Connected: the plan's renewal, only while this account pays for a plan that runs: what Cancel and Keep act on (display only). */
@@ -78,13 +86,15 @@ export type CloudRenewalResult =
  * in only in the browser (single sign-on there, or an older Admin). */
 export type CloudSignInStart =
   | { outcome: "sent"; email: string; expiresAt: number; resendAt: number; /** False: new accounts are closed, so only an existing one gets a code. */ signupOpen: boolean }
-  | { outcome: import("./cloud-signin.mjs").CloudSignInStartFailure };
+  | { outcome: import("./cloud-signin.mjs").CloudSignInStartFailure }
+  | import("./cloud-signin.mjs").CloudSignInBlocked;
 /** `signed-in`: stored and read like the browser sign-in; `wrong-code` says
  * the tries left; `expired` needs a new code. */
 export type CloudSignInVerify =
   | { outcome: "signed-in"; state: CloudAccountState }
   | { outcome: "wrong-code"; triesLeft: number }
-  | { outcome: Exclude<import("./cloud-signin.mjs").CloudSignInVerifyFailure, "wrong-code"> };
+  | { outcome: Exclude<import("./cloud-signin.mjs").CloudSignInVerifyFailure, "wrong-code"> }
+  | import("./cloud-signin.mjs").CloudSignInBlocked;
 /** How the Cloud is shown in this app's switcher and Settings → Servers. */
 export interface CloudHomeLook { name: string; color: import("./cloud-buy.mjs").CloudColor }
 /** Why the Admin opens no other Cloud's checkout now (contract v1 `addBlocked`). */
@@ -144,6 +154,8 @@ export interface CloudAccountBridge {
   signInStart?(email: string): Promise<CloudSignInStart>;
   signInVerify?(code: string): Promise<CloudSignInVerify>;
   signInCancel?(): Promise<void>;
+  /** Clears a saved sign-in this computer can't read or remove (state `reset`), so a new one can start. Absent on an older app. */
+  resetSaved?(): Promise<CloudAccountState>;
   /** The checkout this app opened, again (never a new one while main keeps it); the plan and source only when none is kept. */
   reopenCheckout?(plan: string, source: string): Promise<CloudCheckoutResult>;
   /** Copies that checkout's page to the clipboard in main; false when none is kept. */
@@ -172,6 +184,38 @@ export interface CloudAccountBridge {
   onState(callback: (state: CloudAccountState) => void): () => void;
   files?: import("./cloud-sync.mjs").CloudFilesBridge;
 }
+/** Who is signed in on this device, as the You menu shows it. `signIn`: this account's sign-in has ended here. */
+export interface AccountRow { id: string; email: string; signIn?: true }
+export interface AccountsView { active: AccountRow | null }
+export interface AccountSwitchResult { outcome: "switched" | "signed-out" | "moving" | "sign-in" | "gone" | "failed"; email?: string; view: AccountsView }
+/** What a click on a place of another account answers when it didn't switch: nothing moved. `sign-in`: that sign-in has ended. */
+export interface RailOpenResult { outcome: "switched" | "moving" | "sign-in" | "gone" | "failed"; email?: string }
+/** `added`: kept signed in, not switched to, while this computer's move finishes; `already`: that account is the one signed in. */
+export type AccountAddResult =
+  | { outcome: "switched" | "added" | "already"; email?: string; view: AccountsView }
+  | { outcome: "wrong-code"; triesLeft: number }
+  | { outcome: Exclude<import("./cloud-signin.mjs").CloudSignInVerifyFailure, "wrong-code"> }
+  | import("./cloud-signin.mjs").CloudSignInBlocked;
+/** This app's own pages only: main refuses any other page. Absent on an older app. */
+export interface AccountsBridge {
+  list(): Promise<AccountsView>;
+  /** Removes that account from this device; the window goes to another signed in here, else the app is signed out. */
+  signOut(id: string): Promise<AccountSwitchResult>;
+  /** Add another account: the active account goes on until this succeeds. The attempt and the token stay in main. */
+  addStart(email: string): Promise<CloudSignInStart>;
+  addVerify(code: string): Promise<AccountAddResult>;
+  addBrowser(): Promise<{ outcome: "browser" | "failed"; code?: string }>;
+  addReopen(): Promise<void>;
+  /** How the browser's way ended, asked once the list changes: null until it has. */
+  addResult(): Promise<{ outcome: "switched" | "added" | "already" | "failed"; email?: string } | null>;
+  addCancel(): Promise<void>;
+  sheetPending(): Promise<boolean>;
+  sheetClosed(): Promise<void>;
+  onChanged(callback: () => void): () => void;
+  onOpenSheet(callback: () => void): () => void;
+}
+/** Any place's own page, from the person's click: the accounts sheet opens on the rail's page, and this page learns nothing of them. */
+export interface AccountSheetBridge { offered(): Promise<boolean>; open(): Promise<void> }
 /** On the person's own Cloud, open in this app's window: the plan, read
  * only, Manage in the browser, and Sign in again. No account, credential or address. */
 /** `signin`: this computer's sign-in ended; `tier` names the plan last verified, if any. */
@@ -217,7 +261,7 @@ export declare const STAGING_CLOUD_ORIGIN: string;
 export declare function cloudTarget(env?: Record<string, string | undefined>): {
   origin: string; staging: boolean;
   /** Under userData: the sign-in, saved servers, Files' folder, the Cloud's chosen name. */
-  file: string; environments: string; sync: string; look: string;
+  file: string; saved: string; places: string; environments: string; sync: string; look: string;
 };
 export declare const CHECKOUT_SOURCES: readonly string[];
 export declare const UPGRADE_SOURCES: readonly string[];
@@ -255,6 +299,7 @@ export interface CloudAccountClient {
   emailStart(email: string): Promise<CloudSignInStart>;
   emailVerify(code: string): Promise<CloudSignInVerify>;
   emailCancel(): void;
+  resetSaved(): Promise<CloudAccountState>;
   reopenCheckout(plan?: string, source?: string): Promise<CloudCheckoutResult>;
   /** Main only (the clipboard): the kept checkout page, or null. */
   checkoutLink(): string | null;
@@ -311,6 +356,10 @@ export interface CloudAccountClient {
   reportMove(options: { installation: string }): Promise<boolean>;
   /** This computer keeps its bots on itself again: it no longer counts as moved. False when the Admin can't take it yet. */
   reportKept(options: { installation: string }): Promise<boolean>;
+  /** The Admin's word on this account's own Cloud at `origin` (POST /api/cloud/desktop/moved-to): deleted, ended (stopped and
+   * kept only until it is deleted), live, or unknown (none of this account's). Null without a verified sign-in, or from an
+   * Admin that doesn't say. */
+  movedTo(origin: string): Promise<"deleted" | "ended" | "live" | "unknown" | null>;
   /** Tells the Admin where this computer's move to My Cloud stands (POST /api/cloud/desktop/move-status); false without a
    * sign-in or when the Admin doesn't take it yet. */
   reportMoveStatus(report: import("./move-status.mjs").MoveStatusReport): Promise<boolean>;
@@ -324,6 +373,14 @@ export interface CloudAccountClient {
   /** No sign-in needed: returns the Admin's receipt for this email-only answer. */
   updatesConsentByEmail(input: { email: string; installId: string; textVersion: string }): Promise<string>;
   withdrawUpdatesConsent(input: { status: "declined" | "withdrawn"; receipt: string }): Promise<void>;
+  /** Another account takes over: nothing more is asked or written for this sign-in. */
+  quiesce(): void;
+  /** Reads the sign-in saved in `store` afresh, keeping nothing of the one before. */
+  reload(): Promise<CloudAccountState>;
+  /** Ends a sign-in that waits on this device, at the Admin. */
+  revokeSaved(record: unknown): Promise<void>;
+  /** For cloud-accounts.mjs only, never a page: the active sign-in when it is kept in memory only, as its file would hold it. */
+  memorySignIn(): unknown;
   close(): void;
 }
 export declare function createCloudAccountClient(options: {
@@ -342,7 +399,10 @@ export declare function createCloudAccountClient(options: {
   warn?: (message: string) => void;
   /** Files or lending waits for a sleeping Cloud to wake: the session is read every 15 s. */
   awaitingWake?: () => boolean;
+  t?: (key: string, params?: Record<string, string | number>) => string;
+  /** How long Clear waits for a read of the saved sign-in already under way (READ_WAIT_MS). */
+  readWaitMs?: number;
 }): CloudAccountClient;
 export declare function cloudPlanSnapshot(state: CloudAccountState | null | undefined, extra?: { notice?: import("./cloud-home.mjs").CloudTrialState | null }): CloudPlanSnapshot;
 /** My Cloud's line under its name in the server menus, or null for none. */
-export declare function cloudMenuSublabel(state: CloudAccountState | null | undefined, date: (value: number) => string): string | null;
+export declare function cloudMenuSublabel(state: CloudAccountState | null | undefined, date: (value: number) => string, t?: (key: string, params?: Record<string, string | number>) => string): string | null;

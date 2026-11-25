@@ -20,6 +20,7 @@ function fixture(bot: Partial<BotRecord>) {
   const homes = new Map([OLIVE, ADA, BOB].map((person) => [key(person.email), `inbox-${person.email}`]));
   const levels: Record<string, BotAccessLevel> = { [OLIVE.email]: "edit", [ADA.email]: "edit", [BOB.email]: "view" };
   const writes: unknown[] = [];
+  const audited: Array<{ row: { action: string; after?: unknown }; by: string }> = [];
   const record = { id: "ledger", name: "Ledger", threadId: "t-ledger", createdBy: "gone@acme.test", access: { everyone: "none", people: { [BOB.email]: "view" } }, ...bot } as BotRecord;
   const requests = createAccessRequests({
     team: { id: "team-acme", name: "Acme" } as never,
@@ -45,6 +46,7 @@ function fixture(bot: Partial<BotRecord>) {
     visibleTo: (viewer) => ({ level: () => levels[viewer.email ?? ""] ?? "none" }) as unknown as VisibleSet,
     levelOf: (auth) => levels[auth.kind === "session" ? auth.session.email ?? "" : ""] ?? "none",
     writeAccess: (_bot, access) => { writes.push(access); return record; },
+    record: (row, by) => { audited.push({ row, by }); },
   });
   const ask = async (email: string) => {
     let answered: { status: number; body: unknown } | undefined;
@@ -53,12 +55,12 @@ function fixture(bot: Partial<BotRecord>) {
     return answered!;
   };
   const cards = (email: string) => (threads.get(`inbox-${email}`) ?? []).filter((line) => line.card?.accessRequest);
-  return { requests, ask, cards, writes, threads };
+  return { requests, ask, cards, writes, threads, audited, record };
 }
 
 describe("asking to chat", () => {
   it("asks every admin when the bot's owner is no longer on the team, and one admin's Allow settles every copy", async () => {
-    const { requests, ask, cards, writes } = fixture({});
+    const { requests, ask, cards, writes, audited } = fixture({});
     expect(await ask(BOB.email)).toMatchObject({ status: 201, body: { asked: [{ email: OLIVE.email }, { email: ADA.email }] } });
     expect((await ask(BOB.email)).status, "asked once").toBe(200);
     expect(cards(OLIVE.email)).toHaveLength(1);
@@ -66,17 +68,31 @@ describe("asking to chat", () => {
     const card = cards(ADA.email)[0]!.card!;
     expect(requests.resolve(`inbox-${ADA.email}`, card.requestId!, "answer", "Allow")).toMatchObject({ status: 200, body: { outcome: "allowed" } });
     expect(writes).toEqual([{ everyone: "none", people: { [BOB.email]: "chat" } }]);
+    // Settings → Activity: who allowed whom, on which bot, and the access it now has.
+    expect(audited).toEqual([{ by: ADA.email, row: expect.objectContaining({ category: "visibility", action: "access.allow", target: { kind: "bot", id: "ledger", name: "Ledger" }, after: { access: { everyone: "none", people: { [BOB.email]: "chat" } }, asked: BOB.email } }) }]);
     expect(cards(OLIVE.email)[0]!.card).toMatchObject({ answered: "answer", answeredText: "Allow" });
     expect(requests.resolve(`inbox-${OLIVE.email}`, cards(OLIVE.email)[0]!.card!.requestId!, "answer", "Allow")?.status).toBe(409);
   });
 
   it("asks the owner alone while they are on the team, and Not now gives nothing", async () => {
-    const { requests, ask, cards, writes } = fixture({ reportsTo: OLIVE.email });
+    const { requests, ask, cards, writes, audited } = fixture({ reportsTo: OLIVE.email });
     expect(await ask(BOB.email)).toMatchObject({ status: 201, body: { asked: [{ email: OLIVE.email }] } });
     expect(cards(ADA.email)).toEqual([]);
     expect(requests.resolve(`inbox-${OLIVE.email}`, cards(OLIVE.email)[0]!.card!.requestId!, "answer", "Not now")).toMatchObject({ body: { outcome: "declined" } });
     expect(writes).toEqual([]);
+    expect(audited).toEqual([{ by: OLIVE.email, row: expect.objectContaining({ action: "access.decline", after: { asked: BOB.email } }) }]);
     expect(requests.resolve(`inbox-${OLIVE.email}`, "some-other-card", "answer", "Allow")).toBeNull();
+  });
+
+  it("records the access as it stands when the asker already got more than chat before the Allow", async () => {
+    const { requests, ask, cards, writes, audited, record } = fixture({ reportsTo: OLIVE.email });
+    await ask(BOB.email);
+    const card = cards(OLIVE.email)[0]!.card!;
+    const raised = { everyone: "none" as const, people: { [BOB.email]: "edit" as const } };
+    record.access = raised;
+    expect(requests.resolve(`inbox-${OLIVE.email}`, card.requestId!, "answer", "Allow")?.status).toBe(200);
+    expect(writes).toEqual([]);
+    expect(audited[0]!.row.after).toEqual({ access: raised, asked: BOB.email });
   });
 
   it("refuses an ask from someone who can already chat", async () => {

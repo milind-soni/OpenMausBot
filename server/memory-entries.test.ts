@@ -1,4 +1,4 @@
-import { rmSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -11,14 +11,14 @@ import { ensureWorkspace, loadMemory, memorySystemPrompt, searchMemoryFiles, upd
 const BOT = "bot-memory-entries";
 
 describe("memory entry grammar", () => {
-  it("parses dates, sources, until marks and strike-throughs", () => {
+  it.each(["\n", "\r\n"])("parses dates, sources, until marks and strike-throughs with %j line endings", (newline) => {
     const text = [
       "# Memory",
       "- 2026-09-10 · from chat \"Plans\" · Exams this weekend · until 2026-09-14",
       "- 2026-09-11 · ~~Office is in Pune~~ · superseded 2026-09-12",
       "- 2026-09-12 · Office is in Mumbai · updated 2026-09-13",
       "a hand-written line",
-    ].join("\n");
+    ].join(newline);
     const entries = parseMemoryEntries(text);
     expect(entries).toHaveLength(3);
     expect(entries[0]).toMatchObject({ line: 1, date: "2026-09-10", body: "Exams this weekend", until: "2026-09-14", struck: false });
@@ -75,8 +75,8 @@ describe("fact identity keeps meaning", () => {
     expect(factIdentity("-  Prefers   short replies.")).toBe(factIdentity("Prefers short replies"));
   });
 
-  it("reads a notebook's live facts, ignoring struck ones and entry prefixes", () => {
-    const notebook = "- 2026-09-10 · from chat \"A\" · Likes tea · until 2026-10-01\n- 2026-09-10 · ~~Lives in Pune~~ · superseded 2026-09-11\n";
+  it.each(["\n", "\r\n"])("reads a notebook's live facts with %j line endings, ignoring struck ones and entry prefixes", (newline) => {
+    const notebook = ["- 2026-09-10 · from chat \"A\" · Likes tea · until 2026-10-01", "- 2026-09-10 · ~~Lives in Pune~~ · superseded 2026-09-11", ""].join(newline);
     const ids = notebookIdentities(notebook);
     expect(ids.has("Likes tea")).toBe(true);
     expect(ids.has("Lives in Pune")).toBe(false);
@@ -120,6 +120,19 @@ describe("memory with until dates and topics, on disk", () => {
     rmSync(WORKSPACES_DIR, { recursive: true, force: true });
   });
 
+  it("hides expired Windows-edited notes and their details without rewriting the file", () => {
+    ensureWorkspace(BOT);
+    const file = join(WORKSPACES_DIR, BOT, "MEMORY.md");
+    const kept = ["# Memory", "- 2026-09-12 · Likes tea", "  With milk.", ""].join("\r\n");
+    const text = [
+      "# Memory", "- 2026-09-10 · Exams this weekend · until 2026-09-14", "  Bring the timetable.",
+      "- 2026-09-12 · Likes tea", "  With milk.", "",
+    ].join("\r\n");
+    writeFileSync(file, text);
+    expect(loadMemory(BOT, { now: new Date(2026, 8, 15, 12) })).toMatchObject({ text: kept, expired: 1, truncated: false });
+    expect(readFileSync(file, "utf8")).toBe(text);
+  });
+
   it("appends an until mark, validates it, and hides the entry after that day", () => {
     const now = new Date(2026, 8, 10, 12);
     const ok = updateMemory(BOT, { action: "append", text: "Exams this weekend", until: "2026-09-14" }, { now, source: 'chat "Plans"' });
@@ -140,7 +153,7 @@ describe("memory with until dates and topics, on disk", () => {
     writeMemoryTopic(BOT, "dining.md", "---\ntitle: Dining\naliases: [food, lunch, restaurants]\n---\n- Loves pasta\n");
     writeFileSync(join(WORKSPACES_DIR, BOT, "memory", "notes.md"), "plain topic\n");
     const prompt = memorySystemPrompt(BOT, { managedWrites: true, fileTools: true });
-    expect(prompt).toContain("Your topic notes (not loaded; when a request touches one of these topics, read that file with your file tools before you answer):");
+    expect(prompt).toContain(`Your topic notes (not loaded; paths are relative to ${JSON.stringify(join(WORKSPACES_DIR, BOT))}, not your working folder; when a request touches one of these topics, read that file with your file tools before you answer):`);
     expect(prompt).toContain("- memory/dining.md — Dining (also: food, lunch, restaurants)");
     expect(prompt).toContain("- memory/notes.md");
     expect(memorySystemPrompt(BOT, { fileTools: false })).toContain("look it up with session_search before you answer");

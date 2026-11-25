@@ -1,8 +1,9 @@
-// The engines' usage limits and the automations that wait for them to reset. All three need admin scope
+// The engines' usage limits and the automations that wait for them to reset. All four need admin scope
 // (request-auth's default):
 //   GET  /api/limit-resets              each engine's limit: how full, when it resets, whether it refuses work
 //   POST /api/limit-resets/continue     {botId, threadId}: the stopped turn's "Continue when your limit resets"
 //   POST /api/limit-resets/after-reset  {routineId, engine}: move only that automation's next run past the reset
+//   POST /api/limit-resets/release      {engine}: "Try again now", end the engine's limit hold at once
 import { AFTER_RESET_MS, type LimitResetSchedule } from "../../shared/limit-reset.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { LimitResetClock } from "../limit-resets.ts";
@@ -39,6 +40,9 @@ function waitingIn(routines: readonly Routine[], botId: string, threadId: string
 }
 
 const text = (value: unknown, max: number) => typeof value === "string" && value.trim() && value.length <= max ? value.trim() : null;
+// Ids are taken exactly as sent: the visibility checks before this route (a team phone, the relay) look at the raw id,
+// so a padded id that only matched after trimming would reach a conversation those checks never saw.
+const exactId = (value: unknown) => typeof value === "string" && value && value.length <= 128 && value === value.trim() ? value : null;
 
 export function createLimitResetRoutes(deps: LimitResetRouteDeps): RouteHandler {
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
@@ -48,9 +52,16 @@ export function createLimitResetRoutes(deps: LimitResetRouteDeps): RouteHandler 
       if (url.searchParams.get("refresh") === "1" || deps.clock.report().checkedAt === 0) await fresh;
       return json(res, 200, deps.clock.report());
     }
+    if (path === "/api/limit-resets/release" && method === "POST") {
+      const body = await readBody(req, 4096) as Record<string, unknown> | null;
+      const engine = exactId(body?.engine);
+      if (!engine) return json(res, 400, { error: "engine is required" });
+      deps.clock.release(engine);
+      return json(res, 200, deps.clock.report());
+    }
     if (path === "/api/limit-resets/continue" && method === "POST") {
       const body = await readBody(req, 4096) as Record<string, unknown> | null;
-      const botId = text(body?.botId, 128), threadId = text(body?.threadId, 128);
+      const botId = exactId(body?.botId), threadId = exactId(body?.threadId);
       if (!botId || !threadId) return json(res, 400, { error: "botId and threadId are required" });
       const title = deps.threadTitle(botId, threadId);
       if (title === null) return json(res, 404, { error: "no such conversation" });
