@@ -23,12 +23,12 @@ export function GroupThreadList({ group, selected, query = "" }: { group: Group;
   const [showAll, setShowAll] = useState(false);
   const tasks = (group.tasks ?? [{ threadId: group.threadId, title: group.name, createdAt: group.createdAt }]).map((task) => {
     const { waiting, unread } = roomThreadAttention(group, task, state.bots);
-    return { ...task, busy: roomThreadWorking(group, task.threadId), unread, activity: waiting ? "waiting-on-you" as const : undefined, closedBy: undefined };
+    return { ...task, busy: roomThreadWorking(group, task.threadId), unread, activity: waiting ? "waiting-on-you" as const : undefined, closedBy: undefined, closer: threadRowCloser(task) };
   });
   const bulk = useBulkSelect();
   // A closed room thread stays in the list, marked; only the feed folds them.
   const visible = orderedThreadList(visibleSidebarThreads(tasks, group.threadId, query, [], showAll || bulk.active))
-    .map((task) => ({ ...task, closedBy: threadRowCloser(task) }));
+    .map(({ closer, ...task }) => ({ ...task, closedBy: closer }));
   const selection = bulk.forRows(visible);
   useRevealedThreadRow(state.revealThread, selected ? group.threadId : null);
   const latest = useRef(group);

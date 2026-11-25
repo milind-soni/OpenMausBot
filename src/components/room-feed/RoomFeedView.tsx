@@ -4,7 +4,7 @@ import { t } from "@/lib/i18n";
 import { catchUpOldMarks, openFeedThread } from "@/lib/room-feed";
 import { simpleRoomHeader } from "@/lib/room-panel";
 import { roomThreadAttention, roomThreadSpeakerId, roomThreadWorking } from "@/lib/room-threads";
-import { FOLD_STEP, foldClosedRuns, threadRowCloser } from "@/lib/room-thread-close";
+import { foldClosedRuns, threadRowCloser, unfoldStep } from "@/lib/room-thread-close";
 import { useComposerDockPad } from "@/lib/composer-dock";
 import { sameDrawnBots } from "@/lib/drawn-bots";
 import type { Bot, Group } from "@/state/store";
@@ -101,7 +101,7 @@ export function RoomFeedView({ group }: { group: Group }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [group.id, since]);
   const [pending, setPending] = useState<{ text: string; at: number; threadId: string | null } | null>(null);
-  const [unfolded, setUnfolded] = useState<Record<string, number>>({});
+  const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(() => new Set());
 
   const rows = useMemo(() => {
     if (!threads) return null;
@@ -111,10 +111,10 @@ export function RoomFeedView({ group }: { group: Group }) {
       repliers: [], mark: null, working: false, workingBotId: null } satisfies FeedRowData];
   }, [threads, pending, group, bots]);
   const items = useMemo(() => rows && foldClosedRuns(rows, (row) => folds(row, openThread), unfolded), [rows, openThread, unfolded]);
-  const unfold = useCallback((key: string) => {
+  const unfold = useCallback((threadIds: readonly string[]) => {
     // The fold stays where the person pressed it, and what it shows opens under it.
     atFoot.current = false;
-    setUnfolded((shown) => ({ ...shown, [key]: (shown[key] ?? 0) + FOLD_STEP }));
+    setUnfolded((shown) => new Set([...shown, ...unfoldStep({ threadIds })]));
   }, []);
 
   const waiting = useCallback((text: string | null) => {
@@ -182,9 +182,9 @@ export function RoomFeedView({ group }: { group: Group }) {
               <ol aria-label={t("room.feed.aria", { name: group.name })} className="flex flex-col gap-0.5 py-2">
                 {items.map((item) => item.kind === "fold" ? (
                   <li key={`fold:${item.key}`} className="flex">
-                    <button type="button" data-feed-fold={item.key} onClick={() => unfold(item.key)}
-                      className="ms-14 flex h-8 items-center rounded-md px-2 text-[13px] font-medium leading-[18px] text-ink-secondary transition-colors duration-[120ms] hover:bg-ink/[0.06] hover:text-ink active:bg-ink/[0.08] motion-reduce:transition-none">
-                      {item.hidden === 1 ? t("room.feed.closedOne") : t("room.feed.closedMany", { count: item.hidden })}
+                    <button type="button" data-feed-fold={item.key} onClick={() => unfold(item.threadIds)}
+                      className="ms-12 flex h-8 items-center rounded-md px-2 text-[13px] font-medium leading-[18px] text-ink-secondary transition-colors duration-[120ms] hover:bg-ink/[0.06] hover:text-ink active:bg-ink/[0.08] motion-reduce:transition-none">
+                      {item.threadIds.length === 1 ? t("room.feed.closedOne") : t("room.feed.closedMany", { count: item.threadIds.length })}
                     </button>
                   </li>
                 ) : (

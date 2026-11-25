@@ -17,27 +17,21 @@ export function setRoomThreadClosed(groupId: string, threadId: string, closed: b
     .catch((cause) => dispatch({ type: "error", message: cause instanceof Error ? cause.message : String(cause) }));
 }
 
-export type FeedItem<Row> = { kind: "row"; row: Row } | { kind: "fold"; key: string; hidden: number };
+export type FeedItem<Row> = { kind: "row"; row: Row } | { kind: "fold"; key: string; threadIds: string[] };
 
-/** A feed's rows with each run of consecutive rows that `folds` (closed, with nothing new) as one fold. A fold shows
- * `shown[key]` of its run, newest first from the run's foot, below the fold; the key is the run's first thread. */
+/** A feed's rows with each run of consecutive rows that `folds` (closed, with nothing new) and the person has not opened
+ * as one fold. A thread once shown stays shown, wherever its run later splits. */
 export function foldClosedRuns<Row extends { threadId: string }>(rows: readonly Row[], folds: (row: Row) => boolean,
-  shown: Readonly<Record<string, number>>): FeedItem<Row>[] {
+  shown: ReadonlySet<string>): FeedItem<Row>[] {
   const items: FeedItem<Row>[] = [];
-  let run: Row[] = [];
-  const flush = () => {
-    if (run.length === 0) return;
-    const key = run[0]!.threadId;
-    const open = Math.min(run.length, shown[key] ?? 0);
-    if (open < run.length) items.push({ kind: "fold", key, hidden: run.length - open });
-    for (const row of run.slice(run.length - open)) items.push({ kind: "row", row });
-    run = [];
-  };
   for (const row of rows) {
-    if (folds(row)) { run.push(row); continue; }
-    flush();
-    items.push({ kind: "row", row });
+    if (!folds(row) || shown.has(row.threadId)) { items.push({ kind: "row", row }); continue; }
+    const last = items.at(-1);
+    if (last?.kind === "fold") last.threadIds.push(row.threadId);
+    else items.push({ kind: "fold", key: row.threadId, threadIds: [row.threadId] });
   }
-  flush();
   return items;
 }
+
+/** What one press on a fold shows: its newest FOLD_STEP threads, the ones nearest the rows under it. */
+export const unfoldStep = (fold: { threadIds: readonly string[] }): string[] => fold.threadIds.slice(-FOLD_STEP);
