@@ -4089,6 +4089,7 @@
   "phone.code.trouble": "문제가 있나요?",
   "phone.code.address": "페어링 주소",
   "phone.code.publicNetwork": "Windows에서 이 컴퓨터의 {network} 네트워크가 공용으로 설정되어 있어서 방화벽이 휴대폰을 막을 수 있어요. 휴대폰이 연결되지 않으면 Windows 설정 → 네트워크 및 인터넷 → {network}을(를) 열고 네트워크 프로필 유형을 개인으로 바꾸세요.",
+  "phone.code.hostFirewall": "이 컴퓨터의 방화벽(ufw)이 Wi-Fi에서 휴대폰을 막을 수 있어요. 휴대폰이 연결되지 않으면 '{app}을 통해 어디서나'를 켜거나, 터미널에서 다음을 실행해 휴대폰을 허용하세요:",
   "phone.error.directUnavailable": "지금 이 컴퓨터에서는 Wi-Fi 직접 페어링을 쓸 수 없어요. 이 컴퓨터를 Wi-Fi에 연결한 뒤 다시 시도하세요.",
   "phone.error.protectedUnavailable": "HTTPS 페어링 경로를 쓸 수 없게 됐어요. 안전한 접근을 확인한 뒤 새 코드를 만드세요.",
   "phone.error.remoteUpdate": "원격 접근을 업데이트하지 못했어요. 고급 및 문제 해결을 열고 다시 시도하세요.",

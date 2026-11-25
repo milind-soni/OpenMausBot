@@ -3102,6 +3102,7 @@
   "phone.code.trouble": "Gặp sự cố?",
   "phone.code.address": "Địa chỉ ghép nối",
   "phone.code.publicNetwork": "Windows đã đặt mạng {network} của máy tính này thành Công khai, vì vậy tường lửa có thể chặn điện thoại của bạn. Nếu điện thoại không thể kết nối, hãy mở Cài đặt Windows → Mạng & internet → {network} và đặt loại cấu hình mạng thành Riêng tư.",
+  "phone.code.hostFirewall": "Tường lửa của máy tính này (ufw) có thể chặn điện thoại của bạn trên Wi-Fi. Nếu điện thoại không kết nối được, hãy bật \"Ở bất kỳ đâu, qua {app}\" hoặc cho phép điện thoại bằng cách chạy lệnh này trong terminal:",
   "phone.error.directUnavailable": "Ghép nối Wi-Fi trực tiếp hiện không khả dụng trên máy tính này. Kết nối máy tính này với Wi-Fi rồi thử lại.",
   "phone.error.protectedUnavailable": "Kênh ghép nối HTTPS không còn khả dụng. Hãy kiểm tra kết nối truy cập an toàn, sau đó tạo mã mới.",
   "phone.error.remoteUpdate": "Không thể cập nhật truy cập từ xa. Mở Nâng cao & khắc phục sự cố rồi thử lại.",

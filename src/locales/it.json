@@ -5047,6 +5047,7 @@
   "phone.code.trouble": "Hai difficoltà?",
   "phone.code.address": "Indirizzo di abbinamento",
   "phone.code.publicNetwork": "Windows ha la rete {network} di questo computer impostata su Pubblico, quindi il firewall può bloccare il telefono. Se il telefono non riesce a connettersi, apri Impostazioni di Windows → Rete e internet → {network} e imposta il tipo di profilo di rete su Privato.",
+  "phone.code.hostFirewall": "Il firewall di questo computer (ufw) potrebbe bloccare il telefono sulla Wi-Fi. Se il telefono non riesce a connettersi, attiva «Ovunque, tramite {app}» oppure fai entrare il telefono eseguendo questo comando in un terminale:",
   "phone.error.directUnavailable": "L'abbinamento Wi-Fi diretto non è disponibile su questo computer in questo momento. Connetti questo computer al Wi-Fi, poi riprova.",
   "phone.error.protectedUnavailable": "Il percorso di abbinamento HTTPS non è più disponibile. Controlla l'accesso sicuro, poi crea un nuovo codice.",
   "phone.error.remoteUpdate": "Non è stato possibile aggiornare l'accesso remoto. Apri Avanzate e risoluzione dei problemi e riprova.",

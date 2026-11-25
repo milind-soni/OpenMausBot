@@ -3787,6 +3787,7 @@
   "phone.code.trouble": "Masz problem?",
   "phone.code.address": "Adres parowania",
   "phone.code.publicNetwork": "Windows ma sieć {network} tego komputera ustawioną jako publiczną, więc zapora może blokować twój telefon. Jeśli telefon nie może się połączyć, otwórz Ustawienia Windows → Sieć i internet → {network} i ustaw typ profilu sieci na prywatny.",
+  "phone.code.hostFirewall": "Zapora tego komputera (ufw) może blokować twój telefon w sieci Wi-Fi. Jeśli telefon nie może się połączyć, włącz „Wszędzie, przez {app}” albo wpuść telefon, uruchamiając to w terminalu:",
   "phone.error.directUnavailable": "Bezpośrednie parowanie przez Wi-Fi nie jest teraz dostępne na tym komputerze. Połącz ten komputer z Wi-Fi, a następnie spróbuj ponownie.",
   "phone.error.protectedUnavailable": "Trasa parowania HTTPS stała się niedostępna. Sprawdź bezpieczny dostęp, a następnie utwórz nowy kod.",
   "phone.error.remoteUpdate": "Nie udało się zaktualizować dostępu zdalnego. Otwórz Zaawansowane i rozwiązywanie problemów, a następnie spróbuj ponownie.",

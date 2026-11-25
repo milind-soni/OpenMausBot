@@ -3102,6 +3102,7 @@
   "phone.code.trouble": "Sorun mu yaşıyorsunuz?",
   "phone.code.address": "Eşleştirme adresi",
   "phone.code.publicNetwork": "Windows bu bilgisayarın {network} ağını Genel olarak ayarlamış, bu nedenle güvenlik duvarı telefonunuzu engelleyebilir. Telefonunuz bağlanamazsa Windows Ayarları → Ağ ve internet → {network} bölümünü açın ve ağ profili türünü Özel olarak ayarlayın.",
+  "phone.code.hostFirewall": "Bu bilgisayarın güvenlik duvarı (ufw), Wi-Fi'da telefonunuzu engelleyebilir. Telefonunuz bağlanamazsa \"Her yerden, {app} üzerinden\" seçeneğini açın veya bir terminalde şunu çalıştırarak telefonunuza izin verin:",
   "phone.error.directUnavailable": "Doğrudan Wi-Fi eşleştirmesi şu anda bu bilgisayarda kullanılamıyor. Bu bilgisayarı Wi-Fi'a bağlayıp tekrar deneyin.",
   "phone.error.protectedUnavailable": "HTTPS eşleştirme rotası kullanılamaz hale geldi. Güvenli erişimi kontrol edin ve ardından yeni bir kod oluşturun.",
   "phone.error.remoteUpdate": "Uzaktan erişim güncellenemedi. Gelişmiş ve sorun giderme bölümünü açıp tekrar deneyin.",
