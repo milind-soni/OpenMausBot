@@ -10234,6 +10234,8 @@
   "chat.notice.waitingApprovalElsewhere": "Esperando sua aprovação em @{name}",
   "chat.notice.waitingAnswerElsewhere": "Esperando sua resposta em @{name}",
   "chat.notice.teammateNeedsInput": "{name} precisa da sua resposta: {question}",
+  "chat.notice.askedMe": "{bot} me pediu: {title}",
+  "chat.notice.askedMeTimes": "{bot} me pediu {count} vezes: {title}",
   "chat.notice.waitingPasswordElsewhere": "Esperando você em @{name}: {label}",
   "chat.notice.waitingSignInElsewhere": "Esperando você entrar em {label} em @{name}",
   "chat.notice.waitingConnectElsewhere": "Esperando você conectar {label} em @{name}",
