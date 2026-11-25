@@ -49,6 +49,8 @@ const FULL_DETAIL = 2.56;
 /** Largest image, pixels a side. */
 const MAX_PIXELS = 1024;
 const MIN_PIXELS = 32;
+/** Pixels around an image that are cleared with it, for the painter's smoothing to read. */
+const EDGE_PIXELS = 2;
 /** Room around the body for the pile, viewBox units. */
 const PILE_REACH = 4;
 /** The eyes sit this far above their host's surface at most, viewBox units. */
@@ -396,7 +398,10 @@ function createRenderer(onContextRestored: () => void): Renderer | null {
     gl.uniformMatrix3fv(u.view, false, [view.cY, view.sY * view.sP, -view.sY * view.cP, 0, view.cP, view.sP, view.sY, -view.cY * view.sP, view.facing]);
 
     gl.viewport(0, 0, pixels, pixels);
-    gl.scissor(0, 0, pixels, pixels);
+    // The painter smooths the image as it scales it, blending in the pixels just past its edge:
+    // clear those too, or a larger avatar's image from before shows as a line along its top and right.
+    const cleared = Math.min(canvas.width, pixels + EDGE_PIXELS);
+    gl.scissor(0, 0, cleared, cleared);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     const { shells, strandPasses, fineSockets } = fluffyDetail(scale);
     const triangles = fineSockets ? geometry.fine : geometry.coarse;
