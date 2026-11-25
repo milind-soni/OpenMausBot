@@ -1,8 +1,61 @@
 {
   "$schema": "./releases.schema.json",
   "version": 1,
-  "updatedAt": "2026-11-24T12:05:39Z",
+  "updatedAt": "2026-11-25T18:14:17Z",
   "releases": [
+    {
+      "version": "0.1.181",
+      "date": "2026-11-25T17:46:37Z",
+      "sections": [
+        {
+          "title": "Bots and work",
+          "items": [
+            "**Skills on all your bots.** Put a skill on every one of your bots in one step, from the Skills list or by asking your Chief. Bots made later get it too, each bot can switch it off, and a bot that moves to My Cloud keeps it. On a Team Cloud it reaches only your own bots.",
+            "**GitHub sign-in.** A GitHub row in Apps, and a Connect GitHub card when a bot's push fails for lack of access. Bots on My Cloud can then push to a branch of their own, never the default branch and never with a force-push."
+          ]
+        },
+        {
+          "title": "Devices and computers",
+          "items": [
+            "**Settings → Devices is now one page** for phones, computers, Clouds and your own servers. Adding or fixing a device opens in the page instead of in dialogs stacked on top of each other, \"Phone & devices\" is folded in, and a small map at the top shows what is connected.",
+            "**Devices:** a notice at the top names what needs you, each device has one row of actions, and adding a phone or computer explains each step.",
+            "**Private network (Tailscale)** is one row with one switch, \"Let my other computers connect\", and it tells you the single next step for where you are.",
+            "**Phone alerts when the app is closed** are on by default once a phone is paired (iPhone app 2.0.1 and later; Android later): approvals, questions, sign-ins and finished replies, with only the bot's name on the lock screen.",
+            "**Moving a bot to My Cloud says what changes for it** before you confirm, such as its folder on this computer, a local model, or the teammates it hands work to."
+          ]
+        },
+        {
+          "title": "Models and providers",
+          "items": [
+            "**Codex: several ChatGPT accounts on a Cloud.** Each account signs in with a device code and keeps its own login, with its own email and sign-out in Settings.",
+            "**Codex: group chats no longer fill your Codex history.** Room messages used to leave a saved Codex chat each, titled \"Context from OpenMausBot…\". They no longer do.",
+            "**Claude on a custom endpoint stays under the 20-image limit.** On an Anthropic-compatible endpoint set in Settings, older images in a long conversation are folded away so new requests are not refused. Anthropic's own service is unchanged.",
+            "**ModelGo** is in the main Providers list in Settings → AI, right after Google Gemini, instead of under More providers. New installs see ModelGo's sponsor card again on their first launch, after the first reply.",
+            "**Antigravity CLI:** bots keep their team, browser and connected-apps tools from the first message.",
+            "**Bots know how to connect an engine.** When a bot lists the models it can use, it now sees why an engine can't run yet and how to connect it, for example that Antigravity signs in with a Google account and needs no API key. A local model is listed once, not under several engines."
+          ]
+        },
+        {
+          "title": "MausBot Cloud",
+          "items": [
+            "**A busy Cloud no longer looks unset.** When a Cloud is under heavy load, a check that can't finish no longer shows the \"connect an AI\" setup page; it says plainly that the Cloud is too busy right now.",
+            "**A new Cloud's first look at your apps tries again** if it fails, and a bot that moved in from your computer is greeted as itself instead of being offered the inbox setup.",
+            "**On a My Cloud, each bot reaches only its own AI account's sign-in**, not other engines' or accounts' logins."
+          ]
+        },
+        {
+          "title": "Fixes",
+          "items": [
+            "**The desktop app starts faster:** some start-up checks wait until after the window is up, and engines warm up ahead of your first message.",
+            "**Skill Burger runs are steadier:** replays keep their working folder, stop on a failed app step, resume cleanly after errors, re-send only unsent teammate requests, and refuse an outdated undo. They also keep files with the same name in different folders apart, and keep every append step.",
+            "**Routines:** with the safety floor on, a routine whose reply was already delivered completes, marked partly done, when the only steps that failed afterwards were ones the floor blocked. Any other failure after the reply still fails the run.",
+            "**Thread tabs:** in Midnight the frame around the tabs is darker so the tab curves read clearly, and in Simple mode the sidebar buttons line up with the tabs.",
+            "**Settings:** old links to Activity or Skills open a useful page instead of an empty one, and Settings search no longer offers a section that can't be used here.",
+            "**Docs:** the Bot API guide links to a community app built on it."
+          ]
+        }
+      ]
+    },
     {
       "version": "0.1.180",
       "date": "2026-11-24T12:05:11Z",
@@ -1234,53 +1287,6 @@
           "title": "Security",
           "items": [
             "**A stronger bot sandbox on Clouds and shared servers.** Five fixes close ways a bot's files could affect the server outside the sandbox: server files named on a command line, background engine work and app connections, programs and npm or git settings in the home folder, and the server's own model-list checks for Pi, OpenCode, Hermes, DeepSeek and Muse."
-          ]
-        }
-      ]
-    },
-    {
-      "version": "0.1.151",
-      "date": "2026-11-09T22:56:49Z",
-      "sections": [
-        {
-          "title": "Claude Fable 5.2",
-          "items": [
-            "**Fable 5.2 is in the model picker.** Choose it for any Claude bot. It has a 1M-token context and is cheaper than Fable 5.1."
-          ]
-        },
-        {
-          "title": "One simple app",
-          "items": [
-            "**Simple is now the only mode.** Everything you use every day is in one place, with fewer settings to look through. Bot sharing as a preset, your organization's shared skills, and where an installed bot came from are all in Simple now."
-          ]
-        },
-        {
-          "title": "Your secrets, where bots can use them",
-          "items": [
-            "**A Vault page.** See and manage what's saved in one place. Secret and sign-in cards offer **Use a saved one**, so you don't paste the same thing twice.",
-            "**1Password secrets by name.** Link a password manager, and a bot can use a secret from a vault it's allowed to read, without the value being saved or shown."
-          ]
-        },
-        {
-          "title": "Small things that help",
-          "items": [
-            "**Folder links open in Finder or Explorer.** Click a folder linked in a chat on the desktop app and it opens in your file manager.",
-            "**Connected apps come back on a fresh install.** Connect the same Composio project key on a personal install and your earlier apps return, without connecting each one again. Team Clouds always start fresh.",
-            "**Preview Markdown attachments.** See them formatted, or switch to the raw text.",
-            "**Edit a bot's memory as text.** If it changed while you were editing, you're told before anything is overwritten.",
-            "**Webhook reports get their own chat.** On desktop and self-hosted, webhook and app-event results go to a \"Results\" chat instead of piling into your latest conversation.",
-            "**Dreams only save what you said.** A saved fact now has to quote you, and its numbers, paths and links have to come from that quote.",
-            "**Linux servers find a browser.** They use a compatible installed browser, or download Chrome when needed.",
-            "**Reset saved keys.** If the app can't read its saved keys at launch, Connected apps offers a reset. The old file is set aside, not deleted."
-          ]
-        },
-        {
-          "title": "Fixes",
-          "items": [
-            "**A chat can't get stuck on \"Working\".** Answering Allow on a \"use your computer\" card could leave a chat marked busy with nothing running, and Stop couldn't clear it. Stop now always frees a chat that nothing is running in, and stuck chats free themselves.",
-            "**Computer control recovers by itself.** On macOS 26, a keyboard shortcut could crash the helper that controls your computer, and the bot's tools disappeared until you restarted the app. The helper is updated on macOS and Windows and now restarts itself, and the tools come back on their own.",
-            "**Moving to My Cloud only moves this computer's own workspace.** The move used to carry whichever local environment was open at the time, and could finish without your bots.",
-            "**Your Cloud can change address without confusing your computer.** The desktop app now recognises its Cloud by identity, so it stays connected if the Cloud moves."
           ]
         }
       ]
