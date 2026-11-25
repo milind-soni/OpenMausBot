@@ -44,15 +44,16 @@ export function createSkillsForAllBotsRoutes(deps: SkillsForAllBotsRouteDeps): R
     const bot = deps.store.bot(m[1]!);
     if (!bot) return PASS;
     const name = m[2]!;
-    if (m[3]) {
-      if (method !== "POST") return PASS;
+    if (m[3] && method === "POST") {
       const allowed = requesterScope(bot, auth);
       if ("error" in allowed) return json(res, allowed.status, { error: allowed.error });
       const done = deps.host.fromSkillsPage(bot, name, allowed.scope);
       return json(res, done.status, done.body);
     }
-    // Remove on a shared skill takes it off every bot of the person's; the rest is the per-bot routes'.
-    if (method !== "DELETE" || !listSkills(bot.id).some((skill) => skill.name === name && skill.allBots)) return PASS;
+    if (method !== "DELETE" || !listSkills(bot.id).some((skill) => skill.name === name && skill.allBots)) return m[3] ? json(res, 404, { error: `no skill named "${name}" is on all your bots` }) : PASS;
+    // Only Remove on the Skills page (…/all-bots) takes a shared skill off every bot of the person's. A plain delete of a
+    // bot's shared copy is what a send, a move or a team file does to replace one bot's skill, so it is refused.
+    if (!m[3]) return json(res, 409, { error: `"${name}" is on all your bots. Remove it from all of them on this bot's Skills page, or turn it off for this bot.` });
     const allowed = requesterScope(bot, auth);
     if ("error" in allowed) return json(res, allowed.status, { error: allowed.error });
     const removed = removeFromAllBots(allowed.scope, name);

@@ -388,7 +388,7 @@ export function SkillsSection({ bot }: { bot: Bot }) {
     setWorking(skill.name);
     setError("");
     try {
-      await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, { method: "DELETE" });
+      await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}${skill.allBots ? "/all-bots" : ""}`, { method: "DELETE" });
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("skills.error.remove"));

@@ -255,7 +255,7 @@ export function SkillsPage({ bot }: PageContext) {
     skills.setWorking(skill.name);
     skills.setError("");
     try {
-      await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, { method: "DELETE" });
+      await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}${skill.allBots ? "/all-bots" : ""}`, { method: "DELETE" });
       await skills.refresh();
     } catch (cause) {
       skills.setError(errorText(cause, t("botPanel.skills.removeFailed")));

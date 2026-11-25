@@ -155,6 +155,11 @@ describe("Skills library review and assignment controls", () => {
     vi.stubGlobal("window", { confirm });
     named(render(true), "Remove client-onboarding").props.onClick!();
     expect(confirm).toHaveBeenCalledWith("Remove “client-onboarding” from all your bots?");
+    expect(fixture.request).not.toHaveBeenCalledWith("/api/bots/bot/skills/client-onboarding", expect.objectContaining({ method: "DELETE" }));
+    vi.stubGlobal("window", { confirm: vi.fn(() => true) });
+    named(render(true), "Remove client-onboarding").props.onClick!();
+    await flush();
+    expect(fixture.request).toHaveBeenCalledWith("/api/bots/bot/skills/client-onboarding/all-bots", { method: "DELETE" });
     vi.unstubAllGlobals();
   });
 });

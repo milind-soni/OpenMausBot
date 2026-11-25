@@ -67,14 +67,17 @@ it("reaches only the person's own bots, and only that person can put it on or ta
   expect((await team.as(ada, "DELETE", `/api/bots/${adasKeeper.id}/skills/client-onboarding`)).status).toBe(200);
   expect(await skillsOf(adasKeeper)).toEqual([expect.objectContaining({ allBots: true })]);
 
-  expect((await team.as(olive, "DELETE", `/api/bots/${adasResearcher.id}/skills/client-onboarding`)).status).toBe(403);
+  expect((await team.as(olive, "DELETE", `/api/bots/${adasResearcher.id}/skills/client-onboarding/all-bots`)).status).toBe(403);
   expect(await skillsOf(adasResearcher)).toHaveLength(1);
+  // A plain delete of one bot's shared copy, as a send, a move or a team file replaces a skill with, takes it off no bot.
+  expect((await team.as(ada, "DELETE", `/api/bots/${adasResearcher.id}/skills/client-onboarding`)).status).toBe(409);
+  for (const bot of [adasWriter, adasResearcher, later, adasKeeper]) expect(await skillsOf(bot)).toEqual([expect.objectContaining({ allBots: true })]);
 
   expect((await team.as(ada, "PATCH", `/api/bots/${adasResearcher.id}/skills/client-onboarding`, { enabled: false })).status).toBe(200);
   expect(await skillsOf(adasResearcher)).toEqual([expect.objectContaining({ enabled: false })]);
   expect(await skillsOf(adasWriter)).toEqual([expect.objectContaining({ enabled: true })]);
 
-  expect((await team.as(ada, "DELETE", `/api/bots/${adasWriter.id}/skills/client-onboarding`)).status).toBe(200);
+  expect((await team.as(ada, "DELETE", `/api/bots/${adasWriter.id}/skills/client-onboarding/all-bots`)).status).toBe(200);
   for (const bot of [adasResearcher, later, adasKeeper]) expect(await skillsOf(bot)).toEqual([]);
   // The bot whose own skill it was keeps it.
   expect(await skillsOf(adasWriter)).toEqual([expect.not.objectContaining({ allBots: true })]);
