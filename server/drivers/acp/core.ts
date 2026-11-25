@@ -1183,7 +1183,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 session.sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
                 session.sessionKey = liveSessionKey(sessionKey, heldSystem());
                 receiveModelVariants(result, true);
-              }), () => session.child.exitCode === null && !session.closing && !session.dead); // a busy machine: once more, then plain words
+              }), () => session.child.exitCode === null && !session.closing && !session.dead, undefined, threadId); // a busy machine: once more, then plain words
               break;
             }
             const sessionId = session.sessionId;
