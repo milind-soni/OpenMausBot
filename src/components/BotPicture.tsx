@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { avatarMarks } from "@/lib/avatar-marks";
 import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
 import { EFFECTS, glyphAmount } from "./CursorAvatar";
@@ -53,7 +53,6 @@ export function BotPicture({ src, alt, size, radius, zoom, origin, color, state:
   const state = beat ?? own;
   const live = !reduced && (animated ?? (ACTIVE_STATES.has(own) || beat !== null));
   const latest = useRef({ state, live, color });
-  latest.current = { state, live, color };
   const ticket = useRef<MascotTicket | null>(null);
   const uid = useId();
   const [seed] = useState(() => loopSeed(uid));
@@ -101,7 +100,8 @@ export function BotPicture({ src, alt, size, radius, zoom, origin, color, state:
     };
   }, [size, seed]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    latest.current = { state, live, color };
     ticket.current?.wake();
   }, [state, live, color]);
 
