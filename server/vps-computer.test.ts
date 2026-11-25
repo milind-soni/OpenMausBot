@@ -1,3 +1,4 @@
+import { ComputerIdleTimer } from "./computer-idle.ts";
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { execFileSync } from "node:child_process";
@@ -1358,6 +1359,22 @@ describe("remote desktop tunnel ownership", () => {
       expect(child.kill).toHaveBeenCalledTimes(1);
     } finally { closeAllVpsDesktopTunnels(); vi.useRealTimers(); }
   });
+  it("waits a full idle window after a short desktop view closes", async () => {
+    await openFixture();
+    vi.useFakeTimers();
+    const stop = vi.fn(async () => {});
+    const timer = new ComputerIdleTimer(1000, () => Boolean(vpsDesktopConnection(BOT_ID)), stop);
+    try {
+      timer.touch();
+      await vi.advanceTimersByTimeAsync(400);
+      expect(closeVpsDesktopTunnel(BOT_ID, () => timer.touch())).toEqual({ closed: true });
+      await vi.advanceTimersByTimeAsync(999);
+      expect(stop).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(stop).toHaveBeenCalledTimes(1);
+    } finally { timer.cancel(); closeAllVpsDesktopTunnels(); vi.useRealTimers(); }
+  });
+
   it("keeps remote tabs connected when the native viewer closes", async () => {
     const { child, runner } = await openFixture();
     try {

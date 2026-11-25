@@ -240,14 +240,16 @@ function stopDesktopTunnel(botId: string, expected?: DesktopTunnel): boolean {
   return true;
 }
 
-export function closeVpsDesktopTunnel(botId: string) {
+export function closeVpsDesktopTunnel(botId: string, onClosed?: () => void) {
   const tunnel = desktopTunnels.get(botId);
   if (tunnel?.viewers) {
     tunnel.localViewer = false;
     clearTimeout(tunnel.expiry);
     return { closed: false };
   }
-  return { closed: stopDesktopTunnel(botId) };
+  const closed = stopDesktopTunnel(botId);
+  if (closed) onClosed?.();
+  return { closed };
 }
 
 export function closeAllVpsDesktopTunnels(): void {
