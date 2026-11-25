@@ -5,7 +5,8 @@ import vm from "node:vm";
 
 /** companionRevoke alone, with the sidecar, its store and the transition queue stubbed. */
 function revokeWith({ running, removeAtRest = () => true, control = async () => ({}), portServed = false }) {
-  const source = readFileSync(new URL("./companion.mjs", import.meta.url), "utf8");
+  // A Windows checkout has CRLF line ends: the function is cut out by its "\n}\n" end.
+  const source = readFileSync(new URL("./companion.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const start = source.indexOf("export async function companionRevoke");
   const end = source.indexOf("\n}\n", start);
   assert.ok(start >= 0 && end > start);
