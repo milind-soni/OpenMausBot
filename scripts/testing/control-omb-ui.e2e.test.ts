@@ -269,19 +269,26 @@ describe("control-omb ui drives the real renderer", () => {
     // The picker sets the bot's model, which every chat of it uses.
     const threadModel = async () => (await savedBot()).tasks.find((task: any) => task.threadId === originalBot.threadId).modelSelection.model;
     // Simple keeps the model on the bot's panel while the AI is fine: the bot's name opens it, then its Model row.
-    await ui("eval", info.ui, "--js", "document.querySelector('button[data-chathead-pill]').click(); true");
-    await expect.poll(async () => (await ui("eval", info.ui, "--js", "String(Boolean(document.querySelector('[data-panel-row=\"model\"] button[data-tour=\"model\"]')))")).result,
-      { timeout: 10_000 }).toBe("true");
-    await ui("eval", info.ui, "--js", "document.querySelector('[data-panel-row=\"model\"] button[data-tour=\"model\"]').click(); true");
+    const panelModel = "document.querySelector('[data-panel-row=\"model\"] button[data-tour=\"model\"]')";
+    const menuOpen = async () => (await ui("eval", info.ui, "--js", "String(Boolean(document.querySelector('[data-model-picker-content]')))")).result;
+    // Each try opens what is missing: the panel from the bot's name, then the menu from the panel's Model row.
+    const openModel = () => expect.poll(async () => {
+      if (await menuOpen() === "true") return true;
+      await ui("eval", info.ui, "--js", `(${panelModel} ? ${panelModel}.click() : document.querySelector('[data-chathead-pill][aria-expanded="false"]')?.click(), true)`);
+      return false;
+    }, { timeout: 20_000, interval: 1_000 }).toBe(true);
+    await openModel();
     await expect.poll(async () => (await ui("snapshot", info.ui)).snapshot, { timeout: 10_000 }).toContain("Pepper's model, used in all its chats");
     mkdirSync(evidenceDir, { recursive: true });
     await ui("screenshot", info.ui, "--out", join(evidenceDir, "model-picker.png"));
     await ui("click", info.ui, "--name", nextModel.label);
     await expect.poll(async () => (await savedBot()).modelSelection.model, { timeout: 10_000 }).toBe(nextModel.id);
     expect(await threadModel()).toBe(nextModel.id);
-    // A model with reasoning levels keeps the menu open after the pick, so its level can be set next.
-    expect(await ui("eval", info.ui, "--js", "String(Boolean(document.querySelector('[data-model-picker-content]')))"))
+    // On the panel the menu closes after the pick: the panel's own Reasoning row, just under it, sets the level next.
+    await expect.poll(menuOpen, { timeout: 10_000 }).toBe("false");
+    expect(await ui("eval", info.ui, "--js", "String(Boolean(document.querySelector('[data-panel-card=\"model\"] select[aria-label=\"Reasoning effort\"]')))"))
       .toMatchObject({ result: "true" });
+    await openModel();
     const modelSnapshot = await ui("snapshot", info.ui, "--interactive");
     const [originalRow] = refsNamed(modelSnapshot, originalLabel, "button");
     expect(originalRow).toBeDefined();
@@ -289,10 +296,16 @@ describe("control-omb ui drives the real renderer", () => {
     await expect.poll(async () => (await savedBot()).modelSelection.model, { timeout: 10_000 }).toBe(originalModel);
     expect(await threadModel()).toBe(originalModel);
     expect((await savedBot()).approvalMode).toBe(originalBot.approvalMode);
-    // The menu is still open after that pick; close it before using the composer.
+    // The menu closes after that pick too; Escape makes sure before using the composer.
     await ui("press", info.ui, "--keys", "Escape");
     await expect.poll(async () => (await ui("eval", info.ui, "--js", "String(Boolean(document.querySelector('[data-model-picker-content]')))")).result,
       { timeout: 10_000 }).toBe("false");
+    // And close the bot's panel the model was picked on, so the chat is as it opened (its slide out finished).
+    await expect.poll(async () => {
+      if ((await ui("eval", info.ui, "--js", "String(Boolean(document.querySelector('[role=dialog][aria-labelledby=bot-settings-title]')))")).result === "false") return true;
+      await ui("eval", info.ui, "--js", "(document.querySelector('[data-chathead-pill][aria-expanded=\"true\"]')?.click(), true)");
+      return false;
+    }, { timeout: 15_000, interval: 1_000 }).toBe(true);
 
     const before = await ui("snapshot", info.ui, "--interactive");
     expect(before.ok).toBe(true);
@@ -352,6 +365,10 @@ describe("control-omb ui drives the real renderer", () => {
     expect(png.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
 
     await ui("click", info.ui, "--name", "Open Pepper's profile");
+    // The panel slides in; click its Inspector row once it has landed.
+    await expect.poll(async () => (await ui("eval", info.ui, "--js",
+      "(() => { const panel = document.querySelector('[role=dialog][aria-labelledby=bot-settings-title]'); return String(Boolean(panel) && panel.getAnimations({ subtree: true }).length === 0); })()")).result,
+    { timeout: 10_000 }).toBe("true");
     await ui("click", info.ui, "--name", "Inspector");
     // A local page fetches a screen when it opens, so the panel arrives just after the click.
     const inspected = await vi.waitFor(async () => {
