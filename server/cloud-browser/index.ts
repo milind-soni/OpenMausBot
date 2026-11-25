@@ -16,6 +16,10 @@ import { BROWSER_SANDBOX_CHROMES, BROWSER_SANDBOX_OWNER, COMPUTER_DOOR_PORT, Old
 export const CLOUD_BROWSER_IDLE_MS = 3 * 60_000;
 const SWEEP_MS = 30_000;
 const LEVER_CLEANUP_GAP_MS = 60 * 60_000;
+/** While a browser is used, the provider's own auto-stop is pushed to this far ahead, at most every TTL_REFRESH_MS: it then
+ * stops the sandbox by itself when everything here died, and never in the middle of a session in use. */
+export const SANDBOX_IDLE_TTL_SECONDS = 1_200;
+export const TTL_REFRESH_MS = 10 * 60_000;
 
 export const cloudBrowserLever = (env: NodeJS.ProcessEnv = process.env): boolean => env.OMB_CLOUD_BROWSER?.trim() === "home";
 
@@ -90,6 +94,7 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
   /** Woken (or found awake) by an open here and not yet let sleep. */
   let awake = false;
   let leverCleanupAt = -Infinity;
+  let ttlRefreshedAt = 0;
 
   const home = (request: OpenRequest, reason: HomeReason): Opened => {
     rails.home(reason);
@@ -102,6 +107,8 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
   function refused(error: unknown): HomeReason {
     const failure = cloudFailureOf(error);
     const limit = failure.limit;
+    // No machine free right now: the provider answered at once and counted no start. Not the sandbox's failure.
+    if (failure.code === "no_ready_machine") return "no-machine";
     if (limit?.reason === "too_many_starts" && (limit.window === "day" || limit.window === undefined)) { rails.accountLimit(limit); return "account-limit"; }
     if (limit?.reason === "hours_used") { rails.hoursUsed(limit); return "hours-used"; }
     if (limit?.reason === "at_once") { rails.holdOff(); return "at-once"; }
@@ -137,6 +144,8 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
     const box = await waking;
     boxId = box.id;
     awake = true;
+    // Woken now: the deadline the Admin set at the resume is fresh.
+    if (box.started) ttlRefreshedAt = now();
     rails.awake();
     // On from here: the idle path times it, whatever happens next.
     deps.used(BROWSER_SANDBOX_OWNER, CLOUD_BROWSER_IDLE_MS);
@@ -275,8 +284,19 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
     }
   }
 
+  /** The provider's auto-stop pushed ahead while some browser here was used since the last push. */
+  async function refreshTtl(at: number): Promise<void> {
+    const ops = deps.ops();
+    if (!ops || !boxId || at - ttlRefreshedAt < TTL_REFRESH_MS) return;
+    const used = doors.sessions().some((session) => (doors.lastActivity(session) ?? 0) > ttlRefreshedAt);
+    if (!used) return;
+    ttlRefreshedAt = at;
+    await ops.refreshTtl(boxId, SANDBOX_IDLE_TTL_SECONDS).catch(() => undefined);
+  }
+
   async function closeIdle(): Promise<void> {
     const at = now();
+    await refreshTtl(at);
     await Promise.all([...companions.values()].map((companion) => companion.periodic()));
     await Promise.all(doors.sessions().map(async (session) => {
       const last = doors.lastActivity(session);

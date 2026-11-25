@@ -25,13 +25,15 @@ export function dialable(raw: string): URL | null {
   return url.protocol === "http:" && LOOPBACK.has(url.hostname) ? url : null;
 }
 
-/** The request the computer's door gets: its secret path with the relay's token, the relay's host, and the engine's own
- * WebSocket headers. Origin is dropped: Chrome refuses a DevTools connection that names one it was not told to allow. */
+/** The request the sandbox's door gets: its secret path, the relay's host, the relay's access token as the cookie the
+ * provider names for API clients (`_port_auth`; the `?_token=` form answers a browser with a redirect, which a WebSocket
+ * upgrade cannot follow), and the engine's own WebSocket headers. Origin and any cookie of the engine's are dropped:
+ * Chrome refuses a DevTools connection that names an origin it was not told to allow. */
 export function rewrittenHead(head: Buffer, target: DoorTarget): Buffer {
   const lines = head.toString("latin1").split("\r\n").filter(Boolean);
-  const kept = lines.slice(1).filter((line) => !/^(host|origin):/i.test(line));
-  const query = target.url.search;
-  return Buffer.from([`GET /${target.secret}${query} HTTP/1.1`, `Host: ${target.url.host}`, ...kept, "", ""].join("\r\n"), "latin1");
+  const kept = lines.slice(1).filter((line) => !/^(host|origin|cookie):/i.test(line));
+  const token = target.url.searchParams.get("_token");
+  return Buffer.from([`GET /${target.secret} HTTP/1.1`, `Host: ${target.url.host}`, ...(token ? [`Cookie: _port_auth=${token}`] : []), ...kept, "", ""].join("\r\n"), "latin1");
 }
 
 interface Door { server: Server; url: string; token: Buffer; target: DoorTarget; connections: Set<Socket>; lastActivity: number; dialed: number }

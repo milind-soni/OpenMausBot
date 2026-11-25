@@ -11,7 +11,7 @@ import { ComputerIdleTimer } from "../computer-idle.ts";
 import { LOCAL_SCHEME_REFUSAL, localSchemeRefusal } from "./guards.ts";
 import { SESSION_DOWNLOAD_BYTES, SIGN_IN_SYNC_MS, UPLOAD_MAX_BYTES, type SignInStore } from "./companion.ts";
 import { cookieParam } from "./sign-ins.ts";
-import { CLOUD_BROWSER_IDLE_MS, createCloudBrowser, type CloudBrowserDeps } from "./index.ts";
+import { CLOUD_BROWSER_IDLE_MS, createCloudBrowser, SANDBOX_IDLE_TTL_SECONDS, TTL_REFRESH_MS, type CloudBrowserDeps } from "./index.ts";
 import { CLOUD_BROWSER_BACKOFF_MS, createCloudBrowserRails } from "./rails.ts";
 import { BROWSER_SANDBOX_CHROMES, BROWSER_SANDBOX_OWNER, browserSandboxCreateBody, profileKey, providerOps } from "./remote.ts";
 import { RELAY_KEY, RELAY_TOKEN, startFakeComputer, type FakeComputer } from "./testing/fake-computer.ts";
@@ -103,6 +103,7 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
       expect(upgrade.path).toMatch(new RegExp(`^/${key}/[a-f0-9]{48}$`));
       expect(upgrade.host).toBe(new URL(fake.base).host);
       expect(upgrade.origin).toBeUndefined();
+      expect(upgrade.query, "the relay's token goes as the _port_auth cookie, never a ?_token= the edge would redirect").toBe("");
     }
     const before = fake.requests.length;
     await act(cdpUrl, 3);
@@ -209,6 +210,40 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     expect(deletes()).toHaveLength(1);
     expect(fake.creates()).toBe(1);
     expect(cloud.report().resumes).toBe(1);
+  });
+
+  it("with no machine free at the provider, opens in the home at once, never as a sandbox failure", async () => {
+    fake.state = "archived";
+    fake.startStatus = 503;
+    fake.startBody = { ok: false, code: "no_ready_machine", message: "No machine is ready." };
+    const cloud = browser();
+    expect(await cloud.open(request())).toEqual({ home: "no-machine" });
+    expect(await cloud.open(request())).toEqual({ home: "no-machine" });
+    expect(await cloud.open(request())).toEqual({ home: "no-machine" });
+    expect(cloud.report().held, "no back-off: the next open may find a machine").toBeNull();
+    expect(fake.resumes()).toBe(3);
+  });
+
+  it("pushes the provider's own auto-stop ahead while a browser is used, at most every 10 minutes, so it stops the sandbox only when unused", async () => {
+    const cloud = browser();
+    const cdpUrl = urlOf(await cloud.open(request()));
+    const patches = () => fake.requests.filter((one) => one.method === "PATCH" && one.body?.ttlSeconds !== undefined).map((one) => one.body);
+    await act(cdpUrl, 1);
+    clock += 60_000;
+    await cloud.closeIdle();
+    expect(patches()).toEqual([{ ttlSeconds: SANDBOX_IDLE_TTL_SECONDS }]);
+    clock += 60_000;
+    await act(cdpUrl, 1);
+    await cloud.closeIdle();
+    expect(patches(), "at most every 10 minutes").toHaveLength(1);
+    clock += TTL_REFRESH_MS;
+    await act(cdpUrl, 1);
+    await cloud.closeIdle();
+    expect(patches()).toHaveLength(2);
+    held = true;
+    clock += TTL_REFRESH_MS;
+    await cloud.closeIdle();
+    expect(patches(), "unused since: the deadline is left to run out").toHaveLength(2);
   });
 
   it("wakes a stopped sandbox with exactly one resume, then reads only", async () => {

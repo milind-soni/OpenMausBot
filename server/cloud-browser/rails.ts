@@ -16,7 +16,7 @@ export const CLOUD_BROWSER_BACKOFF_MS = 15 * 60_000;
 
 /** Why a browser session opened in the home instead: names only, for the log and the health report. */
 export type HomeReason =
-  | "lever" | "team" | "not-eligible" | "own-key" | "sign-ins" | "not-set-up" | "busy" | "lent-connection"
+  | "lever" | "team" | "not-eligible" | "own-key" | "sign-ins" | "no-machine" | "not-set-up" | "busy" | "lent-connection"
   | "old-relay" | "unavailable" | "budget" | "minutes-used" | "sandbox-full" | "backoff" | "account-limit" | "hours-used" | "at-once" | "no-route" | "start-failed" | "unreachable";
 
 interface Day {

@@ -57,6 +57,8 @@ export interface ComputerOps {
   quit(boxId: string, key: string | null): Promise<void>;
   /** The door's port on a protected relay URL (one that needs its token); null where it is refused or unprotected. */
   host(boxId: string, port: number): Promise<string | null>;
+  /** Moves the provider's own auto-stop to now + `seconds`, so it stops the sandbox only after that long unused. */
+  refreshTtl(boxId: string, seconds: number): Promise<void>;
   /** Deletes it, journaled like every deletion (boat-delete-journal.ts), so a failed delete is retried and never leaks. */
   remove(boxId: string): Promise<boolean>;
 }
@@ -170,6 +172,10 @@ export function providerOps(cfg: () => AppConfig): ComputerOps {
       const answer = await json(cfg(), `/sandboxes/${boxId}/host`, { method: "POST", body: JSON.stringify({ port, localhost: true }) });
       if (!answer.ok || answer.body?.isProtected === false || answer.body?.access === "public") return null;
       return protectedUrl(answer.body?.url);
+    },
+    async refreshTtl(boxId, seconds) {
+      // A refusal (the Admin's maximum session age, say) leaves the deadline as it is: that is the point of it.
+      await json(cfg(), `/sandboxes/${boxId}`, { method: "PATCH", body: JSON.stringify({ ttlSeconds: seconds }) });
     },
     async remove(boxId) {
       const name = await boatNameFor(BROWSER_SANDBOX_OWNER);

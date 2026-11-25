@@ -30,7 +30,7 @@ export interface FakeComputer {
   unprotected: boolean;
   chromeStarts: boolean;
   requests: Request[];
-  upgrades: Array<{ path: string; host: string | undefined; origin: string | undefined }>;
+  upgrades: Array<{ path: string; host: string | undefined; origin: string | undefined; query?: string }>;
   frames: string[];
   boxId: string;
   /** Files on the sandbox's disk by path (downloads the page made, uploads the home sent). */
@@ -148,7 +148,10 @@ export async function startFakeComputer(): Promise<FakeComputer> {
     const url = new URL(req.url ?? "/", "http://fake");
     fake.upgrades.push({ path: url.pathname, host: req.headers.host, origin: req.headers.origin });
     const [, key = "", secret = ""] = /^\/([a-f0-9]{16})\/([a-f0-9]+)$/.exec(url.pathname) ?? [];
-    if (!key || secrets.get(key) !== secret || url.searchParams.get("_token") !== RELAY_TOKEN) {
+    // The provider's edge takes the token as the `_port_auth` cookie from an API client; a `?_token=` request gets a redirect.
+    const cookie = /(?:^|;\s*)_port_auth=([^;]+)/.exec(String(req.headers.cookie ?? ""))?.[1];
+    fake.upgrades.at(-1)!.query = url.search;
+    if (!key || secrets.get(key) !== secret || cookie !== RELAY_TOKEN || url.search) {
       socket.end("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
       return;
     }
