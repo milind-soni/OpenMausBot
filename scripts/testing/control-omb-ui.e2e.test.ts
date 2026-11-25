@@ -268,7 +268,11 @@ describe("control-omb ui drives the real renderer", () => {
     const nextModel = options.find((option: any) => option.id !== originalModel && !option.needsCliUpdate);
     // The picker sets the bot's model, which every chat of it uses.
     const threadModel = async () => (await savedBot()).tasks.find((task: any) => task.threadId === originalBot.threadId).modelSelection.model;
-    await ui("click", info.ui, "--name", originalLabel);
+    // Simple keeps the model on the bot's panel while the AI is fine: the bot's name opens it, then its Model row.
+    await ui("eval", info.ui, "--js", "document.querySelector('button[data-chathead-pill]').click(); true");
+    await expect.poll(async () => (await ui("eval", info.ui, "--js", "String(Boolean(document.querySelector('[data-panel-row=\"model\"] button[data-tour=\"model\"]')))")).result,
+      { timeout: 10_000 }).toBe("true");
+    await ui("eval", info.ui, "--js", "document.querySelector('[data-panel-row=\"model\"] button[data-tour=\"model\"]').click(); true");
     await expect.poll(async () => (await ui("snapshot", info.ui)).snapshot, { timeout: 10_000 }).toContain("Pepper's model, used in all its chats");
     mkdirSync(evidenceDir, { recursive: true });
     await ui("screenshot", info.ui, "--out", join(evidenceDir, "model-picker.png"));
