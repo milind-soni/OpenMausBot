@@ -1,0 +1,88 @@
+name: Release branch installers
+
+on:
+  push:
+    branches: [release]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-installers-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Package ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            runner: macos-15
+            platform: mac
+            asset: release/OpenMausBot-*-arm64.dmg
+          - name: Windows x64
+            runner: windows-latest
+            platform: windows
+            asset: release/OpenMausBot-*-setup.exe
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build installer
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: bash package-installer.sh "$PLATFORM"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-${{ matrix.platform }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish installers to GitHub Releases
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: installer-*
+          path: installers
+          merge-multiple: true
+      - name: Publish prerelease for the built commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          mac=(installers/OpenMausBot-*-arm64.dmg)
+          win=(installers/OpenMausBot-*-setup.exe)
+          if (( ${#mac[@]} != 1 || ${#win[@]} != 1 )); then
+            echo "::error::Expected one macOS DMG and one Windows setup EXE"
+            exit 1
+          fi
+
+          tag="release-$GITHUB_SHA"
+          release=(--repo "$GITHUB_REPOSITORY")
+          if ! gh release view "$tag" "${release[@]}" >/dev/null 2>&1; then
+            gh release create "$tag" "${release[@]}" --target "$GITHUB_SHA" \
+              --title "Release branch installers (${GITHUB_SHA:0:12})" \
+              --notes "Installers from release commit $GITHUB_SHA. The macOS build is ad hoc signed and not notarized." \
+              --draft --prerelease --latest=false
+          fi
+          gh release upload "$tag" "${mac[0]}" "${win[0]}" "${release[@]}" --clobber
+          gh release edit "$tag" "${release[@]}" --draft=false --prerelease --latest=false
