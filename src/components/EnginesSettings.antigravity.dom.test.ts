@@ -324,6 +324,50 @@ describe("Google Gemini (Antigravity) accounts share one card", () => {
     await act(async () => { send(); await fixture.completeGate; });
   });
 
+  it("offers no second sign-in once a pasted redirect is accepted, while the account is read again", async () => {
+    fixture.state.instances = [google("antigravity", "Personal", { authenticated: false })];
+    await render();
+    await click(buttons(row("antigravity"), "Sign in")[0]);
+    await pasteRedirect("antigravity");
+    const refresh = gate();
+    fixture.refreshGate = refresh.promise;
+    await click(buttons(row("antigravity"), "Send redirect")[0]);
+    expect(usable(row("antigravity"))).not.toContain("Sign in");
+    expect(usable(row("antigravity"))).not.toContain("Open Google sign-in again");
+    await refresh.open();
+    expect(row("antigravity").querySelector("[data-account-sign-in]")).toBeNull();
+  });
+
+  it("adds an account with the path of one that can run, when the first cannot", async () => {
+    fixture.state.instances = [
+      google("antigravity", "Personal", { state: "unavailable", authenticated: undefined, reason: "Not installed" }),
+      google("antigravity-native", "Native", {}, { cli: "/opt/agy/antigravity" }),
+    ];
+    await render();
+    await click(buttons(container, "Add Google account")[0]);
+    const input = container.querySelector<HTMLInputElement>("form[data-add-account] input")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Work");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await click(buttons(container, "Add and sign in")[0]);
+    expect(fixture.calls[0]?.body).toEqual({ displayName: "Work", sourceInstanceId: "antigravity-native" });
+  });
+
+  it("does not start a sign-in again for an account hidden while it waited and shown again", async () => {
+    const work = google("antigravity-work", "Work", { authenticated: false });
+    fixture.state.instances = [fixture.state.instances[0]!, work];
+    await render();
+    await click(buttons(row("antigravity-work"), "Sign in")[0]);
+    fixture.state = { ...fixture.state, instances: [fixture.state.instances[0]!] };
+    await render();
+    fixture.state = { ...fixture.state, instances: [fixture.state.instances[0]!, work] };
+    await render();
+    expect(startCalls()).toEqual(["/api/instances/antigravity-work/auth/start"]);
+    expect(row("antigravity-work").querySelector("[data-account-sign-in]")).toBeNull();
+    expect(buttons(row("antigravity-work"), "Sign in")).toHaveLength(1);
+  });
+
   it("closes the panel of a sign-in the server accepted even when the models cannot be read yet", async () => {
     fixture.state.instances = [google("antigravity", "Personal", { authenticated: false })];
     fixture.modelsFail = true;

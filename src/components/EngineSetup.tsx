@@ -298,7 +298,6 @@ function ManagedEngineSetup({ instance, signInOnly, autoStart = false, onDone }:
   instance: InstanceInfo;
   signInOnly: boolean;
   autoStart?: boolean;
-  /** Signed in or cancelled; given, the panel offers Cancel. */
   onDone?: () => void;
 }) {
   const { state, refreshInstances, refreshModels } = useStore();
@@ -327,9 +326,9 @@ function ManagedEngineSetup({ instance, signInOnly, autoStart = false, onDone }:
         if (!live || auth.phase === "waiting" || auth.phase === "verifying") return;
         if (auth.phase !== "succeeded") return ended(auth.phase === "expired" ? t("engineSetup.googleExpired") : auth.message ?? t("engineSetup.googleFailed"));
         if (done.current) {
+          await refreshInstances().catch(() => {});
           ended(null);
-          done.current();
-          void refreshInstances().catch(() => {});
+          done.current?.();
           void refreshModels(instance.instanceId).catch(() => {});
           return;
         }
@@ -375,8 +374,8 @@ function ManagedEngineSetup({ instance, signInOnly, autoStart = false, onDone }:
       await refreshModels(instance.instanceId);
       return;
     }
-    done.current();
-    void refreshInstances().catch(() => {});
+    await refreshInstances().catch(() => {});
+    done.current?.();
     void refreshModels(instance.instanceId).catch(() => {});
   };
 
@@ -532,7 +531,7 @@ function ManagedEngineSetup({ instance, signInOnly, autoStart = false, onDone }:
       {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
       {onDone && <button type="button" aria-disabled={busy === "complete" || cancelling || undefined} aria-busy={cancelling || undefined}
         onClick={busy === "complete" || cancelling ? undefined : () => void cancel()}
-        className="rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-control aria-disabled:opacity-50">{t("common.cancel")}</button>}
+        className="ui-button ui-button-md aria-disabled:opacity-50">{t("common.cancel")}</button>}
     </div>
   );
 }

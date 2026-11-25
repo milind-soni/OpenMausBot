@@ -257,7 +257,7 @@ function AccountRow({ group, instance, several, signingIn, onSignIn, onSignInDon
                 {t("accounts.signIn")}
               </button>
             )}
-            <AccountMenu group={group} instance={instance} signingIn={signingIn} onRename={() => setRenaming(true)} />
+            <AccountMenu group={group} instance={instance} signingIn={signingIn && !setsUp} onRename={() => setRenaming(true)} />
           </>
         )}
       </div>
@@ -367,6 +367,13 @@ export function AccountsCard({ group, accounts, advanced, bare = false }: { grou
   const [signingIn, setSigningIn] = useState<readonly string[]>([]);
   const startSignIn = (instanceId: string) => setSigningIn((current) => group === "antigravity" ? [...current.filter((id) => id !== instanceId), instanceId] : [instanceId]);
   const endSignIn = (instanceId: string) => setSigningIn((current) => current.includes(instanceId) ? current.filter((id) => id !== instanceId) : current);
+  const shown = accounts.map((instance) => instance.instanceId);
+  const wereShown = useRef(shown);
+  useEffect(() => {
+    const gone = wereShown.current.filter((id) => !shown.includes(id));
+    wereShown.current = shown;
+    if (gone.length) setSigningIn((current) => current.filter((id) => !gone.includes(id)));
+  });
   const primary = accounts[0]!;
   const listed = group === "antigravity" || accounts.some((instance) => instance.snapshot.state === "available");
   const policy = accounts.find((instance) => instance.policy)?.policy;
@@ -390,7 +397,7 @@ export function AccountsCard({ group, accounts, advanced, bare = false }: { grou
           </ul>
           {!primary.snapshot.authenticationUnavailableReason && <>
             <AddAccount label={t(COPY[group].add)} endpoint={`/api/instances/${group}-accounts`} folder={group === "claude"}
-              extra={group === "antigravity" ? { sourceInstanceId: primary.instanceId } : undefined}
+              extra={group === "antigravity" ? { sourceInstanceId: (accounts.find((instance) => instance.snapshot.state === "available") ?? primary).instanceId } : undefined}
               describedBy={browserAccounts ? noteId : undefined} onAdded={startSignIn} />
             {browserAccounts && <p id={noteId} className="px-2 text-[12px] leading-relaxed text-ink-secondary">{t("accounts.addChatgptWorkspaceNote")}</p>}
           </>}
