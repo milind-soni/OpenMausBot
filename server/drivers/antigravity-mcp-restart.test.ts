@@ -77,7 +77,7 @@ describe.skipIf(WINDOWS)("a native Antigravity session whose MCP servers change"
     const entries = fixture.entries();
     const oldExited = entries.findIndex((entry) => entry.event === "exited" && entry.pid === pidOf(first[0]!));
     expect(oldExited).toBeGreaterThanOrEqual(0);
-    expect(entries.findIndex((entry) => entry.pid === pidOf(resumed))).toBeGreaterThan(oldExited);
+    expect(entries.findIndex((entry) => entry.event === "started" && entry.pid === pidOf(resumed))).toBeGreaterThan(oldExited);
 
     expect(await turn("second prompt", unbridged)).toMatch(/TOOLS mcp_agents_read_notes(?!_)/u);
     const back = sessionsOpened();

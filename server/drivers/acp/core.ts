@@ -59,7 +59,7 @@ import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
 import { MAX_QUESTION_TEXT, parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../../shared/ask-question.ts";
 
 import { appendNative } from "../native.ts";
-import { acpAnswersAlone, acpSessionOperationKey, acpShellRequest, permissionLaunchCwd } from "../permission-command.ts"; import { bridgedAlone, bridgedPermission } from "./bridged-permission.ts"; import { missingOptionNote, permissionOptions } from "./permission-options.ts"; import { agentsToolBridged } from "../agents-bridge.ts"; import { CATALOG_TOOL_NAMES } from "../../agents-bridge-names.ts"; import { acpReadPaths } from "../../own-file-reads.ts";
+import { acpAnswersAlone, acpSessionOperationKey, acpShellRequest, permissionLaunchCwd } from "../permission-command.ts"; import { bridgedAlone, bridgedPermission, otherMcpServers } from "./bridged-permission.ts"; import { missingOptionNote, permissionOptions } from "./permission-options.ts"; import { agentsToolBridged } from "../agents-bridge.ts"; import { CATALOG_TOOL_NAMES } from "../../agents-bridge-names.ts"; import { acpReadPaths } from "../../own-file-reads.ts";
 import { openQuestionRequest, questionRequestFor, type AcpQuestionRequest } from "./question-requests.ts";
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
 import { acpToolEndEvents } from "./tool-items.ts";
@@ -577,7 +577,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           current.flushAssistantText();
           const options: Array<{ optionId?: string; kind?: string; name?: string }> = Array.isArray(params.options) ? params.options : [];
           // Security: a bridged use_tool covers whichever tool it names, so it is answered once and only once.
-          const bridged = bridgedPermission(params.toolCall ?? {}, agentsToolBridged(current.turn.integrations?.agents), CATALOG_TOOL_NAMES), onceOnly = bridged.kind !== "ordinary";
+          const bridged = bridgedPermission(params.toolCall ?? {}, agentsToolBridged(current.turn.integrations?.agents), CATALOG_TOOL_NAMES, otherMcpServers(current.turn.integrations)), onceOnly = bridged.kind !== "ordinary";
           const { optionFor, optionAlways } = permissionOptions(options, onceOnly), cancelled = { outcome: { outcome: "cancelled" } };
           // A cancelled answer may leave Antigravity waiting for session/cancel, so a bridged request answered that way ends the turn.
           const answerAlone = (optionId: string | null, end = onceOnly && !optionId) => { send({ jsonrpc: "2.0", id: msg.id, result: optionId ? { outcome: { outcome: "selected", optionId } } : cancelled }); if (end && session.current === current) active.get(threadId)?.interrupt(); };
@@ -963,8 +963,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             if (pooled.dead) sessions.delete(threadId);
             else closeSession(threadId, mcpServersChanged ? "mcp-servers" : "contract", { retire: mcpServersChanged });
           }
-          // The old process is gone before a new one opens the same profile.
-          if (mcpServersChanged) for (const child of retiring.get(threadId) ?? []) if (!await retireChild(threadId, child)) throw new Error(`${support.displayName} could not close its previous tool session. Try again.`);
+          // A thread's old process is gone before a new one opens the same profile.
+          if (support.restartsOnMcpServersChange?.(instanceId)) for (const child of retiring.get(threadId) ?? []) if (!await retireChild(threadId, child)) throw new Error(`${support.displayName} could not close its previous tool session. Try again.`);
           const joining = sharedHost(hostKey, threadId, cwd);
           const admittingAt = Date.now();
           await turn.engineAdmission?.(joining ? "session" : "process", joining?.child.pid);

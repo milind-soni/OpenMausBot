@@ -14,7 +14,7 @@ import { nativeFixture } from "./antigravity-native-fixture.ts";
 import { droppedTools, ServerNames } from "./fake-antigravity-mcp.ts";
 
 const FAKE_MCP = join(dirname(fileURLToPath(import.meta.url)), "fake-mcp-server.ts");
-const WINDOWS = process.platform === "win32";
+const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "fake-antigravity-cli.ts");
 
 describe("the fake native CLI's tool budget", () => {
   const servers = (agents: readonly { name: string }[]) => [
@@ -42,8 +42,8 @@ describe("the fake native CLI's tool budget", () => {
 
 type Message = { id?: unknown; method?: string; params?: any; result?: any; error?: any };
 
-function acpClient(executable: string, profile: string, env: Record<string, string>) {
-  const child = spawnCli(executable, ["acp", "--gemini-dir", profile, "--app-data-dir", "antigravity-acp"], { env: { ...process.env, ...env }, stdio: ["pipe", "pipe", "pipe"] });
+function acpClient(profile: string, env: Record<string, string>) {
+  const child = spawnCli(process.execPath, [FAKE_CLI, "acp", "--gemini-dir", profile, "--app-data-dir", "antigravity-acp"], { env: { ...process.env, ...env }, stdio: ["pipe", "pipe", "pipe"] });
   child.stderr.resume();
   const waiting = new Map<unknown, (message: Message) => void>();
   const seen: Message[] = [];
@@ -73,8 +73,7 @@ function acpClient(executable: string, profile: string, env: Record<string, stri
   return { child, request, seen, text, onPermission: (fn: (message: Message) => unknown) => { answer = fn; } };
 }
 
-// The fixture's `antigravity` is a POSIX shell script.
-describe.skipIf(WINDOWS)("the fake native CLI's MCP turns", () => {
+describe("the fake native CLI's MCP turns", () => {
   const children: Array<{ kill(): void }> = [];
   afterEach(() => { for (const child of children.splice(0)) child.kill(); });
 
@@ -84,7 +83,7 @@ describe.skipIf(WINDOWS)("the fake native CLI's MCP turns", () => {
     const profile = join(directory, "profile");
     writeFileSync(join(directory, "token"), "");
     const env = { FAKE_AGY_LOG: fixture.log, FAKE_AGY_KEYRING: "", SSH_CONNECTION: "127.0.0.1 0 127.0.0.1 0" };
-    const signIn = acpClient(fixture.executable, profile, env);
+    const signIn = acpClient(profile, env);
     children.push(signIn.child);
     await signIn.request("initialize", { protocolVersion: 1 });
     // The fake's sign-in file, written as `acp --login` would.
@@ -115,7 +114,7 @@ describe.skipIf(WINDOWS)("the fake native CLI's MCP turns", () => {
     expect(signIn.text(sessionId, from)).toMatch(/^TOOLS mcp_notes_[0-9a-f]{8}_read_notes\n$/u);
 
     signIn.child.kill();
-    const restarted = acpClient(fixture.executable, profile, env);
+    const restarted = acpClient(profile, env);
     children.push(restarted.child);
     await restarted.request("initialize", { protocolVersion: 1 });
     expect((await restarted.request("session/resume", { sessionId, cwd: directory, mcpServers: [notes("c")] })).error).toBeUndefined();
@@ -131,18 +130,17 @@ describe.skipIf(WINDOWS)("the fake native CLI's MCP turns", () => {
     const credential = join(profile, "antigravity-acp", "antigravity-oauth-token");
     (await import("node:fs")).mkdirSync(dirname(credential), { recursive: true });
     writeFileSync(credential, "{}");
-    const client = acpClient(fixture.executable, profile, { FAKE_AGY_LOG: fixture.log, SSH_CONNECTION: "127.0.0.1 0 127.0.0.1 0" });
+    const client = acpClient(profile, { FAKE_AGY_LOG: fixture.log, SSH_CONNECTION: "127.0.0.1 0 127.0.0.1 0" });
     children.push(client.child);
     await client.request("initialize", { protocolVersion: 1 });
     const { result } = await client.request("session/new", { cwd: directory, mcpServers: [{ name: "notes", command: process.execPath, args: [FAKE_MCP], env: [] }] });
     client.onPermission(() => ({ outcome: { outcome: "cancelled" } }));
     let settled = false;
     const turn = client.request("session/prompt", { sessionId: result.sessionId, prompt: [{ type: "text", text: "fake-agy: call notes/read_notes {}" }] }).then((message) => { settled = true; return message; });
-    for (let waited = 0; !fixture.entries().some((entry) => entry.event === "permission" && entry.outcome?.outcome === "cancelled"); waited += 50) {
-      if (waited > 10_000) throw new Error("the fake never took the cancelled answer");
+    for (let waited = 0; !fixture.entries().some((entry) => entry.event === "awaiting-cancel"); waited += 50) {
+      if (waited > 10_000) throw new Error("the fake never began waiting for session/cancel");
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    await new Promise((resolve) => setTimeout(resolve, 200));
     expect(settled).toBe(false);
     client.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId: result.sessionId } })}\n`);
     expect(await turn).toMatchObject({ result: { stopReason: "cancelled" } });

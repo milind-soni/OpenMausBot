@@ -44,6 +44,7 @@ describe.skipIf(WINDOWS)("an Antigravity permission request on a turn whose agen
     permissionOptions?: object[];
     bridged?: boolean;
     decidedCli?: string;
+    mountData?: boolean;
   }): Promise<Asked> {
     const directory = mkdtempSync(join(tmpdir(), "omb-agy-bridge-"));
     scratch.push(directory);
@@ -65,7 +66,7 @@ describe.skipIf(WINDOWS)("an Antigravity permission request on a turn whose agen
     const bridged = options.bridged !== false;
     const agents = { command: process.execPath, args: ["-e", ""], env: { [TOOL_BRIDGE_ENV]: bridged ? "1" : "0", ...(bridged ? { [BRIDGE_CLI_ENV]: options.decidedCli ?? executable } : {}) } };
     const recorder = recordEvents(instance.adapter);
-    const { turnId } = await instance.adapter.sendTurn({ threadId: name, text: "hello", ...(options.approvalMode === "auto" ? {} : { approvalMode: options.approvalMode }), cwd: directory, integrations: { agents } });
+    const { turnId } = await instance.adapter.sendTurn({ threadId: name, text: "hello", ...(options.approvalMode === "auto" ? {} : { approvalMode: options.approvalMode }), cwd: directory, integrations: { agents, ...(options.mountData ? { data: { command: process.execPath, args: ["-e", ""], env: {} } } : {}) } });
     const first = await recorder.until((event) => event.turnId === turnId && (event.type === "request.opened" || event.type === "turn.completed"));
     if (first.type === "request.opened") await instance.adapter.respondToRequest(name, (first as { requestId: string }).requestId, { behavior: "deny" });
     const done = await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId, 30_000).then(() => true, () => false);
@@ -117,6 +118,7 @@ describe.skipIf(WINDOWS)("an Antigravity permission request on a turn whose agen
     ["a name and a title that disagree", native("use_tool", { name: "list_threads" }, { title: "Run mcp_agents_find_tool" })],
     ["a kind other than other", native("use_tool", { name: "list_threads" }, { kind: "edit" })],
     ["Claude's spelling", { toolCallId: "call_1", title: "mcp__agents__use_tool", kind: "other", rawInput: { name: "list_threads" } }],
+    ["a server the turn did not mount, carrying use_tool's input", { toolCallId: "call_1", name: "mcp_ghost_run", title: "Run mcp_ghost_run", kind: "other", rawInput: { name: "vm_exec", arguments: { command: "ls" } } }],
     ["an unknown name carrying use_tool's input", { toolCallId: "call_1", name: "agents/use_tool", title: "agents/use_tool", kind: "other", rawInput: { name: "vm_exec", arguments: { command: "ls" } } }],
   ])("refuses %s on full access and ends the turn", async (label, toolCall) => {
     const result = await asked(`refuse-${label.replaceAll(/\W+/gu, "-")}`, { approvalMode: "auto", toolCall });
@@ -132,7 +134,7 @@ describe.skipIf(WINDOWS)("an Antigravity permission request on a turn whose agen
 
   it("leaves another server's call whose input happens to have a catalog tool's name alone", async () => {
     const sql = { toolCallId: "call_1", name: "mcp_data_data_sql", title: "Run mcp_data_data_sql", kind: "other", rawInput: { sql: "SELECT 1", name: "list_threads", toolSummary: "x" } };
-    expect(await asked("data-sql", { approvalMode: "auto", toolCall: sql })).toMatchObject({ card: false, answer: "allow", errors: [] });
+    expect(await asked("data-sql", { approvalMode: "auto", toolCall: sql, mountData: true })).toMatchObject({ card: false, answer: "allow", errors: [] });
   }, 90_000);
 
   it("leaves another server's find_tool to the ordinary approval", async () => {

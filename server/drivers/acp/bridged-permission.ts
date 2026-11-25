@@ -2,6 +2,7 @@
 // Security invariant: a bridged use_tool is approved as the tool it names, with that tool's own input, and never for
 // longer than once; a request that may be an agents bridge call but is not in a spelling recorded from the native
 // Antigravity CLI is refused, never approved as some other tool.
+import { OWN_APPS_SERVER } from "../../../shared/own-apps.ts";
 import { FIND_TOOL, USE_TOOL } from "../agents-bridge.ts";
 
 type ToolCall = { name?: unknown; title?: unknown; kind?: unknown; rawInput?: unknown; [key: string]: unknown };
@@ -28,16 +29,23 @@ function namesOf(toolCall: ToolCall): string[] {
   return names;
 }
 
-/** `catalog` holds every agents tool name, the hidden ones among them. */
-export function bridgedPermission(toolCall: ToolCall, bridged: boolean, catalog: ReadonlySet<string>): BridgedPermission {
+/** The names of the turn's MCP servers other than the agents server, as turnStdioMcpServers mounts them. */
+export function otherMcpServers(integrations: { custom?: Record<string, unknown>; [key: string]: unknown } | undefined): string[] {
+  const builtIn: Array<[string, string]> = [["composio", "composio"], ["composioOwn", OWN_APPS_SERVER], ["browser", "browser"], ["data", "data"],
+    ["email", "email"], ["device", "device"], ["localComputer", "computer"]];
+  return [...builtIn.filter(([key]) => integrations?.[key]).map(([, name]) => name), ...Object.keys(integrations?.custom ?? {})].filter((name) => name !== "agents");
+}
+
+/** `catalog` holds every agents tool name, the hidden ones among them; `others`, the turn's other MCP servers. */
+export function bridgedPermission(toolCall: ToolCall, bridged: boolean, catalog: ReadonlySet<string>, others: readonly string[] = []): BridgedPermission {
   if (!bridged) return { kind: "ordinary" };
   const names = namesOf(toolCall);
   const recorded = names.map((name) => RECORDED.exec(name)?.[1]);
   const byName = names.some((name) => BRIDGE_SPELLING.test(name));
   if (!byName) {
     const direct = names.length > 0 && recorded.every((tool) => tool !== undefined && catalog.has(tool));
-    // Another server's tool, by the CLI's mcp_<server>_<tool>: its input says nothing about the agents server.
-    const elsewhere = names.length > 0 && names.every((name) => name.startsWith("mcp_") && !name.startsWith("mcp_agents_"));
+    // A mounted server's own tool, by the CLI's mcp_<server>_<tool>: its input says nothing about the agents server.
+    const elsewhere = names.length > 0 && names.every((name) => others.some((server) => name.startsWith(`mcp_${server}_`)));
     if (direct || elsewhere) return { kind: "ordinary" };
     const input = record(toolCall.rawInput) ? toolCall.rawInput : {};
     const shaped = typeof input.name === "string" && catalog.has(input.name) && (input.arguments === undefined || record(input.arguments));

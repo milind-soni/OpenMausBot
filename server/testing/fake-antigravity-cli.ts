@@ -124,6 +124,7 @@ const configOptions = () => [
   },
 ];
 
+log({ event: "started" });
 const serverNames = new ServerNames();
 const sessionTools = new Map<string, SessionTools>();
 const sessionsDir = join(stateDir, "fake-sessions");
@@ -175,6 +176,7 @@ async function callTool(sessionId: string, target: string, argsText: string): Pr
   const outcome = (answer.result as { outcome?: { outcome?: string; optionId?: string } } | undefined)?.outcome;
   log({ event: "permission", sessionId, tool: found.nativeName, outcome });
   if (outcome?.outcome !== "selected") {
+    log({ event: "awaiting-cancel", sessionId });
     await new Promise<void>((resolveCancel) => cancels.set(sessionId, resolveCancel));
     return false;
   }
