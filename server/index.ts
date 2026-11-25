@@ -9074,8 +9074,6 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           }
           stopScreenPoller(bot.id);
           activeVpsThreads.delete(bot.id);
-          vps.stopVpsDesktopTunnel(bot.id);
-          cancelVpsIdle(bot.id);
           lastReply.delete(bot.threadId);
           const target = perBotLocalVmTarget(bot.id);
           localVmIdles.get(target.key)?.cancel();
@@ -9083,6 +9081,8 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           // Re-check the reviewed receipt at the final durable mutation, so a concurrent profile edit cannot be erased under a stale approval.
           revalidate();
           store.deleteBot(bot.id, setupRequest); sharedVm.botDeleted(bot.id); computerControlRevision.delete(bot.id);
+          vps.stopVpsDesktopTunnel(bot.id);
+          cancelVpsIdle(bot.id);
           skillReview.dropBot(bot.id);
           memoryUpkeep.forgetBot(bot.id);
           calendarCalls!.removeBot(bot.id);
@@ -15047,7 +15047,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               ? desktopViewerUrl(`vps/${botId}`, bot.threadId) : result.joinUrl });
           }
           const action = m[2] === "provision" ? "provision" : m[2] === "remove" ? "remove" : "stop";
-          cancelVpsIdle(botId);
           const status = await vps.vpsComputerAction(action, vpsConfigForBot(cfg, bot), botId);
           if (status.container === "running") touchVpsIdle(bot);
           else cancelVpsIdle(botId);

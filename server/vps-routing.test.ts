@@ -375,6 +375,16 @@ global.setTimeout = (fn, ms, ...args) => schedule(fn, ms === ${TEST_IDLE_MINUTES
       expect((await api("PUT", "/api/config", { vps: { sshAlias: "alpha-vps" } })).status).toBe(200);
       expect((await api("POST", `${path}/computer/viewer-close?threadId=${bot.threadId}`, {})).status).toBe(200);
       await waitStoppedOnB(since, "idle stop on B after default-server switch");
+
+      running();
+      expect((await api("POST", `${path}/computer/provision`, {})).status).toBe(200);
+      since = readFileSync(dockerLog, "utf8").length;
+      writeFileSync(downB, "");
+      expect((await api("POST", `${path}/computer/provision`, {})).status).toBe(409);
+      expect((await api("POST", `${path}/computer/sleep`, {})).status).toBe(409);
+      expect((await api("POST", `${path}/computer/remove`, {})).status).toBe(409);
+      rmSync(downB, { force: true });
+      await waitStoppedOnB(since, "idle stop on B after failed manual provision, sleep and remove");
     } finally {
       rmSync(downA, { force: true });
       rmSync(downB, { force: true });
