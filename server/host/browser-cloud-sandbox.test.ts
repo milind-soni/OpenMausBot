@@ -1,6 +1,6 @@
 // The bots' browser host on a personal Cloud, where a bot's browser opens in the Cloud's browser sandbox, against a fake
 // provider (cloud-browser/testing/fake-computer.ts): the switch's lever, a desktop install, and the rules kept for it.
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -171,5 +171,58 @@ describe("a personal Cloud's bot browser opens in the Cloud's browser sandbox", 
     const withoutFeature = await today.browserIntegration(botId, undefined, undefined, "team", { opening: OPEN });
     expect(JSON.stringify(opened?.spec)).toBe(JSON.stringify(withoutFeature?.spec));
     expect(host.cloudBrowserReport()).toMatchObject({ sessions: { sandbox: 0, home: 1 }, fallbacks: { "start-failed": 1 } });
+  });
+});
+
+/** A stand-in for agent-browser's MCP server: one process per engine client, as the runtime starts it. It lists the same tools
+ * wherever the browser runs, and says in each answer where its browser is (attached to the sandbox, or the home's own). */
+const FAKE_ENGINE = `#!/usr/bin/env node
+const lines = require("node:readline").createInterface({ input: process.stdin });
+const where = process.env.AGENT_BROWSER_CDP ? "sandbox" : "home";
+lines.on("line", (line) => {
+  const m = JSON.parse(line);
+  if (m.id === undefined) return;
+  let result;
+  if (m.method === "initialize") result = { protocolVersion: "2024-11-05", capabilities: { tools: {} } };
+  else if (m.method === "tools/list") result = { tools: [{ name: "agent_browser_get_url", inputSchema: { type: "object" } }, { name: "agent_browser_open", inputSchema: { type: "object" } }] };
+  else result = { content: [{ type: "text", text: where + ":" + m.params.name }] };
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: m.id, result }) + "\\n");
+});
+`;
+
+describe.skipIf(process.platform === "win32")("a turn's first browser call after its tools/list, in a fresh process", () => {
+  let engineDir: string;
+  beforeEach(() => {
+    vi.mocked(BrowserRuntime.prototype.agentRpc).mockRestore();
+    engineDir = mkdtempSync(join(tmpdir(), "fake-engine-"));
+    const binary = join(engineDir, "agent-browser");
+    writeFileSync(binary, FAKE_ENGINE);
+    chmodSync(binary, 0o755);
+    vi.mocked(browserEngineStatus).mockReturnValue({ kind: "ready", binaryPath: binary, version: "0.37.0", managed: false });
+  });
+  afterEach(() => { rmSync(engineDir, { recursive: true, force: true }); });
+
+  it("opens the sandbox on the first call, under the same tools as the list, and goes back to the home's browser after the sandbox's closed", async () => {
+    const { host } = setup();
+    // The turn starts, and its browser MCP server lists the tools: no tool call yet, so nothing opens anywhere.
+    const atStart = (await host.browserIntegration(botId, undefined, turn))!;
+    const listed = await host.browserRuntime.agentRpc(atStart.session, atStart.spec, "tools/list", {});
+    expect(atStart.spec.env.AGENT_BROWSER_CDP).toBeUndefined();
+    // The first tool call opens the sandbox; it must reach the engine, not be refused for the changed launch settings.
+    const first = (await host.browserIntegration(botId, undefined, undefined, "team", { opening: "agent_browser_get_url" }))!;
+    expect(first.spec.env.AGENT_BROWSER_CDP).toBeDefined();
+    const answer = await host.browserRuntime.agentRpc(first.session, first.spec, "tools/call", { name: "agent_browser_get_url", arguments: {} });
+    expect(answer).not.toHaveProperty("isError", true);
+    expect(JSON.stringify(answer)).toContain("sandbox:agent_browser_get_url");
+    // The tool list is the same in the sandbox as in the home.
+    expect(await host.browserRuntime.agentRpc(first.session, first.spec, "tools/list", {})).toEqual(listed);
+    // Back in the home (the operator's lever, or the sandbox unavailable): the next call is not refused either.
+    vi.stubEnv("OMB_CLOUD_BROWSER", "home");
+    // The sandbox's session ends (here with every door at once); the engine client started for it is left behind.
+    host.browserSweep.closeAll();
+    const back = (await host.browserIntegration(botId, undefined, undefined, "team", { opening: "agent_browser_get_url" }))!;
+    expect(back.spec.env.AGENT_BROWSER_CDP).toBeUndefined();
+    const again = await host.browserRuntime.agentRpc(back.session, back.spec, "tools/call", { name: "agent_browser_get_url", arguments: {} });
+    expect(JSON.stringify(again)).toContain("home:agent_browser_get_url");
   });
 });

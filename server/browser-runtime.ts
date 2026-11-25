@@ -770,7 +770,7 @@ export class BrowserRuntime {
   }
 
   heldBy(session: string): string | null { return this.gates.get(session)?.owner ?? null; }
-
+  /** Stops the session's engine client when it was started under other launch settings and nothing uses it now (the place the browser runs changed between a turn's tools/list and its first call), so the next call starts one under these. */ async closeIfLaunchChanged(session: string, spec: BrowserSpawnSpec): Promise<boolean> { const entry = this.clients.get(session); if (!entry || entry.key === launchSettingsKey(spec) || this.working(session)) return false; await this.close(session); return true; }
   /** An interrupted action left the browser's state unknown until the engine answers again or the browser restarts. */
   interrupted(session: string): boolean { return this.gates.get(session)?.uncertain === true; }
 

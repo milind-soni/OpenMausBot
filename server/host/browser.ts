@@ -284,7 +284,12 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     // Only through MausBot Cloud's relay, which keeps the sandbox outside the plan under its own limits: never on a person's own key.
     ops: () => (boatAccount(cfg)?.included === true ? computerOps : null),
     used: (owner, windowMs) => deps.cloudBrowser?.used(owner, windowMs),
-    closeEngine: (session) => { const spec = usedBrowserSessions.get(session); return spec ? closeBrowser(session, spec) : Promise.resolve(true); },
+    // The engine's own client of the session goes too: the next call, in the home, starts one under the home's settings.
+    closeEngine: async (session) => {
+      const spec = usedBrowserSessions.get(session);
+      if (spec) await closeBrowser(session, spec);
+      await agentBrowserRuntime.close(session);
+    },
     held: (session) => !turnResources.free(`browser:${session}`),
     folder: (botId) => deps.cloudBrowser?.folder?.(botId) ?? null,
     // The home's saved sign-ins: agent-browser's encrypted restore file, under this server's key only.
@@ -584,6 +589,9 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     const cdpUrl = lent ? await lentChromeDoor(session) : undefined;
     const cloudUrl = lent ? undefined : await cloudBrowserUrl(botId, profile, session, audience, options.opening);
     const spec = browserSessionSpec(status.binaryPath, session, browserProfileId, usesMyChrome(browserProfileId) || cloudUrl ? undefined : await browserEgress.open(session), cdpUrl, cloudUrl);
+    // On a Cloud the place a session's browser runs can change between a turn's tools/list (which starts the engine's client)
+    // and its first call, or after the sandbox's browser closed: an unused client of the other place goes, never a running browser.
+    if (cloudBrowser && !browserRunning(session, usedBrowserSessions.get(session))) await agentBrowserRuntime.closeIfLaunchChanged(session, spec);
     usedBrowserSessions.set(session, spec);
     await prepareBrowserSessionState(status.binaryPath, session, { env: spec.env, persistent: profile !== "guest" && !attachesToChrome(spec.env), isCurrent: () => {
       const current = store.bot(botId);
