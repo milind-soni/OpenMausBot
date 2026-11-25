@@ -34,12 +34,14 @@ it("answers each member with their own inbox, which a client session may read an
   expect(mine).toMatchObject({ status: 200, body: { botId: "bens-chief", rows: [{ text: "The launch moved to Friday.", tab: "info", unread: true }] } });
   const line = mine.body.rows[0].id as string;
   expect((await call("POST", `/api/inbox/${line}/read`)).body.rows[0]).toMatchObject({ unread: false, tab: "info" });
+  expect((await call("POST", `/api/inbox/${line}/unread`)).body.rows[0]).toMatchObject({ unread: true, tab: "info" });
+  expect(await call("POST", `/api/inbox/${line}/unread`, session(CLEO.email)), "someone else's line").toMatchObject({ status: 404 });
   expect((await call("POST", `/api/inbox/${line}/done`)).body.rows[0]).toMatchObject({ tab: "done" });
   expect(await call("POST", `/api/inbox/${line}/done`, session(CLEO.email)), "someone else's line").toMatchObject({ status: 404, body: { error: "That line is not in your inbox.", errorKey: "serverError.inbox.lineMissing" } });
   expect((await call("GET", "/api/inbox", session(CLEO.email))).body.rows).toEqual([]);
   expect(await call("DELETE", "/api/inbox")).toMatchObject({ status: 405 });
   expect((await call("GET", "/api/needs-you")).out).toBe(PASS);
-  for (const [method, path] of [["GET", "/api/inbox"], ["POST", `/api/inbox/${line}/read`], ["POST", `/api/inbox/${line}/done`]] as const) {
+  for (const [method, path] of [["GET", "/api/inbox"], ["POST", `/api/inbox/${line}/read`], ["POST", `/api/inbox/${line}/unread`], ["POST", `/api/inbox/${line}/done`]] as const) {
     expect(requiredScope(method, path), `${method} ${path}`).toBe("client");
   }
 });

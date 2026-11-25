@@ -63,7 +63,7 @@ describe("the inbox panel", () => {
     expect(document.querySelector(`[data-inbox-row="${approvalRow.id}"]`)!.hasAttribute("data-unread")).toBe(true);
     await click(`[data-inbox-row="${messageRow.id}"] button`);
     expect(document.querySelector(`[data-inbox-reading="${messageRow.id}"]`)?.textContent).toContain("The launch moved to Friday.");
-    expect(server.calls).toContainEqual({ path: `/api/inbox/${messageRow.id}/read`, method: "POST" });
+    expect(server.calls, "it is read after a moment on screen, not at once").not.toContainEqual({ path: `/api/inbox/${messageRow.id}/read`, method: "POST" });
     expect(document.querySelector("textarea"), "a message that waits on an answer takes a reply").not.toBeNull();
     await click('[aria-label="Back to the list"]');
     expect(listed()).toEqual([approvalRow.id, questionRow.id, messageRow.id, reportRow.id]);
@@ -136,7 +136,7 @@ describe("the inbox panel", () => {
     expect(document.querySelector('[data-inbox-panel="side"]')).toBeNull();
   });
 
-  it("shows a pinned conversation once, and counts its unread news once", async () => {
+  it("shows a pinned conversation once, and counts none of its finished work", async () => {
     const reporter = {
       id: "reporter", name: "Reporter", threadId: "rep-main", tasks: [
         { threadId: "rep-daily", title: "Daily digest", createdAt: 0, updatedAt: INBOX_NOW, pinned: true, unread: true },
@@ -151,7 +151,7 @@ describe("the inbox panel", () => {
     expect(active, "the pinned section already shows it").not.toContain("Daily digest");
     const finished = [...document.querySelectorAll("[data-inbox-finished] button")].map((button) => button.textContent).join(" ");
     expect(finished).not.toContain("Older digest");
-    expect(document.querySelector("[data-inbox-tab-count]")?.textContent, "one line plus the same conversation is one").toBe("1");
+    expect(document.querySelector("[data-inbox-tab-count]"), "finished work is Activity, which has no number").toBeNull();
   });
 });
 

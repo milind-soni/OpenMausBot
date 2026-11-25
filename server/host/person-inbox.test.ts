@@ -193,6 +193,8 @@ describe("finished work in a person's inbox", () => {
     f.team.inbox.markRead(person, row.id);
     expect(f.team.inbox.view(person)!.rows[0]!.tab).toBe("done");
     expect(f.team.inbox.view(person)!.rows.filter((one) => one.tab === "info"), "the inbox holds only what needs them").toEqual([]);
+    expect(f.team.inbox.markRead(person, row.id, false), "made new again").toBe(true);
+    expect(f.team.inbox.view(person)!.rows[0]).toMatchObject({ tab: "info", unread: true });
   });
 
   it("points the line at the message it came from, so a client can open the conversation there", () => {
