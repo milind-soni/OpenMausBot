@@ -17,7 +17,7 @@ export const HOSTING_TOOL_DEFINITIONS = [
   {
     name: "publish_app",
     description:
-      "Put a site or simple app you built online on the hosting the person's Cloud plan includes: static files, no account or token. The link is public at once: publish only after the person saw or was told what it is and said yes. The same project published again keeps its link. action delete takes the app down for good, only when the person asks. Follow the publish-to-netlify skill; when the plan can't take the app, offer the person's own Netlify account.",
+      "Put a site or simple app you built online on the hosting the person's Cloud plan includes: static files, no account or token. The link is public at once: publish only after the person saw or was told what it is and said yes; a page or report to share goes through publish_page instead. The same project published again keeps its link. action delete takes the app down for good, only when the person asks. Follow the publish-to-netlify skill; when the plan can't take the app, offer the person's own Netlify account.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
