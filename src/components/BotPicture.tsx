@@ -52,7 +52,7 @@ export function BotPicture({ src, alt, size, radius, zoom, origin, color, state:
   const beat = useBeatState(motion, motionKey, animated);
   const state = beat ?? own;
   const live = !reduced && (animated ?? (ACTIVE_STATES.has(own) || beat !== null));
-  const latest = useRef({ state, live, color });
+  const latest = useRef({ state, live, color, reduced });
   const ticket = useRef<MascotTicket | null>(null);
   const uid = useId();
   const [seed] = useState(() => loopSeed(uid));
@@ -78,7 +78,7 @@ export function BotPicture({ src, alt, size, radius, zoom, origin, color, state:
       if (photo.current) photo.current.style.opacity = amount > 0 ? String(1 - amount) : "";
     };
     const step = (now: number) => {
-      const { state: shown, live: moving, color: paint } = latest.current;
+      const { state: shown, live: moving, color: paint, reduced: still } = latest.current;
       if (shown !== drawn) {
         drawn = shown;
         since = now;
@@ -87,14 +87,14 @@ export function BotPicture({ src, alt, size, radius, zoom, origin, color, state:
       const target = moving ? bodyPose(motion, now - since, 1, { seed, compact: size <= COMPACT_MASCOT_PX }) : REST_POSE;
       const key = `${shown}|${moving}`;
       if (key !== poseKey) {
-        if (poseKey && !motion.enter) blend.retarget(now, shownPose, target);
+        if (poseKey && !motion.enter && !still) blend.retarget(now, shownPose, target);
         poseKey = key;
       }
-      shownPose = blend.apply(now, target);
+      shownPose = still ? target : blend.apply(now, target);
       element.style.transform = pictureTransform(shownPose, size);
       const glyph = moving ? EFFECTS[shown]?.glyph : undefined;
       showGlyph(glyph ? glyph.markup.replace(/\{\{GRADIENT\}\}/g, MAUS_COLORS[paint]) : null, glyph ? glyphAmount(glyph, now - since) : 0);
-      return moving || blend.blending ? nextFrameAt(now, frameFloorMs(size)) : Infinity;
+      return moving || (blend.blending && !still) ? nextFrameAt(now, frameFloorMs(size)) : Infinity;
     };
     const added = mascotClock().add(step, element);
     ticket.current = added;
@@ -107,9 +107,9 @@ export function BotPicture({ src, alt, size, radius, zoom, origin, color, state:
   }, [size, seed]);
 
   useLayoutEffect(() => {
-    latest.current = { state, live, color };
+    latest.current = { state, live, color, reduced };
     ticket.current?.wake();
-  }, [state, live, color]);
+  }, [state, live, color, reduced]);
 
   return (
     <span

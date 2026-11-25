@@ -92,6 +92,16 @@ describe("a bot's own picture follows its state", () => {
     expect(transformsOver(1000)).toEqual(new Set([""]));
   });
 
+  it("goes straight to rest, without a blend, when reduced motion turns on while the bot works", () => {
+    render("working");
+    transformsOver(700);
+    expect(picture().style.transform).not.toBe("");
+    reducedMotion = true;
+    render("working");
+    run(50);
+    expect(transformsOver(600)).toEqual(new Set([""]));
+  });
+
   it("blends a change in over about 300ms instead of jumping, as the mascot's body does", () => {
     render("working");
     transformsOver(700);
