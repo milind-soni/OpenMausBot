@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,7 +10,7 @@ import { removeTempDir } from "../testing/cleanup.ts";
 import { recordEvents } from "../testing/events.ts";
 import { BRIDGE_CLI_ENV, TOOL_BRIDGE_ENV } from "./agents-bridge.ts";
 import { AntigravityDriver } from "./antigravity.ts";
-import { unbridgeableVersions } from "./antigravity-bridge-memory.ts";
+import { unbridgeableFile, unbridgeableVersions } from "./antigravity-bridge-memory.ts";
 
 const FAKE_ACP = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-acp-cli.ts");
 const WINDOWS = process.platform === "win32";
@@ -46,6 +46,7 @@ describe.skipIf(WINDOWS)("an Antigravity permission request on a turn whose agen
     bridged?: boolean;
     decidedCli?: string;
     mountData?: boolean;
+    version?: string;
   }): Promise<Asked> {
     const directory = mkdtempSync(join(tmpdir(), "omb-agy-bridge-"));
     scratch.push(directory);
@@ -58,7 +59,7 @@ describe.skipIf(WINDOWS)("an Antigravity permission request on a turn whose agen
     const instance = await AntigravityDriver.create({
       instanceId: `agy-bridge-${name}`, displayName: "Antigravity", enabled: true, config: { cli: executable, fullAuto: options.approvalMode === "auto" },
       environment: {
-        FAKE_ACP_AUTH_METHOD: "oauth-personal", FAKE_ACP_MODELS: "gemini-3.8-flash", FAKE_ACP_AGENT_NAME: "Antigravity ACP Server", FAKE_ACP_VERSION: "1.5.16",
+        FAKE_ACP_AUTH_METHOD: "oauth-personal", FAKE_ACP_MODELS: "gemini-3.8-flash", FAKE_ACP_AGENT_NAME: "Antigravity ACP Server", FAKE_ACP_VERSION: options.version ?? "1.5.16", FAKE_ACP_AGENT_VERSION: options.version ?? "1.5.16",
         FAKE_ACP_MODES: "default,plan", FAKE_ACP_MODE: "permission", FAKE_ACP_PERMISSION_ANSWER: answer,
         FAKE_ACP_PERMISSION_TOOL_CALL: JSON.stringify(options.toolCall), FAKE_ACP_PERMISSION_OPTIONS: JSON.stringify(options.permissionOptions ?? ONCE),
       },
@@ -129,13 +130,28 @@ describe.skipIf(WINDOWS)("an Antigravity permission request on a turn whose agen
     ["a kind other than other", native("use_tool", { name: "list_threads" }, { kind: "edit" })],
     ["Claude's spelling", { toolCallId: "call_1", title: "mcp__agents__use_tool", kind: "other", rawInput: { name: "list_threads" } }],
     ["a server the turn did not mount, carrying use_tool's input", { toolCallId: "call_1", name: "mcp_ghost_run", title: "Run mcp_ghost_run", kind: "other", rawInput: { name: "vm_exec", arguments: { command: "ls" } } }],
+    ["a later release's dotted find_tool", { toolCallId: "call_1", name: "mcp.agents.find_tool", title: "Run mcp.agents.find_tool", kind: "other", rawInput: { query: "threads" } }],
+    ["a use_tool that names no tool", native("use_tool", {})],
     ["an unknown name carrying use_tool's input with null arguments", { toolCallId: "call_1", name: "agents/use_tool", title: "agents/use_tool", kind: "other", rawInput: { name: "list_threads", arguments: null } }],
     ["an unknown name carrying use_tool's input", { toolCallId: "call_1", name: "agents/use_tool", title: "agents/use_tool", kind: "other", rawInput: { name: "vm_exec", arguments: { command: "ls" } } }],
   ])("refuses %s on full access and ends the turn", async (label, toolCall) => {
     const result = await asked(`refuse-${label.replaceAll(/\W+/gu, "-")}`, { approvalMode: "auto", toolCall });
     expect(result).toMatchObject({ card: false, answer: "deny", completed: true });
-    expect(result.errors.some((message) => message.includes("tool bridge"))).toBe(true);
+    expect(result.errors.some((message) => message.includes("tool bridge") && message.includes("From the next message Antigravity CLI 1.5.16 lists the agents tools directly"))).toBe(true);
     expect(unbridgeableVersions()).toEqual(["1.5.16"]);
+  }, 90_000);
+
+  it("still refuses and ends the turn when the record cannot be saved, and says the bridge stays on", async () => {
+    const record = unbridgeableFile();
+    rmSync(record, { force: true });
+    mkdirSync(record, { recursive: true });
+    try {
+      const result = await asked("record-unsaved", { approvalMode: "auto", version: "1.5.18", toolCall: native("4f234205_use_tool", { name: "list_threads" }) });
+      expect(result).toMatchObject({ card: false, answer: "deny", completed: true });
+      expect(result.errors.some((message) => message.includes("stays on for Antigravity CLI 1.5.18: its record could not be saved"))).toBe(true);
+    } finally {
+      rmSync(record, { recursive: true, force: true });
+    }
   }, 90_000);
 
   it("leaves a direct agents call whose input happens to have a catalog tool's name alone", async () => {

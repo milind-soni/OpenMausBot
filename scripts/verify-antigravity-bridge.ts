@@ -163,7 +163,7 @@ try {
 await launch({ FAKE_AGY_SPELLING: "dotted", FAKE_AGY_VERSION: "1.5.17" });
 try {
   const { bot: chief } = await api("POST", "/api/bots", { name: "Chief", description: "Runs the team.", modelSelection: { instanceId: "antigravity", model: "fixture-base-model" } });
-  const first = await say(chief.id, 'fake-agy: call agents/use_tool {"name":"list_threads","arguments":{}}', "respelled release: a bridged call");
+  const first = await say(chief.id, 'fake-agy: call agents/find_tool {"query":"threads"}', "respelled release: a bridged call");
   check("respelled release: bridged at first", lastTools()?.visible.includes("mcp.agents.find_tool") === true, lastTools()?.visible);
   check("respelled release: the call in an unknown spelling is refused and never reaches the agents server",
     !first.fake.some((e) => e.event === "tools/call") && first.fake.some((e) => e.event === "permission" && e.outcome?.optionId === "deny"), first.fake.filter((e) => e.event === "permission"));

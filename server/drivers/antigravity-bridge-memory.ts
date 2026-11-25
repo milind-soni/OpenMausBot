@@ -10,8 +10,9 @@ const FILE = "antigravity-bridge.json";
 
 export const unbridgeableFile = (dataDir = DATA_DIR) => join(dataDir, FILE);
 
-/** The versions recorded; an unreadable record counts as none, so a damaged file never turns the bridge back on by
- * itself and never stops a turn. */
+/** The versions recorded; an absent or unreadable record counts as none. A release in a damaged record is then
+ * bridged again, and its first request in an unknown spelling is refused and recorded again; a turn is never stopped
+ * by the record. */
 export function unbridgeableVersions(file = unbridgeableFile()): string[] {
   try {
     const parsed = JSON.parse(readFileSync(file, "utf8")) as { unbridgeable?: unknown };

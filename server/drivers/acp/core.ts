@@ -583,7 +583,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           const answerAlone = (optionId: string | null, end = onceOnly && !optionId) => { send({ jsonrpc: "2.0", id: msg.id, result: optionId ? { outcome: { outcome: "selected", optionId } } : cancelled }); if (end && session.current === current) active.get(threadId)?.interrupt(); };
           const missing = (want: string) => emit({ ...base(threadId, current.turnId), type: "runtime.error", message: missingOptionNote(support.displayName, want) });
           const alone = bridgedAlone(bridged, optionFor, support.displayName);
-          if (alone) { if (alone.missing) missing(alone.missing); if (alone.note) support.bridgeSpellingRefused?.(instanceId); if (alone.note) emit({ ...base(threadId, current.turnId), type: "runtime.error", message: alone.note }); return answerAlone(alone.optionId, alone.end); }
+          if (alone) { if (alone.missing) missing(alone.missing); if (alone.note) emit({ ...base(threadId, current.turnId), type: "runtime.error", message: `${alone.note}${support.bridgeSpellingRefused?.(instanceId, session.initResult?.agentInfo?.version) ?? ""}` }); return answerAlone(alone.optionId, alone.end); }
           const toolCall = bridged.kind === "use" ? bridged.toolCall as any : params.toolCall ?? {};
           const isQuestion = String(toolCall.toolCallId ?? "").startsWith("interaction_");
           if ((support.allowsAlone?.(instanceId, current.turn, toolCall) || (current.turnConfig.fullAuto && current.turn.approvalMode === undefined)) && !isQuestion && acpAnswersAlone(toolCall.rawInput)) {

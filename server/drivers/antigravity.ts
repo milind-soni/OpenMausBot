@@ -220,9 +220,14 @@ const support: AcpSupport = {
   // 1.5.16 renames a server it registers again in one process (mcp_agents_<hex>_<tool>), so a new set of MCP servers
   // gets a new process, which keeps the names the approval path recognises.
   restartsOnMcpServersChange: (instanceId) => launched.get(instanceId)?.nativeCli === true,
-  bridgeSpellingRefused: (instanceId) => {
-    const running = launched.get(instanceId);
-    if (running?.nativeCli && running.version) rememberUnbridgeable(running.version);
+  bridgeSpellingRefused: (_instanceId, version) => {
+    if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/u.test(version)) return " The tool bridge stays on: this CLI did not say its version.";
+    try {
+      rememberUnbridgeable(version);
+      return ` From the next message Antigravity CLI ${version} lists the agents tools directly; send the message again.`;
+    } catch {
+      return ` The tool bridge stays on for Antigravity CLI ${version}: its record could not be saved.`;
+    }
   },
   launchRefusal: (turn, launch) => agentsToolBridged(turn.integrations?.agents) && turn.integrations?.agents?.env?.[BRIDGE_CLI_ENV] !== launch.command
     ? "Google Antigravity CLI changed while this message was being set up. Send it again."

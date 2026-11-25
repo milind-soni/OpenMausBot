@@ -17,9 +17,10 @@ const record = (value: unknown): value is Record<string, unknown> => value !== n
 
 /** Recorded on native Antigravity 1.5.14 and 1.5.16: `name` mcp_agents_<tool>, `title` Run mcp_agents_<tool>. */
 const RECORDED = /^mcp_agents_([\w.-]+)$/u;
-/** Any spelling that names an agents bridge tool, the native CLI's own rename of a server it registers again in one
- * process (mcp_agents_<hex>_use_tool) among them. Matched whole, so another server's find_tool is not one. */
-const BRIDGE_SPELLING = /^(?:mcp_agents_(?:[0-9a-f]{4,}_)?|mcp__agents__|agents__|agents_)?(?:use_tool|find_tool)$/iu;
+/** Any spelling that names an agents bridge tool, with any separator: the native CLI's own rename of a server it
+ * registers again in one process (mcp_agents_<hex>_use_tool), Claude's mcp__agents__, a later release's mcp.agents.
+ * Matched whole, so another server's find_tool is not one. */
+const BRIDGE_SPELLING = /^(?:mcp[._:/-]{1,2}agents[._:/-]{1,2}(?:[0-9a-f]{4,}[._:/-])?|agents[._:/-]{1,2})?(?:use_tool|find_tool)$/iu;
 
 /** The request's tool names: its `name`, and its `title` without the CLI's "Run ". */
 function namesOf(toolCall: ToolCall): string[] {
@@ -57,12 +58,13 @@ export function bridgedPermission(toolCall: ToolCall, bridged: boolean, catalog:
   if (tool === FIND_TOOL) return { kind: "find" };
   const input = record(toolCall.rawInput) ? toolCall.rawInput : {};
   const inner = typeof input.name === "string" && input.name.trim() ? input.name : undefined;
+  if (!inner) return { kind: "refuse" };
   return {
     kind: "use",
     toolCall: {
       ...toolCall,
       rawInput: record(input.arguments) ? input.arguments : {},
-      ...(inner ? { title: `Run mcp_agents_${inner}` } : {}),
+      title: `Run mcp_agents_${inner}`,
     },
   };
 }
@@ -79,7 +81,7 @@ export function bridgedAlone(permission: BridgedPermission, optionFor: (want: "a
   return {
     optionId,
     ...(optionId ? {} : { missing: want }),
-    ...(permission.kind === "refuse" ? { note: `${agent} asked to run an agents tool through the tool bridge in a form this version does not know, so it was refused. From the next message this version of ${agent} lists the agents tools directly; send the message again.` } : {}),
+    ...(permission.kind === "refuse" ? { note: `${agent} asked to run an agents tool through the tool bridge in a form this version does not know, so it was refused.` } : {}),
     end: permission.kind === "refuse" || !optionId,
   };
 }
