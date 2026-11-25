@@ -43,6 +43,8 @@
 //   FAKE_ACP_CAPABILITIES_META  JSON initialize advertises as agentCapabilities._meta
 //   FAKE_ACP_MCP_HOLD=1  every session connects its MCP servers at once and keeps the stdio ones running, as Grok does
 //   FAKE_ACP_PERMISSION_OPTIONS  JSON options override in permission mode
+//   FAKE_ACP_PERMISSION_PRIOR_UPDATES  JSON array of tool_call/tool_call_update updates sent before the process's first
+//     permission request only, as Mistral Vibe does before a request that names the call by toolCallId alone
 //   FAKE_ACP_DUMP  path for {argv, env}; with FAKE_ACP_MODES or FAKE_ACP_MODELS also <dump>.prompts.jsonl
 //     and <dump>.initialize.json for the initialize params
 //   FAKE_ACP_LAUNCH_COUNT_FILE  process counter incremented at startup
@@ -582,6 +584,7 @@ const recordMethod = (method: string, sessionId?: unknown, meta?: unknown) => {
 const configCalls: Array<{ method: string; params: unknown }> = [];
 
 let pendingPermissionId: number | null = null;
+let permissionPriorSent = false;
 let onPermissionAnswered: ((allowed: boolean) => void) | null = null;
 let lastPermissionCancelled = false;
 let pendingAskQuestionId: number | null = null;
@@ -1894,6 +1897,9 @@ function handle(msg: any) {
       }
       if (mode === "permission") {
         pendingPermissionId = 9001;
+        const priorUpdates = process.env.FAKE_ACP_PERMISSION_PRIOR_UPDATES && !permissionPriorSent ? JSON.parse(process.env.FAKE_ACP_PERMISSION_PRIOR_UPDATES) : [];
+        permissionPriorSent = true;
+        for (const update of priorUpdates) out({ jsonrpc: "2.0", method: "session/update", params: { update } });
         onPermissionAnswered = () => {
           out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "handled the permission decision" } } } });
           complete();
