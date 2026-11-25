@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 
 import { parseToolScope } from "../shared/tool-scope.ts";
 
-import { antigravityRefusal, dropsToolsPastBudget, type NativeCliRelease } from "./agents-bridge-antigravity.ts";
+import { antigravityNativeRelease, antigravityRefusal, dropsToolsPastBudget, type NativeCliRelease } from "./agents-bridge-antigravity.ts";
 import { bridgedCallName } from "./agents-bridge-names.ts";
 import { BRIDGE_CLI_ENV, TOOL_BRIDGE_ENV } from "./drivers/agents-bridge.ts";
 import { decodeInjectId } from "./drivers/local-inject.ts";
@@ -82,6 +82,19 @@ export function turnEngine(
     ...(turn.nativeCli ? { nativeCli: turn.nativeCli } : {}),
     ...(turn.customMcpServers ? { customMcpServers: turn.customMcpServers } : {}),
   };
+}
+
+/** turnEngine with what a native Antigravity turn is decided on: the CLI release it would start and the names of the
+ * person's own MCP servers mounted on it. */
+export async function bridgeTurnEngine(
+  instance: { instanceId: string; driverKind: string },
+  configs: Record<string, { config?: unknown; environment?: Record<string, string> } | undefined>,
+  snapshot: { version?: string | null } | undefined,
+  cwd: string | undefined,
+  customMcpServers: readonly string[],
+): Promise<BridgeEngine> {
+  const nativeCli = await antigravityNativeRelease({ driverKind: instance.driverKind, config: configs[instance.instanceId]?.config });
+  return turnEngine(instance, configs, snapshot, cwd, { nativeCli, customMcpServers });
 }
 
 /** The person's home and managed Claude Code policy files; passed in so a test never reads the real ones. */

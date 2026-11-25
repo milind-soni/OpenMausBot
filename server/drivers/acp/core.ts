@@ -59,7 +59,7 @@ import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
 import { MAX_QUESTION_TEXT, parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../../shared/ask-question.ts";
 
 import { appendNative } from "../native.ts";
-import { acpAnswersAlone, acpSessionOperationKey, acpShellRequest, permissionLaunchCwd } from "../permission-command.ts"; import { bridgedPermission } from "./bridged-permission.ts"; import { agentsToolBridged } from "../agents-bridge.ts"; import { CATALOG_TOOL_NAMES } from "../../agents-bridge-names.ts"; import { acpReadPaths } from "../../own-file-reads.ts";
+import { acpAnswersAlone, acpSessionOperationKey, acpShellRequest, permissionLaunchCwd } from "../permission-command.ts"; import { bridgedAlone, bridgedPermission } from "./bridged-permission.ts"; import { missingOptionNote, permissionOptions } from "./permission-options.ts"; import { agentsToolBridged } from "../agents-bridge.ts"; import { CATALOG_TOOL_NAMES } from "../../agents-bridge-names.ts"; import { acpReadPaths } from "../../own-file-reads.ts";
 import { openQuestionRequest, questionRequestFor, type AcpQuestionRequest } from "./question-requests.ts";
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
 import { acpToolEndEvents } from "./tool-items.ts";
@@ -188,12 +188,6 @@ export interface AcpSupport extends AcpDriverHooks {
   resumeMethod?: "load" | "resume";
   /** Some agents acknowledge a live load without applying new MCP credentials. */
   restartOnMcpChange?: boolean; /** The turn's MCP servers come from launcher-owned configuration, not ACP session parameters. */ mcpServersFromLaunch?: boolean;
-  /** Whether a turn whose MCP servers differ from the live session's starts a new process, read after resolveCommand: an
-   *  agent that renames a server registered again in one process. Unlike restartOnMcpChange, a new system prompt alone
-   *  keeps the process. */
-  restartsOnMcpServersChange?(instanceId: string): boolean;
-  /** Why this turn must not start on the command resolveCommand chose, or undefined. */
-  launchRefusal?(turn: SendTurnInput, launch: { command: string }): string | undefined;
   /** How the agent takes a person's message into its running turn; without it a message sent mid-turn waits for the next. */
   steer?: AcpSteerSupport;
   /** hermes-agent 0.22.4 re-sends a streamed reply whole under its messageId, as its `💭` reasoning block, a blank line,
@@ -582,38 +576,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           const params = support.permissionRequest ? support.permissionRequest(msg.params ?? {}) : msg.params ?? {};
           current.flushAssistantText();
           const options: Array<{ optionId?: string; kind?: string; name?: string }> = Array.isArray(params.options) ? params.options : [];
-          const bridged = bridgedPermission(params.toolCall ?? {}, agentsToolBridged(current.turn.integrations?.agents), CATALOG_TOOL_NAMES);
           // Security: a bridged use_tool covers whichever tool it names, so it is answered once and only once.
-          const onceOnly = bridged.kind !== "ordinary";
-          const optionFor = (want: "allow" | "reject") =>
-            options.find((o) => o.kind === `${want}_once` && typeof o.optionId === "string")?.optionId
-              ?? (onceOnly ? undefined : options.find((o) => String(o.kind ?? "").startsWith(want) && typeof o.optionId === "string")?.optionId)
-              ?? null;
-          const optionAlways = onceOnly ? null : options.find((o) => o.kind === "allow_always" && typeof o.optionId === "string")?.optionId ?? null;
-          const cancelled = { outcome: { outcome: "cancelled" } };
-          // ACP means "cancelled" only while cancelling the prompt turn, so an agent may then wait for
-          // session/cancel (Antigravity does): end the turn.
-          const answerAlone = (optionId: string | null) => {
-            send({ jsonrpc: "2.0", id: msg.id, result: optionId ? { outcome: { outcome: "selected", optionId } } : cancelled });
-            if (!optionId && onceOnly && session.current === current) active.get(threadId)?.interrupt();
-          };
-          const missing = (want: string) =>
-            emit({
-              ...base(threadId, current.turnId),
-              type: "runtime.error",
-              message: `${support.displayName} offered no "${want}" permission option — cancelling the request instead of guessing`,
-            });
-
-          if (bridged.kind === "refuse" || bridged.kind === "find") {
-            const optionId = optionFor(bridged.kind === "find" ? "allow" : "reject");
-            if (!optionId) missing(bridged.kind === "find" ? "allow" : "reject");
-            if (bridged.kind === "refuse") {
-              emit({ ...base(threadId, current.turnId), type: "runtime.error", message: `${support.displayName} asked to run an agents tool through the tool bridge in a form this version does not know, so it was refused` });
-            }
-            answerAlone(optionId);
-            if (bridged.kind === "refuse" && optionId && session.current === current) active.get(threadId)?.interrupt();
-            return;
-          }
+          const bridged = bridgedPermission(params.toolCall ?? {}, agentsToolBridged(current.turn.integrations?.agents), CATALOG_TOOL_NAMES), onceOnly = bridged.kind !== "ordinary";
+          const { optionFor, optionAlways } = permissionOptions(options, onceOnly), cancelled = { outcome: { outcome: "cancelled" } };
+          // A cancelled answer may leave Antigravity waiting for session/cancel, so a bridged request answered that way ends the turn.
+          const answerAlone = (optionId: string | null, end = onceOnly && !optionId) => { send({ jsonrpc: "2.0", id: msg.id, result: optionId ? { outcome: { outcome: "selected", optionId } } : cancelled }); if (end && session.current === current) active.get(threadId)?.interrupt(); };
+          const missing = (want: string) => emit({ ...base(threadId, current.turnId), type: "runtime.error", message: missingOptionNote(support.displayName, want) });
+          const alone = bridgedAlone(bridged, optionFor, support.displayName);
+          if (alone) { if (alone.missing) missing(alone.missing); if (alone.note) emit({ ...base(threadId, current.turnId), type: "runtime.error", message: alone.note }); return answerAlone(alone.optionId, alone.end); }
           const toolCall = bridged.kind === "use" ? bridged.toolCall as any : params.toolCall ?? {};
           const isQuestion = String(toolCall.toolCallId ?? "").startsWith("interaction_");
           if ((support.allowsAlone?.(instanceId, current.turn, toolCall) || (current.turnConfig.fullAuto && current.turn.approvalMode === undefined)) && !isQuestion && acpAnswersAlone(toolCall.rawInput)) {
@@ -829,8 +799,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           env,
           cwd,
           contractKey,
-          sessionKey: null,
-          mcpServersKey: null,
+          sessionKey: null, mcpServersKey: null,
           get sessionId() { return acp.sessionId; },
           set sessionId(id: string | null) { acp.sessionId = id; },
           sessionConfigResult: null, modeVersion: 0,
@@ -936,8 +905,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           launch = support.resolveCommand
             ? await support.resolveCommand(env, turnConfig, instanceId)
             : { command: turnConfig.cli };
-          const refusal = support.launchRefusal?.(turn, launch);
-          if (refusal) throw new Error(refusal);
+          const refusal = support.launchRefusal?.(turn, launch); if (refusal) throw new Error(refusal);
         } catch (error) {
           requireRunning();
           emit({ ...base(threadId, turnId), type: "turn.started" });
@@ -995,6 +963,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             if (pooled.dead) sessions.delete(threadId);
             else closeSession(threadId, mcpServersChanged ? "mcp-servers" : "contract", { retire: mcpServersChanged });
           }
+          // The old process is gone before a new one opens the same profile.
+          if (mcpServersChanged) for (const child of retiring.get(threadId) ?? []) if (!await retireChild(threadId, child)) throw new Error(`${support.displayName} could not close its previous tool session. Try again.`);
           const joining = sharedHost(hostKey, threadId, cwd);
           const admittingAt = Date.now();
           await turn.engineAdmission?.(joining ? "session" : "process", joining?.child.pid);

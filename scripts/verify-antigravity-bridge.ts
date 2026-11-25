@@ -60,13 +60,11 @@ try {
   await api("PATCH", "/api/mcp/servers/notes", { enabled: true });
   report.servers = await api("GET", "/api/mcp/servers");
 
-  // 1. The default for a native account: bridged with no switch.
   const on0 = await say(chief.id, "fake-agy: tools", "default: tools the model sees");
   const on0Tools = lastTools();
   check("default: bridged with no switch, nothing dropped", on0Tools?.hidden.length === 0 && on0Tools?.visible.includes("mcp_agents_find_tool"), { bytes: on0Tools?.bytes, hidden: on0Tools?.hidden });
   check("default: the person's own server is mounted", on0Tools?.visible.some((name: string) => name.startsWith("mcp_notes_")) === true);
 
-  // 2. The switch set off outright: the CLI drops the largest tools, coordinate_bots among them, as on main.
   await api("PUT", "/api/config", { features: { agentsToolBridge: false } });
   const off1 = await say(chief.id, "fake-agy: tools\nfake-agy: call agents/coordinate_bots {\"bot_ids\":[\"Helper\"],\"message\":\"x\"}", "bridge off: tools the model sees");
   const offTools = lastTools();
@@ -75,7 +73,6 @@ try {
   check("bridge off: no find_tool or use_tool", offTools?.visible.some((name: string) => /find_tool|use_tool/u.test(name)) === false);
   check("bridge off: the switch gave the session a new process", pidsOf(off1.fake).length === 1 && !pidsOf(on0.fake).includes(pidsOf(off1.fake)[0]));
 
-  // 3. Back on, in the same conversation.
   await api("PUT", "/api/config", { features: { agentsToolBridge: true } });
   const on1 = await say(chief.id, "fake-agy: tools", "bridge on again: tools the model sees");
   const onTools = lastTools();
@@ -84,7 +81,6 @@ try {
   check("bridge on: the switch gave the session a new process", pidsOf(on1.fake).length === 1 && !pidsOf(off1.fake).includes(pidsOf(on1.fake)[0]));
   check("the conversation kept one native session throughout", new Set([...on0.fake, ...off1.fake, ...on1.fake].filter((e) => e.event === "tools" && e.visible.length > 0).map((e) => e.sessionId)).size === 1);
 
-  // 3. A hand-off, called by its own name.
   const marker = `handoff-${Date.now()}`;
   const handed = await say(chief.id, `fake-agy: call agents/coordinate_bots {"bot_ids":["Helper"],"message":"${marker}: reply with one word."}`, "hand-off");
   check("hand-off: coordinate_bots ran", /RESULT agents\/coordinate_bots(?! \(error\))/u.test(botText(handed)), botText(handed));
@@ -93,13 +89,11 @@ try {
   check("hand-off: the helper received the work", JSON.stringify(helperMessages).includes(marker));
   steps.push({ label: "helper messages", messages: helperMessages });
 
-  // 4. A hidden tool through find_tool and use_tool, at Full access.
   const hidden = await say(chief.id, 'fake-agy: call agents/find_tool {"query":"threads"}\nfake-agy: call agents/use_tool {"name":"list_threads","arguments":{}}', "hidden tool on Full");
   const text = botText(hidden);
   check("find_tool answered", /RESULT agents\/find_tool(?! \(error\))/u.test(text), text);
   check("use_tool ran list_threads and returned this conversation", /RESULT agents\/use_tool(?! \(error\)):[\s\S]*fake-agy: tools/u.test(text), text);
 
-  // 5. At Ask: the card names the tool, offers no allow for the session, and no saved grant answers it.
   await api("PATCH", `/api/bots/${chief.id}`, { approvalMode: "ask" });
   const { providerToolAllowKey, providerToolConfig } = await import("../server/provider-tool-allow.ts");
   const grant = providerToolAllowKey("antigravity", "mcp__agents__list_threads", providerToolConfig("agents", {}))!;
@@ -120,11 +114,9 @@ try {
   const sinceCard = (afterAllowMessages.messages as Array<any>).slice((afterAllowMessages.messages as Array<any>).findLastIndex((m) => m.role === "user") + 1);
   check("Ask: allowed once, use_tool ran", sinceCard.some((m) => m.role === "bot" && m.kind === "text" && /RESULT agents\/use_tool(?! \(error\))/u.test(m.text)), sinceCard);
 
-  // 6. find_tool needs no card at Ask.
   const findAsk = await say(chief.id, 'fake-agy: call agents/find_tool {"query":"memory"}', "find_tool at Ask");
   check("Ask: find_tool ran with no card", /RESULT agents\/find_tool(?! \(error\))/u.test(botText(findAsk)), findAsk.waited?.state);
 
-  // 7. "Allow for this session" on a direct call does not carry over to use_tool.
   const answerCard = async (label: string, text: string, always: boolean) => {
     await control("send", "--bot", chief.id, "--text", text);
     const waited = await control("wait", "--bot", chief.id, "--timeout", "30");
@@ -140,7 +132,6 @@ try {
   const again = await answerCard("use_tool after a session allow", 'fake-agy: call agents/use_tool {"name":"list_bots","arguments":{}}', false);
   check("Ask: use_tool still asks after the session allow, for the same tool", again?.requestId !== undefined && !again.allowSession && !again.allowKey, again);
 
-  // 8. The safety floor: at Full, a never-list command through use_tool is denied and never reaches the agents server.
   await api("PATCH", `/api/bots/${chief.id}`, { approvalMode: "full" });
   await api("PUT", "/api/config", { safetyFloor: { enabled: true } });
   const floored = await say(chief.id, 'fake-agy: call agents/use_tool {"name":"vm_exec","arguments":{"command":"rm -rf ~"}}', "never-list command through use_tool at Full");
@@ -148,7 +139,6 @@ try {
   check("floor: the agents server got no call", !floored.fake.some((e) => e.event === "tools/call"));
   await api("PUT", "/api/config", { safetyFloor: { enabled: false } });
 
-  // 9. Back off in the same conversation: a new process, the full list again, and a direct call reaches the unbridged proxy.
   await api("PUT", "/api/config", { features: { agentsToolBridge: false } });
   const off2 = await say(chief.id, 'fake-agy: tools\nfake-agy: call agents/list_bots {}', "bridge off again");
   const off2Tools = lastTools();

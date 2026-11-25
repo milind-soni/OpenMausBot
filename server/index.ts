@@ -486,7 +486,7 @@ import { WebhookManager } from "./webhooks.ts";
 import { tieAutomationsToBots } from "./bot-automations.ts"; import { WaitManager } from "./waits.ts"; import { cancelWaitFromCard, createWaitHost, waitContinuationCheck, waitLineFields, waitRunChat, waitTurnRunId } from "./wait-host.ts"; import { continuedConversation } from "./routine-same-conversation.ts"; import { createWaitRoutes, findWaitPeer, handedAssignment, hostWaitRefusal, waitSourceRefusal, type WaitRouteContext } from "./routes/waits.ts";
 import type { WebhookTrigger } from "../shared/webhooks.ts";
 import { AGENTS_NODE_FLAG, SPAWNED_PROXIES } from "./proxy-paths.ts";
-import { agentsProxyLaunch, agentsToolBridgeEnv, applyAgentsBridge, bridgedToolTitle, turnEngine } from "./agents-bridge-switch.ts"; import { antigravityNativeRelease } from "./agents-bridge-antigravity.ts"; import { serverTurnedOff } from "./drivers/agents-tool-groups.ts"; import { availableToolGroups, toolsOffPart } from "./tool-groups.ts"; import { agentsServerEnv, botDrivenConversation, COMPUTER_OFF_REFUSAL, computerPickRefusal, directTurnKind, roomSkillsRefusal, type TurnKind } from "./agents-turn.ts";
+import { agentsProxyLaunch, agentsToolBridgeEnv, applyAgentsBridge, bridgeTurnEngine, bridgedToolTitle } from "./agents-bridge-switch.ts"; import { serverTurnedOff } from "./drivers/agents-tool-groups.ts"; import { availableToolGroups, toolsOffPart } from "./tool-groups.ts"; import { agentsServerEnv, botDrivenConversation, COMPUTER_OFF_REFUSAL, computerPickRefusal, directTurnKind, roomSkillsRefusal, type TurnKind } from "./agents-turn.ts";
 import { harnessMcpTokenEnv } from "./harness-mcp-token.ts";
 import { loadBundledSkills, loadUserSkills, mergeSkills, renderSkillInstructions, selectBundledSkills, skillsLibraryEnabled, readSkillLibraryIndex } from "./skill-library.ts";
 import { runSkillsLibraryBootSweep } from "./skills-library-migration.ts";
@@ -2882,7 +2882,6 @@ const wireTrustedApprovalBot = (bot: NonNullable<ReturnType<typeof store.bot>>) 
 async function previewSystemPrompt(bot: BotRecord) {
   const persona = botPersona(bot);
   const instance = registry.get(bot.modelSelection.instanceId);
-  const previewNativeCli = !instance ? undefined : await antigravityNativeRelease({ driverKind: instance.driverKind, config: providerConfigs()[instance.instanceId]?.config });
   const caps = instance?.adapter.capabilities;
   const teamComputer = inheritedTeamComputer(bot);
   const previewComputer = teamComputer ? "cloud" : bot.computer;
@@ -2937,7 +2936,7 @@ async function previewSystemPrompt(bot: BotRecord) {
     teamAvailabilityPart(agentsMounted && coordination ? peers : []),
     { id: "memory-rules", label: "How memory works", text: memoryRulesPrompt(bot.id, { managedWrites: agentsMounted, fileTools: Boolean(privateWorkspace), enabled: bot.memoryEnabled !== false }) }, { id: "memory", label: "Memory", text: memoryNotesPrompt(bot.id, { managedWrites: agentsMounted, fileTools: Boolean(privateWorkspace), enabled: bot.memoryEnabled !== false }) },
     { id: "skills", label: "Skills index", text: privateWorkspace ? skillsHost.skillsIndex(bot, undefined, instance) : "" },
-  ], agentsMounted ? { env: agentsToolBridgeEnv(cfg, bot, instance && turnEngine(instance, providerConfigs(), registry.lastSnapshot(instance.instanceId), bot.cwd ?? undefined, { nativeCli: previewNativeCli, customMcpServers: [] })) } : undefined, { replyStyle: bot.replyStyle, rules: cfg.everyBotRules });
+  ], agentsMounted ? { env: agentsToolBridgeEnv(cfg, bot, instance && await bridgeTurnEngine(instance, providerConfigs(), registry.lastSnapshot(instance.instanceId), bot.cwd ?? undefined, Object.keys(cfg.mcpServers ?? {}))) } : undefined, { replyStyle: bot.replyStyle, rules: cfg.everyBotRules });
   const totalBytes = built.sections.reduce((n, s) => n + s.bytes, 0);
   return {
     sections: built.sections,
@@ -8231,8 +8230,7 @@ async function beginTurn(
         throw new DirectTurnSetupCancelled("Coordination access changed before dispatch");
       } else if (accountRefusal) throw new DirectTurnSetupCancelled(accountRefusal);
       // The tool bridge is decided here: the folder the turn is launched in is known, and the prompt is not built yet.
-      const nativeCli = await antigravityNativeRelease({ driverKind: instance.driverKind, config: providerConfigs()[instance.instanceId]?.config });
-      applyAgentsBridge(threadId, integrations, cfg, bot, turnEngine(instance, providerConfigs(), registry.lastSnapshot(instance.instanceId), cwd, { nativeCli, customMcpServers: Object.keys(integrations.custom ?? {}) }));
+      applyAgentsBridge(threadId, integrations, cfg, bot, await bridgeTurnEngine(instance, providerConfigs(), registry.lastSnapshot(instance.instanceId), cwd, Object.keys(integrations.custom ?? {})));
       const confined = proactive.fence.confines(threadId), apiFenced = botApiThread(threadId); if (confined || apiFenced) for (const key of Object.keys(integrations) as Array<keyof typeof integrations>) if (!(apiFenced ? BOT_API_TOOLS : READ_AND_DRAFT_TOOLS).has(key)) delete integrations[key];
       const selectionRulesStable = Boolean(integrations.agents) && bot.computer !== "off" && !inheritedTeamComputer(bot), memoryOpts = { managedWrites: Boolean(integrations.agents), fileTools: worksInWorkspace && !apiFenced, enabled: bot.memoryEnabled !== false, writesRefused: notesRefused };
       setup.lap("sync"); const prompt = buildSystemPrompt(persona, liveBot?.soul ?? bot.soul ?? "", [
@@ -10019,8 +10017,7 @@ async function runClaimedGroupMemberTurn(
   }
   // The start-up probe of this engine is part of setup, and the bridge decision needs the engine's version.
   const engineRead = registry.engineRead(instance.instanceId); if (engineRead) await engineRead;
-  const nativeCli = await antigravityNativeRelease({ driverKind: instance.driverKind, config: providerConfigs()[instance.instanceId]?.config });
-  applyAgentsBridge(threadId, integrations, cfg, bot, turnEngine(instance, providerConfigs(), registry.lastSnapshot(instance.instanceId), cwd, { nativeCli, customMcpServers: Object.keys(integrations.custom ?? {}) }));
+  applyAgentsBridge(threadId, integrations, cfg, bot, await bridgeTurnEngine(instance, providerConfigs(), registry.lastSnapshot(instance.instanceId), cwd, Object.keys(integrations.custom ?? {})));
   const roomSystem = buildSystemPrompt(system, store.bot(bot.id)?.soul ?? bot.soul ?? "", [
     { id: "user-profile", label: "About the user", text: userProfileSystemPrompt(teamHost.profileFor(threadId, cfg.profile)) }, { id: "people", label: "People", text: teamMessages.prompt(bot.id, threadId, Boolean(integrations.agents)) },
     { id: "files", label: "File locations", text: workspace ? workspaceLocationsPrompt(bot.id, cwd, readyBot.cwd, { attachFile: Boolean(integrations.agents) && !CLOUD_HOME && !HOSTED_WORKSPACE }) + teamFilesHost.promptLine(bot.id) : "" },

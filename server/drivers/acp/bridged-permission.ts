@@ -36,7 +36,9 @@ export function bridgedPermission(toolCall: ToolCall, bridged: boolean, catalog:
   const byName = names.some((name) => BRIDGE_SPELLING.test(name));
   if (!byName) {
     const direct = names.length > 0 && recorded.every((tool) => tool !== undefined && catalog.has(tool));
-    if (direct) return { kind: "ordinary" };
+    // Another server's tool, by the CLI's mcp_<server>_<tool>: its input says nothing about the agents server.
+    const elsewhere = names.length > 0 && names.every((name) => name.startsWith("mcp_") && !name.startsWith("mcp_agents_"));
+    if (direct || elsewhere) return { kind: "ordinary" };
     const input = record(toolCall.rawInput) ? toolCall.rawInput : {};
     const shaped = typeof input.name === "string" && catalog.has(input.name) && (input.arguments === undefined || record(input.arguments));
     return shaped ? { kind: "refuse" } : { kind: "ordinary" };
@@ -54,5 +56,20 @@ export function bridgedPermission(toolCall: ToolCall, bridged: boolean, catalog:
       rawInput: record(input.arguments) ? input.arguments : {},
       ...(inner ? { title: `Run mcp_agents_${inner}` } : {}),
     },
+  };
+}
+
+/** How the driver answers a bridged request itself, with no card: find_tool allowed once, a refused spelling rejected.
+ * `end` ends the turn: after a refusal, or when the agent offered no option to answer with. */
+export function bridgedAlone(permission: BridgedPermission, optionFor: (want: "allow" | "reject") => string | null, agent: string):
+  { optionId: string | null; missing?: "allow" | "reject"; note?: string; end: boolean } | undefined {
+  if (permission.kind !== "refuse" && permission.kind !== "find") return undefined;
+  const want = permission.kind === "find" ? "allow" : "reject";
+  const optionId = optionFor(want);
+  return {
+    optionId,
+    ...(optionId ? {} : { missing: want }),
+    ...(permission.kind === "refuse" ? { note: `${agent} asked to run an agents tool through the tool bridge in a form this version does not know, so it was refused` } : {}),
+    end: permission.kind === "refuse" || !optionId,
   };
 }

@@ -14,6 +14,7 @@ import { nativeFixture } from "./antigravity-native-fixture.ts";
 import { droppedTools, ServerNames } from "./fake-antigravity-mcp.ts";
 
 const FAKE_MCP = join(dirname(fileURLToPath(import.meta.url)), "fake-mcp-server.ts");
+const WINDOWS = process.platform === "win32";
 
 describe("the fake native CLI's tool budget", () => {
   const servers = (agents: readonly { name: string }[]) => [
@@ -72,7 +73,8 @@ function acpClient(executable: string, profile: string, env: Record<string, stri
   return { child, request, seen, text, onPermission: (fn: (message: Message) => unknown) => { answer = fn; } };
 }
 
-describe("the fake native CLI's MCP turns", () => {
+// The fixture's `antigravity` is a POSIX shell script.
+describe.skipIf(WINDOWS)("the fake native CLI's MCP turns", () => {
   const children: Array<{ kill(): void }> = [];
   afterEach(() => { for (const child of children.splice(0)) child.kill(); });
 
@@ -136,7 +138,11 @@ describe("the fake native CLI's MCP turns", () => {
     client.onPermission(() => ({ outcome: { outcome: "cancelled" } }));
     let settled = false;
     const turn = client.request("session/prompt", { sessionId: result.sessionId, prompt: [{ type: "text", text: "fake-agy: call notes/read_notes {}" }] }).then((message) => { settled = true; return message; });
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    for (let waited = 0; !fixture.entries().some((entry) => entry.event === "permission" && entry.outcome?.outcome === "cancelled"); waited += 50) {
+      if (waited > 10_000) throw new Error("the fake never took the cancelled answer");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
     expect(settled).toBe(false);
     client.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId: result.sessionId } })}\n`);
     expect(await turn).toMatchObject({ result: { stopReason: "cancelled" } });

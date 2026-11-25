@@ -7,6 +7,12 @@ import type { AcpConfig } from "./core.ts";
 import type { AcpHost } from "./host.ts";
 
 export interface AcpDriverHooks {
+  /** Whether a turn whose MCP servers differ from the live session's starts a new process, read after resolveCommand: an
+   * agent that renames a server registered again in one process. Unlike restartOnMcpChange, a new system prompt alone
+   * keeps the process. */
+  restartsOnMcpServersChange?(instanceId: string): boolean;
+  /** Why this turn must not start on the command resolveCommand chose, or undefined. */
+  launchRefusal?(turn: SendTurnInput, launch: { command: string }): string | undefined;
   /** Local video, image, audio and PDF files named in the turn text go to the model as `resource_link` blocks
    * the agent reads itself, for an agent whose own file tool returns media as raw bytes (Antigravity). */
   mediaLinks?: boolean;

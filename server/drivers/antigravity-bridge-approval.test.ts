@@ -130,6 +130,11 @@ describe.skipIf(WINDOWS)("an Antigravity permission request on a turn whose agen
     expect(await asked("direct-ask", { approvalMode: "edits", toolCall: direct })).toMatchObject({ card: true, opened: { allowSession: true } });
   }, 90_000);
 
+  it("leaves another server's call whose input happens to have a catalog tool's name alone", async () => {
+    const sql = { toolCallId: "call_1", name: "mcp_data_data_sql", title: "Run mcp_data_data_sql", kind: "other", rawInput: { sql: "SELECT 1", name: "list_threads", toolSummary: "x" } };
+    expect(await asked("data-sql", { approvalMode: "auto", toolCall: sql })).toMatchObject({ card: false, answer: "allow", errors: [] });
+  }, 90_000);
+
   it("leaves another server's find_tool to the ordinary approval", async () => {
     const other = { toolCallId: "call_1", name: "mcp_team_agents_find_tool", title: "Run mcp_team_agents_find_tool", kind: "other", rawInput: { query: "x" } };
     expect(await asked("third-party", { approvalMode: "edits", toolCall: other })).toMatchObject({ card: true, opened: { allowSession: true }, completed: true });

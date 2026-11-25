@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -9,6 +9,7 @@ import { agentsToolBridgeRefusal, bridgedAgents, engineBridgeRefusal, type Bridg
 import { BRIDGE_CLI_ENV, TOOL_BRIDGE_ENV } from "./drivers/agents-bridge.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
+const WINDOWS = process.platform === "win32";
 const folders: string[] = [];
 const folder = () => { const made = mkdtempSync(join(tmpdir(), "omb-agy-bridge-")); folders.push(made); return made; };
 afterAll(async () => { for (const made of folders) await removeTempDir(made); });
@@ -115,7 +116,7 @@ describe("bridging a native Antigravity account's turn", () => {
       [".agents/settings.json", (cwd: string) => write(join(cwd, ".agents", "settings.json"), {})],
       ["any other entry in .agents", (cwd: string) => write(join(cwd, ".agents", "rules", "a.md"), "x")],
       [".agents as a file", (cwd: string) => write(join(cwd, ".agents"), "x")],
-      [".agents as a link", (cwd: string) => { const target = join(cwd, "..", "elsewhere"); mkdirSync(target); symlinkSync(target, join(cwd, ".agents")); }],
+      [".agents as a link", (cwd: string) => { const target = join(cwd, "..", "elsewhere"); mkdirSync(target); symlinkSync(target, join(cwd, ".agents"), "junction"); }],
       ["a legacy .agent", (cwd: string) => mkdirSync(join(cwd, "..", ".agent"))],
       ["a legacy _agents", (cwd: string) => mkdirSync(join(cwd, "_agents"))],
       ["a legacy _agent", (cwd: string) => mkdirSync(join(cwd, "_agent"))],
@@ -132,7 +133,7 @@ describe("bridging a native Antigravity account's turn", () => {
       const { root, cwd, engine, host } = setup();
       write(join(root, "repo", ".agents", "hooks.json"), {});
       const outside = folder();
-      symlinkSync(cwd, join(outside, "link"));
+      symlinkSync(cwd, join(outside, "link"), "junction");
       expect(decided({ ...engine, cwd: join(outside, "link") }, host)).toBe("an .agents folder the CLI reads holds more than skills");
     });
 
@@ -162,8 +163,8 @@ describe("bridging a native Antigravity account's turn", () => {
       ["an MCP server", (profile: string) => write(join(profile, "config", "mcp_config.json"), { mcpServers: { extra: { command: "x" } } })],
       ["project settings", (profile: string) => write(join(profile, "config", "projects", "p.json"), {})],
       ["a file that is not JSON", (profile: string) => write(join(profile, "config", "config.json"), "{plugins")],
-      ["a FIFO for a file", (profile: string) => { execFileSync("rm", [join(profile, "config", "config.json")]); execFileSync("mkfifo", [join(profile, "config", "config.json")]); }],
-    ])("is off with %s", (_label, plant) => {
+      ...(WINDOWS ? [] : [["a FIFO for a file", (profile: string) => { rmSync(join(profile, "config", "config.json")); execFileSync("mkfifo", [join(profile, "config", "config.json")]); }]]),
+    ] as Array<[string, (profile: string) => void]>)("is off with %s", (_label, plant) => {
       const { profile, engine, host } = setup();
       plant(profile);
       expect(decided(engine, host)).not.toBeNull();
@@ -174,7 +175,7 @@ describe("bridging a native Antigravity account's turn", () => {
       write(join(profile, "config", "mcp_config.json"), { mcpServers: {} });
       expect(decided(engine, host)).toBeNull();
       const bare = setup();
-      execFileSync("rm", ["-rf", join(bare.profile, "config")]);
+      rmSync(join(bare.profile, "config"), { recursive: true });
       expect(decided(bare.engine, bare.host)).toBeNull();
     });
   });
