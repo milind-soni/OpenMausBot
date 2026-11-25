@@ -1,4 +1,4 @@
-import { use, useState } from "react";
+import { type ContextType, use, useState } from "react";
 import { Trash2 } from "lucide-react";
 
 import { t } from "@/lib/i18n";
@@ -49,22 +49,19 @@ export async function saveExtraFileLinkRoots(
   return run;
 }
 
-/** Inline owner action beside an out-of-workspace path on self-hosted remote clients. */
-export function AllowFileLinkFolderButton({ filePath }: { filePath: string }) {
-  const store = use(StoreContext);
+type StoreValue = NonNullable<ContextType<typeof StoreContext>>;
+
+function AllowFileLinkFolderAction({ store, folder }: { store: StoreValue; folder: string }) {
   const isOwner = useOwnerOrAdmin();
   const [allowing, setAllowing] = useState(false);
   const [allowedNow, setAllowedNow] = useState(false);
   const [problem, setProblem] = useState("");
-  const folder = store && isOwner === true && !store.state.config?.cloudHome && REVEALABLE_PATH.test(filePath)
-    ? parentFolderPath(filePath)
-    : "";
-  const existingRoots = store?.state.config?.fileLinks?.extraRoots ?? [];
-  const canAllow = Boolean(store && folder && !existingRoots.includes(folder));
+  const existingRoots = store.state.config?.fileLinks?.extraRoots ?? [];
+  const canAllow = Boolean(isOwner === true && !existingRoots.includes(folder));
   if (!canAllow && !allowedNow && !problem) return null;
 
   const allowFolder = async () => {
-    if (!store || !folder || allowing) return;
+    if (allowing) return;
     setAllowing(true);
     setProblem("");
     try {
@@ -89,6 +86,16 @@ export function AllowFileLinkFolderButton({ filePath }: { filePath: string }) {
       {problem && <span role="alert" className="text-danger">{problem}</span>}
     </>
   );
+}
+
+/** Inline owner action beside an out-of-workspace path on self-hosted remote clients. */
+export function AllowFileLinkFolderButton({ filePath }: { filePath: string }) {
+  const store = use(StoreContext);
+  const folder = store && !store.state.config?.cloudHome && REVEALABLE_PATH.test(filePath)
+    ? parentFolderPath(filePath)
+    : "";
+  if (!store || !folder) return null;
+  return <AllowFileLinkFolderAction store={store} folder={folder} />;
 }
 
 /** Self-hosted owner setting for extra read-only host folders bots can link in chat messages. */
