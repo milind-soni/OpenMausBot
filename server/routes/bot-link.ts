@@ -91,6 +91,14 @@ export function createBotLinkRoutes(deps: BotLinkRouteDeps): RouteHandler {
     held.set(peer, done);
   });
   const state = () => ({ ...link.status(), ...(link.role() === "dialer" ? dialer.state() : {}) });
+  /** Turned off on a computer. The end is written down before the Cloud is asked, so a server stopped mid-way tells its
+   * Cloud later (when the app next says it is awake); a Cloud the app says sleeps is not woken to be told. */
+  const endHere = async () => {
+    const target = link.dial(), sleeping = dialer.state().asleep;
+    await dialer.stop();
+    link.turnOff(false);
+    if (target && !sleeping) await dialer.tellEnded(target.origin);
+  };
 
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     if (path !== STATE_PATH && path !== PAIR_PATH && path !== SYNC_PATH && path !== FILE_PATH && path !== BOTS_PATH) return PASS;
@@ -120,15 +128,17 @@ export function createBotLinkRoutes(deps: BotLinkRouteDeps): RouteHandler {
         return json(res, 200, state());
       }
       if (!body.data.on) {
-        if (link.role() === "dialer") link.turnOff(await dialer.stop({ bye: true }));
+        if (link.role() === "dialer") await endHere();
         return json(res, 200, link.status());
       }
       if (link.role() === "acceptor") return json(res, 409, { error: "This place already takes a computer's link." });
       if (!body.data.origin.startsWith("https://") && !loopbackHost(body.data.origin)) return json(res, 400, { error: "The Cloud's address must be https." });
-      if (link.role() === "dialer" && link.dial()?.origin !== body.data.origin) link.turnOff(await dialer.stop({ bye: true }));
+      if (link.role() === "dialer" && link.dial()?.origin !== body.data.origin) await endHere();
       link.turnOn({ self: { id: deps.environmentId, name: body.data.name }, origin: body.data.origin, token: body.data.token, peer: body.data.cloud, ...(body.data.account ? { account: body.data.account } : {}) });
       deps.turnedOn?.();
       dialer.start();
+      // That Cloud is awake (it just paired): an earlier link to it that ended while it could not be told is ended there now.
+      void dialer.tellEnded(body.data.origin);
       return json(res, 200, state());
     }
 

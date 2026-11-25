@@ -7,6 +7,7 @@ import { mascotBodyColorSchema, mascotMaterialSchema } from "../../shared/bot-av
 import { createDialer } from "../bot-link/dial.ts";
 import { createBotLink } from "../bot-link/link.ts";
 import type { Coordinator, HandoffView } from "../coordinator.ts";
+import type { createPlacesElsewhere, Explained } from "../places-elsewhere.ts";
 import { redactSecretsInText } from "../redact.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { createBotLinkRoutes, linkSessionUser } from "../routes/bot-link.ts";
@@ -35,6 +36,8 @@ export interface BotLinkHostDeps {
   /** A work thread a far bot opened here is named from the job it handed, behind "@Sender · ". */
   titleHanded?(botId: string, threadId: string, brief: string, prefix: string): void;
   refusal(bot: BotRecord): string | null;
+  /** The person paused this bot, or its plan keeps it asleep: the other places are told, so they do not offer it. */
+  paused?(botId: string): boolean;
   language(threadId: string): string | undefined;
   personName(threadId: string): string | undefined;
   sessions: { issue(input: { label: string; scopes: Array<"admin" | "client">; email?: string; userId?: string }): { token: string; session: { id: string } }; revoke(id: string): boolean };
@@ -46,6 +49,8 @@ export interface BotLinkHostDeps {
   storeFile(path: string, name: string, root: string): Promise<{ attachment: { kind: string; path: string; mime: string; name?: string }; bytes: number }>;
   log(line: string): void;
 }
+
+type PlacesElsewhere = ReturnType<typeof createPlacesElsewhere>;
 
 /** Another place's body tint and fur land here only as valid values, since the avatar paints them. */
 const bodyColor = (value: string | undefined) => {
@@ -93,6 +98,7 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
     dataDir: deps.dataDir, coordinator: deps.coordinator, kick: deps.kick, log: deps.log, rooms, directoryChanged: () => { syncStandIns(); }, revoke: (sessionId) => { deps.sessions.revoke(sessionId); },
     bots: () => store.bots, bot: (id) => store.bot(id),
     refusal: (bot) => deps.refusal(bot as BotRecord),
+    paused: (bot) => deps.paused?.(bot.id) ?? false,
     model: (bot) => (bot as BotRecord).modelSelection.model,
     level: (bot) => deps.level(bot as BotRecord),
     openThread: (bot, title, opener, brief) => {
@@ -131,9 +137,11 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
   });
   const dialer = createDialer({ link, log: deps.log });
   let stopWatching: (() => void) | undefined, upkeep: NodeJS.Timeout | undefined;
-  /** While the link is on: bot changes reach the other places, and old records and stray file bytes are cleared hourly. */
+  /** While the link is on: bot changes reach the other places, and old records and stray file bytes are cleared hourly.
+   * Every change to a bot can change what the other places are told (a bot made, renamed, hidden, moved, its look, model
+   * or level); the link tells them once changes settle, and only what did change. */
   const watch = () => {
-    stopWatching ??= store.onChange((change) => { if (change.type.startsWith("bot.")) link.botsChanged(); });
+    stopWatching ??= store.onChange((change) => { if (link.on() && (change.type === "bot" || change.type === "bot.deleted" || change.type === "bots.order")) link.botsChanged(); });
     watchRooms();
     if (upkeep) return;
     upkeep = setInterval(() => link.tidy(), 60 * 60_000);
@@ -153,6 +161,13 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
     revoke: (sessionId) => { deps.sessions.revoke(sessionId); } });
   return {
     link, routes, rooms,
+    /** Why no bot here has the name a bot asked for, past "no such bot". With the link on, the other places' bots it can
+     * reach are listed and nothing says another place cannot be reached; a team, which the link never joins, is named as
+     * before. Off: what the person's app said of their other places, as always. */
+    explain(name: string, places: Pick<PlacesElsewhere, "explain" | "kindOf">): Explained {
+      if (!link.on() || places.kindOf(name) === "team") return places.explain(name);
+      return { hint: link.reachableElsewhere() };
+    },
     /** Once the server is up. Off: nothing. On, on the computer: it starts asking the Cloud. */
     start(): void {
       // Off: nothing, unless a room here still has a member from another place, which is then found and shown as away.

@@ -51,6 +51,10 @@ const FILE_TRIES = 3;
 /** A file that could not cross yet is tried again after this long, doubling up to five minutes. */
 const FILE_RETRY_MS = 5_000;
 const FILE_RETRY_MAX_MS = 5 * 60_000;
+/** This place's bots changed: the other places hear the new list once changes settle, so a burst of them is one hello. */
+const TELL_AFTER_MS = 250;
+/** Under changes that do not stop, the other places still hear at least this often. */
+const TELL_WITHIN_MS = 1_500;
 
 /** How a computer moves a file's bytes: it puts the ones it sends and gets the ones it is sent. `holds`: the Cloud already
  * has this file, so it is not sent again. `gone` on an error: the Cloud said it will not take it or has no such file, so
@@ -156,6 +160,12 @@ export interface BotLinkDeps {
   revoke?(sessionId: string): void;
   now?: () => number;
   log?(line: string): void;
+  /** How long after the last change to this place's bots the other places are told (TELL_AFTER_MS), and the longest a
+   * change waits while more keep coming (TELL_WITHIN_MS). */
+  tellAfterMs?: number;
+  tellWithinMs?: number;
+  /** The person paused this bot, or the plan keeps it asleep: it takes no work now. */
+  paused?(bot: LocalBot): boolean;
 }
 
 export interface CoordinateContext {
@@ -170,8 +180,9 @@ export interface CoordinateContext {
   handed(nodeId: string): void;
 }
 type Remote = { peer: string; bot: LinkedBot };
-/** `level`: what that place's version reads (protocol.ts), 1 until it says more. `told`: the level its last hello was made for. */
-type Live = { online: boolean; seq: number; outbox: Numbered[]; level: number; told?: number };
+/** `level`: what that place's version reads (protocol.ts), 1 until it says more. `told`: the level its last hello was made
+ * for, and `bots` the list it carried. */
+type Live = { online: boolean; seq: number; outbox: Numbered[]; level: number; told?: number; bots?: string };
 
 export type BotLink = ReturnType<typeof createBotLink>;
 
@@ -194,7 +205,8 @@ export function createBotLink(deps: BotLinkDeps) {
   /** Hand-offs whose result came: the rest that end here (cut by restarts, refused, stopped) are stopped where they run. */
   const resulted = new Set<string>();
   let alive: NodeJS.Timeout | undefined;
-  let toldBots = "";
+  /** A change to this place's bots waits here to be told, since `tellingSince`. */
+  let telling: NodeJS.Timeout | undefined, tellingSince = 0;
   /** Hand-offs whose files are being taken in, and results whose files are being sent: one at a time each. */
   const accepting = new Set<string>(), resultsGoing = new Set<string>();
   /** What waits to be tried again because a file could not cross yet, by what it is for. */
@@ -205,12 +217,14 @@ export function createBotLink(deps: BotLinkDeps) {
   const linkOf = (peer: string): Live => { let one = live.get(peer); if (!one) { one = { online: false, seq: 0, outbox: [], level: 1 }; live.set(peer, one); } return one; };
   const isOnline = (peer: string) => live.get(peer)?.online === true;
   const placeName = (peer: string) => state?.peers[peer]?.place.name ?? "the other place";
-  const directory = (): LinkedBot[] => deps.bots().filter((bot) => !bot.hidden && !bot.movedTo && /^[\w-]{1,128}$/u.test(bot.id)).map((bot) => ({
+  /** A bot that moved to another place for good leaves a hidden stub here; one still moving is here and says so. */
+  const movedAway = (bot: LocalBot) => (bot.movedTo as { state?: unknown } | null | undefined)?.state === "moved";
+  const directory = (): LinkedBot[] => deps.bots().filter((bot) => !bot.hidden && !movedAway(bot) && /^[\w-]{1,128}$/u.test(bot.id)).map((bot) => ({
     id: bot.id, name: bot.name, ...(bot.title ? { title: bot.title.slice(0, 200) } : {}), ...(bot.description ? { description: bot.description.slice(0, 400) } : {}),
     ...(deps.model?.(bot) ? { model: deps.model(bot)!.slice(0, 200) } : {}), level: deps.level(bot),
     ...(bot.color ? { color: bot.color.slice(0, 64) } : {}), ...(bot.mascotBody ? { mascotBody: bot.mascotBody.slice(0, 64) } : {}), ...(bot.mascotFaceColor ? { mascotFaceColor: bot.mascotFaceColor.slice(0, 64) } : {}),
     ...(bot.mascotBodyColor ? { mascotBodyColor: bot.mascotBodyColor.slice(0, 64) } : {}), ...(bot.mascotMaterial ? { mascotMaterial: bot.mascotMaterial.slice(0, 64) } : {}),
-    ...(bot.chiefOfStaff ? { chief: true } : {}), ...(bot.threadId ? { threadId: bot.threadId } : {}),
+    ...(bot.chiefOfStaff ? { chief: true } : {}), ...(bot.threadId ? { threadId: bot.threadId } : {}), ...(deps.paused?.(bot) ? { paused: true } : {}),
   })).slice(0, 500);
 
   function send(peer: string, frame: Frame): void {
@@ -221,12 +235,22 @@ export function createBotLink(deps: BotLinkDeps) {
   }
   /** A place on the first version takes a hello only with the fields that version knows. */
   const basic = ({ id, name, title, description, model, level }: LinkedBot): LinkedBot => ({ id, name, ...(title ? { title } : {}), ...(description ? { description } : {}), ...(model ? { model } : {}), ...(level ? { level } : {}) });
-  const hello = (peer: string) => {
+  const hello = (peer: string, bots = directory()) => {
     if (!state) return;
-    const bots = directory(), one = linkOf(peer);
-    toldBots = JSON.stringify(bots);
+    const one = linkOf(peer);
+    one.bots = JSON.stringify(bots);
     one.told = one.level;
+    // A hello not yet taken says less than this one: only the newest goes.
+    one.outbox = one.outbox.filter((entry) => entry.frame.t !== "hello");
     send(peer, { t: "hello", place: state.self, bots: one.level >= 2 ? bots : bots.map(basic) });
+  };
+  /** Each place that was told this place's bots and now holds another list hears the new one. A place not yet in a session
+   * hears it when its session starts, and one that is away when it is back. */
+  const tellBots = () => {
+    telling = undefined;
+    if (!state) return;
+    const bots = directory(), listed = JSON.stringify(bots);
+    for (const peer of Object.keys(state.peers)) { const one = live.get(peer); if (one?.bots !== undefined && one.bots !== listed) hello(peer, bots); }
   };
 
   const spoolRoot = join(deps.dataDir, SPOOL);
@@ -316,16 +340,31 @@ export function createBotLink(deps: BotLinkDeps) {
    * A bot's id here, in any case, or the start of one (8+ characters), stays with the local resolver, so a bot elsewhere
    * named after it never takes that bot's work or its files. */
   function resolve(raw: string): Remote | undefined {
-    if (!state) return undefined;
+    const matches = candidates(raw), awake = matches.length > 1 ? matches.filter((remote) => !remote.bot.paused) : matches;
+    return awake.length === 1 ? awake[0] : undefined;
+  }
+  /** Every bot of another place `raw` could name, by the rules of `resolve`: one is that bot, more say nothing. */
+  function candidates(raw: string): Remote[] {
+    if (!state) return [];
     const wanted = raw.trim(), lower = wanted.toLowerCase();
-    const local = deps.bots();
-    if (local.some((bot) => bot.id.toLowerCase() === lower)) return undefined;
-    if (isLinkedId(wanted)) return remoteOf(wanted);
-    if (isIdStart(wanted) && local.some((bot) => bot.id.toLowerCase().startsWith(lower))) return undefined;
+    // A bot that moved away is named by its own id still: that is the bot of the place it moved to, never its stub here.
+    const stub = deps.bots().find((bot) => movedAway(bot) && bot.id.toLowerCase() === lower);
+    if (stub) return Object.entries(state.peers).flatMap(([peer, known]) => known.bots.filter((bot) => bot.id === stub.id).map((bot) => ({ peer, bot })));
+    const local = deps.bots().filter((bot) => !movedAway(bot));
+    if (local.some((bot) => bot.id.toLowerCase() === lower)) return [];
+    if (isLinkedId(wanted)) { const remote = remoteOf(wanted); return remote ? [remote] : []; }
+    if (isIdStart(wanted) && local.some((bot) => bot.id.toLowerCase().startsWith(lower))) return [];
     const named = foldName(wanted);
-    if (!named || local.some((bot) => !bot.hidden && foldName(bot.name) === named)) return undefined;
-    const matches = Object.entries(state.peers).flatMap(([peer, known]) => known.bots.filter((bot) => foldName(bot.name) === named).map((bot) => ({ peer, bot })));
-    return matches.length === 1 ? matches[0] : undefined;
+    if (!named || local.some((bot) => !bot.hidden && foldName(bot.name) === named)) return [];
+    return Object.entries(state.peers).flatMap(([peer, known]) => known.bots.filter((bot) => foldName(bot.name) === named).map((bot) => ({ peer, bot })));
+  }
+  /** A name more than one bot of the other places has (and no bot here): which one is meant, by its address. */
+  function sharedName(raw: string): string | null {
+    // A bot its place paused would refuse the work, so it is no choice to offer.
+    const matches = candidates(raw).filter((remote) => !remote.bot.paused);
+    if (matches.length < 2) return null;
+    const listed = matches.slice(0, 12).map((remote) => `${remote.bot.name} on ${placeName(remote.peer)} (id ${linkedId(remote.peer, remote.bot.id)})`).join("; ");
+    return `${matches.length} bots of the person's other places are named "${raw.trim().slice(0, 120)}", so nothing was sent: ${listed}${matches.length > 12 ? `; and ${matches.length - 12} more` : ""}. Send it again with the id of the one you mean.`;
   }
 
   const offlineNote = (peer: string) => `${placeName(peer)} is offline now (off, asleep or not connected), so this waits and is delivered when it is back`;
@@ -612,8 +651,11 @@ export function createBotLink(deps: BotLinkDeps) {
     if (!state) return;
     const was = state;
     state = null;
-    try { rmSync(file, { force: true }); } catch (error) { log(`bot link: its record was not removed (${String(error)})`); }
+    clearTimeout(telling);
+    telling = undefined;
+    // The end is written down before the link's record goes, so a server stopped in between still tells its Cloud later.
     if (!told && was.role === "dialer" && was.origin && was.token) writeEnded([...readEnded().filter((one) => one.token !== was.token), { origin: was.origin, token: was.token, at: now() }]);
+    try { rmSync(file, { force: true }); } catch (error) { log(`bot link: its record was not removed (${String(error)})`); }
     if (was.role === "acceptor") for (const known of Object.values(was.peers)) if (known.sessionId) deps.revoke?.(known.sessionId);
     const peers = [...live.keys()];
     live.clear();
@@ -633,6 +675,7 @@ export function createBotLink(deps: BotLinkDeps) {
   /** coordinate_bots for targets that live in another place; the rest go on as they always did (`local`). */
   async function coordinate(call: CoordinateBotsCall, context: CoordinateContext, local: (call: CoordinateBotsCall) => Promise<CoordinateResult>): Promise<CoordinateResult> {
     if (!state || context.external) return local(call);
+    for (const raw of call.botIds) { const shared = sharedName(raw); if (shared) return { status: 403, body: { error: shared } }; }
     const away = new Map<string, Remote>();
     for (const raw of call.botIds) { const remote = resolve(raw); if (remote) away.set(raw, remote); }
     if (away.size === 0) return local(call);
@@ -766,6 +809,16 @@ export function createBotLink(deps: BotLinkDeps) {
     /** Every bot of every linked place, with its address here. `kind`: what that place is, in the words the sidebar's
      * own rows use for where a bot lives: a computer links to its Cloud, a Cloud to computers. */
     linked: () => Object.entries(state?.peers ?? {}).flatMap(([peer, known]) => known.bots.map((bot) => ({ id: linkedId(peer, bot.id), peer, place: known.place, kind: state!.role === "dialer" ? "cloud" as const : "computer" as const, online: isOnline(peer), bot }))),
+    /** What a bot that named no bot here or there is told past "no such bot" while the link is on: the other places' bots
+     * it can reach through the link, each by the id that reaches it. */
+    reachableElsewhere(): string {
+      if (!state) return "";
+      const far = Object.entries(state.peers).flatMap(([peer, known]) => known.bots.filter((bot) => !bot.paused).map((bot) => ({ peer, bot })));
+      const places = [...new Set(Object.keys(state.peers).map(placeName))].join(", ");
+      if (!far.length) return `This place is linked to ${places}, but no bot there can be reached through the link now.`;
+      const listed = far.slice(0, 12).map(({ peer, bot }) => `${bot.name} on ${placeName(peer)} (id ${linkedId(peer, bot.id)})`).join(", ");
+      return `Through the link to ${places} you can also reach: ${listed}${far.length > 12 ? `, and ${far.length - 12} more` : ""}.`;
+    },
     /** Other places' bots as list_bots names them. */
     agents: () => Object.entries(state?.peers ?? {}).flatMap(([peer, known]) => known.bots.map((bot) => ({ id: linkedId(peer, bot.id), name: bot.name, section: "", model: bot.model ?? "", busy: false,
       status: isOnline(peer) ? "linked" : "offline", statusText: isOnline(peer) ? `on ${known.place.name}` : `on ${known.place.name}, offline now: work for it waits until it is back`,
@@ -817,8 +870,17 @@ export function createBotLink(deps: BotLinkDeps) {
     },
     /** Housekeeping, at start and once a day: old records go, and on the Cloud a computer long gone is unlinked. */
     tidy(): void { prune(); expire(); sweep(); },
-    /** This place's bots changed: connected places hear the new list. */
-    botsChanged(): void { if (state && JSON.stringify(directory()) !== toldBots) for (const [peer, one] of live) if (one.online) hello(peer); },
+    /** This place's bots changed (one was made, renamed, hidden, moved, deleted, paused, its look, model or level changed):
+     * once changes settle (or every TELL_WITHIN_MS while they do not), the other places hear the new list, and nothing when
+     * what they are told did not change. */
+    botsChanged(): void {
+      if (!state) return;
+      const at = Date.now();
+      if (!telling) tellingSince = at;
+      clearTimeout(telling);
+      telling = setTimeout(tellBots, Math.max(0, Math.min(deps.tellAfterMs ?? TELL_AFTER_MS, tellingSince + (deps.tellWithinMs ?? TELL_WITHIN_MS) - at)));
+      telling.unref?.();
+    },
     setOnline,
     /** What that place's version reads, as its last exchange said. One that turns out to read more than its last hello
      * was made for is told again, in full. */
@@ -881,6 +943,6 @@ export function createBotLink(deps: BotLinkDeps) {
     onWanted(listener: () => void): () => void { wantedListeners.add(listener); return () => wantedListeners.delete(listener); },
     sleeps: () => state?.sleeps === true,
     setSleeps(sleeps: boolean): void { if (state && state.role === "dialer" && (state.sleeps === true) !== sleeps) { state.sleeps = sleeps; save(); } },
-    close(): void { if (alive) clearInterval(alive); alive = undefined; for (const retry of retries.values()) clearTimeout(retry.timer); retries.clear(); outboundListeners.clear(); wantedListeners.clear(); },
+    close(): void { if (alive) clearInterval(alive); alive = undefined; clearTimeout(telling); telling = undefined; for (const retry of retries.values()) clearTimeout(retry.timer); retries.clear(); outboundListeners.clear(); wantedListeners.clear(); },
   };
 }
