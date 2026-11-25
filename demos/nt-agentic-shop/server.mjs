@@ -361,7 +361,7 @@ tick();setInterval(tick,1000);
 function publicState() {
   return {
     products: state.products,
-    orders: state.orders.map(({ payToken, shipment, ...o }) => ({
+    orders: state.orders.map(({ payToken: _payToken, shipment, ...o }) => ({
       ...o,
       shipment: shipment ? shipmentView({ ...o, shipment }) : null,
     })),
