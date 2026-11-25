@@ -10307,6 +10307,7 @@
   "serverError.wait.alreadyEnded": "This wait has already ended.",
   "chat.notice.failoverSignedInAgain": "{engine} is signed in again, so this conversation is back on {engine}.",
   "chat.notice.failoverSignedOut": "{from} is signed out, so {to} took over.",
+  "chat.notice.signedInAgain": "{engine} is signed in again.",
   "serverError.botDefaults.nameLength": "name must be at most 100 characters",
   "serverError.botDefaults.sectionLength": "section must be at most 60 characters",
   "serverError.botDefaults.invalid": "These bot settings are not valid.",

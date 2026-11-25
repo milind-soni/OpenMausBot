@@ -410,7 +410,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       if (signedOut) {
         emit({ ...base(threadId, turnId), type: "turn.started" });
         emit({ ...base(threadId, turnId), type: "runtime.error", message: codexNotSignedIn(), setup: true });
-        emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "auth_required", cost: null });
+        emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "auth_required", cost: null, unsent: true });
         return { turnId };
       }
       const retryScale = Number(process.env.FAKE_CODEX_RETRY_SCALE ?? "1");

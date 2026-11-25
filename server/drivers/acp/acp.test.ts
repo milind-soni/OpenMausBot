@@ -2550,7 +2550,7 @@ describe("ACP turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-auth-required", text: "go" });
     const done = await recorder.until((e) => e.type === "turn.completed");
 
-    expect(done).toMatchObject({ ok: false, stopReason: "auth_required" });
+    expect(done, "refused at session/new: the prompt never went out").toMatchObject({ ok: false, stopReason: "auth_required", unsent: true });
     expect(recorder.events.find((e) => e.type === "runtime.error")).toMatchObject({ setup: true });
   });
 
@@ -3092,6 +3092,7 @@ describe("ACP turns (fake CLI)", () => {
         setup: true,
       })]);
       expect(completed).toMatchObject({ ok: false, stopReason: "auth_required" });
+      expect(completed, "refused after the prompt went out").not.toHaveProperty("unsent");
     });
 
     it("names any other ACP engine out of credits the same way", async () => {

@@ -11,6 +11,8 @@ type Flow = {
   starting: boolean;
   revoked: boolean;
   revision: number;
+  /** Its success was told: a client reading the finished flow again is not another sign-in. */
+  told?: true;
 };
 
 const failure = (message: string, status: number) => Object.assign(new Error(message), { status });
@@ -79,7 +81,10 @@ export class ProviderAuthSessions {
     const status = await flow.instance.getAuthentication(flowId);
     if (flow.revoked || this.flows.get(instanceId) !== flow || flow.flowId !== flowId || flow.revision !== revision) throw failure("This sign-in session ended.", 404);
     if (status.phase !== "waiting" && status.phase !== "verifying") flow.expiresAt = 0;
-    if (status.phase === "succeeded") this.signedIn(instanceId);
+    if (status.phase === "succeeded" && !flow.told) {
+      flow.told = true;
+      this.signedIn(instanceId);
+    }
     return status;
   }
 

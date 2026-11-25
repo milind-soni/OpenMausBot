@@ -96,7 +96,7 @@ describe.skipIf(WINDOWS)("signing in to the native Antigravity CLI", () => {
     expect(await instance.snapshot()).toMatchObject({ authenticated: false });
     const after = await turn(instance, "native-loop-again", fixture.directory);
     expect(after.events).toContainEqual(expect.objectContaining({ type: "runtime.error", message: expect.stringContaining(LOGIN_NOTE), setup: true }));
-    expect(after.done).toMatchObject({ ok: false, stopReason: "auth_required" });
+    expect(after.done).toMatchObject({ ok: false, stopReason: "auth_required", unsent: true });
 
     expect(fixture.methods()).not.toContain("authenticate");
   }, 120_000);

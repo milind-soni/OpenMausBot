@@ -147,6 +147,8 @@ export class ProviderRegistry {
   private snapshotGeneration = 0;
   private manifestWatched = false;
   private readonly signedInListeners = new Set<(instanceId: InstanceId) => void>();
+  /** The last read that said plainly whether each engine is signed in: a read that does not say keeps it. */
+  private readonly lastAuth = new Map<InstanceId, boolean>();
   /** Per instance object: settings that reload an engine make a new one, so its status is read afresh. */
   private readsOf = new WeakMap<ProviderInstance, { snapshot: ProviderSnapshot; at: number; generation: number }>();
   private driversByKind: Map<string, AnyProviderDriver>;
@@ -635,7 +637,9 @@ export class ProviderRegistry {
       this.unread?.delete(instance.instanceId);
       this.saveStatus();
       if (!inconclusive) this.healWrongCli(instance.instanceId, snapshot);
-      if (before?.authenticated === false && snapshot.state === "available" && snapshot.authenticated === true) {
+      const knew = this.lastAuth.get(instance.instanceId) ?? before?.authenticated;
+      if (!inconclusive && snapshot.state === "available" && typeof snapshot.authenticated === "boolean") this.lastAuth.set(instance.instanceId, snapshot.authenticated);
+      if (knew === false && snapshot.state === "available" && snapshot.authenticated === true) {
         for (const listener of this.signedInListeners) listener(instance.instanceId);
       }
     }

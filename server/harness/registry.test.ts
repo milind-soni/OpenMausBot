@@ -231,6 +231,26 @@ describe("ProviderRegistry", () => {
     expect(heard, "signed in all along: nothing new to tell").toEqual(["a"]);
   });
 
+  it("tells its listeners of a sign-in when a read between said nothing about the sign-in", async () => {
+    let authenticated: boolean | undefined = false;
+    const fake = makeFakeDriver({ get answer() { return { state: "available" as const, version: "1.0.0", ...(authenticated === undefined ? {} : { authenticated }) }; } });
+    const registry = new ProviderRegistry([fake.driver]);
+    await registry.load({ a: { driver: "fake" } });
+    const heard: string[] = [];
+    registry.onSignedIn((instanceId) => heard.push(instanceId));
+    const read = async () => {
+      registry.forgetSnapshots();
+      await registry.describe();
+    };
+    await read();
+    authenticated = undefined;
+    await read();
+    expect(heard).toEqual([]);
+    authenticated = true;
+    await read();
+    expect(heard).toEqual(["a"]);
+  });
+
   it("describe() reports a snapshot() failure as unavailable rather than throwing", async () => {
     const fake = makeFakeDriver({ failSnapshot: "provider probe exploded" });
     const registry = new ProviderRegistry([fake.driver]);

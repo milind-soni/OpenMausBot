@@ -511,7 +511,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         active.delete(threadId); if (current.state.stopped) endBackground(threadId, session);
         const end = endTurn(current, ok, stopReason, support.displayName);
         if (end.error) emit({ ...base(threadId, current.turnId), type: "runtime.error", ...end.error });
-        emit({ ...base(threadId, current.turnId), type: "turn.completed", ok: end.ok, stopReason: end.stopReason, cost: null });
+        emit({ ...base(threadId, current.turnId), type: "turn.completed", ok: end.ok, stopReason: end.stopReason, cost: null, ...(end.stopReason === "auth_required" && !current.state.promptSent ? { unsent: true as const } : {}) });
         if (session.child.exitCode === null && !session.closing && !session.dead) {
           armIdle(threadId);
           recycleWhenIdle(session.host);
@@ -889,7 +889,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           if (!authenticated) {
             emit({ ...base(threadId, turnId), type: "turn.started" });
             emit({ ...base(threadId, turnId), type: "runtime.error", message: support.loginNote, setup: true });
-            emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "auth_required", cost: null });
+            emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "auth_required", cost: null, unsent: true });
             return { turnId };
           }
         }
