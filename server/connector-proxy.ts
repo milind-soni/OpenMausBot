@@ -38,7 +38,8 @@ const MAX_RESPONSE_BYTES = 20 * 1024 * 1024;
 const INITIALIZE_RELAY_TIMEOUT_MS = 1_000;
 const RELAY_TIMEOUT_MS = 10 * 60_000;
 const TOOLS_LIST_RETRY_MS = 500;
-const TOOLS_LIST_RELAY_TIMEOUT_MS = 5_000;
+// Both listing attempts together: Antigravity's CLI drops a stdio server whose tool list is not back ~5 s after it starts.
+const TOOLS_LIST_BUDGET_MS = 3_000;
 
 function parsedHeaders(): Record<string, string> {
   try {
@@ -281,10 +282,14 @@ function refusedListing(failure: { status?: number } | Json | null): boolean {
 
 async function listTools(message: Json): Promise<Json> {
   let refused = false;
+  const deadline = Date.now() + TOOLS_LIST_BUDGET_MS;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    if (attempt) await delay(TOOLS_LIST_RETRY_MS);
+    if (attempt) {
+      if (deadline - Date.now() <= TOOLS_LIST_RETRY_MS) break;
+      await delay(TOOLS_LIST_RETRY_MS);
+    }
     try {
-      const response = await relay(message, TOOLS_LIST_RELAY_TIMEOUT_MS);
+      const response = await relay(message, deadline - Date.now());
       if (response && !response.error && Array.isArray((response.result as Json | undefined)?.tools)) return response;
       refused = refusedListing(response);
     } catch (error) {
