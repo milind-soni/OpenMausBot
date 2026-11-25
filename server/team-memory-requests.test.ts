@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DecisionRow } from "./decision-log.ts";
 import { TeamMemory } from "./team-memory.ts";
@@ -48,6 +48,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await removeTempDir(dir);
 });
 
@@ -116,6 +117,16 @@ describe("forget", () => {
     failAppend = false;
     expect(requests.forget(scout, "t1", false, { kind: "term", name: "OKR" }, "", "level")).toMatchObject({ status: 201, body: { status: "applied" } });
     expect(accepted()).toEqual([]);
+  });
+
+  it("keeps the append error when the put-back fails too, and logs the entry id", () => {
+    save("OKR", "The quarter's goals.");
+    const id = memory.list("")[0]!.id;
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(memory, "undoRemove").mockImplementation(() => { throw new Error("save failed"); });
+    failAppend = true;
+    expect(() => requests.forget(scout, "t1", false, { kind: "term", name: "OKR" }, "", "level")).toThrow("disk full");
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining(id), expect.objectContaining({ message: "save failed" }));
   });
 
   it("removes nothing when no accepted entry matches, and says how to find one", () => {

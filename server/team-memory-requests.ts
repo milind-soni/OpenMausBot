@@ -133,7 +133,12 @@ export function createTeamMemoryRequests(deps: TeamMemoryRequestDeps) {
         });
       } catch (error) {
         // The card is the only receipt and the only Undo, so a removal without a card is put back. Then a retry finds the entry.
-        if (direct && revision) teamMemory.undoRemove(from.section, entry.id, revision);
+        // A failed put-back must not hide the append error, so it is only logged, with the id to restore by hand.
+        if (direct && revision) {
+          const lost = `team memory: forgotten entry ${entry.id} could not be put back after its card failed`;
+          try { if (!teamMemory.undoRemove(from.section, entry.id, revision)) console.error(lost); }
+          catch (undoError) { console.error(lost, undoError); }
+        }
         throw error;
       }
       deps.decide({ threadId, requestId, botId: from.id, botName: from.name, tool: TOOL, summary,
