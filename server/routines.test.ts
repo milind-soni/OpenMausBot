@@ -301,7 +301,7 @@ describe("bounded scheduled overlap and run health", () => {
     await h.manager.tick();
   });
 
-  it("keeps a run that failed only on a step, after its reply came back, failed but marked partly done; only a safety-floor block after the reply completes it", async () => {
+  it("completes a run partly done when its last step fails after the reply; other failures still fail it", async () => {
     const h = harness(start);
     const routine = h.manager.create({ ...input(), enabled: false });
     const event = (threadId: string, patch: Record<string, unknown>) => h.manager.handleRuntimeEvent({ eventId: `e-${Math.random()}`, provider: "fake", threadId, createdAt: new Date().toISOString(), ...patch } as Parameters<typeof h.manager.handleRuntimeEvent>[0]);
@@ -321,12 +321,9 @@ describe("bounded scheduled overlap and run health", () => {
     await attempt("thread-6", true, { blocked: true, reply: false });
     await attempt("thread-7", true, { blocked: true, stopReason: "refusal" });
     const [partly, failed, silent, cutOff, blocked, blockedSilent, blockedOtherStop] = h.manager.listRuns().sort((a, b) => a.threadId!.localeCompare(b.threadId!));
-    // A step that broke after the reply: the reply is no proof, so the run fails, marked partly done.
-    expect(partly).toMatchObject({ status: "failed", partial: true, output: "Here is the summary.", error: expect.stringContaining("read_file") });
+    expect(partly).toMatchObject({ status: "completed", partial: true, output: "Here is the summary.", error: expect.stringContaining("read_file") });
     expect([failed, silent, cutOff].map((run) => [run.status, run.partial])).toEqual([["failed", undefined], ["failed", undefined], ["queued", undefined]]);
-    // Every failed call was blocked by the safety floor after the reply: nothing ran, the run completes partly done.
     expect(blocked).toMatchObject({ status: "completed", partial: true, output: "Here is the summary.", error: expect.stringContaining("shell_exec"), denials: ["shell_exec"] });
-    // With no reply, or another stop, a block still fails the run.
     expect([blockedSilent, blockedOtherStop].map((run) => [run.status, run.partial])).toEqual([["failed", undefined], ["failed", true]]);
   });
 

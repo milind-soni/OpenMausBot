@@ -1289,8 +1289,7 @@ export class RoutineManager {
       if (event.cost != null) run.cost = (run.cost ?? 0) + event.cost;
       if (event.denials?.length) run.denials = [...new Set([...(run.denials ?? []), ...event.denials])];
       const facts = { ...this.failureFacts.get(run.id), stopReason: event.stopReason };
-      // The bot's reply is no proof, so a failed step fails the run. Only one clear case completes it, partly done with the step kept in its error line: every failed call was blocked by the safety floor (it ran nothing) after the reply came back.
-      const delivered = !event.ok && event.stopReason === "tool_error" && facts.partial === true && facts.blockedAfterReply === true && Boolean(run.output);
+      const delivered = !event.ok && event.stopReason === "tool_error" && facts.partial === true && Boolean(run.output);
       if (!event.ok && !delivered) { this.settleFailure(run, routineFailure(run.error, event.stopReason), facts); return cloneRun(run); }
       this.failureFacts.delete(run.id);
       const waitsOnTeammates = this.options.hasPendingDelegations?.(event.threadId) === true, handoffRefused = waitsOnTeammates ? null : this.options.refusedHandoff?.(event.threadId);

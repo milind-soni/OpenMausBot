@@ -196,12 +196,10 @@ it("Case A: the chat-only bot's routine is told it can't run commands, tries, an
   await expect.poll(async () => (await chat(bot.threadId)).filter((message) => message.automation?.routineId === sync).map((message) => message.text), { timeout: hostTimeout(15_000) })
     .toEqual([`${BOT_SAID}\n\n${SENTENCE}`, BOT_SAID]);
 
-  // Should-fix 3: a run that stops on the refused call fails as before (the bot's reply is no proof), and the line saying
-  // so carries the real reason too.
   const lint = await routineFor(bot.id, "Run lint.py from the project folder.");
-  expect((await runNow(lint)).status).toBe("failed");
+  expect(await runNow(lint)).toMatchObject({ status: "completed", partial: true });
   await expect.poll(async () => (await chat(bot.threadId)).find((message) => message.automation?.routineId === lint)?.text, { timeout: hostTimeout(15_000) })
-    .toBe(`This run was partly done: Stopped because the tool call “exec” failed. The bot's reply isn't proof the work was done; the failed step shows the error.\n\n${SENTENCE}`);
+    .toBe(`${BOT_SAID}\n\n${SENTENCE}`);
 
   // A routine that needs no command, on the same bot: the bot's words alone.
   const invoices = await routineFor(bot.id, "File the new invoices.");

@@ -38,8 +38,8 @@ export interface RoutineFailureFacts {
   text?: ServerText;
   /** The turn's reply came back; only a step it ran failed or wasn't allowed (the runtime error's `partial`). */
   partial?: boolean;
-  /** With `partial`: the only failed calls were blocked by the safety floor after the reply came back (the runtime
-   * error's `blockedAfterReply`). Such a run completes, partly done; any other failed step still fails it. */
+  /** With `partial`: every failed call was blocked by the safety floor after the reply came back (the runtime error's
+   * `blockedAfterReply`). */
   blockedAfterReply?: boolean;
 }
 
