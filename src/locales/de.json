@@ -223,6 +223,8 @@
   "server.room.turns": "Wartet auf einen Platz: Dieser Server führt {limit} Aufgaben gleichzeitig aus. Davor in der Reihe: {ahead}. Es startet von selbst, sobald eine fertig ist.",
   "server.room.turnsStill": "Wartet noch: Dieser Server führt {limit} Aufgaben gleichzeitig aus. Davor in der Reihe: {ahead}.",
   "chat.notice.outOfProcesses": "Es ist kein Platz, um ein weiteres Programm zu starten ({code}), deshalb konnte diese Aufgabe nicht laufen. An die KI wurde nichts gesendet. Sie startet von selbst neu, sobald Platz ist.",
+  "chat.notice.cloudBusyStart": "Diese Cloud ist gerade zu ausgelastet, um die KI zu starten, deshalb lief diese Aufgabe nicht. Warte eine Minute und sende sie erneut, beende eine aufwendige laufende Aufgabe oder wechsle für mehr Platz zu einem größeren Plan.",
+  "chat.notice.cloudOutOfCpu": "Deiner Cloud ist für diese Aufgabe die CPU ausgegangen, deshalb konnte die KI nicht starten und nichts lief. Warte eine Minute und sende sie erneut, beende eine aufwendige laufende Aufgabe oder wechsle für mehr CPU zu einem größeren Plan.",
   "server.botPaused": "Pausiert: Starter hält {limit} Bots wach. Führe ein Upgrade durch, um ihn zu wecken, oder tausche, welche Bots wach sind.",
   "server.starter.routineRanPaused": "@{bot} kümmert sich um „{routine}“ und bleibt sonst pausiert: Starter hält {limit} Bots wach. Seine Routinen und Auslöser laufen trotzdem; um mit ihm zu chatten, schreib ihm eine Nachricht und wähle, welche Bots wach bleiben.",
   "server.starter.routineWoke": "@{bot} wurde für „{routine}“ geweckt: Starter hält {limit} Bots wach, deshalb ist @{out}, der eine Weile nichts zu tun hatte, jetzt pausiert. Um das rückgängig zu machen, schreib @{out} eine Nachricht und wähle, welche Bots wach bleiben.",

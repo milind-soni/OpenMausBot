@@ -6155,5 +6155,7 @@
   "phone.reach.offAdding": "Kapalı · Telefon eklemek bunları açar",
   "settings.nav.devicesNeedYou": "Bir cihazın veya özel ağın ilgilenmenize ihtiyacı var",
   "settings.nav.phoneConnectedAllClear": "Bir telefon bağlı ve hiçbir şeyin ilgilenmenize ihtiyacı yok",
-  "keys.vps.ownServer": "Kendi sunucunuz (SSH)"
+  "keys.vps.ownServer": "Kendi sunucunuz (SSH)",
+  "chat.notice.cloudBusyStart": "Bu Cloud şu anda yapay zekâyı başlatamayacak kadar meşgul, bu yüzden bu görev çalışmadı. Bir dakika bekleyip yeniden gönderin, çalışan ağır bir görevi durdurun ya da daha fazla yer için daha büyük bir plana geçin.",
+  "chat.notice.cloudOutOfCpu": "Cloud'unuzun bu görev için CPU'su yetmedi, bu yüzden yapay zekâ başlayamadı ve hiçbir şey çalışmadı. Bir dakika bekleyip yeniden gönderin, çalışan ağır bir görevi durdurun ya da daha fazla CPU için daha büyük bir plana geçin."
 }

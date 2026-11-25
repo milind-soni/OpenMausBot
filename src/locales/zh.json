@@ -10384,5 +10384,7 @@
   "phone.reach.offAdding": "已关闭 · 添加手机会开启这些",
   "settings.nav.devicesNeedYou": "有设备或私有网络需要你处理",
   "settings.nav.phoneConnectedAllClear": "有一部手机已连接，没有需要你处理的事",
-  "keys.vps.ownServer": "你自己的服务器 (SSH)"
+  "keys.vps.ownServer": "你自己的服务器 (SSH)",
+  "chat.notice.cloudBusyStart": "这个 Cloud 现在太忙，无法启动 AI，所以这个任务没有运行。请等一分钟后再发送，停止一个正在运行的繁重任务，或换用更大的方案以获得更多空间。",
+  "chat.notice.cloudOutOfCpu": "你的 Cloud 没有足够的 CPU 来处理这个任务，所以 AI 无法启动，什么也没有运行。请等一分钟后再发送，停止一个正在运行的繁重任务，或换用更大的方案以获得更多 CPU。"
 }

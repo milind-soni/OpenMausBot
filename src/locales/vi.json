@@ -6155,5 +6155,7 @@
   "phone.reach.offAdding": "Tắt · Thêm điện thoại sẽ bật các mục này",
   "settings.nav.devicesNeedYou": "Một thiết bị hoặc mạng riêng cần bạn",
   "settings.nav.phoneConnectedAllClear": "Một điện thoại đang kết nối, và không có gì cần bạn",
-  "keys.vps.ownServer": "Máy chủ của riêng bạn (SSH)"
+  "keys.vps.ownServer": "Máy chủ của riêng bạn (SSH)",
+  "chat.notice.cloudBusyStart": "Cloud này hiện quá bận để khởi động AI, nên việc này chưa chạy. Hãy chờ một phút rồi gửi lại, dừng một việc nặng đang chạy, hoặc chuyển sang gói lớn hơn để có thêm chỗ.",
+  "chat.notice.cloudOutOfCpu": "Cloud của bạn đã hết CPU cho việc này, nên AI không khởi động được và chưa có gì chạy. Hãy chờ một phút rồi gửi lại, dừng một việc nặng đang chạy, hoặc chuyển sang gói lớn hơn để có thêm CPU."
 }

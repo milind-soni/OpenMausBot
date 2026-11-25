@@ -4068,5 +4068,7 @@
   "phone.reach.offAdding": "Désactivé · Ajouter un téléphone les active",
   "settings.nav.devicesNeedYou": "Un appareil ou le réseau privé a besoin de vous",
   "settings.nav.phoneConnectedAllClear": "Un téléphone est connecté, et rien n’a besoin de vous",
-  "keys.vps.ownServer": "Votre propre serveur (SSH)"
+  "keys.vps.ownServer": "Votre propre serveur (SSH)",
+  "chat.notice.cloudBusyStart": "Ce Cloud est trop occupé pour démarrer l'IA en ce moment, donc cette tâche n'a pas été exécutée. Attendez une minute et renvoyez-la, arrêtez une tâche lourde en cours ou passez à un plan supérieur pour avoir plus de place.",
+  "chat.notice.cloudOutOfCpu": "Votre Cloud a manqué de CPU pour cette tâche, donc l'IA n'a pas pu démarrer et rien n'a été exécuté. Attendez une minute et renvoyez-la, arrêtez une tâche lourde en cours ou passez à un plan supérieur pour avoir plus de CPU."
 }

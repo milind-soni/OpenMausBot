@@ -6660,5 +6660,7 @@
   "phone.reach.offAdding": "Desactivado · Al añadir un teléfono se activan",
   "settings.nav.devicesNeedYou": "Un dispositivo o la red privada te necesita",
   "settings.nav.phoneConnectedAllClear": "Hay un teléfono conectado y nada te necesita",
-  "keys.vps.ownServer": "Tu propio servidor (SSH)"
+  "keys.vps.ownServer": "Tu propio servidor (SSH)",
+  "chat.notice.cloudBusyStart": "Esta Cloud está demasiado ocupada ahora mismo para iniciar la IA, así que esta tarea no se ejecutó. Espera un minuto y vuelve a enviarla, detén una tarea pesada que esté en marcha o pasa a un plan mayor para tener más espacio.",
+  "chat.notice.cloudOutOfCpu": "Tu Cloud se quedó sin CPU para esta tarea, así que la IA no pudo iniciarse y no se ejecutó nada. Espera un minuto y vuelve a enviarla, detén una tarea pesada que esté en marcha o pasa a un plan mayor para tener más CPU."
 }

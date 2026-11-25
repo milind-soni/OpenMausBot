@@ -119,6 +119,10 @@ export interface LoopStallsOptions {
   resumed?: (gapMs: number) => void;
 }
 
+/** The started recorder's longest event-loop delay over the last full minute and the one under way, ms; null when none runs. */
+let longestRecent: (() => number) | null = null;
+export const recentLoopDelayMs = (): number | null => longestRecent?.() ?? null;
+
 export function createLoopStalls(options: LoopStallsOptions = {}) {
   const resolutionMs = options.resolutionMs ?? STALL_RESOLUTION_MS;
   const histogram = options.histogram ?? monitorEventLoopDelay({ resolution: resolutionMs });
@@ -146,6 +150,7 @@ export function createLoopStalls(options: LoopStallsOptions = {}) {
     idleSince = idle();
     if (paused !== null) options.resumed?.(Math.round(paused));
   };
+  const longest = () => Math.max(minutes.at(-1)?.maxMs ?? 0, histogram.count ? lateMs(histogram.max, resolutionMs) : 0);
   return {
     start() {
       if (timer) return;
@@ -154,11 +159,13 @@ export function createLoopStalls(options: LoopStallsOptions = {}) {
       idleSince = lastIdleSince = idle();
       timer = setInterval(roll, minuteMs);
       timer.unref?.();
+      longestRecent = longest;
     },
     stop() {
       if (timer) clearInterval(timer);
       timer = undefined;
       histogram.disable();
+      if (longestRecent === longest) longestRecent = null;
     },
     /** Rolls the minute now (tests). */
     roll,

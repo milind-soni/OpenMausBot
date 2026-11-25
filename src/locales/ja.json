@@ -8194,5 +8194,7 @@
   "phone.reach.offAdding": "オフ · スマホを追加するとこれらがオンになります",
   "settings.nav.devicesNeedYou": "デバイスまたはプライベートネットワークの対応が必要です",
   "settings.nav.phoneConnectedAllClear": "スマホが接続されていて、対応が必要なものはありません",
-  "keys.vps.ownServer": "自分のサーバー (SSH)"
+  "keys.vps.ownServer": "自分のサーバー (SSH)",
+  "chat.notice.cloudBusyStart": "この Cloud は今とても混み合っていて AI を起動できなかったため、このタスクは実行されませんでした。1 分ほど待ってからもう一度送るか、実行中の重いタスクを止めるか、余裕のあるより大きなプランに切り替えてください。",
+  "chat.notice.cloudOutOfCpu": "このタスクのための CPU が Cloud で足りなくなったため、AI を起動できず、何も実行されませんでした。1 分ほど待ってからもう一度送るか、実行中の重いタスクを止めるか、CPU に余裕のあるより大きなプランに切り替えてください。"
 }

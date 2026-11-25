@@ -1820,7 +1820,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     const snapshot = async (): Promise<ProviderSnapshot> => {
       const env = environment();
       const probe = await readCliVersion(env);
-      if (!("version" in probe)) return { state: "unavailable", reason: probe.reason };
+      if (!("version" in probe)) return { state: "unavailable", ...probe }; // `busy` when the check could not finish
       const { version } = probe;
       [cliVersion, cliVersionChecked, cliProbedAt] = [parseClaudeCliVersion(version), true, findCliCandidates(config.cli, env.PATH ?? "")[0]];
       if (!config.managed && !config.endpointModels) models = withCliVersionGate(models, "claude", cliVersion);

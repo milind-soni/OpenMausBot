@@ -10437,6 +10437,8 @@
   "chat.notice.memoryReclaimedOnly": "Memoria esaurita, quindi ho interrotto questa attività per evitare che tutto si blocchi.",
   "chat.notice.memoryReclaimedOnlyDetail": "Memoria esaurita, quindi ho interrotto questa attività per evitare che tutto si blocchi. ({detail})",
   "chat.notice.outOfProcesses": "Spazio insufficiente per avviare un altro programma ({code}), quindi questa attività non è stata eseguita. Non è stato inviato nulla all'AI. Ripartirà automaticamente non appena ci sarà spazio.",
+  "chat.notice.cloudBusyStart": "Questo Cloud è troppo occupato in questo momento per avviare l'IA, quindi questa attività non è partita. Aspetta un minuto e inviala di nuovo, ferma un'attività pesante in corso o passa a un piano più grande per avere più spazio.",
+  "chat.notice.cloudOutOfCpu": "Il tuo Cloud ha esaurito la CPU per questa attività, quindi l'IA non è partita e non è stato eseguito nulla. Aspetta un minuto e inviala di nuovo, ferma un'attività pesante in corso o passa a un piano più grande per avere più CPU.",
   "server.personFirst.stoppedSeconds": "ha fermato un passo per {seconds} s, per rispondere prima",
   "server.personFirst.stoppedMinutes": "ha fermato un passo per {minutes} min, per rispondere prima",
   "server.runOwner.onlyAskerStops": "Solo {name} o un amministratore può fermare questo.",

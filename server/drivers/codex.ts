@@ -56,7 +56,7 @@ import { codexAccountEmail, codexHome } from "./codex-identity.ts";
 import { keepChatsOutOfCodexHistory, linkSharedCodexHome } from "./codex-shared-home.ts";
 import { mcpAppApprovalForm, mcpAppApprovalText, mcpElicitationDeclined, plainRecord } from "./codex-app-approval.ts";
 import { archivedNativeCodexThread, CODEX_MISSING_CREDENTIALS, codexProviderMismatch, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, CodexRpcError, codexSignInExpired, codexPlanModelRefused, codexPlanUnsupportedInput, codexSignInRefused, codexUserError, codexUserFailure, missingNativeCodexThread, type CodexRoute } from "./codex-errors.ts";
-import { codexTierOf } from "./codex-tier.ts"; import { codexLoginCheck, readCodexLogin, storedCodexLogin } from "./codex-login.ts";
+import { codexTierOf } from "./codex-tier.ts"; import { codexLoginCheck, keptCodexLogin, readCodexLogin, storedCodexLogin } from "./codex-login.ts";
 import { keyRejected, noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
 import { extractMcpImages } from "../mcp-tool-images.ts"; import { codexImageInputs, withoutInlineImages } from "./codex-images.ts";
@@ -1395,11 +1395,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     return { turnId };
   };
 
-  const readCliVersion = cliVersionProbe(config.cli);
+  const readCliVersion = cliVersionProbe(config.cli), signedIn = keptCodexLogin();
   const snapshot = async (): Promise<ProviderSnapshot> => {
     const env = childEnv();
     const probe = await readCliVersion(env);
-    if (!("version" in probe)) return { state: "unavailable", reason: probe.reason, ...(plan ? { chatgptPlan: true } : {}) };
+    if (!("version" in probe)) return { state: "unavailable", ...probe, ...(plan ? { chatgptPlan: true } : {}) }; // `busy` when the check could not finish
     const { version } = probe;
     const warning = planWarning ?? (planAuth && !planRenewal.noteVersion(version) ? "Update Codex to 0.165.0 or newer to renew ChatGPT credentials during a running task." : undefined);
     if (planAuth) return { state: "available", version, chatgptPlan: true, billing: "subscription", ...await planAuth.snapshot(), update: await codexReleaseUpdate(version, config.cli),
@@ -1409,7 +1409,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     const previousCliVersion = modelsCliVersion;
     modelsCliVersion = version;
     if (previousCliVersion !== null && previousCliVersion !== version) await refreshModels();
-    const login = await readCodexLogin(config.cli, env), authenticated = login.status === "signed-in";
+    const login = await readCodexLogin(config.cli, env), authenticated = signedIn(login);
     if (authenticated && loginRejected()) {
       return { state: "available", version, authenticated: false, reason: CODEX_SIGN_IN_EXPIRED,
         update: await codexReleaseUpdate(version, config.cli), billing: "subscription" };

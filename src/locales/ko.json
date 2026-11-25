@@ -7884,5 +7884,7 @@
   "phone.reach.offAdding": "꺼짐 · 휴대폰을 추가하면 이 설정이 켜져요",
   "settings.nav.devicesNeedYou": "기기나 사설 네트워크를 확인해야 해요",
   "settings.nav.phoneConnectedAllClear": "휴대폰이 연결되어 있고 확인할 것이 없어요",
-  "keys.vps.ownServer": "내 서버 (SSH)"
+  "keys.vps.ownServer": "내 서버 (SSH)",
+  "chat.notice.cloudBusyStart": "지금 이 Cloud가 너무 바빠서 AI를 시작하지 못해 이 작업은 실행되지 않았어요. 1분 정도 기다렸다가 다시 보내거나, 실행 중인 무거운 작업을 멈추거나, 여유 있는 더 큰 요금제로 바꿔 주세요.",
+  "chat.notice.cloudOutOfCpu": "이 작업에 쓸 CPU가 Cloud에서 부족해 AI를 시작하지 못했고 아무것도 실행되지 않았어요. 1분 정도 기다렸다가 다시 보내거나, 실행 중인 무거운 작업을 멈추거나, CPU가 더 많은 더 큰 요금제로 바꿔 주세요."
 }
