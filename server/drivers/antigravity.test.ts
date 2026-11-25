@@ -990,6 +990,8 @@ describe("Antigravity driver over shared ACP", () => {
       // runtime only accepts the base model plus its thinking-level option.
       model: "gemini-3.8-flash-high",
       integrations: {
+        // One of OpenMausBot's own: the Classic runtime keeps it as a stdio proxy, the native CLI gets it by URL.
+        agents: { command: process.execPath, args: ["/app/dist-server/drivers/agents-proxy.js"], env: { OMB_HARNESS_URL: "http://127.0.0.1:8799", OMB_COMMS_TOKEN: "comms" } },
         custom: { docs: { command: "docs-mcp", args: ["serve"], env: { TOKEN: "scoped" } } },
       },
       cwd: fake.directory,
@@ -1022,7 +1024,10 @@ describe("Antigravity driver over shared ACP", () => {
       { method: "session/set_config_option", params: { sessionId: "fake-acp-session", configId: "thinking_level", value: "high" } },
     ]);
     const mcp = JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8"));
-    expect(mcp).toEqual([{ name: "docs", command: "docs-mcp", args: ["serve"], env: [{ name: "TOKEN", value: "scoped" }] }]);
+    expect(mcp).toEqual([
+      { name: "agents", command: process.execPath, args: ["/app/dist-server/drivers/agents-proxy.js"], env: [{ name: "OMB_HARNESS_URL", value: "http://127.0.0.1:8799" }, { name: "OMB_COMMS_TOKEN", value: "comms" }] },
+      { name: "docs", command: "docs-mcp", args: ["serve"], env: [{ name: "TOKEN", value: "scoped" }] },
+    ]);
     // Checked on every OS, so the macOS and Linux runs prove the dump carries TEMP.
     const expectedTemp = process.platform === "win32" ? antigravityTempDir(DATA_DIR, instanceId) : fake.directory;
     expect([dumpState.env.TEMP, dumpState.env.TMP]).toEqual([expectedTemp, expectedTemp]);

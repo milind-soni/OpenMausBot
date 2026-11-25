@@ -503,6 +503,24 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
     expect(recorder.events.some((event) => event.type === "runtime.error" && /did not report its permission mode/u.test(event.message))).toBe(true);
   }, 90_000);
 
+  it("hands the CLI OpenMausBot's own servers as endpoints of this server, no proxy process to start", async () => {
+    const fake = cli();
+    const instance = await create("antigravity-cli-own-http", fake.executable, { FAKE_ACP_MODES: "default,plan", FAKE_ACP_DUMP: fake.dump });
+    const recorder = recordEvents(instance.adapter);
+    const harness = "http://127.0.0.1:8799";
+    const { turnId } = await instance.adapter.sendTurn({
+      threadId: "cli-own-http", text: "hello", approvalMode: "full", cwd: fake.directory,
+      integrations: {
+        agents: { command: process.execPath, args: ["/app/dist-server/drivers/agents-proxy.js"], env: { OMB_HARNESS_URL: harness, OMB_COMMS_TOKEN: "synthetic-comms" } },
+        composio: { command: process.execPath, args: ["/app/dist-server/connector-proxy.js"], env: {} },
+      },
+    });
+    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: true });
+    const sent = JSON.parse(readFileSync(`${fake.dump}.mcp.json`, "utf8")) as Array<{ name: string; type?: string; url?: string; command?: string }>;
+    expect(sent.find((server) => server.name === "agents")).toMatchObject({ type: "http", url: `${harness}/api/internal/mcp-http/agents` });
+    expect(sent.find((server) => server.name === "composio")).toMatchObject({ command: process.execPath });
+  }, 90_000);
+
   const RULES = "Rules. If the user sends /learn or asks you to save a procedure, use skill_manage.";
   const MEMORY = " Memory: likes /plan mode.";
 

@@ -262,6 +262,11 @@ const support: AcpSupport = {
   },
   processStarted: (child, instanceId) => launched.get(instanceId)?.nativeCli === true ? trackNative(instanceId, child) : runtimeProcesses.track(instanceId, child),
   sessionSetupParams: antigravitySessionSetup,
+  // The native CLI (1.5.16) drops a stdio server that has not listed its tools ~5 s after it starts, for the whole session,
+  // and does not advertise mcpCapabilities.http though it takes URL servers: on Windows our own proxy processes (OpenMausBot
+  // run as Node) can miss that. By URL nothing is started. The Classic runtime keeps its stdio proxies.
+  ownMcpOverHttp: "advertised",
+  takesHttpMcp: (_initialized, instanceId) => launched.get(instanceId)?.nativeCli === true,
   sessionSystemPrompt: (initialized, instanceId) => launched.get(instanceId)?.nativeCli === true && antigravityTakesSystemPrompt(initialized),
   // One model family's quota is not the account's: Gemini and the models that share another allowance keep running.
   limitFacts: (_text, model) => antigravityLimitFacts(model, [...support.models.options.map((option) => option.id), ...offeredModels]),

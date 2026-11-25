@@ -123,6 +123,10 @@ describe("an ACP engine", () => {
     expect(acpSessionMcpServers(servers, "advertised", { agentCapabilities: {} })).toBe(servers);
     expect(acpSessionMcpServers(servers, "advertised", { agentCapabilities: { mcpCapabilities: { http: "yes" } } })).toBe(servers);
     expect(acpSessionMcpServers(servers, "stdio", http)).toBe(servers);
+    // A driver that knows better than the agent's initialize: Antigravity's native CLI takes URL servers unadvertised.
+    expect(acpSessionMcpServers(servers, "advertised", http, false)).toBe(servers);
+    expect(acpSessionMcpServers(servers, "advertised", { agentCapabilities: {} }, true)).toEqual(acpSessionMcpServers(servers, "advertised", http));
+    expect(acpSessionMcpServers(servers, "stdio", { agentCapabilities: {} }, true)).toBe(servers);
     const sent = acpSessionMcpServers(servers, "advertised", http);
     expect(sent.map((server) => "type" in server ? `${server.name}:${server.url}` : server.name)).toEqual([
       ...["agents", "browser", "computer", "data", "email", "device"].map((name) => `${name}:${HARNESS}/api/internal/mcp-http/${name}`),

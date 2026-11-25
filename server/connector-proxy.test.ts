@@ -503,6 +503,17 @@ describe("connector MCP bridge", () => {
     expect(reply.result.tools).toEqual([{ name: "COMPOSIO_MANAGE_CONNECTIONS" }]);
   });
 
+  it("lists its own tools within 3 s while connected apps stall, inside the strictest client's start-up wait", async () => {
+    // Antigravity's CLI 1.5.16 drops a stdio server for the whole session when its tool list is not back ~5 s after start.
+    const upstream = await listen((request) => { request.resume(); });
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream });
+    const started = Date.now();
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 42, method: "tools/list", params: {} })}\n`);
+    const reply = await nextJson(lines);
+    expect(Date.now() - started).toBeLessThan(3_500);
+    expect(reply.result.tools.map((tool: { name: string }) => tool.name)).toEqual(expect.arrayContaining(["COMPOSIO_SEARCH_TOOLS", "COMPOSIO_MULTI_EXECUTE_TOOL"]));
+  }, 15_000);
+
   it("keeps the MCP server available when connected apps are not configured", async () => {
     const lines = start({});
     child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/list", params: {} })}\n`);
@@ -571,7 +582,8 @@ describe("connector MCP bridge", () => {
     const reply = await nextJson(lines);
     expect(reply.id).toBe(5);
     expect(reply.result.tools.map((tool: { name: string }) => tool.name)).toEqual(SERVICE_TOOLS);
-    expect(listings).toBe(2);
+    // A stalled service spends the whole listing budget on one ask; only a quick failure is asked again.
+    expect(listings).toBe(1);
   });
 
   it("still lists the service's own tools beside the Gmail and Calendar app tools when discovery fails, and sends their calls on", async () => {
