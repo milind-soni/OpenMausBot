@@ -11,18 +11,18 @@ export type ToolCallFields = { [field in (typeof FIELDS)[number]]?: any };
 export class ToolCallDetails {
   private readonly calls = new Map<string, ToolCallFields>();
 
-  /** A field left out or null keeps its earlier value. */
-  record(update: Record<string, any>): void {
+  /** A tool_call starts the call afresh; in a tool_call_update a field left out or null keeps its earlier value. */
+  record(update: Record<string, any>, isNewCall = false): void {
     const id = update.toolCallId;
     if (typeof id !== "string" || !id) return;
-    const known = this.calls.get(id) ?? {};
+    const known = isNewCall ? {} : this.calls.get(id) ?? {};
     this.calls.delete(id);
     for (const field of FIELDS) if (update[field] !== undefined && update[field] !== null) known[field] = update[field];
     this.calls.set(id, known);
     if (this.calls.size > MAX_CALLS) this.calls.delete(this.calls.keys().next().value!);
   }
 
-  /** The call as known so far, with the request's own fields over it. */
+  /** The call as known so far, with the request's own fields over it. For the card's text, never its policy. */
   merged(toolCall: Record<string, any>): ToolCallFields {
     const known = typeof toolCall.toolCallId === "string" ? this.calls.get(toolCall.toolCallId) : undefined;
     const merged: ToolCallFields = { ...known };

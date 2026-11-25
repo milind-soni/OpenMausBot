@@ -589,7 +589,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             if (!allow) missing("allow");
             return send({ jsonrpc: "2.0", id: msg.id, result: allow ? { outcome: { outcome: "selected", optionId: allow } } : cancelled });
           }
-          const kind = String(toolCall.kind ?? ""), shown = current.toolDetails.merged(toolCall), shownKind = String(shown.kind ?? "");
+          const kind = String(toolCall.kind ?? ""), shown = isQuestion ? toolCall : current.toolDetails.merged(toolCall); // shown: card text only
           const operationKey = isQuestion || current.controlsHost ? null : acpSessionOperationKey(toolCall);
           if (operationKey && acpAnswersAlone(toolCall.rawInput) && sessionAllows.get(threadId)?.has(operationKey)) {
             const allow = optionFor("allow");
@@ -598,7 +598,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             }
           }
           const mcpTitle = !isQuestion && !/^(?:execute|edit|delete|move)$/.test(kind) && typeof toolCall.title === "string" && /^mcp__[\w-]+__[\w.-]+$/.test(toolCall.title) ? toolCall.title : undefined; // an MCP call keeps its name, so a saved grant finds it
-          const tool = mcpTitle ?? (shownKind === "execute" ? "shell" : shownKind === "edit" ? "edit" : shownKind || "tool");
+          const tool = mcpTitle ?? (kind === "execute" ? "shell" : kind === "edit" ? "edit" : kind || "tool");
           const isShellCommand = !isQuestion && kind === "execute" && !/^mcp(?:__|[.:])/i.test(String(toolCall.title ?? ""));
           const rawSummary = String(shown.rawInput?.command ?? shown.title ?? tool);
           const summary = rawSummary.slice(0, isQuestion ? MAX_QUESTION_TEXT : 200) + (!isQuestion && typeof shown.rawInput?.justification === "string" ? `\nReason: ${shown.rawInput.justification.slice(0, 300)}` : "");
@@ -750,7 +750,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             }
             case "tool_call": {
               current.flushAssistantText();
-              trackRunningTool(current, u, "pending"); current.toolDetails.record(u);
+              trackRunningTool(current, u, "pending"); current.toolDetails.record(u, true);
               // ACP can send a tool_call already marked completed or failed (e.g. on a denied permission) with no
               // tool_call_update after it.
               const itemId = (typeof u.toolCallId === "string" && u.toolCallId) ? u.toolCallId

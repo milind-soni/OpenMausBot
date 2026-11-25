@@ -1689,7 +1689,7 @@ describe("ACP turns (fake CLI)", () => {
 
   it("shows the earlier tool_call on a permission request that names the call only by toolCallId", async () => {
     const { opened } = await permissionCard("t-acp-card-id-only", [touch], { toolCallId: "call_1" });
-    expect(opened).toMatchObject({ requestType: "permission", tool: "shell", summary: "touch marker" });
+    expect(opened).toMatchObject({ requestType: "permission", tool: "tool", summary: "touch marker" }); // tool stays the request's: it drives policy
     expect(opened).toHaveProperty("command", undefined);
     expect(opened).toHaveProperty("requiresExplicitApproval", undefined);
   });
@@ -1699,7 +1699,7 @@ describe("ACP turns (fake CLI)", () => {
       { sessionUpdate: "tool_call", toolCallId: "call_1", title: "Bash", kind: "execute", status: "pending" },
       { sessionUpdate: "tool_call_update", toolCallId: "call_1", title: null, kind: null, rawInput: { command: "ls -la" } },
     ], { toolCallId: "call_1", title: "Bash" });
-    expect(opened).toMatchObject({ tool: "shell", summary: "ls -la" });
+    expect(opened).toMatchObject({ tool: "tool", summary: "ls -la" });
   });
 
   it("lets the permission request's own fields win over the earlier tool_call", async () => {
@@ -1722,11 +1722,30 @@ describe("ACP turns (fake CLI)", () => {
     const shell = await permissionCard("t-acp-card-sandbox", [sandbox], { toolCallId: "call_1", kind: "execute" });
     expect(shell.opened).toHaveProperty("command", undefined);
     expect(shell.opened).toHaveProperty("requiresExplicitApproval", undefined);
+    for (const kind of ["web_search", "mcp__notes__read_note"]) {
+      const earlier = { sessionUpdate: "tool_call", toolCallId: "call_1", title: "lookup", kind, status: "pending", rawInput: {} };
+      const card = await permissionCard(`t-acp-card-kind-${kind}`, [earlier], { toolCallId: "call_1" });
+      expect(card.opened).toMatchObject({ requestType: "permission", tool: "tool", summary: "lookup" });
+    }
+  });
+
+  it("keeps a question's own text when an earlier tool_call with the same id ran a command", async () => {
+    const earlier = { sessionUpdate: "tool_call", toolCallId: "interaction_1", title: "bash", kind: "execute", status: "pending", rawInput: { command: "echo something" } };
+    const { opened } = await permissionCard("t-acp-card-question", [earlier], { toolCallId: "interaction_1", title: "Which folder?" });
+    expect(opened).toMatchObject({ requestType: "question", summary: "Which folder?" });
+  });
+
+  it("starts afresh when a new tool_call reuses a toolCallId in the same turn", async () => {
+    const { opened } = await permissionCard("t-acp-card-reused-id", [
+      touch,
+      { sessionUpdate: "tool_call", toolCallId: "call_1", title: "read notes.md", kind: "read", status: "pending" },
+    ], { toolCallId: "call_1" });
+    expect(opened).toMatchObject({ tool: "tool", summary: "read notes.md" });
   });
 
   it("forgets a turn's tool calls when the next turn asks about the same toolCallId", async () => {
     const first = await permissionCard("t-acp-card-turns", [touch], { toolCallId: "call_1" });
-    expect(first.opened).toMatchObject({ tool: "shell", summary: "touch marker" });
+    expect(first.opened).toMatchObject({ tool: "tool", summary: "touch marker" });
     const { turnId } = await instance.adapter.sendTurn({ threadId: "t-acp-card-turns", text: "again", cwd: scratch });
     const second = await recorder.until((event) => event.type === "request.opened" && event.turnId === turnId);
     expect(second).toMatchObject({ tool: "tool", summary: "tool" });
