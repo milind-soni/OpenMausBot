@@ -72,7 +72,8 @@ try {
   const on0Tools = lastTools();
   check("default: bridged with no switch, nothing dropped", on0Tools?.hidden.length === 0 && on0Tools?.visible.includes("mcp_agents_find_tool"), { bytes: on0Tools?.bytes, hidden: on0Tools?.hidden });
   check("default: the person's own server is mounted", on0Tools?.visible.some((name: string) => name.startsWith("mcp_notes_")) === true);
-  check("default: the native CLI reaches the agents server by URL", on0Tools?.transports?.agents === "http", on0Tools?.transports);
+  check("default: the native CLI reaches the agents and data servers by URL", on0Tools?.transports?.agents === "http" && on0Tools?.transports?.data === "http", on0Tools?.transports);
+  check("default: the data server's tools are listed", on0Tools?.visible.some((name: string) => name.startsWith("mcp_data_")) === true);
 
   await api("PUT", "/api/config", { features: { agentsToolBridge: false } });
   const off1 = await say(chief.id, "fake-agy: tools\nfake-agy: call agents/coordinate_bots {\"bot_ids\":[\"Helper\"],\"message\":\"x\"}", "bridge off: tools the model sees");

@@ -110,10 +110,11 @@ export class McpConnection {
   static async open(name: string, server: AcpMcpServer, cwd: string, clientVersion: string): Promise<McpConnection> {
     const connection = new McpConnection(name, server, cwd);
     await connection.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "antigravity", version: clientVersion } });
-    connection.notify("notifications/initialized");
+    await connection.notify("notifications/initialized");
     let cursor: unknown;
     do {
       const listed = await connection.request("tools/list", cursor === undefined ? {} : { cursor });
+      if (listed.error) throw new Error(`${name}: tools/list failed: ${JSON.stringify(listed.error)}`);
       const result = (listed.result ?? {}) as { tools?: McpTool[]; nextCursor?: unknown };
       connection.tools.push(...(result.tools ?? []));
       cursor = result.nextCursor;
@@ -138,9 +139,9 @@ export class McpConnection {
     });
   }
 
-  private notify(method: string): void {
+  private async notify(method: string): Promise<void> {
     const message = { jsonrpc: "2.0", method };
-    if (isHttp(this.server)) void this.post(message, 10_000);
+    if (isHttp(this.server)) await this.post(message, 10_000);
     else this.child?.stdin?.write(`${JSON.stringify(message)}\n`);
   }
 
