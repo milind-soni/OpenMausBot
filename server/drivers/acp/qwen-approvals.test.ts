@@ -5,8 +5,8 @@ import { qwenApprovalArgs } from "./qwen.ts";
 
 describe("qwenApprovalArgs", () => {
   it("passes each level through as the CLI's own flag", () => {
-    expect(qwenApprovalArgs(false, "ask")).toEqual([]);
-    expect(qwenApprovalArgs(false, undefined)).toEqual([]);
+    expect(qwenApprovalArgs(false, "ask")).toEqual(["--approval-mode", "default"]);
+    expect(qwenApprovalArgs(false, undefined)).toEqual(["--approval-mode", "default"]);
     expect(qwenApprovalArgs(false, "edits")).toEqual(["--approval-mode", "auto-edit"]);
     expect(qwenApprovalArgs(false, "auto")).toEqual(["--approval-mode", "auto"]);
     expect(qwenApprovalArgs(true, "full")).toEqual(["--yolo"]);
