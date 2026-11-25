@@ -88,9 +88,9 @@ afterEach(() => {
 describe.each([false, true])("the end of the message box (Advanced %s)", (advanced) => {
   beforeEach(() => { fixture.advanced = advanced; });
 
-  it("keeps one order in every state, adding only Stop in front and the follow-up place while a turn runs", () => {
+  it("keeps one order in every state, with Stop in the context ring's place and the follow-up place while a turn runs", () => {
     const idle = ["context", "mic", "end"];
-    const running = ["stop", "context", "mic", "follow-up", "end"];
+    const running = ["stop", "mic", "follow-up", "end"];
     render(false);
     expect(row(), "empty").toEqual(idle);
     type("a draft");

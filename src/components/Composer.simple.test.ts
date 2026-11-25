@@ -223,13 +223,16 @@ describe("the Simple composer in a bot chat", () => {
     expectBotButton(sendButton(), "yellow");
   });
 
-  it("keeps Stop beside Call while the bot works, and lets Send take Call's place once there is text", () => {
+  it("keeps Stop beside Call while the bot works, in place of the context ring, and lets Send take Call's place once there is text", () => {
+    render({ bot });
+    expect(container.querySelector("[data-composer-context]")).not.toBeNull();
     const busy = { ...bot, busy: true };
     render({ bot: busy });
     const stop = container.querySelector<HTMLButtonElement>("[data-composer-stop]")!;
     expect(stop.getAttribute("aria-label")).toBe("Stop this turn");
     expect(stop.className.split(" ")).toEqual(expect.arrayContaining(["size-7", "bg-ink/[0.06]"]));
     expect(fixture.call).toMatchObject({ bot: { id: "atlas" }, placement: "composer" });
+    expect(container.querySelector("[data-composer-context]")).toBeNull();
     click(stop);
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "interrupt", botId: "atlas", threadId: "atlas-thread" });
 

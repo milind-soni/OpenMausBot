@@ -525,7 +525,8 @@ export function Composer({
   const calling = callTarget !== undefined && (onCall === callTarget || (isLiveCallRunning(media.phase) && media.botId === callTarget));
   const mayAct = useMayAct(), mayStop = !sharedChat || mayAct(profile?.tasks?.find((task) => task.threadId === threadId)?.askedBy);
   const stoppable = (busy || Boolean(!group && bot?.waitingForTeammates)) && mayStop;
-  // Each control keeps its place: Stop leads the row, so it comes and goes without moving the others, and Send takes Call's place.
+  // Each control keeps its place: Stop takes the context ring's place while a turn runs, since a partial ring beside it reads as a
+  // loading spinner, and Send takes Call's place.
   const callShown = singleRow || !hasContent || calling;
   const slot = slotColors(bot?.color, Boolean(group));
   // A bot at work: Enter does the chosen follow-up and Ctrl/⌘ with it the other one. A room joins in when its speaking engine can steer,
@@ -939,7 +940,7 @@ export function Composer({
             <Square size={simpleDock ? 10 : 14} className="fill-current" />
           </button>
         )}
-        {!locked && <ComposerContextMenu bot={bot} group={group} members={members} className={cn(simpleDock ? "size-7" : "size-8", advanced || singleRow ? "text-ink-secondary hover:bg-raised hover:text-ink" : SIMPLE_CONTROL)} />}
+        {!locked && !stoppable && <ComposerContextMenu bot={bot} group={group} members={members} className={cn(simpleDock ? "size-7" : "size-8", advanced || singleRow ? "text-ink-secondary hover:bg-raised hover:text-ink" : SIMPLE_CONTROL)} />}
         {micShown && (
           <button
             onClick={toggleMic}
