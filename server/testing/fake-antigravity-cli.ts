@@ -21,10 +21,20 @@
 //   FAKE_AGY_KEYRING        a folder that stands for the OS keyring: the sign-in is kept there, one entry per --gemini-dir,
 //                           and only `logout` removes it; ignored while SSH_CONNECTION is set, as the real CLI ignores the
 //                           keyring then
+//   FAKE_AGY_TOOL_BUDGET    bytes of tool definitions the model sees before the largest are dropped (default 60000)
+//   FAKE_AGY_OPTIONS        JSON array of permission options to offer instead of 1.5.x's allow / deny
+//   FAKE_AGY_EXIT_DELAY_MS  how long the process lingers after stdin closes or SIGTERM, as a slow exit
+// MCP servers and tool calls follow fake-antigravity-mcp.ts. A prompt line `fake-agy: call <server>/<tool> <JSON args>`
+// stands for the model calling that tool: a tool the model cannot see is answered with `NOTOOL`, any other asks
+// permission as 1.5.14 does (tool_call, then session/request_permission with `allow` / `deny`), runs the tool once
+// allowed and answers `RESULT`; a cancelled answer holds the turn until session/cancel, as 1.5.x does.
+// `fake-agy: tools` answers the names the model sees.
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
+
+import { DEFAULT_TOOL_BUDGET, ServerNames, SessionTools, type AcpStdioServer } from "./fake-antigravity-mcp.ts";
 
 const argv = process.argv.slice(2);
 const version = process.env.FAKE_AGY_VERSION ?? "1.5.14";
@@ -114,10 +124,111 @@ const configOptions = () => [
   },
 ];
 
+const serverNames = new ServerNames();
+const sessionTools = new Map<string, SessionTools>();
+const sessionsDir = join(stateDir, "fake-sessions");
+const budget = Number(process.env.FAKE_AGY_TOOL_BUDGET ?? DEFAULT_TOOL_BUDGET);
+const clientAnswers = new Map<string, (message: { result?: unknown; error?: unknown }) => void>();
+const cancels = new Map<string, () => void>();
+let clientRequests = 0;
+let toolCalls = 0;
+
+type Params = { sessionId?: string; configId?: string; value?: string; cwd?: string; mcpServers?: AcpStdioServer[]; prompt?: Array<{ type?: string; text?: string }> };
+
+function askClient(method: string, params: unknown): Promise<{ result?: unknown; error?: unknown }> {
+  const id = String(++clientRequests);
+  return new Promise((resolveAnswer) => {
+    clientAnswers.set(id, resolveAnswer);
+    out({ id, method, params });
+  });
+}
+
+async function mountTools(sessionId: string, params: Params): Promise<void> {
+  sessionTools.get(sessionId)?.close();
+  const mounted = await SessionTools.mount(params.mcpServers ?? [], { names: serverNames, cwd: params.cwd ?? process.cwd(), stateDir, budget, version });
+  sessionTools.set(sessionId, mounted);
+  log({ event: "tools", sessionId, visible: mounted.visible(), hidden: mounted.hidden() });
+}
+
+const update = (sessionId: string, value: Record<string, unknown>) => out({ method: "session/update", params: { sessionId, update: value } });
+const say = (sessionId: string, text: string) => update(sessionId, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+
+/** Runs one `fake-agy: call` line; false when the turn was cancelled. */
+async function callTool(sessionId: string, target: string, argsText: string): Promise<boolean> {
+  const [serverName, toolName] = target.split("/");
+  const found = sessionTools.get(sessionId)?.find(serverName ?? "", toolName ?? "");
+  if (!found) {
+    say(sessionId, `NOTOOL ${target}\n`);
+    return true;
+  }
+  let args: Record<string, unknown> = {};
+  try { args = argsText.trim() ? JSON.parse(argsText) as Record<string, unknown> : {}; } catch { args = {}; }
+  const shown = { ...args, toolSummary: `Run ${toolName}` };
+  const call = { toolCallId: `call_${process.pid}${++toolCalls}`, name: found.nativeName, args: shown, kind: "other", title: `Run ${found.nativeName}`, rawInput: shown };
+  update(sessionId, { sessionUpdate: "tool_call", ...call, status: "in_progress" });
+  update(sessionId, { sessionUpdate: "tool_call_update", ...call, status: "pending" });
+  const options = process.env.FAKE_AGY_OPTIONS ? JSON.parse(process.env.FAKE_AGY_OPTIONS) : [
+    { optionId: "allow", name: "Allow", kind: "allow_once" },
+    { optionId: "deny", name: "Deny", kind: "reject_once" },
+  ];
+  const answer = await askClient("session/request_permission", { sessionId, toolCall: { sessionUpdate: "tool_call", ...call, status: "pending" }, options });
+  const outcome = (answer.result as { outcome?: { outcome?: string; optionId?: string } } | undefined)?.outcome;
+  log({ event: "permission", sessionId, tool: found.nativeName, outcome });
+  if (outcome?.outcome !== "selected") {
+    await new Promise<void>((resolveCancel) => cancels.set(sessionId, resolveCancel));
+    return false;
+  }
+  const chosen = (options as Array<{ optionId: string; kind: string }>).find((option) => option.optionId === outcome.optionId);
+  if (!chosen?.kind.startsWith("allow")) {
+    update(sessionId, { sessionUpdate: "tool_call_update", ...call, status: "failed" });
+    say(sessionId, `DENIED ${target}\n`);
+    return true;
+  }
+  update(sessionId, { sessionUpdate: "tool_call_update", ...call, status: "in_progress" });
+  const called = await found.connection.request("tools/call", { name: toolName, arguments: args, _meta: { "antigravity.google/conversation_id": sessionId } });
+  log({ event: "tools/call", sessionId, server: found.connection.name, tool: toolName, pid: process.pid });
+  const content = ((called.result as { content?: Array<{ type?: string; text?: string }> } | undefined)?.content ?? []);
+  const text = content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+  const failed = called.error !== undefined || (called.result as { isError?: unknown } | undefined)?.isError === true;
+  update(sessionId, { sessionUpdate: "tool_call_update", ...call, status: failed ? "failed" : "completed", content: [{ type: "content", content: { type: "text", text } }] });
+  say(sessionId, `RESULT ${target}${failed ? " (error)" : ""}: ${text || JSON.stringify(called.error ?? null)}\n`);
+  return true;
+}
+
+async function prompt(id: unknown, params: Params): Promise<void> {
+  const sessionId = params.sessionId ?? "";
+  const text = (params.prompt ?? []).filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n");
+  const lines = [...text.matchAll(/^fake-agy:[ \t]*(\S+)[ \t]*(\S*)[ \t]*(.*)$/gmu)];
+  if (lines.length === 0) {
+    say(sessionId, "fixture reply");
+    return result(id, { stopReason: "end_turn" });
+  }
+  for (const [, verb, target, rest] of lines) {
+    if (verb === "tools") say(sessionId, `TOOLS ${(sessionTools.get(sessionId)?.visible() ?? []).join(" ")}\n`);
+    else if (verb === "call" && !(await callTool(sessionId, target ?? "", rest ?? ""))) return result(id, { stopReason: "cancelled" });
+  }
+  result(id, { stopReason: "end_turn" });
+}
+
+function exitSoon(code: number): void {
+  const delay = Number(process.env.FAKE_AGY_EXIT_DELAY_MS ?? 0);
+  log({ event: "exiting", delayMs: delay });
+  setTimeout(() => {
+    for (const tools of sessionTools.values()) tools.close();
+    process.exit(code);
+  }, delay);
+}
+process.on("SIGTERM", () => exitSoon(0));
+
 createInterface({ input: process.stdin }).on("line", async (line) => {
-  let message: { id?: unknown; method?: string; params?: { sessionId?: string; configId?: string; value?: string } };
+  let message: { id?: unknown; method?: string; params?: Params; result?: unknown; error?: unknown };
   try { message = JSON.parse(line); } catch { return; }
-  if (!message.method) return;
+  if (!message.method) {
+    const answer = clientAnswers.get(String(message.id));
+    clientAnswers.delete(String(message.id));
+    answer?.(message);
+    return;
+  }
   log({ method: message.method, signedIn: signedIn() });
   switch (message.method) {
     case "initialize":
@@ -146,13 +257,31 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
         result(message.id, {});
       }
       break;
-    case "session/new":
+    case "session/new": {
       if (process.env.FAKE_AGY_HANG === "session-new") return;
       if (process.env.FAKE_AGY_HANG === "crash") process.exit(3);
       if (process.env.FAKE_AGY_SESSION_ERROR) return failure(message.id, -32000, process.env.FAKE_AGY_SESSION_ERROR);
       if (!signedIn()) return failure(message.id, -32000, "Authentication required");
       sessions += 1;
-      result(message.id, { sessionId: `fixture-session-${process.pid}-${sessions}`, configOptions: configOptions() });
+      const sessionId = `fixture-session-${process.pid}-${sessions}`;
+      try { await mountTools(sessionId, message.params ?? {}); } catch (error) { return failure(message.id, -32603, `MCP setup failed: ${String(error)}`); }
+      mkdirSync(sessionsDir, { recursive: true });
+      writeFileSync(join(sessionsDir, sessionId), "");
+      result(message.id, { sessionId, configOptions: configOptions() });
+      break;
+    }
+    case "session/resume":
+    case "session/load": {
+      const sessionId = message.params?.sessionId ?? "";
+      if (!signedIn()) return failure(message.id, -32000, "Authentication required");
+      if (!sessionId || !existsSync(join(sessionsDir, sessionId))) return failure(message.id, -32000, "Session not found");
+      try { await mountTools(sessionId, message.params ?? {}); } catch (error) { return failure(message.id, -32603, `MCP setup failed: ${String(error)}`); }
+      result(message.id, { configOptions: configOptions() });
+      break;
+    }
+    case "session/cancel":
+      cancels.get(message.params?.sessionId ?? "")?.();
+      cancels.delete(message.params?.sessionId ?? "");
       break;
     case "session/set_config_option":
       if (message.params?.configId === "mode") mode = String(message.params.value);
@@ -160,10 +289,9 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
       result(message.id, { configOptions: configOptions() });
       break;
     case "session/prompt":
-      out({ method: "session/update", params: { sessionId: message.params?.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "fixture reply" } } } });
-      result(message.id, { stopReason: "end_turn" });
+      void prompt(message.id, message.params ?? {});
       break;
     default:
-      result(message.id, {});
+      if (message.id !== undefined) result(message.id, {});
   }
-}).on("close", () => process.exit(0));
+}).on("close", () => exitSoon(0));
