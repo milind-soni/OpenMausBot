@@ -9,9 +9,10 @@ import { antigravityProfileDirectory } from "./antigravity-acp.ts";
 import { antigravityCliAccessToken } from "./antigravity-account.ts";
 import { antigravityNativeTokenPath } from "./antigravity-native-status.ts";
 
-// Antigravity CLI 1.5.14 keeps one sign-in per computer in the OS keyring (on macOS the login keychain), unless it runs
-// over SSH: then each profile's is the file in that profile. This app always starts it as over SSH
-// (antigravity-acp.ts), so the profile's file is the account's sign-in, and the keychain is never read.
+// Antigravity CLI keeps one sign-in per computer in the OS keyring (on macOS the login keychain), unless it runs over
+// SSH (1.5.14, 1.5.15) or with AGY_CLI_FORCE_FILE_TOKEN_STORAGE (1.5.16): then each profile's is the file in that
+// profile. This app always starts it with both, so the profile's file is the account's sign-in, and the keychain is
+// never read.
 const STORED_MAX_BYTES = 1024 * 1024;
 
 export interface NativeSignInStore {
