@@ -19,7 +19,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 });
 
-function fixture(options: { owner?: boolean; ownerRefusal?: TurnOwnerRefusal; guest?: boolean; group?: boolean; window?: boolean; pictureRefusal?: string; patchRefusal?: string; patchRefusalFor?: (botId: string) => string | null; emptyRegistryBots?: boolean; automated?: boolean } = {}) {
+function fixture(options: { owner?: boolean; ownerRefusal?: TurnOwnerRefusal; guest?: boolean; group?: boolean; window?: boolean; pictureRefusal?: string; patchRefusal?: string; patchRefusalFor?: (botId: string) => string | null; emptyRegistryBots?: boolean; automated?: boolean; tts?: AppConfig["tts"] } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "app-settings-"));
   dirs.push(dataDir);
   const bots: BotRecord[] = [
@@ -27,6 +27,7 @@ function fixture(options: { owner?: boolean; ownerRefusal?: TurnOwnerRefusal; gu
     { id: "clive", name: "Clive", color: "blue", threadId: "t-clive", approvalMode: "ask", modelSelection: { instanceId: "claude", model: "sonnet" }, assignedSkills: ["notes"] } as unknown as BotRecord,
   ];
   const cfg = { language: "en", rooms: { turnTimeoutMinutes: 30 }, mcp: {}, threads: { maxConcurrentPerBot: 3 }, openai: { key: OPENAI_KEY }, anthropic: { url: "https://api.anthropic.com" },
+    ...(options.tts ? { tts: options.tts } : {}),
     instances: { "openai-compat-gw": { driver: "openai-compat", displayName: "Gateway", config: { key: GATEWAY_KEY, url: "https://gw.example/v1" } } } } as unknown as AppConfig;
   const engineCalls: unknown[] = [];
   const engines = [{ instanceId: "claude", name: "Claude", working: true }, { instanceId: "openai-compat-gw", name: "Gateway", working: true }];
@@ -474,6 +475,23 @@ describe("every other setting applies at once with Undo, Full access or not", ()
     check(fx);
     await flushDecisionLog(fx.dataDir);
     expect(readDecisions(fx.dataDir, 10)).toMatchObject([{ decision: "auto-approved", source: "app-settings", tool: "app_settings", summary: expect.stringMatching(new RegExp(`^${id.replaceAll(".", "\\.")}: `)) }]);
+  });
+
+  it("reads, updates, and clears voice.baseUrl without re-sending saved tts keys", async () => {
+    const fx = fixture({
+      tts: { provider: "elevenlabs", key: "el-secret", fishKey: "fish-secret", geminiKey: "gem-secret", baseUrl: "http://127.0.0.1:4123" },
+    });
+    const got = JSON.parse(String((await fx.host.handle({ action: "get", id: "voice.baseUrl" }, fx.turn)).body.text));
+    expect(got).toMatchObject({ tier: "safe", value: "http://127.0.0.1:4123" });
+    expect((await fx.set("voice.baseUrl", "http://127.0.0.1:5000")).status).toBe(200);
+    expect(fx.cards()[0]!.card.subtitle).toBe("http://127.0.0.1:4123 → http://127.0.0.1:5000");
+    expect((await fx.set("voice.baseUrl", "")).status).toBe(200);
+    expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
+    expect(fx.saved).toEqual([
+      { tts: { baseUrl: "http://127.0.0.1:5000" } },
+      { tts: { baseUrl: "" } },
+      { tts: { baseUrl: "http://127.0.0.1:5000" } },
+    ]);
   });
 
   it("an approval mode change says what it allows and applies at once; Undo restores the earlier mode", async () => {
