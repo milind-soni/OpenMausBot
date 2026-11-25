@@ -525,7 +525,9 @@ describe("VPS computer", () => {
 
   it("leaves the desktop running when work arrives during idle-stop inspection", async () => {
     const fake = fixture({ environmentId: vpsEnvironmentId() });
-    const result = await vpsComputerAction("stop", CONFIG, BOT_ID, fake.runner, () => false);
+    let idle = true;
+    const runner: typeof fake.runner = (args, options) => { idle = false; return fake.runner(args, options); };
+    const result = await vpsComputerAction("stop", CONFIG, BOT_ID, runner, () => idle);
     expect(result.container).toBe("running");
     expect(fake.calls.some(({ args }) => ["stop", "rm"].includes(args[2]!))).toBe(false);
   });
