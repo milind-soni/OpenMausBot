@@ -96,8 +96,12 @@ describe("the / menu in the composer", () => {
     fill("/", 1, blankDraft);
     expect(labels()).toEqual(["/goal", "/learn", "/setup", "/burst", "/fork-release", "/standup"]);
     const input = fill("/fork", 5, blankDraft);
+    press(input, "Escape");
+    expect(options()).toEqual([]);
+    expect(input.value).toBe("/fork");
     press(input, "Enter");
-    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "forkMessage" }));
+    expect(dispatch.mock.calls.map(([action]) => action.type)).not.toContain("forkMessage");
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "send", botId: bot.id, text: "/fork", threadId: blank }));
     restoreComposerDraft(blankDraft, { text: "", attachments: [] });
   });
 
