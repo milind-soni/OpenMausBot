@@ -1,4 +1,5 @@
 import { finishedNotificationsEnabled, readSoundChoice } from "../notification-preferences";
+import { randomUuid } from "../random-uuid";
 import { createEventSounds, type NotificationSoundEntry } from "./events";
 import { createSoundPlayer, type HoldReason, type PlayDecision, type PlayOutcome, type SoundDecision, type SoundOutcome, type SoundOutput } from "./player";
 import type { SoundEvent, SoundStyle } from "./render";
@@ -15,7 +16,7 @@ export const SOUND_ACK_KEY = "omb-sound-ack";
 /** How long a window in the background waits for the window in use to say it took a notice, before chiming itself. */
 export const SOUND_ACK_WAIT_MS = 1_500;
 const ACK_KEPT_MS = 10_000;
-const windowId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+const windowId = randomUuid();
 
 function storage(): Storage | undefined {
   try {
