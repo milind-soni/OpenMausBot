@@ -7,6 +7,7 @@ import { currentTaskBot, useStore } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { ChatView } from "./ChatView";
 import { GroupView } from "./GroupView";
+import { ThreadPanelHeading } from "./room-feed/ThreadPanelHeading";
 import { PANEL_MIN_WIDTH, useComputerPanelResize } from "./computer-panel-resize";
 
 const BESIDE_INBOX_MAX = 400;
@@ -66,10 +67,10 @@ export function ForkPanel() {
       />}
       {beside ? (
         <header className="flex shrink-0 items-center gap-2 py-2.5 ps-4 pe-3">
-          <div className="min-w-0 flex-1">
+          {!fork && group && groupTask ? <ThreadPanelHeading group={group} task={groupTask} messages={panel.messages} working={Boolean(openedGroup?.working || openedGroup?.busyBotId)} /> : <div className="min-w-0 flex-1">
             <h2 dir="auto" title={task?.title} className="truncate text-[15px] font-semibold leading-5 text-ink">{fork ? task?.title ?? label : label}</h2>
             <p dir="auto" className="truncate text-[12px] leading-4 text-ink-secondary">{group?.name ?? bot?.name}</p>
-          </div>
+          </div>}
           <button type="button" aria-label={fork ? t("chat.closeForkPanel") : t("room.thread.close")} title={fork ? t("chat.closeForkPanel") : t("room.thread.close")}
             className="ui-icon-button shrink-0" onClick={close}><X size={16} aria-hidden="true" /></button>
         </header>

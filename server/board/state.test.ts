@@ -27,7 +27,7 @@ const inState = (state: BoardItemState): BoardItem => item({
 const MOVES: Record<BoardMove["move"], BoardMove> = {
   take: { move: "take", botId: "scout" }, done: { move: "done", result: "Shipped" }, failed: { move: "failed", result: "No access" },
   ask: { move: "ask", question: "Which client?" }, resume: { move: "resume" }, release: { move: "release" },
-  cancel: { move: "cancel" }, reopen: { move: "reopen" },
+  cancel: { move: "cancel" }, reopen: { move: "reopen" }, later: { move: "later", at: T + 60_000, note: "See CI" }, wake: { move: "wake" },
 };
 
 /** Every move each actor may make, by state: anything not listed is refused. */
@@ -36,7 +36,7 @@ const ALLOWED: Record<string, Array<[BoardItemState, BoardMove["move"], BoardAct
     ["ready", "take", DISPATCHER], ["working", "done", DISPATCHER], ["working", "failed", DISPATCHER], ["working", "release", DISPATCHER],
     ["needs_person", "resume", DISPATCHER], ["needs_person", "release", DISPATCHER],
   ],
-  holder: [["working", "done", HOLDER], ["working", "failed", HOLDER], ["working", "ask", HOLDER], ["working", "release", HOLDER]],
+  holder: [["working", "done", HOLDER], ["working", "failed", HOLDER], ["working", "ask", HOLDER], ["working", "release", HOLDER], ["working", "later", HOLDER]],
   person: [
     ["waiting", "done", PERSON], ["ready", "done", PERSON], ["working", "done", PERSON], ["needs_person", "done", PERSON],
     ["needs_person", "release", PERSON],
@@ -191,5 +191,40 @@ describe("fields", () => {
     expect(boardResult("  ")).toBeUndefined();
     expect(boardResult("x".repeat(BOARD_LIMITS.resultMax))).toHaveLength(BOARD_LIMITS.resultMax);
     expect(() => boardResult(5)).toThrow(BoardError);
+  });
+});
+
+describe("later", () => {
+  const working = inState("working");
+  it("keeps the item working with its holder, notes when and why, and counts it", () => {
+    const set = applyMove(working, { move: "later", at: T + 300_000, note: " See CI " }, HOLDER, [], T + 1);
+    expect(set).toMatchObject({ state: "working", holder: { botId: "scout", since: T }, later: { at: T + 300_000, note: "See CI" }, laterCount: 1, attempts: 0 });
+  });
+  it("needs a note and a time ahead", () => {
+    expect(() => applyMove(working, { move: "later", at: T + 60_000, note: " " }, HOLDER, [], T + 1)).toThrow(expect.objectContaining({ code: "board_bad_input" }));
+    expect(() => applyMove(working, { move: "later", at: T, note: "See CI" }, HOLDER, [], T + 1)).toThrow(expect.objectContaining({ code: "board_bad_input" }));
+  });
+  it(`is refused after ${BOARD_LIMITS.latersMax} times`, () => {
+    const many = item({ state: "working", holder: { botId: "scout", since: T }, laterCount: BOARD_LIMITS.latersMax });
+    expect(() => applyMove(many, { move: "later", at: T + 60_000, note: "Again" }, HOLDER, [], T + 1)).toThrow(expect.objectContaining({ code: "board_bad_move" }));
+  });
+  it("wakes only by the dispatcher, back to the same holder, counting no attempt", () => {
+    const set = applyMove(working, { move: "later", at: T + 60_000, note: "See CI" }, HOLDER, [], T + 1);
+    expect(() => applyMove(set, { move: "wake" }, HOLDER, [], T + 2)).toThrow(expect.objectContaining({ code: "board_bad_move" }));
+    const woken = applyMove(set, { move: "wake" }, DISPATCHER, [], T + 60_000);
+    expect(woken).toMatchObject({ state: "working", holder: { botId: "scout", since: T + 60_000 }, attempts: 0, laterCount: 1 });
+    expect(woken.later).toBeUndefined();
+  });
+  it("is cleared by every move that settles, releases or asks, and its count by a reopen", () => {
+    const set = applyMove(working, { move: "later", at: T + 60_000, note: "See CI" }, HOLDER, [], T + 1);
+    for (const move of [MOVES.done, MOVES.failed, MOVES.release, MOVES.ask]) expect(applyMove(set, move, HOLDER, [], T + 2).later).toBeUndefined();
+    const done = applyMove(set, MOVES.done, HOLDER, [], T + 2);
+    expect(applyMove(done, MOVES.reopen, PERSON, [], T + 3).laterCount).toBeUndefined();
+  });
+  it("resumes a waiting item with a later the dispatcher starts", () => {
+    const asked = inState("needs_person");
+    const resumed = applyMove(asked, { move: "resume", later: { at: T + 5, note: "Mira answered" } }, DISPATCHER, [], T + 5);
+    expect(resumed).toMatchObject({ state: "working", holder: { botId: "scout", since: T + 5 }, later: { at: T + 5, note: "Mira answered" } });
+    expect(resumed.question).toBeUndefined();
   });
 });

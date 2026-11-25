@@ -52,7 +52,9 @@ account. A user may separately sign in on the desktop to enable the optional
   the hosted control-plane database.
 - Closed-app alerts: when the phone allows notifications, the app gives its
   paired computer the Apple Push Notification service device token for this
-  app install. A computer with optional hosted access registers that token
+  app install. A computer with optional hosted access, or a MausBot Cloud
+  through its Admin, registers that token (phone push is on by default, and
+  nothing is registered until a paired phone gives its token)
   with the OpenMausBot control plane, which stores it with the installation
   ID, the APNs environment and timestamps so it can ask Apple to deliver an
   alert. An alert carries only its kind, the bot's and room's names and

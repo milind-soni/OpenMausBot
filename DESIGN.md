@@ -198,8 +198,13 @@ element's job and never a pixel value:
   thread's first line, its reply count, who replied and when; a row, a room
   thread opened from anywhere, and an Inbox line open their thread in a panel
   beside the chat (`ForkPanel`), never by moving the room's current thread,
-  which is everyone's. The feed's composer starts a new thread. Below 768px the
-  room is today's single transcript.
+  which is everyone's. The feed's composer starts a new thread. A row carries
+  the sidebar thread row's menu behind a quiet More (hover, focus and touch),
+  a pin mark when pinned, and its unread or waiting dot; the thread beside the
+  feed has the same menu in its header, with its export. Archived threads come
+  back under "Show archived threads" at the top of the feed. The header is plain
+  words, so the feed is masked under it. Below 768px the room is today's single
+  transcript.
 - **The sidebar stays open beside a side panel** while the chat keeps 440px:
   from 1040px with a 320px panel (a room, Simple's inbox, Notifications), from
   1280px with a wider one. Narrower, it folds to its avatars.

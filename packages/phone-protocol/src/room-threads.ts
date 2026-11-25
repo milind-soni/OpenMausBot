@@ -14,7 +14,7 @@ export interface RoomThreadSummary {
   repliers: RoomThreadSpeaker[];
 }
 
-/** GET /api/groups/:id/threads/summary: the room's threads that are not archived. */
+/** GET /api/groups/:id/threads/summary: the room's threads that are not archived, and with ?archived=1 the archived ones too. */
 export interface RoomThreadSummariesResponse {
   threads: RoomThreadSummary[];
 }

@@ -40,6 +40,9 @@ export interface EnvironmentDescriptor {
      * the manifest, the chats and credentials checks, and lines its owner wrote there stamped as the owner's. Whether a
      * session is that person, /api/auth/session says (`own`). */
     move?: 1;
+    /** A person's own Cloud home, or a desktop's own server, that moves one bot back to where it came from: a returning
+     * hold, the arrival that makes it live there, and a hold that lapses (server/bot-moves.ts). */
+    moveBack?: 1;
     /** Who can update the server: the desktop app that runs it, or the operator. */
     selfUpdate: "desktop-managed" | "operator";
     /** For an operator's server: how it was installed, so a client offers the update command that fits it. */

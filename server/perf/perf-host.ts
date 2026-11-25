@@ -17,6 +17,7 @@ import { createSetupClock, type SetupClock, type SetupMs } from "./setup-steps.t
 import type { FailoverWhy } from "./turn-record.ts";
 import { createTurnTimings, type Refusal, type SlowNote, type TurnTimings } from "./turn-timings.ts";
 import { createLaunchTimings, LAUNCH_FILE, type LaunchTimings } from "./launch-timings.ts";
+import { afterLaunchSettles, launchSettled } from "./launch-probe.ts";
 import { startStallWatch, stallReportLines, type StallWatch } from "./stall-watch.ts";
 import { turnStartsSection } from "./turn-starts.ts";
 
@@ -130,7 +131,8 @@ export function createPerfHost(deps: PerfHostDeps) {
     resumed: (ms) => say("sleep", `the computer slept or the server was paused: the ${linux ? 60 : 300}s sampler fired ${duration(ms)} late, not counted as a stall`),
     seen: (rows, buckets) => { processes.sample(rows, buckets); guarded("bots", () => footprints.sample(rows), null); },
   });
-  if (deps.timer !== false && !windows) sampler.start();
+  let stopped = false; // the first sample's `ps` waits for the desktop window (launch-probe.ts); elsewhere it starts at once
+  if (deps.timer !== false && !windows) afterLaunchSettles(() => { if (!stopped) sampler.start(); });
   const stalls = deps.stalls ?? createLoopStalls({ resumed: (ms) => say("sleep", `the computer slept or the server was paused: the event loop waited through a ${duration(ms)} gap, not counted as a stall`) });
   if (deps.timer !== false) stalls.start();
   const watch: StallWatch | null = deps.timer !== false && deps.watchStalls === true
@@ -161,7 +163,11 @@ export function createPerfHost(deps: PerfHostDeps) {
     setupClock: (): SetupClock => createSetupClock(),
     noteSetup: (threadId: string, ms: SetupMs) => guarded("setup", () => timings.noteSetup(threadId, ms), undefined),
     /** A part of the app's launch from its main process or its page; null where no app starts this server. */
-    noteLaunch: (part: unknown) => (launches ? guarded("launch", () => launches.note(part), { ok: false, complete: false }) : null),
+    noteLaunch: (part: unknown) => {
+      const noted = launches ? guarded("launch", () => launches.note(part), { ok: false, complete: false }) : null;
+      if (noted?.ok) launchSettled();
+      return noted;
+    },
     /** Logs a usage-limit hold that started or ended since the last check; the sampler runs it after each sample. */
     checkHolds: watchHolds,
     health: (): PerfHealth | null => guarded("health", () => perfHealth(sources()), null),
@@ -182,7 +188,7 @@ export function createPerfHost(deps: PerfHostDeps) {
         ...guarded("turn-starts", () => turnStartsSection(), [])].join("\n");
     },
     /** The graceful shutdown: no more samples, and the turns since the last save written now. */
-    stop() { sampler.stop(); stalls.stop(); watch?.stop(); void disk?.stop(); guarded("save", () => timings.flush(), undefined); if (launches) guarded("launch", () => launches.flush(), undefined); },
+    stop() { stopped = true; sampler.stop(); stalls.stop(); watch?.stop(); void disk?.stop(); guarded("save", () => timings.flush(), undefined); if (launches) guarded("launch", () => launches.flush(), undefined); },
   };
 }
 export type PerfHost = ReturnType<typeof createPerfHost>;

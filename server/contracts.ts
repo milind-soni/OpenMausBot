@@ -138,6 +138,10 @@ export interface SendTurnInput {
   toolScope?: ToolScope;
   /** A guest turn: no shell or command execution, no reads outside its folder. Sent only to drivers whose guestTurns is "confined". */
   guestConfined?: boolean;
+  /** Work from the person's other place while it may not run commands here (server/bot-link/far-side.ts): no shell,
+   * command execution or reads outside the working folders, at the level `approvalMode` says (writes in the working
+   * folder only). Sent only to drivers whose guestTurns is "confined". */
+  linkLimited?: true;
   /** Why this turn is confined, in the owner's words, for a refusal to end with. */
   confinedWhy?: string;
   /** Images for this user turn only; kept out of replay transcripts. */
@@ -350,14 +354,18 @@ export interface ProviderAdapter {
    * still on that session takes it: otherwise `ok` is false and nothing was sent to the engine. `usage` is null when the
    * engine reports none for the compaction. */
   compactSession?(threadId: ThreadId, options: { botId?: string; session: string; model?: string | null; selectionNow?: () => { instanceId: string; model: string | null } | undefined; signal?: AbortSignal }): Promise<EngineCompactResult>;
-  /** Starting a thread's engine before its first message, so that message finds it running. `start` launches the process
-   * exactly as a turn with this input would and sends it nothing; it resolves true once the process is launched. The next
-   * sendTurn on the thread takes that process when its launch would have been the same and it has started up (`ready`),
-   * and replaces it otherwise. `held`: one is launching or waiting. `drop` stops one that no turn took; a taken one is
-   * the turn's own. */
+  /** Starting a thread's engine before its next message, so that message finds it running. `start` launches the process
+   * exactly as a turn with this input would and sends it nothing; it resolves true once the process is launched, and the
+   * process closes by itself after `waitMs` (a driver default when absent) with no turn. The next sendTurn on the thread
+   * takes that process when its launch would have been the same, it resumes the same engine session (or none, for a
+   * process started without one), it has started up (`ready`) and it is not older than its wait by the wall clock (it
+   * waited through a sleep); it is replaced otherwise. `held`: one is launching or waiting. `running`: the thread has a
+   * process up of any kind (one waiting, or one a turn used and kept), so there is nothing to start. `drop` stops one that
+   * no turn took; a taken one is the turn's own. */
   prestart?: {
-    start(input: SendTurnInput): Promise<boolean>;
+    start(input: SendTurnInput, waitMs?: number): Promise<boolean>;
     held(threadId: ThreadId): boolean;
+    running(threadId: ThreadId): boolean;
     ready(threadId: ThreadId): boolean;
     drop(threadId: ThreadId): void;
   };
@@ -400,6 +408,11 @@ export interface ProviderSnapshot {
   nativeCli?: true;
   /** Not ready because its runtime is being installed on this computer right now. */
   installing?: true;
+  /** With `unavailable`: its status check could not finish (out of time, killed, no room to start it), which says nothing
+   * about whether it is installed. Never a reason to show that no AI is connected. */
+  busy?: true;
+  /** With `available`: its program file is there but its status check could not finish yet; it is checked again. */
+  unverified?: true;
   /** Display identity from the provider CLI, never credentials; `method` is a personal login or the workspace API key. */
   account?: { email?: string; organization?: string; method?: "login" | "api-key" };
   version?: string | null;

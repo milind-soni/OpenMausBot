@@ -107,6 +107,20 @@ describe("burger layers", () => {
 });
 
 describe("draftWorkflow", () => {
+  it.each(["Bash", "mcp__agents__vm_exec", "mcp__computer__exec", "mcp__localComputer__exec"])("keeps Git mutations when saving a %s release workflow", (name) => {
+    const draft = draftWorkflow([
+      ask("Publish the release"),
+      tool(name, { command: "git tag --list" }),
+      tool(name, { command: "git tag v1.2.3" }),
+      tool(name, { command: "git push origin v1.2.3" }),
+    ]);
+    expect(draft).not.toBeNull();
+    expect(draft!.workflow.steps.map((step) => step.kind === "shell" && step.run)).toEqual([
+      "git tag v1.2.3", "git push origin v1.2.3",
+    ]);
+    expect(workflowSchema.safeParse(draft!.workflow).success).toBe(true);
+  });
+
   it("returns nothing for a run of fewer than two steps", () => {
     expect(draftWorkflow([ask("hi"), tool("Bash", { command: "git push" }, { summary: "git push" })])).toBeNull();
   });
@@ -123,7 +137,7 @@ describe("draftWorkflow", () => {
     const forward = draft.workflow.steps[1]!;
     expect(forward).toMatchObject({ kind: "app", app: "gmail", tool: "GMAIL_FORWARD_MESSAGE" });
     expect(forward.kind === "app" && forward.args).toEqual({
-      message_id: { $step: "s1", path: "data.results.0.response.data.messages.0.id" },
+      message_id: { $step: "s1", path: "messages.0.id" },
       recipient_email: { $arg: "recipient" },
     });
   });

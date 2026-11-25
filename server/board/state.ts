@@ -27,7 +27,11 @@ export type BoardMove =
   | { move: "done"; result?: string }
   | { move: "failed"; result?: string }
   | { move: "ask"; question: string; person?: string }
-  | { move: "resume" }
+  /** The holder sets the item aside until `at`; the dispatcher's `wake` starts it again then, with `note`. */
+  | { move: "later"; at: number; note: string }
+  | { move: "wake" }
+  /** With `later`, the holder is started again when it is free rather than by the person's own line. */
+  | { move: "resume"; later?: { at: number; note: string } }
   | { move: "release" }
   | { move: "cancel"; result?: string }
   | { move: "reopen" };
@@ -117,6 +121,8 @@ function allowed(item: BoardItem, move: BoardMove["move"], actor: BoardActor): b
     case "done": return state === "working" ? person || dispatcher || holds(item, actor) : person && isOpen(state);
     case "failed": return state === "working" && (dispatcher || holds(item, actor));
     case "ask": return state === "working" && holds(item, actor);
+    case "later": return state === "working" && holds(item, actor);
+    case "wake": return state === "working" && dispatcher && item.later !== undefined;
     case "resume": return state === "needs_person" && dispatcher;
     case "release": return state === "working" ? dispatcher || holds(item, actor) : state === "needs_person" && (person || dispatcher);
     case "cancel": return isOpen(state) && (person || madeIt(item, actor));
@@ -125,7 +131,7 @@ function allowed(item: BoardItem, move: BoardMove["move"], actor: BoardActor): b
 }
 
 const settle = (item: BoardItem, state: BoardItemState, result: string | undefined, now: number): BoardItem => {
-  const { holder: _holder, question: _question, ...rest } = item;
+  const { holder: _holder, question: _question, later: _later, ...rest } = item;
   return { ...rest, state, ...(result !== undefined ? { result } : {}), updatedAt: now };
 };
 
@@ -134,7 +140,7 @@ export function applyMove(item: BoardItem, move: BoardMove, actor: BoardActor, i
   if (!allowed(item, move.move, actor)) throw badMove(`This item is ${item.state.replace("_", " ")}: it cannot be moved to ${move.move} now.`);
   switch (move.move) {
     case "take": {
-      const { question: _question, result: _result, ...rest } = item;
+      const { question: _question, result: _result, later: _later, ...rest } = item;
       return { ...rest, state: "working", holder: { botId: move.botId, since: now }, attempts: item.attempts + 1, updatedAt: now };
     }
     case "done":
@@ -145,18 +151,32 @@ export function applyMove(item: BoardItem, move: BoardMove, actor: BoardActor, i
       const text = typeof move.question === "string" ? move.question.trim() : "";
       if (!text) throw badInput("Say what you want to ask.");
       if (text.length > BOARD_LIMITS.questionMax) throw badInput(`A question is at most ${BOARD_LIMITS.questionMax} characters.`);
-      return { ...item, state: "needs_person", question: { text, askedAt: now, ...(move.person ? { person: move.person } : {}) }, updatedAt: now };
+      const { later: _later, ...rest } = item;
+      return { ...rest, state: "needs_person", question: { text, askedAt: now, ...(move.person ? { person: move.person } : {}) }, updatedAt: now };
+    }
+    case "later": {
+      const note = typeof move.note === "string" ? move.note.trim() : "";
+      if (!note) throw badInput("Say what to look at again.");
+      if (note.length > BOARD_LIMITS.questionMax) throw badInput(`A note is at most ${BOARD_LIMITS.questionMax} characters.`);
+      if (!Number.isFinite(move.at) || move.at <= now) throw badInput("Pick a time ahead.");
+      const count = item.laterCount ?? 0;
+      if (count >= BOARD_LIMITS.latersMax) throw badMove(`This item was already set aside ${BOARD_LIMITS.latersMax} times, the most it may be.`);
+      return { ...item, later: { at: move.at, note }, laterCount: count + 1, updatedAt: now };
+    }
+    case "wake": {
+      const { later: _later, ...rest } = item;
+      return { ...rest, holder: { botId: item.holder!.botId, since: now }, updatedAt: now };
     }
     case "resume": {
-      const { question: _question, ...rest } = item;
-      return { ...rest, state: "working", holder: { botId: item.holder!.botId, since: now }, updatedAt: now };
+      const { question: _question, later: _later, ...rest } = item;
+      return { ...rest, state: "working", holder: { botId: item.holder!.botId, since: now }, ...(move.later ? { later: { ...move.later } } : {}), updatedAt: now };
     }
     case "release": {
-      const { holder: _holder, question: _question, ...rest } = item;
+      const { holder: _holder, question: _question, later: _later, ...rest } = item;
       return { ...rest, state: "ready", updatedAt: now };
     }
     case "reopen": {
-      const { holder: _holder, question: _question, result: _result, ...rest } = item;
+      const { holder: _holder, question: _question, result: _result, later: _later, laterCount: _laterCount, ...rest } = item;
       return { ...rest, state: startState(item, items), attempts: 0, updatedAt: now };
     }
   }

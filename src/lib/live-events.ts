@@ -12,6 +12,16 @@ export const LIVE_EVENTS_RETRY_MIN_MS = 500;
 export const LIVE_EVENTS_RETRY_MAX_MS = 10_000;
 const RETRY_LIVE_EVENTS = "omb:retry-live-events";
 
+/** What the page's live connection is doing, by a fixed word: the app's 30-second "still waiting" event names it. */
+export const LIVE_PHASES = ["idle", "opening", "open", "retrying", "offline", "hidden", "asleep"] as const;
+export type LivePhase = (typeof LIVE_PHASES)[number];
+let livePhaseNow: LivePhase = "idle";
+export function livePhase(): LivePhase {
+  return livePhaseNow;
+}
+const holdReason = (platform: Pick<LiveEventsPlatform, "isOnline" | "isVisible">): LivePhase | null =>
+  !platform.isOnline() ? "offline" : !platform.isVisible() ? "hidden" : cloudAsleep() ? "asleep" : null;
+
 export function retryLiveEvents(): void {
   window.dispatchEvent(new Event(RETRY_LIVE_EVENTS));
 }
@@ -245,6 +255,7 @@ export function openLiveEvents(
   let connect: () => void;
   const scheduleReconnect = () => {
     // A Cloud home that went to sleep: reconnecting would wake it. The person's next action does (src/lib/cloud-power.ts).
+    if (!stopped) livePhaseNow = holdReason(platform) ?? "retrying";
     if (stopped || retryTimer !== null || !platform.isOnline() || !platform.isVisible() || cloudAsleep()) return;
     const exponent = Math.min(retryAttempt, 20);
     const delay = Math.min(retryMaxMs, retryMinMs * 2 ** exponent);
@@ -264,6 +275,7 @@ export function openLiveEvents(
   };
 
   connect = () => {
+    if (!stopped && !source) livePhaseNow = (!platform.isOnline() ? "offline" : cloudAsleep() ? "asleep" : null) ?? "opening";
     if (stopped || source || !platform.isOnline() || cloudAsleep()) return;
     let current: LiveEventSourceLike;
     try {
@@ -280,6 +292,7 @@ export function openLiveEvents(
     current.onopen = () => {
       if (stopped || source !== current) return;
       lastHeardAt = platform.now();
+      livePhaseNow = "open";
       handlers.onOpen?.();
     };
     current.onerror = () => connectionLost(current);

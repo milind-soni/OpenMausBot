@@ -2108,6 +2108,13 @@ body {
   -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--glass-top, 0px) - var(--top-fade)), #000 var(--glass-top, 0px));
   mask-image: linear-gradient(to bottom, transparent calc(var(--glass-top, 0px) - var(--top-fade)), #000 var(--glass-top, 0px));
 }
+/* A room's feed of threads: its header is plain words, so nothing that scrolls under it shows through. Rows fade in over
+   the last --feed-fade above the bar's edge, where the top row rests; a mask, so any skin's ground shows. */
+.glass-scroller[data-feed-fade] {
+  --feed-fade: 12px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--glass-top, 0px) - var(--feed-fade)), #000 var(--glass-top, 0px));
+  mask-image: linear-gradient(to bottom, transparent calc(var(--glass-top, 0px) - var(--feed-fade)), #000 var(--glass-top, 0px));
+}
 [data-chathead-float] {
   pointer-events: none;
 }

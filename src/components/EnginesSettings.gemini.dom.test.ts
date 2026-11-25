@@ -116,3 +116,46 @@ describe("Settings → AI → Providers: Google AI Studio (#6352)", () => {
     expect(studio()).toBeNull();
   });
 });
+
+describe("Settings → AI → Providers: ModelGo sits in the main list, after Google's row", () => {
+  const provider = (instanceId: string, driverKind: string, snapshot: InstanceInfo["snapshot"] = { state: "unavailable", reason: "No API key" }) => ({
+    instanceId, driverKind, displayName: instanceId === "modelgo" ? "ModelGo" : instanceId, access: "api", snapshot, models: { default: "model", options: [] },
+  } as unknown as InstanceInfo);
+  const closed = async () => { await act(async () => { root.render(createElement(EnginesSettings, { simple: true, more: { id: "more", open: false, onToggle: () => {} } })); }); };
+  const order = () => [...container.querySelectorAll("[data-simple-engine]")].map((row) => row.getAttribute("data-simple-engine"));
+  const moreCount = () => [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("More providers"))?.textContent;
+
+  it("follows Google AI Studio, outside More providers, which no longer counts it", async () => {
+    fixture.state = { ...fixture.state, instances: [provider("groq", "groq"), provider("modelgo", "modelgo"), provider("mistral", "mistral")] };
+    await closed();
+    expect(order()).toEqual(["google-ai-studio", "modelgo"]);
+    expect(container.querySelector("[data-simple-engine=\"modelgo\"]")?.textContent).toContain("ModelGo");
+    expect(container.querySelector("[data-simple-engine=\"modelgo\"]")?.textContent).toContain("Not set up");
+    expect(moreCount()).toContain("More providers"); expect(moreCount()).toContain("2");
+    await render();
+    expect(order().filter((id) => id === "modelgo"), "listed once, the fold open too").toHaveLength(1);
+  });
+
+  it("follows the ready rows where Google's row is not offered, and stays among them, once, when it is ready itself", async () => {
+    const ready = { state: "available", authenticated: true } as const;
+    fixture.state = { ...fixture.state, instances: [provider("modelgo", "modelgo"), provider("groq", "groq", ready), gemini(GEMINI_URL)] };
+    await closed();
+    expect(order()).toEqual(["groq", "openai-compat-gemini", "modelgo"]);
+    expect(container.textContent).not.toContain("More providers");
+    fixture.state = { ...fixture.state, instances: [provider("groq", "groq", ready), provider("modelgo", "modelgo", ready), provider("mistral", "mistral")] };
+    await closed();
+    expect(order()).toEqual(["groq", "modelgo", "google-ai-studio"]);
+  });
+
+  it("stays folded where it may not be offered, and hidden once the person hid it", async () => {
+    fixture.state = { ...fixture.state, instances: [provider("modelgo", "modelgo")], config: { managedPolicy: { organizationName: "Acme", companyModelsOnly: false, allowedEngines: ["groq"] } } };
+    await closed();
+    expect(order()).toEqual(["google-ai-studio"]);
+    expect(moreCount()).toContain("1");
+    fixture.state = { ...fixture.state, instances: [], config: {} };
+    fixture.hidden = [{ instanceId: "modelgo", driverKind: "modelgo", displayName: "ModelGo" }];
+    await closed();
+    expect(order()).toEqual(["google-ai-studio"]);
+    expect(moreCount()).toContain("1");
+  });
+});

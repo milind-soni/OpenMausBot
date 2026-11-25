@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useLanguageChoice } from "@/lib/language-preference";
-import { duePing, openTarget, presenceBody, shownLanguage } from "@/lib/presence-client";
+import { composerKey, duePing, dueTyping, openTarget, presenceBody, shownLanguage } from "@/lib/presence-client";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { existingThreadTarget } from "@/lib/thread-target";
 import { openThread } from "@/state/thread-navigation";
@@ -25,6 +25,7 @@ function openChat(state: AppState): string | undefined {
 export function usePresence(state: AppState, dispatch: (action: Action) => void): void {
   const showThreads = useShowThreads();
   const lastPing = useRef<number | null>(null);
+  const lastTyping = useRef<{ threadId: string; at: number } | null>(null);
   const language = shownLanguage(state.config?.language, useLanguageChoice());
   const latest = useRef({ state, dispatch, showThreads, language });
   latest.current = { state, dispatch, showThreads, language };
@@ -32,20 +33,26 @@ export function usePresence(state: AppState, dispatch: (action: Action) => void)
   const pingNow = useRef<() => void>(() => {});
   useEffect(() => {
     if (!state.hydrated) return;
-    const ping = (force = false) => {
+    const ping = (force = false, typing = false) => {
       const now = Date.now();
       if (!force && !duePing(lastPing.current, now)) return;
       lastPing.current = now;
       const sentFrom = selection(latest.current.state);
       sentLanguage.current = latest.current.language;
-      const body = presenceBody(Intl.DateTimeFormat().resolvedOptions().timeZone, sentLanguage.current, openChat(latest.current.state));
+      const chat = openChat(latest.current.state);
+      if (typing && chat) lastTyping.current = { threadId: chat, at: now };
+      const body = presenceBody(Intl.DateTimeFormat().resolvedOptions().timeZone, sentLanguage.current, chat, typing);
       void api("/api/presence/active", { method: "POST", body: JSON.stringify(body) }).then((answer) => {
         const live = latest.current;
         const target = existingThreadTarget(openTarget(answer), live.state);
         if (target && !live.state.newChat && selection(live.state) === sentFrom) openThread(live.dispatch, target, live.state, live.showThreads);
       }, () => {});
     };
-    const onActivity = () => ping();
+    const onActivity = (event: Event) => {
+      const chat = composerKey(event) ? openChat(latest.current.state) : undefined;
+      if (chat && dueTyping(lastTyping.current, chat, Date.now())) ping(true, true);
+      else ping();
+    };
     const onVisible = () => { if (document.visibilityState === "visible") ping(); };
     pingNow.current = () => ping(true);
     onVisible();
