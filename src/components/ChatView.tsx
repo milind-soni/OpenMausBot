@@ -3,12 +3,13 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { ThreadLinkContext } from "@/components/ThreadLinkMenu";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { AlertTriangle, ChevronLeft, ChevronRight, Monitor, RefreshCw, Square, Webhook } from "lucide-react";
+import { AlertTriangle, ChevronRight, Monitor, RefreshCw, Square, Webhook } from "lucide-react";
 import { WorkingDots } from "@/components/WorkingIndicator";
 import { ChatBusyContext, CopyButton, MESSAGE_ROW, MessageActions, messageActionClass, ReplyAction } from "@/components/MessageActions";
 import { ReactAction, ReactionChips } from "@/components/Reactions";
 import { replyAndCopy, useBotMessageMenu, userMessageMenu } from "@/components/message-menu";
 import { forkMessageItem, ForkLinks, useForkedMessages } from "@/components/ForkMessage";
+import { VersionSwitch } from "@/components/VersionSwitch";
 import { savesToTeamMemory, TEAM_MEMORY_ITEM, TeamMemorySavesContext } from "@/components/conversation-share/conversation-share";
 import { useSpeech } from "@/lib/tts/useSpeech";
 import { localSystemVoiceActive } from "@/lib/local-voice";
@@ -258,34 +259,6 @@ export function FailedTurnRow({ tool, engine, onRetry, botId, threadId, messageA
 }
 
 export { MessageBoundary };
-
-function VersionSwitch({ versions, index, onSwitch }: { versions: readonly Message[]; index: number; onSwitch: (version: Message) => void }) {
-  const busy = use(ChatBusyContext);
-  const go = (version: Message | undefined) => { if (version && !busy) onSwitch(version); };
-  return (
-    <div className="mt-1 flex items-center gap-0.5 pr-1 text-[12px] text-ink-secondary">
-      <button
-        onClick={() => go(versions[index - 1])}
-        disabled={index <= 0 || busy}
-        className="rounded p-0.5 hover:bg-raised hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
-        title={t("chat.previousVersion")}
-      >
-        <ChevronLeft size={14} />
-      </button>
-      <span className="tabular-nums">
-        {index + 1}/{versions.length}
-      </span>
-      <button
-        onClick={() => go(versions[index + 1])}
-        disabled={index >= versions.length - 1 || busy}
-        className="rounded p-0.5 hover:bg-raised hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
-        title={t("chat.nextVersion")}
-      >
-        <ChevronRight size={14} />
-      </button>
-    </div>
-  );
-}
 
 const Bubble = memo(function Bubble({
   message: row,
