@@ -13,8 +13,9 @@ import { PREVIEW_MAX_BYTES } from "../../shared/upload-limits";
 const AUTO_RENDER_MAX_CHARS = 2 * 1024 * 1024;
 
 /** A Markdown file in a message, drawn the way the chat draws a reply. Security: no message context is passed on, so
- * paths written in the file stay plain text instead of becoming links that fetch other files. */
-export default function MarkdownFileContent({ path, shownPath = path, name, message, fill = false }: { path: string; shownPath?: string; name: string; message: MessageAttachmentContext; fill?: boolean }) {
+ * paths written in the file stay plain text instead of becoming links that fetch other files. plain: a plain text
+ * file, always shown as its raw text. */
+export default function MarkdownFileContent({ path, shownPath = path, name, message, fill = false, plain = false }: { path: string; shownPath?: string; name: string; message: MessageAttachmentContext; fill?: boolean; plain?: boolean }) {
   const [attempt, setAttempt] = useState(0);
   const [source, setSource] = useState<string | null>(null);
   const [error, setError] = useState<"size" | "load" | "encoding" | "outside" | { reason: string } | null>(null);
@@ -32,7 +33,7 @@ export default function MarkdownFileContent({ path, shownPath = path, name, mess
         // Notes saved by Windows apps are often Windows-1252, not UTF-8.
         const text = await readTableResponse(response, controller.signal, PREVIEW_MAX_BYTES, "windows-1252");
         if (!controller.signal.aborted) {
-          setShowSource(text.length > AUTO_RENDER_MAX_CHARS);
+          setShowSource(plain || text.length > AUTO_RENDER_MAX_CHARS);
           setSource(text);
         }
       } catch (reason) {
@@ -52,7 +53,7 @@ export default function MarkdownFileContent({ path, shownPath = path, name, mess
   if (source === null) return <div className="p-12 text-center text-sm text-ink-secondary"><span role="status" className="inline-flex items-center gap-2"><LoaderCircle size={16} className="animate-spin" />{t("markdown.loading")}</span>{recovery}</div>;
   return <div className={cn("flex flex-col gap-2", fill && "min-h-0 flex-1")}>
     <div className="flex items-center justify-end gap-1">
-      <button type="button" className="table-action" aria-pressed={showSource} aria-label={t(showSource ? "markdown.rendered" : "html.source")} title={t(showSource ? "markdown.rendered" : "html.source")} disabled={source.length > AUTO_RENDER_MAX_CHARS} onClick={() => setShowSource(!showSource)}>{showSource ? <Eye size={14} /> : <Code2 size={14} />}</button>
+      {!plain && <button type="button" className="table-action" aria-pressed={showSource} aria-label={t(showSource ? "markdown.rendered" : "html.source")} title={t(showSource ? "markdown.rendered" : "html.source")} disabled={source.length > AUTO_RENDER_MAX_CHARS} onClick={() => setShowSource(!showSource)}>{showSource ? <Eye size={14} /> : <Code2 size={14} />}</button>}
       <button type="button" className="table-action" aria-label={t("html.reload")} title={t("html.reload")} onClick={() => setAttempt(attempt + 1)}><RotateCcw size={14} /></button>
       <button type="button" className="table-action" aria-label={t("attach.saveAria", { name })} title={t("attach.saveAria", { name })} disabled={save.state === "saving"} onClick={() => void save.save()}><Download size={14} /></button>
     </div>

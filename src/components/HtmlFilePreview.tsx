@@ -21,6 +21,10 @@ export function isMarkdownFile(name: string): boolean {
   return /\.(md|markdown)$/i.test(name);
 }
 
+export function isPlainTextFile(name: string): boolean {
+  return /\.(txt|text|log)$/i.test(name);
+}
+
 // Lazy, so the chat's Markdown renderer (which uses this file's chips) is not imported back into it.
 const MarkdownFileContent = lazy(() => import("./MarkdownFilePreview"));
 const WhatChangedContent = lazy(() => import("./WhatChangedView"));
@@ -52,17 +56,18 @@ export function htmlBrowserBridge(): ((source: string, name: string) => Promise<
 }
 
 /** The preview for an HTML or Markdown file in a message, opened by the eye button or by the file's name: beside the chat
- * when the window has room for it, else in a dialog. */
-export function useHtmlPreview(path: string, name: string, message?: MessageAttachmentContext, shownPath = path) {
+ * when the window has room for it, else in a dialog. plainText: a plain text file opens it too. */
+export function useHtmlPreview(path: string, name: string, message?: MessageAttachmentContext, shownPath = path, plainText = false) {
   const [open, setOpen] = useState(false);
   const opener = useRef<HTMLElement | null>(null);
   const beside = useFileBesideChat();
   const kind = message === undefined ? null
     : isHtmlFile(name) || isHtmlFile(path) ? "html"
-      : isMarkdownFile(name) || isMarkdownFile(path) ? "markdown" : null;
+      : isMarkdownFile(name) || isMarkdownFile(path) ? "markdown"
+        : plainText && (isPlainTextFile(name) || isPlainTextFile(path)) ? "text" : null;
   return {
     opens: kind !== null,
-    label: t(kind === "markdown" ? "markdown.preview" : "html.preview", { name }),
+    label: t(kind === "html" ? "html.preview" : "markdown.preview", { name }),
     show: (event: { currentTarget: HTMLElement }) => {
       opener.current = event.currentTarget;
       if (kind && message && beside({ kind, path, shownPath, name, message, opener: event.currentTarget })) return;
@@ -85,7 +90,7 @@ export function FilePreviewContent({ kind, path, shownPath = path, name, message
     const delimiter = tableDelimiter(name) ?? tableDelimiter(path);
     return delimiter && <TableFileContent key={key} path={path} shownPath={shownPath} name={name} message={message} delimiter={delimiter} />;
   }
-  return <MarkdownPreviewBoundary><Suspense fallback={<div role="status" className="flex items-center justify-center gap-2 p-12 text-sm text-ink-secondary"><LoaderCircle size={16} className="animate-spin" />{t("markdown.loading")}</div>}><MarkdownFileContent key={key} path={path} shownPath={shownPath} name={name} message={message} fill={fill} /></Suspense></MarkdownPreviewBoundary>;
+  return <MarkdownPreviewBoundary><Suspense fallback={<div role="status" className="flex items-center justify-center gap-2 p-12 text-sm text-ink-secondary"><LoaderCircle size={16} className="animate-spin" />{t("markdown.loading")}</div>}><MarkdownFileContent key={key} path={path} shownPath={shownPath} name={name} message={message} fill={fill} plain={kind === "text"} /></Suspense></MarkdownPreviewBoundary>;
 }
 
 export function HtmlFileButton({ path, shownPath, name, message }: { path: string; shownPath?: string; name: string; message: MessageAttachmentContext }) {
