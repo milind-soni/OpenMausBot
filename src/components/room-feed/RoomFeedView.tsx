@@ -62,7 +62,7 @@ export function RoomFeedView({ group }: { group: Group }) {
   const openThread = useStoreSelector((state) => (state.forkPanel?.kind === "group" && state.forkPanel.ownerId === group.id ? state.forkPanel.threadId : null));
   const advanced = useAdvancedMode();
   const remoteClient = window.ogb?.remoteClient?.active === true;
-  const simpleHeader = simpleRoomHeader({ advanced, remoteClient, group, setupPending: false });
+  const simpleHeader = simpleRoomHeader({ advanced, remoteClient, group });
   const members = useMemo(() => group.memberIds.map((id) => bots.find((bot) => bot.id === id)).filter((bot): bot is Bot => Boolean(bot)), [group.memberIds, bots]);
   const [membersOpen, setMembersOpen] = useState(false);
   const [folderOpen, setFolderOpen] = useState(false);
@@ -133,12 +133,12 @@ export function RoomFeedView({ group }: { group: Group }) {
       {membersOpen && !remoteClient && <ManageMembersPanel group={group} onClose={closeMembers} triggerRef={membersTriggerRef} />}
       <GlassScrollFrame className="flex-1 [--glass-tint:var(--color-app)]">
         <GlassBar edge="top" fade={!advanced && !remoteClient} className="z-[25]">
-          <RoomHeader group={group} members={members} simple={simpleHeader} setupPending={false} remoteClient={remoteClient} feed
+          <RoomHeader group={group} members={members} simple={simpleHeader} remoteClient={remoteClient} feed
             findOpen={false} onToggleFind={() => {}} onToggleFolder={() => setFolderOpen((shown) => !shown)} onOpenMembers={() => setMembersOpen(true)}
             membersTriggerRef={membersTriggerRef} />
           <ChatErrorBanner message={error} onDismiss={() => dispatch({ type: "error", message: null })} />
           <ChatNotice notice={notice} />
-          {!remoteClient && <RoomChiefAbsent group={group} />}
+          {!remoteClient && !simpleHeader && <RoomChiefAbsent group={group} />}
           <RoomHoldsBanner group={group} members={members} />
           {!simpleHeader && <RoomBulletin group={group} remoteClient={remoteClient} />}
           {folderOpen && <div className="w-full px-5"><div className="mb-1"><RoomWorkingFolder group={group} /></div></div>}

@@ -2067,38 +2067,30 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("persists room setup and blocks the first message until it is finished", async () => {
+  it("makes a room ready to chat at once, named after its bots, and still takes an older client's setup", async () => {
     const bot = (await api("GET", "/api/bots")).body.bots[0];
-    const created = await api("POST", "/api/groups", { name: "Setup probe", memberIds: [bot.id] });
+    const created = await api("POST", "/api/groups", { memberIds: [bot.id] });
     expect(created.status).toBe(201);
     const group = created.body.group;
     try {
-      expect(group).toMatchObject({ setupCompletedAt: null, setupSkippedAt: null, messages: [] });
-      const blocked = await api("POST", `/api/groups/${group.id}/messages`, { text: "before setup" });
-      expect(blocked.status).toBe(409);
-      expect((await api("GET", "/api/bots")).body.groups.find((candidate: { id: string }) => candidate.id === group.id).messages).toHaveLength(0);
+      expect(group).toMatchObject({ name: bot.name, bulletin: "", defaultResponder: { kind: "member", botId: bot.id }, setupSkippedAt: null, messages: [] });
+      expect(group.setupCompletedAt).toEqual(expect.any(Number));
+      const again = await api("POST", "/api/groups", { memberIds: [bot.id] });
+      expect(again.body.group.name).toBe(`${bot.name} 2`);
+      await api("DELETE", `/api/groups/${again.body.group.id}`);
 
-      const invalid = await api("PATCH", `/api/groups/${group.id}/setup`, {
-        action: "complete",
-        cwd: null,
-        bulletin: "",
-        defaultResponder: { kind: "member", botId: "missing" },
-      });
-      expect(invalid.status).toBe(400);
-
-      const completed = await api("PATCH", `/api/groups/${group.id}/setup`, {
+      const older = await api("PATCH", `/api/groups/${group.id}/setup`, {
         action: "complete",
         cwd: null,
         bulletin: "shared brief",
         defaultResponder: { kind: "member", botId: bot.id },
       });
-      expect(completed.status).toBe(200);
-      expect(completed.body.group).toMatchObject({ bulletin: "shared brief", setupCompletedAt: expect.any(Number) });
-      expect((await api("GET", "/api/bots")).body.groups.find((candidate: { id: string }) => candidate.id === group.id)).toMatchObject({
-        bulletin: "shared brief",
-        setupSkippedAt: null,
-      });
+      expect(older.status).toBe(200);
+      expect(older.body.group).toMatchObject({ bulletin: "shared brief", setupCompletedAt: group.setupCompletedAt });
+
+      expect((await api("POST", `/api/groups/${group.id}/messages`, { text: "first words" })).status).toBe(202);
     } finally {
+      await api("POST", `/api/groups/${group.id}/interrupt`, {});
       await api("DELETE", `/api/groups/${group.id}`);
     }
   });
