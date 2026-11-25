@@ -8,7 +8,8 @@ import type { Cdp, CdpEvent } from "../browser-sites.ts";
 import { DOWNLOAD_LIMITS, safeFileName } from "../browser/cdp/downloads.ts";
 import type { CloudBrowserRails } from "./rails.ts";
 import type { ComputerOps } from "./remote.ts";
-import { carryIn, carryOut, cookieChanges, mergeCookies, restoreSessionCookies, type SavedCookie } from "./sign-ins.ts";
+import { carryIn, carryOut, type SavedCookie } from "./sign-ins.ts";
+import { mergeAtOpen, mergeInSession, prints, sandboxHolds, type SyncStore } from "./sync.ts";
 
 /** Where a download lands in the bot's working folder. */
 export const DOWNLOADS_SUBFOLDER = "downloads";
@@ -42,6 +43,8 @@ export interface CompanionDeps {
   folder(botId: string): string | null;
   connect(url: string, listeners: { event(message: CdpEvent): void }): Promise<Cdp>;
   log(line: string): void;
+  /** Which side changed the sign-ins since the home and this sandbox last agreed (sync.ts). */
+  sync: SyncStore;
   now?: () => number;
   /** Bytes free and in all on the disk of a folder; tests pass their own. */
   disk?(folder: string): { free: number; total: number };
@@ -73,10 +76,8 @@ export class SandboxCompanion {
   #delivered = 0;
   readonly #sizes = new Map<string, number>();
   #delivering: Promise<void> = Promise.resolve();
-  /** The profile's cookies as of the last carry or write-back: what the session changed is measured against them. */
+  /** What Chrome really held at the open, or at the last write-back: the session's own changes are measured against it. */
   #baseline: SavedCookie[] | null = null;
-  /** The home's copy was carried into this sandbox in this session, so a removal since then is the person's own. */
-  #carried = false;
   #syncedAt = 0;
   #syncing = false;
 
@@ -91,50 +92,59 @@ export class SandboxCompanion {
   #now(): number { return this.#deps.now?.() ?? Date.now(); }
 
   async start(cdpUrl: string): Promise<void> {
-    const { session, rails, signIns } = this.#deps;
+    const { session, signIns } = this.#deps;
     const loaded = signIns ? signIns.load(session) : null;
     if (loaded === "unreadable") throw new SignInsUnreadable();
     this.#cdp = await this.#deps.connect(cdpUrl, { event: (message) => this.#event(message) });
-    if (signIns && loaded && loaded.modified > rails.carried(this.#stamp)) {
-      // The home's copy is newer than this sandbox's last sync: it is the truth at open, sign-outs included.
-      const carried = await carryIn(this.#cdp, loaded.state).catch(() => { throw new CarryFailed(loaded.modified); });
-      rails.setCarried(this.#stamp, loaded.modified);
-      this.#carried = true;
-      this.#baseline = carried.set;
-      this.#deps.log(`browser ${session}: carried ${carried.cookies} saved cookies${carried.refused ? ` (${carried.refused} refused by Chrome and left out)` : ""} and ${carried.origins} sites' storage into the browser sandbox`);
-    } else if (signIns) {
-      const current = await carryOut(this.#cdp);
-      // The profile's Chrome restarted since the last carry (a stop, a new machine): its session cookies, which live only in
-      // a running Chrome, are gone. The home's are set again; nothing else of the profile is touched.
-      const restored = loaded ? await restoreSessionCookies(this.#cdp, loaded.state.cookies, current) : [];
-      if (restored.length) this.#deps.log(`browser ${session}: set ${restored.length} session cookies again after the browser sandbox's Chrome restarted`);
-      this.#baseline = [...current, ...restored];
-    }
+    if (signIns) await this.#syncAtOpen(this.#cdp, signIns, loaded);
     this.#syncedAt = this.#now();
     await this.#cdp.send("Browser.setDownloadBehavior", { behavior: "allowAndName", downloadPath: this.downloadDir, eventsEnabled: true });
   }
 
-  /** Writes the session's own cookie changes into the home's copy: a cookie the session never touched stays as the home
-   * has it, and an empty profile that was never carried into never empties the home. */
+  /** The home and the sandbox profile made to agree at an open (sync.ts has the rules): what the sandbox kept that the home
+   * never saw goes home, and the home's copy is set in the sandbox when it differs from what the sandbox holds. */
+  async #syncAtOpen(cdp: Cdp, signIns: SignInStore, loaded: Exclude<ReturnType<SignInStore["load"]>, "unreadable">): Promise<void> {
+    const { session, rails, sync } = this.#deps;
+    const last = sync.load(this.#stamp);
+    const sandbox = await carryOut(cdp);
+    const home = loaded?.state.cookies ?? [];
+    const { merged, fromSandbox } = mergeAtOpen(home, sandbox, last);
+    let homeAt = loaded?.modified ?? 0;
+    if (fromSandbox > 0) {
+      homeAt = signIns.save(session, merged);
+      this.#deps.log(`browser ${session}: saved ${fromSandbox} sign-in cookies the browser sandbox kept but the home did not have`);
+    }
+    // The home's storage goes in only when its copy changed since this sandbox last had it.
+    const storage = loaded && loaded.modified > rails.carried(this.#stamp) ? loaded.state.origins : [];
+    let held = sandbox;
+    if (!sandboxHolds(merged, sandbox, last) || storage.length > 0) {
+      const carried = await carryIn(cdp, { cookies: merged, origins: storage }).catch(() => { throw new CarryFailed(loaded?.modified ?? 0); });
+      held = await carryOut(cdp);
+      const kept = new Set(Object.keys(prints(held)));
+      const took = merged.filter((cookie) => kept.has(JSON.stringify([cookie.name, cookie.domain, cookie.path, cookie.partitionKey ?? null]))).length;
+      this.#deps.log(`browser ${session}: carried ${took} of ${merged.length} saved cookies${carried.refused ? ` (${carried.refused} refused by Chrome)` : ""} and ${carried.origins} sites' storage into the browser sandbox`);
+    }
+    rails.setCarried(this.#stamp, homeAt);
+    sync.save(this.#stamp, { home: prints(merged), sandbox: prints(held) });
+    this.#baseline = held;
+  }
+
+  /** Writes the session's own cookie changes into the home's copy: set, changed and removed since what Chrome really held
+   * at the open (a cookie Chrome dropped by itself is no removal), except a cookie the home changed meanwhile. */
   async syncSignIns(): Promise<void> {
-    const { session, rails, signIns } = this.#deps;
+    const { session, rails, signIns, sync } = this.#deps;
     if (!this.#cdp || !signIns || this.#baseline === null || this.#syncing) return;
     this.#syncing = true;
     try {
       const current = await carryOut(this.#cdp);
-      const changes = cookieChanges(this.#baseline, current);
       this.#syncedAt = this.#now();
-      if (!changes.set.length && !changes.removed.length) return;
       const home = signIns.load(session);
       if (home === "unreadable") return;
-      const before = home?.state.cookies ?? [];
-      const merged = mergeCookies(before, changes);
-      if (!this.#carried && before.length > 0 && merged.length < before.length / 2) {
-        this.#deps.log(`browser ${session}: kept the home's saved sign-ins: the browser sandbox's profile had far fewer and was never carried into this session`);
-        return;
-      }
-      rails.setCarried(this.#stamp, signIns.save(session, merged));
+      const last = sync.load(this.#stamp);
+      const { merged, changed } = mergeInSession(home?.state.cookies ?? [], this.#baseline, current, last);
       this.#baseline = current;
+      if (changed > 0) rails.setCarried(this.#stamp, signIns.save(session, merged));
+      sync.save(this.#stamp, { home: prints(merged), sandbox: prints(current) });
     } finally {
       this.#syncing = false;
     }

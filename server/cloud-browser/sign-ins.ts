@@ -38,26 +38,6 @@ export function cookieParam(cookie: SavedCookie): Record<string, unknown> {
 export const cookieId = (cookie: SavedCookie): string =>
   JSON.stringify([cookie.name, cookie.domain, cookie.path, cookie.partitionKey ?? null]);
 
-/** The cookies a session changed: those it set or changed since `baseline`, and the ids of those it removed. */
-export function cookieChanges(baseline: readonly SavedCookie[], current: readonly SavedCookie[]) {
-  const before = new Map(baseline.map((cookie) => [cookieId(cookie), cookie]));
-  const now = new Map(current.map((cookie) => [cookieId(cookie), cookie]));
-  const set = [...now.values()].filter((cookie) => {
-    const old = before.get(cookieId(cookie));
-    return !old || old.value !== cookie.value || old.expires !== cookie.expires;
-  });
-  const removed = [...before.keys()].filter((id) => !now.has(id));
-  return { set, removed };
-}
-
-/** The home's cookies with only a session's own changes applied: a cookie the session never touched stays as the home has it. */
-export function mergeCookies(home: readonly unknown[], changes: ReturnType<typeof cookieChanges>): SavedCookie[] {
-  const merged = new Map(home.filter(isSavedCookie).map((cookie) => [cookieId(cookie), cookie]));
-  for (const id of changes.removed) merged.delete(id);
-  for (const cookie of changes.set) merged.set(cookieId(cookie), cookie);
-  return [...merged.values()].slice(0, MAX_COOKIES);
-}
-
 interface Storage { origin: string; items: Array<{ name: string; value: string }> }
 
 function storageOf(origins: readonly unknown[]): Storage[] {
@@ -82,15 +62,13 @@ const BATCH = 100;
 async function setInBatches(cdp: Cdp, cookies: readonly SavedCookie[]): Promise<{ set: SavedCookie[]; refused: number }> {
   const set: SavedCookie[] = [];
   let refused = 0;
-  for (let at = 0; at < cookies.length; at += BATCH) {
-    const batch = cookies.slice(at, at + BATCH);
-    try {
-      await cdp.send("Storage.setCookies", { cookies: batch.map(cookieParam) });
-      set.push(...batch);
-      continue;
-    } catch {
-      // One of them is refused: each on its own.
-    }
+  const batches: SavedCookie[][] = [];
+  for (let at = 0; at < cookies.length; at += BATCH) batches.push(cookies.slice(at, at + BATCH));
+  // Every batch is sent at once (Chrome takes them in order on the one connection): one round trip, not one per batch.
+  const answers = await Promise.all(batches.map((batch) => cdp.send("Storage.setCookies", { cookies: batch.map(cookieParam) }).then(() => true, () => false)));
+  for (const [i, batch] of batches.entries()) {
+    if (answers[i]) { set.push(...batch); continue; }
+    // One of them is refused: each on its own.
     for (const cookie of batch) {
       try {
         await cdp.send("Storage.setCookies", { cookies: [cookieParam(cookie)] });
@@ -111,8 +89,11 @@ async function setInBatches(cdp: Cdp, cookies: readonly SavedCookie[]): Promise<
  * keeps its cookies). Returns the cookies now in the profile from the home's copy. */
 export async function carryIn(cdp: Cdp, state: { cookies: readonly unknown[]; origins: readonly unknown[] }): Promise<{ cookies: number; refused: number; origins: number; set: SavedCookie[] }> {
   const saved = state.cookies.filter(isSavedCookie).slice(0, MAX_COOKIES);
-  await cdp.send("Storage.clearCookies", {});
-  const { set, refused } = await setInBatches(cdp, saved);
+  // Sent together with the batches: Chrome clears first, then sets, in the order it got them.
+  const cleared = cdp.send("Storage.clearCookies", {});
+  const batches = setInBatches(cdp, saved);
+  await cleared;
+  const { set, refused } = await batches;
   const cookies = set;
   const storage = storageOf(state.origins);
   let carried = 0;
@@ -140,14 +121,6 @@ export async function carryIn(cdp: Cdp, state: { cookies: readonly unknown[]; or
     }
   }
   return { cookies: cookies.length, refused, origins: carried, set };
-}
-
-/** The home's session cookies (no expiry: Chrome keeps them only while it runs) that the profile no longer has, set again
- * one at a time. Only these: a cookie the profile has, or one the session set since, is never replaced. */
-export async function restoreSessionCookies(cdp: Cdp, home: readonly unknown[], current: readonly SavedCookie[]): Promise<SavedCookie[]> {
-  const have = new Set(current.map(cookieId));
-  const missing = home.filter(isSavedCookie).filter((cookie) => (cookie.session === true || (typeof cookie.expires === "number" && cookie.expires < 0)) && !have.has(cookieId(cookie)));
-  return (await setInBatches(cdp, missing.slice(0, MAX_COOKIES))).set;
 }
 
 /** The sandbox's cookies as the home saves them (Chrome's own shape, as agent-browser writes it), at most MAX_COOKIES. */

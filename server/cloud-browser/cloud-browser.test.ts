@@ -95,9 +95,9 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     expect(cdpUrl).toMatch(/^ws:\/\/127\.0\.0\.1:\d+\/devtools\/browser\/[a-f0-9]{64}$/);
     const key = profileKey("scout");
     expect(await act(cdpUrl, 5)).toEqual([0, 1, 2, 3, 4].map((id) => `echo:${key}:${JSON.stringify({ id })}`));
-    // One probe before the session was committed, the session's companion (sign-ins, downloads), and the engine's own
-    // single connection for all five actions.
-    expect(fake.upgrades).toHaveLength(3);
+    // The session's companion (sign-ins, downloads; its connection proves the path, no separate probe), and the engine's
+    // own single connection for all five actions.
+    expect(fake.upgrades).toHaveLength(2);
     expect(cloud.dialed("bot-scout")).toBe(2);
     for (const upgrade of fake.upgrades) {
       expect(upgrade.path).toMatch(new RegExp(`^/${key}/[a-f0-9]{48}$`));
@@ -285,7 +285,7 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     engine.terminate();
   });
 
-  it("sets the home's session cookies again after the sandbox's Chrome restarted, and touches nothing else of the profile", async () => {
+  it("sets the home's session cookies again after the sandbox's Chrome restarted, and keeps what the profile held", async () => {
     const home = memorySignIns({ cookies: [SIGNED_IN], origins: [] });
     const cloud = browser({ signIns: home.store });
     urlOf(await cloud.open(request()));
@@ -294,10 +294,10 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     // A stop and a new machine: Chrome restarted, so its session cookie is gone; a persistent one made in the sandbox stays.
     const key = profileKey("scout");
     fake.cookies.set(key, [{ name: "kept", value: "k", domain: "kept.example", path: "/", expires: 2_000_000_000 }]);
-    const clears = fake.commands.filter((one) => one.method === "Storage.clearCookies").length;
     urlOf(await cloud.open(request()));
     expect(fake.cookies.get(key)?.map((cookie) => cookie.name).sort()).toEqual(["kept", "sid"]);
-    expect(fake.commands.filter((one) => one.method === "Storage.clearCookies").length, "the profile is not cleared").toBe(clears);
+    // The one the sandbox kept and the home never saw went home too.
+    expect((home.store.load("bot-scout") as { state: { cookies: Array<{ name: string }> } }).state.cookies.map((cookie) => cookie.name).sort()).toEqual(["kept", "sid"]);
   });
 
   it("stops the browser sandbox through the cloud computers' sleep without sending it a shell command", async () => {
@@ -338,6 +338,10 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     // It went on coming up meanwhile, timed by the idle path from its start: the next call finds it awake.
     await vi.waitFor(() => expect(fake.launches()).toBe(1));
     await vi.waitFor(() => expect(cloud.busy(BROWSER_SANDBOX_OWNER)).toBe(false));
+    // Given up during the launch: nothing more was spent on the abandoned call: no connection, no carry, its Chrome quit.
+    expect(fake.upgrades).toEqual([]);
+    expect(fake.commands, "no cookie carried").toEqual([]);
+    expect(fake.quits()).toEqual([`quit:${profileKey("scout")}`]);
     expect(used[0]).toEqual([BROWSER_SANDBOX_OWNER, CLOUD_BROWSER_IDLE_MS]);
     expect(cloud.active("bot-scout"), "this call stayed in the home: its session is not on the sandbox").toBeNull();
     urlOf(await cloud.open(request()));
@@ -394,6 +398,22 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     expect(fake.resumes(), "a deletion never wakes the sandbox").toBe(0);
     urlOf(await cloud.open(request("chief")));
     expect(fake.erased).toEqual([profileKey("scout"), profileKey("writer")]);
+  });
+
+  it("logs why a session in the sandbox closed: its real idle time, a deleted bot, a stopped sandbox", async () => {
+    const lines: string[] = [];
+    const cloud = browser({ log: (line) => lines.push(line) });
+    urlOf(await cloud.open(request()));
+    clock += CLOUD_BROWSER_IDLE_MS + 60_000;
+    await cloud.closeIdle();
+    expect(lines.at(-1)).toBe("browser bot-scout: closed in the Cloud's browser sandbox: 4 minutes unused");
+    urlOf(await cloud.open(request()));
+    await cloud.erase("scout");
+    expect(lines).toContain("browser bot-scout: closed in the Cloud's browser sandbox: its bot was deleted");
+    urlOf(await cloud.open(request("writer")));
+    fake.state = "archived";
+    await cloud.failed("bot-writer");
+    expect(lines.at(-1)).toBe("browser bot-writer: closed in the Cloud's browser sandbox: its browser sandbox is archived");
   });
 
   it("carries the home's cookies in batches, not one call each", async () => {
@@ -889,6 +909,63 @@ describe("a bot's sign-ins between the home and its sandbox profile", () => {
     expect(cookieParam({ ...SIGNED_IN, partitionKey: "https://top.example" })).toMatchObject({ partitionKey: "https://top.example" });
     expect(cookieParam({ ...SIGNED_IN, partitionKey: { topLevelSite: "https://top.example", hasCrossSiteAncestor: false } }))
       .toMatchObject({ partitionKey: { topLevelSite: "https://top.example", hasCrossSiteAncestor: false } });
+  });
+
+  it("a sign-in the sandbox kept through a stop with no clean close (the auto-stop, the Admin's stop) reaches the home at the next open", async () => {
+    const home = memorySignIns({ cookies: [SIGNED_IN], origins: [] });
+    const cloud = browser({ signIns: home.store });
+    urlOf(await cloud.open(request()));
+    // The person signs in; the sandbox is stopped under the session (its pre-stop hook saved the cookie in the profile),
+    // and the home's close finds the sandbox gone, so nothing is written home then.
+    const key = profileKey("scout");
+    const made = { name: "ttl3b", value: "1", domain: "mail.example", path: "/", expires: 2_000_000_000 };
+    fake.cookies.set(key, [...fake.cookies.get(key) ?? [], made]);
+    fake.state = "archived";
+    await cloud.failed("bot-scout");
+    expect(home.writes, "nothing went home at that close").toEqual([]);
+    // The next open (a resume onto a new machine: the session cookie is gone, the persistent ones are on disk).
+    fake.cookies.set(key, (fake.cookies.get(key) ?? []).filter((cookie) => cookie.expires !== undefined));
+    urlOf(await cloud.open(request()));
+    const saved = (home.store.load("bot-scout") as { state: { cookies: Array<{ name: string }> } }).state.cookies.map((cookie) => cookie.name).sort();
+    expect(saved).toEqual(["sid", "ttl3b"]);
+    expect(fake.cookies.get(key)?.map((cookie) => cookie.name).sort(), "and the sandbox has both").toEqual(["sid", "ttl3b"]);
+  });
+
+  it("a carry-in never deletes a newer sandbox cookie the home never saw, while a sign-out made in the home still wins", async () => {
+    const other = { ...SIGNED_IN, name: "other", domain: "other.example" };
+    const home = memorySignIns({ cookies: [SIGNED_IN, other], origins: [] });
+    const cloud = browser({ signIns: home.store });
+    urlOf(await cloud.open(request()));
+    const key = profileKey("scout");
+    fake.cookies.set(key, [...fake.cookies.get(key) ?? [], { name: "fresh", value: "f", domain: "fresh.example", path: "/", expires: 2_000_000_000 }]);
+    fake.state = "archived";
+    await cloud.failed("bot-scout");
+    // Meanwhile, in the home, the person signs out of other.example: the home's copy changes, and is newer.
+    home.change({ cookies: [SIGNED_IN], origins: [] });
+    urlOf(await cloud.open(request()));
+    expect(fake.cookies.get(key)?.map((cookie) => cookie.name).sort(), "fresh kept, other signed out").toEqual(["fresh", "sid"]);
+    expect((home.store.load("bot-scout") as { state: { cookies: Array<{ name: string }> } }).state.cookies.map((cookie) => cookie.name).sort()).toEqual(["fresh", "sid"]);
+  });
+
+  it("a cookie Chrome dropped by itself after a carry-in (its per-site limit) is never deleted from the home, and the log says how many it took", async () => {
+    const many = Array.from({ length: 6 }, (_, i) => ({ ...SIGNED_IN, name: `c${i}`, domain: "capped.example", expires: 2_000_000_000, session: false }));
+    const lines: string[] = [];
+    const home = memorySignIns({ cookies: many, origins: [] });
+    fake.cookieCap = 4;
+    const cloud = browser({ signIns: home.store, log: (line) => lines.push(line) });
+    urlOf(await cloud.open(request()));
+    expect(lines.join("\n")).toContain("carried 4 of 6 saved cookies");
+    // The person signs in somewhere else in the session; the close writes that back, and nothing of the 6 is lost.
+    const key = profileKey("scout");
+    fake.cookies.set(key, [...fake.cookies.get(key) ?? [], { name: "new", value: "n", domain: "new.example", path: "/", expires: 2_000_000_000 }]);
+    clock += CLOUD_BROWSER_IDLE_MS;
+    await cloud.closeIdle();
+    const saved = (home.store.load("bot-scout") as { state: { cookies: Array<{ name: string }> } }).state.cookies.map((cookie) => cookie.name).sort();
+    expect(saved).toEqual(["c0", "c1", "c2", "c3", "c4", "c5", "new"]);
+    // And the next open does not carry the dropped ones again at every open.
+    const sets = fake.commands.filter((one) => one.method === "Storage.clearCookies").length;
+    urlOf(await cloud.open(request()));
+    expect(fake.commands.filter((one) => one.method === "Storage.clearCookies").length).toBe(sets);
   });
 
   it("never puts a cookie value in the log", async () => {

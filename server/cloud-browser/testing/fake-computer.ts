@@ -29,6 +29,8 @@ export interface FakeComputer {
   hostRoute: boolean;
   unprotected: boolean;
   chromeStarts: boolean;
+  /** Cookies of one site Chrome keeps at most (its per-site limit); null keeps all. */
+  cookieCap: number | null;
   /** How an Admin from before the browser sandbox answers its probe: 404, or 403 `not_available`. */
   oldRelayAnswer: 403 | 404;
   /** Answers the relay holds back, by path ending: the request waits this many ms (a sandbox stuck provisioning). */
@@ -79,7 +81,7 @@ export async function startFakeComputer(): Promise<FakeComputer> {
   let retired = true;
   const fake = {
     base: "", state: "ready", exists: true, startStatus: 200, startBody: { ok: true }, oldRelay: false, available: true, unavailableReason: "fleet_starts",
-    unavailableUntil: null, hostRoute: true, unprotected: false, chromeStarts: true, policy: true, takeBackFails: false, chromes: 2, caps: null, patchStatus: 200, oldRelayAnswer: 404, stall: new Map(), erased: [], requests: [], upgrades: [], frames: [], boxId: "bx_23456789",
+    unavailableUntil: null, hostRoute: true, unprotected: false, chromeStarts: true, policy: true, takeBackFails: false, chromes: 2, caps: null, patchStatus: 200, oldRelayAnswer: 404, cookieCap: null, stall: new Map(), erased: [], requests: [], upgrades: [], frames: [], boxId: "bx_23456789",
     files: new Map(), cookies: new Map(), commands: [], failing: new Set(),
   } as unknown as FakeComputer;
   const watchers = new Map<string, Set<import("ws").WebSocket>>();
@@ -192,12 +194,18 @@ export async function startFakeComputer(): Promise<FakeComputer> {
         fake.commands.push({ key, method: message.method, params });
         let result: Record<string, unknown> = {};
         const refusedCookie = message.method === "Storage.setCookies" && (params.cookies as Array<Record<string, unknown>>).some((cookie) => cookie.sameSite === "None" && cookie.secure !== true);
+        // A sandbox that stopped answers nothing on a connection it had: as if the machine went.
+        if (fake.state === "archived" || fake.state === "archiving") { ws.terminate(); return; }
         if (fake.failing.has(message.method) || refusedCookie) {
           ws.send(JSON.stringify({ id: message.id, error: { code: -32000, message: "Sanitizing cookie failed" } }));
           return;
         }
         if (message.method === "Storage.clearCookies") fake.cookies.set(key, []);
-        if (message.method === "Storage.setCookies") fake.cookies.set(key, [...(fake.cookies.get(key) ?? []), ...(params.cookies as Array<Record<string, unknown>>)]);
+        if (message.method === "Storage.setCookies") {
+          // Chrome keeps at most so many cookies of one site and drops the rest by itself, as it does past its per-site limit.
+          const all = [...(fake.cookies.get(key) ?? []), ...(params.cookies as Array<Record<string, unknown>>)];
+          fake.cookies.set(key, fake.cookieCap === null ? all : all.filter((cookie, i) => all.slice(0, i).filter((one) => one.domain === cookie.domain).length < fake.cookieCap!));
+        }
         if (message.method === "Storage.getCookies") result = { cookies: (fake.cookies.get(key) ?? []).map((cookie) => ({ ...cookie, size: 1, session: cookie.expires === undefined, expires: cookie.expires ?? -1 })) };
         if (message.method === "Browser.setDownloadBehavior") { const set = watchers.get(key) ?? new Set(); set.add(ws); watchers.set(key, set); }
         if (message.method === "Target.createTarget") result = { targetId: "page-1" };

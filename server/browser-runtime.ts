@@ -467,7 +467,7 @@ export class BrowserRuntime {
     if (method !== "tools/call") return result;
     if (result === null || result === undefined) return scrubBrowserResult({ isError: true, content: [{ type: "text", text: LANE_BUSY }] }, this.scrub);
     if (!gate.reopened || refusedSlot(result)) return scrubBrowserResult(result, this.scrub);
-    const note = gate.reopened === "restart" ? PERSON_RESTARTED : idleClosedNote(spec.env.AGENT_BROWSER_RESTORE_SAVE !== "never");
+    const note = gate.reopened === "restart" ? PERSON_RESTARTED : idleClosedNote(spec.env.AGENT_BROWSER_RESTORE_SAVE !== "never" || attachesToChrome(spec.env)); // an attached browser keeps its sign-ins in its own profile
     gate.reopened = null;
     const content = (result as { content?: unknown } | null)?.content;
     return scrubBrowserResult({ ...result as object, content: [{ type: "text", text: note }, ...Array.isArray(content) ? content : []] }, this.scrub);

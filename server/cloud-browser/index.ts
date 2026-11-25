@@ -4,10 +4,12 @@
 // install never builds this. The one operator lever, never a product setting: OMB_CLOUD_BROWSER=home keeps every browser
 // in the home, and after a day of it the sandbox is deleted.
 import { randomBytes } from "node:crypto";
+import { join } from "node:path";
 
 import { cloudFailureOf } from "../boat-limit.ts";
-import { CloudBrowserDoors, dialable, probeDoor, type DoorTarget } from "./door.ts";
 import { connectCdp } from "../browser-sites.ts";
+import { CloudBrowserDoors, dialable, probeDoor, type DoorTarget } from "./door.ts";
+import { syncStore } from "./sync.ts";
 import { CarryFailed, SandboxCompanion, SignInsUnreadable, type CompanionDeps, type SignInStore } from "./companion.ts";
 import { createCloudBrowserRails, type CloudBrowserRails, type HomeReason } from "./rails.ts";
 import { BROWSER_SANDBOX_CHROMES, BROWSER_SANDBOX_OWNER, COMPUTER_DOOR_PORT, OldRelay, profileKey, StaysHome, wakeSandbox, type ComputerOps } from "./remote.ts";
@@ -85,6 +87,7 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
   const log = deps.log ?? ((line: string) => console.warn(line));
   const rails = deps.rails ?? createCloudBrowserRails({ dataDir: deps.dataDir, now });
   const doors = new CloudBrowserDoors(now);
+  const sync = syncStore(join(deps.dataDir, "cloud-browser", "sync"));
   /** Each running session's bot; one Chrome per bot's profile. */
   const sessions = new Map<string, string>();
   /** Bots whose browser is being opened now. */
@@ -192,10 +195,11 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
   async function erase(botId: string): Promise<void> {
     const key = profileKey(botId);
     rails.forgetProfile(key);
+    sync.forget(key);
     const ops = deps.ops();
     // Erased while the sandbox is still awake for this session, before its close lets it sleep.
     if (awake && boxId && ops) await erasePending(ops, boxId);
-    for (const [session, owner] of Array.from(sessions)) if (owner === botId) await close(session, { discard: true });
+    for (const [session, owner] of Array.from(sessions)) if (owner === botId) await close(session, { discard: true, why: "its bot was deleted" });
   }
 
   async function launch(request: OpenRequest, ops: ComputerOps, gaveUp: () => boolean): Promise<Opened> {
@@ -208,7 +212,11 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
       box = await wake(ops);
       if (gaveUp()) return { home: "slow" };
       const secret = randomBytes(24).toString("hex");
+      // The door's port is put on the relay while Chrome starts: it needs no Chrome.
+      const hosted = ops.host(box.id, COMPUTER_DOOR_PORT).catch(() => null);
       const answer = await ops.launch(box.id, key, secret);
+      // Given up while the launch ran: nothing more is spent on this call (no port, no carry); its Chrome quits.
+      if (gaveUp()) { await quit(); return { home: "slow" }; }
       if (!answer.chrome || !answer.home) {
         rails.failed();
         await quit();
@@ -220,7 +228,7 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
         await quit();
         return home(request, "no-policy");
       }
-      const relay = await ops.host(box.id, COMPUTER_DOOR_PORT).catch(() => null);
+      const relay = await hosted;
       const url = relay ? dialable(relay) : null;
       if (!url) {
         rails.noRoute();
@@ -228,16 +236,12 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
         return home(request, "no-route");
       }
       const target: DoorTarget = { url, secret: `${key}/${secret}` };
-      if (!await probeDoor(target)) {
-        rails.failed();
-        await quit();
-        return home(request, "unreachable");
-      }
+      // No separate probe of the path: the companion's own connection through the door, next, proves it (or fails the open).
       if (gaveUp()) { await quit(); return { home: "slow" }; }
       const cdpUrl = await doors.open(request.session, target);
       const companion = new SandboxCompanion({
         session: request.session, botId: request.botId, key, boxId: box.id, home: answer.home, ops, rails, signIns: deps.signIns ?? null,
-        folder: (botId) => deps.folder?.(botId) ?? null, log, now, ...(deps.disk ? { disk: deps.disk } : {}),
+        folder: (botId) => deps.folder?.(botId) ?? null, log, now, sync, ...(deps.disk ? { disk: deps.disk } : {}),
         connect: deps.connect ?? ((url, listeners) => connectCdp(url, 10_000, listeners)),
       });
       try {
@@ -335,8 +339,10 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
   }
 
   /** The bot's Chrome quits cleanly (its cookies written), the engine's session ends, and the sandbox may sleep. */
-  async function close(session: string, options: { discard?: boolean } = {}): Promise<void> {
+  /** `why`: what the log says; an idle close says how long it really sat unused. */
+  async function close(session: string, options: { discard?: boolean; why?: string } = {}): Promise<void> {
     const botId = sessions.get(session);
+    const unusedFor = Math.round((now() - (lastUse.get(session) ?? now())) / 60_000);
     if (!botId || closing.has(session)) return;
     closing.add(session);
     try {
@@ -354,7 +360,7 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
       const ops = deps.ops();
       if (ops && boxId) await ops.quit(boxId, bots().size > 0 ? profileKey(botId) : null).catch(() => undefined);
       letSleep();
-      log(`browser ${session}: closed in the Cloud's browser sandbox after ${Math.round(CLOUD_BROWSER_IDLE_MS / 60_000)} minutes unused`);
+      log(`browser ${session}: closed in the Cloud's browser sandbox: ${options.why ?? `${unusedFor} minutes unused`}`);
     } finally {
       closing.delete(session);
     }
@@ -383,7 +389,7 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
     const alive = state !== null && READY_STATES.has(state) && target !== null && await probeDoor(target, 5_000);
     if (alive) return false;
     log(`browser ${session}: its browser sandbox is ${state && !READY_STATES.has(state) ? `${state}` : "not answering"}; the session ends and the next call opens again`);
-    await close(session);
+    await close(session, { why: `its browser sandbox is ${state && !READY_STATES.has(state) ? state : "not answering"}` });
     return true;
   }
 
