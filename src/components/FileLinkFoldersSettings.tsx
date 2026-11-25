@@ -17,27 +17,36 @@ function parentFolderPath(filePath: string): string {
   return /^[a-z]:$/i.test(parent) ? `${parent}\\` : parent;
 }
 
-async function saveExtraFileLinkRoots(
+const saveSequences = new WeakMap<object, number>();
+const saveQueues = new WeakMap<object, Promise<void>>();
+
+export async function saveExtraFileLinkRoots(
   next: string[],
   expected: string[],
   dispatch: (action: { type: "configStatus"; config: ConfigStatus }) => void,
 ): Promise<void> {
-  try {
-    const config = await api<ConfigStatus>("/api/config", {
-      method: "PUT",
-      body: JSON.stringify({ fileLinks: { extraRoots: next }, expectedExtraFileLinkRoots: expected }),
-    });
-    dispatch({ type: "configStatus", config });
-  } catch (cause) {
-    if (cause instanceof ApiError && cause.status === 409) {
-      try {
-        const config = await api<ConfigStatus>("/api/config");
-        dispatch({ type: "configStatus", config });
-      } catch {
+  const seq = (saveSequences.get(dispatch) ?? 0) + 1;
+  saveSequences.set(dispatch, seq);
+  const run = (saveQueues.get(dispatch) ?? Promise.resolve()).then(async () => {
+    try {
+      const config = await api<ConfigStatus>("/api/config", {
+        method: "PUT",
+        body: JSON.stringify({ fileLinks: { extraRoots: next }, expectedExtraFileLinkRoots: expected }),
+      });
+      if (saveSequences.get(dispatch) === seq) dispatch({ type: "configStatus", config });
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 409) {
+        try {
+          const config = await api<ConfigStatus>("/api/config");
+          if (saveSequences.get(dispatch) === seq) dispatch({ type: "configStatus", config });
+        } catch {
+        }
       }
+      throw cause;
     }
-    throw cause;
-  }
+  });
+  saveQueues.set(dispatch, run.catch(() => undefined));
+  return run;
 }
 
 /** Inline owner action beside an out-of-workspace path on self-hosted remote clients. */
