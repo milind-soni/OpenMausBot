@@ -52,6 +52,8 @@ export interface ComputerOps {
   fetchFile(boxId: string, path: string, folder: string, to: string): Promise<CopyOutcome>;
   /** A file of the Cloud (`from`, inside `folder`) copied to a sandbox path for an upload. */
   sendFile(boxId: string, folder: string, from: string, path: string): Promise<CopyOutcome>;
+  /** A deleted bot's profile, door secret and files in the sandbox, erased. */
+  erase(boxId: string, key: string): Promise<void>;
   /** A download the sandbox no longer needs to keep. */
   removeDownload(boxId: string, key: string, name: string): Promise<void>;
   /** One bot's Chrome asked to quit (it writes its cookies); `key` null: every Chrome and the door. */
@@ -134,7 +136,8 @@ export function providerOps(cfg: () => AppConfig): ComputerOps {
   return {
     async probe() {
       const answer = await json(cfg(), "/browser-sandbox");
-      if (answer.status === 404) return { kind: "old-relay" };
+      // An Admin from before the browser sandbox answers its unknown route with 404, or 403 `not_available`.
+      if (answer.status === 404 || (answer.status === 403 && (answer.body?.code ?? answer.body?.error?.code) === "not_available")) return { kind: "old-relay" };
       if (!answer.ok || typeof answer.body?.available !== "boolean") throw boatRefusal(answer.status, "asking about the browser sandbox", answer.body, true);
       const chromes = Number.isInteger(answer.body.chromes) && answer.body.chromes >= 1 && answer.body.chromes <= 4 ? answer.body.chromes as number : null;
       const count = (value: unknown) => (typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null);
@@ -166,6 +169,10 @@ export function providerOps(cfg: () => AppConfig): ComputerOps {
     },
     fetchFile: (boxId, path, folder, to) => copyFromComputer(cfg(), boxId, folder, { path, to }, AbortSignal.timeout(10 * 60_000)),
     sendFile: (boxId, folder, from, path) => copyToComputer(cfg(), boxId, folder, { from, path }, AbortSignal.timeout(10 * 60_000)),
+    async erase(boxId, key) {
+      if (!HEX16.test(key)) throw new Error("bad browser profile key");
+      await action(boxId, { action: "erase", key });
+    },
     async removeDownload(boxId, key, name) {
       if (!HEX16.test(key)) throw new Error("bad browser profile key");
       await action(boxId, { action: "remove-download", key, name });

@@ -75,24 +75,44 @@ function storageOf(origins: readonly unknown[]): Storage[] {
   return kept;
 }
 
+const BATCH = 100;
+
+/** Cookies set a hundred at a time; a batch Chrome refuses (one cookie in it it won't take) is set one at a time, so that
+ * cookie alone is left out and counted. */
+async function setInBatches(cdp: Cdp, cookies: readonly SavedCookie[]): Promise<{ set: SavedCookie[]; refused: number }> {
+  const set: SavedCookie[] = [];
+  let refused = 0;
+  for (let at = 0; at < cookies.length; at += BATCH) {
+    const batch = cookies.slice(at, at + BATCH);
+    try {
+      await cdp.send("Storage.setCookies", { cookies: batch.map(cookieParam) });
+      set.push(...batch);
+      continue;
+    } catch {
+      // One of them is refused: each on its own.
+    }
+    for (const cookie of batch) {
+      try {
+        await cdp.send("Storage.setCookies", { cookies: [cookieParam(cookie)] });
+        set.push(cookie);
+      } catch {
+        refused += 1;
+      }
+    }
+  }
+  return { set, refused };
+}
+
 /** The home's saved sign-ins made the sandbox profile's, the home being the newer: the profile's cookies are cleared first
- * (so a site signed out of in the home stays signed out), then each cookie is set on its own, so one Chrome refuses (a
- * SameSite=None one without Secure, say) is skipped and counted instead of failing the rest. Then, as best it can, each
+ * (so a site signed out of in the home stays signed out), then the cookies are set in batches, and a batch Chrome refuses
+ * one cookie of (a SameSite=None one without Secure, say) one at a time, so that one is skipped and counted instead of
+ * failing the rest. Then, as best it can, each
  * site's local storage through one blank page of its own (Chrome may want a page of that site first; a site it refuses
  * keeps its cookies). Returns the cookies now in the profile from the home's copy. */
 export async function carryIn(cdp: Cdp, state: { cookies: readonly unknown[]; origins: readonly unknown[] }): Promise<{ cookies: number; refused: number; origins: number; set: SavedCookie[] }> {
   const saved = state.cookies.filter(isSavedCookie).slice(0, MAX_COOKIES);
   await cdp.send("Storage.clearCookies", {});
-  const set: SavedCookie[] = [];
-  let refused = 0;
-  for (const cookie of saved) {
-    try {
-      await cdp.send("Storage.setCookies", { cookies: [cookieParam(cookie)] });
-      set.push(cookie);
-    } catch {
-      refused += 1;
-    }
-  }
+  const { set, refused } = await setInBatches(cdp, saved);
   const cookies = set;
   const storage = storageOf(state.origins);
   let carried = 0;
@@ -127,16 +147,7 @@ export async function carryIn(cdp: Cdp, state: { cookies: readonly unknown[]; or
 export async function restoreSessionCookies(cdp: Cdp, home: readonly unknown[], current: readonly SavedCookie[]): Promise<SavedCookie[]> {
   const have = new Set(current.map(cookieId));
   const missing = home.filter(isSavedCookie).filter((cookie) => (cookie.session === true || (typeof cookie.expires === "number" && cookie.expires < 0)) && !have.has(cookieId(cookie)));
-  const set: SavedCookie[] = [];
-  for (const cookie of missing.slice(0, MAX_COOKIES)) {
-    try {
-      await cdp.send("Storage.setCookies", { cookies: [cookieParam(cookie)] });
-      set.push(cookie);
-    } catch {
-      // Refused by Chrome: left out, as at a carry.
-    }
-  }
-  return set;
+  return (await setInBatches(cdp, missing.slice(0, MAX_COOKIES))).set;
 }
 
 /** The sandbox's cookies as the home saves them (Chrome's own shape, as agent-browser writes it), at most MAX_COOKIES. */

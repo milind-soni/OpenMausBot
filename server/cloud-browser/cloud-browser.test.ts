@@ -11,7 +11,7 @@ import { ComputerIdleTimer } from "../computer-idle.ts";
 import { LOCAL_SCHEME_REFUSAL, localSchemeRefusal } from "./guards.ts";
 import { SESSION_DOWNLOAD_BYTES, SIGN_IN_SYNC_MS, UPLOAD_MAX_BYTES, type SignInStore } from "./companion.ts";
 import { cookieParam } from "./sign-ins.ts";
-import { CLOUD_BROWSER_IDLE_MS, createCloudBrowser, SANDBOX_IDLE_TTL_SECONDS, TTL_REFRESH_MS, type CloudBrowserDeps } from "./index.ts";
+import { CLOUD_BROWSER_IDLE_MS, createCloudBrowser, OPEN_DEADLINE_MS, REOPENED_NOTE, SANDBOX_IDLE_TTL_SECONDS, TTL_REFRESH_MS, type CloudBrowserDeps } from "./index.ts";
 import { CLOUD_BROWSER_BACKOFF_MS, createCloudBrowserRails } from "./rails.ts";
 import { BROWSER_SANDBOX_CHROMES, BROWSER_SANDBOX_OWNER, browserSandboxCreateBody, profileKey, providerOps, ttlSecondsOf } from "./remote.ts";
 import { RELAY_KEY, RELAY_TOKEN, startFakeComputer, type FakeComputer } from "./testing/fake-computer.ts";
@@ -324,6 +324,84 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     urlOf(await cloud.open(request()));
     expect(fake.resumes()).toBe(2);
     expect(cloud.report().resumes).toBe(1);
+  });
+
+  it("never keeps a call waiting past the open deadline: a sandbox stuck coming up opens the home's browser, and is ready for the next call", async () => {
+    expect(OPEN_DEADLINE_MS).toBe(12_000);
+    fake.state = "archived";
+    fake.stall.set("/browser", 600);
+    const cloud = browser({ openDeadlineMs: 150 });
+    const started = Date.now();
+    expect(await cloud.open(request())).toEqual({ home: "slow" });
+    expect(Date.now() - started, "answered at the deadline, not when the sandbox was").toBeLessThan(550);
+    expect(cloud.report().fallbacks).toMatchObject({ slow: 1 });
+    // It went on coming up meanwhile, timed by the idle path from its start: the next call finds it awake.
+    await vi.waitFor(() => expect(fake.launches()).toBe(1));
+    await vi.waitFor(() => expect(cloud.busy(BROWSER_SANDBOX_OWNER)).toBe(false));
+    expect(used[0]).toEqual([BROWSER_SANDBOX_OWNER, CLOUD_BROWSER_IDLE_MS]);
+    expect(cloud.active("bot-scout"), "this call stayed in the home: its session is not on the sandbox").toBeNull();
+    urlOf(await cloud.open(request()));
+    expect(fake.resumes(), "the next call needs no start").toBe(1);
+  });
+
+  it("times a sandbox from the moment its start was sent, even when the wake then fails", async () => {
+    fake.state = "archived";
+    fake.startStatus = 500;
+    fake.startBody = { ok: false, message: "resume failed" };
+    const cloud = browser();
+    expect(await cloud.open(request())).toEqual({ home: "start-failed" });
+    expect(used[0], "armed at the start, never left untimed").toEqual([BROWSER_SANDBOX_OWNER, CLOUD_BROWSER_IDLE_MS]);
+  });
+
+  it("treats an older Admin's 403 not_available on the probe as the old relay too", async () => {
+    fake.exists = false;
+    fake.oldRelay = true;
+    fake.oldRelayAnswer = 403;
+    const cloud = browser();
+    expect(await cloud.open(request())).toEqual({ home: "old-relay" });
+    expect(fake.creates()).toBe(0);
+  });
+
+  it("tells the bot's next call that the browser was reopened after its session in the sandbox closed, here or in the home", async () => {
+    const cloud = browser();
+    urlOf(await cloud.open(request()));
+    clock += CLOUD_BROWSER_IDLE_MS;
+    await cloud.closeIdle();
+    expect(cloud.takeNotes("bot-scout")).toEqual([REOPENED_NOTE]);
+    expect(cloud.takeNotes("bot-scout"), "said once").toEqual([]);
+    // A session that ended because its sandbox stopped: the same line, whatever opens next.
+    urlOf(await cloud.open(request()));
+    fake.state = "archived";
+    await cloud.failed("bot-scout");
+    expect(cloud.takeNotes("bot-scout")).toEqual([REOPENED_NOTE]);
+  });
+
+  it("erases a deleted bot's profile in the sandbox, ends its session without writing its sign-ins home, and keeps the erase for the next wake when asleep", async () => {
+    const home = memorySignIns({ cookies: [SIGNED_IN], origins: [] });
+    const cloud = browser({ signIns: home.store });
+    urlOf(await cloud.open(request()));
+    fake.cookies.set(profileKey("scout"), [{ name: "late", value: "x", domain: "late.example", path: "/" }]);
+    await cloud.erase("scout");
+    expect(fake.erased).toEqual([profileKey("scout")]);
+    expect(home.writes, "the deleted bot's cookies never go back to the home").toEqual([]);
+    expect(cloud.takeNotes("bot-scout")).toEqual([]);
+    // Asleep: kept, and done at the next wake for anyone.
+    clock += CLOUD_BROWSER_IDLE_MS;
+    await cloud.closeIdle();
+    fake.state = "archived";
+    await cloud.erase("writer");
+    expect(fake.erased).toEqual([profileKey("scout")]);
+    expect(fake.resumes(), "a deletion never wakes the sandbox").toBe(0);
+    urlOf(await cloud.open(request("chief")));
+    expect(fake.erased).toEqual([profileKey("scout"), profileKey("writer")]);
+  });
+
+  it("carries the home's cookies in batches, not one call each", async () => {
+    const many = Array.from({ length: 250 }, (_, i) => ({ ...SIGNED_IN, name: `c${i}` }));
+    const cloud = browser({ signIns: memorySignIns({ cookies: many, origins: [] }).store });
+    urlOf(await cloud.open(request()));
+    expect(fake.commands.filter((one) => one.method === "Storage.setCookies")).toHaveLength(3);
+    expect(fake.cookies.get(profileKey("scout"))).toHaveLength(250);
   });
 
   it("wakes a stopped sandbox with exactly one resume, then reads only", async () => {
@@ -900,7 +978,7 @@ describe("downloads and uploads of a browser in the sandbox", () => {
     await finish("late-guid", "late.txt", Buffer.from("x"));
     await vi.waitFor(() => expect(cloud.takeNotes("bot-scout")).toHaveLength(1));
     await cloud.close("bot-scout");
-    expect(cloud.takeNotes("bot-scout")).toEqual([expect.stringContaining(`"late.txt" was downloaded in the browser but could not be brought`)]);
+    expect(cloud.takeNotes("bot-scout")).toEqual([REOPENED_NOTE, expect.stringContaining(`"late.txt" was downloaded in the browser but could not be brought`)]);
     expect(cloud.takeNotes("bot-scout")).toEqual([]);
     available = true;
   });

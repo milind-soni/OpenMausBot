@@ -15,6 +15,11 @@ import { BROWSER_SANDBOX_CHROMES, BROWSER_SANDBOX_OWNER, COMPUTER_DOOR_PORT, Old
 /** A browser in the sandbox with no activity this long is closed; the sandbox sleeps once none is left. */
 export const CLOUD_BROWSER_IDLE_MS = 3 * 60_000;
 const SWEEP_MS = 30_000;
+/** However the sandbox is doing, a browser call waits at most this long for it: past it the call opens the home's browser,
+ * and the sandbox goes on coming up for the next one. Well inside the 60 s an engine gives a tool call. */
+export const OPEN_DEADLINE_MS = 12_000;
+/** What the bot's next call is told after its browser in the sandbox was closed (unused, or its machine stopped). */
+export const REOPENED_NOTE = "The browser was reopened: the earlier page and tabs are gone, so open the page again before acting on it.";
 const LEVER_CLEANUP_GAP_MS = 60 * 60_000;
 /** While a browser is used, the provider's own auto-stop is pushed to this far ahead, at most every TTL_REFRESH_MS: it then
  * stops the sandbox by itself when everything here died, and never in the middle of a session in use. */
@@ -52,6 +57,7 @@ export interface CloudBrowserDeps {
   /** Tests: a shorter sweep and wake reads. */
   sweepMs?: number;
   pollMs?: number;
+  openDeadlineMs?: number;
 }
 
 export interface OpenRequest {
@@ -103,11 +109,12 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
   /** How many bots' Chromes this Cloud's sandbox takes at once, as the relay last said (by its size). */
   let chromesAllowed = BROWSER_SANDBOX_CHROMES;
 
-  const home = (request: OpenRequest, reason: HomeReason): Opened => {
+  const fallback = (request: OpenRequest, reason: HomeReason): Opened => {
     rails.home(reason);
     log(`browser ${request.session}: opens in the home, not in the Cloud's browser sandbox (${reason})`);
     return { home: reason };
   };
+  const home = fallback;
   const bots = () => new Set([...sessions.values(), ...opening]);
 
   /** A refusal's own words decide: the account's starts, the sandbox's minutes, or a failure that counts toward the back-off. */
@@ -147,26 +154,59 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
     waking ??= wakeSandbox(ops, {
       mayStart: () => rails.refusal(true) === null,
       allowed: () => allowed(ops),
-      starting: () => rails.resumed(),
+      // Timed from the moment a start is sent, whatever follows: a sandbox started is never left untimed.
+      starting: () => { rails.resumed(); armed(); },
       ...(deps.pollMs ? { pollMs: deps.pollMs } : {}),
     }).finally(() => { waking = null; });
     const box = await waking;
     boxId = box.id;
-    awake = true;
     // Woken now: the deadline the Admin set at the resume is fresh.
     if (box.started) ttlRefreshedAt = now();
-    rails.awake();
-    // On from here: the idle path times it, whatever happens next.
-    deps.used(BROWSER_SANDBOX_OWNER, CLOUD_BROWSER_IDLE_MS);
+    armed();
+    await erasePending(ops, box.id);
     return box;
   }
 
-  async function launch(request: OpenRequest, ops: ComputerOps): Promise<Opened> {
+  /** On from here: the sandbox's idle path times it, whatever happens next. */
+  function armed(): void {
+    awake = true;
+    rails.awake();
+    deps.used(BROWSER_SANDBOX_OWNER, CLOUD_BROWSER_IDLE_MS);
+  }
+
+  /** Deleted bots' profiles, erased while the sandbox is awake anyway: a deletion never wakes it on its own. */
+  async function erasePending(ops: ComputerOps, id: string): Promise<void> {
+    for (const key of rails.pendingErasures()) {
+      try {
+        await ops.erase(id, key);
+        rails.erased(key);
+        log("browser sandbox: erased a deleted bot's profile");
+      } catch {
+        // Kept for the next wake (an Admin without the action keeps it pending).
+      }
+    }
+  }
+
+  /** A deleted bot: its sessions end without their sign-ins going home, its sync stamps go, and its profile in the
+   * sandbox is erased now if the sandbox is awake, else at its next wake. */
+  async function erase(botId: string): Promise<void> {
+    const key = profileKey(botId);
+    rails.forgetProfile(key);
+    const ops = deps.ops();
+    // Erased while the sandbox is still awake for this session, before its close lets it sleep.
+    if (awake && boxId && ops) await erasePending(ops, boxId);
+    for (const [session, owner] of Array.from(sessions)) if (owner === botId) await close(session, { discard: true });
+  }
+
+  async function launch(request: OpenRequest, ops: ComputerOps, gaveUp: () => boolean): Promise<Opened> {
     const key = profileKey(request.botId);
     let box: { id: string; started: boolean } | null = null;
     const quit = async () => { if (box) await ops.quit(box.id, key).catch(() => undefined); };
+    // Past the deadline this call already opened the home's browser: what follows only readies the sandbox for the next.
+    const home = (_request: OpenRequest, reason: HomeReason): Opened => (gaveUp() ? { home: reason } : fallback(request, reason));
     try {
       box = await wake(ops);
+      if (gaveUp()) return { home: "slow" };
       const secret = randomBytes(24).toString("hex");
       const answer = await ops.launch(box.id, key, secret);
       if (!answer.chrome || !answer.home) {
@@ -193,6 +233,7 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
         await quit();
         return home(request, "unreachable");
       }
+      if (gaveUp()) { await quit(); return { home: "slow" }; }
       const cdpUrl = await doors.open(request.session, target);
       const companion = new SandboxCompanion({
         session: request.session, botId: request.botId, key, boxId: box.id, home: answer.home, ops, rails, signIns: deps.signIns ?? null,
@@ -209,6 +250,12 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
         if (error instanceof CarryFailed) { rails.setCarryBad(key, error.modified); return home(request, "sign-ins"); }
         rails.failed();
         return home(request, "unreachable");
+      }
+      if (gaveUp()) {
+        companion.close();
+        doors.close(request.session);
+        await quit();
+        return { home: "slow" };
       }
       rails.setCarryBad(key, null);
       companions.set(request.session, companion);
@@ -269,24 +316,36 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
     const bad = rails.carryBad(profileKey(request.botId));
     if (bad !== null && known && known !== "unreadable" && known.modified === bad) return home(request, "sign-ins");
     opening.add(request.botId);
-    try {
-      return await launch(request, ops);
-    } finally {
+    let late = false;
+    const attempt = launch(request, ops, () => late).finally(() => {
       opening.delete(request.botId);
       letSleep();
-    }
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), deps.openDeadlineMs ?? OPEN_DEADLINE_MS);
+      timer.unref?.();
+    });
+    const first = await Promise.race([attempt, deadline]);
+    clearTimeout(timer);
+    if (first) return first;
+    late = true;
+    void attempt.catch(() => undefined);
+    return home(request, "slow");
   }
 
   /** The bot's Chrome quits cleanly (its cookies written), the engine's session ends, and the sandbox may sleep. */
-  async function close(session: string): Promise<void> {
+  async function close(session: string, options: { discard?: boolean } = {}): Promise<void> {
     const botId = sessions.get(session);
     if (!botId || closing.has(session)) return;
     closing.add(session);
     try {
       const companion = companions.get(session);
-      await companion?.stop().catch(() => undefined);
-      const notes = companion?.takeNotes() ?? [];
-      if (notes.length) leftNotes.set(session, notes);
+      if (options.discard) companion?.close();
+      else await companion?.stop().catch(() => undefined);
+      // The bot's next call opens a fresh browser (here or in the home): it is told the earlier page is gone.
+      const notes = options.discard ? [] : [REOPENED_NOTE, ...companion?.takeNotes() ?? []];
+      if (notes.length) leftNotes.set(session, notes); else leftNotes.delete(session);
       companions.delete(session);
       lastUse.delete(session);
       await deps.closeEngine(session).catch(() => undefined);
@@ -359,6 +418,7 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
     closeIdle,
     dialed: (session: string): number => doors.dialed(session),
     failed,
+    erase,
     /** Lines for the session's next browser call (downloads that arrived, or could not). */
     takeNotes: (session: string): string[] => {
       const left = leftNotes.get(session) ?? [];

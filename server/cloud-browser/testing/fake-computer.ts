@@ -29,6 +29,12 @@ export interface FakeComputer {
   hostRoute: boolean;
   unprotected: boolean;
   chromeStarts: boolean;
+  /** How an Admin from before the browser sandbox answers its probe: 404, or 403 `not_available`. */
+  oldRelayAnswer: 403 | 404;
+  /** Answers the relay holds back, by path ending: the request waits this many ms (a sandbox stuck provisioning). */
+  stall: Map<string, number>;
+  /** The profile keys an erase action named. */
+  erased: string[];
   /** The caps the probe says this Cloud's plan has. */
   caps: { resumesPerDay: number; awakeMinutesPerDay: number } | null;
   /** Status the PATCH of a sandbox answers with. */
@@ -73,16 +79,23 @@ export async function startFakeComputer(): Promise<FakeComputer> {
   let retired = true;
   const fake = {
     base: "", state: "ready", exists: true, startStatus: 200, startBody: { ok: true }, oldRelay: false, available: true, unavailableReason: "fleet_starts",
-    unavailableUntil: null, hostRoute: true, unprotected: false, chromeStarts: true, policy: true, takeBackFails: false, chromes: 2, caps: null, patchStatus: 200, requests: [], upgrades: [], frames: [], boxId: "bx_23456789",
+    unavailableUntil: null, hostRoute: true, unprotected: false, chromeStarts: true, policy: true, takeBackFails: false, chromes: 2, caps: null, patchStatus: 200, oldRelayAnswer: 404, stall: new Map(), erased: [], requests: [], upgrades: [], frames: [], boxId: "bx_23456789",
     files: new Map(), cookies: new Map(), commands: [], failing: new Set(),
   } as unknown as FakeComputer;
   const watchers = new Map<string, Set<import("ws").WebSocket>>();
   const HOME = "/home/user";
+  /** A held-back answer waits its time first (a sandbox stuck provisioning); every other answers at once. */
+  const after = (path: string, respond: () => void) => {
+    const entry = [...fake.stall].find(([ending]) => path.endsWith(ending));
+    if (!entry) return respond();
+    fake.stall.delete(entry[0]);
+    setTimeout(respond, entry[1]);
+  };
   const server: Server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://fake");
     const chunks: Buffer[] = [];
     req.on("data", (chunk: Buffer) => { chunks.push(chunk); });
-    req.on("end", () => {
+    req.on("end", () => after(url.pathname, () => {
       // The transfer links: no bearer, as the provider's signed links need none.
       if (url.pathname === "/file" && req.method === "GET") {
         const file = fake.files.get(url.searchParams.get("p") ?? "");
@@ -105,7 +118,7 @@ export async function startFakeComputer(): Promise<FakeComputer> {
       const row = { id: boxId, name: legacyName("browser"), state: fake.state };
       const rest = url.pathname.replace(/^\/api\/v1/, "");
       if (rest === "/browser-sandbox") {
-        if (fake.oldRelay) return send(404, { ok: false, code: "not_found" });
+        if (fake.oldRelay) return fake.oldRelayAnswer === 403 ? send(403, { ok: false, code: "not_available", message: "Not available." }) : send(404, { ok: false, code: "not_found" });
         return send(200, { ok: true, type: "browser.sandbox", available: fake.available, boxId: fake.exists ? boxId : null, sandboxType: fake.chromes > 2 ? "default" : "small", chromes: fake.chromes, ...(fake.caps ? { caps: fake.caps } : {}),
           ...(fake.available ? {} : { reason: fake.unavailableReason, ...(fake.unavailableUntil ? { resetsAt: fake.unavailableUntil } : {}) }) });
       }
@@ -142,6 +155,7 @@ export async function startFakeComputer(): Promise<FakeComputer> {
           secrets.set(body.key, body.secret);
           return send(200, { ok: true, chrome: fake.chromeStarts, policy: fake.policy, home: HOME });
         }
+        if (body.action === "erase" && typeof body.key === "string") { fake.erased.push(body.key); fake.cookies.delete(body.key); return send(200, { ok: true }); }
         if (body.action === "remove-download") fake.files.delete(`${HOME}/.omb-browser/.downloads/${String(body.key)}/${String(body.name)}`);
         return send(200, { ok: true });
       }
@@ -154,7 +168,7 @@ export async function startFakeComputer(): Promise<FakeComputer> {
       }
       if (rest === `/sandboxes/${boxId}/stop`) { fake.state = "archived"; return send(200, { ok: true }); }
       send(404, { ok: false, code: "not_found" });
-    });
+    }));
   });
   server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     const url = new URL(req.url ?? "/", "http://fake");

@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import type { CloudLimit } from "../../shared/place-view.ts";
 
 /** Resumes a Cloud may spend on its bots' browsers in one UTC day; past it, every browser opens in the home. */
-export const CLOUD_BROWSER_DAILY_RESUMES = 100;
+export const CLOUD_BROWSER_DAILY_RESUMES = 30;
 /** Minutes the Cloud's browser sandbox may be awake in one UTC day; past it, every browser opens in the home. */
 export const CLOUD_BROWSER_DAILY_AWAKE_MINUTES = 1_080;
 /** Failed starts in a row before the back-off. */
@@ -17,7 +17,7 @@ export const CLOUD_BROWSER_BACKOFF_MS = 15 * 60_000;
 /** Why a browser session opened in the home instead: names only, for the log and the health report. */
 export type HomeReason =
   | "lever" | "team" | "not-eligible" | "own-key" | "sign-ins" | "no-machine" | "no-policy" | "not-set-up" | "busy" | "lent-connection"
-  | "old-relay" | "unavailable" | "budget" | "minutes-used" | "sandbox-full" | "backoff" | "account-limit" | "hours-used" | "at-once" | "no-route" | "start-failed" | "unreachable";
+  | "slow" | "old-relay" | "unavailable" | "budget" | "minutes-used" | "sandbox-full" | "backoff" | "account-limit" | "hours-used" | "at-once" | "no-route" | "start-failed" | "unreachable";
 
 interface Day {
   day: string;
@@ -49,6 +49,8 @@ interface State extends Day {
   carried: Record<string, number>;
   /** Per bot's profile key: the home copy (by file time) Chrome would not take, not tried again until it changes. */
   carryBad: Record<string, number>;
+  /** Deleted bots' profile keys, still to erase in the sandbox at its next wake. */
+  pendingErase: string[];
   /** Since when the operator lever has kept every browser in the home; 0 when it does not. */
   leverSince: number;
 }
@@ -78,7 +80,7 @@ export function createCloudBrowserRails(options: CloudBrowserRailsOptions) {
   let awakeCapMs = (options.awakeMinutes ?? CLOUD_BROWSER_DAILY_AWAKE_MINUTES) * 60_000;
   const file = join(options.dataDir, "cloud-browser", "rails.json");
   const fresh = (day: string): Day => ({ day, resumes: 0, awakeMs: 0, computer: 0, home: 0, fallbacks: {} });
-  let state: State = { ...fresh(utcDay(now())), failuresInRow: 0, backoffUntil: 0, accountUntil: 0, hoursUntil: 0, noRouteDay: null, awakeSince: 0, leverSince: 0, oldRelayUntil: 0, unavailableUntil: 0, carried: {}, carryBad: {} };
+  let state: State = { ...fresh(utcDay(now())), failuresInRow: 0, backoffUntil: 0, accountUntil: 0, hoursUntil: 0, noRouteDay: null, awakeSince: 0, leverSince: 0, oldRelayUntil: 0, unavailableUntil: 0, carried: {}, carryBad: {}, pendingErase: [] };
   try {
     const saved = JSON.parse(readFileSync(file, "utf8")) as Partial<State>;
     const number = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0);
@@ -94,6 +96,7 @@ export function createCloudBrowserRails(options: CloudBrowserRailsOptions) {
       oldRelayUntil: 0, unavailableUntil: number(saved.unavailableUntil),
       carried: Object.fromEntries(Object.entries(saved.carried && typeof saved.carried === "object" ? saved.carried : {})
         .filter(([key, at]) => /^bx_[a-z0-9]{8}:[a-f0-9]{16}$/.test(key) && typeof at === "number" && Number.isFinite(at))),
+      pendingErase: Array.isArray(saved.pendingErase) ? saved.pendingErase.filter((key): key is string => typeof key === "string" && /^[a-f0-9]{16}$/.test(key)) : [],
       carryBad: Object.fromEntries(Object.entries(saved.carryBad && typeof saved.carryBad === "object" ? saved.carryBad : {})
         .filter(([key, at]) => /^[a-f0-9]{16}$/.test(key) && typeof at === "number" && Number.isFinite(at))),
     };
@@ -212,6 +215,20 @@ export function createCloudBrowserRails(options: CloudBrowserRailsOptions) {
     },
     carried: (key: string): number => today().carried[key] ?? 0,
     carryBad: (key: string): number | null => today().carryBad[key] ?? null,
+    /** A deleted bot's profile: its stamps go, and its erase in the sandbox is kept until done. */
+    forgetProfile(key: string): void {
+      const current = today();
+      for (const stamp of Object.keys(current.carried)) if (stamp.endsWith(`:${key}`)) delete current.carried[stamp];
+      delete current.carryBad[key];
+      if (!current.pendingErase.includes(key)) current.pendingErase.push(key);
+      save();
+    },
+    pendingErasures: (): string[] => [...today().pendingErase],
+    erased(key: string): void {
+      const current = today();
+      current.pendingErase = current.pendingErase.filter((one) => one !== key);
+      save();
+    },
     setCarryBad(key: string, at: number | null): void {
       const current = today();
       if (at === null) delete current.carryBad[key]; else current.carryBad[key] = at;

@@ -767,6 +767,9 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     return results.every(Boolean);
   }
   async function eraseOneBrowser(request: BrowserCleanupWireRequest): Promise<boolean> {
+    // A deleted bot's profile in the Cloud's browser sandbox goes too, and its open session there ends without writing its
+    // sign-ins back to the home, whose copy is erased below.
+    if (request.type === "openmausbot:browser-bot-deleted" && request.botId) await cloudBrowser?.erase(request.botId).catch(() => undefined);
     const session = request.type === "openmausbot:browser-bot-deleted" && request.botId ? browserSessionId(request.botId, "")
       : request.partitionId ? browserSessionId("", request.partitionId) : null;
     const engine = cleanupEngine();

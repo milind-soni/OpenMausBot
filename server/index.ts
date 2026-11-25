@@ -12900,7 +12900,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!bot || bot.browser === false || bot.computer === "off" || !builtInBrowserEnabled(cfg)) {
           return json(res, 403, { error: "browser tools are not enabled for this bot" });
         }
-        const browser = await browserIntegration(bot.id, bot.browserProfile, undefined, teamHost.browserAudience(internalCapability.threadId), { opening: body?.method === "tools/call" ? String(body?.params?.name ?? "") || null : null });
+        let browser = await browserIntegration(bot.id, bot.browserProfile, undefined, teamHost.browserAudience(internalCapability.threadId));
         if (!browser || browser.session !== internalCapability.browserSession) {
           return json(res, 409, { error: "this browser profile changed; start a new turn" });
         }
@@ -12910,7 +12910,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (body.method === "tools/call") {
           const abort = new AbortController(); res.once("close", () => { if (!res.writableEnded) abort.abort(); });
           const refused = await browserSeats.take(internalCapability, browser.session, abort.signal); requireActiveInternalCapability();
-          if (refused) return json(res, 200, { result: { isError: true, content: [{ type: "text", text: refused }] } });
+          if (refused) return json(res, 200, { result: { isError: true, content: [{ type: "text", text: refused }] } }); if (!claimTurnResource(internalCapability, `browser:${browser.session}`)) throw Object.assign(new Error("another thread is using this browser — pause browser work until that thread finishes"), { status: 409 }); browser = (await browserIntegration(bot.id, bot.browserProfile, undefined, teamHost.browserAudience(internalCapability.threadId), { opening: String(body?.params?.name ?? "") || null })) ?? browser; // Only now, past the seat and the claim, may it open the Cloud's browser sandbox: a refused call never spends a start.
         }
         let params = body.params;
         if (body.method === "tools/call" && params?.name === BROWSER_UPLOAD_TOOL) {
