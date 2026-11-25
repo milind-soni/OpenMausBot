@@ -25,6 +25,22 @@ let restoreSettled = false;
  * stays unread until the person opens a conversation here. */
 let restoredUnread: string | undefined;
 
+/** Whether the page is opening, by itself, the conversation a bot opens to at launch. */
+let launching = false;
+
+/** Runs the page's own move at launch to the conversation a bot opens to: it is not the person opening one, so a
+ * conversation restored unread stays held, now on the thread the page moved to. */
+export function launchNavigation(navigate: () => void): void {
+  launching = true;
+  try { navigate(); } finally { launching = false; }
+}
+
+function threadIsUnread(state: AppState, botId: string, threadId: string): boolean {
+  const bot = state.bots.find((candidate) => candidate.id === botId);
+  const task = bot?.tasks?.find((candidate) => candidate.threadId === threadId);
+  return Boolean(task ? task.unread : bot?.unread);
+}
+
 function shownBotThread(state: AppState): string | undefined {
   if (state.activeView !== "chat" || (state.newChat && state.newChat.botId === state.selectedId)) return undefined;
   const bot = state.bots.find((candidate) => candidate.id === state.selectedId);
@@ -43,6 +59,11 @@ function openedBotThread(action: Action, state: AppState): string | undefined {
  * this one included, write in one, or act from anywhere else in the app. The server's own mark ends only for the
  * conversation they open or write in. */
 export function holdMarkedUnread(action: Action, state: AppState): void {
+  if (launching) {
+    // The page moving to the bot's main thread by itself at launch: the hold follows it, since nobody chose to look.
+    if (action.type === "switchTask") restoredUnread = threadIsUnread(state, action.botId, action.threadId) ? action.threadId : undefined;
+    return;
+  }
   if (OPENS_A_CONVERSATION.has(action.type) || OPENS_A_ROOM_THREAD.has(action.type)) {
     restoreSettled = true;
     restoredUnread = undefined;
@@ -124,8 +145,9 @@ export function markVisibleBotThreadsRead(state: AppState, bot: BotAnnouncement,
     if (task) task.unread = false;
     post(`/api/bots/${bot.id}/read`, threadId, task?.updatedAt ?? 0, task?.heldUnread !== undefined ? "open" : "seen");
   }
+  // Without per-thread state the aggregate mark is the shown thread's, so a restored hold on it keeps the bot unread.
   if (bot.tasks) bot.unread = botShowsUnread(bot);
-  else if (!held && shown) bot.unread = false;
+  else if (!held && shown && shown !== restoredUnread) bot.unread = false;
 }
 
 export function markVisibleGroupThreadsRead(state: AppState, group: Partial<Group> & { id: string }, focused: boolean,
@@ -142,5 +164,5 @@ export function markVisibleGroupThreadsRead(state: AppState, group: Partial<Grou
     post(`/api/groups/${group.id}/read`, threadId, task?.updatedAt ?? 0, "seen");
   }
   if (group.tasks) group.unread = group.tasks.some((task) => task.unread);
-  else if (shown) group.unread = false;
+  else if (shown && shown !== restoredUnread) group.unread = false;
 }

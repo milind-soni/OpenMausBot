@@ -19,7 +19,7 @@ import { isNotificationFeedAction, reduceNotificationFeed, type NotificationFeed
 import { bumpThreadUpdatedAt, mergeTaskStamps, rewindThreadUpdatedAt } from "./thread-stamps";
 import { botOpensTo, closeTrayUnlessShown, closeUnpinnedTray, openBot, openThread, visibleNotificationThread, withRememberedTrayPin } from "./thread-navigation";
 import { patchGroupTask } from "./thread-edits"; import { unreadBeyondFrame, wholeBotFrame } from "./bot-thread-frame";
-import type { EngineInstall } from "./engine-install"; import { holdRestoredUnread } from "./read-visible";
+import type { EngineInstall } from "./engine-install"; import { holdRestoredUnread, launchNavigation } from "./read-visible";
 import { optimisticMessageId, optimisticUserMessage, sendArrived, sendReconciled } from "./optimistic-send";
 import { patchedGroups, roomAnswers, snapshotPatch } from "./room-frames";
 import { savedStateAction, type SavedOwner, type SavedSnapshot } from "./saved-state";
@@ -2827,7 +2827,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!state.hydrated || !state.config || launched.current) return;
     launched.current = true;
     const bot = state.bots.find((candidate) => candidate.id === state.selectedId);
-    if (bot && state.activeView === "chat" && botOpensTo(bot, showThreads) !== bot.threadId) openBot(dispatch, bot, showThreads);
+    if (bot && state.activeView === "chat" && botOpensTo(bot, showThreads) !== bot.threadId) launchNavigation(() => openBot(dispatch, bot, showThreads));
   }, [state.hydrated, state.config, state.bots, state.selectedId, state.activeView, showThreads, dispatch]);
 
   useEffect(() => {
