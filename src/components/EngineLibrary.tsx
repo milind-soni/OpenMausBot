@@ -9,6 +9,8 @@ import { InstanceProviderMark } from "./ProviderIcons";
 import { useStoreActions } from "@/state/store-select";
 
 export function engineReady(instance: InstanceInfo): boolean {
+  // Only found installed while its checks could not finish: its sign-in is not known yet.
+  if (instance.snapshot.unverified === true) return false;
   if (instance.driverKind === "clineAgent") {
     return instance.snapshot.state === "available" && instance.snapshot.authenticated === true;
   }

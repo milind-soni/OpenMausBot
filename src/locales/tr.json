@@ -6008,7 +6008,18 @@
   "remote.tailscale.needsApproval": "Bu bilgisayar Tailscale ağınızda onay bekliyor. Tailscale yönetici konsolunda onaylayın, ardından tekrar deneyin.",
   "together.switch.title": "Bu bilgisayar ve Cloud'um birlikte",
   "together.switch.line": "Varsayılan olarak kapalı. Cloud'daki botlar ile bu bilgisayardaki botlar tek listede görünür ve her biri bulunduğu yerde açılır.",
+  "together.switch.commands": "Açtığınızda Cloud'um içindeki botlar bu bilgisayarda komut da çalıştırabilir; bunu OpenMausBot simgesinden kapatabilirsiniz.",
   "together.switch.failed": "Kaydedilemedi. Yeniden deneyin.",
+  "together.mark.workingCloud": "Şu anda Cloud'umda çalışıyor",
+  "together.mark.workingComputer": "Şu anda bu bilgisayarda çalışıyor",
+  "together.mark.asleep": "Cloud'um uykuda. {name} açıldığında uyanır.",
+  "together.mark.offlineCloud": "Cloud'uma şu anda ulaşılamıyor. {name} geri geldiğinde devam eder.",
+  "together.line.asleep": "Cloud'um uykuda. Botlarını görmek için açın.",
+  "together.mark.livesCloud": "Cloud'umda yaşıyor",
+  "together.mark.livesComputer": "Bu bilgisayarda yaşıyor",
+  "together.mark.livesOn": "Yaşadığı yer: {place}",
+  "together.mark.workingOn": "Şu anda çalıştığı yer: {place}",
+  "together.mark.offline": "{place} şu anda erişilemiyor. {name} geri geldiğinde devam eder.",
   "imageGen.complexity.label": "Ayrıntı düzeyi",
   "imageGen.complexity.help": "GPT-Image-2.6 görsellerinin ne kadar ayrıntılı olacağı. Düşük daha basit ve daha hızlıdır.",
   "imageGen.complexity.low": "Düşük",
@@ -6144,5 +6155,7 @@
   "phone.reach.offAdding": "Kapalı · Telefon eklemek bunları açar",
   "settings.nav.devicesNeedYou": "Bir cihazın veya özel ağın ilgilenmenize ihtiyacı var",
   "settings.nav.phoneConnectedAllClear": "Bir telefon bağlı ve hiçbir şeyin ilgilenmenize ihtiyacı yok",
-  "keys.vps.ownServer": "Kendi sunucunuz (SSH)"
+  "keys.vps.ownServer": "Kendi sunucunuz (SSH)",
+  "chat.notice.cloudBusyStart": "Bu Cloud şu anda yapay zekâyı başlatamayacak kadar meşgul, bu yüzden bu görev çalışmadı. Bir dakika bekleyip yeniden gönderin, çalışan ağır bir görevi durdurun ya da daha fazla yer için daha büyük bir plana geçin.",
+  "chat.notice.cloudOutOfCpu": "Cloud'unuzun bu görev için CPU'su yetmedi, bu yüzden yapay zekâ başlayamadı ve hiçbir şey çalışmadı. Bir dakika bekleyip yeniden gönderin, çalışan ağır bir görevi durdurun ya da daha fazla CPU için daha büyük bir plana geçin."
 }

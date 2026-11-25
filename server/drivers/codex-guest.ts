@@ -4,6 +4,8 @@ import { join } from "node:path";
 
 import { codexSkillRoots } from "../imported-skills.ts";
 import { deniedNativeSkills } from "../native-skill-choices.ts";
+import type { SendTurnInput } from "../contracts.ts";
+import { shellOff } from "./shell-off.ts";
 
 const plainRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -42,10 +44,10 @@ export function codexDisabledNativeSkillArgs(botId: string | undefined, env: Rec
   return ["-c", `skills.config=[${tables}]`];
 }
 
-/** Guest confinement and per-bot native skill disables for one Codex turn. */
-export function codexTurnConfigArgs(turn: { guestConfined?: boolean; botId?: string }, env: Record<string, string | undefined>): string[] {
+/** Guest or link confinement and per-bot native skill disables for one Codex turn. */
+export function codexTurnConfigArgs(turn: Pick<SendTurnInput, "guestConfined" | "linkLimited" | "botId">, env: Record<string, string | undefined>): string[] {
   return [
-    ...(turn.guestConfined ? GUEST_CONFINED_CODEX_ARGS : []),
+    ...(shellOff(turn) ? GUEST_CONFINED_CODEX_ARGS : []),
     ...codexDisabledNativeSkillArgs(turn.botId, env),
   ];
 }

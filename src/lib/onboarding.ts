@@ -243,6 +243,38 @@ export function plainSignIn(instance: SignInStep): boolean {
     : Boolean(instance.install?.server || instance.install?.managed);
 }
 
+/** A status check that could not finish (`busy`, a starved machine) says nothing about whether an engine is there: it never
+ * counts as missing. The status the server keeps when a check could not finish (`unverified`) is available already. */
+export function engineMaybeThere(instance: { snapshot: { state: string; busy?: true } }): boolean {
+  return instance.snapshot.state === "available" || instance.snapshot.busy === true;
+}
+
+type EngineRow = { instanceId: string; snapshot: { state: string; busy?: true; unverified?: true; authenticated?: boolean } };
+
+/** Engines seen available since this page loaded. */
+const workedThisSession = new Set<string>();
+/** A fresh page, as a new load starts (tests). */
+export const forgetWorkedEngines = (): void => workedThisSession.clear();
+
+/** Notes the engines available now (by a check that answered); true for one that was available earlier since this page
+ * loaded and has not since been found missing. A setup page never replaces a working engine whose later check could not
+ * finish: the app's usual waiting view stays while the server checks it again. */
+export function workedEarlier(instance: EngineRow, worked: Set<string> = workedThisSession): boolean {
+  if (instance.snapshot.state === "available" && instance.snapshot.unverified !== true) worked.add(instance.instanceId);
+  // A check that answered "not there" is a real loss: the setup page may show again.
+  else if (instance.snapshot.state !== "available" && instance.snapshot.busy !== true) worked.delete(instance.instanceId);
+  return worked.has(instance.instanceId);
+}
+
+/** The "no AI connected" setup page: engines are known and none is there, by checks that answered, and none of them
+ * worked earlier since this page loaded. */
+export function noEnginesDue(state: { connected: boolean; instances: ReadonlyArray<EngineRow> }, worked: Set<string> = workedThisSession): boolean {
+  // Ids repeat across places: what worked is forgotten whenever the live connection drops, as it does on a switch.
+  if (!state.connected) worked.clear();
+  const earlier = state.instances.filter((instance) => workedEarlier(instance, worked));
+  return state.connected && state.instances.length > 0 && !state.instances.some(engineMaybeThere) && earlier.length === 0;
+}
+
 export function cloudSignInDue<Instance>(
   viewer: WelcomeViewer | null,
   state: { connected: boolean; instances: readonly Instance[] },

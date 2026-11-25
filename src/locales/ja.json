@@ -8051,7 +8051,18 @@
   "remote.tailscale.needsApproval": "このコンピューターは Tailscale ネットワークでの承認を待っています。Tailscale の管理コンソールで承認してから、もう一度お試しください。",
   "together.switch.title": "このコンピューターと My Cloud をまとめる",
   "together.switch.line": "既定ではオフです。Cloud のボットとこのコンピューターのボットを 1 つの一覧に表示し、それぞれがある場所で開きます。",
+  "together.switch.commands": "オンにすると、My Cloud のボットがこのコンピューターでコマンドも実行できるようになります。OpenMausBot アイコンからオフにできます。",
   "together.switch.failed": "保存できませんでした。もう一度お試しください。",
+  "together.mark.workingCloud": "現在 My Cloud で作業中",
+  "together.mark.workingComputer": "現在このコンピューターで作業中",
+  "together.mark.asleep": "My Cloud はスリープ中です。{name} を開くと起動します。",
+  "together.mark.offlineCloud": "現在 My Cloud に接続できません。復帰すると {name} は作業を続けます。",
+  "together.line.asleep": "My Cloud はスリープ中です。開くとボットが表示されます。",
+  "together.mark.livesCloud": "My Cloud にいます",
+  "together.mark.livesComputer": "このコンピューターにいます",
+  "together.mark.livesOn": "{place} にいます",
+  "together.mark.workingOn": "現在 {place} で作業中",
+  "together.mark.offline": "現在 {place} に接続できません。復帰すると {name} は作業を続けます。",
   "imageGen.complexity.label": "詳細レベル",
   "imageGen.complexity.help": "GPT-Image-2.6 の画像の詳細さ。低いほどシンプルで高速です。",
   "imageGen.complexity.low": "低",
@@ -8183,5 +8194,7 @@
   "phone.reach.offAdding": "オフ · スマホを追加するとこれらがオンになります",
   "settings.nav.devicesNeedYou": "デバイスまたはプライベートネットワークの対応が必要です",
   "settings.nav.phoneConnectedAllClear": "スマホが接続されていて、対応が必要なものはありません",
-  "keys.vps.ownServer": "自分のサーバー (SSH)"
+  "keys.vps.ownServer": "自分のサーバー (SSH)",
+  "chat.notice.cloudBusyStart": "この Cloud は今とても混み合っていて AI を起動できなかったため、このタスクは実行されませんでした。1 分ほど待ってからもう一度送るか、実行中の重いタスクを止めるか、余裕のあるより大きなプランに切り替えてください。",
+  "chat.notice.cloudOutOfCpu": "このタスクのための CPU が Cloud で足りなくなったため、AI を起動できず、何も実行されませんでした。1 分ほど待ってからもう一度送るか、実行中の重いタスクを止めるか、CPU に余裕のあるより大きなプランに切り替えてください。"
 }

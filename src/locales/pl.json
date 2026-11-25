@@ -7212,7 +7212,18 @@
   "remote.tailscale.needsApproval": "Ten komputer czeka na zatwierdzenie w Twojej sieci Tailscale. Zatwierdź go w konsoli administracyjnej Tailscale, a potem spróbuj ponownie.",
   "together.switch.title": "Ten komputer i My Cloud razem",
   "together.switch.line": "Domyślnie wyłączone. Boty z Cloud i boty z tego komputera są na jednej liście, a każdy otwiera się tam, gdzie działa.",
+  "together.switch.commands": "Włączenie pozwala też botom z My Cloud uruchamiać polecenia na tym komputerze; możesz to wyłączyć w ikonie OpenMausBot.",
   "together.switch.failed": "Nie udało się zapisać. Spróbuj ponownie.",
+  "together.mark.workingCloud": "Pracuje teraz w My Cloud",
+  "together.mark.workingComputer": "Pracuje teraz na tym komputerze",
+  "together.mark.asleep": "My Cloud śpi. Otwarcie {name} go wybudzi.",
+  "together.mark.offlineCloud": "My Cloud jest teraz nieosiągalny. {name} będzie kontynuować, gdy wróci.",
+  "together.line.asleep": "My Cloud śpi. Otwórz go, aby zobaczyć jego boty.",
+  "together.mark.livesCloud": "Mieszka w My Cloud",
+  "together.mark.livesComputer": "Mieszka na tym komputerze",
+  "together.mark.livesOn": "Mieszka na: {place}",
+  "together.mark.workingOn": "Pracuje teraz na: {place}",
+  "together.mark.offline": "{place} jest teraz nieosiągalne. {name} będzie kontynuować, gdy wróci.",
   "imageGen.complexity.label": "Poziom szczegółowości",
   "imageGen.complexity.help": "Jak szczegółowe są obrazy GPT-Image-2.6. Niższy poziom jest prostszy i szybszy.",
   "imageGen.complexity.low": "Niski",
@@ -7345,5 +7356,7 @@
   "phone.reach.offAdding": "Wyłączone · Dodanie telefonu włącza te opcje",
   "settings.nav.devicesNeedYou": "Urządzenie lub sieć prywatna wymaga uwagi",
   "settings.nav.phoneConnectedAllClear": "Telefon jest połączony i nic nie wymaga uwagi",
-  "keys.vps.ownServer": "Własny serwer (SSH)"
+  "keys.vps.ownServer": "Własny serwer (SSH)",
+  "chat.notice.cloudBusyStart": "Ta chmura jest teraz zbyt zajęta, by uruchomić AI, więc to zadanie się nie wykonało. Poczekaj minutę i wyślij je ponownie, zatrzymaj ciężkie zadanie, które właśnie działa, albo przejdź na większy plan, by mieć więcej miejsca.",
+  "chat.notice.cloudOutOfCpu": "Twojej chmurze zabrakło procesora na to zadanie, więc AI nie mogło się uruchomić i nic się nie wykonało. Poczekaj minutę i wyślij je ponownie, zatrzymaj ciężkie zadanie, które właśnie działa, albo przejdź na większy plan, by mieć więcej procesora."
 }
