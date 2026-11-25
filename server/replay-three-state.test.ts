@@ -189,3 +189,113 @@ describe("Auto-VM continuation", () => {
     expect(guard()).toBeUndefined();
   });
 });
+
+// State A after a restart: the only positive evidence is a turn the restart cut while it was still preparing (nothing
+// submitted to the provider, no action reserved). reconcileInterrupted records that as a failure before dispatch.
+describe("state A across a restart: rerun and Auto-VM continuation are permitted", () => {
+  const held = (source = ref) => ledger.replayGuard(source.logicalTaskId, source.generation, "held-request", scope);
+  function restart() { ledger.close(); ledger = createReplayLedger(file); ledger.reconcileInterrupted(); }
+  function cutWhilePreparing() { expect(ledger.begin(ref, scope, model)).toBe(true); restart(); }
+
+  it("admits a restart rerun of a turn cut before any prompt or tool dispatch, once", () => {
+    cutWhilePreparing();
+    expect(audit().attempts).toMatchObject([{ outcome: "failed", evidence: "confirmed:no-dispatch" }]);
+    expect(ledger.positiveEvidence(ref)).toBe(true);
+    expect(ledger.latestForTask(ref.logicalTaskId)).toEqual(ref);
+    const next = held()!;
+    expect(next).toMatchObject({ logicalTaskId: ref.logicalTaskId });
+    expect(held()).toBeUndefined();
+    // beginTurn's gate: the recovery flag and the reused request pass only with the admitted ref.
+    expect(ledger.isAdmitted(next, scope.threadId)).toBe(true);
+    expect(() => requireReplayAdmission({ recoveringCoordination: true, replay: next }, true, false, scope.threadId)).not.toThrow();
+    expect(() => requireReplayAdmission({ recoveringCoordination: true }, true, false, scope.threadId)).toThrow(/Replay was blocked/);
+    // The rerun starts exactly once and then runs as an ordinary tracked turn.
+    expect(ledger.begin(next, scope, model)).toBe(true);
+    expect(ledger.begin(next, scope, model)).toBe(false);
+    expect(ledger.isAdmitted(next, scope.threadId)).toBe(false);
+    expect(ledger.markSubmitted(next, { scope })).toBe(true);
+    expect(audit().decisions.map((row: any) => [row.site, row.decision])).toEqual([["held-request", "admitted"], ["held-request", "superseded"]]);
+  });
+
+  it("admits the startup-refusal and routine-recovery sites on the same evidence", () => {
+    cutWhilePreparing();
+    expect(ledger.replayGuard(ref.logicalTaskId, ref.generation, "routine-recovery", scope)).toBeTruthy();
+    const other = { logicalTaskId: "task-2", generation: "g-2" };
+    expect(ledger.begin(other, scope, model)).toBe(true);
+    restart();
+    expect(ledger.replayGuard(other.logicalTaskId, other.generation, "startup-refusal", scope)).toBeTruthy();
+  });
+
+  it.each([
+    ["a reserved action", (r: ReplayRef) => ledger.reserveAction(r, "tool:1", "effect"), "action-requires-reconciliation"],
+    ["a dispatched action", (r: ReplayRef) => ledger.authorizeNativeAction(r, "tool:1", "effect", ["Bash", {}]), "action-requires-reconciliation"],
+    ["a submitted prompt", (r: ReplayRef) => ledger.markSubmitted(r, { scope }), "no-positive-evidence"],
+  ] as const)("still blocks a restart rerun when the cut turn had %s", (_name, record, decision) => {
+    expect(ledger.begin(ref, scope, model)).toBe(true);
+    expect(record(ref)).toBe(true);
+    restart();
+    expect(ledger.positiveEvidence(ref)).toBe(false);
+    expect(held()).toBeUndefined();
+    expect(audit().decisions[0]).toMatchObject({ site: "held-request", decision });
+  });
+
+  it("still blocks a restart rerun after the scope changed", () => {
+    cutWhilePreparing();
+    expect(ledger.replayGuard(ref.logicalTaskId, ref.generation, "held-request", { ...scope, tools: ["native:Bash"] })).toBeUndefined();
+    expect(held()).toBeUndefined();
+  });
+
+  it("lets only one of several concurrent processes admit the same restart rerun", async () => {
+    cutWhilePreparing();
+    ledger.close();
+    const race = () => new Promise<string>((resolve, reject) => {
+      const child = spawn(process.execPath, ["--input-type=module", "-e", `import {createReplayLedger} from ${JSON.stringify(ledgerModule)};
+        const next = createReplayLedger(${JSON.stringify(file)}).replayGuard(${JSON.stringify(ref.logicalTaskId)}, ${JSON.stringify(ref.generation)}, "held-request", ${JSON.stringify(scope)});
+        process.stdout.write(next ? "admitted" : "blocked");`], { stdio: ["ignore", "pipe", "inherit"] });
+      let output = "";
+      child.stdout.on("data", data => { output += data; });
+      child.on("error", reject).on("close", code => { if (code === 0) resolve(output); else reject(new Error(`child exit ${code}`)); });
+    });
+    const results = await Promise.all([race(), race(), race(), race()]);
+    ledger = createReplayLedger(file);
+    expect(results.sort()).toEqual(["admitted", "blocked", "blocked", "blocked"]);
+    expect(audit().attempts).toHaveLength(2);
+  });
+
+  it("permits the Auto-VM continuation of an admitted restart rerun that completed with every action receipted", () => {
+    cutWhilePreparing();
+    const next = held()!;
+    expect(ledger.begin(next, scope, model)).toBe(true);
+    expect(ledger.markSubmitted(next, { scope })).toBe(true);
+    expect(ledger.reserveAction(next, "select_computer", "effect")).toBe(true);
+    expect(ledger.actionState(next, "select_computer", "dispatched")).toBe(true);
+    expect(ledger.actionReceipt(next, "select_computer", "completed", "bridge-response")).toBe(true);
+    expect(ledger.finish(next, "complete", "uncertain")).toBe(true);
+    expect(ledger.latest(scope.threadId)).toEqual(next);
+    const token = ledger.claimContinuation(next, scope.threadId)!;
+    expect(token).toBeTruthy();
+    expect(() => requireReplayAdmission({ computerSelectionContinuation: true }, true, true, scope.threadId, ledger.consumeContinuation(next, token))).not.toThrow();
+    expect(ledger.claimContinuation(next, scope.threadId)).toBeUndefined();
+    expect(() => requireReplayAdmission({ computerSelectionContinuation: true }, true, true, scope.threadId, ledger.consumeContinuation(next, token)))
+      .toThrow(/Replay was blocked/);
+  });
+
+  it("permits an Auto-VM continuation that carries an admitted state-A replay", () => {
+    cutWhilePreparing();
+    const next = held()!;
+    expect(() => requireReplayAdmission({ computerSelectionContinuation: true, replay: next }, true, true, scope.threadId)).not.toThrow();
+    expect(ledger.isAdmitted(next, scope.threadId)).toBe(true);
+  });
+
+  it("refuses the Auto-VM continuation of a rerun whose selecting turn left an action unreceipted", () => {
+    cutWhilePreparing();
+    const next = held()!;
+    expect(ledger.begin(next, scope, model)).toBe(true);
+    expect(ledger.markSubmitted(next, { scope })).toBe(true);
+    expect(ledger.reserveAction(next, "select_computer", "effect")).toBe(true);
+    expect(ledger.actionState(next, "select_computer", "dispatched")).toBe(true);
+    expect(ledger.finish(next, "complete", "uncertain")).toBe(true);
+    expect(ledger.claimContinuation(next, scope.threadId)).toBeUndefined();
+    expect(audit().decisions.at(-1)).toMatchObject({ site: "computer-continuation", decision: "action-requires-reconciliation" });
+  });
+});
