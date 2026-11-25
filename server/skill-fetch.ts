@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import type { GitHubSkillOrigin, SkippedSkillFile } from "../shared/skill-import.ts";
-import { SKILL_FILE_MAX_BYTES } from "../shared/skill-md.ts";
+import { readSkillFrontmatter, SKILL_FILE_MAX_BYTES } from "../shared/skill-md.ts";
 import { planSkillFolder, SKILL_FOLDER_LIMITS, type FolderEntry, type SkillFolderFile } from "./skill-folder.ts";
 
 const API = "https://api.github.com";
@@ -228,7 +228,7 @@ async function skillNameFrom(entries: ContentEntry[], fetcher: typeof fetch): Pr
   if (!skillMd) return undefined;
   try {
     const text = (await fetchBytes(skillMd.download_url!, fetcher)).toString("utf8");
-    return text.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1]?.match(/^name:\s*(.+)$/m)?.[1]?.trim();
+    return readSkillFrontmatter(text)?.fields.name;
   } catch (error) {
     if (passThrough(error)) throw error;
     return undefined;

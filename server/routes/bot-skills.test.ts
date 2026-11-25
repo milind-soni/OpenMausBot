@@ -9,7 +9,7 @@ import { json, readBody } from "../harness/http.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { installLibrarySkill, readLibrarySkillFile, setLibrarySkillEveryBot } from "../skill-library.ts";
 import type { Store } from "../store.ts";
-import { installSkill, listSkills, resolveBotSkills } from "../skills.ts";
+import { installSkill, listSkills, readSkillFile, resolveBotSkills, skillsSystemPrompt } from "../skills.ts";
 import { fakeGitHub } from "../testing/fake-github.ts";
 import { workspaceDir } from "../workspace.ts";
 import { createBotSkillsRoutes } from "./bot-skills.ts";
@@ -28,8 +28,8 @@ async function serve(botId: string) {
   const routes = [createBotSkillsRoutes({
     store,
     cfg: {} as AppConfig,
-    listBotSkills: () => [],
-    readBotSkillFile: () => null,
+    listBotSkills: (bot) => listSkills(bot.id),
+    readBotSkillFile: (bot, name) => readSkillFile(bot.id, name),
     stagedSkillListing: (staged) => staged,
   })];
   const server = createServer(async (req, res) => {
@@ -43,6 +43,61 @@ async function serve(botId: string) {
 }
 
 describe("importing a skill from GitHub into a bot", () => {
+  it.each([
+    ["a BOM at the repository root", `\uFEFF${SKILL}`, ""],
+    ["a BOM and CRLF in a differently named folder", `\uFEFF${SKILL.replaceAll("\n", "\r\n")}`, "skills/form-helper"],
+    ["a capitalized frontmatter key", SKILL.replace("name:", "Name:"), "skills/form-helper"],
+    ["a quoted skill name", SKILL.replace("name: pdf-forms", 'name: "pdf-forms"'), "skills/form-helper"],
+    ["a folder matching the requested name", `\uFEFF${SKILL}`, "skills/pdf-forms"],
+  ])("imports a named skills.sh skill with %s and makes it available after review", async (_label, text, directory) => {
+    const botId = `route-bot-${Math.random().toString(36).slice(2, 10)}`;
+    const base = await serve(botId);
+    const prefix = directory ? `${directory}/` : "";
+    const github = fakeGitHub({ "acme/skills": {
+      [`${prefix}SKILL.md`]: text,
+      [`${prefix}references/fields.md`]: "# Fields\nUse the invoice number.\n",
+    } }, { passThrough: fetch });
+    vi.stubGlobal("fetch", github.fetch);
+
+    const imported = await fetch(`${base}/api/bots/${botId}/skills`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ source: "https://skills.sh/acme/skills/pdf-forms" }),
+    });
+    const result = await imported.json();
+    expect(imported.status, JSON.stringify(result)).toBe(201);
+    expect(result).toMatchObject({ installed: [expect.objectContaining({
+      name: "pdf-forms", enabled: false,
+      github: { owner: "acme", repo: "skills", ref: "HEAD", commit: github.commitOf("acme/skills"), path: directory },
+    })] });
+    const read = await fetch(`${base}/api/bots/${botId}/skills/pdf-forms`);
+    expect(read.status).toBe(200);
+    expect(await read.json()).toEqual({ text: text.replace(/^\uFEFF/, "") });
+    expect(readFileSync(join(workspaceDir(botId), "skills/pdf-forms/references/fields.md"), "utf8"))
+      .toBe("# Fields\nUse the invoice number.\n");
+    expect(skillsSystemPrompt(botId)).not.toContain("pdf-forms");
+    const enabled = await fetch(`${base}/api/bots/${botId}/skills/pdf-forms`, {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true }),
+    });
+    expect(enabled.status).toBe(200);
+    expect(skillsSystemPrompt(botId)).toContain("pdf-forms");
+    const listing = await fetch(`${base}/api/bots/${botId}/skills`);
+    expect(await listing.json()).toMatchObject({ skills: [expect.objectContaining({ name: "pdf-forms", enabled: true })] });
+  });
+
+  it("does not install a different named skill when the requested skills.sh name is missing", async () => {
+    const botId = `route-bot-${Math.random().toString(36).slice(2, 10)}`;
+    const base = await serve(botId);
+    const github = fakeGitHub({ "acme/skills": { "skills/form-helper/SKILL.md": `\uFEFF${SKILL}` } }, { passThrough: fetch });
+    vi.stubGlobal("fetch", github.fetch);
+    const response = await fetch(`${base}/api/bots/${botId}/skills`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ source: "https://skills.sh/acme/skills/another-skill" }),
+    });
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({ error: expect.stringContaining('no skill named "another-skill"') });
+    expect(listSkills(botId)).toEqual([]);
+  });
+
   it("stores the whole folder with its origin and says what arrived and what was left out", async () => {
     const botId = `route-bot-${Math.random().toString(36).slice(2, 10)}`;
     const base = await serve(botId);
