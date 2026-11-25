@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 
 import { approvalModeFor, modelSwitchNeedsAsk, type ApprovalMode } from "../../shared/approval-mode.ts";
 import { writeFileAtomic } from "../atomic.ts";
-import { recoveryCapabilityError } from "../automatic-recovery.ts";
+import { recoveryCapabilityError, withOfferedReasoning } from "../automatic-recovery.ts";
 import type { InstanceConfigMap, ProviderAdapter, RuntimeEvent } from "../contracts.ts";
 import { readyToRun, signedOut as statusSignedOut, type DefaultSelectionContext, type SelectableInstance } from "../default-model-selection.ts";
 import { engineFailureKind } from "../drivers/engine-errors.ts";
@@ -201,7 +201,8 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
     if (!current) return { backups: [], skipped: [] };
     const out: ModelSelection[] = [];
     const left: SkippedBackup[] = [];
-    const add = (pick: ModelSelection) => {
+    const add = (chosenPick: ModelSelection) => {
+      const pick = withOfferedReasoning(chosenPick, engines.find((engine) => engine.instanceId === chosenPick.instanceId));
       if (pick.instanceId === from.instanceId && pick.model === from.model) return;
       if ([...out, ...left.map((one) => one.selection)].some((known) => known.instanceId === pick.instanceId && known.model === pick.model)) return;
       if (pick.instanceId === from.instanceId && (scope === "engine" || scope === "signed-out")) {

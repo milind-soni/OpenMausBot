@@ -277,6 +277,16 @@ describe("quota switch", () => {
       }
     });
 
+    it("carries the backup model's configured reasoning effort or variant on automatic failover", async () => {
+      const backupWithEffort: ModelSelection = { instanceId: "codex", model: "codex-default", effort: "medium" };
+      backups = [backupWithEffort];
+      const turn = begin(bot.threadId, { messageId: said("use backup reasoning") });
+      coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
+      expect(await ranOut(turn)).toBeNull();
+      expect(thread().modelSelection).toEqual(backupWithEffort);
+      expect(resend).toHaveBeenCalledTimes(1);
+    });
+
     it("moves a request whose turn had already run something to the backup without sending it again", async () => {
       for (const ran of ["tool", "reply"] as const) {
         const turn = begin(bot.threadId, { messageId: said(`file the ticket (${ran})`) });

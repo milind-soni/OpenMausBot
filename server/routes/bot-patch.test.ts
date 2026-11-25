@@ -584,3 +584,34 @@ describe("PATCH /api/bots/:id unread", () => {
     expect(store.bot(bot.id)?.unread).toBe(true);
   });
 });
+
+describe("PATCH /api/bots/:id fallback", () => {
+  it("checks a backup's reasoning as a model choice is checked, saves what that check returns, and passes plain rows as before", async () => {
+    const engine = { instanceId: "codex", driverKind: "codex", enabled: true } as unknown as ProviderInstance;
+    const checkedModelSelection = vi.fn((raw: unknown) => {
+      const row = raw as ModelSelection;
+      return row.effort === ("turbo" as never)
+        ? { ok: false as const, status: 400, error: `effort "turbo" is not recognized` }
+        : { ok: true as const, selection: { instanceId: row.instanceId, model: row.model.trim(), ...(row.effort ? { effort: row.effort } : {}), ...(row.variant ? { variant: row.variant } : {}) } };
+    });
+    const { store, bot, patch } = fixture({ registry: { get: () => engine }, checkedModelSelection } as unknown as Partial<BotPatchRouteDeps>);
+
+    const refused = await patch(bot.id, { fallback: [{ instanceId: "codex", model: "gpt-6", effort: "turbo" }] });
+    expect(refused.status).toBe(400);
+    expect(store.bot(bot.id)?.fallback).toBeUndefined();
+
+    const saved = await patch(bot.id, { fallback: [
+      { instanceId: "codex", model: "gpt-6-mini", effort: "low" },
+      { instanceId: "codex", model: "gpt-6", variant: "medium" },
+      { instanceId: "codex", model: "gpt-6-nano" },
+    ] });
+    expect(saved.status).toBe(200);
+    expect(store.bot(bot.id)?.fallback).toEqual([
+      { instanceId: "codex", model: "gpt-6-mini", effort: "low" },
+      { instanceId: "codex", model: "gpt-6", variant: "medium" },
+      { instanceId: "codex", model: "gpt-6-nano" },
+    ]);
+    // A row with no reasoning is saved as it was, without the model check a reasoning choice needs.
+    expect(checkedModelSelection).toHaveBeenCalledTimes(3);
+  });
+});
