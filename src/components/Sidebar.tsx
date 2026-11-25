@@ -101,7 +101,7 @@ import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { useAdvancedMode } from "@/lib/interface-mode"; import { useRoomFeed } from "./room-feed/use-room-feed"; import { feedPreview } from "@/lib/room-feed";
 import { myDefaultBot, useViewerEmail, useWelcomingBot } from "@/lib/default-bot";
 import { PinnedBotRoster, PinnedCircleThreadSection } from "./PinnedCircleThreads";
-import { archiveBotWithNotice, onArchiveNotice } from "./bot-archive";
+import { archiveBotWithNotice, onArchiveNotice, type ArchiveNotice } from "./bot-archive";
 import { ArchivedBotsPanel, botConfirmProps, type BotConfirmKind } from "./ArchivedBotsPanel"; import { MovedBotRows } from "./MoveToTeam"; import { MovedToMyCloudRow } from "./MoveToMyCloud";
 import { NewRoomPanel } from "./SidebarNewRoomPanel";
 import { SectionPicker } from "./SidebarSectionPicker";
@@ -974,11 +974,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const [teamLibraryOpen, setTeamLibraryOpen] = useState(false);
   const [importUrl, setImportUrl] = useState<string | null>(null);
   const [archivedBotsOpen, setArchivedBotsOpen] = useState(false);
-  const [teamFeedback, setTeamFeedback] = useState<{
-    error: boolean;
-    text: string;
-    restoreBot?: { id: string; name: string };
-  } | null>(null);
+  const [teamFeedback, setTeamFeedback] = useState<ArchiveNotice | null>(null);
   const [query, setQuery] = useState("");
   const storedDensity = useSidebarDensity();
   const density = collapseToIcons ? "icons" : storedDensity;
@@ -1122,7 +1118,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const archivedEntry = remoteClient ? undefined : { count: archivedBots.length, open: () => setArchivedBotsOpen(true) };
   const showAttention = (advanced && inboxSupport === "no") || (attentionPinned && density !== "icons");
   const attention = showAttention ? crossBotAttentionThreads(state.bots, state.pendingQueued, undefined, state.groups) : [];
-  const pendingBotUndo = teamFeedback?.restoreBot;
+  const restoreBot = teamFeedback?.restoreBot, pendingUndo = teamFeedback?.undo ?? (restoreBot ? () => void undoBotArchive(restoreBot) : undefined);
   const botRow = (bot: Bot) => isPlacedBot(bot) ? botRowProps(state, otherPlaceDispatch(bot), bot, { density, query: q, onMenu: NO_MENU, placeHere }) : botRowProps(state, dispatch, bot, { density, query: q, onMenu: setMenu, placeHere, renameRequest: renameRequest?.botId === bot.id ? renameRequest.nonce : 0, ...drops.row(bot.id) });
   const railSearch = () => {
     if (collapseToIcons) return openCommandPalette();
@@ -1640,9 +1636,9 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
           >
             <div className="flex items-center gap-3">
               <span>{teamFeedback.text}</span>
-              {pendingBotUndo && (
+              {pendingUndo && (
                 <button
-                  onClick={() => void undoBotArchive(pendingBotUndo)}
+                  onClick={() => { setTeamFeedback(null); void pendingUndo(); }}
                   className="rounded-md px-1.5 py-0.5 font-medium text-accent hover:bg-raised"
                 >
                   {t("common.undo")}
