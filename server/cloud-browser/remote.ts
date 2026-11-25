@@ -18,8 +18,9 @@ const TERMINAL = new Set(["error", "cancelled"]);
 export const BROWSER_SANDBOX_OWNER = "browser";
 /** The provider's smallest size that runs Chrome well: 2 vCPU, 4 GB. A heavy page measured 0.8–0.87 GB per Chrome. */
 export const BROWSER_SANDBOX_TYPE = "small";
-/** Chromes at once in one sandbox (one per bot browsing); past this a bot's browser opens in the home. */
-export const BROWSER_SANDBOX_CHROMES = 3;
+/** Chromes at once in one sandbox (one per bot browsing); past this a bot's browser opens in the home. One heavy page
+ * measured 954 MB on `small` (4 GB), so two; the Admin's launch also refuses a Chrome when under 1 GiB is free. */
+export const BROWSER_SANDBOX_CHROMES = 2;
 /** The port the sandbox's small door listens on, on its loopback only; the provider's relay reaches it there. */
 export const COMPUTER_DOOR_PORT = 39231;
 
@@ -176,7 +177,7 @@ export function providerOps(cfg: () => AppConfig): ComputerOps {
     },
     async refreshTtl(boxId, seconds) {
       // A refusal (the Admin's maximum session age, say) leaves the deadline as it is: that is the point of it.
-      await json(cfg(), `/sandboxes/${boxId}`, { method: "PATCH", body: JSON.stringify({ ttlSeconds: seconds }) });
+      await json(cfg(), `/sandboxes/${boxId}`, { method: "PATCH", body: JSON.stringify({ ttlSeconds: ttlSecondsOf(seconds) }) });
     },
     async remove(boxId) {
       const name = await boatNameFor(BROWSER_SANDBOX_OWNER);
@@ -184,6 +185,9 @@ export function providerOps(cfg: () => AppConfig): ComputerOps {
     },
   };
 }
+
+/** The provider silently takes a ttlSeconds that is not a number as an hour: only a whole number within the Admin's range goes. */
+export const ttlSecondsOf = (seconds: number): number => Math.min(1_800, Math.max(300, Math.round(Number.isFinite(seconds) ? seconds : 300)));
 
 /** Not a failure of the sandbox: the browser opens in the home, and nothing is counted against it. */
 export class StaysHome extends Error {
@@ -210,23 +214,32 @@ export interface WakeOptions {
 export async function wakeSandbox(ops: ComputerOps, options: WakeOptions): Promise<{ id: string; started: boolean }> {
   let found = await ops.find();
   if (found && READY.has(found.state)) return { id: found.id, started: false };
-  // Archiving: its snapshot must land before it can be resumed, and another stop path owns it now.
-  if (found?.state === "archiving") throw new StaysHome("busy");
   const broken = found && TERMINAL.has(found.state) ? found.id : found ? null : ops.dead();
   if (broken) {
     await ops.remove(broken);
     found = null;
   }
-  let started = false;
-  if (!found || SLEEPING_BOAT_STATES.has(found.state)) {
+  const counted = async (box: { id: string; state: string } | null): Promise<{ id: string; state: string }> => {
     if (!options.mayStart()) throw new StaysHome("budget");
     await options.allowed();
     options.starting();
+    if (!box) return ops.create();
+    await ops.resume(box.id);
+    return box;
+  };
+  let started = false;
+  /** Taken back while still stopping: the same machine, ready in about 0.3 s, and no start (measured). Only the home asks
+   * for a browser, so a stop the Admin made because the home was down is never undone by this; the newest request wins. */
+  let takenBack = false;
+  if (found?.state === "archiving") {
+    await ops.resume(found.id);
+    takenBack = true;
     started = true;
-    if (!found) found = await ops.create();
-    else await ops.resume(found.id);
+  } else if (!found || SLEEPING_BOAT_STATES.has(found.state)) {
+    found = await counted(found);
+    started = true;
   }
-  const id = found.id;
+  const id = found!.id;
   const deadline = Date.now() + (options.budgetMs ?? 45_000);
   // Quick reads first: a resume after a short stop is ready in well under a second.
   for (let reads = 0; Date.now() < deadline; reads++) {
@@ -234,6 +247,8 @@ export async function wakeSandbox(ops: ComputerOps, options: WakeOptions): Promi
     const state = await ops.state(id).catch(() => null);
     if (state && READY.has(state)) return { id, started };
     if (state && TERMINAL.has(state)) break;
+    // The take-back came too late (the machine went with the stop): one real, counted resume instead.
+    if (takenBack && state === "archived") { takenBack = false; await counted({ id, state }); }
     // Never a second start: a refused resume is billed as one too.
   }
   throw new Error("the browser sandbox did not become ready in time");

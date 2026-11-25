@@ -13,7 +13,7 @@ import { SESSION_DOWNLOAD_BYTES, SIGN_IN_SYNC_MS, UPLOAD_MAX_BYTES, type SignInS
 import { cookieParam } from "./sign-ins.ts";
 import { CLOUD_BROWSER_IDLE_MS, createCloudBrowser, SANDBOX_IDLE_TTL_SECONDS, TTL_REFRESH_MS, type CloudBrowserDeps } from "./index.ts";
 import { CLOUD_BROWSER_BACKOFF_MS, createCloudBrowserRails } from "./rails.ts";
-import { BROWSER_SANDBOX_CHROMES, BROWSER_SANDBOX_OWNER, browserSandboxCreateBody, profileKey, providerOps } from "./remote.ts";
+import { BROWSER_SANDBOX_CHROMES, BROWSER_SANDBOX_OWNER, browserSandboxCreateBody, profileKey, providerOps, ttlSecondsOf } from "./remote.ts";
 import { RELAY_KEY, RELAY_TOKEN, startFakeComputer, type FakeComputer } from "./testing/fake-computer.ts";
 
 let fake: FakeComputer;
@@ -232,6 +232,7 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     clock += 60_000;
     await cloud.closeIdle();
     expect(patches()).toEqual([{ ttlSeconds: SANDBOX_IDLE_TTL_SECONDS }]);
+    expect(Number.isInteger(patches()[0]?.ttlSeconds), "the provider takes a non-number as an hour").toBe(true);
     clock += 60_000;
     await act(cdpUrl, 1);
     await cloud.closeIdle();
@@ -244,6 +245,24 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     clock += TTL_REFRESH_MS;
     await cloud.closeIdle();
     expect(patches(), "unused since: the deadline is left to run out").toHaveLength(2);
+  });
+
+  it("takes back a sandbox that is still stopping: one resume, no start counted, no question to the relay", async () => {
+    fake.state = "archiving";
+    const cloud = browser();
+    urlOf(await cloud.open(request()));
+    expect(fake.resumes()).toBe(1);
+    expect(cloud.report().resumes, "the kept machine is no start").toBe(0);
+    expect(fake.requests.filter((one) => one.path.endsWith("/browser-sandbox"))).toEqual([]);
+  });
+
+  it("when the take-back comes too late, sends one real resume, counted like any", async () => {
+    fake.state = "archiving";
+    fake.takeBackFails = true;
+    const cloud = browser();
+    urlOf(await cloud.open(request()));
+    expect(fake.resumes()).toBe(2);
+    expect(cloud.report().resumes).toBe(1);
   });
 
   it("wakes a stopped sandbox with exactly one resume, then reads only", async () => {
@@ -261,16 +280,17 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     expect(fake.resumes() + fake.creates()).toBe(0);
   });
 
-  it("gives each bot its own profile and Chrome, carries up to three at once, and keeps a fourth in the home", async () => {
+  it("gives each bot its own profile and Chrome, carries up to two at once, and keeps a third in the home", async () => {
     fake.state = "archived";
     const cloud = browser();
-    const bots = ["scout", "writer", "chief", "fourth"];
+    const bots = ["scout", "writer", "chief"];
     const opened = await Promise.all(bots.slice(0, BROWSER_SANDBOX_CHROMES).map((bot) => cloud.open(request(bot))));
     expect(fake.resumes(), "bots opening together share one wake").toBe(1);
-    for (const [i, bot] of bots.slice(0, 3).entries()) expect(await act(urlOf(opened[i]!), 1)).toEqual([`echo:${profileKey(bot)}:{"id":0}`]);
-    expect(new Set(fake.profiles())).toEqual(new Set(bots.slice(0, 3).map(profileKey)));
+    expect(BROWSER_SANDBOX_CHROMES, "one heavy page measured 954 MB on a 4 GB sandbox").toBe(2);
+    for (const [i, bot] of bots.slice(0, 2).entries()) expect(await act(urlOf(opened[i]!), 1)).toEqual([`echo:${profileKey(bot)}:{"id":0}`]);
+    expect(new Set(fake.profiles())).toEqual(new Set(bots.slice(0, 2).map(profileKey)));
     expect(profileKey("scout")).toMatch(/^[a-f0-9]{16}$/);
-    expect(await cloud.open(request("fourth"))).toEqual({ home: "sandbox-full" });
+    expect(await cloud.open(request("chief"))).toEqual({ home: "sandbox-full" });
   });
 
   it("reuses a bot's profile after the sandbox slept", async () => {
@@ -652,6 +672,14 @@ describe("a bot's sign-ins between the home and its sandbox profile", () => {
     await cloud.closeIdle();
     expect(home.writes).toEqual([[expect.objectContaining({ name: "auth" })]]);
     expect(cloud.active("bot-scout"), "the session goes on").toBe(cdpUrl);
+  });
+
+  it("sends ttlSeconds only as a whole number within the Admin's range", () => {
+    expect(ttlSecondsOf(1200)).toBe(1200);
+    expect(ttlSecondsOf(1199.6)).toBe(1200);
+    expect(ttlSecondsOf(Number.NaN)).toBe(300);
+    expect(ttlSecondsOf(10)).toBe(300);
+    expect(ttlSecondsOf(1e9)).toBe(1800);
   });
 
   it("keeps a cookie's partition, saved as an object or as a site's text", () => {

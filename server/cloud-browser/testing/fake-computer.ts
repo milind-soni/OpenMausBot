@@ -29,6 +29,8 @@ export interface FakeComputer {
   hostRoute: boolean;
   unprotected: boolean;
   chromeStarts: boolean;
+  /** A resume during `archiving` finds the machine already gone. */
+  takeBackFails: boolean;
   /** Whether the launch could write the Chrome policy (sudo in the sandbox). */
   policy: boolean;
   requests: Request[];
@@ -65,7 +67,7 @@ export async function startFakeComputer(): Promise<FakeComputer> {
   let retired = true;
   const fake = {
     base: "", state: "ready", exists: true, startStatus: 200, startBody: { ok: true }, oldRelay: false, available: true, unavailableReason: "fleet_starts",
-    unavailableUntil: null, hostRoute: true, unprotected: false, chromeStarts: true, policy: true, requests: [], upgrades: [], frames: [], boxId: "bx_23456789",
+    unavailableUntil: null, hostRoute: true, unprotected: false, chromeStarts: true, policy: true, takeBackFails: false, requests: [], upgrades: [], frames: [], boxId: "bx_23456789",
     files: new Map(), cookies: new Map(), commands: [], failing: new Set(),
   } as unknown as FakeComputer;
   const watchers = new Map<string, Set<import("ws").WebSocket>>();
@@ -119,6 +121,8 @@ export async function startFakeComputer(): Promise<FakeComputer> {
         return send(200, { ok: true, operation: { id: `bdop_${"a".repeat(32)}`, status: "completed", kind: "sandbox", targetId: boxId } });
       }
       if (rest === `/sandboxes/${boxId}/resume`) {
+        // Taken back while still stopping, unless the machine already went: then the stop finishes and the answer is 409.
+        if (fake.state === "archiving" && fake.takeBackFails) { fake.state = "archived"; return send(409, { ok: false, code: "sandbox_stopping" }); }
         if (fake.startStatus < 300) fake.state = "ready";
         return send(fake.startStatus, fake.startBody);
       }
