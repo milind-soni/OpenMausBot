@@ -126,7 +126,9 @@ function checkProfile(profile: string): void {
   const settings = jsonOf(join(profile, "antigravity-acp", "settings.json"));
   if (settings !== undefined && (!record(settings) || Object.keys(settings).some((key) => key !== "auth"))) throw new Unclean("the profile's settings hold more than the sign-in");
   const builtins = join(profile, "antigravity-acp", "builtin", "plugins");
-  const builtinNames = kindOf(builtins) === "folder" ? readdirSync(builtins) : [];
+  const builtinsKind = kindOf(builtins);
+  if (builtinsKind !== null && builtinsKind !== "folder") throw new Unclean("the profile's built-in plugins are not a folder");
+  const builtinNames = builtinsKind === "folder" ? readdirSync(builtins) : [];
   for (const name of builtinNames) if (kindOf(join(builtins, name, "hooks.json")) !== null) throw new Unclean("a built-in plugin has hooks");
   const config = join(profile, "config");
   const kind = kindOf(config);

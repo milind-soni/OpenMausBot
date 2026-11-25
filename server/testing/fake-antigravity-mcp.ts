@@ -86,6 +86,8 @@ export class McpConnection {
   readonly server: AcpMcpServer;
   private readonly child: ChildProcess | undefined;
   private nextId = 1;
+  /** The Mcp-Session-Id an http server gave in its initialize answer, sent back on every later request. */
+  private sessionId: string | undefined;
   private readonly waiting = new Map<number, (message: Json) => void>();
 
   private constructor(name: string, server: AcpMcpServer, cwd: string) {
@@ -109,17 +111,27 @@ export class McpConnection {
 
   static async open(name: string, server: AcpMcpServer, cwd: string, clientVersion: string): Promise<McpConnection> {
     const connection = new McpConnection(name, server, cwd);
-    await connection.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "antigravity", version: clientVersion } });
-    await connection.notify("notifications/initialized");
+    try {
+      return await connection.handshake(clientVersion);
+    } catch (error) {
+      connection.close();
+      throw error;
+    }
+  }
+
+  private async handshake(clientVersion: string): Promise<McpConnection> {
+    const initialized = await this.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "antigravity", version: clientVersion } });
+    if (initialized.error) throw new Error(`${this.name}: initialize failed: ${JSON.stringify(initialized.error)}`);
+    await this.notify("notifications/initialized");
     let cursor: unknown;
     do {
-      const listed = await connection.request("tools/list", cursor === undefined ? {} : { cursor });
-      if (listed.error) throw new Error(`${name}: tools/list failed: ${JSON.stringify(listed.error)}`);
+      const listed = await this.request("tools/list", cursor === undefined ? {} : { cursor });
+      if (listed.error) throw new Error(`${this.name}: tools/list failed: ${JSON.stringify(listed.error)}`);
       const result = (listed.result ?? {}) as { tools?: McpTool[]; nextCursor?: unknown };
-      connection.tools.push(...(result.tools ?? []));
+      this.tools.push(...(result.tools ?? []));
       cursor = result.nextCursor;
     } while (typeof cursor === "string" && cursor);
-    return connection;
+    return this;
   }
 
   request(method: string, params: unknown, timeoutMs = 60_000): Promise<Json> {
@@ -149,9 +161,10 @@ export class McpConnection {
   private async post(message: Json, timeoutMs: number): Promise<Json> {
     const server = this.server as AcpHttpServer;
     const headers = { "content-type": "application/json", accept: "application/json, text/event-stream",
-      ...Object.fromEntries((server.headers ?? []).map(({ name, value }) => [name, value])) };
+      ...Object.fromEntries((server.headers ?? []).map(({ name, value }) => [name, value])), ...(this.sessionId ? { "mcp-session-id": this.sessionId } : {}) };
     try {
       const response = await fetch(server.url, { method: "POST", headers, body: JSON.stringify(message), signal: AbortSignal.timeout(timeoutMs) });
+      this.sessionId = response.headers.get("mcp-session-id") ?? this.sessionId;
       const text = await response.text();
       if (!response.ok) return { error: { code: -32000, message: `HTTP ${response.status}` } };
       if (!text.trim()) return {};
@@ -188,9 +201,14 @@ export class SessionTools {
 
   static async mount(servers: readonly AcpMcpServer[], options: { names: ServerNames; cwd: string; stateDir: string; budget: number; version: string }): Promise<SessionTools> {
     const connections: McpConnection[] = [];
-    for (const server of servers) {
-      if (!server || (isHttp(server) ? typeof server.url !== "string" : typeof server.command !== "string")) continue;
-      connections.push(await McpConnection.open(options.names.nameFor(server), server, options.cwd, options.version));
+    try {
+      for (const server of servers) {
+        if (!server || (isHttp(server) ? typeof server.url !== "string" : typeof server.command !== "string")) continue;
+        connections.push(await McpConnection.open(options.names.nameFor(server), server, options.cwd, options.version));
+      }
+    } catch (error) {
+      for (const connection of connections) connection.close();
+      throw error;
     }
     for (const connection of connections) {
       const folder = join(options.stateDir, "mcp", connection.name);

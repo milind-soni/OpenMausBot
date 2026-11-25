@@ -132,6 +132,8 @@ const sessionsDir = join(stateDir, "fake-sessions");
 const budget = Number(process.env.FAKE_AGY_TOOL_BUDGET ?? DEFAULT_TOOL_BUDGET);
 const clientAnswers = new Map<string, (message: { result?: unknown; error?: unknown }) => void>();
 const cancels = new Map<string, () => void>();
+/** Sessions whose session/cancel came before the turn began waiting for it. */
+const cancelledEarly = new Set<string>();
 let clientRequests = 0;
 let toolCalls = 0;
 
@@ -178,7 +180,7 @@ async function callTool(sessionId: string, target: string, argsText: string): Pr
   log({ event: "permission", sessionId, tool: found.nativeName, outcome });
   if (outcome?.outcome !== "selected") {
     log({ event: "awaiting-cancel", sessionId });
-    await new Promise<void>((resolveCancel) => cancels.set(sessionId, resolveCancel));
+    if (!cancelledEarly.delete(sessionId)) await new Promise<void>((resolveCancel) => cancels.set(sessionId, resolveCancel));
     return false;
   }
   const chosen = (options as Array<{ optionId: string; kind: string }>).find((option) => option.optionId === outcome.optionId);
@@ -288,10 +290,14 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
       result(message.id, { configOptions: configOptions() });
       break;
     }
-    case "session/cancel":
-      cancels.get(message.params?.sessionId ?? "")?.();
-      cancels.delete(message.params?.sessionId ?? "");
+    case "session/cancel": {
+      const cancelled = message.params?.sessionId ?? "";
+      const waiting = cancels.get(cancelled);
+      cancels.delete(cancelled);
+      if (waiting) waiting();
+      else cancelledEarly.add(cancelled);
       break;
+    }
     case "session/set_config_option":
       if (message.params?.configId === "mode") mode = String(message.params.value);
       if (message.params?.configId === "model") model = String(message.params.value);

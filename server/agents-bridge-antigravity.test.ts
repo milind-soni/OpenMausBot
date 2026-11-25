@@ -181,6 +181,7 @@ describe("bridging a native Antigravity account's turn", () => {
       ["any other entry in config/", (profile: string) => mkdirSync(join(profile, "config", "plugins"))],
       ["a plugin that is not built in", (profile: string) => write(join(profile, "config", "config.json"), { plugins: { mine: { enabled: true } } })],
       ["config.json beyond plugins", (profile: string) => write(join(profile, "config", "config.json"), { plugins: {}, hooks: {} })],
+      ["built-in plugins that are not a folder", (profile: string) => { rmSync(join(profile, "antigravity-acp", "builtin", "plugins"), { recursive: true }); write(join(profile, "antigravity-acp", "builtin", "plugins"), "x"); }],
       ["a built-in plugin with hooks", (profile: string) => write(join(profile, "antigravity-acp", "builtin", "plugins", "swarm", "hooks.json"), {})],
       ["an MCP server", (profile: string) => write(join(profile, "config", "mcp_config.json"), { mcpServers: { extra: { command: "x" } } })],
       ["project settings", (profile: string) => write(join(profile, "config", "projects", "p.json"), {})],

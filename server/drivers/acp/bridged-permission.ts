@@ -52,9 +52,11 @@ export function bridgedPermission(toolCall: ToolCall, bridged: boolean, catalog:
     // A direct agents tool, in any separator: mcp.agents.attach_file is the same call as mcp_agents_attach_file.
     const direct = names.length > 0 && names.every((name) => { const tool = /^mcp_agents_(.+)$/u.exec(plain(name))?.[1]; return tool !== undefined && catalog.has(tool); });
     if (direct) return { kind: "ordinary" };
+    // use_tool's input under an unknown name: refused for this call only. Only a name in an agents bridge spelling marks
+    // the release as one whose spelling changed, since another tool's input can look the same.
     const input = record(toolCall.rawInput) ? toolCall.rawInput : {};
-    const shaped = typeof input.name === "string" && catalog.has(input.name) && (input.arguments == null || record(input.arguments));
-    return shaped ? { kind: "refuse" } : { kind: "ordinary" };
+    const shaped = toolCall.kind === "other" && typeof input.name === "string" && catalog.has(input.name) && (input.arguments == null || record(input.arguments));
+    return shaped ? { kind: "reject" } : { kind: "ordinary" };
   }
   const tool = recorded[0];
   const agreed = names.length > 0 && recorded.every((name) => name === tool) && (tool === USE_TOOL || tool === FIND_TOOL);

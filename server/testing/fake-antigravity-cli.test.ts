@@ -132,6 +132,26 @@ describe("the fake native CLI's MCP turns", () => {
     expect(restarted.text(sessionId, from)).toBe("TOOLS mcp_notes_read_notes\nNOTOOL notes/missing\n");
   }, 30_000);
 
+  it("ends a turn whose session/cancel came before the cancelled answer", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "fake-agy-early-cancel-"));
+    folders.push(directory);
+    const fixture = nativeFixture(join(directory, "bin"));
+    const profile = join(directory, "profile");
+    const credential = join(profile, "antigravity-acp", "antigravity-oauth-token");
+    (await import("node:fs")).mkdirSync(dirname(credential), { recursive: true });
+    writeFileSync(credential, "{}");
+    const client = acpClient(profile, { FAKE_AGY_LOG: fixture.log, SSH_CONNECTION: "127.0.0.1 0 127.0.0.1 0" });
+    children.push(client.child);
+    await client.request("initialize", { protocolVersion: 1 });
+    const { result } = await client.request("session/new", { cwd: directory, mcpServers: [{ name: "notes", command: process.execPath, args: [FAKE_MCP], env: [] }] });
+    client.onPermission(() => {
+      client.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId: result.sessionId } })}\n`);
+      return { outcome: { outcome: "cancelled" } };
+    });
+    expect(await client.request("session/prompt", { sessionId: result.sessionId, prompt: [{ type: "text", text: "fake-agy: call notes/read_notes {}" }] }))
+      .toMatchObject({ result: { stopReason: "cancelled" } });
+  }, 30_000);
+
   it("holds a turn whose permission was cancelled until session/cancel", async () => {
     const directory = mkdtempSync(join(tmpdir(), "fake-agy-cancel-"));
     folders.push(directory);

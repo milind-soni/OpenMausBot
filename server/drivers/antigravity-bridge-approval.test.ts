@@ -130,7 +130,6 @@ describe.skipIf(WINDOWS)("an Antigravity permission request on a turn whose agen
     ["a name and a title that disagree", native("use_tool", { name: "list_threads" }, { title: "Run mcp_agents_find_tool" })],
     ["a kind other than other", native("use_tool", { name: "list_threads" }, { kind: "edit" })],
     ["Claude's spelling", { toolCallId: "call_1", title: "mcp__agents__use_tool", kind: "other", rawInput: { name: "list_threads" } }],
-    ["a server the turn did not mount, carrying use_tool's input", { toolCallId: "call_1", name: "mcp_ghost_run", title: "Run mcp_ghost_run", kind: "other", rawInput: { name: "vm_exec", arguments: { command: "ls" } } }],
     ["a later release's dotted find_tool", { toolCallId: "call_1", name: "mcp.agents.find_tool", title: "Run mcp.agents.find_tool", kind: "other", rawInput: { query: "threads" } }],
     ["an unknown name carrying use_tool's input with null arguments", { toolCallId: "call_1", name: "agents/use_tool", title: "agents/use_tool", kind: "other", rawInput: { name: "list_threads", arguments: null } }],
     ["an unknown name carrying use_tool's input", { toolCallId: "call_1", name: "agents/use_tool", title: "agents/use_tool", kind: "other", rawInput: { name: "vm_exec", arguments: { command: "ls" } } }],
@@ -139,6 +138,14 @@ describe.skipIf(WINDOWS)("an Antigravity permission request on a turn whose agen
     expect(result).toMatchObject({ card: false, answer: "deny", completed: true });
     expect(result.errors.some((message) => message.includes("tool bridge") && message.includes("From the next message Antigravity CLI 1.5.16 lists the agents tools directly"))).toBe(true);
     expect(unbridgeableVersions()).toEqual(["1.5.16"]);
+  }, 90_000);
+
+  it("rejects another tool that carries use_tool's input for this call only, and leaves its release bridged", async () => {
+    const ghost = { toolCallId: "call_1", name: "mcp_ghost_run", title: "Run mcp_ghost_run", kind: "other", rawInput: { name: "vm_exec", arguments: { command: "ls" } } };
+    const result = await asked("shape-only", { approvalMode: "auto", version: "1.5.21", toolCall: ghost });
+    expect(result).toMatchObject({ card: false, answer: "deny" });
+    expect(result.errors.some((message) => message.includes("tool bridge"))).toBe(false);
+    expect(unbridgeableVersions()).not.toContain("1.5.21");
   }, 90_000);
 
   it("rejects a use_tool in the recorded spelling that names no tool, and leaves its release bridged", async () => {
