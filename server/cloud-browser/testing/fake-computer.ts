@@ -29,6 +29,10 @@ export interface FakeComputer {
   hostRoute: boolean;
   unprotected: boolean;
   chromeStarts: boolean;
+  /** The caps the probe says this Cloud's plan has. */
+  caps: { resumesPerDay: number; awakeMinutesPerDay: number } | null;
+  /** Status the PATCH of a sandbox answers with. */
+  patchStatus: number;
   /** How many Chromes the probe says this Cloud's sandbox takes (by its plan's size). */
   chromes: number;
   /** A resume during `archiving` finds the machine already gone. */
@@ -69,7 +73,7 @@ export async function startFakeComputer(): Promise<FakeComputer> {
   let retired = true;
   const fake = {
     base: "", state: "ready", exists: true, startStatus: 200, startBody: { ok: true }, oldRelay: false, available: true, unavailableReason: "fleet_starts",
-    unavailableUntil: null, hostRoute: true, unprotected: false, chromeStarts: true, policy: true, takeBackFails: false, chromes: 2, requests: [], upgrades: [], frames: [], boxId: "bx_23456789",
+    unavailableUntil: null, hostRoute: true, unprotected: false, chromeStarts: true, policy: true, takeBackFails: false, chromes: 2, caps: null, patchStatus: 200, requests: [], upgrades: [], frames: [], boxId: "bx_23456789",
     files: new Map(), cookies: new Map(), commands: [], failing: new Set(),
   } as unknown as FakeComputer;
   const watchers = new Map<string, Set<import("ws").WebSocket>>();
@@ -102,7 +106,7 @@ export async function startFakeComputer(): Promise<FakeComputer> {
       const rest = url.pathname.replace(/^\/api\/v1/, "");
       if (rest === "/browser-sandbox") {
         if (fake.oldRelay) return send(404, { ok: false, code: "not_found" });
-        return send(200, { ok: true, type: "browser.sandbox", available: fake.available, boxId: fake.exists ? boxId : null, sandboxType: fake.chromes > 2 ? "default" : "small", chromes: fake.chromes,
+        return send(200, { ok: true, type: "browser.sandbox", available: fake.available, boxId: fake.exists ? boxId : null, sandboxType: fake.chromes > 2 ? "default" : "small", chromes: fake.chromes, ...(fake.caps ? { caps: fake.caps } : {}),
           ...(fake.available ? {} : { reason: fake.unavailableReason, ...(fake.unavailableUntil ? { resetsAt: fake.unavailableUntil } : {}) }) });
       }
       if (rest === "/sandboxes" && req.method === "GET") return send(200, { ok: true, sandboxes: fake.exists ? [row] : [], pageInfo: { nextCursor: null } });
@@ -114,7 +118,7 @@ export async function startFakeComputer(): Promise<FakeComputer> {
         fake.state = "ready";
         return send(202, { ok: true, sandbox: { id: fake.boxId, state: "provisioning", ...(!fake.oldRelay && body.purpose ? { purpose: body.purpose } : {}) } });
       }
-      if (rest === `/sandboxes/${boxId}` && req.method === "PATCH") return send(200, { ok: true, sandbox: row });
+      if (rest === `/sandboxes/${boxId}` && req.method === "PATCH") return body.ttlSeconds !== undefined && fake.patchStatus >= 300 ? send(fake.patchStatus, { ok: false }) : send(200, { ok: true, sandbox: row });
       if (rest === `/sandboxes/${boxId}` && req.method === "GET") return fake.exists ? send(200, { ok: true, sandbox: row }) : send(404, { ok: false });
       if (rest === `/sandboxes/${boxId}` && req.method === "DELETE") {
         fake.exists = false;

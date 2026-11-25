@@ -29,7 +29,7 @@ export const profileKey = (botId: string): string => createHash("sha256").update
 /** What the relay says before anything is started: whether a browser sandbox may start now, and until when it may not. */
 export type Availability =
   | { kind: "old-relay" }
-  | { kind: "available"; boxId: string | null; chromes: number | null }
+  | { kind: "available"; boxId: string | null; chromes: number | null; caps: { resumes: number | null; awakeMinutes: number | null } }
   | { kind: "unavailable"; reason: string; resetsAt: string | null };
 
 /** What the browser needs from the relay; tests pass their own. */
@@ -58,8 +58,9 @@ export interface ComputerOps {
   quit(boxId: string, key: string | null): Promise<void>;
   /** The door's port on a protected relay URL (one that needs its token); null where it is refused or unprotected. */
   host(boxId: string, port: number): Promise<string | null>;
-  /** Moves the provider's own auto-stop to now + `seconds`, so it stops the sandbox only after that long unused. */
-  refreshTtl(boxId: string, seconds: number): Promise<void>;
+  /** Moves the provider's own auto-stop to now + `seconds`, so it stops the sandbox only after that long unused: "moved",
+   * "refused" (the Admin's maximum session age: the deadline is left to run out on purpose) or "failed" (to try again soon). */
+  refreshTtl(boxId: string, seconds: number): Promise<"moved" | "refused" | "failed">;
   /** Deletes it, journaled like every deletion (boat-delete-journal.ts), so a failed delete is retried and never leaks. */
   remove(boxId: string): Promise<boolean>;
 }
@@ -136,7 +137,9 @@ export function providerOps(cfg: () => AppConfig): ComputerOps {
       if (answer.status === 404) return { kind: "old-relay" };
       if (!answer.ok || typeof answer.body?.available !== "boolean") throw boatRefusal(answer.status, "asking about the browser sandbox", answer.body, true);
       const chromes = Number.isInteger(answer.body.chromes) && answer.body.chromes >= 1 && answer.body.chromes <= 4 ? answer.body.chromes as number : null;
-      if (answer.body.available) return { kind: "available", boxId: typeof answer.body.boxId === "string" ? answer.body.boxId : null, chromes };
+      const count = (value: unknown) => (typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null);
+      const caps = { resumes: count(answer.body.caps?.resumesPerDay), awakeMinutes: count(answer.body.caps?.awakeMinutesPerDay) };
+      if (answer.body.available) return { kind: "available", boxId: typeof answer.body.boxId === "string" ? answer.body.boxId : null, chromes, caps };
       return { kind: "unavailable", reason: typeof answer.body.reason === "string" ? answer.body.reason : "unknown", resetsAt: typeof answer.body.resetsAt === "string" ? answer.body.resetsAt : null };
     },
     async find() {
@@ -177,8 +180,9 @@ export function providerOps(cfg: () => AppConfig): ComputerOps {
       return protectedUrl(answer.body?.url);
     },
     async refreshTtl(boxId, seconds) {
-      // A refusal (the Admin's maximum session age, say) leaves the deadline as it is: that is the point of it.
-      await json(cfg(), `/sandboxes/${boxId}`, { method: "PATCH", body: JSON.stringify({ ttlSeconds: ttlSecondsOf(seconds) }) });
+      const answer = await json(cfg(), `/sandboxes/${boxId}`, { method: "PATCH", body: JSON.stringify({ ttlSeconds: ttlSecondsOf(seconds) }) }).catch(() => null);
+      if (answer?.ok) return "moved";
+      return answer?.status === 409 && (answer.body?.code ?? answer.body?.error?.code) === "max_age" ? "refused" : "failed";
     },
     async remove(boxId) {
       const name = await boatNameFor(BROWSER_SANDBOX_OWNER);

@@ -146,18 +146,21 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     expect(cloud.report().resumes).toBe(1);
   });
 
-  it("on an Admin from before the browser sandbox, makes nothing at all and stays in the home for a week", async () => {
+  it("on an Admin from before the browser sandbox, makes nothing at all, and asks again the next day or at the home's next start", async () => {
     fake.exists = false;
     fake.oldRelay = true;
     const cloud = browser();
     expect(await cloud.open(request())).toEqual({ home: "old-relay" });
     expect(fake.creates()).toBe(0);
-    clock += 6 * 24 * 60 * 60_000;
+    clock += 60 * 60_000;
     const asked = fake.requests.length;
     expect(await cloud.open(request())).toEqual({ home: "old-relay" });
-    expect(fake.requests.length).toBe(asked);
-    clock += 24 * 60 * 60_000;
+    expect(fake.requests.length, "not asked again the same day").toBe(asked);
+    // The relay is updated meanwhile: a restarted home finds it at once.
     fake.oldRelay = false;
+    urlOf(await browser().open(request("writer")));
+    // And the running one, the next day.
+    clock = Date.UTC(2026, 10, 25, 0, 0, 1);
     urlOf(await cloud.open(request()));
   });
 
@@ -165,7 +168,7 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     fake.exists = false;
     // The probe answers, but the create comes back unmarked (an Admin rolled back between the two).
     const realProbe = providerOps(() => ({}) as AppConfig);
-    const ops = { ...realProbe, probe: async () => { fake.oldRelay = true; return { kind: "available" as const, boxId: null, chromes: null }; } };
+    const ops = { ...realProbe, probe: async () => { fake.oldRelay = true; return { kind: "available" as const, boxId: null, chromes: null, caps: { resumes: null, awakeMinutes: null } }; } };
     const guarded = browser({ ops: () => ops });
     expect(await guarded.open(request())).toEqual({ home: "old-relay" });
     expect(fake.creates()).toBe(1);
@@ -472,14 +475,66 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     urlOf(await cloud.open(request()));
   });
 
-  it("treats the relay's busy answer as the account's limit for the day", async () => {
+  it("treats the relay's busy answer (a minute or hour window) as a back-off of minutes, not the rest of the day", async () => {
     fake.state = "archived";
     fake.startStatus = 429;
     fake.startBody = { ok: false, code: "rate_limited", message: "Cloud computers are busy right now." };
     const cloud = browser();
-    expect(await cloud.open(request())).toEqual({ home: "account-limit" });
-    expect(await cloud.open(request())).toEqual({ home: "account-limit" });
+    expect(await cloud.open(request())).toEqual({ home: "backoff" });
+    expect(await cloud.open(request())).toEqual({ home: "backoff" });
     expect(fake.resumes()).toBe(1);
+    clock += CLOUD_BROWSER_BACKOFF_MS;
+    fake.startStatus = 200;
+    fake.startBody = { ok: true };
+    urlOf(await cloud.open(request()));
+  });
+
+  it("takes this Cloud's caps from the relay's answer, not its own table", async () => {
+    fake.state = "archived";
+    fake.caps = { resumesPerDay: 1, awakeMinutesPerDay: 720 };
+    const cloud = browser();
+    urlOf(await cloud.open(request()));
+    expect(cloud.report()).toMatchObject({ budget: 1, awakeMinutesCap: 720 });
+    clock += CLOUD_BROWSER_IDLE_MS;
+    await cloud.closeIdle();
+    fake.state = "archived";
+    expect(await cloud.open(request())).toEqual({ home: "budget" });
+  });
+
+  it("ends a session whose sandbox stopped under it (a cap, the maximum age, an outage), so the next call opens again instead of failing", async () => {
+    const cloud = browser();
+    urlOf(await cloud.open(request()));
+    expect(await cloud.failed("bot-scout"), "still there: the call's own failure").toBe(false);
+    expect(cloud.active("bot-scout")).not.toBeNull();
+    // The Admin stopped it (its minutes cap) while a turn held the browser.
+    fake.state = "archived";
+    expect(await cloud.failed("bot-scout")).toBe(true);
+    expect(cloud.active("bot-scout")).toBeNull();
+    expect(engineClosed).toEqual(["bot-scout"]);
+    urlOf(await cloud.open(request()));
+    expect(fake.resumes()).toBe(1);
+  });
+
+  it("stamps the provider deadline's push only when it moved, and tries a failed one again at the next sweep", async () => {
+    const cloud = browser();
+    urlOf(await cloud.open(request()));
+    const pushes = () => fake.requests.filter((one) => one.method === "PATCH" && one.body?.ttlSeconds !== undefined).length;
+    fake.patchStatus = 500;
+    clock += 60_000;
+    cloud.touch("bot-scout");
+    await cloud.closeIdle();
+    expect(pushes()).toBe(1);
+    clock += 30_000;
+    await cloud.closeIdle();
+    expect(pushes(), "tried again soon").toBe(2);
+    fake.patchStatus = 200;
+    clock += 30_000;
+    await cloud.closeIdle();
+    expect(pushes()).toBe(3);
+    clock += 30_000;
+    cloud.touch("bot-scout");
+    await cloud.closeIdle();
+    expect(pushes(), "moved: not again for 10 minutes").toBe(3);
   });
 
   it("a session the caller rules out (a shared profile, another person's, a person's own key) makes no relay call", async () => {

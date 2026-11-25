@@ -21,6 +21,8 @@ const LEVER_CLEANUP_GAP_MS = 60 * 60_000;
 export const SANDBOX_IDLE_TTL_SECONDS = 1_200;
 export const TTL_REFRESH_MS = 10 * 60_000;
 
+const READY_STATES = new Set(["idle", "ready", "running"]);
+
 export const cloudBrowserLever = (env: NodeJS.ProcessEnv = process.env): boolean => env.OMB_CLOUD_BROWSER?.trim() === "home";
 
 export interface CloudBrowserDeps {
@@ -118,8 +120,8 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
     if (limit?.reason === "hours_used") { rails.hoursUsed(limit); return "hours-used"; }
     if (limit?.reason === "at_once") { rails.holdOff(); return "at-once"; }
     if (limit) { rails.holdOff(); return "backoff"; }
-    // The account's start pool (the relay's "busy", or the provider's own limit met with a person's own key): the rest of the day.
-    if (failure.status === 429) { rails.accountLimit(undefined); return "account-limit"; }
+    // The account's start pool is busy for now (the relay's "busy", a minute or hour window): a few minutes, not the day.
+    if (failure.status === 429) { rails.holdOff(); return "backoff"; }
     rails.failed();
     return "start-failed";
   }
@@ -138,6 +140,7 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
     if (said.kind === "old-relay") throw new OldRelay();
     if (said.kind === "unavailable") throw new Unavailable(said.reason, said.resetsAt);
     if (said.chromes !== null) chromesAllowed = said.chromes;
+    rails.caps(said.caps.resumes, said.caps.awakeMinutes);
   }
 
   async function wake(ops: ComputerOps): Promise<{ id: string; started: boolean }> {
@@ -299,13 +302,30 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
   }
 
   /** The provider's auto-stop pushed ahead while some browser here was used since the last push. */
+  /** Stamped only once the deadline really moved (or the Admin refused on purpose); a failed push is tried again at the
+   * next sweep, well before the deadline it was meant to move. */
   async function refreshTtl(at: number): Promise<void> {
     const ops = deps.ops();
     if (!ops || !boxId || at - ttlRefreshedAt < TTL_REFRESH_MS) return;
     const used = [...lastUse.values()].some((at) => at > ttlRefreshedAt);
     if (!used) return;
-    ttlRefreshedAt = at;
-    await ops.refreshTtl(boxId, SANDBOX_IDLE_TTL_SECONDS).catch(() => undefined);
+    const outcome = await ops.refreshTtl(boxId, SANDBOX_IDLE_TTL_SECONDS).catch(() => "failed" as const);
+    if (outcome !== "failed") ttlRefreshedAt = at;
+  }
+
+  /** A call in a session on the sandbox failed: when the sandbox is no longer ready (stopped by a cap, the Admin's maximum
+   * session age, an outage) or the door no longer answers, the session ends so the next call opens again, in the home if
+   * the sandbox can't be had. A session never fails call after call on a dead sandbox. */
+  async function failed(session: string): Promise<boolean> {
+    const ops = deps.ops();
+    if (!sessions.has(session) || !ops || !boxId) return false;
+    const state = await ops.state(boxId).catch(() => null);
+    const target = doors.target(session);
+    const alive = state !== null && READY_STATES.has(state) && target !== null && await probeDoor(target, 5_000);
+    if (alive) return false;
+    log(`browser ${session}: its browser sandbox is ${state && !READY_STATES.has(state) ? `${state}` : "not answering"}; the session ends and the next call opens again`);
+    await close(session);
+    return true;
   }
 
   async function closeIdle(): Promise<void> {
@@ -338,6 +358,7 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
     close,
     closeIdle,
     dialed: (session: string): number => doors.dialed(session),
+    failed,
     /** Lines for the session's next browser call (downloads that arrived, or could not). */
     takeNotes: (session: string): string[] => {
       const left = leftNotes.get(session) ?? [];

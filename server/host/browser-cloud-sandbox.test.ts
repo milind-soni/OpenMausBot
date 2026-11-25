@@ -58,14 +58,14 @@ afterEach(async () => {
   await fake.close();
 });
 
-function setup({ desktop = false, cloudBrowser = true, ownKey = false }: { desktop?: boolean; cloudBrowser?: boolean; ownKey?: boolean } = {}) {
+function setup({ desktop = false, cloudBrowser = true, ownKey = false, turnHolds = false }: { desktop?: boolean; cloudBrowser?: boolean; ownKey?: boolean; turnHolds?: boolean } = {}) {
   const cfg = { features: { browser: true }, ...(ownKey ? { box: { token: "boat_persons-own-key" } } : {}) } as unknown as AppConfig;
   const bots = [{ id: botId, name: botId, browser: true }];
   const used: Array<[string, number]> = [];
   const deps: BrowserHostDeps = {
     cfg,
     store: () => ({ bots, bot: (id: string) => bots.find((bot) => bot.id === id), botByThread: () => bots[0] }) as unknown as Pick<Store, "bots" | "bot" | "botByThread">,
-    turnResources: { free: () => true, holder: () => undefined, onClaim: () => () => {} },
+    turnResources: { free: () => !turnHolds, holder: () => undefined, onClaim: () => () => {} },
     activeInternalGenerationByThread: new Map([[turn.threadId, turn.generation]]),
     mintInternalCapability: () => "capability-token",
     DESKTOP_MANAGED: desktop,
@@ -185,6 +185,7 @@ lines.on("line", (line) => {
   let result;
   if (m.method === "initialize") result = { protocolVersion: "2024-11-05", capabilities: { tools: {} } };
   else if (m.method === "tools/list") result = { tools: [{ name: "agent_browser_get_url", inputSchema: { type: "object" } }, { name: "agent_browser_open", inputSchema: { type: "object" } }] };
+  else if (m.params.name === "agent_browser_fail") result = { isError: true, content: [{ type: "text", text: "Target closed" }] };
   else result = { content: [{ type: "text", text: where + ":" + m.params.name }] };
   process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: m.id, result }) + "\\n");
 });
@@ -224,5 +225,46 @@ describe.skipIf(process.platform === "win32")("a turn's first browser call after
     expect(back.spec.env.AGENT_BROWSER_CDP).toBeUndefined();
     const again = await host.browserRuntime.agentRpc(back.session, back.spec, "tools/call", { name: "agent_browser_get_url", arguments: {} });
     expect(JSON.stringify(again)).toContain("home:agent_browser_get_url");
+  });
+});
+
+describe.skipIf(process.platform === "win32")("what keeps a session on the browser sandbox open, on the host's real rules", () => {
+  let engineDir: string;
+  beforeEach(() => {
+    vi.mocked(BrowserRuntime.prototype.agentRpc).mockRestore();
+    engineDir = mkdtempSync(join(tmpdir(), "fake-engine-"));
+    const binary = join(engineDir, "agent-browser");
+    writeFileSync(binary, FAKE_ENGINE);
+    chmodSync(binary, 0o755);
+    vi.mocked(browserEngineStatus).mockReturnValue({ kind: "ready", binaryPath: binary, version: "0.37.0", managed: false });
+  });
+  afterEach(() => { vi.useRealTimers(); rmSync(engineDir, { recursive: true, force: true }); });
+
+  it("a turn that made one call and goes on for hours does not keep the sandbox awake: 3 minutes after its last call the session closes", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    // The turn holds the browser for its whole life once it made a call, as the real route claims it.
+    const { host } = setup({ turnHolds: true });
+    const browser = (await host.browserIntegration(botId, undefined, undefined, "team", { opening: "agent_browser_get_url" }))!;
+    await host.browserRuntime.agentRpc(browser.session, browser.spec, "tools/call", { name: "agent_browser_get_url", arguments: {} });
+    expect(host.cloudBrowserBusy("browser")).toBe(true);
+    vi.setSystemTime(Date.now() + 2 * 60_000);
+    await host.cloudBrowserSweep();
+    expect(host.cloudBrowserBusy("browser"), "2 minutes after the call").toBe(true);
+    vi.setSystemTime(Date.now() + 60_000 + 1);
+    await host.cloudBrowserSweep();
+    expect(host.cloudBrowserBusy("browser"), "3 minutes after the call, the turn's hold notwithstanding").toBe(false);
+  });
+
+  it("a failed call on a sandbox that stopped under the session ends it, so the next call opens again", async () => {
+    const { host } = setup();
+    const browser = (await host.browserIntegration(botId, undefined, undefined, "team", { opening: "agent_browser_get_url" }))!;
+    await host.browserRuntime.agentRpc(browser.session, browser.spec, "tools/call", { name: "agent_browser_get_url", arguments: {} });
+    fake.state = "archived";
+    const failed = await host.browserRuntime.agentRpc(browser.session, browser.spec, "tools/call", { name: "agent_browser_fail", arguments: {} });
+    expect(failed).toHaveProperty("isError", true);
+    expect(host.cloudBrowserBusy("browser")).toBe(false);
+    const next = (await host.browserIntegration(botId, undefined, undefined, "team", { opening: "agent_browser_get_url" }))!;
+    expect(JSON.stringify(await host.browserRuntime.agentRpc(next.session, next.spec, "tools/call", { name: "agent_browser_get_url", arguments: {} }))).toContain("sandbox:");
+    expect(fake.resumes()).toBe(1);
   });
 });

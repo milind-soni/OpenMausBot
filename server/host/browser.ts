@@ -127,6 +127,12 @@ function lentDevice(device: NonNullable<EgressSetup["device"]>, holder: (session
 type Spec = { command: string; args?: readonly string[]; env: Record<string, string> };
 type LendRefusal = CloudLendingRefusal | "memory-changed" | "memory-changed-here";
 const BOT_SESSION = /^bot-[A-Za-z0-9_.-]+$/;
+/** What keeps a session on the browser sandbox open past its 3 quiet minutes: a call running in it, or a person driving it
+ * (a take-over). Not a turn's claim on the browser, which lasts the whole turn after one call, and not an open view, which
+ * streams even while hidden: each bot call already counts as use when it is made. */
+export function sandboxInUse(runtime: Pick<BrowserRuntime, "working">, session: string): boolean {
+  return runtime.working(session);
+}
 /** What the upload tool answers while the bot's browser runs on its cloud computer. */
 /** However short of room the server is, a bot's browser stays this long after its last use: a turn's next browser call is
  * seldom further apart. */
@@ -254,6 +260,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       return lender.online ? null : lentChromeGuidance("offline", lender);
     },
     annotate: (spec, result) => passkeyAnnotation(chromeEngine.onPane(spec) ? "pane" : CLOUD_HOME ? "cloud" : DESKTOP_MANAGED ? "desktop" : "server")(spec, result),
+    // A failed call in a session on the browser sandbox: a sandbox no longer there ends the session, so the next call reopens.
+    failedCall: async (session) => { if (cloudBrowser?.attached(session)) await cloudBrowser.failed(session); },
     // agent-browser's own error names only the CDP connection; the door knows what went wrong on the way.
     afterCall: (session, spec, answer) => {
       cloudBrowser?.touch(session);
@@ -291,8 +299,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       if (spec) await closeBrowser(session, spec);
       await agentBrowserRuntime.close(session);
     },
-    // Real use only: a turn holding the browser, a call running in it, or a person watching or driving it.
-    held: (session) => !turnResources.free(`browser:${session}`) || agentBrowserRuntime.working(session) || agentBrowserRuntime.spare(session) === null,
+    held: (session) => sandboxInUse(agentBrowserRuntime, session),
     folder: (botId) => deps.cloudBrowser?.folder?.(botId) ?? null,
     // The home's saved sign-ins: agent-browser's encrypted restore file, under this server's key only.
     signIns: {
@@ -853,5 +860,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     eraseAudienceBrowsers, browserOwners, closeCapBrowsers,
     cloudBrowserBusy: (owner: string) => cloudBrowser?.busy(owner) ?? false,
     cloudBrowserReport: () => cloudBrowser?.report() ?? null,
+    /** The browser sandbox's idle sweep, run now (it runs on its own every 30 s while a session is open). */
+    cloudBrowserSweep: () => cloudBrowser?.closeIdle() ?? Promise.resolve(),
   };
 }

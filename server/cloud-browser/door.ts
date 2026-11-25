@@ -96,6 +96,8 @@ export class CloudBrowserDoors {
   }
 
   url(session: string): string | null { return this.#doors.get(session)?.url ?? null; }
+  /** Where the session's door leads, for a check that it still answers. */
+  target(session: string): DoorTarget | null { return this.#doors.get(session)?.target ?? null; }
   sessions(): string[] { return [...this.#doors.keys()]; }
   /** When bytes last crossed this session's door either way: its browser's last activity. */
   lastActivity(session: string): number | null { return this.#doors.get(session)?.lastActivity ?? null; }

@@ -74,8 +74,8 @@ export interface CloudBrowserRailsOptions {
 
 export function createCloudBrowserRails(options: CloudBrowserRailsOptions) {
   const now = options.now ?? Date.now;
-  const budget = options.budget ?? CLOUD_BROWSER_DAILY_RESUMES;
-  const awakeCapMs = (options.awakeMinutes ?? CLOUD_BROWSER_DAILY_AWAKE_MINUTES) * 60_000;
+  let budget = options.budget ?? CLOUD_BROWSER_DAILY_RESUMES;
+  let awakeCapMs = (options.awakeMinutes ?? CLOUD_BROWSER_DAILY_AWAKE_MINUTES) * 60_000;
   const file = join(options.dataDir, "cloud-browser", "rails.json");
   const fresh = (day: string): Day => ({ day, resumes: 0, awakeMs: 0, computer: 0, home: 0, fallbacks: {} });
   let state: State = { ...fresh(utcDay(now())), failuresInRow: 0, backoffUntil: 0, accountUntil: 0, hoursUntil: 0, noRouteDay: null, awakeSince: 0, leverSince: 0, oldRelayUntil: 0, unavailableUntil: 0, carried: {}, carryBad: {} };
@@ -90,7 +90,8 @@ export function createCloudBrowserRails(options: CloudBrowserRailsOptions) {
       accountUntil: number(saved.accountUntil), hoursUntil: number(saved.hoursUntil),
       noRouteDay: typeof saved.noRouteDay === "string" ? saved.noRouteDay : null,
       awakeSince: number(saved.awakeSince), leverSince: number(saved.leverSince),
-      oldRelayUntil: number(saved.oldRelayUntil), unavailableUntil: number(saved.unavailableUntil),
+      // An older relay's hold is not kept across a restart: the home asks again, so a relay deployed meanwhile is found.
+      oldRelayUntil: 0, unavailableUntil: number(saved.unavailableUntil),
       carried: Object.fromEntries(Object.entries(saved.carried && typeof saved.carried === "object" ? saved.carried : {})
         .filter(([key, at]) => /^bx_[a-z0-9]{8}:[a-f0-9]{16}$/.test(key) && typeof at === "number" && Number.isFinite(at))),
       carryBad: Object.fromEntries(Object.entries(saved.carryBad && typeof saved.carryBad === "object" ? saved.carryBad : {})
@@ -148,6 +149,11 @@ export function createCloudBrowserRails(options: CloudBrowserRailsOptions) {
       current.awakeMs += Math.max(0, now() - current.awakeSince);
       current.awakeSince = 0;
       save();
+    },
+    /** This Cloud's caps as the Admin said them for its plan: they replace the defaults here, which are only a backstop. */
+    caps(resumes: number | null, awakeMinutes: number | null): void {
+      if (resumes !== null && Number.isInteger(resumes) && resumes >= 0) budget = resumes;
+      if (awakeMinutes !== null && Number.isFinite(awakeMinutes) && awakeMinutes >= 0) awakeCapMs = awakeMinutes * 60_000;
     },
     /** Whether a spell is open, so a restarted server lets the sandbox sleep again. */
     leftAwake: (): boolean => today().awakeSince > 0,
@@ -215,9 +221,9 @@ export function createCloudBrowserRails(options: CloudBrowserRailsOptions) {
       today().carried[key] = at;
       save();
     },
-    /** An Admin from before the browser sandbox: asked again in a week. */
+    /** An Admin from before the browser sandbox: asked again the next UTC day, or at the home's next start. */
     oldRelay(): void {
-      today().oldRelayUntil = now() + 7 * 24 * 60 * 60_000;
+      today().oldRelayUntil = nextUtcMidnight(now());
       save();
     },
     /** The relay's no, until its `resetsAt` (the fleet's starts, this Cloud's, or switched off), else for the back-off. */
