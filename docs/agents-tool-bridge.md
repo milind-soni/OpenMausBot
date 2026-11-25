@@ -105,7 +105,8 @@ A native account is bridged unless `OMB_AGENTS_TOOL_BRIDGE=0` or
 - the installed CLI is outside 1.5.14 (whose permission requests were first
   recorded) to before 1.6.0, or is a release recorded as unbridgeable (below),
   or the turn would start a different file than the one decided for;
-- another of the turn's MCP servers is named `agents` or starts with `agents_`;
+- another of the turn's MCP servers is named `agents`, or starts with `agents`
+  and a separator (`agents_x`, `agents-2026`, `agents.x`);
 - the launch folder or any folder above it, read both as written and through
   its links, holds an `.agents` folder with anything but skills, a legacy
   `.agent`, `_agents`, `_agent` or `.antigravity`, or a workspace

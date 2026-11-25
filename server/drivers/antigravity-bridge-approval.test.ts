@@ -147,6 +147,12 @@ describe.skipIf(WINDOWS)("an Antigravity permission request on a turn whose agen
     expect(unbridgeableVersions()).not.toContain("1.5.19");
   }, 90_000);
 
+  it("leaves a direct agents call in another separator alone, before any bridged call", async () => {
+    const attach = { toolCallId: "call_1", name: "mcp.agents.attach_file", title: "Run mcp.agents.attach_file", kind: "other", rawInput: { path: "report.csv", name: "list_threads" } };
+    expect(await asked("direct-dotted", { approvalMode: "auto", version: "1.5.20", toolCall: attach })).toMatchObject({ card: false, answer: "allow", errors: [] });
+    expect(unbridgeableVersions()).not.toContain("1.5.20");
+  }, 90_000);
+
   it("leaves a mounted server's call in another separator alone", async () => {
     const sql = { toolCallId: "call_1", name: "mcp.data.data_sql", title: "Run mcp.data.data_sql", kind: "other", rawInput: { sql: "SELECT 1", name: "list_threads" } };
     expect(await asked("data-sql-dotted", { approvalMode: "auto", toolCall: sql, mountData: true })).toMatchObject({ card: false, answer: "allow", errors: [] });

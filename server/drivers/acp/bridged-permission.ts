@@ -49,7 +49,8 @@ export function bridgedPermission(toolCall: ToolCall, bridged: boolean, catalog:
   const recorded = names.map((name) => RECORDED.exec(name)?.[1]);
   const byName = names.some((name) => BRIDGE_SPELLING.test(name));
   if (!byName) {
-    const direct = names.length > 0 && recorded.every((tool) => tool !== undefined && catalog.has(tool));
+    // A direct agents tool, in any separator: mcp.agents.attach_file is the same call as mcp_agents_attach_file.
+    const direct = names.length > 0 && names.every((name) => { const tool = /^mcp_agents_(.+)$/u.exec(plain(name))?.[1]; return tool !== undefined && catalog.has(tool); });
     if (direct) return { kind: "ordinary" };
     const input = record(toolCall.rawInput) ? toolCall.rawInput : {};
     const shaped = typeof input.name === "string" && catalog.has(input.name) && (input.arguments == null || record(input.arguments));
