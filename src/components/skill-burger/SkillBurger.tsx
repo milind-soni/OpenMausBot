@@ -62,7 +62,7 @@ export function SkillBurger({ run, layers, draft, summary: initialSummary, canSa
   run: string;
   /** The bot is still working: the pill cooks. */
   busy?: boolean;
-  /** Simple mode: the pill shows the run's marks and Add, not how many steps it took. */
+  /** Simple mode: the pill shows the run's marks and Add, not how many steps it took (unless a step failed). */
   quiet?: boolean;
   layers: BurgerLayer[];
   /** The finished run as it would be saved: shown in place of the live layers once it arrives. */
@@ -143,7 +143,7 @@ export function SkillBurger({ run, layers, draft, summary: initialSummary, canSa
   const count = [stepCount === 1 ? t("skillBurger.layersOne") : t("skillBurger.layersMany", { count: stepCount }), draft && !saved ? replayLine(draft.steps, skipped) : ""].filter(Boolean).join(" · ");
   const cooking = busy || live;
   const failed = !cooking && layers.some((layer) => layer.status === "failed");
-  const pillLabel = quiet && !cooking ? null : cooking
+  const pillLabel = quiet && !cooking && !failed ? null : cooking
     ? <Sheen text={t("skillBurger.pill.cooking", { count: stepCount })}><WithCount template={t("skillBurger.pill.cooking")} count={stepCount} /></Sheen>
     : stepCount === 1 ? t("skillBurger.layersOne") : <WithCount template={t("skillBurger.layersMany")} count={stepCount} />;
   return (

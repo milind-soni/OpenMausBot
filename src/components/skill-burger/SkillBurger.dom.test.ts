@@ -221,3 +221,10 @@ it("keeps Simple mode's run out of sight while the bot works, then offers Add wi
   expect([...host.querySelectorAll("[data-burger-layer]")].map((layer) => layer.textContent?.trim())).toEqual(["Read from Google Sheets", "Send email"]);
   expect(button("Add Skill Burger")?.disabled).toBe(false);
 });
+
+it("still shows a failed step in Simple mode's quiet pill", async () => {
+  fixture.advanced = false;
+  const failed: RunMessage = { id: "f3", role: "bot", kind: "activity", tool: { name: "Bash", ok: false, input: JSON.stringify({ command: "pnpm deploy" }) } };
+  await render([ask, app("f1", "GOOGLESHEETS_BATCH_GET"), app("f2", "GMAIL_SEND_EMAIL"), failed]);
+  expect(host.querySelector("[data-burger-pill] .text-danger")?.textContent).toBe("3 steps");
+});

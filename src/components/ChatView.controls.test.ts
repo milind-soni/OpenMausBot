@@ -97,7 +97,8 @@ describe("the header's right side", () => {
       fixture.instances = [ready];
       expect(header().controls).not.toContain("data-test-model-control");
       for (const trouble of [{ ...ready, snapshot: { state: "available", authenticated: false } }, { ...ready, snapshot: { state: "missing" } },
-        { ...ready, models: { options: ["thread-model", "profile-default"].map((id) => ({ id, label: id, orgBlocked: true })) } }]) {
+        { ...ready, models: { options: ["thread-model", "profile-default"].map((id) => ({ id, label: id, orgBlocked: true })) } },
+        { ...ready, instanceId: "another" }]) {
         fixture.instances = [trouble];
         expect(header().controls).toContain("data-test-model-control");
         expect(fixture.model).toMatchObject({ bot: { id: "bot" }, threadId: "selected" });
