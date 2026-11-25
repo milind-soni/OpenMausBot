@@ -30,10 +30,11 @@ const WORDS: Record<WhatsNewSlide, { title: LocaleKey; body: LocaleKey }> = {
   modelgo: { title: "modelgoOffer.title", body: "modelgoOffer.line" },
 };
 type Clip = { video: string; still: string };
-const PICTURES: Record<WhatsNewSlide, { label: LocaleKey; dark: Clip; light: Clip }> = {
-  pro: { label: "whatsNew.cloud.videoLabel", dark: { video: cloudDark, still: cloudDarkStill }, light: { video: cloudLight, still: cloudLightStill } },
-  team: { label: "whatsNew.team.videoLabel", dark: { video: teamDark, still: teamDarkStill }, light: { video: teamLight, still: teamLightStill } },
-  modelgo: { label: "modelgoOffer.videoLabel", dark: { video: modelgoDark, still: modelgoDarkStill }, light: { video: modelgoLight, still: modelgoLightStill } },
+/** `focus`: where a clip's pointer clicks, kept in view when a taller slide crops the clip's sides. */
+const PICTURES: Record<WhatsNewSlide, { label: LocaleKey; focus: string; dark: Clip; light: Clip }> = {
+  pro: { label: "whatsNew.cloud.videoLabel", focus: "object-[50%_50%]", dark: { video: cloudDark, still: cloudDarkStill }, light: { video: cloudLight, still: cloudLightStill } },
+  team: { label: "whatsNew.team.videoLabel", focus: "object-[40%_50%]", dark: { video: teamDark, still: teamDarkStill }, light: { video: teamLight, still: teamLightStill } },
+  modelgo: { label: "modelgoOffer.videoLabel", focus: "object-[80%_50%]", dark: { video: modelgoDark, still: modelgoDarkStill }, light: { video: modelgoLight, still: modelgoLightStill } },
 };
 const TEAM_POINTS: readonly LocaleKey[] = ["whatsNew.team.apps", "whatsNew.team.groupChats", "whatsNew.team.memory", "whatsNew.team.handoff", "whatsNew.team.accessUse"];
 const NAV = "ui-button ui-button-pill min-h-9 gap-1 px-3";
@@ -42,12 +43,13 @@ const focusLost = (focus: Element | null) => !focus || focus === document.body |
 const titleId = (slide: WhatsNewSlide) => `whats-new-${slide}-title`;
 const controls = (popup: Element | null) => [...(popup?.querySelectorAll<HTMLElement>("button:not([disabled])") ?? [])].filter(button => !button.closest("[inert]"));
 
-/** A slide's short loop of the app itself, at least half as tall as it is wide; in the room a taller slide leaves it stays
- * whole, centered. It plays only on the slide on screen; elsewhere, and wherever motion is reduced, its still. */
+/** A slide's short loop of the app itself, at least half as tall as it is wide; it fills the room a taller slide leaves, so
+ * every slide is one height, cropping the clip's sides around where it clicks. It plays only on the slide on screen;
+ * elsewhere, and wherever motion is reduced, its still. */
 function Picture({ slide, active }: { slide: WhatsNewSlide; active: boolean }) {
   const scheme = useColorScheme();
-  const { label, ...clips } = PICTURES[slide], clip = clips[scheme === "dark" ? "dark" : "light"];
-  const fill = "absolute inset-0 size-full select-none object-contain";
+  const { label, focus, ...clips } = PICTURES[slide], clip = clips[scheme === "dark" ? "dark" : "light"];
+  const fill = cn("absolute inset-0 size-full select-none object-cover", focus);
   return <div data-whats-new-picture={slide} className="relative aspect-[2/1] shrink-0 grow overflow-hidden bg-ink/[0.035] [@media(max-height:600px)]:hidden">
     {active && !reducedMotion()
       ? <video src={clip.video} poster={clip.still} autoPlay muted loop playsInline disablePictureInPicture aria-label={t(label)} className={fill} />
