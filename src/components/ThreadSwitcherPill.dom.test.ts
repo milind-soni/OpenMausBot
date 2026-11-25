@@ -108,6 +108,14 @@ describe("the pill's thread switcher", () => {
     expect(q("[data-thread-chip-new]")).toBeNull();
   });
 
+  it("lets a long name give way when open, so the chevron is never pushed out of the pill", () => {
+    render({ ...pepper(THREADS, "launch"), name: "A bot with a very long name that would not fit beside its threads" } as Bot);
+    act(() => q("[data-chathead-threads]")!.click());
+    const face = q("[data-chathead-pill]")!.classList;
+    expect([face.contains("shrink-0"), face.contains("min-w-0"), face.contains("max-w-40")]).toEqual([false, true, true]);
+    expect(q("[data-chathead-threads]")!.classList.contains("shrink-0")).toBe(true);
+  });
+
   it("stays the plain pill for a bot with one thread", () => {
     render(pepper([task("sales", "Weekly sales", 5)], "sales"));
     expect(q("[data-chathead-threads]")).toBeNull();
