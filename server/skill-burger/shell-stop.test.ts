@@ -40,6 +40,7 @@ it.runIf(process.platform === "linux").each(["abort", "overflow", "timeout"])("s
   const wrote = new Promise<string>((resolve) => { written = () => resolve("wrote"); });
   const server = createServer((socket) => {
     held = socket;
+    socket.on("error", (error) => expect(error).toHaveProperty("code", "ECONNRESET"));
     closed = new Promise<void>((resolve) => socket.once("close", () => resolve()));
     let line = "";
     socket.on("data", (chunk) => {
