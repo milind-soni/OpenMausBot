@@ -422,7 +422,7 @@ jobs:
           grep -q 7d1e2f3a-4b5c-4d6e-8f70-8192a3b4c5d6 <<<"$(docker run --rm -v omb-own-ci:/data:ro --entrypoint cat omb-cloud-home:ci /data/.omb-cloud-home.json)"
           # A second home on the volume the live one holds refuses to start, and the live one carries on.
           if timeout 90 docker run --name own3 -v omb-own-ci:/data "${contract[@]}" omb-cloud-home:ci; then echo "a second home started on a held volume"; exit 1; fi
-          grep -qF "Another MausBot home is already running on this volume. No data was changed." <<<"$(docker logs own3 2>&1)"
+          grep -qE "Another .+ home is already running on this volume\. No data was changed\." <<<"$(docker logs own3 2>&1)"
           docker rm -f own3 >/dev/null
           healthy own2 18081
           docker rm -f own2 >/dev/null

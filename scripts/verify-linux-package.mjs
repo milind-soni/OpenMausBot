@@ -18,6 +18,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+
+import product from "../product.json" with { type: "json" };
 import { LICENSE_FILES } from "./cua-linux-release.mjs";
 import {
   CLOUDFLARED_ASSETS,
@@ -78,8 +80,10 @@ function requireUpdaterTarget(resources, label) {
   const updateFile = path.join(resources, "app-update.yml");
   requireFile(updateFile);
   const update = readFileSync(updateFile, "utf8");
-  if (!/^owner: milind-soni$/m.test(update) || !/^repo: OpenMausBot$/m.test(update)) {
-    fail(`${label} app-update.yml does not point at milind-soni/OpenMausBot`);
+  const { owner, repo } = product.updates;
+  const lines = update.split(/\r?\n/);
+  if (!lines.includes(`owner: ${owner}`) || !lines.includes(`repo: ${repo}`)) {
+    fail(`${label} app-update.yml does not point at ${owner}/${repo}`);
   }
 }
 

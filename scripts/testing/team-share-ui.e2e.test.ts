@@ -6,6 +6,7 @@ import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { waitForExit } from "../../server/testing/cleanup.ts";
 import { runControlOmb } from "../control-omb.ts";
 import { request } from "../mcp-server.ts";
+import { SERVICES } from "../../shared/services.ts";
 import { UI_TOOLS_DIR } from "./control-omb-ui.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -55,7 +56,9 @@ describe("Share a department in the real renderer", () => {
     await click("Share");
     await expect.poll(snapshot, { timeout: 20_000 }).toContain("Chats, memory and keys are never shared");
     const dialog = await snapshot();
-    for (const line of ["Share Sales desk", "Publishing isn't available here", "Upload on GitHub", "Save folder…"]) expect(dialog).toContain(line);
+    for (const line of ["Share Sales desk", "Publishing isn't available here", "Save folder…"]) expect(dialog).toContain(line);
+    if (SERVICES.teamLibrary) expect(dialog).toContain("Upload on GitHub");
+    else expect(dialog).not.toContain("Upload on GitHub");
     expect(dialog, "shared instructions are not the card's line").not.toContain("Quote list prices only.");
     expect(await evaluate("document.querySelector('[data-share-department]').closest('[role=dialog]').querySelectorAll('input, textarea, select, [role=checkbox]').length")).toBe(0);
     await ui("screenshot", "--out", join(ROOT, ".omb-scratch", "verify-evidence", "share-department.png"));
