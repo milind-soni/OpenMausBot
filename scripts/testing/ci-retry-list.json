@@ -9,35 +9,35 @@
       "since": "2026-10-08"
     },
     {
-      "file": "server/delta-context.e2e.test.ts",
+      "file": "server/delta-context-recovery.e2e.test.ts",
       "test": "offers a steer written into a resume the provider then rejected on the next turn",
       "owner": "milind-soni",
       "reason": "Failed 7 runs (6 branches, 2 main runs) since Sep 24, Windows; same commit later green.",
       "since": "2026-10-08"
     },
     {
-      "file": "server/delta-context.e2e.test.ts",
+      "file": "server/delta-context-recovery.e2e.test.ts",
       "test": "gives a replacement session the full assignment when a result returns after its resume was rejected",
       "owner": "milind-soni",
       "reason": "Failed 5 runs since Sep 24, mostly Windows; same commit later green.",
       "since": "2026-10-08"
     },
     {
-      "file": "server/delta-context.e2e.test.ts",
+      "file": "server/delta-context-recovery.e2e.test.ts",
       "test": "gives a replacement session an earlier round's result that its rebuild could not replay, and credits it only with that rebuild",
       "owner": "milind-soni",
       "reason": "Failed 5 runs since Sep 24, mostly Windows; same commit later green.",
       "since": "2026-10-08"
     },
     {
-      "file": "server/delta-context.e2e.test.ts",
+      "file": "server/delta-context-recovery.e2e.test.ts",
       "test": "does not send a message again that a recovery replay carried, including one the unseen limit had deferred",
       "owner": "milind-soni",
       "reason": "Failed 4 runs since Sep 24, mostly Windows; same commit later green.",
       "since": "2026-10-08"
     },
     {
-      "file": "server/delta-context.e2e.test.ts",
+      "file": "server/delta-context-recovery.e2e.test.ts",
       "test": "replays again when a replacement session fails before the provider acts on it",
       "owner": "milind-soni",
       "reason": "Timed out at 60 s in 3 Windows runs since Sep 24 (its timeout now doubles on Windows too).",

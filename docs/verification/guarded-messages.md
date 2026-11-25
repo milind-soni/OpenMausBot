@@ -111,7 +111,7 @@ tools.
 Run the isolated request/continuation checks:
 
 ```sh
-pnpm exec vitest run server/guarded-requests.test.ts server/guarded-messages-api.test.ts server/direct-coordination.e2e.test.ts server/team-setup.e2e.test.ts server/turn-dispatch-guard.test.ts server/request-auth.test.ts
+pnpm exec vitest run server/guarded-requests.test.ts server/guarded-messages-api.test.ts server/direct-coordination.e2e.test.ts server/direct-coordination-delivery.e2e.test.ts server/team-setup.e2e.test.ts server/turn-dispatch-guard.test.ts server/request-auth.test.ts
 pnpm exec tsc -p tsconfig.server.json --noEmit
 ```
 
