@@ -57,6 +57,8 @@ const NO_CARD: Reply = { status: 404, body: { error: "no such connection request
  * replaced, set aside, or refused before the browser opened. */
 const ENDED: Partial<Record<McpSignInPhase, ServerLineKey>> = { expired: "server.mcp.signIn.expired", failed: "server.mcp.signIn.failed" };
 
+const failedText = (slug: string, reason: string): string => `OpenMausBot MCP sign-in for ${slug}: ${reason} Nothing was signed in.`;
+
 export const isMcpSignInCard = (message: Message | undefined): message is McpCard =>
   message?.kind === "connector" && message.connector?.source === "mcp";
 
@@ -191,7 +193,7 @@ export function createMcpSignInCards(deps: McpSignInCardDeps) {
   function unreachable(threadId: string, card: McpCard, server: Unreachable, extra: Record<string, unknown> = {}): Reply {
     const error = server.reason(deps.language(threadId));
     patch(threadId, card.id, { status: "failed", error });
-    const said = `OpenMausBot MCP sign-in for ${card.connector.slug}: ${server.reason(undefined)} Nothing was signed in.`;
+    const said = failedText(card.connector.slug, server.reason(undefined));
     if (!find(threadId, card.id)!.connector.resumed && deps.answer(threadId, card.id, said)) patch(threadId, card.id, { resumed: true });
     return { status: server.status, body: { error, ...extra } };
   }
@@ -290,6 +292,7 @@ export function createMcpSignInCards(deps: McpSignInCardDeps) {
     parkedAnswer(card: ConnectorCardData): string | null {
       if (card.superseded || card.resumed) return null;
       if (card.status === "connected") return signedInTextNow(card.slug);
+      if (card.status === "failed" && card.error) return failedText(card.slug, card.error);
       return card.dismissed ? notSignedInText(card.slug) : null;
     },
   };

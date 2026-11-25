@@ -399,6 +399,24 @@ describe("the Sign in card", () => {
     expect(f.answers).toHaveLength(1);
   });
 
+  it("a server that registers no apps, refused before the turn parks, still reaches the bot once it parks", async () => {
+    const f = await setup();
+    const oauth = await startFakeOAuth({ noRegistration: true });
+    const mcp = await startFakeHttpMcp({ acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge });
+    fixtures.push(oauth, mcp);
+    f.cfg.mcpServers!.linear = { type: "http", url: mcp.url, headers: {}, enabled: true } as never;
+    const { card } = await f.signIn();
+    f.turn.parked = false;
+    const refused = await f.authorize(card);
+    expect(f.answers).toEqual([]);
+    expect(f.current(card).connector).toMatchObject({ status: "failed", error: refused.body.error });
+    expect(f.current(card).connector!.resumed).toBeFalsy();
+    const waited = resumableCards({ activePath: (threadId: string) => f.store.messagesFor(threadId) } as never, "main-chat", 0);
+    expect(waited.map((entry) => entry.id)).toEqual([card.id]);
+    expect(f.cards.parkedAnswer(f.current(card).connector!)).toBe(`OpenMausBot MCP sign-in for linear: ${refused.body.error as string} Nothing was signed in.`);
+    expect(f.cards.parkedAnswer({ ...f.current(card).connector!, resumed: true })).toBeNull();
+  });
+
   it("dismiss cancels the flow and resumes with the not-signed-in text", async () => {
     const f = await setup();
     const { card } = await f.signIn();
