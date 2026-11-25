@@ -38,7 +38,7 @@ import { serverErrorText } from "@/lib/server-error";
 import { CopyImageButton } from "./CopyImageButton";
 import { FilePreviewButton } from "./FilePreviewButton";
 import { chipNameAction, SaveIconButton, useHtmlPreview } from "./HtmlFilePreview";
-import { ImageLoading } from "./ImageLoading"; import { openLinkedFolder } from "./RevealOriginalMenu"; import { serverFetch } from "@/lib/relay-server";
+import { ImageLoading } from "./ImageLoading"; import { openLinkedFolder } from "./RevealOriginalMenu"; import { serverFetch } from "@/lib/relay-server"; import { AllowFileLinkFolderButton } from "./FileLinkFoldersSettings";
 
 export interface PreviewImage {
   src: string;
@@ -421,11 +421,7 @@ export function OutsideWorkspaceFile({ filePath, standalone = false }: { filePat
   const [problem, setProblem] = useState("");
   const reveal = revealBridge();
   if (!reveal || !REVEALABLE_PATH.test(filePath)) {
-    return (
-      <code title={t("attach.outsideWorkspacePath")} className="select-all whitespace-pre-wrap break-all text-ink">
-        {filePath}
-      </code>
-    );
+    return <><code title={t("attach.outsideWorkspacePath")} className="select-all whitespace-pre-wrap break-all text-ink">{filePath}</code><AllowFileLinkFolderButton filePath={filePath} /></>;
   }
   const show = async () => {
     setProblem("");

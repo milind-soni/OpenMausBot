@@ -19,6 +19,8 @@ import {
   mimeFor,
   openMessageFile,
   openMessageFolderEntry,
+  safeExtraFileLinkRoots,
+  validateExtraFileLinkRoot,
 } from "./message-file.ts";
 
 const referencesAttachment = (text: string, requested: string) => messageAttachmentName(text, requested) !== null;
@@ -498,5 +500,28 @@ describe("message-linked files", () => {
     expect(messageFileDownloadName("Quarterly report.pdf", "4e8d.pdf")).toBe("Quarterly report.pdf");
     expect(messageFileDownloadName("setup.exe", "4e8d.pdf")).toBe("setup.pdf");
     expect(messageFileDownloadName("preview.jpg", "4e8d.png")).toBe("preview.png");
+  });
+
+  it("validates and resolves extra file link roots while rejecting data, parent, secret, and relative paths", async () => {
+    const dataDir = join(suite, "app-data");
+    const docsDir = join(suite, "team-docs");
+    const secretDir = join(docsDir, ".openmausbot-secrets");
+    mkdirSync(dataDir, { recursive: true });
+    mkdirSync(docsDir, { recursive: true });
+    mkdirSync(secretDir, { recursive: true });
+
+    expect(validateExtraFileLinkRoot("relative/path", [dataDir])).toBeNull();
+    expect(validateExtraFileLinkRoot(dataDir, [dataDir])).toBeNull();
+    expect(validateExtraFileLinkRoot(join(dataDir, "sub"), [dataDir])).toBeNull();
+    expect(validateExtraFileLinkRoot(suite, [dataDir])).toBeNull();
+    expect(validateExtraFileLinkRoot(secretDir, [dataDir])).toBeNull();
+    expect(validateExtraFileLinkRoot(docsDir, [dataDir])).toBe(docsDir);
+
+    const safe = await safeExtraFileLinkRoots(
+      [docsDir, docsDir, "relative/path", dataDir, suite, secretDir, join(suite, "missing")],
+      [dataDir],
+    );
+    expect(safe).toHaveLength(1);
+    expect(safe[0]!.toLowerCase()).toContain("team-docs");
   });
 });

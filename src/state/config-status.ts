@@ -168,6 +168,8 @@ export interface ConfigStatus {
   language?: string;
   /** What a paired phone calls this computer; "" uses the default. */
   computerName?: string;
+  /** Owner-allowed extra folders for self-hosted message file links (read-only preview/download). */
+  fileLinks?: { extraRoots: string[] };
   /** Opt-in flags. Absent means off. */
   features?: { skillAuthoring: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean; usbPhoneTakeover?: boolean; skillBurger?: boolean; threadTabs?: boolean; roomFeed?: boolean; teamBoard?: boolean };
   /** First-run progress: whether the welcome tour was finished and which

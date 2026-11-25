@@ -24,7 +24,7 @@ import {
   listMessageFolder, MESSAGE_FILE_DOWNLOAD_MAX_BYTES, MESSAGE_FILE_MAX_BYTES, messageAttachmentName, messageFileDisposition, messageFileDownloadName, messageFolderEntryName,
   messageImageTargetAt, messageReferencesFile, openMessageFile, openMessageFolderEntry, referencedFileName,
 } from "../message-file.ts";
-import { resolveRequestAuth, type RequestAuth, type ResolveOptions } from "../request-auth.ts";
+import { ownerOrAdmin, resolveRequestAuth, type RequestAuth, type ResolveOptions } from "../request-auth.ts";
 import type { queuedSteerSnapshot } from "../steer-queue.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { answerAsleep, backgroundWhileAsleep } from "../cloud-power.ts";
@@ -65,6 +65,7 @@ export interface ThreadRouteDeps {
   wireBot(bot: BotRecord): WireBot;
   botComputerControlSnapshot(botId: string): ReturnType<ComputerControl["snapshot"]>;
   messageFileRootsForThread(senderId: string, threadId: string): string[];
+  extraFileLinkRoots?(): Promise<string[]>;
   viewerFor(auth: RequestAuth): Viewer;
   /** A room's unread mark as this person has read it (a Team Cloud); the room as it is anywhere else. */
   groupFor?(auth: RequestAuth, group: WireGroup): WireGroup;
@@ -85,7 +86,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
     store, userName: userNameFor, sessions, groupUsageReader, lendingEnabled,
     hostedWorkspace: HOSTED_WORKSPACE, sessionCookie: SESSION_COOKIE, loopback: LOOPBACK, defaultPage: DEFAULT_PAGE,
     pageSize, messagePage, messagePageBefore, messageWindow, publicBotQueuedMessages, publicGroupState, wireBot,
-    botComputerControlSnapshot, messageFileRootsForThread, viewerFor, visibleTo,
+    botComputerControlSnapshot, messageFileRootsForThread, extraFileLinkRoots, viewerFor, visibleTo,
   } = deps;
   const mediaLinks = new MessageMediaLinks();
   // tasks stays explicit: clients expect [] where wireBot() would omit the key.
@@ -268,7 +269,8 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         }
         const runThread = message.automation?.executionThreadId;
         const fromRun = runThread && store.botByThread(runThread)?.id === senderId ? messageFileRootsForThread(senderId, runThread) : [];
-        roots = [...new Set([...messageFileRootsForThread(senderId, threadId), ...fromRun])];
+        const extra = ownerOrAdmin(auth) && extraFileLinkRoots ? await extraFileLinkRoots() : [];
+        roots = [...new Set([...messageFileRootsForThread(senderId, threadId), ...fromRun, ...extra])];
       }
 
       const folderEntry = mediaGrant

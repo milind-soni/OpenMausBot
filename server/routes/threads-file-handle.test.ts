@@ -1,6 +1,6 @@
 import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Readable, Writable } from "node:stream";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -138,5 +138,71 @@ describe("POST /api/threads/:threadId/messages/:messageId/file", () => {
     release();
     await result;
     expect(captured.handles[0]!.fd).toBe(-1);
+  });
+
+  it("allows owner to read a bot-linked file inside extraFileLinkRoots, while denying guests and unapproved paths", async () => {
+    const store = new Store(() => sonnet);
+    const bot = store.createBot({ name: "Scout" }, { seedMessages: false });
+    const botRoot = join(DATA_DIR, "task-workspaces", bot.id, bot.threadId);
+    const docsDir = join(DATA_DIR, "..", `omb-extra-docs-${Date.now()}`);
+    const otherDir = join(DATA_DIR, "..", `omb-extra-other-${Date.now()}`);
+    mkdirSync(botRoot, { recursive: true });
+    mkdirSync(docsDir, { recursive: true });
+    mkdirSync(otherDir, { recursive: true });
+    const allowedFile = join(docsDir, "NOTES.md");
+    const blockedFile = join(otherDir, "SECRET.md");
+    writeFileSync(allowedFile, "team notes");
+    writeFileSync(blockedFile, "nope");
+    try {
+      const msg = store.appendMessage(bot.threadId, {
+        role: "bot",
+        kind: "text",
+        text: `[notes](<${pathToFileURL(allowedFile).href}>) and [other](<${pathToFileURL(blockedFile).href}>)`,
+      });
+      const route = createThreadRoutes({
+        store,
+        viewerFor: () => ({}),
+        visibleTo: () => ({ bot: () => true, group: () => true, thread: () => true }),
+        workspaceAccess: () => null,
+        desktopMutationToken: () => undefined,
+        companionMutationToken: () => undefined,
+        cliOwnerToken: () => undefined,
+        messageFileRootsForThread: () => [botRoot],
+        extraFileLinkRoots: async () => [dirname(allowedFile)],
+      } as unknown as ThreadRouteDeps);
+      const path = `/api/threads/${bot.threadId}/messages/${msg.id}/file`;
+
+      const invoke = async (filePath: string, reqAuth: RequestAuth) => {
+        let status = 0;
+        let body: unknown = null;
+        let streamed = "";
+        const res = Object.assign(new Writable({
+          write(chunk, _enc, cb) { streamed += chunk.toString(); cb(); },
+        }), {
+          writeHead(code: number) { status = code; return res; },
+          setHeader() { return res; },
+        }) as unknown as ServerResponse;
+        const req = Readable.from([Buffer.from(JSON.stringify({ path: filePath }))]) as IncomingMessage;
+        req.headers = { "content-type": "application/json" };
+        req.method = "POST";
+        await route({
+          req, res, url: new URL(path, "http://127.0.0.1"), path, method: "POST", auth: reqAuth,
+          json: (_r, s, b) => { status = s; body = b; },
+          readBody,
+        });
+        return { status, body, streamed };
+      };
+
+      const ownerOk = await invoke(allowedFile, auth);
+      expect(ownerOk.status).toBe(200);
+      expect(ownerOk.streamed).toBe("team notes");
+
+      const guestAuth = { kind: "session", session: { id: "g", scopes: ["client"], teamRole: "member" } as never, via: "bearer", scopes: ["client"] } as RequestAuth;
+      await expect(invoke(allowedFile, guestAuth)).rejects.toMatchObject({ status: 403, code: "outside_workspace" });
+      await expect(invoke(blockedFile, auth)).rejects.toMatchObject({ status: 403, code: "outside_workspace" });
+    } finally {
+      rmSync(docsDir, { recursive: true, force: true });
+      rmSync(otherDir, { recursive: true, force: true });
+    }
   });
 });

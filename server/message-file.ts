@@ -1,6 +1,6 @@
 // A message file link must never become a general-purpose host file reader: every handle stays inside a root
 // derived from the exact bot message.
-import { constants } from "node:fs";
+import { constants, realpathSync } from "node:fs";
 import { lstat, open, readdir, realpath, stat, type FileHandle } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -330,6 +330,74 @@ export function messageAttachmentName(text: string, requested: string): string |
 function containedBy(root: string, candidate: string): boolean {
   const suffix = relative(root, candidate);
   return suffix === "" || (suffix !== ".." && !suffix.startsWith(`..${sep}`) && !isAbsolute(suffix));
+}
+
+function tryRealpathSync(target: string): string | null {
+  try {
+    return realpathSync(target);
+  } catch {
+    return null;
+  }
+}
+
+function overlapsForbiddenDir(candidate: string, canonical: string | null, forbiddenDirs: readonly string[]): boolean {
+  for (const dir of forbiddenDirs) {
+    if (!dir) continue;
+    const resolvedDir = resolve(dir);
+    if (containedBy(resolvedDir, candidate) || containedBy(candidate, resolvedDir)) return true;
+    const canonicalDir = tryRealpathSync(resolvedDir);
+    if (canonicalDir && (containedBy(canonicalDir, candidate) || containedBy(candidate, canonicalDir))) return true;
+    if (canonical && (containedBy(resolvedDir, canonical) || containedBy(canonical, resolvedDir))) return true;
+    if (canonical && canonicalDir && (containedBy(canonicalDir, canonical) || containedBy(canonical, canonicalDir))) return true;
+  }
+  return false;
+}
+
+/** Validates one owner-configured extra root for message file links: must be absolute, free of NULs, outside secret
+ * folders, and must neither sit inside nor contain the app's own data directories. Returns normalized path or null. */
+export function validateExtraFileLinkRoot(raw: string, forbiddenDirs: readonly string[]): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.includes("\0") || !isAbsolute(trimmed)) return null;
+  const normalized = resolve(trimmed);
+  const canonical = tryRealpathSync(normalized);
+  if (inSecretFolder(normalized) || (canonical && inSecretFolder(canonical))) return null;
+  if (overlapsForbiddenDir(normalized, canonical, forbiddenDirs)) return null;
+  return normalized;
+}
+
+/** Resolves valid, non-overlapping existing directories from owner-configured extra file link roots. */
+export async function safeExtraFileLinkRoots(
+  roots: readonly string[] | undefined,
+  forbiddenDirs: readonly string[],
+): Promise<string[]> {
+  if (!roots?.length) return [];
+  const valid: string[] = [];
+  const seen = new Set<string>();
+  const resolvedForbidden = await Promise.all(forbiddenDirs.filter(Boolean).map(async (dir) => {
+    const lex = resolve(dir);
+    const real = await realpath(lex).catch(() => null);
+    return real ? [lex, real] : [lex];
+  }));
+  const allForbidden = resolvedForbidden.flat();
+  for (const raw of roots) {
+    const normalized = validateExtraFileLinkRoot(raw, forbiddenDirs);
+    if (!normalized) continue;
+    let canonical: string;
+    try {
+      canonical = await realpath(normalized);
+      if (!(await stat(canonical)).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    if (inSecretFolder(canonical)) continue;
+    if (allForbidden.some((dir) => containedBy(dir, canonical) || containedBy(canonical, dir))) continue;
+    const key = process.platform === "win32" ? canonical.toLowerCase() : canonical;
+    if (!seen.has(key)) {
+      seen.add(key);
+      valid.push(canonical);
+    }
+  }
+  return valid;
 }
 
 export function mimeFor(path: string): string {

@@ -2,6 +2,7 @@ import { t } from "@/lib/i18n";
 import { ActivitySection } from "../../ActivitySection";
 import { AdminOnly } from "../../AdminOnly";
 import { AttachmentStorageSettings } from "../../AttachmentStorageSettings";
+import { FileLinkFoldersSettings } from "../../FileLinkFoldersSettings";
 import { AccessOverview } from "../../bot-access/AccessOverview";
 import { CompanyBackupSettings } from "../../CompanyBackupSettings";
 import { ImportSettings } from "../../ImportSettings";
@@ -42,9 +43,12 @@ export function ImportExportPage() {
 export function DataPage() {
   const { ctx } = useSettingsShell();
   return <>
-    <AdvancedPagePart anchor="storage"><SettingsGroup label={t("settings.data.storage")} block="storage">
-      <SettingsRows><AttachmentStorageSettings /></SettingsRows>
-    </SettingsGroup></AdvancedPagePart>
+    <AdvancedPagePart anchor="storage">
+      <SettingsGroup label={t("settings.data.storage")} block="storage">
+        <SettingsRows><AttachmentStorageSettings /></SettingsRows>
+      </SettingsGroup>
+      {!ctx.cloud && ctx.admin && <FileLinkFoldersSettings />}
+    </AdvancedPagePart>
     {ctx.advanced && <ThreadCleanupSettings />}
     {!ctx.desktop && ctx.admin && <AdvancedPagePart anchor="activity"><ActivitySection /></AdvancedPagePart>}
   </>;

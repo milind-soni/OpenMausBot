@@ -12,6 +12,7 @@ import type { BrowserRuntime } from "../browser-runtime.ts";
 import { boatAccountResourceChangeError, vpsAliasLeftBehindNotice, vpsAliasResourceChangeError } from "../cloud-backend.ts";
 import * as composio from "../composio.ts";
 import {
+  DATA_DIR,
   browserProfilePartitionTarget,
   browserProfileReplacementConflict,
   builtInBrowserEnabled,
@@ -26,7 +27,8 @@ import {
   type AppConfig,
 } from "../config.ts";
 import type { InstanceConfigMap, ModelSelection } from "../contracts.ts";
-import { fromPairedDevice, type RequestAuth } from "../request-auth.ts";
+import { fromPairedDevice, ownerOrAdmin, type RequestAuth } from "../request-auth.ts";
+import { validateExtraFileLinkRoot } from "../message-file.ts";
 import { parseConfigPatchForPerson } from "../decider/config-errors.ts";
 import { teamPersonalHint } from "../../shared/cloud-hints.ts";
 import { DECIDER_KEY_ERROR, deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderBorrowedKey, type Decider } from "../decider/index.ts";
@@ -82,6 +84,8 @@ export interface ConfigRouteDeps {
   cloudTeam?: boolean;
   /** Security: a Team Cloud never takes over another installation's Composio user, since every member's bots would then get that person's apps. */
   sharedMembership: () => boolean;
+  /** Optional override for tests validating `fileLinks.extraRoots`. */
+  forbiddenFileLinkDirs?(): string[];
   lendingEnabled(): boolean;
   providerConfigs(): InstanceConfigMap;
   localVmIdleMs(): number;
@@ -147,6 +151,18 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       const patch = parseConfigPatchForPerson(body);
       if (deps.cloudTeam && patch.browserEngine?.egress?.proxy !== undefined && !(auth.kind === "session" && auth.session.teamRole === "owner")) {
         return json(res, 403, { error: "Only the Team Cloud owner can configure the browser proxy." });
+      }
+      if (patch.fileLinks?.extraRoots !== undefined) {
+        if (CLOUD_HOME) return json(res, 403, { error: "Extra file link folders are only available on self-hosted servers." });
+        if (!ownerOrAdmin(auth)) return json(res, 403, { error: "Only an owner or admin can configure extra file link folders." });
+        const forbidden = deps.forbiddenFileLinkDirs?.() ?? [DATA_DIR, ...(process.env.OMB_USER_DATA ? [process.env.OMB_USER_DATA] : [])];
+        const clean: string[] = [];
+        for (const entry of patch.fileLinks.extraRoots) {
+          const valid = validateExtraFileLinkRoot(entry, forbidden);
+          if (!valid) return json(res, 400, { error: "Each folder must be an absolute path that does not overlap OpenMausBot's own data or secret folders." });
+          if (!clean.includes(valid)) clean.push(valid);
+        }
+        patch.fileLinks = { extraRoots: clean };
       }
       if (patch.profile && ownProfile) {
         // The address is the verified claim's; a profile names no other.
