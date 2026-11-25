@@ -7,10 +7,11 @@
 // before: a provider outage (a 429, "503 overloaded") keeps its own words, and a backup AI still starts where one may.
 // Our own limits stay as they are (session/new may take NEW_SESSION_TIMEOUT); a timeout is never asked again, which would
 // double the wait.
+import { clearStartFailure, noteStartFailure } from "../../engine-start-failures.ts";
 import { engineMemory } from "../../engine-memory.ts";
 import { machinePressure } from "../../machine-pressure.ts";
 import { classifyError } from "../retry.ts";
-import { RuntimeNoticeError } from "../runtime-notice-error.ts";
+import { RuntimeNoticeError, runtimeErrorText } from "../runtime-notice-error.ts";
 
 /** Before asking again while the machine is pressed: room for what holds it to ease. */
 export const BUSY_RETRY_PAUSE_MS = 10_000;
@@ -58,23 +59,42 @@ export function busyStartFailure(error: unknown, why: string | null, slow: boole
   });
 }
 
-/** session/new, asked once more after a transient refusal while its process lives. */
-export async function sessionNewRetried<T>(send: () => Promise<T>, alive: () => boolean, deps: BusyStartDeps = defaults): Promise<T> {
+/** Why this start failed, for the health report's code (engine-start-failures.ts): the machine too busy (the plain line
+ * above), or the engine's or its provider's own transient refusal (a 5xx, an overload, a timeout); a sign-in or anything
+ * else keeps its code as before. */
+export function startFailureClass(error: unknown): "overloaded" | "provider" | null {
+  const key = runtimeErrorText(error)?.key;
+  if (key === "chat.notice.cloudOutOfCpu" || key === "chat.notice.cloudBusyStart") return "overloaded";
+  if (!(error instanceof Error) || (error as { acpSignInRequired?: unknown }).acpSignInRequired === true) return null;
+  return classifyError({ text: error.message }).transient ? "provider" : null;
+}
+
+/** session/new, asked once more after a transient refusal while its process lives. `threadId`: the turn's thread, whose
+ * failed row the health report codes by why the start failed (`startFailureClass`); one map write on a failed start only. */
+export async function sessionNewRetried<T>(send: () => Promise<T>, alive: () => boolean, deps: BusyStartDeps = defaults, threadId?: string): Promise<T> {
   const atStart = deps.pressure(), startedAt = deps.now();
   /** The pressure read at the start, else now: a Cloud pressed at any point of the start. */
   const during = () => atStart ?? deps.pressure();
+  const failed = (error: unknown) => {
+    if (threadId === undefined) return error;
+    // A start that failed for another reason (a sign-in, a request problem) takes back an earlier start's note on the thread
+    // (the backup AI's start after a provider refusal): its row keeps its own code.
+    const why = startFailureClass(error);
+    if (why) noteStartFailure(threadId, why, deps.now()); else clearStartFailure(threadId);
+    return error;
+  };
   try {
     return await send();
   } catch (first) {
     const slow = deps.now() - startedAt >= SLOW_FIRST_ANSWER_MS;
-    if (!askAgain(first) || !alive()) throw busyStartFailure(first, during(), slow, deps);
+    if (!askAgain(first) || !alive()) throw failed(busyStartFailure(first, during(), slow, deps));
     const afterFirst = during();
     if (afterFirst !== null) await deps.pause(BUSY_RETRY_PAUSE_MS);
-    if (!alive()) throw busyStartFailure(first, afterFirst ?? deps.pressure(), slow, deps);
+    if (!alive()) throw failed(busyStartFailure(first, afterFirst ?? deps.pressure(), slow, deps));
     try {
       return await send();
     } catch (second) {
-      throw busyStartFailure(second, afterFirst ?? deps.pressure(), slow, deps);
+      throw failed(busyStartFailure(second, afterFirst ?? deps.pressure(), slow, deps));
     }
   }
 }

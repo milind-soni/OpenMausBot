@@ -807,7 +807,7 @@ export function createBotLink(deps: BotLinkDeps) {
   const cloudPeer = () => (state?.role === "dialer" ? Object.keys(state.peers)[0] ?? null : null);
 
   return {
-    host, coordinate, resolve,
+    host, coordinate, resolve, candidates,
     on: () => state !== null,
     /** What this place is called, as the other places were told. */
     selfName: () => state?.self.name ?? "",
