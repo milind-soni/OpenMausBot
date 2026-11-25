@@ -87,14 +87,23 @@ export function createSignInResume(deps: SignInResumeDeps) {
   };
 
   if (deps.file) {
+    let saved: unknown;
     try {
-      const saved = JSON.parse(readFileSync(deps.file, "utf8")) as unknown;
-      const rows = (key: keyof Saved) => saved && typeof saved === "object" && Array.isArray((saved as Saved)[key]) ? (saved as Record<string, unknown[]>)[key]! : [];
+      saved = JSON.parse(readFileSync(deps.file, "utf8"));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") log(`sign-in resume: could not read the saved file: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (saved !== undefined && (!saved || typeof saved !== "object" || Array.isArray(saved))) log("sign-in resume: the saved file is not an object; left out");
+    else if (saved) {
+      const rows = (key: keyof Saved) => {
+        const value = (saved as Record<string, unknown>)[key];
+        return Array.isArray(value) ? value : [];
+      };
       waiting = rows("waiting").filter(savedWait);
       notices = rows("notices").filter(savedNotice);
       const dropped = rows("waiting").length + rows("notices").length - waiting.length - notices.length;
       if (dropped) log(`sign-in resume: left out ${dropped} unreadable saved rows`);
-    } catch {}
+    }
     prune();
   }
 
@@ -267,22 +276,40 @@ export function createSignInResumeHost(deps: Omit<SignInResumeDeps, "file" | "si
       const stands = () => Boolean(instance) && registry.get(instanceId) === instance;
       return stands() && snapshot?.state === "available" && snapshot.authenticated === true ? stands : null;
     },
-    retry: (wait, message) => deps.startTurn(wait.botId, message.text ?? "", {
-      threadId: wait.threadId, editedMessageId: message.id, dataContext: message.dataContext,
-      ...(message.replyToId ? { replyTo: deps.replyTarget(wait.threadId, message.replyToId) } : {}),
-      ...(wait.trigger ? { trigger: wait.trigger } : {}), ...(message.sender ? { sender: message.sender } : {}),
-    }),
+    retry: async (wait, message) => {
+      const sent = await deps.startTurn(wait.botId, message.text ?? "", {
+        threadId: wait.threadId, editedMessageId: message.id, dataContext: message.dataContext,
+        ...(message.replyToId ? { replyTo: deps.replyTarget(wait.threadId, message.replyToId) } : {}),
+        ...(wait.trigger ? { trigger: wait.trigger } : {}), ...(message.sender ? { sender: message.sender } : {}),
+      });
+      const id = (sent as { id?: unknown } | null | undefined)?.id;
+      if (typeof id === "string") sentAgain.add(id);
+    },
   });
+  const now = deps.now ?? Date.now;
+  /** The messages a pass sent again: one refused again says nothing new about the AI's sign-in. */
+  const sentAgain = new Set<string>();
+  const statusToldAt = new Map<string, number>();
+  const refusedAt = new Map<string, number>();
   const signedIn = (instanceId: string): void => {
     deps.takeover.signedIn(instanceId);
     void resume.signedIn(instanceId);
   };
-  registry.onSignedIn(signedIn);
+  registry.onSignedIn((instanceId) => {
+    statusToldAt.set(instanceId, now());
+    signedIn(instanceId);
+  });
   void Promise.resolve(deps.startupRead).then(() => resume.resumeSaved());
-  /** A sign-in made in the app is one sign-in with the status read that finds it, whichever comes first. */
+  /** A sign-in made in the app is the one a status read already told only when that read came after the last refusal of a
+   * message the person sent; a message sent again and refused again does not count. */
   const appSignedIn = (instanceId: string): void => {
-    if (registry.sawSignedIn(instanceId)) deps.takeover.signedIn(instanceId);
+    const told = registry.sawSignedIn(instanceId) && (statusToldAt.get(instanceId) ?? -Infinity) > (refusedAt.get(instanceId) ?? -Infinity);
+    if (told) deps.takeover.signedIn(instanceId);
     else signedIn(instanceId);
   };
-  return { ...resume, signedIn, appSignedIn };
+  const waiting = (wait: SignInWait) => {
+    if (!sentAgain.has(wait.messageId)) refusedAt.set(wait.selection.instanceId, Math.max(refusedAt.get(wait.selection.instanceId) ?? -Infinity, wait.failedAt));
+    return resume.waiting(wait);
+  };
+  return { ...resume, waiting, signedIn, appSignedIn };
 }

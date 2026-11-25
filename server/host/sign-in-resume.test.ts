@@ -411,11 +411,15 @@ describe("createSignInResume", () => {
     await resume.resumeSaved();
     expect(w.sent.map(({ message }) => message.id)).toEqual([kai.asked.id]);
     expect(w.noticeTool("t-kai", kai.notice.id)?.nameCode).toBe("chat.notice.signedInAgain");
-    writeFileSync(file, "[1, 2]");
-    expect(() => createSignInResume(w.deps)).not.toThrow();
+    const logged: string[] = [];
+    for (const damaged of ["[1, 2]", "{not json"]) {
+      writeFileSync(file, damaged);
+      expect(() => createSignInResume({ ...w.deps, log: (line) => logged.push(line) })).not.toThrow();
+    }
+    expect(logged).toEqual([expect.stringContaining("not an object"), expect.stringContaining("could not read the saved file")]);
   });
 
-  it("takes the app's own report of a sign-in the status read already found for the same sign-in", async () => {
+  function hostWorld() {
     const directory = mkdtempSync(join(tmpdir(), "omb-sign-in-resume-"));
     scratch.push(directory);
     const w = world();
@@ -431,23 +435,47 @@ describe("createSignInResume", () => {
         onSignedIn: (listener) => { listeners.push(listener); },
         sawSignedIn: () => { const known = readSignedIn; readSignedIn = true; return known; },
       },
-      startTurn: async (_botId, text, opts) => { w.sent.push({ wait: { threadId: opts.threadId } as SignInWait, message: { text } as Message }); },
+      startTurn: async (_botId, text, opts) => {
+        const sent = w.row(opts.threadId, { role: "user", kind: "text", text });
+        w.sent.push({ wait: { threadId: opts.threadId } as SignInWait, message: sent });
+        return sent;
+      },
       replyTarget: () => undefined,
     });
+    const statusRead = () => {
+      readSignedIn = true;
+      listeners.forEach((listener) => listener("claude"));
+    };
+    return { w, host, takeover, statusRead };
+  }
+
+  it("takes the app's own report of a sign-in the status read already found for the same sign-in", async () => {
+    const { w, host, takeover, statusRead } = hostWorld();
     const kai = w.stuck("t-kai");
     host.waiting(kai.wait);
     w.tick(10);
-    readSignedIn = true;
-    listeners.forEach((listener) => listener("claude"));
+    statusRead();
     await vi.waitFor(() => expect(w.sent).toHaveLength(1));
     w.tick(5);
-    const resent = w.row("t-kai", { role: "user", kind: "text", text: "Draft the plan" });
-    await host.waiting({ ...kai.wait, messageId: resent.id, failedAt: 1_015 });
+    const resent = w.sent[0]!.message;
+    w.row("t-kai", { tool: { name: "error: Not logged in · Please run /login", ok: false, setup: true } });
+    await host.waiting({ ...kai.wait, messageId: resent.id, failedAt: w.deps.now!() });
     w.tick(10);
     host.appSignedIn("claude");
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(w.sent, "the app's report is the sign-in the status read already found").toHaveLength(1);
     expect(takeover.signedIn).toHaveBeenCalledTimes(2);
+  });
+
+  it("takes the app's sign-in for a new one when a message was refused after the status read last found it signed in", async () => {
+    const { w, host, statusRead } = hostWorld();
+    statusRead();
+    w.tick(10);
+    const kai = w.stuck("t-kai");
+    host.waiting(kai.wait);
+    w.tick(10);
+    host.appSignedIn("claude");
+    await vi.waitFor(() => expect(w.sent.map(({ message }) => message.text)).toEqual(["Draft the plan"]));
   });
 
   it("after a restart, asks the AI once and sends what was left waiting", async () => {

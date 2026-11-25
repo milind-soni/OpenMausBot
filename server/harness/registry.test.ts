@@ -250,6 +250,10 @@ describe("ProviderRegistry", () => {
     expect(registry.sawSignedIn("a"), "the app reporting it again is the same sign-in").toBe(true);
     authenticated = false;
     await read();
+    expect(registry.sawSignedIn("a"), "a read found it signed out since: a new sign-in").toBe(false);
+    authenticated = true;
+    authenticated = false;
+    await read();
     await registry.dispose("a");
     await registry.load({ a: { driver: "fake" } });
     authenticated = true;

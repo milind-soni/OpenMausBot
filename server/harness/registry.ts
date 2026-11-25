@@ -642,7 +642,7 @@ export class ProviderRegistry {
       const kept = this.lastAuth.get(instance.instanceId), knew = kept ? kept.authenticated : before?.authenticated;
       const newest = !kept || kept.read < begun;
       if (newest && !inconclusive && snapshot.state === "available" && typeof snapshot.authenticated === "boolean") this.lastAuth.set(instance.instanceId, { authenticated: snapshot.authenticated, read: begun });
-      if (newest && knew === false && snapshot.state === "available" && snapshot.authenticated === true) {
+      if (newest && !inconclusive && knew === false && snapshot.state === "available" && snapshot.authenticated === true) {
         for (const listener of this.signedInListeners) listener(instance.instanceId);
       }
     }
