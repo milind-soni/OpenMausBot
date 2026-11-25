@@ -49,7 +49,7 @@ import { escapeAttribute } from "../src/lib/composer-attachments.ts";
 import { signInCardResumePrompt, signInCardWaits, signInOutcome } from "../shared/sign-in-request.ts"; import { createHandoffRequests } from "./host/handoff-requests.ts";
 
 import { createRoomTurnLevels } from "./room-turn-level.ts";
-import { createSignInSettle } from "./host/sign-in-settle.ts"; import { createNoTerminal } from "./host/no-terminal.ts"; import type { ComputerSelection } from "./host/place-move.ts"; import { createPersonLanguages, THIS_COMPUTER } from "./host/person-languages.ts"; import "./server-line-packs.ts"; import { conversationLanguage, serverLine, setConversationLanguage } from "./server-lines.ts";
+import { createSignInSettle } from "./host/sign-in-settle.ts"; import { createNoTerminal } from "./host/no-terminal.ts"; import { createPlaceMoves, type ComputerSelection } from "./host/place-move.ts"; import { createPersonLanguages, THIS_COMPUTER } from "./host/person-languages.ts"; import "./server-line-packs.ts"; import { conversationLanguage, serverLine, setConversationLanguage } from "./server-lines.ts";
 import { RoomMemberLock } from "./room-member-lock.ts";
 import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, undeliveredApprovalTool } from "./auto-approve.ts"; import { readsOwnFiles } from "./own-file-reads.ts";
 import { bindSafetyFloor, denyAtSafetyFloor, heldAtSafetyFloor, safetyFloorOn } from "./safety-floor-gate.ts";
@@ -5569,6 +5569,7 @@ const activityNotice = (threadId: string, text: string) => { store.appendMessage
   cloudDesktop: (bot: BotRecord) => bot.computer !== "off" && bot.cloudBackend !== "vps" && boat.boatConfigured(cfg) && canWorkOnCloud(cloudEngine(registry.get(bot.modelSelection.instanceId))) && !computerPlaceRefusal("box") && !cloudPlaceRefusal(cloudEngine(registry.get(bot.modelSelection.instanceId), bot.modelSelection.model), "works-on", bot.name) && !computerToolsRefusal(toolScopeForTurn(bot.id), "works-on", bot.name),
   lentTerminal: () => sharedComputers.known(CLOUD_HOME_LENDER).some((lent) => lent.lent && lent.scopes.terminal), noComputer: (botId, threadId) => { const bot = store.bot(botId), place = bot && turnSurfacePlan(bot, undefined, threadId).computer; return Boolean(bot) && place !== "cloud" && !(place === undefined && bot!.cloudBackend === "vps") && !inheritedTeamComputer(bot!); },
   engine: (selection) => { const instance = registry.get(selection.instanceId); return instance ? { model: cloudEngine(instance, selection.model).name, shell: supportsWorkspaceFiles(instance.driverKind) } : undefined; }, bot: (botId) => store.bot(botId) ?? undefined, routines: (botId) => routines?.listRoutines().filter((routine) => routine.botId === botId) ?? [] });
+const placeMoves = createPlaceMoves({ home: CLOUD_PERSONAL ? "my-cloud" : CLOUD_HOME ? "team-cloud" : null, folder: (botId, threadId) => messageFileRootsForThread(botId, threadId)[0], vps: (botId) => store.bot(botId)?.cloudBackend === "vps", language: threadLanguage, notice: activityNotice });
 let routines: RoutineManager | null = null;
 const automationReports = createAutomationReports({ store, routines: () => routines, busy: threadBusy, wrote: markTaskContextExternallyUpdated, brief: (run, turnId) => proactive.runSettled(run, turnId), threadLanguage, notes: { has: (id) => refusedLending.notes.has(id) || noTerminal.notes.has(id), take: (id, language) => [refusedLending.notes.take(id, language), noTerminal.notes.take(id, language)].filter(Boolean).join("\n\n") || null },
   notify: (kind, bot, threadId, detail) => notify(buildNotification(kind, bot, threadId, detail, { avatarUrl: bot.avatarUrl }), { routine: true }) });
@@ -6101,9 +6102,15 @@ function continueComputerSelection(threadId: string, generation: string | undefi
     if (store.taskByThread(bot.id, threadId)?.surface !== selection.previousSurface) return giveUp();
     if (hasQueuedSteeredMessages(bot.id, threadId)) { giveUp(); drainQueuedSends(); return; }
     if (selection.source && store.activePath(threadId).findLast(message => message.role === "user" && message.kind === "text")?.id !== selection.source.id) return;
+    // State A for a continuation: the ledger shows the selecting turn completed with every action receipted, claimed once.
+    const ref = replayLedger.latest(threadId), token = ref?.generation === generation ? replayLedger.claimContinuation(ref, threadId) : undefined;
+    if (!ref || !token) { store.appendMessage(threadId, { role: "bot", kind: "activity", tool: failedTurnTool(replayBlocked(threadId)) }); if (selection.handoff) settleDirectCoordination(generation, { ok: false, text: replayBlocked(threadId) }); return; }
     store.patchTask(bot.id, threadId, { surface, surfaceSource: "auto" });
-    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: failedTurnTool(replayBlocked(threadId)) });
-    if (selection.handoff) settleDirectCoordination(generation, { ok: false, text: replayBlocked(threadId) });
+    const text = `The computer selection is now ${surfaceLabel(surface)}.${placeMoves.forBot(bot.id, threadId, selection.mounted, surface, selection.fresh)} Continue the ${selection.handoff ? "handed-off" : "user's original"} request using the tools mounted for this turn; verify the result before claiming success.\n\n${selection.text}`;
+    const continuation = { ref, token };
+    if (selection.handoff) directCoordinationSettlers.delete(generation!); /* the continuing turn owns the hand-off's result */ void startTurn(bot.id, text, selection.handoff ? { ...selection.handoff.opts, threadId, computerSelectionContinuation: true, continuation } : { threadId, userMessage: selection.source, computerSelectionContinuation: true, continuation, dataContext: selection.dataContext }).then(() => placeMoves.continued(bot, threadId, selection.mounted, surface, selection.fresh)).catch(error => {
+      const why = `Could not continue on ${surfaceLabel(surface)}: ${error instanceof Error ? error.message : String(error)}`; selection.handoff?.opts?.coordination?.settle({ ok: false, text: why });
+      if (store.taskByThread(bot.id, threadId)) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: why, ok: false } }); });
   });
   return true;
 }
@@ -7496,6 +7503,8 @@ async function beginTurn(
     requestMessageId?: string;
     origin?: WorkOrigin;
     computerSelectionContinuation?: boolean;
+    /** The ledger claim that admits this Auto-VM continuation; spent once in beginTurn. */
+    continuation?: { ref: ReplayRef; token: string };
     replyTo?: ReplyTarget;
     sendId?: string;
     via?: "call"; callId?: string;
@@ -7527,7 +7536,8 @@ async function beginTurn(
   requireReplayAdmission(opts,
     Boolean(suppliedRequest && replayLedger.hasRequest(threadId, suppliedRequest)),
     // The goal loop advances after a successful step, but reuses the request ID when retrying a failed step.
-    Boolean(controlledRequest && replayLedger.hasDispatchedForRequest(threadId, controlledRequest, Boolean(opts?.goalRunId))), threadId);
+    Boolean(controlledRequest && replayLedger.hasDispatchedForRequest(threadId, controlledRequest, Boolean(opts?.goalRunId))), threadId,
+    Boolean(opts?.computerSelectionContinuation && opts.continuation && replayLedger.consumeContinuation(opts.continuation.ref, opts.continuation.token)));
   if (opts?.replay && !replayLedger.isAdmitted(opts.replay, threadId)) throw Object.assign(new Error(replayBlocked(threadId)), { status: 409 });
   const continuingRoutine = opts?.cardContinuation ? activeRoutineRunForThread(threadId) : null;
   if (continuingRoutine) {
@@ -12889,7 +12899,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!replayLedger.reserveAction(ref, actionId, "effect") || !replayLedger.actionState(ref, actionId, "dispatched")) {
           return json(res, 409, { error: replayBlocked(internalCapability.threadId) });
         }
-        res.once("close", () => { replayLedger.actionState(ref, actionId, "unknown"); });
+        // A response the server finished sending is the handler's own receipt; a dropped connection or a 5xx stays unknown.
+        res.once("close", () => { if (res.writableFinished && res.statusCode < 500) replayLedger.actionReceipt(ref, actionId, res.statusCode < 400 ? "completed" : "failed", "bridge-response"); else replayLedger.actionState(ref, actionId, "unknown"); });
       }
       const readInternalBody = async () => {
         const body = await readBody(req);

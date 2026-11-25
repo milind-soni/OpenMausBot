@@ -3,7 +3,7 @@ import { closeSync, openSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { conversationLanguage, serverLine } from "./server-lines.ts";
 
-export type ReplaySite = "direct-quota" | "peer-limit" | "startup-refusal" | "quota-card" | "quick-model" | "saved-steps" | "routine-recovery" | "chief-retry" | "held-request";
+export type ReplaySite = "computer-continuation" | "direct-quota" | "peer-limit" | "startup-refusal" | "quota-card" | "quick-model" | "saved-steps" | "routine-recovery" | "chief-retry" | "held-request";
 export type ReplayRef = { logicalTaskId: string; generation: string };
 export type ActionStatus = "reserved" | "dispatched" | "confirmed" | "unknown";
 export interface ActionRecord {
@@ -28,9 +28,13 @@ export const replayBlocked = (threadId?: string | null): string =>
 type ReplayDispatch = { replay?: ReplayRef; peerLimitResent?: boolean; automaticRecoveryAttempted?: boolean;
   automaticRecoveryIndex?: number; computerSelectionContinuation?: boolean; recoveringCoordination?: boolean };
 
-export function requireReplayAdmission(dispatch: ReplayDispatch | undefined, reusedRequest = false, priorDispatch = false, threadId?: string): void {
+/** Three states. A (positive no-dispatch evidence, or a claimed continuation with a full accounting) is admitted;
+ * B (a recorded dispatch or action) and C (missing, unknown or inconsistent history) are refused here and in replayGuard. */
+export function requireReplayAdmission(dispatch: ReplayDispatch | undefined, reusedRequest = false, priorDispatch = false, threadId?: string, continuationClaimed = false): void {
+  // A claimed Auto-VM continuation reuses its request by design; every other recovery flag still needs an admitted replay.
+  if (continuationClaimed && dispatch?.computerSelectionContinuation) reusedRequest = priorDispatch = false;
   if (!dispatch?.replay && (reusedRequest || priorDispatch || dispatch?.peerLimitResent || dispatch?.automaticRecoveryAttempted ||
-      dispatch?.automaticRecoveryIndex !== undefined || dispatch?.computerSelectionContinuation || dispatch?.recoveringCoordination)) {
+      dispatch?.automaticRecoveryIndex !== undefined || (dispatch?.computerSelectionContinuation && !continuationClaimed) || dispatch?.recoveringCoordination)) {
     throw Object.assign(new Error(replayBlocked(threadId)), { status: 409 });
   }
 }
@@ -176,7 +180,7 @@ export function createReplayLedger(file: string) {
         .run(key, now, id, action, ref.generation, kind).changes === 1;
     });
   }
-  function actionReceipt(ref: ReplayRef, actionId: string, outcome: "completed" | "failed", source: "native-hook" | "provider-event"): boolean {
+  function actionReceipt(ref: ReplayRef, actionId: string, outcome: "completed" | "failed", source: "native-hook" | "provider-event" | "bridge-response"): boolean {
     const id = ref.logicalTaskId, action = digest(actionId);
     const changed = db.prepare(`UPDATE replay_actions SET status='confirmed',receipt=?,providerReceipt=?,updated=?
       WHERE id=? AND action=? AND generation=? AND status IN ('dispatched','unknown')`)
@@ -230,5 +234,26 @@ export function createReplayLedger(file: string) {
       return { logicalTaskId, generation: next };
     });
   }
-  return { begin, markSubmitted, finish, bindProviderTurn, servingModel, reserveAction, actionState, authorizeNativeAction, actionReceipt, reconcileInterrupted, replayGuard, latest, latestForTask, positiveEvidence, hasRequest, hasDispatchedForRequest, isAdmitted, close: () => db.close() };
+  /** Auto-VM continuation is a new turn after a completed one, not a replay: admitted only when that turn completed and
+   * every action it recorded has a receipt (no reserved, dispatched or unknown action). The claim is a compare-and-set on
+   * `next`, so one completed turn yields at most one continuation, and consumeContinuation spends it exactly once. */
+  function claimContinuation(ref: ReplayRef, thread: string): string | undefined {
+    return atomic(() => {
+      const { logicalTaskId: id, generation } = ref, row = attempt(id, generation), now = Date.now();
+      const open = db.prepare("SELECT 1 FROM replay_actions WHERE id=? AND status!='confirmed' LIMIT 1").get(id);
+      const decision = !row || row.thread !== thread ? "missing-evidence"
+        : current(id) !== generation || latest(thread)?.logicalTaskId !== id || row.next !== null ? "superseded"
+        : row.outcome !== "complete" ? "no-positive-evidence" : open ? "action-requires-reconciliation" : "admitted";
+      db.prepare("INSERT INTO replay_decisions VALUES (?,?,?,?,?)").run(id, generation, "computer-continuation", decision, now);
+      if (decision !== "admitted") return;
+      const token = randomUUID();
+      return db.prepare("UPDATE replay_attempts SET next=?,updated=? WHERE id=? AND generation=? AND next IS NULL")
+        .run(`continuation:${token}`, now, id, generation).changes === 1 ? token : undefined;
+    });
+  }
+  function consumeContinuation(ref: ReplayRef, token: string): boolean {
+    return db.prepare("UPDATE replay_attempts SET next=?,updated=? WHERE id=? AND generation=? AND next=?")
+      .run(`continued:${token}`, Date.now(), ref.logicalTaskId, ref.generation, `continuation:${token}`).changes === 1;
+  }
+  return { claimContinuation, consumeContinuation, begin, markSubmitted, finish, bindProviderTurn, servingModel, reserveAction, actionState, authorizeNativeAction, actionReceipt, reconcileInterrupted, replayGuard, latest, latestForTask, positiveEvidence, hasRequest, hasDispatchedForRequest, isAdmitted, close: () => db.close() };
 }
