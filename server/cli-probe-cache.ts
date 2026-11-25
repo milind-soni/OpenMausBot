@@ -15,7 +15,8 @@ import { basename, dirname, isAbsolute, join } from "node:path";
 import type { ExecFileOptions } from "node:child_process";
 
 import { writeFileAtomic } from "./atomic.ts";
-import { findCliCandidates, splitCliString } from "./env-path.ts";
+import { cliProgramFile, probeUnsettled } from "./cli-program.ts";
+import { splitCliString } from "./env-path.ts";
 import { execCli, outsideBoxOptions, resolveCli } from "./procs.ts";
 
 export const PROBE_CACHE_FILE = "engine-probes.json";
@@ -33,8 +34,6 @@ export function probeCacheFile(env: NodeJS.ProcessEnv = process.env): string | n
   return env.OMB_DESKTOP_PARENT === "1" && env.OMB_USER_DATA && isAbsolute(env.OMB_USER_DATA) ? join(env.OMB_USER_DATA, PROBE_CACHE_FILE) : null;
 }
 
-/** A name on a PATH, the way an engine's spawn finds it. */
-const programOnPath = (name: string, path: string): string | null => findCliCandidates(name, path).find(isFile) ?? null;
 
 /** What a probe of `cli` actually runs, found the way execCli finds it (procs.ts): on Windows a shim or #! script becomes
  * Node plus the script; elsewhere a bare name is looked up on the PATH the probe runs with, and a script's #! line names its
@@ -51,7 +50,7 @@ export function probedProgram(cli: string, opts: ExecFileOptions): { program: st
   const path = String(env.PATH ?? env.Path ?? "");
   const file = rest.length
     ? rest.find((arg) => isAbsolute(arg) && isFile(arg))
-    : /[\\/]/.test(command) ? command : programOnPath(command, path);
+    : /[\\/]/.test(command) ? command : cliProgramFile(command, path);
   if (!file) return null;
   let real: string;
   try { real = realpathSync(file); } catch { return null; }
@@ -73,7 +72,7 @@ function interpreterOf(file: string, path: string): string | null | undefined {
   if (!words[0]) return undefined;
   if (basename(words[0]) !== "env") return isFile(words[0]) ? words[0] : undefined;
   const name = words.slice(1).find((word) => !word.startsWith("-") && !word.includes("="));
-  return name ? programOnPath(name, path) ?? undefined : undefined;
+  return name ? cliProgramFile(name, path) ?? undefined : undefined;
 }
 
 function firstLine(file: string): string | undefined {
@@ -148,7 +147,7 @@ export function createCliProbeCache(options: { file: string | null; appVersion: 
     const program = options.file && args.length === 1 && CACHED_ARGS.has(args[0]!) ? probedProgram(cli, opts) : null;
     const key = program ? probeKey(program, args, options.appVersion, platform) : null;
     // A check again after one that could not finish runs the program: an earlier answer never stands in for it.
-    const kept = key && !(options.unsettled ?? lastCheckUnsettled)(cli) ? loaded().get(key) : undefined;
+    const kept = key && !(options.unsettled ?? probeUnsettled)(cli) ? loaded().get(key) : undefined;
     if (kept) {
       queueMicrotask(() => cb(null, kept.stdout, kept.stderr));
       return;
@@ -166,9 +165,6 @@ export function createCliProbeCache(options: { file: string | null; appVersion: 
   };
   return { exec, forget() { entries = new Map(); save(); } };
 }
-
-/** Whether a CLI's last status check could not finish; none is known here until the engine status hold reports one. */
-const lastCheckUnsettled = (_cli: string): boolean => false;
 
 let shared: ReturnType<typeof createCliProbeCache> | null = null;
 
