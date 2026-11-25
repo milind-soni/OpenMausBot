@@ -155,7 +155,7 @@ export const InboxPanel = memo(function InboxPanel() {
                         <p className="mt-1 text-[13px] leading-[18px] text-ink-tertiary">{t("inbox.emptyHint")}</p>
                       </div>
                     )
-                  : <InboxGroups groups={groups} now={now} current={held} onOpen={open} onAction={act} />}
+                  : <InboxGroups groups={groups} now={now} current={held} onOpen={open} onAction={act} moreForYou={fixes > 0} />}
               </div>
               {!query.trim() && threads.owners.length > 0 && <ThreadFilterBar owners={threads.owners} filter={filter} onChange={setFilter} />}
               {!query.trim() && threadFilterOn(filter) && !threads.any && (

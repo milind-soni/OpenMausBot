@@ -37,6 +37,22 @@ function useReadAfterLooking(row: InboxRow | undefined, onRead: (row: InboxRow) 
   }, [id]);
 }
 
+/** Calls `onRead` when `row` turns read while it stays open, by anything but an answer: opening its conversation reads
+ * it as well. */
+function useReadWithoutAnswer(row: InboxRow | undefined, onRead: (id: string) => void): void {
+  const was = useRef<Pick<InboxRow, "id" | "unread" | "tab"> | null>(null);
+  const latest = useRef(onRead);
+  latest.current = onRead;
+  const id = row?.id, unread = row?.unread, tab = row?.tab, kind = row?.kind;
+  useEffect(() => {
+    const before = was.current;
+    was.current = id && tab ? { id, unread: Boolean(unread), tab } : null;
+    if (!id || before?.id !== id || !before.unread || unread) return;
+    const answered = kind === "ask" || (tab === "done" && before.tab !== "done" && kind !== "result");
+    if (!answered) latest.current(id);
+  }, [id, unread, tab, kind]);
+}
+
 /** The line the person opened last. It keeps its place in the list, read or settled, until they pick another, so no row
  * moves under the pointer; it is read after a moment on screen, with an Undo for that. */
 export function useInboxHold(view: InboxView | null, reading: string | null) {
@@ -51,6 +67,7 @@ export function useInboxHold(view: InboxView | null, reading: string | null) {
   useEffect(() => { if (reading) pick({ id: reading }); }, [reading, pick]);
   const row = held && held !== kept ? view?.rows.find((one) => one.id === held) : undefined;
   useReadAfterLooking(row, (seen) => { readInboxRow(seen); setMarked(seen.id); });
+  useReadWithoutAnswer(row, setMarked);
   const undo = useCallback(() => {
     if (!marked) return;
     unreadInboxRow({ id: marked });

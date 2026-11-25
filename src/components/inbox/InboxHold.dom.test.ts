@@ -21,6 +21,7 @@ vi.mock("../../state/api", () => ({
 
 import { initialState, StoreContext, type AppState, type Bot } from "@/state/store";
 import { closeInbox, currentInbox, openInbox, replyToInboxRow, setInboxView } from "@/state/inbox";
+import { setTeamPeople } from "@/state/team-people";
 import { approvalRow, inboxView, messageRow, questionRow, reportRow } from "@/testing/inbox-fixture";
 import type { InboxView } from "../../../shared/inbox";
 import { SidebarInboxRow } from "../SidebarInboxRow";
@@ -106,6 +107,26 @@ describe("reading a line in the inbox", () => {
     expect(listed()).toEqual(before.filter((id) => id !== reportRow.id));
   });
 
+  it("says so, with the same Undo, when opening its conversation read the line first", async () => {
+    openInbox();
+    await mount(createElement(InboxPanel));
+    await click(`[data-inbox-row="${reportRow.id}"] button`);
+    await act(async () => { shown(inboxView([approvalRow, questionRow, messageRow, { ...reportRow, unread: false, tab: "done" }])); });
+    expect(reads(reportRow.id), "the server read it, not the panel").toBe(0);
+    expect(document.querySelector("[data-inbox-marked]")).not.toBeNull();
+    expect(rowOf(reportRow.id), "it keeps its place").not.toBeNull();
+    await click("[data-inbox-undo]");
+    expect(server.calls).toContainEqual({ path: `/api/inbox/${reportRow.id}/unread`, method: "POST" });
+  });
+
+  it("shows no note for a line the person answered", async () => {
+    openInbox();
+    await mount(createElement(InboxPanel));
+    await click(`[data-inbox-row="${approvalRow.id}"] [data-inbox-action="allow"]`);
+    await wait(READ_AFTER_MS * 2);
+    expect(document.querySelector("[data-inbox-marked]")).toBeNull();
+  });
+
   it("reads a line at once when the person replies to it", async () => {
     await replyToInboxRow(inboxView(), messageRow, "Friday works.");
     expect(server.calls.map((call) => call.path)).toEqual(["/api/bots/bens-chief/messages", `/api/inbox/${messageRow.id}/read`, "/api/inbox"]);
@@ -124,6 +145,11 @@ describe("reading a line in the inbox", () => {
     expect(document.querySelector('[data-inbox-group="for-you"] [data-inbox-caught-up]')?.textContent).toBe("You're all caught up.");
     expect(group("activity")).toEqual([reportRow.id]);
     expect(document.querySelector("[data-inbox-tab-count]")).toBeNull();
+
+    await act(async () => { setTeamPeople({ people: [], me: null, admin: true, needsYou: [{ kind: "connection", id: "c", at: 1, app: "github", botIds: ["reporter"], threadId: "rep-main", text: "Reconnect GitHub" }] }); });
+    expect(document.querySelector("[data-inbox-caught-up]"), "a fix further down is for the person").toBeNull();
+    expect(document.querySelector("[data-inbox-tab-count]")?.textContent).toBe("1");
+    await act(async () => { setTeamPeople(null); });
   });
 });
 
