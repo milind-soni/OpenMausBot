@@ -13,6 +13,7 @@
 //   FAKE_PI_STEER_REFUSE  answer a steer with an explicit success:false
 //   FAKE_PI_STEER_OUT_OF_ORDER  hold the first steer until a second arrives, then refuse the first and accept the second
 //   FAKE_PI_CONTEXT_WINDOW  positive token count attached to every listed model
+//   FAKE_PI_TOOLS  JSON tool calls ({name, args, result?, isError?}) for tooluse mode
 
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -229,8 +230,12 @@ const streamCompactionRecoveryUpstreamTurn = () => {
 const streamToolTurn = () => {
   send({ type: "agent_start" });
   send({ type: "turn_start" });
-  send({ type: "tool_execution_start", toolCallId: "call_1", toolName: "bash", args: { command: "echo hi", password: "pi-input-secret" } });
-  send({ type: "tool_execution_end", toolCallId: "call_1", toolName: "bash", isError: false, result: { content: [{ type: "text", text: "hi" }], api_key: "pi-output-secret" } });
+  const calls = process.env.FAKE_PI_TOOLS ? JSON.parse(process.env.FAKE_PI_TOOLS) : [{ name: "bash", args: { command: "echo hi", password: "pi-input-secret" }, result: { content: [{ type: "text", text: "hi" }], api_key: "pi-output-secret" } }];
+  for (const [index, call] of calls.entries()) {
+    const toolCallId = `call_${index + 1}`;
+    send({ type: "tool_execution_start", toolCallId, toolName: call.name, args: call.args });
+    send({ type: "tool_execution_end", toolCallId, toolName: call.name, isError: call.isError ?? false, result: call.result ?? { content: [{ type: "text", text: "Tool completed" }] } });
+  }
   send({ type: "turn_end", message: { stopReason: "toolUse", usage: { input: 5, output: 1 } }, usage: { input: 5, output: 1 } });
   send({ type: "turn_start" });
   send({ type: "message_update", usage: { input: 0, output: 0 }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "done" } });
