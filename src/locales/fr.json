@@ -4070,5 +4070,20 @@
   "settings.nav.phoneConnectedAllClear": "Un téléphone est connecté, et rien n’a besoin de vous",
   "keys.vps.ownServer": "Votre propre serveur (SSH)",
   "chat.notice.cloudBusyStart": "Ce Cloud est trop occupé pour démarrer l'IA en ce moment, donc cette tâche n'a pas été exécutée. Attendez une minute et renvoyez-la, arrêtez une tâche lourde en cours ou passez à un plan supérieur pour avoir plus de place.",
-  "chat.notice.cloudOutOfCpu": "Votre Cloud a manqué de CPU pour cette tâche, donc l'IA n'a pas pu démarrer et rien n'a été exécuté. Attendez une minute et renvoyez-la, arrêtez une tâche lourde en cours ou passez à un plan supérieur pour avoir plus de CPU."
+  "chat.notice.cloudOutOfCpu": "Votre Cloud a manqué de CPU pour cette tâche, donc l'IA n'a pas pu démarrer et rien n'a été exécuté. Attendez une minute et renvoyez-la, arrêtez une tâche lourde en cours ou passez à un plan supérieur pour avoir plus de CPU.",
+  "server.allBotsSkill.create.title": "Mettre la compétence « {name} » sur tous vos bots ?",
+  "server.allBotsSkill.create.done": "La compétence « {name} » est sur tous vos bots",
+  "server.allBotsSkill.update.title": "Mettre à jour la compétence « {name} » sur tous vos bots ?",
+  "server.allBotsSkill.update.done": "Compétence « {name} » mise à jour sur tous vos bots",
+  "server.allBotsSkill.delete.title": "Retirer la compétence « {name} » de tous vos bots ?",
+  "server.allBotsSkill.delete.done": "Compétence « {name} » retirée de tous vos bots",
+  "server.allBotsSkill.body": "Tous vos bots utilisent la même copie, y compris ceux que vous ajouterez plus tard. Pour la désactiver sur un seul bot, utilisez la page Compétences de ce bot.",
+  "server.allBotsSkill.deleteBody": "Elle est retirée de tous vos bots ; un bot qui l'avait déjà avant garde sa propre copie. Son SKILL.md est affiché ci-dessous, secrets masqués.",
+  "skills.allBots.tag": "Tous les bots",
+  "skills.allBots.tagHint": "Sur tous vos bots, y compris ceux que vous ajouterez plus tard. L'interrupteur la désactive pour ce bot seulement.",
+  "skills.allBots.use": "Utiliser sur tous les bots",
+  "skills.allBots.useName": "Utiliser {name} sur tous vos bots",
+  "skills.allBots.removeConfirm": "Retirer « {name} » de tous vos bots ?",
+  "skills.allBots.kept": "Ces bots gardent leur propre copie, différente : {names}",
+  "skills.allBots.failed": "Impossible de mettre cette compétence sur tous vos bots."
 }

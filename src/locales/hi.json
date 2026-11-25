@@ -3922,5 +3922,20 @@
   "settings.nav.phoneConnectedAllClear": "एक फ़ोन जुड़ा है, और किसी चीज़ को आपकी ज़रूरत नहीं है",
   "keys.vps.ownServer": "आपका अपना सर्वर (SSH)",
   "chat.notice.cloudBusyStart": "यह Cloud अभी AI शुरू करने के लिए बहुत व्यस्त है, इसलिए यह काम नहीं चला। एक मिनट रुककर इसे फिर से भेजें, चल रहा कोई भारी काम रोकें, या ज़्यादा जगह के लिए बड़े प्लान पर जाएँ।",
-  "chat.notice.cloudOutOfCpu": "इस काम के लिए आपके Cloud का CPU ख़त्म हो गया, इसलिए AI शुरू नहीं हो सका और कुछ नहीं चला। एक मिनट रुककर इसे फिर से भेजें, चल रहा कोई भारी काम रोकें, या ज़्यादा CPU के लिए बड़े प्लान पर जाएँ।"
+  "chat.notice.cloudOutOfCpu": "इस काम के लिए आपके Cloud का CPU ख़त्म हो गया, इसलिए AI शुरू नहीं हो सका और कुछ नहीं चला। एक मिनट रुककर इसे फिर से भेजें, चल रहा कोई भारी काम रोकें, या ज़्यादा CPU के लिए बड़े प्लान पर जाएँ।",
+  "server.allBotsSkill.create.title": "स्किल \"{name}\" को अपने सभी बॉट्स पर लगाएँ?",
+  "server.allBotsSkill.create.done": "स्किल \"{name}\" आपके सभी बॉट्स पर है",
+  "server.allBotsSkill.update.title": "अपने सभी बॉट्स पर स्किल \"{name}\" अपडेट करें?",
+  "server.allBotsSkill.update.done": "आपके सभी बॉट्स पर स्किल \"{name}\" अपडेट हो गई",
+  "server.allBotsSkill.delete.title": "स्किल \"{name}\" को अपने सभी बॉट्स से हटाएँ?",
+  "server.allBotsSkill.delete.done": "स्किल \"{name}\" आपके सभी बॉट्स से हटा दी गई",
+  "server.allBotsSkill.body": "आपके सभी बॉट्स एक ही कॉपी इस्तेमाल करते हैं, बाद में जोड़े गए बॉट्स भी। किसी एक बॉट के लिए बंद करने हेतु उस बॉट का Skills पेज खोलें।",
+  "server.allBotsSkill.deleteBody": "यह आपके सभी बॉट्स से हट जाती है; जिस बॉट के पास यह पहले से थी, वह अपनी कॉपी रखता है। इसकी SKILL.md नीचे दिखाई गई है, सभी सीक्रेट छिपे हुए हैं।",
+  "skills.allBots.tag": "सभी बॉट्स",
+  "skills.allBots.tagHint": "आपके सभी बॉट्स पर, बाद में जोड़े गए बॉट्स पर भी। स्विच इसे केवल इस बॉट के लिए बंद करता है।",
+  "skills.allBots.use": "सभी बॉट्स पर इस्तेमाल करें",
+  "skills.allBots.useName": "{name} को अपने सभी बॉट्स पर इस्तेमाल करें",
+  "skills.allBots.removeConfirm": "“{name}” को अपने सभी बॉट्स से हटाएँ?",
+  "skills.allBots.kept": "ये बॉट्स अपनी अलग कॉपी रखते हैं: {names}",
+  "skills.allBots.failed": "यह स्किल आपके सभी बॉट्स पर नहीं लगाई जा सकी।"
 }

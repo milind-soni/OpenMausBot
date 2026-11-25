@@ -888,7 +888,8 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         // Unreviewed imports: a hostile description is still prompt content, so only names and status.
         const revision = typeof row.revision === "string" ? `, shared with your team, revision ${row.revision}` : "";
         const unlisted = row.enabled && row.listed === false ? ", not in your prompt: search to read it" : "";
-        return `- ${row.name} (${row.enabled ? "enabled" : "disabled"}, ${row.editable === true ? "learned/editable" : "imported"}${revision}${unlisted})`;
+        const kind = row.allBots === true ? "on all your bots: update/delete changes all" : row.editable === true ? "learned/editable" : "imported";
+        return `- ${row.name} (${row.enabled ? "enabled" : "disabled"}, ${kind}${revision}${unlisted})`;
       }).join("\n")
       : "(none)";
     const pending = staged.length
@@ -940,7 +941,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         ...(Array.isArray(args.references) ? { references: args.references } : {}),
         gist: typeof args.gist === "string" ? args.gist : undefined,
         base_revision: typeof args.base_revision === "string" ? args.base_revision : undefined,
-        source,
+        source, ...(args.all_bots === true ? { all_bots: true } : {}),
       }),
     });
     const nameLabel = typeof r.name === "string" ? r.name : "the skill";

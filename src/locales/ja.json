@@ -8196,5 +8196,20 @@
   "settings.nav.phoneConnectedAllClear": "スマホが接続されていて、対応が必要なものはありません",
   "keys.vps.ownServer": "自分のサーバー (SSH)",
   "chat.notice.cloudBusyStart": "この Cloud は今とても混み合っていて AI を起動できなかったため、このタスクは実行されませんでした。1 分ほど待ってからもう一度送るか、実行中の重いタスクを止めるか、余裕のあるより大きなプランに切り替えてください。",
-  "chat.notice.cloudOutOfCpu": "このタスクのための CPU が Cloud で足りなくなったため、AI を起動できず、何も実行されませんでした。1 分ほど待ってからもう一度送るか、実行中の重いタスクを止めるか、CPU に余裕のあるより大きなプランに切り替えてください。"
+  "chat.notice.cloudOutOfCpu": "このタスクのための CPU が Cloud で足りなくなったため、AI を起動できず、何も実行されませんでした。1 分ほど待ってからもう一度送るか、実行中の重いタスクを止めるか、CPU に余裕のあるより大きなプランに切り替えてください。",
+  "server.allBotsSkill.create.title": "スキル「{name}」をすべてのボットに追加しますか？",
+  "server.allBotsSkill.create.done": "スキル「{name}」はすべてのボットにあります",
+  "server.allBotsSkill.update.title": "すべてのボットでスキル「{name}」を更新しますか？",
+  "server.allBotsSkill.update.done": "すべてのボットでスキル「{name}」を更新しました",
+  "server.allBotsSkill.delete.title": "スキル「{name}」をすべてのボットから削除しますか？",
+  "server.allBotsSkill.delete.done": "スキル「{name}」をすべてのボットから削除しました",
+  "server.allBotsSkill.body": "すべてのボットが同じコピーを使います。あとから追加するボットも同じです。1つのボットだけでオフにするには、そのボットのスキルページで切り替えてください。",
+  "server.allBotsSkill.deleteBody": "すべてのボットから削除されます。以前から持っていたボットは自分のコピーを残します。SKILL.md を下に表示しています（秘密情報は伏せています）。",
+  "skills.allBots.tag": "すべてのボット",
+  "skills.allBots.tagHint": "すべてのボットにあります（あとから追加するボットにも）。スイッチはこのボットだけでオフにします。",
+  "skills.allBots.use": "すべてのボットで使う",
+  "skills.allBots.useName": "{name} をすべてのボットで使う",
+  "skills.allBots.removeConfirm": "「{name}」をすべてのボットから削除しますか？",
+  "skills.allBots.kept": "これらのボットは独自の別のコピーを残しています：{names}",
+  "skills.allBots.failed": "このスキルをすべてのボットに追加できませんでした。"
 }

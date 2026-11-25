@@ -7358,5 +7358,20 @@
   "settings.nav.phoneConnectedAllClear": "Telefon jest połączony i nic nie wymaga uwagi",
   "keys.vps.ownServer": "Własny serwer (SSH)",
   "chat.notice.cloudBusyStart": "Ta chmura jest teraz zbyt zajęta, by uruchomić AI, więc to zadanie się nie wykonało. Poczekaj minutę i wyślij je ponownie, zatrzymaj ciężkie zadanie, które właśnie działa, albo przejdź na większy plan, by mieć więcej miejsca.",
-  "chat.notice.cloudOutOfCpu": "Twojej chmurze zabrakło procesora na to zadanie, więc AI nie mogło się uruchomić i nic się nie wykonało. Poczekaj minutę i wyślij je ponownie, zatrzymaj ciężkie zadanie, które właśnie działa, albo przejdź na większy plan, by mieć więcej procesora."
+  "chat.notice.cloudOutOfCpu": "Twojej chmurze zabrakło procesora na to zadanie, więc AI nie mogło się uruchomić i nic się nie wykonało. Poczekaj minutę i wyślij je ponownie, zatrzymaj ciężkie zadanie, które właśnie działa, albo przejdź na większy plan, by mieć więcej procesora.",
+  "server.allBotsSkill.create.title": "Dodać umiejętność „{name}” do wszystkich Twoich botów?",
+  "server.allBotsSkill.create.done": "Umiejętność „{name}” jest na wszystkich Twoich botach",
+  "server.allBotsSkill.update.title": "Zaktualizować umiejętność „{name}” na wszystkich Twoich botach?",
+  "server.allBotsSkill.update.done": "Umiejętność „{name}” zaktualizowana na wszystkich Twoich botach",
+  "server.allBotsSkill.delete.title": "Usunąć umiejętność „{name}” ze wszystkich Twoich botów?",
+  "server.allBotsSkill.delete.done": "Umiejętność „{name}” usunięta ze wszystkich Twoich botów",
+  "server.allBotsSkill.body": "Wszystkie Twoje boty używają tej samej kopii, także te dodane później. Aby wyłączyć ją dla jednego bota, użyj strony Umiejętności tego bota.",
+  "server.allBotsSkill.deleteBody": "Znika ze wszystkich Twoich botów; bot, który miał ją wcześniej, zachowuje własną kopię. Jej SKILL.md jest pokazany poniżej, z ukrytymi sekretami.",
+  "skills.allBots.tag": "Wszystkie boty",
+  "skills.allBots.tagHint": "Na wszystkich Twoich botach, także dodanych później. Przełącznik wyłącza ją tylko dla tego bota.",
+  "skills.allBots.use": "Użyj na wszystkich botach",
+  "skills.allBots.useName": "Użyj {name} na wszystkich Twoich botach",
+  "skills.allBots.removeConfirm": "Usunąć „{name}” ze wszystkich Twoich botów?",
+  "skills.allBots.kept": "Te boty zachowują własną, inną kopię: {names}",
+  "skills.allBots.failed": "Nie udało się dodać tej umiejętności do wszystkich Twoich botów."
 }

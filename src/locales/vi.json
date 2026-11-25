@@ -6157,5 +6157,20 @@
   "settings.nav.phoneConnectedAllClear": "Một điện thoại đang kết nối, và không có gì cần bạn",
   "keys.vps.ownServer": "Máy chủ của riêng bạn (SSH)",
   "chat.notice.cloudBusyStart": "Cloud này hiện quá bận để khởi động AI, nên việc này chưa chạy. Hãy chờ một phút rồi gửi lại, dừng một việc nặng đang chạy, hoặc chuyển sang gói lớn hơn để có thêm chỗ.",
-  "chat.notice.cloudOutOfCpu": "Cloud của bạn đã hết CPU cho việc này, nên AI không khởi động được và chưa có gì chạy. Hãy chờ một phút rồi gửi lại, dừng một việc nặng đang chạy, hoặc chuyển sang gói lớn hơn để có thêm CPU."
+  "chat.notice.cloudOutOfCpu": "Cloud của bạn đã hết CPU cho việc này, nên AI không khởi động được và chưa có gì chạy. Hãy chờ một phút rồi gửi lại, dừng một việc nặng đang chạy, hoặc chuyển sang gói lớn hơn để có thêm CPU.",
+  "server.allBotsSkill.create.title": "Đưa kỹ năng \"{name}\" vào tất cả bot của bạn?",
+  "server.allBotsSkill.create.done": "Kỹ năng \"{name}\" đã có trên tất cả bot của bạn",
+  "server.allBotsSkill.update.title": "Cập nhật kỹ năng \"{name}\" trên tất cả bot của bạn?",
+  "server.allBotsSkill.update.done": "Đã cập nhật kỹ năng \"{name}\" trên tất cả bot của bạn",
+  "server.allBotsSkill.delete.title": "Gỡ kỹ năng \"{name}\" khỏi tất cả bot của bạn?",
+  "server.allBotsSkill.delete.done": "Đã gỡ kỹ năng \"{name}\" khỏi tất cả bot của bạn",
+  "server.allBotsSkill.body": "Tất cả bot của bạn dùng cùng một bản sao, kể cả bot bạn thêm sau này. Để tắt cho riêng một bot, hãy dùng trang Kỹ năng của bot đó.",
+  "server.allBotsSkill.deleteBody": "Nó bị gỡ khỏi tất cả bot của bạn; bot nào đã có nó từ trước sẽ giữ bản sao riêng. SKILL.md của nó hiển thị bên dưới, các bí mật đã được ẩn.",
+  "skills.allBots.tag": "Tất cả bot",
+  "skills.allBots.tagHint": "Trên tất cả bot của bạn, kể cả bot thêm sau này. Công tắc chỉ tắt nó cho bot này.",
+  "skills.allBots.use": "Dùng trên tất cả bot",
+  "skills.allBots.useName": "Dùng {name} trên tất cả bot của bạn",
+  "skills.allBots.removeConfirm": "Gỡ “{name}” khỏi tất cả bot của bạn?",
+  "skills.allBots.kept": "Những bot này giữ bản sao riêng, khác: {names}",
+  "skills.allBots.failed": "Không thể đưa kỹ năng này vào tất cả bot của bạn."
 }

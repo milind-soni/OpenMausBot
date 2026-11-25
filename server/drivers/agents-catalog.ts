@@ -759,6 +759,7 @@ const TOOL_DEFINITIONS = [
         gist: { type: "string", description: "Optional one-line summary of the change." },
         base_revision: { type: "string", description: "To update a skill shared with your team: its revision from skills_list." },
         source: { type: "string", description: "create or update: the URL, folder or 'conversation' it came from. import: owner/repo, a GitHub link to the skill's folder or SKILL.md, or a skills.sh link." },
+        all_bots: { type: "boolean", description: "create/import: on all the person's bots, if they asked." },
       },
       required: ["action"],
     },
