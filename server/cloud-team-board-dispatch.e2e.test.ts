@@ -98,6 +98,8 @@ it("lists no board tools while the switch is off, and refuses their calls", asyn
   await team.as(olive, "POST", `/api/bots/${writer.id}/messages`, { text: "Hello again", threadId: writer.threadId });
   await until(() => existsSync(file("dump.json")), "a second turn");
   expect(env().OMB_TEAM_BOARD).toBe("1");
+  // Writer's own chat turn must be over before the next case: a busy Writer would hand its first item to another bot.
+  await until(async () => ((await team.as(olive, "GET", "/api/bots")).body.bots as Array<{ busy?: boolean }>).every((one) => !one.busy), "idle again");
 }, hostTimeout(90_000));
 
 it("hands a person's item to a free bot as unattended work, and a done item readies and dispatches what needs it", async () => {
