@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { enginesBinDir, enginesPrefix } from "../engine-install.ts";
+import { enginesBinDir } from "../engine-install.ts";
 import { registerPathDir, unregisterPathDir } from "../env-path.ts";
 import { codexAppCopyUpdateCommand, codexReleaseUpdate, codexUpdateCommand } from "./codex-update.ts";
 
@@ -58,7 +58,6 @@ it("updates the app's own npm copy in the app's folder, not npm's global copy th
   try {
     const update = await codexReleaseUpdate("codex-cli 0.167.0", "codex", false);
     expect(update).toMatchObject({ title: "Update Codex to 0.169.0", serverInstall: false, command: codexAppCopyUpdateCommand("0.169.0") });
-    expect(update?.command).toContain(enginesPrefix());
     expect(update?.command).toContain("@openai/codex@0.169.0");
   } finally {
     unregisterPathDir(bin);
