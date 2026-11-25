@@ -7,7 +7,7 @@ bot’s remote desktop, see [Bring Your Own VPS](byo-vps.md) and the
 Run the server on a machine you control (a VPS, a home server, a Mac mini in a
 closet). Then connect the desktop app, browsers and phones to it. Every path
 below ends the same way: the server prints **one link**, and you paste it into
-MausBot under **＋ → Connect to a server**.
+MausBot under **＋ → Connect to another computer**.
 
 > **Security first:** the server listens on `127.0.0.1:8799`, and a program on
 > that machine counts as its owner. Never forward that port yourself. Let one
@@ -56,7 +56,7 @@ Reach    https://maus.example.com   ✓ answers as this server (11:04)
 Pairing code   7KQ2-M9XD-H4TP   works once, until 11:14 · everything
 Link           https://maus.example.com/pair#code=7KQ2-M9XD-H4TP
 
-  Desktop app   ＋ → Connect to a server, paste the link
+  Desktop app   ＋ → Connect to another computer, paste the link
   Phone         scan with your camera or the MausBot app
 
   ▄▄▄▄▄▄▄ ▄ ▄▄ ▄▄▄▄▄▄▄   (QR of the link)
@@ -71,7 +71,7 @@ Each way in has its own Reach line:
 - `--tailscale`: `… · your tailnet`
 - `--tunnel`: `… · MausBot web address`
 
-Paste the link into MausBot: **＋ → Connect to a server**. The sheet names the
+Paste the link into MausBot: **＋ → Connect to another computer**. The sheet names the
 server it found ("✓ hetzner-1 · MausBot 0.1.147 · HTTPS"), and **Connect to
 hetzner-1** finishes. You can also type the address (`maus.example.com`,
 `192.168.1.20:8799`) and the pairing code in their own fields.
@@ -500,7 +500,7 @@ docker compose exec omb openmausbot pair             # prints a code, a link and
 ```
 
 Paste the link (`https://<DOMAIN>/pair#code=…`) into MausBot under **＋ →
-Connect to a server**, or open it in a browser, and it is paired; see "Using it from your computer" for what a session is. Webhook
+Connect to another computer**, or open it in a browser, and it is paired; see "Using it from your computer" for what a session is. Webhook
 URLs (`https://<DOMAIN>/hooks/wh_…`) work without a session, and that is the
 base the app prints on new hooks because the stack sets
 `OMB_WEBHOOK_PUBLIC_URL`.
@@ -905,7 +905,7 @@ days, renewed on use up to 180 days from pairing, revocable) and the app
 loads. `npx openmausbot devices` lists the paired devices and
 `devices revoke ID` signs one out.
 
-From the **desktop app**, choose **＋ → Connect to a server** and paste the
+From the **desktop app**, choose **＋ → Connect to another computer** and paste the
 link. You can also type the address (`maus.example.com`,
 `192.168.1.20:8799`, a `*.ts.net` name) and the pairing code in its own
 field. The sheet looks the address up and names what it found, for example
@@ -928,7 +928,7 @@ the menu bar).
 When the desktop is paired with a code for everything (the server's owner), one
 switch, **Let <server>'s bots use this computer**, lets the server's bots see
 and use the apps on this computer's screen, and run the MCP servers you keep
-for it, while the app is open. It is in the add form (**Connect to a server**),
+for it, while the app is open. It is in the add form (**Connect to another computer**),
 on the server's row in **Settings → This app → Your computers**, on its card in
 **Settings → Devices**, and in the Screen panel on the server's own page (which
 asks once more in a native window, since that page comes from the server). On

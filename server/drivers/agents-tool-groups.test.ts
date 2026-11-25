@@ -13,7 +13,7 @@ import { CORE_TOOLS, OWN_SWITCH_TOOLS, serverTurnedOff, TOOL_GROUP_MEMBERS, tool
 const FULLEST = {
   OMB_BOT_ID: "bot-full", OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1", OMB_VOICE_NOTES: "1", OMB_CHIEF_OF_STAFF: "1",
   OMB_COMPUTER_SELECTION: "1", OMB_X_RESEARCH: "1", OMB_RESEARCH: "1", OMB_TEAM_PEOPLE: "1", OMB_IMAGE_GENERATION: "1", OMB_APP_HOSTING: "1",
-  OMB_MEETINGS: "1", OMB_MAUSBOT: "1",
+  OMB_MEETINGS: "1", OMB_MAUSBOT: "1", OMB_TEAM_BOARD: "1",
 };
 const listed = (env: Record<string, string>) => availableTools(catalogProfileFromEnv(env));
 const names = (env: Record<string, string>) => listed(env).map((tool) => tool.name);

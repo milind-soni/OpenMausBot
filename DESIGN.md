@@ -57,7 +57,7 @@ where they belong instead of adding new places.
   the behaviour automatic with a good default. An optional field on something
   the person sets up is fine. One exception: **Settings → Features**, a short
   list of plain on/off switches for whole features some people don't want
-  (Skill Burger, thread tabs). It's there so
+  (Skill Burger, thread tabs, room feed). It's there so
   Simple mode can turn off one feature at a time without switching to
   Advanced. A switch goes there only when its off state is clean: the feature
   is hidden whole, and nothing the person made is lost.
@@ -187,12 +187,24 @@ element's job and never a pixel value:
   chevrons at the end of a row, not before the label.
 - **Control heights: 24, 28, 32 or 36px.** Menu rows are 30px (32px in the
   composer's menu). The chat header's controls and the sidebar's top buttons
-  are 36px. On touch screens, targets grow to 40–44px with the `touch:`
+  are 36px; beside the thread tabs band both are 32px, on the same centre
+  line. On touch screens, targets grow to 40–44px with the `touch:`
   variant.
 - **Sidebar rows:** Simple's rows have 8px padding and a 10px gap after the
   36px avatar; every row hovers at `bg-ink/[0.06]`. The sidebar is 280px wide
   in both modes; pinned bots are 95 × 92px tiles with a 60px avatar. Pinned
   pages never join them: a bot's pages are in its bot panel's Library tab.
+- **With Room feed on, a room is a feed of its threads.** Each row is a
+  thread's first line, its reply count, who replied and when; a row, a room
+  thread opened from anywhere, and an Inbox line open their thread in a panel
+  beside the chat (`ForkPanel`), never by moving the room's current thread,
+  which is everyone's. The feed's composer starts a new thread. A row carries
+  the sidebar thread row's menu behind a quiet More (hover, focus and touch),
+  a pin mark when pinned, and its unread or waiting dot; the thread beside the
+  feed has the same menu in its header, with its export. Archived threads come
+  back under "Show archived threads" at the top of the feed. The header is plain
+  words, so the feed is masked under it. Below 768px the room is today's single
+  transcript.
 - **The sidebar stays open beside a side panel** while the chat keeps 440px:
   from 1040px with a 320px panel (a room, Simple's inbox, Notifications), from
   1280px with a wider one. Narrower, it folds to its avatars.

@@ -197,7 +197,7 @@ export async function fetchPiModels(
   env: Record<string, string | undefined>,
   allowEnv: readonly string[] = [],
 ): Promise<ModelCatalog> {
-  const child = spawnCli(cli, PI_ARGS, { stdio: ["pipe", "pipe", "pipe"], env, box: { allowEnv } });
+  const child = spawnCli(cli, PI_ARGS, { stdio: ["pipe", "pipe", "pipe"], env, box: { allowEnv, engine: DRIVER_KIND } });
   return new Promise((resolve) => {
     let done = false;
     const fallbackDefault = readPiDefaultModel(env);
@@ -237,7 +237,7 @@ export async function updatePiModelCatalog(
   allowEnv: readonly string[] = [],
 ): Promise<boolean> {
   return new Promise((resolve) => {
-    execCliBoxed(cli, PI_MODEL_UPDATE_ARGS, { env, timeout: 60_000, maxBuffer: 1024 * 1024, box: { allowEnv } }, (error) => resolve(!error));
+    execCliBoxed(cli, PI_MODEL_UPDATE_ARGS, { env, timeout: 60_000, maxBuffer: 1024 * 1024, box: { allowEnv, engine: DRIVER_KIND } }, (error) => resolve(!error));
   });
 }
 
@@ -422,7 +422,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           return spawnCli(config.cli, childArgs, {
             stdio: ["pipe", "pipe", "pipe"],
             cwd: turn.cwd,
-            box: { rw: [sessionDir, mcpTempDir] },
+            box: { rw: [sessionDir, mcpTempDir], engine: DRIVER_KIND },
             env: piEnvironment({ ...turnEnv, OMB_MCP_CONFIG: join(mcpTempDir, "mcp.json") }),
           }, "bot");
         } catch (err) {

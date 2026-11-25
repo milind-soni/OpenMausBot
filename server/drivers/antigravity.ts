@@ -20,6 +20,7 @@ import { acpVendorMessage } from "./acp/rpc-error.ts";
 import { classifyError } from "./retry.ts";
 import {
   antigravityCliSessionMode,
+  antigravityCliTakesHttpMcp,
   antigravityClientInfo,
   antigravityLaunchArgs,
   antigravityProfileAuthenticated,
@@ -207,6 +208,9 @@ const support: AcpSupport = {
     message: "Antigravity's local agent connection failed. Send the message again to continue in a fresh Antigravity process.",
   },
   clientFileSystem: true,
+  // Only the native CLI takes them; agy_acp_server keeps its stdio proxies.
+  ownMcpOverHttp: "advertised",
+  takesUnadvertisedHttpMcp: antigravityCliTakesHttpMcp,
   clientReadRoots: (turn) => (turn.skillFiles ?? []).map(dirname),
   sanitizeToolPayload: true,
   updateFilter: antigravityUpdateFilter,
@@ -334,6 +338,7 @@ const AcpAntigravityDriver = createAcpDriver(support);
 
 export const AntigravityDriver: ProviderDriver<AcpConfig> = {
   ...AcpAntigravityDriver,
+  metadata: { ...AcpAntigravityDriver.metadata, signInAccount: "Google" },
   async create(input: DriverCreateInput<AcpConfig>): Promise<ProviderInstance> {
     // A rebuilt instance may run another CLI, or the same one after a sign-in made outside MausBot.
     nativeSignIn.forget(input.instanceId);

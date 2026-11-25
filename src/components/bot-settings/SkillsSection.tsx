@@ -1,4 +1,4 @@
-import { BookOpen, Trash2 } from "lucide-react";
+import { BookOpen, Trash2, Users } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { skillImportLines } from "@/lib/skill-import";
 import type { SkillImportSummary } from "../../../shared/skill-import";
@@ -23,10 +23,19 @@ export interface ManagedSkill {
   /** "imported": one copy brought in from this computer for every bot, switched per bot and never removed from one.
    * "native": loaded by the bot's engine from a skills folder of its own; changed only there.
    * "project": shipped in the folder the bot works in; used while the owner trusts project skills, changed only there. */
-  origin?: "private" | "library" | "imported" | "native" | "project";
+  origin?: "private" | "library" | "all-bots" | "imported" | "native" | "project";
+  /** On all of the person's bots, a bot made later too; the switch is this bot's own. */
+  allBots?: boolean;
+  canUseOnAllBots?: boolean;
   /** An imported skill that is on but not in this bot's list: the bot finds it when a task needs it. */
   listed?: boolean;
 }
+
+/** On all of the person's bots, with this bot's own switch. */
+export const onAllBots = (skill: ManagedSkill): boolean => skill.allBots === true;
+
+/** One of this bot's own skills, on, that this person may put on all of their bots (the server says so per skill). */
+export const canUseOnAllBots = (skill: ManagedSkill): boolean => skill.canUseOnAllBots === true;
 
 /** A skill that lives in a folder of the person's, read only here. */
 const inFolder = (skill: ManagedSkill): boolean => skill.origin === "native" || skill.origin === "project";
@@ -58,6 +67,8 @@ export function useManagedSkills(bot: Bot) {
   const [error, setError] = useState("");
   const [reviewing, setReviewing] = useState<{ skill: ManagedSkill; text: string } | null>(null);
   const assignmentBusy = useRef(false);
+  /** What the last "use on all bots" left to say: bots that keep a different copy of their own. */
+  const [note, setNote] = useState("");
 
   const refresh = async (cancelled?: () => boolean) => {
     try {
@@ -122,8 +133,9 @@ export function useManagedSkills(bot: Bot) {
     setWorking(skill.name);
     setError("");
     try {
-      // Native skills live in the engine's own folders; the switch only affects this bot.
-      if (skill.origin === "native") {
+      // Native skills live in the engine's own folders, and one on all the person's bots is switched here for this bot
+      // only: the switch only affects this bot.
+      if (skill.origin === "native" || skill.allBots) {
         await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, {
           method: "PATCH",
           body: JSON.stringify({ enabled: !skill.enabled }),
@@ -178,8 +190,24 @@ export function useManagedSkills(bot: Bot) {
     }
   };
 
+  /** Puts one of this bot's own skills on all of the person's bots; a bot with a different copy of its own keeps it. */
+  const putOnAllBots = async (skill: ManagedSkill) => {
+    setWorking(skill.name);
+    setError("");
+    setNote("");
+    try {
+      const result = (await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}/all-bots`, { method: "POST" })) as { kept?: string[] };
+      if (result.kept?.length) setNote(t("skills.allBots.kept", { names: result.kept.join(", ") }));
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("skills.allBots.failed"));
+    } finally {
+      setWorking("");
+    }
+  };
+
   return {
-    skills, staged, loading, working, setWorking, error, setError, reviewing, setReviewing, refresh, toggle, enableReviewed,
+    skills, staged, loading, working, setWorking, error, setError, note, reviewing, setReviewing, refresh, toggle, enableReviewed, putOnAllBots,
     libraryPool, addFromLibrary, setAddFromLibrary, assignmentBusy, putAssignments, addToBot,
   };
 }
@@ -292,7 +320,7 @@ export function SkillsSection({ bot }: { bot: Bot }) {
   const featureEnabled = skillAuthoringEnabled(state.config);
   const libraryOn = skillsLibraryEnabled(state.config);
   const {
-    skills, staged, loading, working, setWorking, error, setError, reviewing, setReviewing, refresh, toggle, enableReviewed,
+    skills, staged, loading, working, setWorking, error, setError, note, reviewing, setReviewing, refresh, toggle, enableReviewed, putOnAllBots,
     libraryPool, addFromLibrary, setAddFromLibrary, assignmentBusy, addToBot,
   } = useManagedSkills(bot);
   const [viewing, setViewing] = useState<{ name: string; text: string } | null>(null);
@@ -356,11 +384,11 @@ export function SkillsSection({ bot }: { bot: Bot }) {
       }
       return;
     }
-    if (!window.confirm(t("skills.removeLearnedConfirm", { name: skill.name }))) return;
+    if (!window.confirm(t(skill.allBots ? "skills.allBots.removeConfirm" : "skills.removeLearnedConfirm", { name: skill.name }))) return;
     setWorking(skill.name);
     setError("");
     try {
-      await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, { method: "DELETE" });
+      await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}${skill.allBots ? "/all-bots" : ""}`, { method: "DELETE" });
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("skills.error.remove"));
@@ -485,12 +513,12 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                     className="min-w-0 flex-1 text-left"
                   >
                     <div className="truncate font-mono text-[13px] text-ink">{skill.name}</div>
-                    {(libraryOn || skill.origin === "imported" || inFolder(skill)) && (
+                    {(libraryOn || onAllBots(skill) || skill.origin === "imported" || inFolder(skill)) && (
                       <span
                         className="ml-1.5 rounded bg-control px-1 py-px font-mono text-[10px] uppercase tracking-wide text-ink-secondary"
-                        title={skill.origin === "imported" ? t("skills.origin.importedHint") : skill.origin === "native" ? t("skills.origin.nativeHint") : skill.origin === "project" ? t("skills.origin.projectHint") : undefined}
+                        title={onAllBots(skill) ? t("skills.allBots.tagHint") : skill.origin === "imported" ? t("skills.origin.importedHint") : skill.origin === "native" ? t("skills.origin.nativeHint") : skill.origin === "project" ? t("skills.origin.projectHint") : undefined}
                       >
-                        {skill.origin === "imported" ? t("skills.origin.imported") : skill.origin === "native" ? t("skills.origin.native") : skill.origin === "project" ? t("skills.origin.project") : skill.origin === "library" ? t("skills.origin.library") : t("skills.origin.private")}
+                        {onAllBots(skill) ? t("skills.allBots.tag") : skill.origin === "imported" ? t("skills.origin.imported") : skill.origin === "native" ? t("skills.origin.native") : skill.origin === "project" ? t("skills.origin.project") : skill.origin === "library" ? t("skills.origin.library") : t("skills.origin.private")}
                       </span>
                     )}
                     <div className="mt-0.5 line-clamp-2 text-[12px] text-ink-secondary">{skill.description}</div>
@@ -503,6 +531,18 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                       disabled={Boolean(working)}
                       onClick={() => void toggle(skill)}
                     />
+                  )}
+                  {canUseOnAllBots(skill) && (
+                    <button
+                      type="button"
+                      aria-label={t("skills.allBots.useName", { name: skill.name })}
+                      title={t("skills.allBots.use")}
+                      disabled={Boolean(working)}
+                      onClick={() => void putOnAllBots(skill)}
+                      className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40"
+                    >
+                      <Users size={15} />
+                    </button>
                   )}
                   {skill.origin !== "imported" && !inFolder(skill) && (
                     <button
@@ -529,6 +569,7 @@ export function SkillsSection({ bot }: { bot: Bot }) {
             {staged.length === 1 ? t("skills.stagedOne") : t("skills.stagedMany", { count: staged.length })}
           </div>
         )}
+        {note && <div className="mt-2 text-[12px] text-ink-secondary">{note}</div>}
         {error && <div role="alert" className="mt-2 text-[12px] text-danger">{error}</div>}
       </div>
 

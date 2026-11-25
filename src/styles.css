@@ -2108,6 +2108,13 @@ body {
   -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--glass-top, 0px) - var(--top-fade)), #000 var(--glass-top, 0px));
   mask-image: linear-gradient(to bottom, transparent calc(var(--glass-top, 0px) - var(--top-fade)), #000 var(--glass-top, 0px));
 }
+/* A room's feed of threads: its header is plain words, so nothing that scrolls under it shows through. Rows fade in over
+   the last --feed-fade above the bar's edge, where the top row rests; a mask, so any skin's ground shows. */
+.glass-scroller[data-feed-fade] {
+  --feed-fade: 12px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--glass-top, 0px) - var(--feed-fade)), #000 var(--glass-top, 0px));
+  mask-image: linear-gradient(to bottom, transparent calc(var(--glass-top, 0px) - var(--feed-fade)), #000 var(--glass-top, 0px));
+}
 [data-chathead-float] {
   pointer-events: none;
 }
@@ -2215,6 +2222,8 @@ body {
 [data-settings-look] :is([data-settings-page], [data-settings-hit], [data-settings-key-result], [data-settings-rows] > button, [data-settings-rows] > * > button[aria-expanded], [data-settings-fold] > button, [data-settings-rows] > button[data-pair-with-cloud]):focus-visible {
   outline-offset: -2px;
 }
+/* A whole-row button in a card takes the card's corners, so its inset ring never cuts across a rounded corner. */
+[data-settings-look] [data-settings-rows] > button:focus-visible { border-radius: 12px; }
 /* A menu row shows keyboard focus as its hover fill. */
 [role="menu"] :is(button, [role^="menuitem"]):focus-visible {
   outline: none;
@@ -3914,7 +3923,9 @@ button:disabled.bg-danger {
    sits beside the chat). A hairline in the frame's edge colour runs along the card's top, round its corners and down
    the sidebar's side. The open tab's ground is the card's and slides between tabs; its foot curves out into the band.
    Separators sit only between two closed tabs, neither under the pointer. Every control in the band is 32px tall on
-   the sidebar buttons' centre line, 10px apart as the sidebar's are, and the band's end inset mirrors the sidebar's. */
+   the sidebar buttons' centre line, 10px apart as the sidebar's are, and the band's end inset mirrors the sidebar's;
+   Simple's sidebar buttons step down to 32px beside it on the same line. Midnight's frame sits a step darker than its
+   sidebar elsewhere, so the card's corners read as clearly as Daylight's. */
 @media (min-width: 768px) {
   [data-chathead-tabs] {
     --chat-card-radius: var(--radius-xl);
@@ -3930,6 +3941,10 @@ button:disabled.bg-danger {
   [data-chathead-tabs]:has([data-panel-beside])::after { display: none; }
   :root:has([data-chathead-tabs="simple"]) [data-sidebar] { border-image: linear-gradient(to bottom, transparent 60px, var(--color-edge) 60px) 1; }
   :root:has([data-chathead-tabs="advanced"]) [data-sidebar] { border-image: linear-gradient(to bottom, transparent 54px, var(--color-edge) 54px) 1; }
+  :root[data-skin="midnight"]:has([data-chathead-tabs]) { --color-frame: #0a0a0a; }
+  :root[data-skin="midnight"]:has([data-chathead-tabs]) :is([data-sidebar], [data-places-rail], [data-chathead-tabs]) { --color-panel: #0a0a0a; }
+  :root:has([data-chathead-tabs="simple"]) [data-sidebar-top-row="simple"] { padding-top: 14px; }
+  :root:has([data-chathead-tabs="simple"]) [data-sidebar-top-row="simple"] :is([data-rail-toggle], [data-sidebar-top-buttons] button.size-9) { width: 32px; height: 32px; }
   [data-chathead-tabs] [data-chathead-row] { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; height: 100%; }
   [data-chathead-tabs] [data-chathead-identity] { grid-column: 2; justify-self: stretch; align-self: stretch; -webkit-app-region: drag !important; }
   [data-chathead-tabs] [data-chathead-identity] > :not([data-thread-tabs], [data-chathead-status]) { display: none; }

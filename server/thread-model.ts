@@ -1,6 +1,6 @@
 // A model missing from its engine's catalog is no reason to fall back: engines run IDs their catalog does not list.
 import type { ModelSelection } from "./contracts.ts";
-import { readyToRun, signedOut, type DefaultSelectionContext, type SelectableInstance } from "./default-model-selection.ts";
+import { confirmedAvailable, readyToRun, signedOut, type DefaultSelectionContext, type SelectableInstance } from "./default-model-selection.ts";
 import { sameModelSelection } from "../shared/thread-model.ts";
 
 export type ThreadEngine = SelectableInstance & { enabled: boolean };
@@ -12,7 +12,7 @@ export interface ThreadModelContext extends DefaultSelectionContext {
 }
 
 function canRunOn(engine: ThreadEngine | undefined, selection: ModelSelection, context: ThreadModelContext): engine is ThreadEngine {
-  return Boolean(engine?.enabled) && engine!.snapshot.state === "available" && context.refusal?.(engine!) === undefined &&
+  return Boolean(engine?.enabled) && confirmedAvailable(engine!) && context.refusal?.(engine!) === undefined &&
     context.allows?.(selection) !== false;
 }
 

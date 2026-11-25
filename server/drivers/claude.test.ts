@@ -3,6 +3,7 @@ import { createServer as createHttpServer, type IncomingHttpHeaders } from "node
 import { connect, createServer as createNetServer, type AddressInfo, type Socket } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
+import { CLAUDE_IMAGE_LIMIT, FOLD_BACKUP_SUFFIX, transcriptPath } from "./claude-transcript-images.ts";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -926,6 +927,40 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(Object.keys(seen.mcpConfig.mcpServers)).not.toContain("planted");
     expect(after("--allowedTools").split(",")).not.toContain("mcp__browser");
     expect(recorder.events.find((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
+  });
+
+  it("runs work from the person's other place with no command-running tool, at Auto-accept edits, never at Full", async () => {
+    await create(undefined, { FAKE_CLAUDE_VERSION: "2.1.284" });
+    const folder = mkdtempSync(join(scratch, "link-folder-"));
+    writeFileSync(join(folder, ".mcp.json"), JSON.stringify({ mcpServers: { planted: { command: "sh", args: ["-c", "id"] } } }));
+    const dump = join(scratch, "dump-link.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-link", text: "hello", approvalMode: "edits", linkLimited: true, cwd: folder, userSkillsDir: join(scratch, "user-skills"),
+      integrations: { agents: { command: process.execPath, args: ["fixture-agents"], env: {} }, composio: { command: process.execPath, args: ["fixture-apps"], env: {} },
+        email: { command: process.execPath, args: ["fixture-email"], env: {} } } });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8")) as { argv: string[]; settings: any; mcpConfig: any };
+    const after = (flag: string) => seen.argv[seen.argv.indexOf(flag) + 1];
+    expect(seen.argv).toContain("--restricted");
+    expect(after("--tools")).toBe("Read,Grep,Glob,Edit,Write,WebSearch");
+    expect(after("--permission-mode")).toBe("acceptEdits");
+    expect(seen.settings.permissions).toMatchObject({ blockReadsOutsideWorkingDirectories: true });
+    expect(seen.settings.permissions.deny).toEqual(expect.arrayContaining(["Bash", "PowerShell", "WebFetch"]));
+    expect(Object.keys(seen.mcpConfig.mcpServers)).not.toContain("planted");
+    // Only the harness's own tools run unasked: a connected app's or Email's tool asks, and the harness answers it.
+    expect(after("--allowedTools").split(",").filter((name) => !name.startsWith("mcp__ogb")).sort()).toEqual(["mcp__agents"]);
+    expect(seen.argv, "the person's skills folder is not a working folder").not.toContain("--add-dir");
+    expect(recorder.events.find((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
+    await expect(instance.adapter.sendTurn({ threadId: "t-link-full", text: "hello", approvalMode: "full", linkLimited: true }))
+      .rejects.toThrow("runs here only in Ask or Auto-accept edits");
+  });
+
+  it("stops work from the person's other place when the CLI kept a shell", async () => {
+    await create(undefined, { FAKE_CLAUDE_VERSION: "2.1.284", FAKE_CLAUDE_KEEP_BASH: "1" });
+    await instance.adapter.sendTurn({ threadId: "t-link-kept", text: "hello", approvalMode: "edits", linkLimited: true, confinedWhy: "Commands are off." });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(JSON.stringify(recorder.events)).toContain("kept its shell, so it can't run this turn. Update Claude Code. Commands are off.");
+    expect(recorder.events.find((e) => e.type === "turn.completed")).toMatchObject({ ok: false });
   });
 
   it("stops a guest's turn when the CLI kept a shell, and refuses one too old to confine it", async () => {
@@ -3868,6 +3903,62 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(dump.argv).toContain("--resume");
     expect(dump.argv).toContain("claude-other");
   });
+
+  /** A thread whose transcript gains a page image every turn, on a custom endpoint or first-party Anthropic. */
+  const imageThread = async (endpoint: boolean) => {
+    const configDir = join(scratch, "claude-config");
+    const cwd = join(scratch, "work");
+    mkdirSync(cwd, { recursive: true });
+    await create(undefined, endpoint ? { ANTHROPIC_BASE_URL: "https://endpoint.example.test", ANTHROPIC_API_KEY: "endpoint-token", ANTHROPIC_AUTH_TOKEN: "endpoint-token" } : {},
+      endpoint ? { configDir, requireApiKey: true, endpointModels: ["deepseek-chat"] } : { configDir });
+    const threadId = `t-images-${endpoint ? "endpoint" : "anthropic"}`;
+    await instance.adapter.sendTurn({ threadId, text: "one", cwd });
+    await recorder.until((e) => e.type === "turn.completed");
+    const announced = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
+    // what Claude Code itself would have written: a page image on every turn
+    const file = transcriptPath(configDir, cwd, announced);
+    mkdirSync(dirname(file), { recursive: true });
+    const row = (n: number) => JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: `page ${n}` },
+      { type: "image", source: { type: "base64", media_type: "image/png", data: `img${n}` } }] } });
+    const write = (count: number) => writeFileSync(file, Array.from({ length: count }, (_, i) => row(i)).join("\n") + "\n");
+    const imagePath = join(scratch, "page.png");
+    writeFileSync(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const turn = async (text: string, images = 0) => {
+      const sent = await instance.adapter.sendTurn({ threadId, text, cwd, resumeCursor: announced,
+        ...(images ? { images: Array.from({ length: images }, () => ({ path: imagePath, mime: "image/png", bytes: 4 })) } : {}) });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === sent.turnId);
+    };
+    const closes = () => readFileSync(join(NATIVE_DIR, `${threadId}.ndjson`), "utf8").split("\n").filter(Boolean)
+      .map((line) => { try { return JSON.parse(line).msg?.close; } catch { return undefined; } }).filter(Boolean);
+    return { file, write, turn, closes };
+  };
+
+  it("on a custom endpoint, does not reuse a warm process whose next request would carry more than 20 images: a fresh one resumes the folded transcript", async () => {
+    const t = await imageThread(true);
+    t.write(19);
+    // 19 held + none new: still the warm process
+    await t.turn("two");
+    expect(t.closes()).toEqual([]);
+    // 16 held + 5 new: over, so a fresh process resumes a transcript that leaves room for this turn's own
+    t.write(16);
+    const before = readFileSync(t.file, "utf8");
+    await t.turn("three", 5);
+    expect(t.closes()).toEqual(["images over the request limit"]);
+    const kept = readFileSync(t.file, "utf8");
+    expect(kept.split('"type":"image"').length - 1).toBe(CLAUDE_IMAGE_LIMIT - 5);
+    // the transcript as it was stays beside it
+    expect(readFileSync(`${t.file}${FOLD_BACKUP_SUFFIX}`, "utf8")).toBe(before);
+  }, 20_000);
+
+  it("on first-party Anthropic, keeps every image and the warm process, and never touches the transcript", async () => {
+    const t = await imageThread(false);
+    t.write(25);
+    const before = readFileSync(t.file);
+    await t.turn("two", 5);
+    expect(t.closes()).toEqual([]);
+    expect(readFileSync(t.file).equals(before)).toBe(true);
+    expect(existsSync(`${t.file}${FOLD_BACKUP_SUFFIX}`)).toBe(false);
+  }, 20_000);
 
   it("names the changed contract fields when a warm process is replaced", async () => {
     await create();

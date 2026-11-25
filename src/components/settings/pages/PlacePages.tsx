@@ -88,7 +88,7 @@ export function OverviewPage() {
     {place.kind === "server" && !ctx.client && !window.ogb?.updater && <SettingsGroup label={t("settings.updates.title")} block="version"><SettingsRows><ServerUpdateRow title={versionLine()} /></SettingsRows></SettingsGroup>}
     <SettingsGroup label={t("settings.overview.glance")} block="glance">
       <SettingsRows>
-        {!ctx.client && <SettingsLinkRow title={t("settings.section.phoneDevices")} value={phoneValue} onClick={() => go("phone")} data={{ "data-glance": "phone" }} />}
+        {!ctx.client && <SettingsLinkRow title={t("settings.page.devices")} value={phoneValue} onClick={() => go("devices", "phones")} data={{ "data-glance": "devices" }} />}
         {!ctx.client && <SettingsLinkRow title={t("settings.group.ai")} onClick={() => go("ai", "providers")} data={{ "data-glance": "ai" }}
           value={ctx.admin ? engines > 0 ? t("settings.glance.aiReady", { count: engines }) : t("settings.glance.aiStart") : t("settings.glance.aiAdmin")} />}
         {/* Simple's sidebar footer has Connect apps right beside the avatar, so Simple's Overview leaves the jump out and
@@ -198,7 +198,7 @@ export function DesktopsPage() {
         </SettingsDisclosureRow>
       </AdminOnly>
     )}
-    <AdvancedSection anchor="automation"><SettingsGroup label={t("settings.desktops.automation")} block="automation"><SettingsRows><SavedStepsRow /></SettingsRows></SettingsGroup></AdvancedSection>
+    {ctx.savedSteps && <AdvancedSection anchor="automation"><SettingsGroup label={t("settings.desktops.automation")} block="automation"><SettingsRows><SavedStepsRow /></SettingsRows></SettingsGroup></AdvancedSection>}
   </>;
 }
 

@@ -80,7 +80,7 @@ openmausbot doctor --url https://maus.example.com --token-file ~/.openmausbot-to
 
 `connect` also takes the whole link the server printed
 (`https://maus.example.com/pair#code=…`), so `--code` can be left out then.
-Make the pairing code in the app's Settings → Phone & devices, or on a server
+Make the pairing code in the app's Settings → Devices, or on a server
 with `openmausbot pair` (add `--client --ttl 24h` for a chat-only code that
 stays open up to a day; a code works once). On a server you started with
 `openmausbot serve`, `connect` makes the code itself (`--client` gives a token

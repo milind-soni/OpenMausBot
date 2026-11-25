@@ -200,6 +200,18 @@ it("ModelGo's card follows update consent and the account's notices, and goes be
   expect(MODELGO_OFFER_NOTICE).toBe("modelgo-offer-2026-11");
 });
 
+it("a new install's first launch: once its first reply has come, ModelGo's card is its one notice, or follows the move popup", () => {
+  // The welcome's own launch rules out the popups, the question, Boat and the announcements; a new install has no star yet.
+  const first = (modelgo: boolean | null, grok: boolean | null = false) => facts(false, false, false, false, false, false, false, false, false, false, grok, modelgo);
+  expect(nextNotice(first(null), none), "before the first reply").toBeNull();
+  expect(nextNotice(first(true), none)).toBe(MODELGO_OFFER_NOTICE);
+  expect(nextNotice(first(true, true), none), "the move popup still goes first").toBe(GROK_MOVE_NOTICE);
+  const grokSeen = (id: NoticeId) => id === GROK_MOVE_NOTICE;
+  expect(nextNotice(first(null, true), grokSeen, GROK_MOVE_NOTICE, true), "closed before the reply: the card still waits").toBeNull();
+  expect(nextNotice(first(true, true), grokSeen, GROK_MOVE_NOTICE, true), "then follows it").toBe(MODELGO_OFFER_NOTICE);
+  expect(nextNotice(first(true), id => id === MODELGO_OFFER_NOTICE), "seen: never again").toBeNull();
+});
+
 it("Update MausBot on your phone goes right after the Grok Bot popup, ahead of every promotion, and holds the sponsor's card", () => {
   const all = (phone: boolean | null, grok: boolean | null = false) => facts(true, true, true, true, true, true, true, true, true, true, grok, true, phone);
   expect(nextNotice(all(true), none)).toBe(PHONE_UPDATE_NOTICE);

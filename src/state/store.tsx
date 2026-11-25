@@ -51,7 +51,7 @@ import {
 import type { Routine, RoutineInput, RoutineRun, RoutineRunLimits, RoutineRunStatusFilter } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { duplicateBotProfile, restrictedCopyRequest } from "@/lib/bot-duplicate";
-import { holdMarkedUnread, markVisibleBotThreadsRead, markVisibleGroupThreadsRead, type ReadReason } from "./read-visible";
+import { holdMarkedUnread, markVisibleBotThreadsRead, markVisibleGroupThreadsRead, type ReadReason } from "./read-visible"; import { feedThreadAction, roomFeedShows } from "@/lib/room-feed";
 import { applyWindowPref } from "@/lib/window-prefs"; import { applyThemeFrame } from "@/lib/theme/runtime"; import { appCatalogAnnounced } from "@/lib/app-catalog-signal";
 import { placeUnreadDivider, threadOpensUnread, threadReadCursor, unreadDividerFor, type UnreadDivider } from "@/lib/unread-divider";
 import type { ComputerStart } from "@/lib/computer-start";
@@ -424,7 +424,7 @@ export interface InstanceInfo extends InstanceEndpointInfo {
   snapshot: {
     state: "available" | "unavailable";
     reason?: string;
-    authenticated?: boolean; /** The CLI path runs another program, not this engine's CLI. */ notEngineCli?: true; /** Runs Google's native Antigravity CLI. */ nativeCli?: true; /** Its runtime is being installed now. */ installing?: true;
+    authenticated?: boolean; /** Its status check could not finish (a busy machine): not a sign that it is missing. */ busy?: true; /** Installed, not yet confirmed. */ unverified?: true; /** The CLI path runs another program, not this engine's CLI. */ notEngineCli?: true; /** Runs Google's native Antigravity CLI. */ nativeCli?: true; /** Its runtime is being installed now. */ installing?: true;
     chatgptPlan?: boolean;
     /** Ready only through OpenCode's free no-login models: a backup, never "an AI already works". */
     freeFallback?: boolean;
@@ -469,8 +469,8 @@ export interface InstanceInfo extends InstanceEndpointInfo {
 export type AppSettingsSection = SettingsPageId
   | "desktopWorkspaces" | "organization" | "cloudAccount" | "experimental" | "connections" | "decisionModel" | "imageGeneration"
   | "engines" | "companion" | "remote" | "computer" | "logins" | "botAccess" | "activity" | "backups" | "workspaces"
-  | "skills" | "import" | "updates";
-export type SettingsPageId = "overview" | "devices" | "phone" | "ai" | "bots" | "desktops" | "vault" | "usage" | "transfer" | "storage" | "data" | "people"
+  | "skills" | "import" | "updates" | "phone";
+export type SettingsPageId = "overview" | "devices" | "ai" | "bots" | "desktops" | "vault" | "usage" | "transfer" | "storage" | "data" | "people"
   | "installations" | "account" | "plan" | "app" | "general" | "appearance" | "features";
 
 export type BotSettingsSection =
@@ -1044,7 +1044,7 @@ function reduceApp(state: AppState, action: Action): AppState {
           forkPanel: null,
           groups: state.groups.map((g) => {
             if (g.id !== action.id) return g;
-            const tasks = g.tasks?.map((task) => task.threadId === g.threadId ? { ...task, unread: false } : task);
+            const tasks = g.tasks?.map((task) => task.threadId === g.threadId && !roomFeedShows(state.config, g) ? { ...task, unread: false } : task);
             return { ...g, tasks, unread: tasks ? tasks.some((task) => task.unread) : false };
           }),
         };
@@ -2194,7 +2194,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const wrapped: React.Dispatch<Action> = (action) => {
       store.flushFrames(); if (["select", "newTask", "switchTask", "newGroupTask", "switchGroupTask", "showChat", "showRoutines", "showTeamMap", "showFiles", "showWebPanel", "showPublishedApps", "showSkillBurgers", "showTeamFiles", "showAnnouncements"].includes(action.type)) selectionRevision.current++;
       // Pin before any await or optimistic state change.
-      action = pinBotThreadAction(action, stateRef.current.bots); holdMarkedUnread(action, stateRef.current);
+      action = pinBotThreadAction(action, stateRef.current.bots); holdMarkedUnread(action, stateRef.current); const fed = feedThreadAction(action, stateRef.current); if (!fed) return; action = fed;
       if (runNewChat(action)) return;
       if (action.type === "taskSwitched") action = { ...action, bot: withTaskWrites(action.bot) as Bot };
       if (action.type === "botPatched") action = { ...action, bot: withTaskWrites(action.bot) };
@@ -2543,7 +2543,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const group = stateRef.current.groups.find((g) => g.id === id);
           if (bot?.unread) {
             api(`/api/bots/${id}/read`, { method: "POST", body: JSON.stringify({ threadId: bot.threadId }) }).catch(() => {});
-          } else if (group?.tasks?.find((task) => task.threadId === group.threadId)?.unread ?? group?.unread) {
+          } else if (!roomFeedShows(stateRef.current.config, group) && (group?.tasks?.find((task) => task.threadId === group.threadId)?.unread ?? group?.unread)) {
             api(`/api/groups/${id}/read`, { method: "POST" }).catch(() => {});
           }
           break;

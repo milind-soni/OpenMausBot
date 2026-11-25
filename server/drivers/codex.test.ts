@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
 import { createConnection, type AddressInfo } from "node:net";
@@ -14,6 +14,7 @@ import type { ProviderInstance, RuntimeEvent } from "../contracts.ts";
 import { DATA_DIR, NATIVE_DIR } from "../config.ts";
 import { flushNativeLog } from "./native.ts";
 import { ChatGptPlanAuthController } from "./chatgpt-plan-auth.ts";
+import { chatgptAccountHome } from "./codex-account-home.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { publishedMessages, replyProblems } from "../harness/text-items.testkit.ts";
 import { caseTokens, LIVE_REPLY_CASES, liveReplyScripts } from "../testing/live-reply-cases.ts";
@@ -734,6 +735,22 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(owner.calls.find((call) => call.method === "turn/start")?.params).not.toHaveProperty("environments");
   });
 
+  it("runs work from the person's other place with the shell off and no environment, in Ask's workspace sandbox", async () => {
+    await create();
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-link", text: "rm -rf ~", system: "You are Testy.", model: "gpt-5.6-sol", approvalMode: "ask", linkLimited: true });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8")) as { argv: string[]; calls: Array<{ method: string; params: any }> };
+    for (const override of ["features.shell_tool=false", "features.unified_exec=false", "features.view_image=false"]) {
+      expect(seen.argv[seen.argv.indexOf(override) - 1], override).toBe("-c");
+    }
+    const started = seen.calls.find((call) => call.method === "turn/start")?.params;
+    expect(started.environments).toEqual([]);
+    expect(started.sandboxPolicy).toMatchObject({ type: "workspaceWrite" });
+    expect(started.approvalPolicy).toBe("on-request");
+  });
+
   it("refuses a guest's turn when Codex did not take the shell-off overrides", async () => {
     await create({ environment: { FAKE_CODEX_IGNORE_FEATURES: "1" } });
     const dump = join(scratch, "dump.json");
@@ -857,6 +874,24 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     const fourth = await send("split-4.json", "fourth", "Memory: moved to Toronto.", "codex-thread-1", true);
     expect(turnText(fourth)).toContain("Memory: moved to Toronto.");
     expect(turnText(fourth)).toContain("fourth");
+  });
+
+  it("saves a conversation's thread but not one no later turn resumes", async () => {
+    await create({ mode: "resume" });
+    const threadStart = async (dumpName: string, threadId: string, ephemeral?: boolean) => {
+      process.env.FAKE_CODEX_DUMP = join(scratch, dumpName);
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId, text: "hello", system: "Stable rules.", systemStable: "Stable rules.", systemVolatile: "Memory: likes quiet hours.",
+        ...(ephemeral === undefined ? {} : { ephemeral }),
+      });
+      await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      const calls = JSON.parse(readFileSync(join(scratch, dumpName), "utf8")).calls as Array<{ method: string; params: Record<string, unknown> }>;
+      return calls.filter((call) => call.method === "thread/start").map((call) => call.params.ephemeral);
+    };
+    // A one-to-one chat resumes its thread next turn, so Codex keeps it.
+    expect(await threadStart("chat.json", "t-chat")).toEqual([false]);
+    // A room turn sends the whole conversation each time and never resumes: nothing is saved, so the Codex app lists nothing.
+    expect(await threadStart("room.json", "t-room", true)).toEqual([true]);
   });
 
   it("ignores requests received after turn completion", async () => {
@@ -1440,7 +1475,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       const plain = { command: "python3", args: ["todo.py"], env: {} };
       await instance.adapter.sendTurn({ threadId: "t-box-no-env", text: "go", integrations: { custom: { plain } } });
       await recorder.until((event) => event.type === "turn.completed" && event.threadId === "t-box-no-env");
-      expect(appServer()).not.toHaveProperty("box");
+      expect(appServer()?.box).toEqual({ engine: "codex" });
     } finally {
       spawnSpy.mockRestore();
     }
@@ -1682,7 +1717,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
         expect(await recorder.until((event) => event.type === "turn.completed" && event.threadId === "plan-box")).toMatchObject({ ok: true });
         const appServer = spawns.find(([, args]) => args.includes("app-server"))?.[2];
         expect(appServer?.env?.OMB_CODEX_AUTH_SOCKET).toBeTruthy();
-        expect(appServer?.box).toEqual({ rw: [appServer!.env!.OMB_CODEX_AUTH_SOCKET] });
+        expect(appServer?.box).toEqual({ engine: "codex", rw: [appServer!.env!.OMB_CODEX_AUTH_SOCKET] });
       } finally {
         spawnSpy.mockRestore();
       }
@@ -2441,24 +2476,76 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
   it.each([
     ["Cloud home", "OMB_CLOUD_ROLE", "home"],
     ["hosted enterprise", "OMB_ADMIN_URL", "https://admin.example.test"],
-  ])("refuses desktop ChatGPT plan sign-in on %s before accessing credentials or spawning", async (_name, variable, value) => {
+  ])("signs each added ChatGPT account in on %s with Codex's device code, in a Codex home of its own", async (_name, variable, value) => {
     vi.stubEnv(variable, value);
-    const spawn = vi.spyOn(procs, "spawnCli").mockImplementation(() => { throw new Error("Unexpected process"); });
-    const exec = vi.spyOn(procs, "execCli").mockImplementation(() => { throw new Error("Unexpected process"); });
-    const catalog = vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockResolvedValue({ default: "", options: [] });
-    const token = vi.spyOn(ChatGptPlanAuthController.prototype, "accessToken").mockResolvedValue("unused-synthetic-token");
-    const snapshot = vi.spyOn(ChatGptPlanAuthController.prototype, "snapshot").mockResolvedValue({ authenticated: false });
-    const start = vi.spyOn(ChatGptPlanAuthController.prototype, "start").mockRejectedValue(new Error("Unexpected sign-in"));
-    await create({ authMode: "chatgpt-plan" });
-    expect(instance.models).toEqual({ default: "", options: [] });
-    expect(await instance.snapshot()).toMatchObject({
-      state: "unavailable", authenticated: false, chatgptPlan: true,
-      authenticationUnavailableReason: expect.stringContaining("hosted-app approval"),
+    const planCalls = (["models", "accessToken", "snapshot", "start", "signOut"] as const)
+      .map((method) => vi.spyOn(ChatGptPlanAuthController.prototype, method).mockRejectedValue(new Error("Unexpected plan call")));
+    const personHome = join(scratch, ".codex"), loginLog = join(scratch, "logins.jsonl"), dump = join(scratch, "turn.json");
+    mkdirSync(personHome, { recursive: true });
+    writeFileSync(join(personHome, "config.toml"), "model = \"gpt-fake-default\"\n");
+    const firstLogin = JSON.stringify({ auth_mode: "chatgpt", email: "first@example.test", tokens: { access_token: "fixture-first" } });
+    writeFileSync(join(personHome, "auth.json"), firstLogin);
+    const shared = { HOME: scratch, USERPROFILE: scratch, FAKE_CODEX_LOGIN_FILE: "1", FAKE_CODEX_LOGIN_LOG: loginLog, FAKE_CODEX_DUMP: dump, FAKE_CODEX_DUMP_TURNS_ONLY: "1" };
+    const make = (instanceId: string, email: string, config: object, environment: Record<string, string> = {}) => CodexDriver.create({
+      instanceId, displayName: instanceId, enabled: true, environment: { ...shared, FAKE_CODEX_DEVICE_EMAIL: email, ...environment },
+      config: { cli: FAKE_CLI, fullAuto: false, ...config },
     });
-    await expect(instance.startAuthentication!()).rejects.toThrow("hosted-app approval");
-    await expect(instance.adapter.sendTurn({ threadId: "hosted-plan", text: "Continue", model: "gpt-6.1-sol" }))
-      .rejects.toThrow("hosted-app approval");
-    for (const operation of [spawn, exec, catalog, token, snapshot, start]) expect(operation).not.toHaveBeenCalled();
+    const first = await make("codex", "unused@example.test", {}, { CODEX_HOME: personHome });
+    const work = await make(`chatgpt-work-${variable}`, "work@example.test", { authMode: "chatgpt-plan" });
+    const spare = await make(`chatgpt-spare-${variable}`, "spare@example.test", { authMode: "chatgpt-plan" });
+    const workHome = chatgptAccountHome(`chatgpt-work-${variable}`), spareHome = chatgptAccountHome(`chatgpt-spare-${variable}`);
+    try {
+      expect(workHome).not.toBe(spareHome);
+      for (const home of [workHome, spareHome]) {
+        expect(home.startsWith(join(DATA_DIR, "providers", "chatgpt-plan") + sep)).toBe(true);
+        if (process.platform !== "win32") expect(statSync(home).mode & 0o777).toBe(0o700);
+      }
+      expect(work.authenticationMethod).toBeUndefined();
+      expect(work.signOut).toBeTypeOf("function");
+      expect(await work.snapshot()).toMatchObject({ state: "available", authenticated: false });
+
+      const started = await work.startAuthentication!();
+      expect(started).toMatchObject({ phase: "waiting", authorizationUrl: "https://auth.openai.com/codex/device", userCode: "0CSG-0IXIM" });
+      await vi.waitFor(async () => expect((await work.getAuthentication!(started.flowId!)).phase).toBe("succeeded"), { timeout: 10_000 });
+
+      // Only the work account's home got a login; the first account's login is untouched and the spare has none.
+      expect(JSON.parse(readFileSync(join(workHome, "auth.json"), "utf8"))).toMatchObject({ email: "work@example.test" });
+      expect(lstatSync(join(workHome, "auth.json")).isSymbolicLink()).toBe(false);
+      expect(existsSync(join(spareHome, "auth.json"))).toBe(false);
+      expect(readFileSync(join(personHome, "auth.json"), "utf8")).toBe(firstLogin);
+      expect(realpathSync(join(workHome, "config.toml"))).toBe(realpathSync(join(personHome, "config.toml")));
+      const logins = readFileSync(loginLog, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+      expect(logins.filter((call) => call.codexHome === workHome).map((call) => call.args.join(" ")))
+        .toEqual(["login status", "login status", "login --device-auth", "login status"]);
+      expect(logins.filter((call) => call.codexHome !== workHome).every((call) => call.args.join(" ") === "login status")).toBe(true);
+
+      expect(await work.snapshot()).toMatchObject({ authenticated: true, account: { email: "work@example.test" } });
+      expect(await spare.snapshot()).toMatchObject({ authenticated: false });
+      expect(await first.snapshot()).toMatchObject({ authenticated: true, account: { email: "first@example.test" } });
+
+      // A turn of the work account runs with its home, never the first account's.
+      const turns = recordEvents(work.adapter);
+      await work.adapter.sendTurn({ threadId: "work-turn", text: "Fixture" });
+      await turns.until((event) => event.type === "turn.completed");
+      expect(turns.events.find((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      expect(JSON.parse(readFileSync(dump, "utf8")).env.CODEX_HOME).toBe(workHome);
+
+      // Signing the work account out removes only its login.
+      await work.signOut!();
+      expect(existsSync(join(workHome, "auth.json"))).toBe(false);
+      expect(readFileSync(join(personHome, "auth.json"), "utf8")).toBe(firstLogin);
+      expect(await work.snapshot()).toMatchObject({ authenticated: false });
+      expect(await first.snapshot()).toMatchObject({ authenticated: true });
+      for (const call of planCalls) expect(call).not.toHaveBeenCalled();
+    } finally {
+      await Promise.all([first, work, spare].map((engine) => engine.dispose()));
+    }
+  });
+
+  it("keeps the browser ChatGPT plan sign-in on the person's own computer", async () => {
+    vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockResolvedValue({ default: "", options: [] });
+    await create({ authMode: "chatgpt-plan" });
+    expect(instance.authenticationMethod).toBe("browser-pkce");
   });
 
   it.each(["signOut", "dispose"] as const)("invalidates pending ChatGPT token/model preparation on %s", async (action) => {

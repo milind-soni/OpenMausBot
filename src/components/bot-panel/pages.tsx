@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { FolderOpen, Plus, Server } from "lucide-react";
+import { FolderOpen, Plus, Server, Users } from "lucide-react";
 
 import { appSwitchPatch } from "@/lib/bot-app-access";
 import { skillsLibraryEnabled } from "@/lib/feature-flags";
@@ -22,7 +22,7 @@ import { useBotEditor } from "../bot-settings/BotEditorContext";
 import { OrgSkillsCard } from "../bot-settings/OrgSkillsCard";
 import { SavedWorkflowsCard } from "../skill-burger/SavedWorkflowsCard";
 import { isBurgerSource } from "../../../shared/skill-burger/saved";
-import { SkillReviewDialog, skillSwitchOn, useManagedSkills, type ManagedSkill } from "../bot-settings/SkillsSection";
+import { canUseOnAllBots, onAllBots, SkillReviewDialog, skillSwitchOn, useManagedSkills, type ManagedSkill } from "../bot-settings/SkillsSection";
 import { useBotApps, type BotApp } from "../bot-settings/useBotApps";
 import { useChoosesVisibility, VisibilitySection } from "../bot-settings/VisibilitySection";
 import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
@@ -251,11 +251,11 @@ export function SkillsPage({ bot }: PageContext) {
 
   const remove = async (skill: ManagedSkill) => {
     if (skills.working) return;
-    if (!window.confirm(t(skill.origin === "library" ? "skills.unassignConfirm" : "botPanel.skills.removeConfirm", { name: skill.name }))) return;
+    if (!window.confirm(t(skill.origin === "library" ? "skills.unassignConfirm" : skill.allBots ? "skills.allBots.removeConfirm" : "botPanel.skills.removeConfirm", { name: skill.name }))) return;
     skills.setWorking(skill.name);
     skills.setError("");
     try {
-      await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, { method: "DELETE" });
+      await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}${skill.allBots ? "/all-bots" : ""}`, { method: "DELETE" });
       await skills.refresh();
     } catch (cause) {
       skills.setError(errorText(cause, t("botPanel.skills.removeFailed")));
@@ -301,16 +301,26 @@ export function SkillsPage({ bot }: PageContext) {
           <SwitchRow
             key={skill.name}
             data-panel-row={`skill:${skill.name}`}
-            title={skill.name}
+            title={onAllBots(skill) ? <>{skill.name}<span data-panel-tag="all-bots" title={t("skills.allBots.tagHint")} className="ml-1.5 rounded bg-ink/[0.06] px-1.5 py-px align-[1px] text-[11px] font-normal text-ink-secondary">{t("skills.allBots.tag")}</span></> : skill.name}
             hint={skill.description || skill.source}
             label={t("botSettings.simple.skillToggle", { name: skill.name })}
             color={bot.color}
             checked={skillSwitchOn(skill)}
             disabled={Boolean(skills.working)}
             onChange={() => void skills.toggle(skill)}
-            extra={skill.origin === "imported" || skill.origin === "native" ? undefined : <TrashButton data-panel-action={`remove-skill:${skill.name}`} label={t("botPanel.skills.remove", { name: skill.name })} disabled={Boolean(skills.working)} onClick={() => void remove(skill)} />}
+            extra={skill.origin === "imported" || skill.origin === "native" ? undefined : <>
+              {canUseOnAllBots(skill) && (
+                <button type="button" data-panel-action={`all-bots-skill:${skill.name}`} aria-label={t("skills.allBots.useName", { name: skill.name })} title={t("skills.allBots.use")}
+                  disabled={Boolean(skills.working)} onClick={() => void skills.putOnAllBots(skill)}
+                  className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-tertiary hover:bg-ink/[0.05] hover:text-ink disabled:cursor-not-allowed disabled:opacity-50">
+                  <Users size={15} />
+                </button>
+              )}
+              <TrashButton data-panel-action={`remove-skill:${skill.name}`} label={t("botPanel.skills.remove", { name: skill.name })} disabled={Boolean(skills.working)} onClick={() => void remove(skill)} />
+            </>}
           />
         ))}
+        {skills.note && <NoteRow>{skills.note}</NoteRow>}
         {skills.error && !skills.reviewing && <NoteRow tone="warn">{skills.error}</NoteRow>}
       </Card>
       {project.length > 0 && (

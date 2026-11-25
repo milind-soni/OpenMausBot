@@ -6,6 +6,7 @@ import childProcess from "node:child_process";
 import fs from "node:fs";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const config = JSON.parse(process.env.OMB_BENCH_LAUNCH ?? "null");
 if (!config) { console.error("bench-launch-entry runs only under scripts/bench-launch.mjs"); app.exit(64); await new Promise(() => {}); }
@@ -219,7 +220,9 @@ void app.whenReady().then(finish);
 
 mark("main-import:start"); snapshot("importStart");
 try {
-  await import(new URL("./electron/main.mjs", import.meta.url).href);
+  // The app's own entry, which turns on the main process' compile cache before main.mjs loads; main.mjs where there is none.
+  const boot = new URL("./electron/boot.mjs", import.meta.url);
+  await import((fs.existsSync(fileURLToPath(boot)) ? boot : new URL("./electron/main.mjs", import.meta.url)).href);
 } catch (error) {
   console.error(`bench-launch-entry: the app's main module did not load: ${error?.stack ?? error}`);
   app.exit(66);

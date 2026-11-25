@@ -10,7 +10,8 @@ import { lendLine, useLendComputer } from "@/lib/use-lend-computer";
 import { cn } from "@/lib/cn";
 import { Switch } from "./SettingsPrimitives";
 
-type Look = "row" | "panel";
+/** `setting`: a Settings switch row's type (a 14 px title, a 13 px line), with no box of its own. */
+type Look = "row" | "panel" | "setting";
 
 /** `id`: the saved server on this app's own page, null on a server's own page. `onChoose`: Advanced's folders and terminal
  * for it, offered once it is on. `quietReasons`: reasons a Cloud or team gives are left out (a panel that isn't about
@@ -25,10 +26,11 @@ export function LendComputerSwitch({ id, look = "row", onChoose, quietReasons = 
     return <p data-lend-reason={view.why} className={cn("text-[12px] leading-4 text-ink-secondary", look === "panel" && "mt-3 text-center", className)}>{line}</p>;
   }
   const title = t("lend.title", { name: view.name });
-  return <div data-lend-switch={view.on ? "on" : "off"} className={cn("flex items-start gap-3 rounded-lg bg-inset px-3 py-2", look === "panel" && "mt-3 text-left", className)}>
+  const setting = look === "setting";
+  return <div data-lend-switch={view.on ? "on" : "off"} className={cn("flex items-start gap-3", !setting && "rounded-lg bg-inset px-3 py-2", look === "panel" && "mt-3 text-left", className)}>
     <div className="min-w-0 flex-1">
-      <div className="text-[12px] font-medium text-ink">{title}</div>
-      <div data-lend-line className="text-[12px] leading-4 text-ink-secondary">{line}</div>
+      <div className={setting ? "text-[14px] leading-5 text-ink" : "text-[12px] font-medium text-ink"}>{title}</div>
+      <div data-lend-line className={setting ? "mt-0.5 text-[13px] leading-[18px] text-ink-secondary" : "text-[12px] leading-4 text-ink-secondary"}>{line}</div>
       {view.on && view.screen === "permissions" && <button type="button" data-lend-allow disabled={lend.busy} onClick={() => void lend.allowScreen()}
         className="mt-1 text-[12px] font-medium text-accent-text hover:underline disabled:opacity-50">{t("lend.screen.allow")}</button>}
       {lend.error && <div role="alert" className="text-[12px] leading-4 text-danger">{lend.error}</div>}

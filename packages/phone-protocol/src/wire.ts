@@ -1,7 +1,7 @@
 /** The client-visible wire model for tasks, bots, messages and rooms. A field
  * here is one the server emits in every response and SSE frame that carries
  * the shape. */
-import type { PresenceFrame } from "./team-presence.ts"; import type { HandoffCardFields } from "./sign-in-request.ts";
+import type { PresenceFrame } from "./team-presence.ts"; import type { BoardItemFrame } from "./board.ts"; import type { HandoffCardFields } from "./sign-in-request.ts";
 import type { DataBroadcast } from "./data-surface.ts";
 import type { ApprovalMode } from "./approval-mode.ts";
 import type { ToolScope } from "./tool-scope.ts"; import type { ToolGroup } from "./tool-groups.ts";
@@ -995,6 +995,6 @@ export type ServerFrame =
   /** A job is waiting for the phone whose registry key this is; it polls now. */
   | { kind: "device.job"; phone: string; id: string }
   /** Who is here on a Team Cloud (shared/team-presence.ts). */
-  | PresenceFrame
+  | PresenceFrame | /** A Team Board item was made, changed or removed (board.ts). */ BoardItemFrame
   /** The config status object spread flat into the frame. */
   | ({ kind: "config" } & Record<string, unknown>);

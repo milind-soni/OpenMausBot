@@ -25,6 +25,10 @@ describe a setting from memory: read the setting, the file, or the page.
   page explains why something is built that way and what happens if.
 - When the two disagree the app wins, and say which one you checked. When
   neither has the setting, say it does not exist instead of inventing a name.
+- Which AI engines work here, why one can't run and how it is connected (a
+  subscription sign-in, a device code, an API key or a local program):
+  `list_models` says, per engine. Repeat what it says; if you have not checked,
+  say so rather than guessing about sign-in or billing.
 
 ## The data folder
 

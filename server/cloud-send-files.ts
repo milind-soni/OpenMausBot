@@ -31,7 +31,8 @@ export interface BotFile { path: string; size: number; sha256: string }
 
 export interface MoveFilesDeps {
   dataDir: string;
-  bots(): ReadonlyArray<{ id: string }>;
+  /** `movedTo.back`: the bot is coming back here (bot-moves.ts), and what it kept here gives way to what arrives. */
+  bots(): ReadonlyArray<{ id: string; movedTo?: { at: number } }>;
   owner(auth: RequestAuth): CloudOwner | null;
 }
 
@@ -155,13 +156,26 @@ async function readPart(dataDir: string, { path, offset, length }: z.infer<typeo
   } finally { await handle.close(); }
 }
 
+/** Where a bot coming back keeps the files it had here that a newer one took the place of. */
+export const SET_ASIDE_DIR = "move-back-kept";
+
+/** The file at `path` moved to `<dataDir>/move-back-kept/<hold>/<path>`; false when that could not be done. */
+async function setAside(dataDir: string, path: string, hold: string): Promise<boolean> {
+  const aside = `${SET_ASIDE_DIR}/${hold}/${path}`;
+  if (!(await realFolders(dataDir, aside))) return false;
+  if (await lstat(join(dataDir, aside)).catch(() => null)) return false;
+  try { await rename(join(dataDir, path), join(dataDir, aside)); return true; } catch { return false; }
+}
+
 /** One part of a file: 200 `{ received }` until the last, then 201 `{ stored }`, or 409 `{ conflict }` when the path holds a
  * file the move may not replace; 409 `{ received }` when the part does not start where My Cloud's copy ends. */
 async function takePart(deps: MoveFilesDeps, req: IncomingMessage, query: z.infer<typeof putSchema>): Promise<{ status: number; body: Record<string, unknown> }> {
   const { path, size, sha256, offset, mode, expect } = query;
   const botId = /^(?:workspaces|task-workspaces)\/([\w-]{1,128})\//u.exec(path)?.[1];
   if (!movedFilePath(path) || !botId) return { status: 400, body: { error: "not a bot file a move carries" } };
-  if (!deps.bots().some((bot) => bot.id === botId)) return { status: 409, body: { error: "This file's bot is not on My Cloud yet." } };
+  const bot = deps.bots().find((candidate) => candidate.id === botId);
+  if (!bot) return { status: 409, body: { error: "This file's bot is not on My Cloud yet." } };
+  const returning = (bot.movedTo as { back?: true; at: number } | undefined)?.back === true ? bot.movedTo!.at : null;
   const partial = partialPath(deps.dataDir, sha256, size);
   await mkdir(staging(deps.dataDir), { recursive: true, mode: 0o700 });
   const held = (await stat(partial).catch(() => null))?.size ?? 0;
@@ -180,6 +194,13 @@ async function takePart(deps: MoveFilesDeps, req: IncomingMessage, query: z.infe
   const there = await lstat(target).catch(() => null);
   if (there && !there.isFile()) return { status: 409, body: { conflict: true } };
   if (there && await sha256Of(target) === sha256) { await unlink(partial).catch(() => {}); return { status: 201, body: { stored: false } }; }
+  // The bot is coming back: the file it kept here is older than the one that arrives, which takes its place; the kept one
+  // is set aside under the data folder, never deleted.
+  if (there && returning !== null && await setAside(deps.dataDir, path, `${botId}-${returning}`)) {
+    await link(partial, target);
+    await unlink(partial).catch(() => {});
+    return { status: 201, body: { stored: true, setAside: true } };
+  }
   if (mode === "replace" && there && expect && await sha256Of(target) === expect) {
     const placed = join(staging(deps.dataDir), `${randomUUID()}.placing`);
     await link(partial, placed);

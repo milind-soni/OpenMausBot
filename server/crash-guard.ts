@@ -37,7 +37,7 @@ export function withTurnScope<I extends Pick<ProviderInstance, "adapter">>(insta
     ...adapter,
     sendTurn: (input) => runInTurn({ botId: input.botId ?? "", threadId: input.threadId }, () => adapter.sendTurn(input)),
     // An engine started ahead of its first turn is that conversation's too: what it throws later belongs to the turn that took it.
-    ...(adapter.prestart ? { prestart: { ...adapter.prestart, start: (input) => runInTurn({ botId: input.botId ?? "", threadId: input.threadId }, () => adapter.prestart!.start(input)) } } : {}),
+    ...(adapter.prestart ? { prestart: { ...adapter.prestart, start: (input, waitMs) => runInTurn({ botId: input.botId ?? "", threadId: input.threadId }, () => adapter.prestart!.start(input, waitMs)) } } : {}),
     onEvent: (listener) => adapter.onEvent((event) => outsideTurn(() => listener(event))),
   };
   return instance;

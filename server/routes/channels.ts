@@ -16,6 +16,8 @@ import {
 import { DATA_DIR, type AppConfig } from "../config.ts";
 import type { ProviderInstance, SteerOutcome } from "../contracts.ts";
 import { cancelledChatFollowup } from "../message-db.ts";
+import { roomThreadSummaries } from "../message-db-thread-summaries.ts";
+import type { RoomThreadSummariesResponse } from "../../shared/room-threads.ts";
 import { messageTextRefusal } from "../message-text.ts";
 import { prepareRoomPointed, roomPickBots, type RoomPick } from "../room-pointed.ts";
 import { refusalBody } from "../user-errors.ts";
@@ -84,6 +86,8 @@ export interface ChannelRouteDeps {
   personMarkRoom?(auth: RequestAuth, room: GroupRecord, unread: boolean, threadId?: string): WireGroup | null;
   /** A room as this person has read it (a Team Cloud); the room itself anywhere else. */
   groupFor?(auth: RequestAuth, group: WireGroup): WireGroup;
+  /** Whether this person may read the conversation; a room's threads all show where nobody's reading is narrowed. */
+  threadShown?(auth: RequestAuth, threadId: string): boolean;
   pageSize(raw: string | null): number | null | undefined;
   messagePage(threadId: string, limit: number | undefined): MessagePage;
   resolveReplyTarget(threadId: string, value: unknown): Message | undefined;
@@ -99,6 +103,11 @@ export interface ChannelRouteDeps {
     options: { via?: "api"; sender?: ResolvedSender; trigger?: UsageTrigger; threadId?: string; mentions?: string[]; pointed?: RoomPick },
   ): Message;
   applyRoomHoldsFromMessage(groupId: string, text: string, mentions?: readonly string[]): void;
+  /** A person's chat line in a thread whose board item waits on a person: the line addressed to the bot that asked, and
+   * the move that takes the item back to work once it is sent. Null for every other thread (board/wiring.ts). */
+  boardReply?(groupId: string, threadId: string, text: string): { text: string; botId: string; resume(): void } | null;
+  /** What a resent line may have been saved as by `boardReply`. */
+  boardAddressed?(groupId: string, threadId: string, text: string): string | null;
   cancelGroupTurnOperations(groupId: string, threadId: string): void;
   /** Whether this bot's live turn in the thread is a job another bot handed it. */
   speakerOnHandedWork(threadId: string, botId: string): boolean;
@@ -110,7 +119,7 @@ export interface ChannelRouteDeps {
   rejectDeletedThreadSkillStages(cleanups: Array<{ botId: string; stagedId: string }>): void;
 }
 
-const createGroupTaskRequestSchema = z.object({ title: z.string().optional() });
+const createGroupTaskRequestSchema = z.object({ title: z.string().optional(), activate: z.boolean().optional() });
 
 type StopAnswer = { status: 200 | 403 | 409; body: { ok: true } | { error: string; code?: "stop_not_yours" } };
 
@@ -180,11 +189,21 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       }
       const request = createGroupTaskRequestSchema.safeParse(body);
       if (!request.success) return json(res, 400, { error: "title must be text" });
-      const task = store.createGroupTask(group.id, request.data.title);
+      const task = store.createGroupTask(group.id, request.data.title, request.data.activate !== false);
       if (!task) return json(res, 500, { error: "couldn't create that task" });
       // Who opened it decides who may answer its cards on a shared workspace.
       if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));
       return json(res, 201, { group: own(groupWithThread(store.group(group.id)!)), task } satisfies RoomTaskCreateResponse);
+    }
+
+    m = path.match(/^\/api\/groups\/([\w-]+)\/threads\/summary$/);
+    if (m && method === "GET") {
+      const group = store.group(m[1]);
+      if (!group || group.dm) return json(res, 404, { error: "no such room" });
+      const archived = url.searchParams.get("archived") === "1";
+      const threadIds = (group.tasks ?? [{ threadId: group.threadId, archivedAt: undefined }]).filter((task) => (archived || task.archivedAt === undefined) && (deps.threadShown?.(auth, task.threadId) ?? true))
+        .map((task) => task.threadId);
+      return json(res, 200, { threads: roomThreadSummaries(threadIds) } satisfies RoomThreadSummariesResponse);
     }
 
     m = path.match(/^\/api\/groups\/([\w-]+)\/tasks\/delete$/);
@@ -413,7 +432,9 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
             if (cancelledChatFollowup("channel", group.id, threadId, sendId)) {
               throw Object.assign(new Error("this queued sendId was cancelled; send a new message to try again"), { status: 409 });
             }
-            const accepted = acceptedSendMatch(store.messagesFor(threadId), sendId, text, replyTo?.id, channelMode);
+            let accepted = acceptedSendMatch(store.messagesFor(threadId), sendId, text, replyTo?.id, channelMode);
+            const addressed = accepted.kind === "conflict" ? deps.boardAddressed?.(group.id, threadId, text) : null;
+            if (addressed) accepted = acceptedSendMatch(store.messagesFor(threadId), sendId, addressed, replyTo?.id, channelMode);
             if (accepted.kind === "conflict") {
               throw Object.assign(new Error("sendId already belongs to another message"), { status: 409 });
             }
@@ -423,7 +444,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
             const queued = queuedChannelMessage(group.id, threadId, sendId);
             if (queued) {
               if (
-                queued.text !== text ||
+                (queued.text !== text && queued.text !== deps.boardAddressed?.(group.id, threadId, text)) ||
                 queued.replyToId !== replyTo?.id ||
                 queued.mode !== channelMode
               ) {
@@ -455,22 +476,26 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
             : sameNameRefusal(text, members, mentions, conversationLanguage(threadId));
           if (sameName) throw Object.assign(new Error(sameName), { status: 409 });
           if (channelMode === "chat" && !owners.stopRefusal(auth, threadId)) applyRoomHoldsFromMessage(current.id, text, mentions);
+          const board = channelMode === "chat" && !via && (trigger.kind === "user" || trigger.kind === "owner") ? deps.boardReply?.(current.id, threadId, text) ?? null : null;
+          const lineText = board?.text ?? text, lineMentions = board ? [...new Set([...(mentions ?? []), board.botId])] : mentions;
           const threadWorking = groupThreadIsWorking(current.id, threadId);
           const decision = admit("room", {}, { roomWorking: threadWorking, threadWorking });
           if (decision.action === "queue") {
-            const queued = queueChannelMessage(current.id, threadId, text, {
+            const queued = queueChannelMessage(current.id, threadId, lineText, {
               replyToId: replyTo?.id,
               sendId,
               mode: channelMode,
               via,
               sender: messageSender(auth),
               trigger,
-              mentions,
+              mentions: lineMentions,
               ...(pick ? { pointed: pick } : {}),
             });
+            board?.resume();
             return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
           }
-          const message = startGroupTurn(current.id, text, replyTo, sendId, channelMode, undefined, { via, sender: messageSender(auth), trigger, threadId, mentions, ...(pick ? { pointed: pick } : {}) });
+          const message = startGroupTurn(current.id, lineText, replyTo, sendId, channelMode, undefined, { via, sender: messageSender(auth), trigger, threadId, mentions: lineMentions, ...(pick ? { pointed: pick } : {}) });
+          board?.resume();
           return { ok: true as const, threadId, message };
         },
       );

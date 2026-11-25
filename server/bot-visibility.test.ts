@@ -241,6 +241,19 @@ describe("live frames for a member", () => {
       .toEqual({ kind: "bot", bot: { id: "corp" } });
   });
 
+  it("sends a board item only to someone who sees both its room and its thread", () => {
+    const ctx = context(new VisibleSet(bots, groups, BOB));
+    const shown = { kind: "board.item", groupId: "room-pub", threadId: "t-room-pub", item: null };
+    expect(frameForMember(shown, ctx, seen())).toBe(shown);
+    for (const frame of [
+      { kind: "board.item", groupId: "room-mixed", threadId: "t-room-mixed-2", item: { title: "Payroll run" } },
+      { kind: "board.item", groupId: "room-pub", threadId: "t-hr", item: null },
+      { kind: "board.item", groupId: "room-mixed", threadId: "t-room-pub", item: null },
+      { kind: "board.item", threadId: "t-room-pub", item: null },
+      { kind: "board.item", groupId: "room-pub", item: null },
+    ]) expect(frameForMember(frame, ctx, seen()), JSON.stringify(frame)).toBeUndefined();
+  });
+
   it("withdraws a bot once when it becomes hidden, and sends it whole when it appears", () => {
     const state = seen();
     const before = new VisibleSet(bots, groups, BOB);

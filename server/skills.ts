@@ -36,15 +36,7 @@ import {
 import { workspaceDir } from "./workspace.ts";
 import { isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
 
-export {
-  DESCRIPTION_MAX,
-  isSkillName,
-  parseSkillMd,
-  scanSkillText,
-  SKILL_FILE_MAX_BYTES,
-  SKILL_NAME_MAX,
-  type ParsedSkill,
-} from "../shared/skill-md.ts";
+export { DESCRIPTION_MAX, isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, SKILL_NAME_MAX, type ParsedSkill } from "../shared/skill-md.ts";
 export { STAGED_SKILL_FILE_MAX_BYTES } from "./skill-storage.ts";
 
 export const INDEX_MAX_SKILLS = 30;
@@ -71,7 +63,9 @@ export interface SkillManifestEntry {
   appliedStageId?: string;
   storageRevision?: string;
   package?: SkillPackageStamp;
+  /** This bot's copy of a skill on all of the person's bots (skills-for-all-bots.ts); `adopted`: it had the same one before. */ allBots?: SharedSkillMark;
 }
+export interface SharedSkillMark { store: string; sha256: string; adopted?: true }
 
 export interface SkillPackageStamp {
   installId: string;
@@ -101,14 +95,9 @@ const skillManifestEntrySchema = z.object({
   github: githubSkillOriginSchema.optional(),
   appliedStageId: z.string().optional(),
   storageRevision: z.string().regex(/^[a-f0-9]{64}$/).optional(),
-  package: z.object({
-    installId: z.string().regex(/^[a-f0-9]{32}$/),
-    key: z.string().min(1).max(64),
-    release: z.string().min(1).max(40),
-    r: z.string().regex(/^[a-f0-9]{64}$/),
-    w: z.string().regex(/^[a-f0-9]{64}$/),
-    via: z.literal("preset").optional(),
-  }).optional(),
+  package: z.object({ installId: z.string().regex(/^[a-f0-9]{32}$/), key: z.string().min(1).max(64), release: z.string().min(1).max(40),
+    r: z.string().regex(/^[a-f0-9]{64}$/), w: z.string().regex(/^[a-f0-9]{64}$/), via: z.literal("preset").optional() }).optional(),
+  allBots: z.object({ store: z.string().max(64), sha256: z.string().max(200), adopted: z.literal(true).optional() }).optional(),
 });
 const skillManifestSchema = z.record(z.string(), skillManifestEntrySchema);
 
@@ -466,6 +455,8 @@ export interface SkillListing {
   skippedFiles: string[];
   files?: string[];
   github?: GitHubSkillOrigin;
+  /** On all of the person's bots: this is the bot's copy, its switch the bot's own. */
+  allBots?: true;
 }
 
 function skillContentMatches(botId: string, name: string, entry: SkillManifestEntry): boolean {
@@ -485,11 +476,12 @@ function skillContentMatches(botId: string, name: string, entry: SkillManifestEn
 }
 
 function skillListing(botId: string, name: string, entry: SkillManifestEntry): SkillListing {
-  const { appliedStageId, storageRevision: _storageRevision, package: _package, ...visible } = entry;
+  const { appliedStageId, storageRevision: _storageRevision, package: _package, allBots: mark, ...visible } = entry;
   const intact = skillContentMatches(botId, name, entry);
   return {
     name,
     ...visible,
+    ...(mark && sharedSkills?.current(botId, mark) ? { allBots: true as const } : {}),
     enabled: entry.enabled && intact,
     editable: entry.source.startsWith(LEARN_SOURCE_PREFIX) && Boolean(appliedStageId),
     warnings: intact
@@ -498,7 +490,15 @@ function skillListing(botId: string, name: string, entry: SkillManifestEntry): S
   };
 }
 
+let sharedSkills: { list(botId: string): void; current(botId: string, mark: SharedSkillMark): boolean } | null = null;
+/** skills-for-all-bots.ts brings a bot's copies of the person's all-bots skills up to date as its skills are listed. */
+export function setSharedSkills(hooks: typeof sharedSkills): void { sharedSkills = hooks; }
+export function setSharedSkillMark(botId: string, name: string, mark: SharedSkillMark | undefined): void {
+  const manifest = readManifest(botId), entry = manifest[name]; if (!entry) return; if (mark) entry.allBots = mark; else delete entry.allBots; writeManifest(botId, manifest);
+}
+
 export function listSkills(botId: string): SkillListing[] {
+  sharedSkills?.list(botId);
   const manifest = readManifest(botId);
   return Object.entries(manifest)
     .map(([name, entry]) => skillListing(botId, name, entry))
