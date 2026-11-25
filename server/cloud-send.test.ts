@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BOT_PARTS, EMPTY, PICTURE_PART, itemKey } from "../electron/cloud-send-parts.mjs";
+import { BOT_PARTS, EMPTY, PICTURE_PART, itemKey, parseSendSummary, planSend } from "../electron/cloud-send-parts.mjs";
 import { botParts, cloudSendSummary, partHash, unused, type CloudSendSources } from "./cloud-send.ts";
 import { keptBotIds } from "./routes/bots-create.ts";
 import type { BotRecord } from "./store.ts";
@@ -108,5 +108,31 @@ describe("a bot sent from the person's other computer keeps its id", () => {
     expect(keptBotIds({ id: "Ember-0001-4eea-ac52" }, here)).toEqual({ error: "a bot with this id already exists here" });
     // An id that names no bot here, exactly or in another case, is taken as usual.
     expect(keptBotIds({ id: "ember-0002-4eea-ac52" }, here)).toEqual({ id: "ember-0002-4eea-ac52" });
+  });
+});
+
+describe("a bot coming back to the place it left", () => {
+  const stub = (movedTo: object) => bot({ hidden: true, title: "Old title", movedTo } as Partial<BotRecord>);
+  const routine = { key: "routine:r1", kind: "routine" as const, label: "Daily", id: "r1", bot: "ember-0001", parts: { def: "aaa" } };
+  const move = { items: () => [routine], botParts: () => ({ archived: "x" }) };
+
+  it("is listed where it comes to while it is held as returning, marked with its skills and routines; as a stub it is not", () => {
+    const leaving = (movedTo: object) => cloudSendSummary(sources({ bots: () => [stub(movedTo)], move }), { move: true, leaving: true });
+    expect(leaving({ team: { id: "my-cloud", name: "My Cloud" }, state: "moved", at: 1 }).items.filter((item) => item.kind === "bot")).toEqual([]);
+    const coming = leaving({ team: { id: "my-cloud", name: "My Cloud" }, state: "moving", at: 1, back: true });
+    expect(coming.items.filter((item) => item.bot === "ember-0001" || item.key === itemKey.bot("ember-0001")).map((item) => [item.key, item.returning])).toEqual([
+      [itemKey.bot("ember-0001"), true], [itemKey.skill("ember-0001", "weekly-summary"), true], ["routine:r1", true]]);
+    expect(cloudSendSummary(sources({ move }), { move: true }).items.some((item) => item.returning), "a bot that is not coming back is not marked").toBe(false);
+  });
+
+  it("takes what the place it comes from has, over what its line kept, even where an earlier send left both agreeing", () => {
+    const there = { v: 1 as const, appVersion: "x", items: [{ key: itemKey.bot("ember-0001"), kind: "bot", label: "Ember", parts: { title: "new", soul: "same", archived: EMPTY } }, { ...routine, parts: { def: "bbb" } }] };
+    const here = parseSendSummary({ v: 1, appVersion: "x", items: [{ key: itemKey.bot("ember-0001"), kind: "bot", label: "Ember", parts: { title: "old", soul: "same", archived: "hid" }, returning: true },
+      { ...routine, returning: true }] });
+    const sent = { [itemKey.bot("ember-0001")]: { title: ["new", "old"] as [string, string] } };
+    const plan = planSend({ local: there as never, cloud: here, sent });
+    expect(plan.rows.map((row) => [row.key, row.state, row.parts])).toEqual([[itemKey.bot("ember-0001"), "to-update", ["title", "archived"]], ["routine:r1", "to-update", ["def"]]]);
+    const plain = planSend({ local: there as never, cloud: parseSendSummary({ ...here, items: here!.items.map(({ returning: _returning, ...item }) => item) }), sent });
+    expect(plain.rows[0]!.state, "without the mark, the line's own values are kept").toBe("differs");
   });
 });

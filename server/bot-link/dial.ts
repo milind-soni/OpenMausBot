@@ -6,6 +6,15 @@
 // the other has not acknowledged. The Cloud's answer that it sleeps stops the asking until this computer has work for it
 // or the app says the Cloud is awake (`start`), since any request would start a sleeping Cloud; the app looks every
 // minute and never asks the Cloud itself to find out.
+//
+// Work a person waits on (a hand-off or room turn from a person's own line: `onWanted(true)`) may wake a parked Cloud:
+// the exchanges that follow are not marked background until one is answered, so the Cloud counts them as use and answers
+// them even if it has not yet noticed it was woken. Such a wake is bounded: WAKE_TRIES exchanges within WAKE_MS, and
+// WAKES_PER_HOUR wakes an hour; one that gets no answer parks the link again until new work or the app's "awake".
+// Work no person waits on (a routine's, a scheduled run's) unparks the link with background exchanges, as before.
+// Everything else (directory news, idle polls) stays background and is never sent while parked, so it never wakes the
+// Cloud or keeps it awake. An answer to a foreground exchange is the Cloud's own word that it is awake: the app's
+// "asleep" heard before it is stale and parks nothing; only one heard after it does.
 import { createWriteStream, openAsBlob, rmSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { Readable, Transform } from "node:stream";
@@ -21,6 +30,10 @@ const POWER_HEADER = "x-omb-cloud-power";
 const BACKGROUND_HEADER = "x-omb-background";
 /** One file may take this long to cross. */
 const FILE_MS = 10 * 60_000;
+/** A wake for work a person waits on: this long and this many exchanges at most (a stopped Cloud takes about 20 s to
+ * start), and this many wakes in any hour. */
+export const WAKE_MS = 150_000, WAKE_TRIES = 6, WAKES_PER_HOUR = 3;
+const HOUR_MS = 60 * 60_000;
 
 export interface DialerOptions {
   link: BotLink;
@@ -30,10 +43,17 @@ export interface DialerOptions {
   firstRetryMs?: number;
   /** What this computer says its version reads; a test stands in for an older app with it. */
   level?: number;
+  now?: () => number;
 }
 
-export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, holdMs = HOLD_MS, firstRetryMs = FIRST_RETRY_MS, level = PROTOCOL_LEVEL }: DialerOptions) {
+export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, holdMs = HOLD_MS, firstRetryMs = FIRST_RETRY_MS, level = PROTOCOL_LEVEL, now = Date.now }: DialerOptions) {
   let running = false, stopped = true, asleep = false, needsPairing = false;
+  /** `wake`: work a person waits on is waking the Cloud until `wakeUntil` or WAKE_TRIES exchanges (`wakeTries`), so
+   * exchanges are not background until one is answered; `wakes`: when each wake of the last hour began. `provedAt`: when
+   * the Cloud last answered a foreground exchange (its own word that it is awake); `staleSaid`: the app's last "asleep"
+   * that was older, so it is logged once. */
+  let wake = false, wakeUntil = 0, wakeTries = 0, provedAt = -Infinity, staleSaid: number | undefined | null = null;
+  const wakes: number[] = [];
   let session = "", ack = 0, fresh = true, retryMs = firstRetryMs;
   let active: AbortController | null = null, held: AbortController | null = null;
   let wakeUp: (() => void) | null = null;
@@ -93,10 +113,35 @@ export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, h
   };
   link.setTransfer(transfer);
   const stopListening = link.onOutgoing(() => { held?.abort(); });
-  const stopWanted = link.onWanted(() => { if (stopped) return; asleep = false; retryMs = firstRetryMs; wakeUp?.(); });
+  /** The wake had its time or its tries without an answer. */
+  const wakeOver = () => wake && (now() >= wakeUntil || wakeTries >= WAKE_TRIES);
+  const endWake = (peer: string | null) => { if (!wake) return; wake = false; if (peer) link.setWaking(peer, false); };
+  const stopWanted = link.onWanted((person) => {
+    if (stopped) return;
+    if (wake && !wakeOver()) { wakeUp?.(); return; }
+    const peer = link.cloudPeer(), at = now();
+    while (wakes.length && at - wakes[0]! >= HOUR_MS) wakes.shift();
+    if (person && asleep && peer && !needsPairing && link.dial() && wakes.length < WAKES_PER_HOUR) {
+      wakes.push(at);
+      wake = true; wakeUntil = at + WAKE_MS; wakeTries = 0;
+      link.setWaking(peer, true);
+    }
+    asleep = false; retryMs = firstRetryMs;
+    wakeUp?.();
+  });
+  /** The Cloud answered that it sleeps, the app's word parks the link, or a wake got no answer: nothing asks it until
+   * there is new work for it or the app says it is awake. */
+  const park = (peer: string | null) => {
+    asleep = true; fresh = true; provedAt = -Infinity;
+    endWake(peer);
+    link.setSleeps(true);
+    if (peer) link.setOnline(peer, false);
+  };
 
   async function exchange(target: { origin: string; token: string }, peer: string): Promise<void> {
-    if (fresh) link.sessionStarted(peer);
+    // A new session takes everything the Cloud sends again from the start: a Cloud that ended this link and paired it again
+    // numbers its frames from one again, and a count kept from before would pass over its hello.
+    if (fresh) { link.sessionStarted(peer); ack = 0; }
     const sending = link.outgoing(peer, 0);
     const controller = new AbortController();
     active = controller;
@@ -104,24 +149,25 @@ export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, h
     timeout.unref?.();
     const wait = sending.length > 0 || fresh ? 0 : holdMs;
     if (wait > 0) held = controller;
+    const foreground = wake || carriesWork(sending);
+    if (wake) wakeTries += 1;
     try {
       const response = await fetchImpl(`${target.origin}${SYNC_PATH}`, {
         method: "POST", redirect: "error", cache: "no-store", signal: controller.signal,
         headers: { "content-type": "application/json", accept: "application/json", authorization: `Bearer ${target.token}`, origin: target.origin, [LEVEL_HEADER]: String(level),
-          ...(carriesWork(sending) ? {} : { [BACKGROUND_HEADER]: "1" }) },
+          ...(foreground ? {} : { [BACKGROUND_HEADER]: "1" }) },
         body: JSON.stringify({ fresh, ack, frames: sending.map((entry) => entry.frame), wait }),
       });
       controller.signal.throwIfAborted();
       if (response.status === 503 && response.headers.get(POWER_HEADER) === "asleep") {
         await response.body?.cancel();
-        asleep = true; fresh = true;
-        link.setSleeps(true);
-        link.setOnline(peer, false);
+        park(peer);
         return;
       }
       if (response.status === 401 || response.status === 403) {
         await response.body?.cancel();
         needsPairing = true;
+        endWake(peer);
         link.setOnline(peer, false);
         return;
       }
@@ -130,6 +176,7 @@ export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, h
       controller.signal.throwIfAborted();
       const answer = syncAnswer.safeParse(data);
       if (!answer.success) throw new Error("the Cloud's answer did not parse");
+      if (foreground) { provedAt = now(); wake = false; }
       link.outgoing(peer, sending.at(-1)?.seq ?? 0);
       if (answer.data.session !== session) {
         const restarted = session !== "";
@@ -160,10 +207,17 @@ export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, h
         const target = link.dial(), peer = link.cloudPeer();
         if (!target || !peer || needsPairing) break;
         if (asleep) { await pause(24 * 60 * 60_000); continue; }
+        if (wakeOver()) { park(peer); continue; }
         try { await exchange(target, peer); } catch (error) {
           if (stopped) break;
           link.setOnline(peer, false);
-          fresh = true;
+          // The Cloud no longer answers, so its last answer proves nothing about now: the app's word governs again.
+          fresh = true; provedAt = -Infinity;
+          if (wakeOver()) {
+            log("bot link: the Cloud did not answer while it was woken for work; it is left asleep until there is new work or the app says it is awake");
+            park(peer);
+            continue;
+          }
           if (!asleep) log(`bot link: the Cloud could not be reached (${error instanceof Error ? error.message : String(error)}); trying again in ${Math.round(retryMs / 1000)} s`);
           await pause(retryMs * (0.75 + Math.random() / 2));
           retryMs = Math.min(retryMs * 2, MAX_RETRY_MS);
@@ -189,15 +243,28 @@ export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, h
      * there is work for it. */
     start({ gentle = false }: { gentle?: boolean } = {}): void {
       stopped = false; asleep = gentle && link.sleeps(); needsPairing = false; fresh = true; retryMs = firstRetryMs;
+      endWake(link.cloudPeer());
       wakeUp?.();
       void loop();
     },
-    /** The app says the Cloud sleeps now: nothing asks it until there is work for it or it is awake again. */
-    sleep(): void { if (!stopped) { link.setSleeps(true); asleep = true; fresh = true; const peer = link.cloudPeer(); if (peer) link.setOnline(peer, false); active?.abort(); } },
+    /** The app says the Cloud sleeps now: nothing asks it until there is work for it or it is awake again. `heardAt`: when
+     * the app first heard that word (this computer's clock). It parks nothing while work a person waits on is waking the
+     * Cloud (within the wake's bounds), or when the Cloud has answered such work since: the Admin's word lags the Cloud's. */
+    sleep(heardAt?: number): void {
+      if (stopped) return;
+      if ((wake && !wakeOver()) || (heardAt !== undefined && heardAt <= provedAt)) {
+        if (staleSaid !== heardAt) log(`bot link: the app says the Cloud sleeps, but it has answered since${wake ? " (waking it for work)" : ""}; the link stays up`);
+        staleSaid = heardAt;
+        return;
+      }
+      park(link.cloudPeer());
+      active?.abort();
+    },
     /** Stops asking. `bye`: the link was turned off here, so the Cloud is told once, unless it sleeps. True when it knows. */
     async stop({ bye: tell = false }: { bye?: boolean } = {}): Promise<boolean> {
       const target = link.dial(), sleeping = asleep;
       stopped = true;
+      endWake(link.cloudPeer());
       active?.abort();
       wakeUp?.();
       return tell && target !== null && !sleeping ? bye(target) : false;

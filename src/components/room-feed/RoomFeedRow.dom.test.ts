@@ -3,9 +3,10 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
-import { RoomFeedRow, type FeedRowData } from "./RoomFeedRow";
+import { RoomFeedRow, type FeedRowActions, type FeedRowData } from "./RoomFeedRow";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+vi.mock("@/state/api", async (original) => ({ ...(await original<typeof import("@/state/api")>()), api: vi.fn(() => new Promise(() => {})) }));
 
 const NOW = Date.UTC(2026, 10, 24, 12, 0, 0);
 const bot = (id: string, name: string, color: Bot["color"]) => ({ id, name, color, threadId: `${id}-main`, messages: [] } as unknown as Bot);
@@ -16,11 +17,13 @@ const row = (extra: Partial<FeedRowData> = {}): FeedRowData => ({
 });
 
 let root: Root | null = null;
-const render = (data: FeedRowData, onOpen = vi.fn(), open = false) => {
+const render = (data: FeedRowData, onOpen = vi.fn(), open = false, actions?: FeedRowActions) => {
   root = createRoot(document.body.appendChild(document.createElement("ol")));
-  act(() => root!.render(createElement(RoomFeedRow, { row: data, bots: BOTS, you: "Sam", now: NOW, open, onOpen })));
+  act(() => root!.render(createElement(RoomFeedRow, { row: data, groupId: "room", bots: BOTS, you: "Sam", now: NOW, open, onOpen, actions })));
   return onOpen;
 };
+const roomActions = (deletable = true): FeedRowActions => ({ onRename: vi.fn(), onDelete: vi.fn(), onPin: vi.fn(), onArchive: vi.fn(), deletable });
+const menuItem = (label: string) => [...document.querySelectorAll<HTMLButtonElement>("[data-thread-overlay] button")].find((button) => button.textContent?.includes(label));
 const item = () => document.querySelector<HTMLElement>("[data-feed-thread]")!;
 afterEach(() => { act(() => root?.unmount()); root = null; document.body.innerHTML = ""; });
 
@@ -82,5 +85,46 @@ describe("a room feed row", () => {
     render(row(), vi.fn(), true);
     expect(item().querySelector("button")!.getAttribute("aria-current")).toBe("true");
     expect(item().className).toContain("bg-raised");
+  });
+
+  it("gives a thread the sidebar row's menu from a quiet More button: pin, archive and rename it there", () => {
+    const actions = roomActions();
+    render(row({ title: "Launch plan" }), vi.fn(), false, actions);
+    const more = item().querySelector<HTMLButtonElement>('button[aria-label="Actions for Launch plan"]')!;
+    expect(more.className).toContain("group-hover:opacity-100");
+    expect(more.className).toContain("focus-visible:opacity-100");
+    expect(more.className).toContain("touch:opacity-70");
+    act(() => more.click());
+    expect(more.getAttribute("aria-expanded")).toBe("true");
+    expect(["Rename thread", "Pin", "Archive", "Delete"].every((label) => menuItem(label))).toBe(true);
+    act(() => menuItem("Pin")!.click());
+    expect(actions.onPin).toHaveBeenCalledWith(expect.objectContaining({ threadId: "t1", title: "Launch plan" }), true);
+    act(() => more.click());
+    act(() => menuItem("Archive")!.click());
+    expect(actions.onArchive).toHaveBeenCalledWith(expect.objectContaining({ threadId: "t1" }), expect.any(Number));
+    act(() => more.click());
+    act(() => menuItem("Rename thread")!.click());
+    const field = item().querySelector<HTMLInputElement>('input[aria-label="Rename thread"]')!;
+    expect(field.value).toBe("Launch plan");
+    act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, "Launch week"); field.dispatchEvent(new Event("input", { bubbles: true })); });
+    act(() => { field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+    expect(actions.onRename).toHaveBeenCalledWith(expect.objectContaining({ threadId: "t1" }), "Launch week");
+  });
+
+  it("marks a pinned thread with the pin, an archived one as archived with Unarchive in its menu, keeps a room's only thread, and gives a line on its way no menu", () => {
+    render(row({ title: "Launch plan", pinned: true, archived: true }), vi.fn(), false, roomActions());
+    expect(item().querySelector("[data-feed-pinned]")?.getAttribute("aria-label")).toBe("Pin");
+    expect(item().textContent).toContain("Archived");
+    act(() => item().querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
+    expect(menuItem("Unpin")).toBeDefined();
+    expect(menuItem("Unarchive")).toBeDefined();
+    act(() => root!.unmount());
+    render(row({ title: "Only thread" }), vi.fn(), false, roomActions(false));
+    act(() => item().querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
+    expect(menuItem("Archive")).toBeDefined();
+    expect(menuItem("Delete")).toBeUndefined();
+    act(() => root!.unmount());
+    render(row({ threadId: "" }), vi.fn(), false, roomActions());
+    expect(item().querySelector("button[aria-expanded]")).toBeNull();
   });
 });

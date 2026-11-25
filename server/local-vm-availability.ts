@@ -9,6 +9,7 @@ export interface LocalVmRuntimeStatus {
 
 const RECHECK_MS = 60_000;
 
+/** The first check starts at once, so the answer is known before the first turn lists its tools. */
 export function createLocalVmAvailability(probe: () => Promise<LocalVmRuntimeStatus>, now: () => number = Date.now) {
   let usable = true;
   let checkedAt = 0;

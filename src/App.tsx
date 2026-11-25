@@ -8,7 +8,7 @@ import { MausBotWelcome } from "@/components/MausBotWelcome";
 import { NewBotNameHost } from "@/components/NewBotName";
 import { MemberApps } from "@/components/MemberApps";
 import { CloudTimeZoneSync } from "@/components/CloudTimeZone";
-import { cloudSignInDue, spotlightsQuiet, type WelcomeViewer } from "@/lib/onboarding";
+import { cloudSignInDue, noEnginesDue, spotlightsQuiet, workedEarlier, type WelcomeViewer } from "@/lib/onboarding";
 import { FirstConversationTour } from "@/components/onboarding/FirstConversationTour";
 import { GuidedTour } from "@/components/onboarding/GuidedTour";
 import { LiveCallHost } from "@/components/LiveCallHost";
@@ -223,11 +223,9 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const sidebarBesidePanel = anySidePanel(panelsMovingSidebar(sidePanels)) && !sidebarAndPanelFit;
   const notificationTray = notificationFeed && !calendarFocus;
 
-  const noEngines =
-    state.connected &&
-    state.instances.length > 0 &&
-    !state.instances.some((i) => i.snapshot.state === "available");
-  const cloudSignIn = cloudSignInDue(viewer, state, engineReady);
+  // Only engines truly absent, never status checks that could not finish on a busy machine (onboarding.ts).
+  const noEngines = noEnginesDue(state);
+  const cloudSignIn = cloudSignInDue(viewer, state, (instance) => engineReady(instance) || instance.snapshot.busy === true || (workedEarlier(instance) && instance.snapshot.authenticated !== false));
   const cloudIntent = useCloudIntent();
   const cloudAsk = cloudIntentShown(cloudIntentDue({
     viewer, connected: state.connected, enginesKnown: state.instances.length > 0,

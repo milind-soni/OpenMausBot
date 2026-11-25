@@ -1,8 +1,10 @@
 // A room as a feed of its threads, in the real renderer: with Settings → Features → Room feed on, a room of two bots
 // shows each thread's first line and its replies, a row opens its thread beside the feed, and a line sent from the
-// feed's composer starts a thread of its own there while the room's current thread stays where it was. With the switch
-// off the room is its single transcript again. Needs the pinned agent-browser binary: runs when one resolves (tools
-// directory, OMB_AGENT_BROWSER_PATH or PATH) or OMB_UI_E2E=1 asks for the verified download; otherwise skipped.
+// feed's composer starts a thread of its own there while the room's current thread stays where it was. A row's menu
+// pins, archives and deletes its thread, archived ones come back under Show archived threads, and the panel beside
+// the feed renames and deletes the thread it holds. With the switch off the room is its single transcript again.
+// Needs the pinned agent-browser binary: runs when one resolves (tools directory, OMB_AGENT_BROWSER_PATH or PATH) or
+// OMB_UI_E2E=1 asks for the verified download; otherwise skipped.
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -85,7 +87,7 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     expect(await evaluate(`Boolean(document.querySelector('[aria-expanded][aria-label*="Launch room"]'))`)).toBe(false);
     await ui("screenshot", "--out", join(evidenceDir, "room-feed.png"));
 
-    await evaluate("document.querySelectorAll('[data-feed-thread] button')[1].click(); true");
+    await evaluate("document.querySelectorAll('[data-feed-thread] > button:first-child')[1].click(); true");
     const opened = await until(() => evaluate("document.querySelector('[data-thread-panel]')?.getAttribute('data-thread-panel')"), "the thread to open beside the feed");
     await until(() => evaluate("document.querySelector('[data-thread-panel]').textContent.includes('Who has the logo files?')"), "the thread's lines in the panel");
     expect(await current()).toBe(room.threadId);
@@ -104,6 +106,57 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     expect(transcript.find((message) => message.role === "user")?.text).toBe("Draft the outage email");
     expect(await current()).toBe(room.threadId);
     await ui("screenshot", "--out", join(evidenceDir, "room-feed-new-thread.png"));
+
+    const row = (threadId: string) => `[data-feed-thread="${threadId}"]`;
+    const menuItem = (label: string) => `[...[...document.querySelectorAll('[data-thread-overlay]')].at(-1)?.querySelectorAll('button') ?? []].find((button) => button.textContent.includes(${JSON.stringify(label)}))`;
+    const tasks = async () => ((await api("GET", "/api/bots")).groups as Array<{ id: string; tasks: Array<{ threadId: string; title: string; pinned?: boolean; archivedAt?: number }> }>).find((group) => group.id === room.id)!.tasks;
+    const [, logos] = await evaluate("[...document.querySelectorAll('[data-feed-thread]')].map((item) => item.getAttribute('data-feed-thread'))") as string[];
+    await evaluate(`document.querySelector('${row(logos!)} button[aria-expanded]').click(); true`);
+    await until(() => evaluate(`Boolean(${menuItem("Pin")})`), "the row's menu");
+    await evaluate(`${menuItem("Pin")}.click(); true`);
+    await until(async () => (await tasks()).find((task) => task.threadId === logos)?.pinned === true, "the thread to be pinned");
+    await until(() => evaluate(`Boolean(document.querySelector('${row(logos!)} [data-feed-pinned]'))`), "the pin on its row");
+
+    await evaluate(`document.querySelector('${row(logos!)} button[aria-expanded]').click(); true`);
+    await until(() => evaluate(`Boolean(${menuItem("Archive")})`), "the row's menu again");
+    await evaluate(`${menuItem("Archive")}.click(); true`);
+    await until(() => evaluate(`!document.querySelector('${row(logos!)}')`), "the archived thread to leave the feed");
+    await evaluate("document.querySelector('[data-feed-archived-toggle]').click(); true");
+    await until(() => evaluate(`Boolean(document.querySelector('${row(logos!)}'))`), "the archived thread to show again");
+    await evaluate(`document.querySelector('${row(logos!)} button[aria-expanded]').click(); true`);
+    await until(() => evaluate(`Boolean(${menuItem("Unarchive")})`), "Unarchive in its menu");
+    await evaluate(`${menuItem("Unarchive")}.click(); true`);
+    await until(async () => (await tasks()).find((task) => task.threadId === logos)?.archivedAt === undefined, "the thread to come back");
+
+    await evaluate(`document.querySelector('${row(logos!)} > button:first-child').click(); true`);
+    await until(() => evaluate(`document.querySelector('[data-thread-panel]')?.getAttribute('data-thread-panel') === ${JSON.stringify(logos)}`), "the thread beside the feed");
+    await browse("click", "[data-thread-panel] header button[aria-expanded]");
+    await until(() => evaluate(`Boolean(${menuItem("Download as .md")})`), "the panel's menu with the thread's export");
+    await evaluate(`${menuItem("Rename thread")}.click(); true`);
+    await until(() => evaluate("document.activeElement === document.querySelector('[data-thread-panel] header input')"), "the title's field");
+    await browse("fill", "[data-thread-panel] header input", "Logo files");
+    await browse("press", "Enter");
+    await until(async () => (await tasks()).find((task) => task.threadId === logos)?.title === "Logo files", "the thread's new title");
+    expect(await evaluate("document.querySelector('[data-thread-panel] h2').textContent")).toBe("Logo files");
+    expect(await evaluate("getComputedStyle(document.querySelector('[data-room-feed] .glass-scroller')).maskImage")).toContain("linear-gradient");
+    await ui("screenshot", "--out", join(evidenceDir, "room-feed-thread-actions.png"));
+
+    const confirmDelete = `[...document.querySelectorAll('[role="alertdialog"] button')].find((button) => button.textContent === "Delete thread")`;
+    const demo = (await evaluate("[...document.querySelectorAll('[data-feed-thread]')].map((item) => item.getAttribute('data-feed-thread'))") as string[])[2]!;
+    await evaluate(`document.querySelector('${row(demo)} button[aria-expanded]').click(); true`);
+    await until(() => evaluate(`Boolean(${menuItem("Delete thread")})`), "Delete in the row's menu");
+    await evaluate(`${menuItem("Delete thread")}.click(); true`);
+    await until(() => evaluate(`Boolean(${confirmDelete})`), "the delete confirmation");
+    await evaluate(`${confirmDelete}.click(); true`);
+    await until(async () => !(await tasks()).some((task) => task.threadId === demo), "the thread to be deleted");
+    await until(() => evaluate(`!document.querySelector('${row(demo)}')`), "its row to leave the feed");
+    await browse("click", "[data-thread-panel] header button[aria-expanded]");
+    await until(() => evaluate(`Boolean(${menuItem("Delete thread")})`), "Delete in the panel's menu");
+    await evaluate(`${menuItem("Delete thread")}.click(); true`);
+    await until(() => evaluate(`Boolean(${confirmDelete})`), "the panel's delete confirmation");
+    await evaluate(`${confirmDelete}.click(); true`);
+    await until(async () => !(await tasks()).some((task) => task.threadId === logos), "the open thread to be deleted");
+    await until(() => evaluate("!document.querySelector('[data-thread-panel]')"), "the panel to close");
 
     await ui("flag", "--set", "features.roomFeed=false");
     await until(() => evaluate("!document.querySelector('[data-room-feed]') && Boolean(document.querySelector('[data-look=\"chat\"] [role=\"log\"]'))"), "the room's transcript to come back");

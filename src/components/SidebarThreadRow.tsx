@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState, type Dispatch, type ReactNode } from "react";
+import { memo, useEffect, useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import { Archive, ArchiveRestore, BellOff, Brain, Check, ChevronRight, Clock, Clock3, FolderInput, Link2, Link2Off, Loader2, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Star, Trash2 } from "lucide-react";
 import type { Action, AppState, BotProject, Task } from "@/state/store";
@@ -312,25 +312,11 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
   const activityLabel = useHeldText(liveActivity);
   // Simple mode's menu keeps what a person needs for a conversation; Advanced adds the rest.
   const advanced = useAdvancedMode();
-  const [menu, setMenu] = useState<{ left: number; top: number } | null>(null);
-  const [webLink, setWebLink] = useState<string | null>(null);
-  useEffect(() => {
-    setWebLink(null);
-    if (!menu) return;
-    let active = true;
-    void api<{ publicUrl?: string | null }>("/api/settings/custom-domain", { background: true }).then((domain) => {
-      if (active) setWebLink(domain.publicUrl ? threadWebRefUrl({ botId: ownerId, threadId: task.threadId }, domain.publicUrl) : null);
-    }).catch(() => { if (active) setWebLink(null); });
-    return () => { active = false; };
-  }, [menu, ownerId, task.threadId]);
-  const menuMotion = useHeldMenuMotion(menu);
+  const [menu, setMenu] = useState<ThreadMenuAt | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(task.title);
-  const [deleting, setDeleting] = useState(false);
-  const [regenerating, setRegenerating] = useState(false);
   const displayTitle = localizedTaskTitle(task.title);
   const finishing = useRef(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const actionRef = useRef<HTMLButtonElement>(null);
   const status = task.activity === "waiting-on-you" ? t("task.waiting") : isWaitingOnTeammate(task) ? t("task.waitingOnTeammate") : isWorking(task) ? activityLabel ?? t("chat.activity.working") : task.queued ? t("task.queued") : null;
   const byline = threadByline(task);
@@ -343,17 +329,10 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
   const tickable = isTickable(task);
   const choose = (event: React.MouseEvent) => { if (!selectMode) onSelect(task); else if (tickable) onToggleSelect?.(task, event.shiftKey); };
   const contextMenu = (event: React.MouseEvent) => { event.preventDefault(); if (!selectMode) openMenu(event.clientX, event.clientY); };
-  const openMenu = (x: number, y: number) => setMenu({ left: Math.max(8, Math.min(x, window.innerWidth - 228)), top: Math.max(8, Math.min(y, window.innerHeight - 230)) });
+  const openMenu = (x: number, y: number) => setMenu(threadMenuAt(x, y));
   const startRename = () => { if (task.sharedChat) return; finishing.current = false; setDraft(task.title); setRenaming(true); setMenu(null); };
-  const copyLink = () => {
-    setMenu(null);
-    void copyText(threadRefUrl({ botId: ownerId, threadId: task.threadId }));
-  };
-  const regenerateTitle = () => {
-    if (!onRegenerateTitle || regenerating) return;
-    setRegenerating(true);
-    onRegenerateTitle(task, (ok) => { setRegenerating(false); if (ok) setMenu(null); });
-  };
+  const menuSheet = useThreadRowMenu({ task, displayTitle, ownerId, folders, main, menu, setMenu, actionRef, onStartRename: startRename, onSelect, onRegenerateTitle, onDelete, onMove,
+    onArchive, onPin, onSetMain, onSnooze, onLink, onRefreshPermissions, onMemory });
   const finishRename = (save: boolean) => {
     if (finishing.current) return;
     finishing.current = true;
@@ -361,29 +340,6 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
     setRenaming(false);
     if (title) onRename(task, title);
   };
-  useEffect(() => {
-    if (!menu) return;
-    menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
-    const outside = (event: MouseEvent) => {
-      if (event.target instanceof Node && !menuRef.current?.contains(event.target) && !actionRef.current?.contains(event.target)) setMenu(null);
-    };
-    window.addEventListener("mousedown", outside);
-    return () => window.removeEventListener("mousedown", outside);
-  }, [menu]);
-  useEffect(() => {
-    if (!menu || !menuRef.current) return;
-    const keepOnScreen = () => {
-      const el = menuRef.current;
-      if (!el) return;
-      const top = Math.max(8, window.innerHeight - el.offsetHeight - 8);
-      setMenu((current) => (current && current.top > top ? { ...current, top } : current));
-    };
-    keepOnScreen();
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(keepOnScreen);
-    observer?.observe(menuRef.current);
-    window.addEventListener("resize", keepOnScreen);
-    return () => { observer?.disconnect(); window.removeEventListener("resize", keepOnScreen); };
-  }, [menu]);
   const heading = <span className={cn("flex min-w-0 flex-1 items-baseline gap-1.5", panel && "pe-6")}>
     <span dir="auto" className={cn("min-w-0 flex-1 max-w-max truncate", task.unread && "font-semibold text-ink", (closed || archived || snoozed) && !current && "text-ink-tertiary")}>{displayTitle}</span>
     {main && <MainThreadMark className="self-center" />}
@@ -432,13 +388,90 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
         <MoreHorizontal size={13} />
       </button>}
     </div>
+    {menuSheet}
+  </>;
+}, sameThreadRow);
+
+export type ThreadMenuAt = { left: number; top: number };
+/** The menu's width (`w-[220px]`), for a control that lines the menu up with its own end. */
+export const THREAD_MENU_WIDTH = 220;
+export const threadMenuAt = (x: number, y: number): ThreadMenuAt =>
+  ({ left: Math.max(8, Math.min(x, window.innerWidth - 228)), top: Math.max(8, Math.min(y, window.innerHeight - 230)) });
+
+type ThreadMenuProps = Pick<ThreadRowProps, "task" | "ownerId" | "folders" | "main" | "onRegenerateTitle" | "onDelete" | "onMove" | "onArchive" | "onPin" | "onSetMain"
+  | "onSnooze" | "onLink" | "onRefreshPermissions" | "onMemory"> & {
+  menu: ThreadMenuAt | null;
+  setMenu: Dispatch<SetStateAction<ThreadMenuAt | null>>;
+  /** The control that opened the menu: a click on it is not a click outside, and focus returns to it. */
+  actionRef: RefObject<HTMLButtonElement | null>;
+  onStartRename: () => void;
+  onSelect?: (task: ThreadRowTask) => void;
+  displayTitle: string;
+  /** More rows above Delete; each closes the menu with the function it is given. */
+  extra?: (close: () => void) => ReactNode;
+  /** False for a room's only thread, which a room keeps. */
+  deletable?: boolean;
+};
+
+/** A thread row's menu and its delete confirmation, for every list that draws a thread with its actions. */
+export function useThreadRowMenu({ task, displayTitle, ownerId, folders, main = false, menu, setMenu, actionRef, onStartRename, onSelect, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSetMain, onSnooze, onLink, onRefreshPermissions, onMemory, extra, deletable = true }: ThreadMenuProps): ReactNode {
+  const advanced = useAdvancedMode();
+  const [webLink, setWebLink] = useState<string | null>(null);
+  useEffect(() => {
+    setWebLink(null);
+    if (!menu) return;
+    let active = true;
+    void api<{ publicUrl?: string | null }>("/api/settings/custom-domain", { background: true }).then((domain) => {
+      if (active) setWebLink(domain.publicUrl ? threadWebRefUrl({ botId: ownerId, threadId: task.threadId }, domain.publicUrl) : null);
+    }).catch(() => { if (active) setWebLink(null); });
+    return () => { active = false; };
+  }, [menu, ownerId, task.threadId]);
+  const menuMotion = useHeldMenuMotion(menu);
+  const [deleting, setDeleting] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const archived = isArchived(task);
+  const snoozed = isSnoozed(task);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const copyLink = () => {
+    setMenu(null);
+    void copyText(threadRefUrl({ botId: ownerId, threadId: task.threadId }));
+  };
+  const regenerateTitle = () => {
+    if (!onRegenerateTitle || regenerating) return;
+    setRegenerating(true);
+    onRegenerateTitle(task, (ok) => { setRegenerating(false); if (ok) setMenu(null); });
+  };
+  useEffect(() => {
+    if (!menu) return;
+    menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    const outside = (event: MouseEvent) => {
+      if (event.target instanceof Node && !menuRef.current?.contains(event.target) && !actionRef.current?.contains(event.target)) setMenu(null);
+    };
+    window.addEventListener("mousedown", outside);
+    return () => window.removeEventListener("mousedown", outside);
+  }, [menu, setMenu, actionRef]);
+  useEffect(() => {
+    if (!menu || !menuRef.current) return;
+    const keepOnScreen = () => {
+      const el = menuRef.current;
+      if (!el) return;
+      const top = Math.max(8, window.innerHeight - el.offsetHeight - 8);
+      setMenu((current) => (current && current.top > top ? { ...current, top } : current));
+    };
+    keepOnScreen();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(keepOnScreen);
+    observer?.observe(menuRef.current);
+    window.addEventListener("resize", keepOnScreen);
+    return () => { observer?.disconnect(); window.removeEventListener("resize", keepOnScreen); };
+  }, [menu, setMenu]);
+  return <>
     {menuMotion.shown && menuMotion.value && createPortal(<div ref={menuRef} data-thread-overlay role="group" aria-label={t("task.actions", { title: displayTitle })} style={menuMotion.value}
       className={cn("fixed z-50 max-h-[calc(100vh-16px)] w-[220px] overflow-y-auto", MENU_SHEET, menuMotion.className)} {...menuMotion.exitProps}
       onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setMenu(null); actionRef.current?.focus(); } }}>
       {advanced && <button type="button" onClick={copyLink} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Link2 size={16} />{t("task.copyLink")}</button>}
       {advanced && webLink && <button type="button" onClick={() => { setMenu(null); void copyText(webLink); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Link2 size={16} />{t("task.copyLink")} (HTTP{webLink.startsWith("https:") ? "S" : ""})</button>}
-      {!task.sharedChat && <button type="button" onClick={startRename} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Pencil size={16} />{t("task.renameAria")}</button>}
-      {onMemory && <button type="button" data-thread-memory="" onClick={() => { setMenu(null); onSelect(task); onMemory(task); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Brain size={16} />{t("memory.title")}</button>}
+      {!task.sharedChat && <button type="button" onClick={onStartRename} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Pencil size={16} />{t("task.renameAria")}</button>}
+      {onMemory && <button type="button" data-thread-memory="" onClick={() => { setMenu(null); onSelect?.(task); onMemory(task); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Brain size={16} />{t("memory.title")}</button>}
       {advanced && <ShareRowItems botId={ownerId} task={task} onPicked={() => setMenu(null)} />}
       {advanced && onRegenerateTitle && !task.sharedChat && <button type="button" disabled={regenerating} aria-busy={regenerating} onClick={regenerateTitle} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40">{regenerating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}{regenerating ? t("task.regeneratingTitle") : t("task.regenerateTitle")}</button>}
       {advanced && onMove && Boolean(folders?.length) && <label className="block rounded-md px-2 py-1.5 text-[13px] text-ink"><span className="mb-1 flex items-center gap-2 text-ink-secondary"><FolderInput size={16} />{t("folder.move")}</span>
@@ -461,9 +494,10 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
       </div>}
       {advanced && onSnooze && snoozed && <button type="button" onClick={() => { setMenu(null); onSnooze(task, null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><BellOff size={16} />{t("task.stopSnoozing")}</button>}
       {advanced && onRefreshPermissions && <button type="button" disabled={isWorking(task)} title={t("task.refreshPermissionsHint")} onClick={() => { setMenu(null); onRefreshPermissions(task); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40"><RefreshCw size={16} />{t("task.refreshPermissions")}</button>}
-      <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); setDeleting(true); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-danger hover:bg-menu-hover disabled:opacity-40"><Trash2 size={16} />{t("task.deleteAria")}</button>
+      {extra?.(() => setMenu(null))}
+      {deletable && <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); setDeleting(true); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-danger hover:bg-menu-hover disabled:opacity-40"><Trash2 size={16} />{t("task.deleteAria")}</button>}
     </div>, document.body)}
     <ConfirmDialog open={deleting} title={t("task.deleteConfirm")} body={t("task.deleteBody", { title: task.title })} confirmLabel={t("task.deleteAria")}
       onCancel={() => setDeleting(false)} onConfirm={() => { if (!isWorking(task)) onDelete(task); setDeleting(false); }} returnFocusRef={actionRef} />
   </>;
-}, sameThreadRow);
+}

@@ -82,7 +82,7 @@ const staleRoutineCard = (card: OptionCardData) => Boolean(card.routineRequest &
 
 /** Cards whose server-written title and first option say what approving does. */
 export const titledCard = (card: OptionCardData | undefined) =>
-  Boolean(card?.teamSetupRequest || card?.mcpRequest || card?.lendingLift || isSkillSwitchAction(card?.skillRequest?.action));
+  Boolean(card?.teamSetupRequest || card?.mcpRequest || card?.lendingLift || isSkillSwitchAction(card?.skillRequest?.action) || card?.skillRequest?.allBots);
 
 export function titledCardAction(card: OptionCardData): string {
   if (card.mcpRequest) return mcpRequestActionLabel(card.mcpRequest.action);
@@ -190,7 +190,7 @@ export function appliedChange(card: OptionCardData, name: string): { line: strin
   const skill = card.skillRequest;
   if (skill) {
     return {
-      line: t(SKILL_APPLIED_LINE[skill.action], { name, title: skill.name }),
+      line: t(SKILL_APPLIED_LINE[skill.action], { name, title: skill.allBots ? `${skill.name} · ${t("skills.allBots.tag")}` : skill.name }),
       canUndo: skill.action === "create" || skill.action === "enable" || skill.action === "disable" || Boolean(skill.previous),
     };
   }

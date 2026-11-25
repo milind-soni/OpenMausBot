@@ -123,7 +123,7 @@ describe("environment identity", () => {
       label: "cab mini",
       platform: process.platform,
       version: "0.1.99",
-      capabilities: { remoteSessions: true, selfUpdate: "desktop-managed", emailSignIn: false, jobs: true },
+      capabilities: { remoteSessions: true, moveBack: 1, selfUpdate: "desktop-managed", emailSignIn: false, jobs: true },
     });
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false }).capabilities.selfUpdate).toBe("operator");
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true }).capabilities, "the desktop updates its own server").not.toHaveProperty("install");
@@ -138,16 +138,19 @@ describe("environment identity", () => {
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true, sharedComputers: false }).capabilities)
       .not.toHaveProperty("sharedComputers");
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true, sharedComputers: true }).capabilities)
-      .toEqual({ remoteSessions: true, sharedComputers: true, lendingDetails: true, commandTimeouts: true, longCommands: true, fileEdits: true, lentMcp: true, mcpCaller: true, selfUpdate: "desktop-managed", emailSignIn: false, jobs: true });
+      .toEqual({ remoteSessions: true, sharedComputers: true, lendingDetails: true, commandTimeouts: true, longCommands: true, fileEdits: true, lentMcp: true, mcpCaller: true, moveBack: 1, selfUpdate: "desktop-managed", emailSignIn: false, jobs: true });
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: true }).capabilities)
-      .toEqual({ remoteSessions: true, cloudHome: true, move: 1, selfUpdate: "operator", install: expect.any(String), emailSignIn: false, jobs: true });
+      .toEqual({ remoteSessions: true, cloudHome: true, move: 1, moveBack: 1, selfUpdate: "operator", install: expect.any(String), emailSignIn: false, jobs: true });
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: false }).capabilities).not.toHaveProperty("cloudHome");
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true }).capabilities, "only a Cloud home, or a server one person owns, takes a move").not.toHaveProperty("move");
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, ownHome: true }).capabilities).toEqual({ remoteSessions: true, move: 1, selfUpdate: "operator", install: expect.any(String), emailSignIn: false, jobs: true });
+    // A bot moves back only to or from a person's own Cloud or their desktop's own server; a team's Cloud and a server one
+    // person runs by hand never offer it.
+    expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: true, cloudTeam: true }).capabilities).not.toHaveProperty("moveBack");
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, ownHome: false }).capabilities).not.toHaveProperty("move");
     // A lent computer may lend its internet connection only to a Cloud home that lends at all.
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: true, sharedComputers: true }).capabilities)
-      .toEqual({ remoteSessions: true, sharedComputers: true, lendingDetails: true, commandTimeouts: true, longCommands: true, fileEdits: true, deviceLink: true, lentMcp: true, mcpCaller: true, myChromeLink: true, computerAsks: true, cloudHome: true, move: 1, selfUpdate: "operator", install: expect.any(String), emailSignIn: false, jobs: true });
+      .toEqual({ remoteSessions: true, sharedComputers: true, lendingDetails: true, commandTimeouts: true, longCommands: true, fileEdits: true, deviceLink: true, lentMcp: true, mcpCaller: true, myChromeLink: true, computerAsks: true, cloudHome: true, move: 1, moveBack: 1, selfUpdate: "operator", install: expect.any(String), emailSignIn: false, jobs: true });
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true, sharedComputers: true }).capabilities).not.toHaveProperty("deviceLink");
   });
 

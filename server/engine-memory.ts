@@ -25,6 +25,8 @@ export const ENGINE_MAX_BYTES = 1500 * MB;
 /** One more session in a running shared process: OpenCode 1.19.3 grew about 110 MB a session with three stdio MCP
  * servers after a prompt; more MCP servers cost more. */
 export const SESSION_BYTES = 200 * MB;
+/** Memory the server, Chrome and the page cache keep: below it a machine without swap starts to thrash. */
+export const memoryFloor = (totalBytes: number): number => Math.max(320 * MB, totalBytes * 0.1);
 /** One bot's browser (agent-browser's daemon and its Chrome) on a page or two: 270 to 390 MB per bot on an 8 GB Cloud home,
  * 2026-10-21. It runs outside the engine's process group, so an engine's measured size never includes it. */
 export const BROWSER_BYTES = 400 * MB;
@@ -721,8 +723,7 @@ export class EngineMemory {
   /** Runs on every tick (every couple of seconds while engines run): the idle policy closes what it kept too long. */
   useIdleSweep(sweep: () => void): void { this.idleSweep = sweep; }
 
-  /** Memory the server, Chrome and the page cache keep: below it a machine without swap starts to thrash. */
-  private floor(memory: HostMemory): number { return Math.max(320 * MB, memory.totalBytes * 0.1); }
+  private floor(memory: HostMemory): number { return memoryFloor(memory.totalBytes); }
 
   private free(memory: HostMemory): number { return memory.availableBytes + memory.swapFreeBytes / 2; }
 

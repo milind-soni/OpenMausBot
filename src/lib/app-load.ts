@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { track } from "@/lib/analytics";
 import { allow, APP_LOAD_WAITING } from "@/lib/analytics-allowlist";
+import { LIVE_PHASES, livePhase } from "@/lib/live-events";
 import { useStore } from "@/state/store";
 
 export const SLOW_LOAD_MS = 30_000;
@@ -16,7 +17,7 @@ export function loadWaitingFor(state: LoadState): (typeof APP_LOAD_WAITING)[numb
 const sincePageStart = () => Math.round(performance.now() / 100) / 10;
 
 /** Once per page: when the app has its server, its data and its settings (`ready`), or that it still waits for one of
- * them SLOW_LOAD_MS after the page started (`slow`). */
+ * them SLOW_LOAD_MS after the page started (`slow`), with what its live connection is doing then (`phase`). */
 export function useAppLoadSignal(): void {
   const { state } = useStore();
   const waiting = loadWaitingFor(state);
@@ -32,7 +33,7 @@ export function useAppLoadSignal(): void {
     const timer = setTimeout(() => {
       if (sent.current.ready || sent.current.slow) return;
       sent.current.slow = true;
-      track("app_load", { stage: "slow", waiting: allow(waiting, APP_LOAD_WAITING) });
+      track("app_load", { stage: "slow", waiting: allow(waiting, APP_LOAD_WAITING), phase: allow(livePhase(), LIVE_PHASES) });
     }, Math.max(0, SLOW_LOAD_MS - performance.now()));
     return () => clearTimeout(timer);
   }, [waiting]);

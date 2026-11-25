@@ -27,10 +27,13 @@ const SECRET_MIN_LENGTH = 32;
 /** The fleet's row in machine_push_rate_limits: no machine id can be `*`. */
 export const FLEET_ID = "*";
 /** Across every Cloud home in an hour. A leaked Admin secret can name any machine id, so the per-machine limits alone
- * would not bound it; these do. They sit well above what the fleet sends today (each home's own limits are 600 sends
- * and 120 registrations an hour) and are the owner's to change. */
+ * would not bound it; these do. They sit well above what the fleet sends today (each home's own limits are
+ * CLOUD_HOME_SEND_LIMIT sends and 120 registrations an hour) and are the owner's to change. */
 export const CLOUD_HOME_FLEET_SEND_LIMIT = 20_000;
 export const CLOUD_HOME_FLEET_REGISTER_LIMIT = 6_000;
+/** One Cloud home's sends an hour: 1% of the fleet's, so no single home can use up what every other home shares. The
+ * Admin applies the same (openmaus-cloud server/cloud-push.ts PUSH_SEND_LIMIT). An installation keeps PUSH_SEND_LIMIT. */
+export const CLOUD_HOME_SEND_LIMIT = 200;
 
 const FLEET_SENDS: PushLimit = { owner: FLEET_ID, action: "push_send", limit: CLOUD_HOME_FLEET_SEND_LIMIT };
 const FLEET_REGISTERS: PushLimit = { owner: FLEET_ID, action: "push_register", limit: CLOUD_HOME_FLEET_REGISTER_LIMIT };
@@ -63,6 +66,7 @@ function sender(request: Request, env: Env, machineId: string): PushSender {
   return {
     store: MACHINE_PUSH_STORE,
     fleet: [FLEET_SENDS],
+    sendLimit: CLOUD_HOME_SEND_LIMIT,
     authenticate: async (read) => {
       await requireCloudHomeRelay(request, env);
       const row = read ? await read(machineId).first<DeviceRow>() : null;

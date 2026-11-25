@@ -3,6 +3,7 @@ import type { Dispatch } from "react";
 import type { Action, AppState, Bot, Group, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { roomThreadSpeakerId, roomThreadWorking } from "@/lib/room-threads";
+import { openFeedThread, roomFeedShows } from "@/lib/room-feed";
 import { t } from "@/lib/i18n";
 import { isArchived, orderedSidebarThreads, orderedThreadList } from "./SidebarThreadRow";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
@@ -104,6 +105,17 @@ export function attentionJumpAction(entry: AttentionThread):
   return entry.task.threadId === entry.groupThreadId
     ? { type: "select", id: entry.groupId }
     : { type: "switchGroupTask", groupId: entry.groupId, threadId: entry.task.threadId };
+}
+
+/** Opens an activity row's thread; a room that shows its feed comes on screen with the thread beside the feed, its
+ * current thread too. */
+export function attentionJump(dispatch: Dispatch<Action>, entry: AttentionThread, state: Pick<AppState, "config" | "groups">): void {
+  if (entry.kind === "group" && roomFeedShows(state.config, state.groups.find((group) => group.id === entry.groupId))) {
+    dispatch({ type: "select", id: entry.groupId });
+    dispatch(openFeedThread(entry.groupId, entry.task.threadId));
+    return;
+  }
+  dispatch(attentionJumpAction(entry));
 }
 
 export function attentionUnpinAction(entry: AttentionThread):

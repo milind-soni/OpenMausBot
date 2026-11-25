@@ -16,7 +16,7 @@ export function PlacesTogetherSwitch() {
   return <SettingsGroup block="together">
     <SettingsRows>
       <div data-places-together={together.on ? "on" : "off"} className="contents">
-        <SettingRow title={t("together.switch.title")} tag={t("settings.early.tag")} subtitle={t("together.switch.line")}
+        <SettingRow title={t("together.switch.title")} tag={t("settings.early.tag")} subtitle={`${t("together.switch.line")} ${t("together.switch.commands")}`}
           message={failed ? <span role="alert" className="block text-danger">{t("together.switch.failed")}</span> : undefined}>
           <Switch checked={together.on} disabled={busy} aria-label={t("together.switch.title")} onClick={turn} />
         </SettingRow>

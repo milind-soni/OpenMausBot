@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppState, Group } from "@/state/store";
 import { markVisibleGroupThreadsRead } from "@/state/read-visible";
 import { openThread, visibleNotificationThread } from "@/state/thread-navigation";
-import { feedPreview, feedThreadAction, openThreadBeside, roomFeedShows } from "./room-feed";
+import { feedPreview, feedThreadAction, openRoomThreadThen, openThreadBeside, roomFeedShows } from "./room-feed";
+import { roomThreadAttention } from "./room-threads";
 
 const on = { features: { roomFeed: true } } as AppState["config"];
 const off = { features: { roomFeed: false } } as AppState["config"];
@@ -100,5 +101,27 @@ describe("a feed room's sidebar line", () => {
     ];
     expect(feedPreview({ tasks })).toBe("Logo files");
     expect(feedPreview({ tasks: [tasks[2]!] })).toBeUndefined();
+  });
+});
+
+describe("a room's run opened from the calendar", () => {
+  it("shows the room first and keeps the thread open beside the feed, and keeps today's order with the switch off", () => {
+    const sent: unknown[] = [];
+    const showRoom = (id: string) => sent.push({ type: "select", id });
+    openRoomThreadThen((action) => sent.push(action), state(on), "room", "other", showRoom);
+    expect(sent).toEqual([{ type: "select", id: "room" }, { type: "openForkPanel", kind: "group", ownerId: "room", threadId: "other" }]);
+    sent.length = 0;
+    openRoomThreadThen((action) => sent.push(action), state(off), "room", "other", showRoom);
+    expect(sent).toEqual([{ type: "switchGroupTask", groupId: "room", threadId: "other" }, { type: "select", id: "room" }]);
+  });
+});
+
+describe("a room thread's mark", () => {
+  it("waits on the person when the thread does or the bot speaking in it does, and falls back to the room's unread for its current thread", () => {
+    const busy = room({ tasks: [{ threadId: "current", title: "", createdAt: 1, busyBotId: "kiwi", working: true }, { threadId: "other", title: "", createdAt: 2, activity: "waiting-on-you" }], unread: true });
+    expect(roomThreadAttention(busy, busy.tasks![0]!, [{ id: "kiwi", activity: "waiting-on-you" }])).toEqual({ waiting: true, unread: true });
+    expect(roomThreadAttention(busy, busy.tasks![0]!, [{ id: "kiwi", activity: "working" }])).toEqual({ waiting: false, unread: true });
+    expect(roomThreadAttention(busy, busy.tasks![1]!, [])).toEqual({ waiting: true, unread: false });
+    expect(roomThreadAttention(busy, { ...busy.tasks![1]!, activity: undefined, unread: true }, [])).toEqual({ waiting: false, unread: true });
   });
 });

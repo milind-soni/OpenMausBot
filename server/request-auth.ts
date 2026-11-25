@@ -18,6 +18,8 @@ export type RequestAuth =
     kind: "loopback"; scopes: readonly Scope[]; trust?: "service";
     /** Set only on the verified companion-token path: the sidecar's id for the phone that authenticated. */
     companionDevice?: string;
+    /** Set only when the desktop's capability came from no browser page: the app's own main process (move-back.ts). */
+    desktopMain?: true;
   }
   | { kind: "session"; session: SessionRecord; via: "bearer" | "cookie" | "ticket"; scopes: readonly Scope[] };
 
@@ -746,7 +748,7 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
       }
       return { auth: { kind: "loopback", scopes: SERVICE_SCOPES, trust: "service" }, status: 401, error: "" };
     }
-    return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES }, status: 401, error: "" };
+    return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES, ...(desktopOwner && !fromBrowser(req) ? { desktopMain: true as const } : {}) }, status: 401, error: "" };
   }
 
   if (proxied) {

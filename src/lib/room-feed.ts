@@ -30,6 +30,19 @@ export function feedThreadAction(action: Action, state: Pick<AppState, "config" 
   return null;
 }
 
+/** A room's thread opened from a page that then shows the room (`showRoom` selects it): with the feed, the room comes
+ * first so the thread stays open beside it. */
+export function openRoomThreadThen(dispatch: (action: Action) => void, state: Pick<AppState, "config" | "groups">, groupId: string, threadId: string,
+  showRoom: (groupId: string) => void): void {
+  if (!roomFeedShows(state.config, state.groups.find((group) => group.id === groupId))) {
+    dispatch({ type: "switchGroupTask", groupId, threadId });
+    showRoom(groupId);
+    return;
+  }
+  showRoom(groupId);
+  dispatch(openFeedThread(groupId, threadId));
+}
+
 /** With the room feed on, a thread opened from the Inbox opens beside whatever is on screen, and the Inbox stays.
  * False where today's way applies: a phone, a room's bot-to-bot chat, a thread no room or bot here holds, or the one
  * already shown in the chat. */

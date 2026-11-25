@@ -4,7 +4,7 @@
 import { readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
-import { EMAIL_MCP_SERVER, EMAIL_SLUG, type EmailToolName } from "../../shared/email.ts";
+import { EMAIL_MCP_SERVER, EMAIL_READ_TOOL_NAMES, EMAIL_SLUG, type EmailToolName } from "../../shared/email.ts";
 import { connectorAccessDecision, describeConnectorScopes, type ConnectorScopes } from "../../shared/connector-scopes.ts";
 import type { ConnectorToolGrant } from "../../shared/wire.ts";
 import { connectorRefusalText, connectorScopeRefusalText, evaluateConnectorTools } from "../connector-verdict.ts";
@@ -140,10 +140,14 @@ export function createEmailHost(deps: EmailHostDeps) {
     toolListing: () => (service.status().state === "unavailable" ? null : { email: EMAIL_TOOLS.map(({ name, description }) => ({ name, description })) }),
 
     /** The JSON-RPC entry the harness proxy reaches: tools/list (what this bot may run) and tools/call (validate, verdict, run). */
-    async handle(body: unknown, capability: { botId: string; threadId: string }, assertActive: () => void): Promise<{ tools: EmailTool[]; instructions: string } | EmailToolResult> {
+    /** `readOnly`: only the reading tools, and what any other answers (work from the person's other place, server/bot-link/far-side.ts). */
+    async handle(body: unknown, capability: { botId: string; threadId: string }, assertActive: () => void, readOnly?: string): Promise<{ tools: EmailTool[]; instructions: string } | EmailToolResult> {
       const request = (body ?? {}) as { method?: unknown; params?: unknown };
       // Re-read the live bot on every call, so a permission change wins over a request authenticated under the old one.
-      const verdict = (name: string): Verdict => { const bot = deps.bot(capability.botId); return bot ? emailAccess(bot, name) : { ok: false, text: "This bot no longer exists.", rule: "bot" }; };
+      const verdict = (name: string): Verdict => {
+        if (readOnly !== undefined && !(EMAIL_READ_TOOL_NAMES as readonly string[]).includes(name)) return { ok: false, text: readOnly, rule: "read-only" };
+        const bot = deps.bot(capability.botId); return bot ? emailAccess(bot, name) : { ok: false, text: "This bot no longer exists.", rule: "bot" };
+      };
       if (request.method === "tools/list") {
         assertActive();
         return { tools: EMAIL_TOOLS.filter((tool) => verdict(tool.name).ok), instructions: EMAIL_INSTRUCTIONS };

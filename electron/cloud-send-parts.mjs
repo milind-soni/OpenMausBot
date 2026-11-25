@@ -77,6 +77,7 @@ export function parseSendSummary(value) {
       ...(typeof item.id === "string" && item.id.length <= 300 ? { id: item.id } : {}),
       ...(typeof item.bot === "string" && /^[\w-]{1,128}$/u.test(item.bot) ? { bot: item.bot } : {}),
       parts,
+      ...(item.returning === true ? { returning: true } : {}),
     });
   }
   return { v: 1, appVersion: typeof value.appVersion === "string" ? value.appVersion.slice(0, 40) : null, items, ...(value.chats === 1 ? { chats: true } : {}), ...(value.vault === 1 ? { vault: true } : {}) };
@@ -120,13 +121,15 @@ export function planSend({ local, cloud, sent = {}, off = {}, force = [] }) {
       continue;
     }
     const parts = [], differs = [];
+    // What the other side kept of a bot coming back to it (server/cloud-send.ts `returning`) is older than this side's.
+    const returning = theirs.returning === true;
     for (const [part, mine] of Object.entries(item.parts)) {
       const cloudHash = theirs.parts[part] ?? EMPTY;
       const pair = Array.isArray(last?.[part]) ? last[part] : null;
-      if (mine === cloudHash || (!pair && !CONTENT_COMPARED.has(item.kind) && cloudHash !== EMPTY)) {
+      if (mine === cloudHash || (!returning && !pair && !CONTENT_COMPARED.has(item.kind) && cloudHash !== EMPTY)) {
         if (!pair || pair[0] !== mine || pair[1] !== cloudHash) (baseline[item.key] ??= {})[part] = [mine, cloudHash];
-      } else if (pair && mine === pair[0]) continue;
-      else if ((pair && cloudHash === pair[1]) || (cloudHash === EMPTY && mine !== EMPTY) || forced.has(item.key)) parts.push(part);
+      } else if (!returning && pair && mine === pair[0]) continue;
+      else if (returning || (pair && cloudHash === pair[1]) || (cloudHash === EMPTY && mine !== EMPTY) || forced.has(item.key)) parts.push(part);
       else differs.push(part);
     }
     settled({ ...base, state: parts.length ? "to-update" : differs.length ? "differs" : "on-both",

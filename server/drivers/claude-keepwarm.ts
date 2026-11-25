@@ -123,7 +123,7 @@ export function parseKeepWarmResult(stdout: string, stderr: string, code: number
  * by owner: a fork is not the bot's engine, so nothing tracks it as one. `dir` holds the fork's private files; the deny
  * hook in it is named only inside the settings file, so the folder is put in the box, read-only. */
 export function forkSpawnOptions(contract: Pick<KeepWarmContract, "cwd">, env: NodeJS.ProcessEnv, dir: string): CliSpawnOptions {
-  return { cwd: contract.cwd, env, stdio: ["pipe", "pipe", "pipe"], engineHome: true, botWork: true, box: { ro: [dir] } };
+  return { cwd: contract.cwd, env, stdio: ["pipe", "pipe", "pipe"], engineHome: true, botWork: true, box: { ro: [dir], engine: "claudeAgent" } };
 }
 
 /** Never throws. The credentialed MCP config, settings and prompt live in a 0700 temp dir removed at exit. */
