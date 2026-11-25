@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 
 import { launchVerificationServer, runControlOmb, verificationServerArgs, verificationServerEnvironment } from "../scripts/control-omb.ts";
-import { CONTROL_WAITED } from "./control-client.ts";
+import { CONTROL_WAITED_HELD } from "./control-client.ts";
 import { CONSENT_RULE } from "./peer-provenance.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
@@ -263,7 +263,7 @@ it("carries a consult-and-implement job over several teammate turns, through a s
     expect(f.prompt(f.turn(key))).not.toMatch(DISTRUST);
   }
   const mainThreads = Object.fromEntries(((await f.api("GET", "/api/bots?messages=0")).body.bots as any[]).map((bot) => [bot.id, bot.mainThreadId]));
-  expect(mainThreads).toMatchObject({ [f.clive.id]: job, [f.mira.id]: f.mira.activeTaskId, [f.eli.id]: f.eli.activeTaskId });
+  expect(mainThreads).toMatchObject({ [f.clive.id]: f.clive.activeTaskId, [f.mira.id]: f.mira.activeTaskId, [f.eli.id]: f.eli.activeTaskId });
 }), hostTimeout(120_000));
 
 it("tells the Chief what happened to each approval: allowed or denied, and parks a hand-off on the person when nobody answered", () => chiefJob(async (f) => {
@@ -550,7 +550,7 @@ it("tells a teammate the person's job is its task, and a routine's handoff is no
   await f.final(april, "APRIL-FINAL");
 
   const [waited, acted] = f.turn("KS").screen;
-  expect(waited.state).toEqual({ held: true, helpOpen: false, blockedReason: CONTROL_WAITED });
+  expect(waited.state).toEqual({ held: true, helpOpen: false, blockedReason: CONTROL_WAITED_HELD });
   expect(waited.ms).toBeGreaterThanOrEqual(1_000);
   expect(acted.state).toEqual({ held: false, helpOpen: false });
   expect(f.turn("MS").screen.map((call: any) => call.state)).toEqual([{ held: false, helpOpen: false }]);

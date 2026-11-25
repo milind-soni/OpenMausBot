@@ -4,6 +4,17 @@ export const MASCOT_FACE_COLORS = ["white", "black"] as const;
 export const mascotFaceColorSchema = z.enum(MASCOT_FACE_COLORS);
 export type MascotFaceColor = z.infer<typeof mascotFaceColorSchema>;
 
+/** The finish of an engine-drawn avatar body (the shapes and Open Bot Avatar objects): Open Bot Avatar's fluffy fur; absent or null is flat. */
+export const MASCOT_MATERIALS = ["fluffy"] as const;
+export const mascotMaterialSchema = z.enum(MASCOT_MATERIALS);
+export type MascotMaterial = z.infer<typeof mascotMaterialSchema>;
+
+/** A custom avatar body tint, stored as lowercase `#rrggbb`. */
+export const mascotBodyColorSchema = z
+  .string()
+  .regex(/^#[0-9a-f]{6}$/i, "must be a #rrggbb hex colour")
+  .transform((value) => value.toLowerCase());
+
 export function mascotFaceInk(value: unknown): string | undefined {
   const color = mascotFaceColorSchema.safeParse(value).data;
   return color === "white" ? "#ffffff" : color === "black" ? "#000000" : undefined;

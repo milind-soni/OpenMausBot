@@ -10,7 +10,7 @@ import { BotAvatar } from "./Avatar";
 import { ELEVATED_CARD, ELEVATED_FLOAT } from "./elevated";
 
 /** The bot a card asks for: its face and name lead the card. */
-export type Asker = Pick<Bot, "name" | "color"> & Partial<Pick<Bot, "avatarUrl" | "avatarCrop" | "avatarZoom" | "avatarFocusX" | "avatarFocusY" | "mascotBody" | "mascotFaceColor">>;
+export type Asker = Pick<Bot, "name" | "color"> & Partial<Pick<Bot, "avatarUrl" | "avatarCrop" | "avatarZoom" | "avatarFocusX" | "avatarFocusY" | "mascotBody" | "mascotFaceColor" | "mascotBodyColor" | "mascotMaterial">>;
 
 export function AskHeader({ asker, line, origin }: { asker: Asker; line: string; origin?: { label: string; hint: string; open(): void } }) {
   return (

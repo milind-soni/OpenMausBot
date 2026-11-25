@@ -10,6 +10,23 @@ export type ProviderKeyVerdict =
 
 export const PROVIDER_KEY_KINDS: readonly ProviderKeyKind[] = ["anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta"];
 
+/** What a paired phone may write per provider: a key, never a URL (`openaiCompat` carries one, so it is absent). */
+const PHONE_KEY_FIELDS: Readonly<Record<string, Readonly<Record<string, "string" | "boolean">>>> = {
+  anthropic: { key: "string", everyClaudeBot: "boolean" },
+  ...Object.fromEntries(PROVIDER_KEY_KINDS.filter((kind) => kind !== "anthropic" && kind !== "openaiCompat").map((kind) => [kind, { key: "string" }])),
+};
+
+/** True when `body` sets only provider keys, so a paired phone's config write cannot widen into anything else. */
+export function isPhoneKeyPatch(body: unknown): boolean {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return false;
+  const entries = Object.entries(body);
+  return entries.length > 0 && entries.every(([kind, entry]) => {
+    const fields = Object.hasOwn(PHONE_KEY_FIELDS, kind) ? PHONE_KEY_FIELDS[kind] : undefined;
+    return fields !== undefined && typeof entry === "object" && entry !== null && !Array.isArray(entry) && Object.hasOwn(entry, "key")
+      && Object.entries(entry).every(([name, value]) => Object.hasOwn(fields, name) && typeof value === fields[name]);
+  });
+}
+
 const DEFAULT_URLS: Record<ProviderKeyKind, string> = {
   anthropic: "https://api.anthropic.com",
   openai: "https://api.openai.com/v1",

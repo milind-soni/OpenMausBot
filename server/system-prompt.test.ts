@@ -8,6 +8,8 @@ import {
   CONVERSATIONAL_STYLE_PROMPT,
   CLOUD_HOME_PLACE,
   CLOUD_ENGINES_HERE,
+  CLOUD_PUSH_CODE_WORK,
+  CLOUD_REUSE_INSTALLS,
   cloudHomePrompt,
   userProfileSystemPrompt,
   computerPrompt,
@@ -406,6 +408,25 @@ describe("composioSystemPrompt", () => {
 });
 
 describe("cloudHomePrompt", () => {
+  it("asks bots to reuse what a task already installed or cloned, and never to remove anything", () => {
+    for (const tools of [true, false]) {
+      const text = cloudHomePrompt(tools);
+      expect(text).toContain(CLOUD_REUSE_INSTALLS);
+      expect(CLOUD_REUSE_INSTALLS).not.toMatch(/\b(?:remove|delete|clean)/i);
+    }
+  });
+
+  it("asks bots to push code work with a remote to a new branch, never forced, never the default branch, never secrets", () => {
+    for (const tools of [true, false]) {
+      const text = cloudHomePrompt(tools);
+      expect(text).toContain(CLOUD_REUSE_INSTALLS + CLOUD_PUSH_CODE_WORK);
+    }
+    expect(CLOUD_PUSH_CODE_WORK).toMatch(/a git remote the person works in and you can push to it/);
+    expect(CLOUD_PUSH_CODE_WORK).toMatch(/push it to one branch of your own, reusing that branch/);
+    expect(CLOUD_PUSH_CODE_WORK).toMatch(/never force-push, never push to the default branch/);
+    expect(CLOUD_PUSH_CODE_WORK).toMatch(/never commit secrets, \.env files or installed packages/);
+  });
+
   it("says the Cloud is off their network, whatever memory says, and sends ssh through the lent computer", () => {
     const lent = cloudHomePrompt(true, [], [{ name: "ASH-PC", platform: "win32" }]);
     expect(lent).toContain("This Cloud is not on their network");
@@ -495,6 +516,8 @@ it("tells Cloud bots that a sign-in ending on an unreachable 127.0.0.1 page is f
   for (const text of [cloudHomePrompt(true), cloudHomePrompt(false), cloudHomePrompt(true, [], [{ name: "ASH-PC", platform: "win32" }], true)]) {
     expect(text).toContain("ends on a 127.0.0.1 or localhost page that can't be reached, that is the expected last step, not a failed sign-in");
     expect(text).toContain("paste it in the \"Paste its address here\" field on the AI's card");
+    // Antigravity's native CLI signs in with a code its Google page shows instead.
+    expect(text).toContain("paste the code in the \"Code from the Antigravity page\" field on the AI's card, then press Send code");
   }
 });
 

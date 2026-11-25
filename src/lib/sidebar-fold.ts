@@ -30,9 +30,27 @@ export function onlyNarrowSidePanels(panels: OpenSidePanels): boolean {
   return true;
 }
 
-/** Whether the sidebar folds to its column of avatars: only while a side panel is open and the window is too narrow
- * for the sidebar, a chat of at least 440 and that panel. */
-export function sidebarFoldsForPanel(panels: OpenSidePanels, fits: { wide: boolean; narrow: boolean }): boolean {
+/** Simple's own bot panel (not a remote client's): the one panel that never moves the sidebar. */
+function simpleBotPanel(panels: OpenSidePanels): boolean {
+  return panels.bot && panels.simple && !panels.remoteClient;
+}
+
+/** The open panels that make room for themselves out of the sidebar. Simple's bot panel is not one: opening or closing
+ * it leaves the sidebar's width, and its pinned bots, exactly as they were. */
+export function panelsMovingSidebar(panels: OpenSidePanels): OpenSidePanels {
+  return simpleBotPanel(panels) ? { ...panels, bot: false } : panels;
+}
+
+/** Whether Simple's bot panel floats over the chat's edge instead of standing beside it: in a window too narrow for
+ * the open sidebar, a chat of 320 and the panel (`fits`, SIDEBAR_AND_BOT_PANEL_FIT). */
+export function botPanelFloats(panels: OpenSidePanels, fits: boolean): boolean {
+  return simpleBotPanel(panels) && !fits;
+}
+
+/** Whether the sidebar folds to its column of avatars: only while a side panel that moves it is open and the window is
+ * too narrow for the sidebar, a chat of at least 440 and that panel. */
+export function sidebarFoldsForPanel(open: OpenSidePanels, fits: { wide: boolean; narrow: boolean }): boolean {
+  const panels = panelsMovingSidebar(open);
   if (!anySidePanel(panels) || fits.wide) return false;
   return !(fits.narrow && onlyNarrowSidePanels(panels));
 }

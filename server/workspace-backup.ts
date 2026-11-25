@@ -48,6 +48,9 @@ const EXCLUDED = new Set([
   "box",
   // The processes this machine's servers started (engine-records.ts), stopped by its next start.
   "engine-runs",
+  // Deleted and idle conversations' dependency trees on their way out, what the orphan sweep has seen on this disk and
+  // what the idle reclaim shed (host/conversation-folder-cleanup.ts, host/orphan-sweep.ts, host/idle-reclaim.ts).
+  ".removing", "orphan-sweep.json", "idle-reclaim.json",
   // A Team Cloud's engine homes (engine-homes/layout.ts): CLI login homes, each audience's own transcripts and the held
   // folder, which no admin reads.
   "engine-homes",
@@ -58,6 +61,8 @@ const EXCLUDED = new Set([
   // The doctor's copies of what it repaired, and the version it last ran for (doctor/backup.ts, doctor/start.ts): this
   // folder's own history, and copies of files a backup already holds.
   "doctor-backups", "doctor-state.json",
+  // A Cloud server's database copies for its own backup of the volume (cloud-backup-stage.ts), removed when it is packed.
+  "backup-stage",
 ]);
 const EXCLUSION_NOTES = [
   "Device pairing, server identity, live leases and runtime files (existing destination identities are preserved).",

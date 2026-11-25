@@ -6,10 +6,11 @@ import { buildTask } from "./task-record.ts";
 import { titleFromMessage } from "./thread-title.ts";
 import type { ApprovalMode } from "../shared/approval-mode.ts";
 
-function forkHistory(path: Message[], messageId: string): Message[] | null {
-  const anchor = path.findIndex((message) => message.id === messageId);
-  if (anchor < 0 || path[anchor]?.kind !== "text" || !["user", "bot"].includes(path[anchor]!.role)) return null;
-  return structuredClone(path.slice(0, anchor + 1));
+function forkHistory(path: Message[], sourceMessageId: string | undefined) {
+  const anchor = path.findLastIndex((message) => message.kind === "text" && (message.role === "user" || message.role === "bot")
+    && (sourceMessageId === undefined || message.id === sourceMessageId));
+  if (anchor < 0) return null;
+  return { history: structuredClone(path.slice(0, anchor + 1)), messageId: path[anchor]!.id };
 }
 
 function registerImportedFork<T extends { threadId: string }>(task: T, history: Message[], messageId: string,
@@ -25,10 +26,11 @@ function registerImportedFork<T extends { threadId: string }>(task: T, history: 
   }
 }
 
-export function createGroupFork(source: GroupTaskRecord, path: Message[], messageId: string,
+export function createGroupFork(source: GroupTaskRecord, path: Message[], sourceMessageId: string | undefined,
   register: (task: GroupTaskRecord) => void): GroupTaskRecord | null {
-  const history = forkHistory(path, messageId);
-  if (!history) return null;
+  const fork = forkHistory(path, sourceMessageId);
+  if (!fork) return null;
+  const { history, messageId } = fork;
   const createdAt = Date.now();
   const task: GroupTaskRecord = {
     threadId: newId(),
@@ -43,11 +45,12 @@ export function createGroupFork(source: GroupTaskRecord, path: Message[], messag
   return task;
 }
 
-export function createBotFork(bot: BotRecord, source: TaskRecord, path: Message[], messageId: string,
+export function createBotFork(bot: BotRecord, source: TaskRecord, path: Message[], sourceMessageId: string | undefined,
   approval: { mode: ApprovalMode; alwaysAllow: string[] },
   register: (task: TaskRecord) => void): TaskRecord | null {
-  const history = forkHistory(path, messageId);
-  if (!history) return null;
+  const fork = forkHistory(path, sourceMessageId);
+  if (!fork) return null;
+  const { history, messageId } = fork;
   const task = buildTask(bot, titleFromMessage(history.at(-1)?.text ?? ""), source.projectId, undefined,
     undefined, source.modelSelection, source.cwd);
   // A fork starts with the source's effective permissions, including an Ask mask for an unconfirmed grant.
@@ -57,6 +60,10 @@ export function createBotFork(bot: BotRecord, source: TaskRecord, path: Message[
   task.outside = source.outside;
   task.botApi = source.botApi;
   if (source.botApiAsOwner) task.botApiAsOwner = true;
+  if (source.surface && source.surfaceSource !== "auto") {
+    task.surface = source.surface;
+    if (source.surfaceSource) task.surfaceSource = source.surfaceSource;
+  }
   task.origin = { threadId: source.threadId, messageId };
   task.lastReadMessageId = messageId;
   registerImportedFork(task, history, messageId, register);

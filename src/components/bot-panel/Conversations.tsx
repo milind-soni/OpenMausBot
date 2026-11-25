@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Search, SquarePen } from "lucide-react";
 
 import { cn } from "@/lib/cn";
@@ -6,7 +6,7 @@ import { activeLocale, t } from "@/lib/i18n";
 import { SIDEBAR_INLINE, useMediaQuery } from "@/lib/use-media-query";
 import { api, currentTaskBot, openBotThread, visibleMessages, type Bot, type Message } from "@/state/store";
 import { lastLine } from "../sidebar-preview";
-import { isArchived, orderedThreadList, SidebarThreadRow, stampClock, threadRecency, threadRowActions, useRelativeNow } from "../SidebarThreadRow";
+import { isArchived, mainThreadFirst, orderedThreadList, SidebarThreadRow, stampClock, threadRecency, threadRowActions, useRelativeNow } from "../SidebarThreadRow";
 import { filterTasks } from "../TaskPicker";
 import { useConversationSide } from "../TeamSideSwitch";
 import { tasksOfSide } from "@/state/team-side";
@@ -49,6 +49,14 @@ function useRecentMessages(bot: Bot, threads: readonly { threadId: string; updat
   return (threadId) => threadId === bot.threadId ? open : fetched.get(byThread.get(threadId) ?? "");
 }
 
+/** The sidebar's "N more" opens this list with every conversation showing, whether or not the panel is already open. */
+let showAllNext: string | null = null;
+const showAllListeners = new Set<(botId: string) => void>();
+export function showAllConversations(botId: string): void {
+  showAllNext = botId;
+  for (const listener of showAllListeners) listener(botId);
+}
+
 /** Tests only. */
 export function forgetConversationLines(): void {
   fetched.clear();
@@ -61,11 +69,20 @@ export function BotConversations({ bot }: { bot: Bot }) {
   const phone = !useMediaQuery(SIDEBAR_INLINE, true);
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(() => {
+    const asked = showAllNext === bot.id;
+    if (asked) showAllNext = null;
+    return asked;
+  });
+  useEffect(() => {
+    const listener = (botId: string) => { if (botId !== bot.id) return; showAllNext = null; setExpanded(true); };
+    showAllListeners.add(listener);
+    return () => { showAllListeners.delete(listener); };
+  }, [bot.id]);
   const [showArchived, setShowArchived] = useState(false);
   const actions = useMemo(() => {
-    const { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive } = threadRowActions(bot.id, dispatch);
-    return { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive };
+    const { onRename, onRegenerateTitle, onDelete, onMove, onPin, onSetMain, onArchive, onMemory } = threadRowActions(bot.id, dispatch);
+    return { onRename, onRegenerateTitle, onDelete, onMove, onPin, onSetMain, onArchive, onMemory };
   }, [bot.id, dispatch]);
 
   const side = useConversationSide(bot);
@@ -79,7 +96,7 @@ export function BotConversations({ bot }: { bot: Bot }) {
         turnStartedAt: thread.turnStartedAt ?? undefined, queued: Boolean(state.pendingQueued[task.threadId]?.length),
       };
     });
-  const conversations = orderedThreadList(threads.filter((task) => !isArchived(task) || task.threadId === bot.threadId));
+  const conversations = mainThreadFirst(orderedThreadList(threads.filter((task) => !isArchived(task) || task.threadId === bot.threadId)), bot.mainThreadId);
   const archived = orderedThreadList(threads.filter((task) => isArchived(task) && task.threadId !== bot.threadId));
   const needle = query.trim();
   const collapsed = conversations.filter((task, index) => index < CONVERSATIONS_SHOWN || task.threadId === bot.threadId || task.threadId === bot.mainThreadId);
@@ -96,13 +113,16 @@ export function BotConversations({ bot }: { bot: Bot }) {
   const hidden = conversations.length - collapsed.length;
   const project = bot.projects?.find((folder) => folder.id === bot.tasks?.find((task) => task.threadId === bot.threadId)?.projectId);
 
-  const closeOnPhone = () => {
-    if (phone) dispatch({ type: "toggleSettings", open: false });
-  };
-  const select = (task: { threadId: string }) => {
-    if (task.threadId !== bot.threadId) openBotThread(dispatch, bot, task.threadId, false);
+  const latest = useRef({ bot, phone });
+  latest.current = { bot, phone };
+  const closeOnPhone = useCallback(() => {
+    if (latest.current.phone) dispatch({ type: "toggleSettings", open: false });
+  }, [dispatch]);
+  const select = useCallback((task: { threadId: string }) => {
+    const current = latest.current.bot;
+    if (task.threadId !== current.threadId) openBotThread(dispatch, current, task.threadId, false);
     closeOnPhone();
-  };
+  }, [dispatch, closeOnPhone]);
   const startNew = () => {
     dispatch({ type: "newTask", botId: bot.id, ...(project ? { projectId: project.id } : {}) });
     closeOnPhone();

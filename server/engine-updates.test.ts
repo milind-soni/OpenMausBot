@@ -348,6 +348,173 @@ describe("a runtime the app manages itself", () => {
       await removeTempDir(scratch);
     }
   });
+
+  it("names the version a runtime really moved to, and counts an install that changed nothing as failed", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-engine-updates-"));
+    try {
+      const lines: string[] = [];
+      let installs: string | void = "1.5.8";
+      const managed = { older: async () => "1.5.7", install: async () => installs, folder: join(scratch, "runtimes") };
+      const engines = createEngineUpdater({
+        plans: [{ driverKind: "managedEngine", name: "Managed", pin: { target: "1.4.3", minimum: "1.4.3" }, managed }],
+        baseDir: scratch, statePath: join(scratch, "state.json"), turnRunning: () => false, log: (line) => lines.push(line),
+        liveCommands: () => [], steps: noSteps(),
+      });
+      await engines.check();
+      expect(lines).toEqual(["Engine update: Managed 1.5.7 → 1.5.8"]);
+      expect(engines.shown("managedEngine").autoUpdated?.version).toBe("1.5.8");
+      installs = "1.5.7";
+      await engines.check();
+      expect(lines[1]).toBe("Engine update: Managed stays on 1.5.7; 1.5.7 could not be installed (the install left the same version in place). Trying again later.");
+    } finally {
+      await removeTempDir(scratch);
+    }
+  });
+});
+
+describe("a runtime with more than one release channel", () => {
+  const setup = (older: Array<string | { version: string; channel: string } | null>, install: (channel?: string) => Promise<string | void>) => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-engine-updates-"));
+    const lines: string[] = [];
+    const queue = [...older];
+    const managed = { older: async () => queue.shift() ?? null, install, folder: join(scratch, "runtimes") };
+    const engines = createEngineUpdater({
+      plans: [{ driverKind: "managedEngine", name: "Managed", pin: { target: "1.4.3", minimum: "1.4.3" }, managed }],
+      baseDir: scratch, statePath: join(scratch, "state.json"), turnRunning: () => false, log: (line) => lines.push(line),
+      liveCommands: () => [], steps: noSteps(),
+    });
+    return { engines, lines, done: () => removeTempDir(scratch) };
+  };
+
+  it("installs from the channel whose copy is older, then looks for another channel's update in the same pass, and says each to the instances that run it", async () => {
+    const asked: Array<string | undefined> = [];
+    const run = setup([{ version: "1.5.7", channel: "native" }, { version: "1.1.1", channel: "pinned" }, null], async (channel) => {
+      asked.push(channel);
+      return channel === "native" ? "1.5.8" : "1.4.3";
+    });
+    try {
+      await run.engines.check();
+      expect(asked).toEqual(["native", "pinned"]);
+      expect(run.lines).toEqual(["Engine update: Managed 1.5.7 → 1.5.8", "Engine update: Managed 1.1.1 → 1.4.3"]);
+      expect(run.engines.shown("managedEngine").autoUpdated?.version).toBe("1.4.3");
+      expect(run.engines.shown("managedEngine", "1.5.8").autoUpdated?.version).toBe("1.5.8");
+      expect(run.engines.shown("managedEngine", "1.4.3").autoUpdated?.version).toBe("1.4.3");
+      expect(run.engines.shown("managedEngine", "1.4.2")).toEqual({});
+    } finally {
+      await run.done();
+    }
+  });
+
+  it("keeps the first channel's update when the second channel's cannot be installed, and retries the second sooner than a day", async () => {
+    const run = setup([{ version: "1.5.7", channel: "native" }, { version: "1.1.1", channel: "pinned" }], async (channel) => {
+      if (channel === "pinned") throw new Error("Google download failed (404).");
+      return "1.5.8";
+    });
+    try {
+      const started = Date.now();
+      await run.engines.check();
+      expect(run.lines).toEqual([
+        "Engine update: Managed 1.5.7 → 1.5.8",
+        "Engine update: Managed stays on 1.1.1; 1.4.3 could not be installed (Google download failed (404).). Trying again later.",
+      ]);
+      expect(run.engines.shown("managedEngine").autoUpdated?.version).toBe("1.5.8");
+      expect(run.engines.dueAt() - started).toBeLessThan(2 * 60 * 60_000);
+    } finally {
+      await run.done();
+    }
+  });
+
+  it("keeps the first channel's update and comes back in minutes for the second when a turn starts in between", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-engine-updates-"));
+    try {
+      const lines: string[] = [];
+      let busy = false;
+      const asked: Array<string | undefined> = [];
+      const queue: Array<{ version: string; channel: string }> = [{ version: "1.5.7", channel: "native" }, { version: "1.1.1", channel: "pinned" }];
+      const managed = {
+        older: async (skip: readonly string[] = []) => queue.find((entry) => !skip.includes(entry.channel)) ?? null,
+        install: async (channel?: string) => { asked.push(channel); busy = true; return "1.5.8"; },
+        folder: join(scratch, "runtimes"),
+      };
+      const engines = createEngineUpdater({
+        plans: [{ driverKind: "managedEngine", name: "Managed", pin: { target: "1.4.3", minimum: "1.4.3" }, managed }],
+        baseDir: scratch, statePath: join(scratch, "state.json"), turnRunning: () => busy, log: (line) => lines.push(line),
+        liveCommands: () => [], steps: noSteps(),
+      });
+      const started = Date.now();
+      await engines.check();
+      expect(asked).toEqual(["native"]);
+      expect(lines).toEqual(["Engine update: Managed 1.5.7 → 1.5.8"]);
+      expect(engines.dueAt() - started).toBeLessThanOrEqual(6 * 60_000);
+    } finally {
+      await removeTempDir(scratch);
+    }
+  });
+
+  it("comes back in minutes for a channel a turn kept it from, even after the first channel failed", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-engine-updates-"));
+    try {
+      let busy = false;
+      const queue: Array<{ version: string; channel: string }> = [{ version: "1.5.7", channel: "native" }, { version: "1.1.1", channel: "pinned" }];
+      const managed = {
+        older: async (skip: readonly string[] = []) => queue.find((entry) => !skip.includes(entry.channel)) ?? null,
+        install: async () => { busy = true; throw new Error("Google download failed (500)."); },
+        folder: join(scratch, "runtimes"),
+      };
+      const engines = createEngineUpdater({
+        plans: [{ driverKind: "managedEngine", name: "Managed", pin: { target: "1.4.3", minimum: "1.4.3" }, managed }],
+        baseDir: scratch, statePath: join(scratch, "state.json"), turnRunning: () => busy, log: () => {},
+        liveCommands: () => [], steps: noSteps(),
+      });
+      const started = Date.now();
+      await engines.check();
+      expect(engines.dueAt() - started).toBeLessThanOrEqual(6 * 60_000);
+    } finally {
+      await removeTempDir(scratch);
+    }
+  });
+
+  it("still tries the other channel when the first channel's install fails", async () => {
+    const asked: Array<string | undefined> = [];
+    const run = setup([{ version: "1.5.7", channel: "native" }, { version: "1.1.1", channel: "pinned" }, null], async (channel) => {
+      asked.push(channel);
+      if (channel === "native") throw new Error("Google download failed (500).");
+      return "1.4.3";
+    });
+    try {
+      await run.engines.check();
+      expect(asked).toEqual(["native", "pinned"]);
+      expect(run.lines).toEqual([
+        "Engine update: Managed 1.1.1 → 1.4.3",
+        "Engine update: Managed stays on 1.5.7; 1.4.3 could not be installed (Google download failed (500).). Trying again later.",
+      ]);
+    } finally {
+      await run.done();
+    }
+  });
+
+  it("counts a channel whose install left its own version in place as failed, whatever the other channel has", async () => {
+    const run = setup([{ version: "1.5.7", channel: "native" }], async () => "1.5.7");
+    try {
+      await run.engines.check();
+      expect(run.lines[0]).toContain("Managed stays on 1.5.7");
+      expect(run.lines[0]).toContain("the install left the same version in place");
+    } finally {
+      await run.done();
+    }
+  });
+
+  it("still takes an older that names only a version, as a runtime with one channel does", async () => {
+    const asked: Array<string | undefined> = [];
+    const run = setup(["1.4.2", null], async (channel) => { asked.push(channel); return undefined; });
+    try {
+      await run.engines.check();
+      expect(asked).toEqual([undefined]);
+      expect(run.lines).toEqual(["Engine update: Managed 1.4.2 → 1.4.3"]);
+    } finally {
+      await run.done();
+    }
+  });
 });
 
 describe.skipIf(process.platform === "win32")("the ACP handshake", () => {

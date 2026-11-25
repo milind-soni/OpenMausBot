@@ -34,7 +34,7 @@ afterEach(() => {
 
 describe("Settings in another language", () => {
   const NAV = ["settings.page.bots", "settings.page.desktops", "settings.page.spending", "settings.page.data", "settings.page.account",
-    "settings.page.browser", "settings.section.general", "settings.section.appearance", "settings.section.phoneDevices",
+    "settings.page.browser", "settings.section.general", "settings.section.appearance", "settings.page.devices",
     "settings.advancedMode.title"] as const;
 
   it("renders in the language the picker selected, and re-renders in the next one", async () => {

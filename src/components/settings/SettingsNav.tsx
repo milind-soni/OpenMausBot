@@ -13,6 +13,7 @@ import { PlaceMark } from "../PlacesRail";
 import { profileInitials } from "../SidebarProfileMenu";
 import { Switch, SettingsTag } from "../SettingsPrimitives";
 import { accountLine, useAccountSummary, useYou } from "./account-summary";
+import { devicesDot, devicesPlaceKey, useDevicesSignal, type NavDot } from "./devices-signal";
 import { usePhonePlaceState } from "./phone-status";
 import type { SettingsPlace } from "./settings-context";
 import { OWNERS, pageById, type SearchHit, type SettingsContext, type SettingsOwner, type SettingsPage, type SettingsPageId } from "./settings-index";
@@ -101,7 +102,26 @@ function IdentityRow({ page, current, badge, name, line, onOpen, narrow }: {
   );
 }
 
-function PageItem({ page, label, current, dot, onOpen }: { page: SettingsPage; label: string; current: boolean; dot?: "success" | "warning" | null; onOpen: () => void }) {
+type Dot = { tone: NavDot; label: string };
+
+/** The mark beside Devices, said in words too: amber while a device or the private network needs the person, green while
+ * a phone is connected and nothing does. Before Devices has been read, the phones alone decide it. */
+function useDevicesDot(place: SettingsPlace, enabled: boolean): Dot | null {
+  const phone = usePhonePlaceState(enabled);
+  const seen = useDevicesSignal(devicesPlaceKey(place));
+  if (seen) {
+    const tone = devicesDot(seen);
+    return tone && { tone, label: t(tone === "warning" ? "settings.nav.devicesNeedYou" : "settings.nav.phoneConnectedAllClear") };
+  }
+  if (phone.kind === "paired" && phone.connected) return { tone: "success", label: t("settings.nav.phoneConnected") };
+  return phone.kind === "attention" ? { tone: "warning", label: t("settings.nav.phoneNeedsYou") } : null;
+}
+
+function PageDot({ dot }: { dot: Dot }) {
+  return <span role="img" aria-label={dot.label} title={dot.label} data-settings-dot={dot.tone} className={cn("size-1.5 shrink-0 rounded-full", dot.tone === "success" ? "bg-success" : "bg-warning")} />;
+}
+
+function PageItem({ page, label, current, dot, onOpen }: { page: SettingsPage; label: string; current: boolean; dot?: Dot | null; onOpen: () => void }) {
   const Icon = page.icon;
   return (
     <button type="button" data-settings-page={page.id} data-settings-section={page.id} aria-current={current ? "page" : undefined} onClick={onOpen}
@@ -111,7 +131,7 @@ function PageItem({ page, label, current, dot, onOpen }: { page: SettingsPage; l
         <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap [grid-area:1/1]">{label}</span>
         <span aria-hidden="true" className="invisible h-0 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-medium [grid-area:1/1]">{label}</span>
       </span>
-      {dot && <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", dot === "success" ? "bg-success" : "bg-warning")} />}
+      {dot && <PageDot dot={dot} />}
     </button>
   );
 }
@@ -182,7 +202,7 @@ export function SettingsNav({ ctx, place, pages, current, query, hits, keyHits, 
   const account = { ...summary, email: summary.email ?? (summary.plan ? profile?.email ?? null : null) };
   const placeLine = usePlaceSubLine(place);
   const appLine = useAppSubLine(ctx.desktop);
-  const phone = usePhonePlaceState(!ctx.client);
+  const devicesMark = useDevicesDot(place, !ctx.client);
   const listRef = useRef<HTMLDivElement>(null);
   const openSource = ctx.desktop && !window.ogb?.cloudAccount && !window.ogb?.cloudPlan;
   const lines: Record<SettingsOwner, { badge: ReactNode; name: string; line: string; page: SettingsPageId }> = {
@@ -190,8 +210,7 @@ export function SettingsNav({ ctx, place, pages, current, query, hits, keyHits, 
     account: { badge: <YouAvatar size={24} />, name: t("settings.page.account"), line: accountLine(account, { browser: !ctx.desktop, place: place.name, openSource }), page: "account" },
     app: { badge: <AppIcon size={24} />, name: ctx.desktop ? t("settings.page.app") : t("settings.page.browser"), line: appLine, page: "app" },
   };
-  const dot = (page: SettingsPageId) => page === "phone" && phone.kind === "paired" && phone.connected ? "success" as const
-    : page === "phone" && phone.kind === "attention" ? "warning" as const : null;
+  const dot = (page: SettingsPageId) => (page === "devices" ? devicesMark : null);
   const searching = query.trim() !== "";
   return (
     <nav aria-label={t("settings.title")} className={cn("flex min-h-0 flex-col", narrow ? "flex-1" : "w-[220px] shrink-0 shadow-[inset_-0.5px_0_0_var(--settings-edge)]")}>
@@ -212,7 +231,7 @@ export function SettingsNav({ ctx, place, pages, current, query, hits, keyHits, 
                     className="flex h-11 w-full cursor-pointer items-center gap-2 rounded-lg px-2 text-left text-[14px] leading-5 text-ink hover:bg-menu-hover">
                     <span className="flex w-6 shrink-0 justify-center">{page.icon && <page.icon size={16} aria-hidden="true" className="text-ink-secondary" />}</span>
                     <span className="min-w-0 flex-1 truncate">{t(page.labelKey)}</span>
-                    {dot(page.id) && <span aria-hidden="true" className={cn("size-1.5 rounded-full", dot(page.id) === "success" ? "bg-success" : "bg-warning")} />}
+                    {dot(page.id) && <PageDot dot={dot(page.id)!} />}
                     <ChevronRight size={14} aria-hidden="true" className="text-ink-tertiary rtl:-scale-x-100" />
                   </button>
                 ) : (
@@ -320,17 +339,17 @@ function HitRow({ ctx, place, hit, query, onHit }: { ctx: SettingsContext; place
 }
 
 const PAGE_OWNER: Record<SettingsPageId, SettingsOwner> = {
-  overview: "place", phone: "place", ai: "place", bots: "place", desktops: "place", vault: "place", usage: "place", transfer: "place", data: "place",
-  people: "place", installations: "place", account: "account", plan: "account", app: "app", general: "app", appearance: "app",
+  overview: "place", devices: "place", ai: "place", bots: "place", desktops: "place", vault: "place", usage: "place", transfer: "place", storage: "place",
+  data: "place", people: "place", installations: "place", account: "account", plan: "account", app: "app", general: "app", appearance: "app", features: "place",
 };
 
 const PAGE_KEY: Partial<Record<SettingsPageId, Parameters<typeof t>[0]>> = {
-  phone: "settings.section.phoneDevices", ai: "settings.group.ai", bots: "settings.page.bots", desktops: "settings.page.desktops",
-  vault: "settings.section.vault", usage: "settings.page.spending", transfer: "settings.page.importExport", data: "settings.page.data", people: "settings.section.people",
-  installations: "settings.section.workspaces", plan: "settings.page.plan", general: "settings.section.general", appearance: "settings.section.appearance",
+  devices: "settings.page.devices", ai: "settings.group.ai", bots: "settings.page.bots", desktops: "settings.page.desktops",
+  vault: "settings.section.vault", usage: "settings.page.spending", transfer: "settings.page.importExport", storage: "settings.page.storage", data: "settings.page.data", people: "settings.section.people",
+  installations: "settings.section.workspaces", plan: "settings.page.plan", general: "settings.section.general", appearance: "settings.section.appearance", features: "settings.page.features",
 };
 
-/** A result's second line: its owner and its page ("This computer › Phone & devices"), or what a jump opens. */
+/** A result's second line: its owner and its page ("This computer › Devices"), or what a jump opens. */
 export function searchWhere(hit: SearchHit, place: SettingsPlace, ctx: SettingsContext): { owner: string; page?: string } | null {
   const entry = hit.entry;
   if (entry.jump) return { owner: searchLocation(hit, place, ctx) };
@@ -341,7 +360,7 @@ export function searchWhere(hit: SearchHit, place: SettingsPlace, ctx: SettingsC
   return { owner: ownerName, ...(pageKey && !entry.id.startsWith("page:") ? { page: t(pageKey) } : {}) };
 }
 
-/** The full path, owner first ("This computer › Phone & devices › How your phone reaches this computer"): the tooltip. */
+/** The full path, owner first ("This computer › Devices › How your phone reaches this computer"): the tooltip. */
 export function searchLocation(hit: SearchHit, place: SettingsPlace, ctx: SettingsContext): string {
   const entry = hit.entry;
   if (entry.jump === "apps") return t("settings.search.opensApps");

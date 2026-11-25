@@ -3,8 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeEvent } from "./contracts.ts";
 import {
   ROOM_TOOL_QUIET_LIMIT_MS,
+  ROOM_TURN_CLOCK_LOOK_MS,
   ROOM_TURN_PROGRESS,
   RoomTurnDeadline,
+  type RoomTurnClock,
   RoomTurnStallRegistry,
   effectiveRoomTurnTimeoutMinutes,
   parseConversationTurnTimeout,
@@ -19,6 +21,60 @@ const toolStarted = (itemId: string): RuntimeEvent => ({ ...base, type: "item.st
 const toolEnded = (itemId: string): RuntimeEvent => ({ ...base, type: "item.completed", itemType: "tool", itemId, ok: true });
 const cardOpened: RuntimeEvent = { ...base, type: "request.opened", requestId: "r", requestType: "permission", tool: "Bash", summary: "ls" };
 const cardResolved: RuntimeEvent = { ...base, type: "request.resolved", requestId: "r", behavior: "allow", source: "user" };
+const reply: RuntimeEvent = { ...base, type: "content.delta", streamKind: "assistant_text", delta: "ok" };
+
+/** Timers that keep counting through a sleep, as Node's do on macOS: `sleep` moves the clock on and runs nothing, and
+ * `wake` runs what came due meanwhile, the kind named first. */
+function sleepingClock() {
+  type Timer = { at: number; every?: number; run: () => void };
+  let now = 0, nextId = 0, sleepAfterRead = 0;
+  const timers = new Map<number, Timer>();
+  const add = (timer: Timer) => {
+    const id = nextId++;
+    timers.set(id, timer);
+    return () => { timers.delete(id); };
+  };
+  const clock: RoomTurnClock = {
+    now: () => {
+      const at = now;
+      now += sleepAfterRead;
+      sleepAfterRead = 0;
+      return at;
+    },
+    after: (ms, run) => add({ at: now + ms, run }),
+    every: (ms, run) => add({ at: now + ms, every: ms, run }),
+  };
+  const fire = (id: number, timer: Timer) => {
+    if (timer.every) timer.at = now + timer.every;
+    else timers.delete(id);
+    timer.run();
+  };
+  const due = (by: number, kind?: "after" | "every") => [...timers].filter(([, timer]) => timer.at <= by && (kind === undefined || (kind === "every") === Boolean(timer.every)))
+    .sort(([leftId, left], [rightId, right]) => left.at - right.at || leftId - rightId);
+  return {
+    clock,
+    advance(ms: number) {
+      const end = now + ms;
+      for (let next = due(end)[0]; next; next = due(end)[0]) {
+        now = next[1].at;
+        fire(...next);
+      }
+      now = end;
+    },
+    sleep(ms: number) {
+      now += ms;
+    },
+    /** The next reading of the clock is the last before a sleep of `ms`. */
+    sleepAfterNextRead(ms: number) {
+      sleepAfterRead = ms;
+    },
+    wake(first: "after" | "every") {
+      for (const kind of [first, first === "after" ? "every" : "after"] as const) {
+        for (const [id, timer] of due(now, kind)) if (timers.get(id) === timer) fire(id, timer);
+      }
+    },
+  };
+}
 
 describe("room turn timeout", () => {
   it("converts configured minutes to milliseconds", () => {
@@ -85,17 +141,133 @@ describe("room turn timeout", () => {
     deadline.stop();
   });
 
-  it("stops a turn whose progress arrives after the limit, before the timer ran", () => {
+  it("stops a turn whose progress arrives after the limit, before the timer ran", async () => {
     vi.useFakeTimers();
     const onTimeout = vi.fn();
     const deadline = new RoomTurnDeadline(5, onTimeout);
     deadline.start();
 
     // A stalled event loop delivers the event past the limit, before the timer callback ran.
-    vi.setSystemTime(Date.now() + 5 * 60_000 + 1);
+    await vi.advanceTimersByTimeAsync(5 * 60_000 - 10_000);
+    vi.setSystemTime(Date.now() + 10_001);
     deadline.progress();
     expect(onTimeout).toHaveBeenCalledOnce();
-    deadline.stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+
+  it("does not count a sleep as silence when the engine's next event comes first on waking", () => {
+    const time = sleepingClock();
+    const onTimeout = vi.fn();
+    const deadline = new RoomTurnDeadline(5, onTimeout, time.clock);
+    deadline.start();
+
+    time.advance(5 * 60_000 - ROOM_TURN_CLOCK_LOOK_MS);
+    time.sleep(2 * 60 * 60_000);
+    deadline.observe(reply);
+    time.wake("after");
+    expect(onTimeout).not.toHaveBeenCalled();
+
+    time.advance(5 * 60_000 - 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    time.advance(1);
+    expect(onTimeout).toHaveBeenCalledOnce();
+  });
+
+  for (const first of ["after", "every"] as const) {
+    it(`keeps the idle time from before a sleep when the ${first === "after" ? "deadline's own timer" : "clock's look"} runs first on waking`, () => {
+      const time = sleepingClock();
+      const onTimeout = vi.fn();
+      const deadline = new RoomTurnDeadline(5, onTimeout, time.clock);
+      deadline.start();
+
+      time.advance(5 * 60_000 - ROOM_TURN_CLOCK_LOOK_MS);
+      time.sleep(2 * 60 * 60_000);
+      time.wake(first);
+      expect(onTimeout).not.toHaveBeenCalled();
+
+      time.advance(ROOM_TURN_CLOCK_LOOK_MS - 1);
+      expect(onTimeout).not.toHaveBeenCalled();
+      time.advance(1);
+      expect(onTimeout).toHaveBeenCalledOnce();
+    });
+
+    it(`keeps the idle time from before a wait that ends on waking, ${first === "after" ? "before" : "after"} the clock's look`, () => {
+      const time = sleepingClock();
+      const onTimeout = vi.fn();
+      const deadline = new RoomTurnDeadline(5, onTimeout, time.clock);
+      deadline.start();
+
+      time.advance(4 * 60_000);
+      deadline.setWaiting(true);
+      time.advance(10_000);
+      time.sleep(2 * 60 * 60_000);
+      if (first === "every") time.wake("every");
+      deadline.setWaiting(false);
+      time.wake("every");
+      expect(onTimeout).not.toHaveBeenCalled();
+
+      time.advance(60_000 - 1);
+      expect(onTimeout).not.toHaveBeenCalled();
+      time.advance(1);
+      expect(onTimeout).toHaveBeenCalledOnce();
+    });
+  }
+
+  it("keeps the idle time from before a wait when the computer sleeps right as the wait ends", () => {
+    const time = sleepingClock();
+    const onTimeout = vi.fn();
+    const deadline = new RoomTurnDeadline(1, onTimeout, time.clock);
+    deadline.start();
+
+    time.advance(50_000);
+    deadline.setWaiting(true);
+    time.advance(10_000);
+    time.sleepAfterNextRead(2 * 60 * 60_000);
+    deadline.setWaiting(false);
+    time.wake("every");
+    expect(onTimeout).not.toHaveBeenCalled();
+
+    time.advance(10_000 - 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    time.advance(1);
+    expect(onTimeout).toHaveBeenCalledOnce();
+  });
+
+  it("counts the time awake between many short wakes", () => {
+    const time = sleepingClock();
+    const onTimeout = vi.fn();
+    const deadline = new RoomTurnDeadline(5, onTimeout, time.clock);
+    deadline.start();
+
+    const wakeOnce = () => {
+      time.advance(20_000);
+      time.sleep(60 * 60_000);
+      time.wake("every");
+    };
+    for (let wake = 0; wake < 14; wake += 1) wakeOnce();
+    expect(onTimeout).not.toHaveBeenCalled();
+    time.advance(20_000 - 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    time.advance(1);
+    expect(onTimeout).toHaveBeenCalledOnce();
+  });
+
+  it("counts a gap between looks too short to be a sleep as silence", () => {
+    const time = sleepingClock();
+    const onTimeout = vi.fn();
+    const deadline = new RoomTurnDeadline(5, onTimeout, time.clock);
+    deadline.start();
+
+    time.advance(280_000);
+    time.sleep(3 * ROOM_TURN_CLOCK_LOOK_MS);
+    time.wake("every");
+    expect(onTimeout).not.toHaveBeenCalled();
+
+    time.advance(5 * 60_000 - 280_000 - 3 * ROOM_TURN_CLOCK_LOOK_MS - 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    time.advance(1);
+    expect(onTimeout).toHaveBeenCalledOnce();
   });
 
   it("can be cancelled when the room turn settles", async () => {
@@ -103,10 +275,24 @@ describe("room turn timeout", () => {
     const onTimeout = vi.fn();
     const deadline = new RoomTurnDeadline(5, onTimeout);
     deadline.start();
+    deadline.start();
     deadline.stop();
+    deadline.start();
+    expect(vi.getTimerCount()).toBe(0);
 
     await vi.advanceTimersByTimeAsync(5 * 60_000);
     expect(onTimeout).not.toHaveBeenCalled();
+  });
+
+  it("leaves no timer behind once it fires", async () => {
+    vi.useFakeTimers();
+    const onTimeout = vi.fn();
+    const deadline = new RoomTurnDeadline(5, onTimeout);
+    deadline.start();
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(onTimeout).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("holds the clock while a human decides and resumes where it left off", async () => {
@@ -159,7 +345,8 @@ describe("room turn timeout", () => {
     deadline.start();
 
     // A stalled event loop delivers the card event past the deadline, before the timer callback ran.
-    vi.setSystemTime(Date.now() + 5 * 60_000 + 1);
+    await vi.advanceTimersByTimeAsync(5 * 60_000 - 10_000);
+    vi.setSystemTime(Date.now() + 10_001);
     deadline.setWaiting(true);
     expect(onTimeout).toHaveBeenCalledOnce();
 

@@ -19,10 +19,14 @@ const PAGE_BYTES = 4096;
 /** What one engine and its MCP servers take until one has been measured here: `opencode acp` 1.19.3 measured 361 MB on a
  * Cloud home before its first prompt and 623 MB with six stdio MCP servers, and about 466 MB while working. */
 export const ENGINE_DEFAULT_BYTES = 700 * MB;
-const ENGINE_MIN_BYTES = 300 * MB, ENGINE_MAX_BYTES = 1500 * MB;
+const ENGINE_MIN_BYTES = 300 * MB;
+/** The most admission plans for one engine, however large the ones measured here. */
+export const ENGINE_MAX_BYTES = 1500 * MB;
 /** One more session in a running shared process: OpenCode 1.19.3 grew about 110 MB a session with three stdio MCP
  * servers after a prompt; more MCP servers cost more. */
 export const SESSION_BYTES = 200 * MB;
+/** Memory the server, Chrome and the page cache keep: below it a machine without swap starts to thrash. */
+export const memoryFloor = (totalBytes: number): number => Math.max(320 * MB, totalBytes * 0.1);
 /** One bot's browser (agent-browser's daemon and its Chrome) on a page or two: 270 to 390 MB per bot on an 8 GB Cloud home,
  * 2026-10-21. It runs outside the engine's process group, so an engine's measured size never includes it. */
 export const BROWSER_BYTES = 400 * MB;
@@ -685,6 +689,29 @@ export class EngineMemory {
     return memory !== null && this.free(memory) < this.floor(memory);
   }
 
+  /** Memory available, not counting swap, is under relief's floor (`times` the floor, where given): a browser over its hard
+   * line then closes whatever holds it (browser/memory-ceiling.ts). False where memory can't be read. */
+  memoryShort(times = 1): boolean {
+    const memory = this.read();
+    return memory !== null && memory.availableBytes < this.floor(memory) * times;
+  }
+
+  /** The browser this thread's turn holds was closed for memory, whatever held it (browser/memory-ceiling.ts): the engine
+   * running that turn is stopped as relief stops one, and the turn ends with the line that the browser was closed. False
+   * when no engine here runs that turn. */
+  stopForBrowser(threadId: string): boolean {
+    const engine = [...this.engines.values()].find((candidate) => this.working(candidate).includes(threadId));
+    if (!engine) return false;
+    if (engine.stopping) return true;
+    const stopped = this.working(engine);
+    // A driver that carries other conversations stops them too; only this one's line says its browser was the cause.
+    this.noteStops(stopped, () => this.busy(), false, threadId);
+    this.noteRoomStopped(engine);
+    this.lastRelief = this.now();
+    void this.stop(engine, "relief").then(() => this.closeBrowsers(stopped));
+    return true;
+  }
+
   /** Stops the engine idle longest, if any: what a browser that has no room to open asks before it is refused. */
   async reclaimIdle(): Promise<boolean> {
     const idle = this.enabled ? this.idle() : null;
@@ -696,8 +723,7 @@ export class EngineMemory {
   /** Runs on every tick (every couple of seconds while engines run): the idle policy closes what it kept too long. */
   useIdleSweep(sweep: () => void): void { this.idleSweep = sweep; }
 
-  /** Memory the server, Chrome and the page cache keep: below it a machine without swap starts to thrash. */
-  private floor(memory: HostMemory): number { return Math.max(320 * MB, memory.totalBytes * 0.1); }
+  private floor(memory: HostMemory): number { return memoryFloor(memory.totalBytes); }
 
   private free(memory: HostMemory): number { return memory.availableBytes + memory.swapFreeBytes / 2; }
 
@@ -800,10 +826,10 @@ export class EngineMemory {
   }
 
   /** These threads' turns were stopped for memory, with how many tasks ran then: each says whether its browser was closed. */
-  private noteStops(threadIds: string[], count: (threadId: string) => number, only = false): void {
+  private noteStops(threadIds: string[], count: (threadId: string) => number, only = false, browserClosed?: string): void {
     for (const threadId of threadIds) {
       if (!this.stops.has(threadId)) this.ledger.note(this.now(), "stopped");
-      this.stops.set(threadId, { count: count(threadId), browser: this.browsers?.running(threadId) === true, ...(only ? { only: true as const } : {}) });
+      this.stops.set(threadId, { count: count(threadId), browser: threadId === browserClosed || this.browsers?.running(threadId) === true, ...(only ? { only: true as const } : {}) });
     }
   }
 

@@ -453,6 +453,13 @@ describe("server-side scope check (audit M1)", () => {
     expect(sharedComputerScopeRefusal(lent, { action: "read_file", folder_id: readOnly.id })).toBeNull();
     expect(sharedComputerScopeRefusal(lent, { action: "write_file", folder_id: writable.id })).toBeNull();
   });
+  it("on the person's own Cloud, a folder that isn't lent says where it is lent from, and never asks a card that can't lend one", () => {
+    const refusal = sharedComputerScopeRefusal(lent, { action: "read_file", folder_id: randomUUID() }, "ask_for_computer");
+    expect(refusal).toMatch(/^That folder isn't lent to this Cloud: use a folder_id list_shared_computers gives\./u);
+    expect(refusal).toContain("share it from the OpenMausBot desktop app, under Files");
+    expect(refusal).not.toContain("ask_for_computer");
+    expect(sharedComputerScopeRefusal(lent, { action: "read_file", folder_id: readOnly.id }, "ask_for_computer")).toBeNull();
+  });
   it("edits, appends and deletes only in a folder lent with editing, and only on a desktop that takes them", () => {
     const current = registration({ folders: [readOnly, writable], fileEdits: true });
     for (const action of ["edit_file", "append_file", "delete_file"] as const) {

@@ -278,7 +278,7 @@ export interface RoutineManagerOptions {
   onRunDeferred?: (run: RoutineRun, alert?: RoutineAlert) => void;
   /** A run a restart cut off, before it starts again or fails: its old turn's work must not resume as well. */
   onRunCut?: (run: RoutineRun) => void;
-  hasPendingDelegations?: (threadId: string) => boolean; /** Why a run that ended well in this thread must fail instead (a hand-off refused, the lent computer refused), once; null when nothing was. */ refusedHandoff?: (threadId: string) => string | RefusedRunLine | null;
+  hasPendingDelegations?: (threadId: string) => boolean; /** What a run a restart cut ends with in place of starting again, or null (memory-freeze-restart.ts). */ restartCut?: (threadId: string, startedAt: number | undefined) => string | null; /** Why a run that ended well in this thread must fail instead (a hand-off refused, the lent computer refused), once; null when nothing was. */ refusedHandoff?: (threadId: string) => string | RefusedRunLine | null;
   /** The turn in this thread is a routine's own, not one a person started there while its run waits on teammates. */
   routineTurn?: (threadId: string) => boolean; /** The thread's latest turn is one a person started there by typing (false when not known, e.g. after a restart). */ personTurn?: (threadId: string) => boolean;
   /** When an engine's usage limit resets (epoch ms), or null while that is not known. */
@@ -374,13 +374,13 @@ export class RoutineManager {
     const cut = settleRestored(this.routines, this.runs, this.ledger.restoredThrough, this.now(), (routine, past) => this.advancePastOccurrence(routine, past, past)).map(cloneRun); this.ledger.restoredThrough = null;
     let restarts = 0;
     for (const run of this.runs.filter((candidate) => candidate.status === "running" || candidate.status === "waiting")) {
-      settleAsk(run, undefined, this.now());
+      const turnRan = run.status === "running"; settleAsk(run, undefined, this.now());
       if (run.threadId && run.target === "bot" && this.options.hasPendingDelegations?.(run.threadId) === true) {
         this.wait(run, ROUTINE_HANDOFF_WAIT);
         continue;
-      }
-      if (!requeueOnce(run, "restarted", ROUTINE_RESTARTED, this.now(), restartRetryAt(this.now(), restarts++, this.ledger.retryAfterBoot(run)))) {
-        Object.assign(run, { status: "failed", error: ROUTINE_RESTARTED, attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>);
+      } const froze = run.threadId && turnRan ? this.options.restartCut?.(run.threadId, run.startedAt) ?? null : null; // A run waiting on hand-offs keeps waiting; one whose turn ran through a memory freeze ends.
+      if (froze !== null || !requeueOnce(run, "restarted", ROUTINE_RESTARTED, this.now(), restartRetryAt(this.now(), restarts++, this.ledger.retryAfterBoot(run)))) {
+        Object.assign(run, { status: "failed", error: froze ?? ROUTINE_RESTARTED, attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>);
         if (run.target === "room-goal") run.goalStatus = "failed";
       }
       cut.push(cloneRun(run));
@@ -1288,16 +1288,16 @@ export class RoutineManager {
       if (this.closing && (!event.ok || event.stopReason === "cancelled" || event.stopReason === "interrupted")) return null;
       if (event.cost != null) run.cost = (run.cost ?? 0) + event.cost;
       if (event.denials?.length) run.denials = [...new Set([...(run.denials ?? []), ...event.denials])];
-      if (!event.ok) {
-        this.settleFailure(run, routineFailure(run.error, event.stopReason), { ...this.failureFacts.get(run.id), stopReason: event.stopReason });
-        return cloneRun(run);
-      }
+      const facts = { ...this.failureFacts.get(run.id), stopReason: event.stopReason };
+      // The bot's reply is no proof, so a failed step fails the run. Only one clear case completes it, partly done with the step kept in its error line: every failed call was blocked by the safety floor (it ran nothing) after the reply came back.
+      const delivered = !event.ok && event.stopReason === "tool_error" && facts.partial === true && facts.blockedAfterReply === true && Boolean(run.output);
+      if (!event.ok && !delivered) { this.settleFailure(run, routineFailure(run.error, event.stopReason), facts); return cloneRun(run); }
       this.failureFacts.delete(run.id);
       const waitsOnTeammates = this.options.hasPendingDelegations?.(event.threadId) === true, handoffRefused = waitsOnTeammates ? null : this.options.refusedHandoff?.(event.threadId);
       if (handoffRefused) { const said = typeof handoffRefused === "string" ? { text: handoffRefused } : handoffRefused; this.failRun(Object.assign(run, { partial: (said.partial !== false && Boolean(run.output)) || undefined }, said.lendingRefused ? { lendingRefused: true as const } : {}), said.text); queueMicrotask(() => this.tickInBackground()); return cloneRun(run); }
       if (waitsOnTeammates) this.wait(run, ROUTINE_HANDOFF_WAIT);
-      else { Object.assign(run, { status: "completed", attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>); this.ownerNotices = this.ownerNotices.filter((notice) => notice.botId !== run.botId); }
-      run.error = undefined;
+      else { Object.assign(run, { status: "completed", attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>, delivered ? { partial: true } : {}); this.ownerNotices = this.ownerNotices.filter((notice) => notice.botId !== run.botId); }
+      if (!delivered) run.error = undefined;
     } else {
       return null;
     }

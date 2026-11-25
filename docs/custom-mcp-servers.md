@@ -221,6 +221,17 @@ the server's address. Sign-in with a registered app always uses that port; if
 another program holds it, sign-in stops and says so. Changing the client ID
 or the scopes signs the server out; a new secret for the same app does not.
 
+When you sign in from a browser on another computer, a return to
+`127.0.0.1` lands on the wrong machine and only the paste-back step is left.
+If the provider lets the app register an https address instead, set
+**Redirect URI** in the app's entry in `config.json` to this server's public
+https address at `/mcp-oauth/callback` (for example
+`https://maus.example/mcp-oauth/callback`) — the same address the editor
+shows once it is set. The sign-in then returns straight to that page and
+says **Signed in**, with nothing to paste; a browser on this computer uses
+the same address. Only that exact address is accepted, over https, with no
+query, credentials or fragment.
+
 ### Example: give your bots web search
 
 A good first URL server is You.com's search server, because the free profile

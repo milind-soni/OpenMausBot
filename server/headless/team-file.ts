@@ -8,6 +8,7 @@ import { z } from "zod";
 import { BOT_PROFILE_LIMITS, fitsOnOneLine } from "../../shared/bot-profile.ts";
 import { parseSkillMd } from "../../shared/skill-md.ts";
 import { parseToolScope, type ToolScope } from "../../shared/tool-scope.ts";
+import { EFFORT_LEVELS } from "../../shared/wire.ts";
 import { usageError } from "./args.ts";
 
 export const TEAM_BRIEF_MAX_BYTES = 24_000;
@@ -44,7 +45,7 @@ const botFields = {
   description: z.string().max(BOT_PROFILE_LIMITS.description, `must be at most ${BOT_PROFILE_LIMITS.description} characters`).optional(),
   soul: textOrFile.optional(),
   model: z.string().regex(/^[\w.-]+\/\S.*$/, "must be INSTANCE/MODEL, such as claude/claude-sonnet-5-5").optional(),
-  effort: z.enum(["none", "low", "medium", "high", "xhigh", "max"]).optional(),
+  effort: z.enum(EFFORT_LEVELS).optional(),
   approval: z.enum(["ask", "edits", "auto", "full"], { error: "must be ask, edits, auto or full (custom is set in the desktop app)" }).optional(),
   computer: z.enum(["auto", "off", "browser", "local", "vm", "cloud"]).optional(),
   cwd: z.string().min(1).optional(),

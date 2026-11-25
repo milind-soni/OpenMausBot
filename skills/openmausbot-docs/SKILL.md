@@ -25,6 +25,10 @@ describe a setting from memory: read the setting, the file, or the page.
   page explains why something is built that way and what happens if.
 - When the two disagree the app wins, and say which one you checked. When
   neither has the setting, say it does not exist instead of inventing a name.
+- Which AI engines work here, why one can't run and how it is connected (a
+  subscription sign-in, a device code, an API key or a local program):
+  `list_models` says, per engine. Repeat what it says; if you have not checked,
+  say so rather than guessing about sign-in or billing.
 
 ## The data folder
 
@@ -58,7 +62,7 @@ a hand edit races the next save.
 | What a bot remembers between tasks | `memory.md` |
 | Timing, cron, time zones, paused and done routines | `routine-schedules.md` |
 | The daily brief, and the checks that run before it | `proactive-routines.md` |
-| Letting an app or a script message one bot | `bot-api.md` |
+| Letting an app or a script message one bot, or a bot on another server | `bot-api.md` |
 | Letting a script drive the whole server | `headless-cli.md` |
 | Which model picks between bots, and whose key decides | `decision-model.md` |
 | How a bot chooses a tool | `tool-selection.md` |

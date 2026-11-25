@@ -18,7 +18,7 @@ export const APP_SETTINGS_TOOL_DEFINITION = {
       reason: { type: "string", maxLength: 240, description: "set on a secret: why, for the card." },
       card: { type: "string", enum: [...SETTINGS_CARD_IDS], description: `show_card: ${SETTINGS_CARD_IDS.map((id) => `${id} ${SETTINGS_CARDS[id].when}`).join("; ")}.` },
       theme: { type: "string", maxLength: 120000, description: "set_theme: theme JSON." },
-      path: { type: "string", maxLength: 1024, description: "add_theme_asset: a file of yours." },
+      path: { type: "string", maxLength: 1024, description: "add_theme_asset: a file of yours or an attachment; left out: the latest picture." },
       steps: { type: "integer", description: "undo_theme: changes back, default 1." },
       index: { type: "integer", description: "undo_theme: the theme_history entry to return to." },
     },

@@ -106,6 +106,19 @@ describe("a server's JSON-RPC error", () => {
   });
 });
 
+describe("the protocol version the server answers with", () => {
+  it.each([
+    { echo: "2026-07-28", wire: "2025-06-18" },
+    { echo: "2024-11-05", wire: "2024-11-05" },
+  ])("puts $wire, not the echoed $echo, on later requests", async ({ echo, wire }) => {
+    fake = await startFakeHttpMcp({ tools: [{ name: "still_available" }], protocolVersion: echo });
+    client = new RemoteMcpClient({ type: "http", url: fake.url, headers: {} });
+    await client.initialize("fixture", AbortSignal.timeout(5_000));
+    await client.request("tools/list", {}, AbortSignal.timeout(5_000));
+    for (const headers of fake.seenHeaders.slice(1)) expect(headers["mcp-protocol-version"]).toBe(wire);
+  });
+});
+
 describe("which plain http requests go through HTTP_PROXY", () => {
   it("skips loopback and NO_PROXY hosts the way curl does", () => {
     const at = (url: string, list = "") => bypassesProxy(new URL(url), list);

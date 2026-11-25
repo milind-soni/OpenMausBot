@@ -53,7 +53,7 @@ export const BASE_IMAGE = `${BASE_IMAGE_REPOSITORY}@${BASE_IMAGE_DIGEST}`;
 // localhost/ is explicit: Podman prepends it to unqualified build tags and may then resolve the name on Docker Hub.
 // Image and container labels, not this mutable tag, decide compatibility.
 export const IMAGE_REPOSITORY = "localhost/openmausbot/cua-local-vm";
-export const IMAGE_LAYER_VERSION = "9";
+export const IMAGE_LAYER_VERSION = "10";
 export const IMAGE_LAYER_LABEL = "com.openmausbot.image-layer";
 export const IMAGE = `${IMAGE_REPOSITORY}:driver-${CUA_DRIVER_VERSION}-v${IMAGE_LAYER_VERSION}`;
 export const CONTAINER = "openmausbot-computer";
@@ -242,11 +242,11 @@ export interface ContainerRuntimeStatus {
   daemonUp: boolean;
 }
 
-/** Inspects only the host runtime: never opens a container, calls Cua, or reads a screenshot. */
-export async function containerRuntimeStatus(
-  runner: CommandRunner = sh,
-  platform: NodeJS.Platform = process.platform,
-): Promise<ContainerRuntimeStatus> {
+let hostRuntimeRead: Promise<ContainerRuntimeStatus> | null = null; /** Inspects only the host runtime: never opens a container, calls Cua, or reads a screenshot. Callers at one moment share one read (the Local VM's availability and its recovery both ask at start). */
+export function containerRuntimeStatus(runner: CommandRunner = sh, platform: NodeJS.Platform = process.platform): Promise<ContainerRuntimeStatus> {
+  return runner !== sh || platform !== process.platform ? readContainerRuntimeStatus(runner, platform) : (hostRuntimeRead ??= readContainerRuntimeStatus(runner, platform).finally(() => { hostRuntimeRead = null; }));
+}
+async function readContainerRuntimeStatus(runner: CommandRunner, platform: NodeJS.Platform): Promise<ContainerRuntimeStatus> {
   // Podman is the supported Windows VM lane and owns the pinned image; Docker-first would pick an unrelated image store.
   const candidates: Runtime[] = platform === "win32"
     ? ["podman", "docker"]
@@ -572,7 +572,6 @@ export async function containerComputerStatus(
         detail?.Mounts,
         platform,
         target.workspaceDir,
-        status.runtime,
       ) ? "durable" : "unsafe";
       status.security = (
         status.runtime === "podman"
@@ -709,28 +708,27 @@ function sameWorkspaceSource(
   return platform === "win32" ? actual.toLowerCase() === expected.toLowerCase() : actual === expected;
 }
 
-/** Podman Machine exposes a Windows bind source through its WSL mount path; accept only the exact translation. */
-function samePodmanWindowsWorkspaceSource(source: string | undefined, expectedWorkspace: string): boolean {
+/**
+ * Podman Machine and Rancher Desktop (dockerd) expose a Windows bind source through its WSL mount path;
+ * accept only the exact translation, ignoring slash style, doubled slashes and a trailing slash.
+ */
+function sameWslWindowsWorkspaceSource(source: string | undefined, expectedWorkspace: string): boolean {
   if (!source) return false;
   const match = expectedWorkspace.match(/^([A-Za-z]):[\\/](.+)$/);
   if (!match) return false;
-  const expected = `/mnt/${match[1].toLowerCase()}/${match[2].replaceAll("\\", "/")}`;
-  const actual = source.replaceAll("\\", "/");
-  return actual.toLowerCase() === expected.toLowerCase();
+  const tidy = (path: string) => path.replaceAll("\\", "/").replace(/\/{2,}/g, "/").replace(/\/+$/, "").toLowerCase();
+  return tidy(source) === tidy(`/mnt/${match[1]}/${match[2]}`);
 }
 
-function dockerWorkspaceMountIsSafe(
+export function dockerWorkspaceMountIsSafe(
   mounts:
     | Array<{ Type?: string; Source?: string; Destination?: string; RW?: boolean }>
     | undefined,
   platform: NodeJS.Platform,
   expectedWorkspace: string,
-  runtime: Runtime = "docker",
 ): boolean {
   const sourceMatches = sameWorkspaceSource(mounts?.[0]?.Source, platform, expectedWorkspace) ||
-    (runtime === "podman" &&
-      platform === "win32" &&
-      samePodmanWindowsWorkspaceSource(mounts?.[0]?.Source, expectedWorkspace));
+    (platform === "win32" && sameWslWindowsWorkspaceSource(mounts?.[0]?.Source, expectedWorkspace));
   return Boolean(
     mounts?.length === 1 &&
       mounts[0]?.Type === "bind" &&
@@ -1003,7 +1001,7 @@ export async function containerComputerScreenshot(
 const screenshotStatusCache = new Map<
   string,
   { status: ContainerComputerStatus; expiresAt: number }
->();
+>(); /** The status a Local VM's last screen capture read, however old, and when: never a new one. */ export function lastLocalVmStatus(target: LocalVmTarget): { status: ContainerComputerStatus; at: number } | null { const hit = screenshotStatusCache.get(target.key); return hit ? { status: hit.status, at: hit.expiresAt - SCREENSHOT_STATUS_TTL_MS } : null; }
 
 const containerMcpPath = SPAWNED_PROXIES.containerMcp;
 

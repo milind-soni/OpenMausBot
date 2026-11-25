@@ -10,7 +10,7 @@ import {
 beforeEach(() => setLocale("en"));
 
 const ids = (ctx: SettingsContext) => visiblePages(ctx).map((page) => page.id);
-const PLACE_PAGES = ["overview", "phone", "ai", "bots", "desktops", "vault", "usage", "transfer", "data"];
+const PLACE_PAGES = ["overview", "devices", "ai", "bots", "desktops", "vault", "usage", "transfer", "data"];
 const find = (query: string, ctx: SettingsContext = fullContext()) => searchSettings(query, ctx, (entry) => t(entry.labelKey), (page) => t(page.labelKey));
 const first = (query: string, ctx?: SettingsContext) => find(query, ctx)[0]?.entry;
 
@@ -25,7 +25,7 @@ const PEOPLE = {
 
 describe("the pages", () => {
   it("lists the place's pages, then Your account, then This app, in one fixed order", () => {
-    expect(ids(fullContext())).toEqual([...PLACE_PAGES, "account", "plan", "app", "general", "appearance"]);
+    expect(ids(fullContext())).toEqual([...PLACE_PAGES, "features", "account", "plan", "app", "general", "appearance"]);
   });
 
   it.each(Object.entries(PEOPLE))("keeps the same place pages, in the same order, for %s", (who, ctx) => {
@@ -35,8 +35,8 @@ describe("the pages", () => {
   });
 
   it.each(["local only", "This computer, with My Cloud", "My Cloud's page in the desktop window", "My Cloud in a browser (owner)"] as const)(
-    "shows Simple's ten entries for %s", (who) => {
-      expect(ids({ ...PEOPLE[who], advanced: false })).toEqual(["overview", "phone", "ai", "vault", "usage", "transfer", "account", "plan", "app", "appearance"]);
+    "shows Simple's eleven entries for %s", (who) => {
+      expect(ids({ ...PEOPLE[who], advanced: false })).toEqual(["overview", "devices", "ai", "vault", "usage", "transfer", "features", "account", "plan", "app", "appearance"]);
     });
 
   it("is shorter in Simple: the four Advanced pages come back in Advanced, in place", () => {
@@ -48,11 +48,11 @@ describe("the pages", () => {
   it("turns Advanced on for a link, a notice or a search hit that asks for an Advanced page or row from Simple", () => {
     const simple = fullContext({ advanced: false });
     expect(resolveSettingsTarget("general", simple)).toEqual({ page: "general", advanced: true });
-    expect(resolveSettingsTarget("activity", simple)).toEqual({ page: "data", anchor: "activity", advanced: true });
+    expect(resolveSettingsTarget("activity", { ...simple, desktop: false })).toEqual({ page: "data", anchor: "activity", advanced: true });
     expect(resolveSettingsTarget("backups", simple)).toEqual({ page: "transfer", anchor: "take-out" });
     expect(resolveSettingsTarget("import", simple)).toEqual({ page: "transfer", anchor: "bring-in" });
     expect(resolveSettingsTarget("decisionModel", simple)).toEqual({ page: "ai", anchor: "routing", advanced: true });
-    expect(resolveSettingsTarget("phone", simple)).toEqual({ page: "phone" });
+    expect(resolveSettingsTarget("phone", simple)).toEqual({ page: "devices", anchor: "phones" });
     expect(needsAdvanced({ page: "general" }, fullContext())).toBe(false);
   });
 
@@ -81,7 +81,7 @@ describe("the pages", () => {
     for (const advanced of [false, true]) {
       for (const query of ["other computers", "another computer", "tailscale", "your other", "laptop"]) {
         const hit = find(query, fullContext({ advanced })).find((found) => found.entry.id === "other-computers");
-        expect(hit, query).toMatchObject({ entry: { page: "phone", anchor: "computers" }, elsewhere: false });
+        expect(hit, query).toMatchObject({ entry: { page: "devices", anchor: "network" }, elsewhere: false });
         expect(hit!.advanced, query).toBeUndefined();
       }
       expect(find("tailscale", fullContext({ advanced }))[0]?.entry.id).toBe("other-computers");
@@ -90,8 +90,12 @@ describe("the pages", () => {
     expect(cloud.filter((found) => found.entry.id === "other-computers")).toEqual([]);
   });
 
-  it("names Phone & devices the same on every place: there is no This server page", () => {
-    for (const ctx of Object.values(PEOPLE)) expect(visiblePages(ctx).find((page) => page.id === "phone")?.labelKey).toBe("settings.section.phoneDevices");
+  it("names Devices the same on every place, phones included: there is no Phone & devices or This server page", () => {
+    for (const ctx of Object.values(PEOPLE)) {
+      if (ctx.client) continue;
+      expect(visiblePages(ctx).find((page) => page.id === "devices")?.labelKey).toBe("settings.page.devices");
+      expect(visiblePages(ctx).map((page) => page.labelKey)).not.toContain("settings.section.phoneDevices");
+    }
     expect(JSON.stringify(SETTINGS_PAGES)).not.toContain("thisServer");
   });
 
@@ -128,8 +132,10 @@ describe("old links", () => {
   it("lands each old page where the design says", () => {
     const ctx = fullContext();
     const where = (id: AppSettingsSection) => resolveSettingsTarget(id, ctx);
-    expect(where("companion")).toEqual({ page: "phone" });
-    expect(where("remote")).toEqual({ page: "phone" });
+    expect(where("phone")).toEqual({ page: "devices", anchor: "phones" });
+    expect(where("companion")).toEqual({ page: "devices", anchor: "phones" });
+    expect(where("remote")).toEqual({ page: "devices", anchor: "reach" });
+    expect(resolveSettingsTarget("remote", fullContext({ here: false, cloud: true }))).toEqual({ page: "devices", anchor: "phones" });
     expect(resolveSettingsTarget("remote", fullContext({ client: true }))).toEqual({ page: "app", anchor: "your-computers" });
     expect(where("engines")).toEqual({ page: "ai", anchor: "providers" });
     expect(where("connections")).toEqual({ page: "ai", anchor: "ai-keys" });
@@ -142,9 +148,11 @@ describe("old links", () => {
     expect(where("desktopWorkspaces")).toEqual({ page: "app", anchor: "your-computers" });
     expect(where("backups")).toEqual({ page: "transfer", anchor: "take-out" });
     expect(where("import")).toEqual({ page: "transfer", anchor: "bring-in" });
-    expect(where("activity")).toEqual({ page: "data", anchor: "activity" });
+    expect(where("activity")).toEqual({ page: "data" });
+    expect(resolveSettingsTarget("activity", fullContext({ desktop: false }))).toEqual({ page: "data", anchor: "activity" });
     expect(where("experimental")).toEqual({ page: "bots", anchor: "early" });
-    expect(where("skills")).toEqual({ page: "bots", anchor: "skills" });
+    expect(where("skills")).toEqual({ page: "bots" });
+    expect(resolveSettingsTarget("skills", fullContext({ skills: true }))).toEqual({ page: "bots", anchor: "skills" });
     expect(where("updates")).toEqual({ page: "app", anchor: "updates" });
     expect(resolveSettingsTarget("updates", PEOPLE["My Cloud in a browser (owner)"])).toEqual({ page: "overview" });
     expect(where("usage")).toEqual({ page: "usage" });
@@ -156,8 +164,8 @@ describe("old links", () => {
 });
 
 describe("search", () => {
-  it.each(["phone", "pair", "qr", "iphone", "android", "this server", "pair a device", "connect your phone"])("puts Phone & devices first for “%s”", (query) => {
-    expect(first(query)?.page).toBe("phone");
+  it.each(["phone", "pair", "qr", "iphone", "android", "this server", "pair a device", "connect your phone"])("puts Devices' phones first for “%s”", (query) => {
+    expect(first(query)).toMatchObject({ page: "devices", anchor: "phones" });
   });
 
   it.each(["name", "my name", "photo", "avatar", "profile", "profile picture"])("puts About you first for “%s”", (query) => {
@@ -175,6 +183,21 @@ describe("search", () => {
   it("puts All bots on You and your bots", () => expect(first("all bots")?.page).toBe("bots"));
   it.each(["kimi", "hidden providers", "unhide"])("puts AI › Providers first for “%s”", (query) => expect(first(query)?.id).toBe("providers"));
   it("finds AI › Providers for “cursor” beside importing from Cursor", () => expect(find("cursor").map((hit) => hit.entry.id)).toEqual(expect.arrayContaining(["providers", "ai-apps"])));
+  it("opens an old link to Activity at the top of Data in the desktop app, where only a browser has it", () => {
+    expect(resolveSettingsTarget("activity", fullContext({ advanced: false }))).toEqual({ page: "data", advanced: true });
+    expect(resolveSettingsTarget("activity", fullContext())).toEqual({ page: "data" });
+    expect(resolveSettingsTarget("activity", fullContext({ desktop: false, admin: false, advanced: false }))).toEqual({ page: "data", advanced: true });
+  });
+
+  it("finds Repeat computer tasks without AI only where the server can repeat saved steps", () => {
+    const simple = fullContext({ advanced: false });
+    expect(find("saved", simple).map((hit) => hit.entry.id)).toContain("saved-steps");
+    for (const ctx of [{ ...simple, savedSteps: false }, { ...simple, savedSteps: undefined }, fullContext({ savedSteps: false })]) {
+      expect(find("saved", ctx).map((hit) => hit.entry.id)).not.toContain("saved-steps");
+      expect(find("repeat", ctx)).toEqual([]);
+    }
+  });
+
   it("finds Activity in Data where it exists: a browser, for an admin", () => {
     expect(first("activity", PEOPLE["a team admin"])?.anchor).toBe("activity");
     expect(find("activity", fullContext()).some((hit) => hit.entry.anchor === "activity")).toBe(false);
@@ -220,8 +243,8 @@ describe("search", () => {
   it("lists This computer's rows under On your other places on My Cloud's rail, and never with one place", () => {
     const wifi = find("wifi", PEOPLE["My Cloud's page in the desktop window"]);
     expect(wifi.find((hit) => hit.entry.id === "wifi")?.elsewhere).toBe(true);
-    // My Cloud has no Same Wi-Fi of its own, so its own phone page isn't offered for it.
-    expect(wifi.some((hit) => hit.entry.id === "page:phone")).toBe(false);
+    // My Cloud has no Same Wi-Fi of its own, so its own Devices page isn't offered for it.
+    expect(wifi.some((hit) => hit.entry.id === "page:devices")).toBe(false);
     expect(find("wifi", PEOPLE["My Cloud in a browser (owner)"]).some((hit) => hit.entry.id === "wifi")).toBe(false);
   });
 

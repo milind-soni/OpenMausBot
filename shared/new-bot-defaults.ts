@@ -5,7 +5,7 @@ import type { ToolScope } from "./tool-scope";
 /** Data shared by the default template and an individual creation draft. */
 export type BotDefaultsProfile = Partial<Pick<WireBot,
   "name" | "title" | "description" | "soul" | "notifications" | "avatarUrl" | "avatarCrop" |
-  "mascotBody" | "mascotFaceColor" | "color" | "voice" | "speakReplies" | "section" | "modelSelection" |
+  "mascotBody" | "mascotFaceColor" | "mascotBodyColor" | "mascotMaterial" | "color" | "voice" | "speakReplies" | "section" | "modelSelection" |
   "cloudBackend" | "autoStartVps" | "approvalMode" | "alwaysAllow" | "chiefOfStaff" |
   "managedSections" | "composio" | "browser" | "voiceNotes"
 >> & {

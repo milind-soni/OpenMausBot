@@ -302,6 +302,7 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_RPC_APPEND_FILE;
     delete process.env.FAKE_ACP_RPC_FAILURE_FILE;
     delete process.env.FAKE_ACP_RPC_FAILURE_METHOD;
+    delete process.env.FAKE_ACP_RPC_FAILURE_ONCE;
     delete process.env.FAKE_ACP_RPC_FAILURE_AFTER_OUTPUT;
     delete process.env.FAKE_ACP_RPC_FAILURE_AFTER_USAGE;
     delete process.env.FAKE_ACP_LOAD_ERROR;
@@ -2804,6 +2805,18 @@ describe("ACP turns (fake CLI)", () => {
     expect(argv[modelFlag + 1]).toBe("grok-4.5");
     expect(argv.indexOf("--reasoning-effort")).toBeGreaterThan(agent);
     expect(argv.indexOf("--permission-mode")).toBeLessThan(agent);
+  });
+
+  it("asks session/new once more after the engine's own transient refusal, and the turn runs", async () => {
+    const failureFile = join(scratch, "session-new-once.json"), rpcFile = join(scratch, "session-new-once-rpc.json");
+    Object.assign(process.env, { FAKE_ACP_RPC_FAILURE_FILE: failureFile, FAKE_ACP_RPC_FAILURE_METHOD: "session/new", FAKE_ACP_RPC_FAILURE_ONCE: "1", FAKE_ACP_RPC_DUMP: rpcFile });
+    writeFileSync(failureFile, JSON.stringify({ code: -32603, message: "Internal error", data: { details: "Internal service failure", errorName: "ServiceUnavailableError" } }));
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-session-new-once", text: "hi" });
+    expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+    expect(recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
+    const methods = JSON.parse(readFileSync(rpcFile, "utf8")) as string[];
+    expect(methods.filter((method) => method.startsWith("session/new"))).toEqual(["session/new", "session/new.error", "session/new"]);
   });
 
   describe("opt-in startup recovery", () => {

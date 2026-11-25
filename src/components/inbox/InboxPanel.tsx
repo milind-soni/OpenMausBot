@@ -11,14 +11,14 @@ import { sameJson } from "@/state/same-json";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useActiveLocale } from "@/lib/use-active-locale";
 import { InboxActive, inboxAttentionEntries, inboxOpenThread, readNewsThreads, unreadConversations } from "./InboxActive";
-import { attentionJumpAction, attentionUnpinAction } from "../SidebarBotActivity";
+import { attentionUnpinAction } from "../SidebarBotActivity";
 import { InboxReading } from "./InboxReading";
 import { InboxRowItem } from "./InboxRow";
 import { FinishedThreads, finishedThreads } from "./FinishedThreads";
 import { PinnedThreads, pinnedThreadRows } from "./PinnedThreads";
 import { matchesSearch, nextAfter } from "./inbox-answer";
 import { listedRows, rowsIn, waitingCount } from "./inbox-view";
-import { useInboxActions } from "./use-inbox-actions";
+import { useInboxActions, useInboxJump } from "./use-inbox-actions";
 import { roundButtonCls } from "../bot-panel/rows";
 
 
@@ -30,7 +30,7 @@ export const InboxPanel = memo(function InboxPanel() {
   const markingAll = useInboxMarkingAll();
   const phone = useMediaQuery(PHONE_LAYOUT);
   const simple = !useAdvancedMode();
-  const { run, openInChat } = useInboxActions(view);
+  const { run, openInChat } = useInboxActions(view), jump = useInboxJump();
   const [now, setNow] = useState(() => Date.now());
   const [query, setQuery] = useState("");
   const [showDone, setShowDone] = useState(false);
@@ -114,7 +114,7 @@ export const InboxPanel = memo(function InboxPanel() {
           <>
             <div className="min-h-0 flex-1 overflow-y-auto">
               {/* The conversations each bot and room pinned, at the top of the list. */}
-              {!query.trim() && <PinnedThreads rows={pinnedRows} now={now} current={openThread} onOpen={(row) => dispatch(attentionJumpAction(row))} onUnpin={(row) => dispatch(attentionUnpinAction(row))} />}
+              {!query.trim() && <PinnedThreads rows={pinnedRows} now={now} current={openThread} onOpen={jump} onUnpin={(row) => dispatch(attentionUnpinAction(row))} />}
               {listed.length > 0 && <label className="mx-[13px] my-2.5 flex h-8 items-center gap-2 rounded-lg bg-ink/[0.045] px-2.5 ring-[0.5px] ring-ink/[0.12] focus-within:ring-ink/30">
                 <Search size={14} aria-hidden="true" className="shrink-0 text-ink-tertiary" />
                 <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("inbox.search")} aria-label={t("inbox.search")}
@@ -135,7 +135,7 @@ export const InboxPanel = memo(function InboxPanel() {
               </div>
               {!query.trim() && <InboxActive view={view} current={openThread} exclude={pinnedThreads} />}
               {/* The finished, already-read conversations. */}
-              {!query.trim() && <FinishedThreads rows={finishedRows} now={now} current={openThread} onOpen={(row) => dispatch(attentionJumpAction(row))} />}
+              {!query.trim() && <FinishedThreads rows={finishedRows} now={now} current={openThread} onOpen={jump} />}
               {done.length > 0 && (
                 <section data-inbox-done className="px-1.5 pb-1.5">
                   <button type="button" data-inbox-done-toggle aria-expanded={showDone} onClick={() => setShowDone(!showDone)}

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { Action } from "@/state/store";
 import { takeConnectRequest, type TeamAdminSection } from "./connect-link";
 import { useOwnerOrAdmin } from "./use-owner-or-admin";
+import { replaceUrl } from "./replace-url";
 
 /** Opens the page a `/?connect=` link asks for, once, and leaves the address clean. A page only a team's admin is
  * shown opens when this person is known to be one, and never for anyone else. */
@@ -12,7 +13,7 @@ export function useConnectLink(dispatch: (action: Action) => void, team: boolean
   useEffect(() => {
     const request = takeConnectRequest(window.location.href);
     if (!request) return;
-    window.history.replaceState(null, "", request.rest);
+    replaceUrl(request.rest);
     if ("teamAdminSection" in request) setAdminSection(request.teamAdminSection);
     else dispatch("section" in request ? { type: "toggleAppSettings", open: true, section: request.section } : { type: "togglePlugins", open: true, surface: request.surface });
   }, [dispatch]);

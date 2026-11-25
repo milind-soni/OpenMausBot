@@ -396,6 +396,14 @@ export function classifyCursorError(error: unknown): ProviderErrorCode | undefin
   return undefined;
 }
 
+/** cursor-agent 2026.10.22's session/prompt catches any failed model call, sends `\n\nError: ${String(error)}` as one
+ * message chunk and answers end_turn. Its own errors are named RetriableError and NonRetriableError. */
+const CURSOR_REPLY_FAILURE = /^\n\nError: (?:(?:Non)?RetriableError: )?([^\n]+)$/;
+
+export function cursorReplyFailure(chunk: string): string | null {
+  return CURSOR_REPLY_FAILURE.exec(chunk.trimEnd())?.[1]?.trim() || null;
+}
+
 /** Cursor's AskQuestion blocks on `cursor/ask_question` (cursor.com/docs/cli/acp; cursor-agent 2026.10.01, no sessionId).
  * Cursor answers by option id only, so a reply with any own words goes back whole as `skipped` with the answers as the
  * reason, which Cursor hands the model verbatim: a typed answer is never forced onto an option. */
@@ -514,6 +522,7 @@ const support = (run: typeof execCli): AcpSupport => ({
   authFailure: "continue",
   isAuthenticated: (env, config) => probeCursorAuth(config.cli || "cursor-agent", env, run),
   classifyError: classifyCursorError,
+  replyFailure: cursorReplyFailure,
 
   clientCapabilitiesMeta: CURSOR_CLIENT_META,
 

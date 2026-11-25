@@ -5,6 +5,7 @@ import {
   isLivePing,
   listenLiveFrames,
   liveEventsUrl,
+  livePhase,
   openLiveEvents,
   retryLiveEvents,
   shouldReconnectLiveEvents,
@@ -504,6 +505,25 @@ describe("live screens", () => {
     await Promise.resolve();
     expect(test.sources[2].url).toBe("/api/events?since=run00000%3A4&screens=off&window=1&frames=thread");
     quiet();
+    stop();
+  });
+});
+
+describe("the live connection's phase, which the 30-second still-waiting event names", () => {
+  it("is opening until the stream opens, open after, retrying once it is lost, offline while the computer is", () => {
+    const test = harness();
+    const stop = openLiveEvents({ onFrame: () => {}, onSnapshotRequired: async () => true }, test.platform);
+    expect(livePhase()).toBe("opening");
+    test.sources[0]!.open();
+    expect(livePhase()).toBe("open");
+    test.setOnline(false);
+    test.sources[0]!.error();
+    expect(livePhase()).toBe("offline");
+    test.setOnline(true);
+    test.windowTarget.emit("online");
+    expect(livePhase()).toBe("opening");
+    test.sources.at(-1)!.error();
+    expect(livePhase()).toBe("retrying");
     stop();
   });
 });

@@ -13,8 +13,8 @@ export type CoordinateBotsCall = {
   message: string;
   reason?: string;
   rework: boolean;
-  /** "standing" (the conversation's one work thread with each teammate), "new", or the id of a thread the caller opened on
-   * that teammate. */
+  /** "standing" (the conversation's work thread with each teammate; while a turn runs there, another idle one or a new one,
+   * unless work it still waits on is there), "new", or the id of a thread the caller opened on that teammate. */
   thread: string;
   reply: "resume" | "none";
   consult: boolean;
@@ -28,6 +28,8 @@ export type CoordinateBotsCall = {
   files?: readonly PassedFile[];
   /** start_thread's report_back: the one target is the sender's own new thread, run on this model. */
   ownThread?: { modelSelection?: ModelSelection; approvalMode?: NewThreadLevel };
+  /** coordinate_bots thread "new": the thread it opens is this one hand-off's, so it closes once the result is back. */
+  oneShot?: true;
   /** post_to_thread: one message into this existing thread; wake starts a run there, else it waits for the next one. */
   post?: { deliveryId: string; wake: boolean };
 };
@@ -229,6 +231,9 @@ export interface Coordinator {
   liveEdges(): LiveHandoffEdge[];
   /** The conversation stopped: its work and everything that work handed out end, and nothing resumes it. */
   stopAwaitingDirect(threadId: string, reason?: string): void;
+  /** The person stopped one hand-off, not the conversation that made it: that work and everything it handed on end as the
+   * person's stop, and its requester hears it was stopped and goes on. Undefined for no such hand-off. */
+  stopHandoff(id: string): "stopped" | "ended" | undefined;
   /** The next start goes on with this thread's turn, so a shutdown's "cut" line would be false. */
   continuesAfterRestart(threadId: string): boolean;
   note(id: string): string | undefined;
@@ -261,7 +266,16 @@ export interface CoordinatorOptions {
   legacyThreads?: LegacyThreadResolver;
   /** After every write to the assignment store, so a host that ticks only when work is due can tick again. */
   wrote?: () => void;
+  /** What a turn a restart cut ends with in place of starting again, or null (runtime/runtime.ts RuntimeOptions). */
+  restartCut?: (threadId: string, startedAt: number | undefined) => string | null;
 }
+
+/** The outcome clause for the same-turn "finish your response" answer about an assignment this turn handed out, from its
+ * reply mode — the same wording the coordinate_bots receipt gives. */
+export const sameTurnReturns = (reply: Reply | undefined): string =>
+  reply === "none" ? "nothing comes back from it"
+  : reply === "poll" ? "read its result with assignment_status"
+  : "its result returns to this conversation and resumes you";
 
 export function createCoordinator(options: CoordinatorOptions): Coordinator {
   return new RuntimeCoordinator(options);

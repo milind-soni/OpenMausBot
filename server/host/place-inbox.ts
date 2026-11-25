@@ -155,7 +155,9 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
       try { card = row.card ? JSON.parse(row.card) as OptionCardData : null; } catch { continue; }
       if (!card || !personWait({ id: row.id, at: row.at, kind: "options", card }) || !deps.sees(auth, row.threadId) || !deps.mayAnswer(auth, row.threadId, card.requestId!)) continue;
       if (overtaken(row.threadId, row.id) && !deps.live(row.threadId, card.requestId!)) continue;
-      const bot = (row.fromBotId ? store.bot(row.fromBotId) : undefined) ?? store.botByThread(row.threadId);
+      const owner = store.botByThread(row.threadId);
+      if (owner && store.taskByThread(owner.id, row.threadId)?.closedBy) continue;
+      const bot = (row.fromBotId ? store.bot(row.fromBotId) : undefined) ?? owner;
       if (!bot) continue;
       const group = store.groupByThread(row.threadId);
       const guest = deps.guestOf(row.threadId);

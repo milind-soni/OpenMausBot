@@ -1,10 +1,11 @@
 import { directMessageSent, roomMessageSent } from "@/lib/product-events";
 import { TeamAudienceLabel } from "./TeamSideSwitch";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
+import { ComposerForkError, useComposerFork } from "./ComposerFork";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
-import { Mic, Square, X } from "lucide-react";
+import { Mic, Square } from "lucide-react";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { useStoreRef } from "@/state/store-ref"; import { sameDrawnBots } from "@/lib/drawn-bots";
-import { visibleMessages, currentTaskBot, type Bot, type Group, type InstanceInfo, type Message } from "@/state/store";
+import { visibleMessages, currentTaskBot, type Action, type Bot, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { useMenuMotion } from "./MenuMotion";
@@ -35,7 +36,7 @@ import {
   type FailedComposerSend,
 } from "@/lib/drafts";
 import { DEVS_CHOICE, MentionMenu, teammateChoices, type MentionChoice } from "./MentionMenu"; import { useTeammates } from "@/state/team-people"; import { hiddenFromSidebar, useViewerEmail } from "@/lib/default-bot"; import { useMayAct } from "./SharedQueueLine";
-import { SlashCommandMenu } from "./SlashCommandMenu";
+import { SlashCommandMenu } from "./SlashCommandMenu"; import { ComposerFailedSends } from "./ComposerFailedSends";
 import { MentionTextarea } from "./MentionTextarea";
 import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
 import { PointedChips } from "./app/PointedChips"; import { SetupRequestChip, setupRequestPlaceholder } from "./SetupOffer";
@@ -72,6 +73,8 @@ import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "
 import { CallButton } from "./CallView";
 import { GroupCallButton } from "./GroupCallView";
 import { ApprovalChip, ComposerPlusMenu, GoalToggle } from "./ComposerPlusMenu";
+import { PlaceMark } from "./PlaceChip";
+import type { Place } from "@/lib/place";
 import { PhonePlus } from "./PhonePlus";
 import { useThreadApproval } from "./thread-approval";
 import { useTallPill } from "./composer-wrap";
@@ -116,7 +119,7 @@ export function Composer({
   onClearReply,
   onConsumeReply,
   onRestoreReply,
-  locked: setupLocked = false,
+  locked: setupLocked = false, onSendGroup,
 }: {
   bot?: Bot;
   group?: Group;
@@ -127,6 +130,8 @@ export function Composer({
   onConsumeReply?: () => void;
   onRestoreReply?: (message: Message, threadId: string) => void;
   locked?: boolean;
+  /** Takes a room's send instead of the store: the room feed starts a new thread with it. */
+  onSendGroup?: (action: Extract<Action, { type: "sendGroup" }>) => void;
 }) {
   const bot = profile ? currentTaskBot(profile) : undefined;
   const locked = setupLocked || Boolean(bot?.awaitingThreadSnapshot);
@@ -173,6 +178,7 @@ export function Composer({
     draftId,
     !group && bot && !state.config?.team ? `bot:${bot.id}` : undefined,
   );
+  const forkOwnerId = singleRow || group?.dm || !threadId ? undefined : group?.id ?? bot?.id;
   const attachmentPending = useDraftAttachmentPending(draftId);
   const failedSends = useFailedComposerSends(draftId); const picks = mentionPicksFor(draftId);
   const [channelMode, setChannelMode] = useComposerChannelMode(draftId);
@@ -228,6 +234,8 @@ export function Composer({
     [text, editText, editAttachments],
   );
   const { recording, ready: micReady, speechError, toggle: toggleMic, stop: stopDictation } = useComposerDictation({ draftId, text, onText: editText });
+  const fork = useComposerFork({ ownerId: forkOwnerId, kind: group ? "group" : "bot", threadId,
+    branchLeafId: group ? undefined : bot?.activeLeafId ?? undefined, draftId, text, editText, stopDictation });
   const micShown = !locked && !busy && micReady;
   const [caret, setCaret] = useState(0);
   const shellRef = useRef<HTMLDivElement>(null);
@@ -241,10 +249,11 @@ export function Composer({
   draftIdRef.current = draftId;
   const caretRef = useRef(0);
   caretRef.current = caret;
-  const refocusInput = useCallback(() => {
+  const escapeBlurs = useRef(0);
+  const refocusInput = useCallback((escapesBefore: number) => {
     requestAnimationFrame(() => {
       const input = inputRef.current;
-      if (!input || input.disabled || !composerShouldRefocus(document.activeElement, input)) return;
+      if (escapeBlurs.current !== escapesBefore || !input || input.disabled || !composerShouldRefocus(document.activeElement, input)) return;
       const at = Math.min(caretRef.current, input.value.length);
       input.focus();
       input.setSelectionRange(at, at);
@@ -326,9 +335,10 @@ export function Composer({
       label: "/setup",
       description: t("composer.command.setupDesc"),
     }, { kind: "command", id: "burst", label: "/burst", description: t("composer.command.burstDesc") });
-    available.push(...skillSlashCommands(slashSkills));
+    if (builtIns && forkOwnerId) available.push({ kind: "command", id: "fork", label: "/fork", description: t("composer.command.forkDesc") });
+    available.push(...skillSlashCommands(slashSkills).filter((command) => !(builtIns && forkOwnerId && command.id === "fork")));
     return available.filter((command) => slashCommandMatches(command, slash.query));
-  }, [slash, dismissedSlashAt, group, bot, canLearn, state.instances, locale, slashSkills]);
+  }, [slash, dismissedSlashAt, group, bot, canLearn, state.instances, locale, slashSkills, forkOwnerId]);
   const commandPickerOpen = commandCandidates.length > 0;
 
   const mention = mentionQueryAt(text, caret); const teammates = useTeammates(); const viewer = useViewerEmail();
@@ -484,10 +494,13 @@ export function Composer({
   const fileInput = useRef<HTMLInputElement>(null);
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   const modeBot = group ? undefined : bot;
+  const pinPlace = (surface: Place | null) => modeBot && dispatch({ type: "updateTask", botId: modeBot.id, threadId: modeBot.threadId, patch: { surface } });
+  const place = modeBot && !remoteClient && advanced ? { bot: modeBot, task: composerTask, disabled: Boolean(modeBot.busy), onPin: pinPlace } : undefined;
   const { choice: approvalChoice, dialogs: approvalDialogs } = useThreadApproval(modeBot);
   const uploadImage = useCallback((file: File) => uploadDraftImage(draftId, file), [draftId]);
   const pickFiles = async (picked: FileList | readonly File[] | null) => {
     if (!picked?.length) return;
+    const escapesBefore = escapeBlurs.current;
     changeDraftAttachmentPending(draftId, true);
     try {
       const { attachments: added, notice } = await intakeFilesWithNotice(Array.from(picked), {
@@ -502,7 +515,7 @@ export function Composer({
     } finally {
       changeDraftAttachmentPending(draftId, false);
     }
-    refocusInput();
+    refocusInput(escapesBefore);
   };
 
   const hasContent = Boolean(effectiveText.trim()) || attachments.length > 0;
@@ -515,10 +528,12 @@ export function Composer({
   const stopInSlot = simpleDock && stoppable && !locked && !hasContent && !calling;
   const callShown = singleRow || !hasContent || busy || Boolean(!group && bot?.waitingForTeammates) || calling;
   const slot = slotColors(bot?.color, Boolean(group));
-  // A one-to-one bot at work: Enter does the chosen follow-up and Ctrl/⌘ with it the other one. Rooms keep their own queue.
-  const followUpFor = (alternate: boolean) => resolveFollowUp({ running: busy && !group && Boolean(bot), alternate, preferred: followUpDefault, canSteer }) ?? undefined;
-  const steersNow = group ? canSteer : followUpFor(false) === "steer";
-  const sendNames = sendLabels({ simple: !advanced, busy, canSteer: steersNow, name: busyName, sendLabel });
+  // A bot at work: Enter does the chosen follow-up and Ctrl/⌘ with it the other one. A room joins in when its speaking engine can steer,
+  // without the send menu: a room's turn has no restart.
+  const followUpFor = (alternate: boolean) => resolveFollowUp({ running: busy && (group ? roomSteers : Boolean(bot)), alternate, preferred: followUpDefault, canSteer }) ?? undefined;
+  const steersNow = followUpFor(false) === "steer";
+  const sendNames = fork.command ? { label: t("composer.command.forkDesc"), title: t("composer.command.forkDesc") }
+    : sendLabels({ simple: !advanced, busy, canSteer: steersNow, name: busyName, sendLabel });
   const retryFailedSend = (failed: FailedComposerSend) => {
     const failedMode = failed.channelMode ?? "chat";
     if (failed.requestText.includes("<attached-image ") && !imageTargetsSupport(failed.requestText, failedMode)) {
@@ -544,13 +559,18 @@ export function Composer({
       },
     };
     if (group) {
-      dispatch({ type: "sendGroup", groupId: group.id, mode: failedMode, ...retry });
+      (onSendGroup ?? dispatch)({ type: "sendGroup", groupId: group.id, mode: failedMode, ...(failed.followUp ? { followUp: failed.followUp } : {}), ...retry });
     } else if (bot) {
       dispatch({ type: "send", botId: bot.id, mode: failedMode, followUp: failed.followUp, ...retry });
     }
   };
   const send = (followUp: FollowUp | undefined = followUpFor(false)) => {
     if (locked || attachmentPending) return;
+    if (fork.command) {
+      setDismissedSlashAt(slash?.start ?? 0);
+      fork.submit();
+      return;
+    }
     if (
       attachments.some((attachment) => attachment.kind === "image") &&
       !imageTargetsSupport(effectiveText, effectiveChannelMode)
@@ -577,7 +597,7 @@ export function Composer({
     };
     if (group) {
       const points = effectiveChannelMode === "goal" ? null : takePointedChips(threadId);
-      dispatch({
+      (onSendGroup ?? dispatch)({
         type: "sendGroup",
         groupId: group.id,
         text: body,
@@ -585,7 +605,7 @@ export function Composer({
         replyToId: replyTo?.id,
         threadId,
         mode: effectiveChannelMode, mentions: sentDraft.mentions,
-        ...(points ? { pointed: points.pointed } : {}),
+        ...(points ? { pointed: points.pointed } : {}), ...(followUp ? { followUp } : {}),
         onError: () => { points?.restore(); restoreDraft(sentDraft); },
       });
       roomMessageSent(effectiveChannelMode, busy);
@@ -698,34 +718,8 @@ export function Composer({
         </div>
       )}
       <div className="pointer-events-auto relative w-full">
-        {failedSends.map((failed) => (
-          <div
-            key={failed.id}
-            className="mb-2 flex items-center gap-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[13px] text-danger"
-          >
-            <span className="min-w-0 flex-1 truncate">
-              {t("composer.failed.notSent", {
-                text: failed.text.trim() || t("composer.failed.attachment"),
-              })}
-            </span>
-            <button
-              type="button"
-              onClick={() => retryFailedSend(failed)}
-              className="shrink-0 rounded px-2 py-1 font-medium hover:bg-danger/10"
-            >
-              {t("chat.retry")}
-            </button>
-            <button
-              type="button"
-              onClick={() => forgetFailedComposerSend(draftId, failed.id)}
-              aria-label={t("composer.failed.dismissAria")}
-              title={t("composer.failed.dismiss")}
-              className="flex size-5 shrink-0 items-center justify-center rounded hover:bg-danger/10"
-            >
-              <X size={13} strokeWidth={2.5} />
-            </button>
-          </div>
-        ))}
+        {fork.error && <ComposerForkError message={fork.error} onRetry={() => { inputRef.current?.focus(); send(); }} />}
+        <ComposerFailedSends draftId={draftId} failedSends={failedSends} onRetry={retryFailedSend} />
         <SlashCommandMenu listRef={commandListRef} motion={commandMotion} commands={commandCandidates} highlight={highlight}
           onPick={pickCommand} onHighlight={setHighlight} />
         <MentionMenu listRef={mentionListRef} motion={mentionMotion} choices={candidates} highlight={highlight}
@@ -789,12 +783,7 @@ export function Composer({
               teach={canLearn ? teachTask : undefined}
               approval={approvalChoice && modeBot && { name: modeBot.name, choice: approvalChoice }}
               callBotId={bot && !group ? bot.id : undefined}
-              place={modeBot && !remoteClient && advanced ? {
-                bot: modeBot,
-                task: composerTask,
-                disabled: Boolean(modeBot.busy),
-                onPin: (surface) => dispatch({ type: "updateTask", botId: modeBot.id, threadId: modeBot.threadId, patch: { surface } }),
-              } : undefined}
+              place={place}
             />
           </div>
         )}
@@ -818,6 +807,7 @@ export function Composer({
               {/* Simple mode shows a mode's chip only while it is on, so a choice made in the + menu or the bot panel stays in view. */}
               {goal?.on && <GoalToggle {...goal} />}
               {approvalChoice && profile && bot && approvalModeFor(bot) !== approvalModeFor(profile) && <ApprovalChip choice={approvalChoice} />}
+              {modeBot && <PlaceMark bot={modeBot} task={composerTask} />}
             </div>
           )}
           <MentionTextarea
@@ -841,7 +831,8 @@ export function Composer({
           onKeyDown={(e) => {
             // An input method's confirming Enter and arrows pick its own candidates, not a mention or command.
             if (imeComposing(e.nativeEvent)) return;
-            if (commandPickerOpen) {
+            const submitsFork = fork.command && commandCandidates[highlight]?.id === "fork" && sendsMessage(e.nativeEvent, sendKey);
+            if (commandPickerOpen && !submitsFork) {
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                 e.preventDefault();
                 const delta = e.key === "ArrowDown" ? 1 : -1;
@@ -906,7 +897,12 @@ export function Composer({
               }
               send(followUpFor(alternateSend(e.nativeEvent, sendKey)));
             }
-            if (e.key === "Escape" && recording) stopDictation();
+            if (e.key !== "Escape") return;
+            if (recording) stopDictation();
+            else if (!e.defaultPrevented) {
+              escapeBlurs.current += 1;
+              e.currentTarget.blur();
+            }
           }}
           // Not disabled during an upload: a disabled element drops keyboard focus for good. send() refuses while one
           // is pending.
@@ -916,7 +912,7 @@ export function Composer({
             simple: !advanced, locked: setupLocked, approval: blocking, attaching: attachmentPending, listening: recording,
             replying: Boolean(replyTo), busy, canSteer: steersNow, queued: pendingCount > 0, busyName, sendLabel, group, members: members ?? [],
             jevOn: jevRoomRoutingOn(state.config), goal: channelMode === "goal", botName: bot?.name ?? "",
-            setupHint: group ? null : setupRequestPlaceholder(bot, threadId),
+            setupHint: group ? null : setupRequestPlaceholder(bot, threadId), startsThread: Boolean(onSendGroup),
           })}
           aria-label={t("composer.placeholder.bot", { name: group ? group.name : (bot?.name ?? "") })}
             className={cn(
@@ -929,7 +925,7 @@ export function Composer({
             <ComposerAdvancedTools profile={profile} bot={modeBot} task={composerTask} locked={locked} remoteClient={remoteClient}
               onAttach={() => fileInput.current?.click()} goal={goal} teach={canLearn ? teachTask : undefined} approval={approvalChoice}
               callBotId={callShown && bot && !group ? bot.id : undefined}
-              onPin={(surface) => modeBot && dispatch({ type: "updateTask", botId: modeBot.id, threadId: modeBot.threadId, patch: { surface } })} />
+              onPin={pinPlace} />
           )}
           <div data-composer-actions className={cn("flex items-center", simpleDock ? "gap-2" : "gap-1", stacked && "ms-auto")}>
           {(simpleDock ? stoppable : busy && mayStop) && !locked && (
@@ -969,9 +965,9 @@ export function Composer({
         {callShown && bot && !group && <CallButton bot={bot} placement="composer" fill={advanced || singleRow ? undefined : slot.fill} ink={slot.ink} inverse={singleRow} modeMenu={!stacked} />}
         {callShown && group && !advanced && <GroupCallButton group={group} members={members ?? []} placement="composer" fill={slot.fill} ink={slot.ink} />}
         {hasContent && !locked && (
-          <ComposerSendButton compact={simpleDock} waits={busy && !steersNow} label={sendNames.label} title={sendNames.title} look={slot.button}
+          <ComposerSendButton compact={simpleDock} waits={!fork.command && busy && !steersNow} label={sendNames.label} title={sendNames.title} look={slot.button}
             disabled={attachmentPending} onSend={(alternate) => send(followUpFor(alternate))} onChoose={send}
-            menu={followUpFor(false) && { choices: followUpChoices(followUpDefault, canSteer), name: busyName, sendKey: sendLabel, alternateKey: alternateSendLabel(sendKey) }} />
+            menu={!fork.command && !group && followUpFor(false) ? { choices: followUpChoices(followUpDefault, canSteer), name: busyName, sendKey: sendLabel, alternateKey: alternateSendLabel(sendKey) } : undefined} />
           )}
           </div>
         </div>

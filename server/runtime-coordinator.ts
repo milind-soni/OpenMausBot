@@ -157,9 +157,11 @@ export class RuntimeCoordinator implements Coordinator {
   private readonly now: () => number;
   private readonly log: (line: string) => void;
   /** The person's stops, remembered: which bots' work on which request they stopped, and when. */
-  private readonly stops: Array<{ at: number; request: string; bots: Set<string> }> = [];
+  private readonly stops: Array<{ at: number; request: string; bots: Set<string>; rootId?: string }> = [];
   /** The cause of the stop running now, if any (stopFor). */
   private stopCause: string | undefined;
+  /** A single hand-off is being stopped (stopHandoff): its thread's other work is not part of that stop. */
+  private stoppingHandoff = false;
   private opened = false;
   private prunedAt: number | undefined;
 
@@ -177,6 +179,7 @@ export class RuntimeCoordinator implements Coordinator {
       clock: { now: () => this.now(), monotonic: () => performance.now() },
       limits: { depth: 4, requests: REQUESTS_PER_ROOT, executions: EXECUTIONS_PER_ROOT, turnStallMs: TURN_STALL_MS, inputWaitMs: PARKED_LIMIT_MS, inputRemindMs: PARKED_REMIND_MS, ...handoffLimits(), ...options.runtimeLimits },
       ...(options.log ? { log: options.log } : {}),
+      ...(options.restartCut ? { restartCut: options.restartCut } : {}),
     });
   }
 
@@ -458,11 +461,28 @@ export class RuntimeCoordinator implements Coordinator {
   /** With no reason given, the stop is the person's, unless it is part of a stop already under way: see stopFor. */
   stopAwaitingDirect(threadId: string, reason?: string): void {
     this.ready();
+    // The host stops a teammate's whole thread when one of its turns is aborted; when that turn is one hand-off the person
+    // stopped, the runtime already ends that hand-off and what it handed on, and other requests queued there go on.
+    if (reason === undefined && this.stoppingHandoff) return;
     const cause = reason ?? this.stopCause ?? STOPPED_BY_USER;
     const stopping = cause === STOPPED_BY_USER ? this.live().filter(n => n.assignee.destination.threadId === threadId) : [];
     const trees = stopping.map(n => ({ root: this.store.get(n.rootId), work: this.subtree(n).filter(a => !isTerminal(a)) }));
     this.stopFor(cause, () => this.runtime.stopRequester({ threadId }, cause));
     for (const { root, work } of trees) if (root) this.rememberStop(root, work);
+  }
+
+  stopHandoff(id: string): "stopped" | "ended" | undefined {
+    this.ready();
+    const n = this.store.get(id);
+    if (!n?.parentId) return undefined;
+    if (isTerminal(n)) return "ended";
+    const root = this.store.get(n.rootId);
+    const work = this.subtree(n).filter(a => !isTerminal(a));
+    const outer = this.stoppingHandoff;
+    this.stoppingHandoff = true;
+    try { this.stopFor(STOPPED_BY_USER, () => this.runtime.cancel(id, STOPPED_BY_USER, "stopped")); } finally { this.stoppingHandoff = outer; }
+    if (root) this.rememberStop(root, work, true);
+    return "stopped";
   }
 
   /** Runs a stop with its cause. A teammate's turn it ends stops that teammate's thread as well (the host's abort handler
@@ -475,19 +495,24 @@ export class RuntimeCoordinator implements Coordinator {
   }
 
   /** The person's stop, remembered (scoped to that request): the bots whose work on it the stop ended don't take the same
-   * request from another bot again, unless the person asked again after the stop. In memory only, for a day. */
-  private rememberStop(root: Assignment, work: readonly Assignment[]): void {
+   * request from another bot again, unless the person asked again after the stop. In memory only, for a day. A `scoped`
+   * stop holds for that one request's tree only, never for another request in the same words, and needs no person's words:
+   * a routine run's tree is held the same way. */
+  private rememberStop(root: Assignment, work: readonly Assignment[], scoped = false): void {
     const request = requestKey(root);
     const bots = new Set(work.filter(a => this.store.get(a.id)?.status === "cancelled").map(a => a.assignee.botId));
     const at = this.now();
     while (this.stops.length && at - this.stops[0]!.at > STOP_MEMORY_MS) this.stops.shift();
-    if (request && bots.size) this.stops.push({ at, request, bots });
+    if (!bots.size) return;
+    if (scoped) this.stops.push({ at, request, bots, rootId: root.id });
+    else if (request) this.stops.push({ at, request, bots });
   }
 
   /** Work for `root`'s request was stopped for `botId`, and this request is not one the person made after that stop. */
   private stoppedFor(root: Assignment, botId: string): boolean {
     const request = requestKey(root);
-    return request !== "" && this.stops.some(stop => stop.request === request && stop.bots.has(botId) && root.createdAt <= stop.at && this.now() - stop.at <= STOP_MEMORY_MS);
+    return this.stops.some(stop => stop.bots.has(botId) && this.now() - stop.at <= STOP_MEMORY_MS
+      && (stop.rootId !== undefined ? stop.rootId === root.id : request !== "" && stop.request === request && root.createdAt <= stop.at));
   }
 
   activeDirect(threadId: string): boolean {

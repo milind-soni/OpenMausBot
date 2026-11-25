@@ -60,7 +60,7 @@ it("shows another computer the address with the code, and makes Copy link the ma
   expect(computer.rowText).toContain("Pair another computer");
   expect(computer.rowText).not.toMatch(/phone/i);
   expect(computer.title).toBe("Pair another computer");
-  expect(computer.text).toBe("On your other computer, open Connect to a server in MausBot and paste the link you copy here. Or type this address and code there.");
+  expect(computer.text).toBe("On your other computer, open Connect to another computer in MausBot and paste the link you copy here. Or type this address and code there.");
   expect(computer.dialog.querySelector("[data-pairing-address]")?.textContent).toBe("http://macmini.tail1234.ts.net:8799");
   expect(computer.dialog.querySelector("[data-pairing-code]")?.textContent).toBe("ABCD-EFGH-IJKL");
   expect(computer.qr).toBe(false);

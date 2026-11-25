@@ -11,26 +11,42 @@ export interface AcpDriverHooks {
    * the agent reads itself, for an agent whose own file tool returns media as raw bytes (Antigravity). */
   mediaLinks?: boolean;
   /** An agent that asks for a sign-in no turn can give. Its turns fail at once with `loginNote`, its process is closed
-   * and `required` is told, instead of the turn waiting on a sign-in nobody sees. */
+   * and `required` is told, instead of the turn waiting on a sign-in nobody sees. Only these say the account is signed
+   * out: any other `authenticate` failure fails the turn as an ordinary startup error. */
   signInRequest?: {
     /** Whether a whole stderr line announces the request. */
     stderrLine(line: string): boolean;
     /** Whether a request's error means the same. */
-    rpcError(error: unknown): boolean;
+    rpcError(error: unknown, instanceId: string): boolean;
     required(instanceId: string): void;
   };
-  /** Every agent process the driver starts for turns. */
+  /** Whether this instance's agent is never sent `authenticate`, because it answers by opening a browser nobody sees: its
+   * turns, background text and model discovery start the session directly, and a session it refuses for want of a sign-in
+   * fails as a sign-in request. */
+  skipsAuthenticate?(instanceId: string): boolean;
+  /** Every agent process the driver starts for turns and background text. */
   processStarted?(child: ChildProcess, instanceId: string): void;
-  /** Extra session/new, session/load and session/resume parameters, from the agent's initialize answer. */
-  sessionSetupParams?(initializeResult: unknown): Record<string, unknown>;
+  /** Extra session/new, session/load and session/resume parameters, from the agent's initialize answer. `system` is the
+   * session's system prompt when sessionSystemPrompt holds. */
+  sessionSetupParams?(initializeResult: unknown, system?: string): Record<string, unknown>;
+  /** Whether this instance's agent takes the system prompt through sessionSetupParams instead of in the prompt text, where
+   * it would read words of it as the person's commands. A changed system prompt then loads the live session again. */
+  sessionSystemPrompt?(initializeResult: unknown, instanceId: string): boolean;
   /** The `clientInfo` of initialize, for an agent that reads it; the app's own name when unset or undefined. */
   clientInfo?(instanceId: string): { name: string; version: string } | undefined;
+  /** Whether the driver answers this permission request with "allow" itself, with no card: for an agent that asks
+   * about actions the turn's approval level already covers. Never consulted for a question or a never-list command. */
+  allowsAlone?(instanceId: string, turn: { approvalMode?: string; approvalModeNow?: () => string; cwd?: string }, toolCall: { kind?: unknown; rawInput?: unknown; locations?: unknown }): boolean;
   /** Called before each session/prompt. The check it returns gets that prompt's result and names the failure the agent
    * reported as an ordinary reply, which then fails the turn. Neither may throw. */
   promptOutcome?(instanceId: string, sessionId: string): Promise<(result: unknown) => Promise<Error | undefined>>;
   /** The failure a turn's thrown error stands for, in the person's words (a usage limit with its reset), or undefined to
    * keep the error as it is. Must not throw. */
   reportedFailure?(error: unknown): Error | undefined;
+  /** Gets the last text chunk of a prompt the agent answered with end_turn. When the agent sent a failed model call as
+   * that chunk instead of failing the prompt, returns the failure in its words, which fails the turn as a thrown one
+   * does; the text before the chunk stays the reply. Null for any other chunk. */
+  replyFailure?(chunk: string): string | null;
   /** initialize's own `_meta` (beside clientCapabilities' vendor `_meta`), for an agent that reads who its client is there. */
   initializeMeta?: Record<string, unknown>;
   /** session/cancel's `_meta`, for an agent that reads how its turn was stopped there. */
@@ -103,8 +119,16 @@ export class SignInRequests {
   /** The sign-in failure `error` stands for, or null when it is some other failure. */
   asked(error: unknown): Error | null {
     if (this.is(error)) return error as Error;
-    if (!this.#support.signInRequest?.rpcError(error)) return null;
+    if (!this.#support.signInRequest?.rpcError(error, this.#instanceId)) return null;
     this.#support.signInRequest.required(this.#instanceId);
     return this.#error();
+  }
+
+  authenticateFailed(error: unknown, authFailure: "fail" | "fail-request" | "continue"): Error | null {
+    const asked = this.asked(error);
+    if (asked) return asked;
+    if (authFailure === "continue") return null;
+    if (!this.#support.signInRequest) return new Error(this.#support.loginNote);
+    return error instanceof Error ? error : new Error(String(error));
   }
 }

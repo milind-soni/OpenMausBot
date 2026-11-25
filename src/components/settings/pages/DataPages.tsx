@@ -12,6 +12,7 @@ import { UsageSection } from "../../UsageSection";
 import { VaultSettings } from "../../VaultSettings";
 import { WorkspaceBackupSettings } from "../../WorkspaceBackupSettings";
 import { WorkspacesSection } from "../../WorkspacesSection";
+import { AdvancedPagePart } from "../AdvancedSection";
 import { useSettingsShell } from "../settings-shell";
 import { MoveSection } from "./PlacePages";
 
@@ -41,11 +42,11 @@ export function ImportExportPage() {
 export function DataPage() {
   const { ctx } = useSettingsShell();
   return <>
-    <SettingsGroup label={t("settings.data.storage")} block="storage">
+    <AdvancedPagePart anchor="storage"><SettingsGroup label={t("settings.data.storage")} block="storage">
       <SettingsRows><AttachmentStorageSettings /></SettingsRows>
-    </SettingsGroup>
+    </SettingsGroup></AdvancedPagePart>
     {ctx.advanced && <ThreadCleanupSettings />}
-    {!ctx.desktop && ctx.admin && <ActivitySection />}
+    {!ctx.desktop && ctx.admin && <AdvancedPagePart anchor="activity"><ActivitySection /></AdvancedPagePart>}
   </>;
 }
 

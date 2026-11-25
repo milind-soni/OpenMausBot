@@ -8,11 +8,12 @@ import { AboutDialog } from "../../AboutDialog";
 import { AnalyticsRow } from "../../AnalyticsRow";
 import { ChatWidthRow, FontRow, SidebarToolsLayoutRow } from "../../AppearanceSelectRows";
 import {
-  ColorUserBubblesRow, FollowUpRow, LanguageRow, PinnedCirclesRow, ReplayTourRow, RunCardRow, SendKeyRow, ShowThreadsRow,
+  ColorUserBubblesRow, FollowUpRow, LanguageRow, PinnedCirclesRow, ReplayTourRow, SendKeyRow, ShowThreadsRow,
   ToolCallsRow, UniversalPinsRow, UpdatesRow,
 } from "../../AppSettingsRows";
 import { ChromeRailRow } from "../../ChromeRailToggle";
 import { ConnectedWorkspacesSettings } from "../../ConnectedWorkspacesSettings";
+import { LendComputerSwitch } from "../../LendComputerSwitch";
 import { CustomThemesSettings } from "../../CustomThemesSettings";
 import { DiagnosticsRow } from "../../DiagnosticsRow";
 import { NotificationRows } from "../../NotificationSettingsRows";
@@ -29,6 +30,7 @@ import { versionLine } from "../settings-context";
 import { useSettingsShell } from "../settings-shell";
 import { PlaceBadge } from "../SettingsNav";
 import { InertRow, useSwitchToComputer } from "../inert";
+import { AdvancedPagePart, AdvancedSection } from "../AdvancedSection";
 import { useOtherPlaces } from "../settings-context";
 
 /** A row this page can't change because it lives on This computer: not on the app's own home page (main's home:page). */
@@ -63,8 +65,8 @@ export function AppPage() {
         </SettingsRows>
       </SettingsGroup>
     )}
-    {/* Your computers is Advanced: in Simple the rail switches places, and the page stays one window tall. */}
-    {ctx.desktop && ctx.advanced && (window.ogb?.environments
+    {/* Your computers, in Simple too: where a server is added, and where "Let its bots use this computer" is switched. */}
+    {ctx.desktop && (window.ogb?.environments
       ? <ConnectedWorkspacesSettings label={t("settings.app.computers")} description={t("settings.app.computersLine")} />
       : !ctx.client && <PlacesFromHere />)}
     {ctx.desktop && ctx.advanced && <RemoteComputerSection hideWhenUnavailable legacyOnly />}
@@ -89,7 +91,7 @@ export function AppPage() {
 /** A Cloud's page in the desktop window: the places list reads the rail through the workspaces bridge, which works on
  * every page; only the environments on this computer need This computer's own page. */
 function PlacesFromHere() {
-  const { place } = useSettingsShell();
+  const { place, ctx } = useSettingsShell();
   const others = useOtherPlaces("app");
   const workspaces = window.ogb?.workspaces;
   if (!workspaces) return null;
@@ -99,45 +101,47 @@ function PlacesFromHere() {
         <SettingRow title={place.name} leading={<PlaceBadge place={place} size={24} />} subtitle={t("servers.managed")}>
           <span className="text-[13px] leading-5 text-ink-secondary">{t("servers.current")}</span>
         </SettingRow>
+        {/* On a server's own page: the same switch its row has on This computer's page. */}
+        {window.ogb?.lendComputer && <LendComputerSwitch id={null} className="mx-4 mb-3 ms-[60px]" />}
         {others.map((other) => (
           <SettingRow key={other.key} title={other.name} leading={<PlaceBadge place={{ kind: other.kind === "computer" ? "computer" : "cloud", name: other.name, color: other.color }} size={24} />}
             subtitle={other.kind === "computer" ? t("servers.localHint") : undefined}>
             <button type="button" className="ui-button" data-place-switch={other.key} onClick={other.open}>{t("servers.switch")}</button>
           </SettingRow>
         ))}
-        {workspaces.add && <SettingsLinkRow title={t("connect.title")} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Plus size={18} aria-hidden="true" /></span>}
+        {workspaces.add && <SettingsLinkRow title={t("connect.otherTitle")} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Plus size={18} aria-hidden="true" /></span>}
           onClick={() => void workspaces.add?.("address")} data={{ "data-server-connect": "" }} />}
       </SettingsRows>
     </SettingsGroup>
-    <SettingsGroup label={t("connectedWorkspaces.localTitle")} block="environments">
+    {ctx.advanced && <SettingsGroup label={t("connectedWorkspaces.localTitle")} block="environments">
       <SettingsRows><InertRow title={t("connectedWorkspaces.newEnvironment")} /></SettingsRows>
-    </SettingsGroup>
+    </SettingsGroup>}
   </>;
 }
 
 export function GeneralPage() {
   const { ctx, place, go } = useSettingsShell();
   return <>
-    <SettingsGroup label={t("settings.simple.group.typing")} block="typing">
+    <AdvancedPagePart anchor="typing"><SettingsGroup label={t("settings.simple.group.typing")} block="typing">
       <SettingsRows selectWidth={208}>
         <LanguageRow simple />
         <SendKeyRow simple />
         <FollowUpRow simple />
         {window.ogb?.talkShortcut ? <TalkShortcutRow /> : elsewhere(window.ogb?.talkShortcut, ctx) && ctx.cloud ? <InertRow title={t("settings.search.talk")} control={<span className="text-[13px] leading-5 text-ink-secondary">{t("settings.general.talkOff")}</span>} /> : null}
       </SettingsRows>
-    </SettingsGroup>
-    <SettingsGroup label={t("notifications.title")} block="notifications"
+    </SettingsGroup></AdvancedPagePart>
+    <AdvancedPagePart anchor="notifications"><SettingsGroup label={t("notifications.title")} block="notifications"
       footnote={!ctx.client && <>{t("settings.general.awayEmails")}{" "}<button type="button" className="cursor-pointer text-accent-text hover:underline" onClick={() => go("bots", "about-you")}>{`${place.name} › ${t("settings.page.bots")}`}</button></>}>
       <SettingsRows><NotificationRows simple /></SettingsRows>
-    </SettingsGroup>
+    </SettingsGroup></AdvancedPagePart>
     {ctx.desktop && !ctx.client && (
-      <SettingsGroup label={t("settings.general.startup")} block="startup">
+      <AdvancedPagePart anchor="startup"><SettingsGroup label={t("settings.general.startup")} block="startup">
         <SettingsRows>{window.ogb?.openAtLogin ? <OpenAtLoginRow simple /> : <InertRow title={t("settings.openAtLogin.title")} control={<Switch checked={false} tabIndex={-1} aria-label={t("settings.openAtLogin.title")} />} />}</SettingsRows>
-      </SettingsGroup>
+      </SettingsGroup></AdvancedPagePart>
     )}
-    <SettingsGroup label={t("settings.general.privacy")} block="privacy">
+    <AdvancedPagePart anchor="privacy"><SettingsGroup label={t("settings.general.privacy")} block="privacy">
       <SettingsRows><AnalyticsRow simple /></SettingsRows>
-    </SettingsGroup>
+    </SettingsGroup></AdvancedPagePart>
   </>;
 }
 
@@ -168,22 +172,21 @@ export function AppearancePage() {
     <SettingsGroup label={t("settings.appearance.chat")} block="chat">
       <SettingsRows>
         {!ctx.client && <ToolCallsRow />}
-        {ctx.advanced && <RunCardRow />}
         {ctx.advanced && <ChatWidthRow />}
         {ctx.advanced && <FontRow />}
       </SettingsRows>
     </SettingsGroup>
     {/* Simple keeps the Look card and Tool calls; the window's layout is Advanced. */}
-    {ctx.advanced && <SettingsGroup label={t("settings.appearance.layout")} block="appearance">
+    <AdvancedSection anchor="appearance"><SettingsGroup label={t("settings.appearance.layout")} block="appearance">
       <SettingsRows>
         <ChromeRailRow />
         <WindowFrameRow />
-        {ctx.advanced && <ShowThreadsRow />}
-        {ctx.advanced && <SidebarToolsLayoutRow />}
-        {ctx.advanced && <PinnedCirclesRow />}
-        {ctx.advanced && <UniversalPinsRow />}
+        <ShowThreadsRow />
+        <SidebarToolsLayoutRow />
+        <PinnedCirclesRow />
+        <UniversalPinsRow />
       </SettingsRows>
-    </SettingsGroup>}
+    </SettingsGroup></AdvancedSection>
     {ctx.advanced && <PinnedPanelsSettings />}
   </>;
 }

@@ -15,8 +15,6 @@ export function windowEntries(windowPref: WindowPref): SettingEntry[] {
   return [
     flag("appearance.userBubbles", "Coloured messages", "Your own messages take the bot's colour.", "bubbles", ["bubbles", "message color", "my messages"],
       "Colour your messages with each bot's colour", "Show your messages in plain grey"),
-    flag("appearance.runCard", "This run card", "Show the card that follows a bot's run while it works.", "tool-calls", ["this run", "run card", "progress"],
-      "Show the card that follows each run", "Hide the card that follows each run"),
     flag("appearance.showThreads", "Threads in the sidebar", "List each bot's conversations under it in the sidebar.", "layout", ["threads", "conversations", "sidebar"],
       "List each bot's threads in the sidebar", "Hide threads from the sidebar"),
     windowPref("appearance.toolsLayout", "Sidebar tools layout", "How the sidebar shows its tools: rows, or a toolbar of icons.", "layout", ["tools layout", "toolbar", "rows"], "rows or toolbar",
@@ -54,7 +52,7 @@ export function windowEntries(windowPref: WindowPref): SettingEntry[] {
       "Let your paired phones reach this computer on the same Wi-Fi"),
     wayIn("remote.relay", "Reach from anywhere", "Paired phones reach this computer from anywhere through MausBot's relay (needs a MausBot sign-in).", "relay", ["relay", "anywhere", "away", "remote access"],
       "Let your paired phones reach this computer from anywhere, through MausBot's relay"),
-    wayIn("remote.tailscale", "Tailscale", "Paired devices reach this computer over your Tailscale network (Tailscale must be installed and signed in).", "tailscale", ["tailscale", "tailnet", "remote access"],
+    wayIn("remote.tailscale", "Tailscale", "Paired devices reach this computer over your Tailscale network (Tailscale must be installed and signed in).", "private-network", ["tailscale", "tailnet", "remote access"],
       "Let your devices reach this computer over Tailscale"),
     flag("remote.keepAwake", "Keep awake", "Keep this computer awake while a way in is on, so paired phones can reach it.", "keep-awake", ["sleep", "awake", "overnight"],
       "Keep this computer awake so paired phones can reach it", "Let this computer sleep"),

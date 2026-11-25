@@ -28,7 +28,7 @@ function temporaryDirectory(name = "data") {
 }
 
 function delegationEntry(lease) {
-  const entries = Object.entries(lease.utilityServerLeaseEnvironment());
+  const entries = Object.entries(lease.utilityServerLeaseEnvironment()).filter(([name]) => !name.endsWith("_HOST"));
   assert.equal(entries.length, 1);
   assert.match(entries[0][0], /INTERNAL.*LEASE/);
   assert.match(entries[0][1], /^v1:[1-9][0-9]*:[0-9a-f-]{36}$/);

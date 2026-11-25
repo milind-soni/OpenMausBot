@@ -4,8 +4,9 @@
 // clicked. With the switch off nothing here reads, keeps or sends anything.
 //
 // Security: the list goes only to this computer's own page and to My Cloud's own page (`asking`, which main works out from
-// the sender), never to a team's Cloud or a server saved by hand. A row is a name, a look and a state: no message, address
-// or token. A page names a bot by an id main listed itself; main opens only such an id, in a place of its own choosing.
+// the sender), never to a team's Cloud or a server saved by hand. A row is a name, a look, a state and, as the person's
+// own two pages show each other, a short preview of the bot's newest line (PREVIEW_MAX characters of plain words; never a
+// step, a card, a file or another bot's note): no whole message, address or token. A page names a bot by an id main listed itself; main opens only such an id, in a place of its own choosing.
 // A sleeping Cloud is never asked, since any request would wake it; it keeps the list it gave last.
 import { asleepAnswer, BACKGROUND_HEADERS } from "./cloud-power.mjs";
 
@@ -24,6 +25,10 @@ export const NEW_BOT_WAIT_MS = 45_000;
 /** The page that was told to make a new bot says it heard within this long, or is told to forget it. */
 export const NEW_BOT_ACK_MS = 10_000;
 const TIMEOUT_MS = 10_000;
+/** The most of a bot's newest line a row carries: the sidebar shows one truncated line of it. */
+export const PREVIEW_MAX = 300;
+/** A line another bot sent is stored with this note in front (src/lib/peer-message.ts): never shown as the person's. */
+const PEER_NOTE = /^\[(?:From @|Message from @|Delegated by @|Thread opened by @)/;
 const MAX_BOTS = 500;
 const ID = /^[\w-]{1,128}$/;
 const COLOR = /^[\w#(),.% -]{1,64}$/;
@@ -45,7 +50,30 @@ function rowState(bot) {
   const waiting = bot.activity === "waiting-on-you" || tasks.some((task) => task.activity === "waiting-on-you");
   const working = !waiting && (Boolean(bot.busy) || tasks.some((task) => task.busy || task.activity === "working"));
   const unread = tasks.length ? tasks.some((task) => task.unread === true) : bot.unread === true;
-  return { ...(waiting ? { waiting: true } : {}), ...(working ? { working: true } : {}), ...(unread ? { unread: true } : {}) };
+  // When its conversations last moved (each thread's own server-derived time, never a word of them): what Unread lists
+  // the row by, newest first, beside this place's own rows.
+  const times = tasks.map((task) => task.updatedAt).filter((at) => Number.isFinite(at) && at > 0);
+  const lastAt = times.length ? Math.max(...times) : null;
+  return { ...(waiting ? { waiting: true } : {}), ...(working ? { working: true } : {}), ...(unread ? { unread: true } : {}), ...(lastAt !== null ? { lastAt } : {}) };
+}
+
+/** Kinds a row looks past for the newest words said: a turn's work summary, a condensed-history marker and its steps, as
+ * the sidebar's own preview does in Simple. */
+const LOOKED_PAST = new Set(["digest", "compaction", "activity"]);
+/** How many of a bot's newest messages a read carries to find them. */
+export const PREVIEW_LOOK = 3;
+
+/** The start of the newest words the person or the bot said, looking past a turn's steps and summary: what the row's
+ * second line shows, as this page's own rows do in Simple. Nothing when the newest thing is a card, a screen, a file, a
+ * voice note, a setup line or another bot's note, which stay on their own page. */
+export function previewOf(bot) {
+  const messages = Array.isArray(bot.messages) ? bot.messages : [];
+  const last = messages.findLast((message) => !(record(message) && LOOKED_PAST.has(message.kind))) ?? null;
+  if (!record(last) || last.kind !== "text" || (last.role !== "bot" && last.role !== "user") || typeof last.text !== "string") return null;
+  if (last.attachments?.length || last.setupSuggestion || last.helperIntro || last.peerAsk || last.relay || last.comm || last.threadRef || last.roomRequest) return null;
+  if (last.role === "user" && PEER_NOTE.test(last.text)) return null;
+  const line = last.text.trim().slice(0, PREVIEW_MAX);
+  return line || null;
 }
 
 /** One bot of the other place as its row: who it is, how it looks and how it is doing. A bot that is archived, hidden
@@ -54,9 +82,10 @@ export function botRow(bot, home) {
   if (!record(bot) || !ID.test(String(bot.id)) || !ID.test(String(bot.threadId)) || bot.hidden || bot.sidebarHidden || bot.movedTo) return null;
   const name = text(bot.name, 80);
   if (!name) return null;
-  const title = text(bot.title, 80), color = look(bot.color), body = look(bot.mascotBody), face = look(bot.mascotFaceColor);
-  return { home, id: bot.id, threadId: bot.threadId, name, ...(title ? { title } : {}), ...(color ? { color } : {}),
-    ...(body ? { mascotBody: body } : {}), ...(face ? { mascotFaceColor: face } : {}), ...(bot.chiefOfStaff === true ? { chief: true } : {}), ...rowState(bot) };
+  const open = Array.isArray(bot.tasks) ? bot.tasks.find((task) => record(task) && task.threadId === bot.threadId) : null;
+  const title = text(bot.title, 80), chat = text(open?.title, 80), preview = previewOf(bot), color = look(bot.color), body = look(bot.mascotBody), face = look(bot.mascotFaceColor), tint = look(bot.mascotBodyColor), fur = look(bot.mascotMaterial);
+  return { home, id: bot.id, threadId: bot.threadId, name, ...(title ? { title } : {}), ...(chat ? { chat } : {}), ...(color ? { color } : {}),
+    ...(body ? { mascotBody: body } : {}), ...(face ? { mascotFaceColor: face } : {}), ...(tint ? { mascotBodyColor: tint } : {}), ...(fur ? { mascotMaterial: fur } : {}), ...(bot.chiefOfStaff === true ? { chief: true } : {}), ...(preview ? { preview } : {}), ...rowState(bot) };
 }
 
 /** The AIs a place's `GET /api/instances` answer says are ready to use: installed and signed in, never one that only
@@ -117,7 +146,7 @@ const needsSignIn = (response) => response?.status === 401 || response?.status =
  * remains is a Cloud that fell asleep in the seconds since the Admin answered; one that only agreed to sleep answers so
  * itself and is left alone. Rows are kept for the Cloud and account they came from, and dropped the moment either changes.
  */
-export function createPlacesTogether({ pref, cloud, powerChecked, computer, local, cloudFetch, napped = () => {}, address = () => null, shown, focused, openPlace, send, changed, now = Date.now,
+export function createPlacesTogether({ pref, cloud, powerChecked, computer, local, cloudFetch, napped = () => {}, address = () => null, shown, focused, openPlace, send, changed, turnedOn = () => {}, now = Date.now,
   setTimer = setInterval, clearTimer = clearInterval, later = setTimeout, cancelLater = clearTimeout }) {
   /** What each place gave last: its rows, when, and how the last read went. */
   const kept = new Map();
@@ -164,7 +193,8 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
     if (had) tell();
   }
 
-  async function ask(home, route = "/api/bots?messages=0") {
+  // A bot's newest few messages, for its preview (previewOf); nothing more of them is kept.
+  async function ask(home, route = `/api/bots?messages=${PREVIEW_LOOK}`) {
     const signal = AbortSignal.timeout(TIMEOUT_MS);
     if (home === "computer") return local(route, { signal, headers: { accept: "application/json" } });
     const { origin } = cloud();
@@ -293,10 +323,13 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
       void refresh(otherHome(here));
       return { v: 1, available: true, on: true, here, other: otherOf(here) };
     },
-    /** The switch. Off forgets every list. */
+    /** The switch. Off forgets every list. Turned on from this computer's page, it also lets My Cloud run commands here
+     * (`turnedOn`), so the two places work as one with one switch; the person turns that alone off from the icon's menu. */
     set(asking, value) {
+      const was = isOn();
       on = value === true;
       pref.write({ v: 1, on });
+      if (on && !was && asking === "computer") { try { turnedOn(); } catch {} }
       sameScope();
       tell();
       return this.state(asking);

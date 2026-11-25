@@ -6,6 +6,8 @@ import { toolsOffFromEnv, type ToolGroup } from "../../shared/tool-groups.ts";
  * authenticates and scopes every call. */
 export interface CatalogProfile {
   skillAuthoring: boolean;
+  /** Skill Burgers are on here: run_workflow and workflow_edit are mounted. Absent means on. */
+  skillBurger?: boolean;
   sharedComputers: boolean;
   voiceNotes: boolean;
   /** A treg key or a Cloud plan's research credential is held and this bot's research switch is on: x_search is mounted.
@@ -22,6 +24,8 @@ export interface CatalogProfile {
   botId: string;
   /** A Team Cloud: message_person is mounted. */
   team?: boolean;
+  /** A Team Cloud with its board on: board_add, board_list and board_update are mounted. Absent means off. */
+  board?: boolean;
   /** The person's MausBot with a Chief's powers: its notification tools are mounted. */
   mausbot?: boolean;
   /** A direct chat whose bot may pick where it works (Works on is not Off and no team computer is its own): select_computer
@@ -45,6 +49,7 @@ export interface CatalogProfile {
 export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
   return {
     skillAuthoring: env.OMB_SKILL_AUTHORING_ENABLED === "1",
+    skillBurger: env.OMB_SKILL_BURGER !== "0",
     sharedComputers: env.OMB_SHARED_COMPUTERS_ENABLED === "1",
     voiceNotes: env.OMB_VOICE_NOTES === "1",
     xResearch: env.OMB_X_RESEARCH === "1",
@@ -54,6 +59,7 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     chief: env.OMB_CHIEF_OF_STAFF === "1",
     botId: env.OMB_BOT_ID ?? "",
     team: env.OMB_TEAM_PEOPLE === "1",
+    board: env.OMB_TEAM_BOARD === "1",
     mausbot: env.OMB_MAUSBOT === "1",
     computerSelection: env.OMB_COMPUTER_SELECTION === "1",
     localVm: env.OMB_LOCAL_VM !== "0",

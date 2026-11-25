@@ -225,4 +225,22 @@ describe("routeDirectTurn", () => {
       });
     },
   );
+
+  it("respects per-model effortLevels when stepping down a conversational turn", () => {
+    const codexBot = { replyStyle: "conversational" as const, modelSelection: { instanceId: "codex", model: "gpt-5.4", effort: "ultra" as const } };
+    const codexInstance = {
+      models: {
+        default: "gpt-5.4",
+        options: [{ id: "gpt-5.4", label: "GPT-5.4", effortLevels: ["medium", "high", "ultra"] as const }],
+      },
+      adapter: { capabilities: { effortLevels: ["low", "medium", "high", "ultra"] as const } },
+    };
+    const hi = { text: "hey, how are you?", images: [] };
+    expect(routeDirectTurn(codexBot, {}, [], hi, codexInstance, false)).toEqual({
+      tier: "simple",
+      model: "gpt-5.4",
+      effort: "ultra",
+      variant: undefined,
+    });
+  });
 });

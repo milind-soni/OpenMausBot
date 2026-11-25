@@ -194,7 +194,14 @@ export { syncedFolders } from "./cloud-sync-store.ts";
 export const CLOUD_ENGINES_HERE = " The AIs bots run on (Claude, Codex, Cursor and the rest) run here, on My Cloud, not on their computer or their cloud computer."
   + " If one needs installing or signing in, tell them to choose it in the model picker: its card does that here, with a sign-in link they open on any device."
   + " Never tell them to run an AI's install or sign-in command on their own computer, and never run one on their cloud computer yourself: neither signs in the AIs here."
-  + " When an AI's Google sign-in ends on a 127.0.0.1 or localhost page that can't be reached, that is the expected last step, not a failed sign-in: tell them to copy that page's full address and paste it in the \"Paste its address here\" field on the AI's card, then press Send redirect.";
+  + " When an AI's Google sign-in ends on a 127.0.0.1 or localhost page that can't be reached, that is the expected last step, not a failed sign-in: tell them to copy that page's full address and paste it in the \"Paste its address here\" field on the AI's card, then press Send redirect."
+  + " When Google's Antigravity page shows a code after the sign-in, that is the last step too: tell them to paste the code in the \"Code from the Antigravity page\" field on the AI's card, then press Send code.";
+
+/** My Cloud's disk is its owner's: what a task already has in its folder is used again, not fetched a second time. */
+export const CLOUD_REUSE_INSTALLS = " Reuse, and update if needed, what is already installed or cloned in your working folder instead of installing or cloning it again, unless the person asks for a fresh copy.";
+
+/** Work on a Cloud disk lives only there: code with a remote goes up as a branch, never over anyone's main line. */
+export const CLOUD_PUSH_CODE_WORK = " When a project in your working folder has a git remote the person works in and you can push to it, commit your work and push it to one branch of your own, reusing that branch, instead of leaving it only on this disk: never force-push, never push to the default branch, and never commit secrets, .env files or installed packages such as node_modules.";
 
 /** `asks`: the person's own Cloud, whose bots ask them to turn on what their computer doesn't give now (ask_for_computer). */
 export function cloudHomePrompt(sharedComputerTools: boolean, synced: ReadonlyArray<{ computerName: string; pcPath: string; cloudPath: string }> = [],
@@ -211,6 +218,8 @@ export function cloudHomePrompt(sharedComputerTools: boolean, synced: ReadonlyAr
     + (asks ? " For work that doesn't need their own computer, use what works here:" : " Offer what works here:")
     + " the built-in browser and their cloud computer, a desktop in the cloud. Call it their cloud computer, as the app does. Never ask them to set up this computer or a Local VM; neither exists here."
     + CLOUD_ENGINES_HERE
+    + CLOUD_REUSE_INSTALLS
+    + CLOUD_PUSH_CODE_WORK
     + syncedFoldersPrompt(synced);
 }
 

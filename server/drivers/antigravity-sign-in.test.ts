@@ -16,12 +16,14 @@ import {
   antigravityBrowserHelperProblem,
   antigravityProfileAuthenticated,
   antigravitySessionSetup,
+  antigravityTakesSystemPrompt,
   antigravityTokenPath,
   linuxCaBundle,
   prepareAntigravityProfile,
   probeAntigravityModels,
   verifyAntigravityBrowserHelper,
 } from "./antigravity-acp.ts";
+import { acpRpcError } from "./acp/rpc-error.ts";
 import { AntigravityAuthController } from "./antigravity-auth.ts";
 import { resolveAntigravityRuntime } from "./antigravity-runtime.ts";
 import { AntigravityDriver, antigravitySignInError } from "./antigravity.ts";
@@ -133,6 +135,28 @@ describe("a sign-in the runtime asks for in the middle of a turn", () => {
     expect((await instance.snapshot()).authenticated).toBe(false);
   }, 60_000);
 
+  it.each([-32603, -32000])("keeps the account signed in when authenticate fails (%i) without asking for a sign-in", async (code) => {
+    ensureDirs();
+    const fake = fakeRuntime(runtimeSource(
+      `reply(message.id, { error: { code: ${code}, message: "Failed to refresh token: network is unreachable" } });`,
+    ));
+    const instanceId = `antigravity-network-blip${code}`;
+    storeToken(instanceId);
+    const instance = await create(instanceId, fake.executable);
+    const recorder = recordEvents(instance.adapter);
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "blip", text: "hello", cwd: fake.directory });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+    const events = recorder.events.filter((event) => event.turnId === turnId);
+    expect(events).not.toContainEqual(expect.objectContaining({ message: LOGIN_NOTE }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "runtime.error",
+      message: expect.stringContaining("network is unreachable"),
+    }));
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+    expect(events.at(-1)).not.toMatchObject({ stopReason: "auth_required" });
+    expect((await instance.snapshot()).authenticated).toBe(true);
+  }, 60_000);
+
   it("reads signed in again after a sign-in that succeeds without rewriting the stored token", async () => {
     ensureDirs();
     const fake = fakeRuntime();
@@ -163,6 +187,32 @@ describe("a sign-in the runtime asks for in the middle of a turn", () => {
     [null, false],
   ])("reads a sign-in request only where the error's code and words agree (%j)", (error, expected) => {
     expect(antigravitySignInError(error)).toBe(expected);
+  });
+
+  it.each([
+    [{ code: -32000, message: "Request failed" }, false],
+    [{ code: -32000, message: "Authentication service unavailable" }, false],
+    [{ code: -32000, message: "Request failed", data: { trace: "x".repeat(2_500), details: "Please sign in again" } }, true],
+    [{ code: -32000, message: "Authentication required" }, true],
+    [{ code: -32000, message: "Authentication required", data: { network: "online" } }, true],
+    [{ code: -32000, message: "Authentication failed: connection refused" }, false],
+    [{ code: -32000, message: "Login check failed: socket hang up" }, false],
+    [{ code: -32000, message: "Authentication failed: network is unreachable" }, false],
+    [{ code: -32000, message: "Please sign in again", data: { details: "Previous refresh timed out" } }, true],
+    [{ code: -32000, message: "Login expired" }, true],
+    [{ code: -32000, message: "invalid_grant: Token has been expired or revoked." }, true],
+    [{ code: -32000, message: "Failed to reauthenticate: connection refused" }, false],
+    [{ code: -32000, message: "Please reauthenticate" }, true],
+    [{ code: -32000, message: "Reauthentication required" }, true],
+    [{ code: -32000, message: "Re-authentication required" }, true],
+    [{ code: -32000, message: "Access token expired", data: { details: "refresh failed: network is unreachable" } }, false],
+    [{ code: -32000, message: "Request failed", data: { details: "Authentication failed: connection refused" } }, false],
+    [{ code: -32000, message: "Request failed", data: { reason: "Authentication failed: connection refused" } }, false],
+    [{ code: -32000, message: "Request failed", data: { reason: "UNAUTHENTICATED" } }, true],
+    [{ code: -32000, message: "Authentication failed: getaddrinfo ENOTFOUND oauth2.googleapis.com" }, false],
+    [{ code: -32000, message: "Login check failed: getaddrinfo EAI_AGAIN oauth2.googleapis.com" }, false],
+  ])("reads the runtime's own words, not the method OpenMausBot called (%j)", (answer, expected) => {
+    expect(antigravitySignInError(acpRpcError(answer, "authenticate"))).toBe(expected);
   });
 
   it("stops a model lookup the same way instead of waiting on a link nobody sees", async () => {
@@ -213,6 +263,13 @@ describe("the session setup for releases that write a workflow skill file", () =
 
   it.each(["1.4.1", "1.4.6", "1.4.20", "1.5.1", "1.1.1", "2.4.3", "", undefined, 143])("sends nothing on %s", (version) => {
     expect(antigravitySessionSetup({ agentInfo: { version } })).toEqual({});
+  });
+
+  it("carries the system prompt beside the tools it turns off", () => {
+    expect(antigravitySessionSetup({ agentInfo: { version: "1.5.14" } }, "Rules.")).toEqual({ _meta: { antigravity: { systemPrompt: { append: "Rules." } } } });
+    expect(antigravitySessionSetup({ agentInfo: { version: "1.4.3" } }, "")).toEqual({
+      _meta: { antigravity: { disabledTools: ["run_workflow"], systemPrompt: { append: "" } } },
+    });
   });
 
   it("rides the turn's session/new on the pinned release and not on another", async () => {
@@ -407,5 +464,14 @@ describe("the runtime's launch environment", () => {
       writeFileSync(script, "not a program\n");
       expect(await antigravityBrowserHelperProblem(profile.environment, script)).toBe("it could not be started");
     }, 60_000);
+  });
+});
+
+describe("a CLI that takes the system prompt in its session", () => {
+  it("is one whose initialize advertises appending to it", () => {
+    expect(antigravityTakesSystemPrompt({ agentCapabilities: { _meta: { antigravity: { tier: true, systemPrompt: { append: true } } } } })).toBe(true);
+    for (const capabilities of [undefined, {}, { _meta: { antigravity: { tier: true } } }, { _meta: { antigravity: { systemPrompt: { append: "yes" } } } }]) {
+      expect(antigravityTakesSystemPrompt({ agentCapabilities: capabilities })).toBe(false);
+    }
   });
 });
