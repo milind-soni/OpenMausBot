@@ -8,6 +8,7 @@ import { ChatView } from "./ChatView";
 import { GroupView } from "./GroupView";
 import { ThreadPanelHeading } from "./room-feed/ThreadPanelHeading";
 import { useRoomFeedHere } from "./room-feed/use-room-feed";
+import { useThreadTurnStart } from "./room-feed/thread-turn-start";
 import { PANEL_MIN_WIDTH, useComputerPanelResize } from "./computer-panel-resize";
 
 const BESIDE_INBOX_MAX = 400;
@@ -29,6 +30,8 @@ export function ForkPanel() {
     focusedLoad.current = panel.loadId;
     (aside.querySelector<HTMLTextAreaElement>('[data-tour="composer"] textarea:not([disabled])') ?? aside).focus();
   }, [panel?.focusComposer, panel?.loadId, panel?.loading]);
+  const panelGroup = panel?.kind === "group" ? state.groups.find((candidate) => candidate.id === panel.ownerId) : undefined;
+  const turnStartedAt = useThreadTurnStart(panelGroup, panelGroup?.tasks?.find((candidate) => candidate.threadId === panel?.threadId));
   if (!panel) return null;
   const bot = panel.kind === "bot" ? state.bots.find((candidate) => candidate.id === panel.ownerId) : undefined;
   const group = panel.kind === "group" ? state.groups.find((candidate) => candidate.id === panel.ownerId) : undefined;
@@ -38,7 +41,7 @@ export function ForkPanel() {
   const openedBot = bot && botTask ? { ...currentTaskBot(bot, panel.threadId), messages: panel.messages, activeLeafId: panel.activeLeafId, hasMore: false } : null;
   const openedGroup = group && groupTask ? { ...group, threadId: panel.threadId, messages: panel.messages, hasMore: false,
     working: groupTask.working ?? false, busyBotId: groupTask.busyBotId ?? null,
-    turnStartedAt: null, pinnedCwd: groupTask.pinnedCwd, pinnedMessageId: groupTask.pinnedMessageId } : null;
+    turnStartedAt, pinnedCwd: groupTask.pinnedCwd, pinnedMessageId: groupTask.pinnedMessageId } : null;
   const fork = !beside || Boolean(task?.origin);
   const label = fork ? t("chat.forkPanel") : t("room.thread.panel");
   const close = () => dispatch({ type: "closeForkPanel" });
