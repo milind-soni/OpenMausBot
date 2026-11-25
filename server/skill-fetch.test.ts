@@ -116,6 +116,35 @@ describe("importing a skill's whole folder", () => {
     expect(raw.every((call) => call.headers.get("authorization") === null && call.redirect === "error")).toBe(true);
   });
 
+  it("cancels the import while the GitHub credential lookup is still pending", async () => {
+    let release: (signIn: { token: string | null }) => void = () => {};
+    const credential = new Promise<{ token: string | null }>((resolve) => { release = resolve; });
+    let markEntered: () => void = () => {};
+    const getterEntered = new Promise<void>((resolve) => { markEntered = resolve; });
+    const fetchSpy = vi.fn(async () => new Response("unused")) as typeof fetch;
+    const controller = new AbortController();
+    const result = fetchSkillFromSource("a/b", fetchSpy, controller.signal, async () => {
+      markEntered();
+      return credential;
+    });
+    try {
+      await getterEntered;
+      controller.abort(new Error("fixture import cancelled"));
+      const checkpoint = new Promise<void>((resolve) => { setImmediate(resolve); });
+      const settled = await Promise.race([
+        result.then((value) => ({ settled: true as const, value })),
+        checkpoint.then(() => ({ settled: false as const })),
+      ]);
+      expect(settled).toEqual({ settled: true, value: { error: "fixture import cancelled" } });
+      release({ token: SIGNED_IN });
+      release = () => {};
+      await new Promise<void>((resolve) => { setImmediate(resolve); });
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      release({ token: null });
+    }
+  });
+
   it("stays anonymous when the sign-in getter has no token", async () => {
     const github = fakeGitHub({ "a/b": PDF_SKILL });
     const recorded = recordingFetch(github.fetch);

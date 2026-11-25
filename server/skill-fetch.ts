@@ -67,7 +67,21 @@ function boundedImportFetch(
   const timeout = AbortSignal.timeout(IMPORT_LIMITS.ms);
   const signal = cancel ? AbortSignal.any([timeout, cancel]) : timeout;
   // `gh auth token` starts a process; a null answer stays null for this import.
-  const credentialOnce = (): Promise<SkillImportSignIn> => (credential ??= (async () => authorization())());
+  const credentialOnce = (): Promise<SkillImportSignIn> => {
+    if (credential) return credential;
+    if (signal.aborted) return (credential = Promise.reject(signal.reason));
+    const lookup = authorization();
+    void lookup.catch(() => {});
+    return (credential = new Promise((resolve, reject) => {
+      const abort = () => reject(signal.reason);
+      if (signal.aborted) {
+        abort();
+        return;
+      }
+      signal.addEventListener("abort", abort, { once: true });
+      lookup.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    }));
+  };
   return async (input, init) => {
     const api = isGitHubApiRequest(input);
     if (api ? ++apiRequests > IMPORT_LIMITS.apiRequests : ++downloads > IMPORT_LIMITS.downloads) {
@@ -85,6 +99,7 @@ function boundedImportFetch(
         carried = signIn.refused;
       }
     }
+    signal.throwIfAborted();
     const response = await fetcher(input, sent);
     if (carried && response.status === 401 && !reported) {
       reported = true;
