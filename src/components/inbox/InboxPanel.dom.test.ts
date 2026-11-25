@@ -258,7 +258,7 @@ describe("the inbox's bot and status filters", () => {
     id: "ben", name: "Ben", threadId: "ben-main",
     tasks: Array.from({ length: 10 }, (_, index) => ({ threadId: `ben-${index}`, title: `Ben finished ${index}`, createdAt: 0, updatedAt: minutes(10 + index) })),
   } as unknown as Bot;
-  const titles = (section: string) => [...document.querySelectorAll<HTMLElement>(`[${section}] button[title]:not([data-inbox-pin])`)].map((row) => row.querySelector("span span")?.textContent ?? row.textContent);
+  const titles = (section: string) => [...document.querySelectorAll<HTMLElement>(`[${section}] button[title]:not([data-inbox-pin])`)].map((row) => row.querySelector("span.min-w-0 > span")?.textContent ?? row.textContent);
   const choose = (selector: string, value: string) => act(async () => {
     const select = document.querySelector<HTMLSelectElement>(selector)!;
     select.value = value;
