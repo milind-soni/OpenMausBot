@@ -142,11 +142,12 @@ describe("message_person naming a bot", () => {
 
   it("off a team, puts nothing in the person's Inbox for a bot, however it is written, and names coordinate_bots", async () => {
     const f = fixture({ team: false, place: true });
-    for (const to of ["Reporter", "reporter", "@Reporter", " REPORTER ", "reporter"]) {
+    for (const to of ["Reporter", "reporter", "@Reporter", " REPORTER "]) {
       const answer = await send(f, { to, message: "Send me the Q4 numbers." });
       expect(answer.status, to).toBe(409);
       expect(answer.body.error).toBe('Reporter is a bot, not a person, so nothing was sent and no answer will come. Use coordinate_bots with bot_ids ["Reporter"]. For the person, leave out to.');
     }
+    for (const to of ["bens-chief", "ben's-chief", "@Ben's Chief"]) expect((await send(f, { to, message: "Hi" })).body.error, to).toContain('bot_ids ["Ben\'s Chief"]');
     expect(await send(f, { to: "Scout", message: "Note to self" })).toEqual({ status: 409, body: { error: '"Scout" is you, so nothing was sent and no answer will come. For the person, leave out to.' } });
     expect(f.lines("scout-main"), "no line, so no Inbox row").toEqual([]);
     expect(f.notified).toEqual([]);
@@ -161,12 +162,9 @@ describe("message_person naming a bot", () => {
     expect(f.lines("scout-main")).toEqual([expect.objectContaining({ kind: "text", text: "Can you send the slides?", inbox: expect.objectContaining({ kind: "message" }) })]);
   });
 
-  it("on a team, refuses a bot no person shares the name of with the same words, and a person keeps their name", async () => {
+  it("on a team, leaves a name nobody has to the team's own refusal", async () => {
     const f = fixture();
-    const answer = await send(f, { to: "reporter", message: "Send me the Q4 numbers." });
-    expect(answer).toEqual({ status: 409, body: { error: 'Reporter is a bot, not a person, so nothing was sent and no answer will come. Use coordinate_bots with bot_ids ["Reporter"].' } });
-    expect((await send(f, { to: "Zed", message: "Hi" })).body.error).toContain("The people here: Ada, Ben, Cleo.");
-    expect((await send(f, { to: "Ben", message: "Hi" })).status).toBe(200);
+    expect(await send(f, { to: "reporter", message: "Hi" })).toMatchObject({ status: 404, body: { error: expect.stringContaining("The people here: Ada, Ben, Cleo.") } });
   });
 });
 

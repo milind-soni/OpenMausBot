@@ -225,16 +225,16 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
 
   /** message_person is for people: when `to` names a bot here, as coordinate_bots reads a name (its id, or its name in any
    * case, with or without @), the refusal that points there; null when no bot has that name. Nothing is posted either way,
-   * so no bot waits on an answer that cannot come. `alone`: a place of one person, reached by leaving out to. */
-  function botNamed(botId: string, to: string, alone: boolean): string | null {
+   * so no bot waits on an answer that cannot come. Only off a team: there every bot is the one person's, so naming one tells
+   * nothing new, and coordinate_bots refuses past an audience in its own words. */
+  function botNamed(botId: string, to: string): string | null {
     const wanted = to.replace(/^@+/, "").trim();
     const named = wanted ? store.bots.filter((bot) => !bot.hidden && namesTeammate(bot, wanted)) : [];
     if (!named.length) return null;
-    const person = alone ? " For the person, leave out to." : "";
     const other = named.find((bot) => bot.id !== botId);
-    if (!other) return `${JSON.stringify(peerName(wanted))} is you, so nothing was sent and no answer will come.${person}`;
+    if (!other) return `${JSON.stringify(peerName(wanted))} is you, so nothing was sent and no answer will come. For the person, leave out to.`;
     const name = peerName(other.name);
-    return `${name} is a bot, not a person, so nothing was sent and no answer will come. Use coordinate_bots with bot_ids ${JSON.stringify([name])}.${person}`;
+    return `${name} is a bot, not a person, so nothing was sent and no answer will come. Use coordinate_bots with bot_ids ${JSON.stringify([name])}. For the person, leave out to.`;
   }
 
   const handledTurns = new Set<string>();
@@ -349,7 +349,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
         const body = placeBodySchema.safeParse(await ctx.readBody());
         if (!body.success) return ctx.json(ctx.res, 400, { error: `message_person needs message (up to ${MESSAGE_PERSON_MAX} characters).` });
         const to = body.data.to ?? "";
-        const bot = to ? botNamed(ctx.botId, to, true) : null;
+        const bot = to ? botNamed(ctx.botId, to) : null;
         if (bot) return ctx.json(ctx.res, 409, { error: bot });
         const sent = deps.place.message(ctx.botId, ctx.threadId, body.data.message);
         // There is one person here: a name that is no bot's still reaches them, and the bot is told so, never left waiting on "Bob".
@@ -362,9 +362,6 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       const body = bodySchema.safeParse(await ctx.readBody());
       if (!body.success) return ctx.json(ctx.res, 400, { error: `message_person needs to (a teammate's name or email) and message (up to ${MESSAGE_PERSON_MAX} characters).` });
       const passed = pass(ctx.botId, ctx.threadId, body.data.to, body.data.message);
-      // Nobody on the team has that name but a bot does: the same refusal as off a team. A person keeps their name.
-      const bot = passed.status === 404 ? botNamed(ctx.botId, body.data.to, false) : null;
-      if (bot) return ctx.json(ctx.res, 409, { error: bot });
       return ctx.json(ctx.res, passed.status, passed.status === 200 ? { text: passed.text } : { error: passed.text });
     },
     pass,
