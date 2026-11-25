@@ -83,6 +83,13 @@ export const CREDENTIAL_TARGETS = {
     placeholder: "Paste your Mistral API key",
     helpUrl: "https://console.mistral.ai/api-keys",
   },
+  minimaxApiKey: {
+    label: "MiniMax API key",
+    description: "Runs MiniMax models with your own key.",
+    placeholder: "Paste your MiniMax API key",
+    helpUrl: "https://platform.minimax.io/api-key",
+  },
+
   cerebrasApiKey: {
     label: "Cerebras API key",
     description: "Runs Cerebras models with your own key.",
@@ -127,7 +134,7 @@ export type LoginCredentialTargetId = "onePasswordToken";
 export type ConfigCredentialTargetId = Exclude<CredentialTargetId, LoginCredentialTargetId>;
 /** AI provider keys: refused where Admin manages the models, and typed only in the computer's own app or a desktop paired to it, never on a phone. */
 export const PROVIDER_CREDENTIAL_TARGETS = [
-  "openaiApiKey", "anthropicApiKey", "openrouterApiKey", "mistralApiKey", "cerebrasApiKey", "groqApiKey", "greenferenceApiKey", "modelgoApiKey", "metaApiKey", "deepseekApiKey",
+  "openaiApiKey", "anthropicApiKey", "openrouterApiKey", "mistralApiKey", "minimaxApiKey", "cerebrasApiKey", "groqApiKey", "greenferenceApiKey", "modelgoApiKey", "metaApiKey", "deepseekApiKey",
 ] as const satisfies readonly ConfigCredentialTargetId[];
 export type DesktopCredentialSlot = ConfigCredentialTargetId;
 export type CredentialConfig = {
@@ -141,6 +148,7 @@ export type CredentialConfig = {
   anthropic?: { key?: string; everyClaudeBot?: boolean };
   openrouter?: { key?: string };
   mistral?: { key?: string };
+  minimax?: { key?: string };
   cerebras?: { key?: string };
   groq?: { key?: string };
   greenference?: { key?: string };

@@ -18,6 +18,7 @@ export interface ConfigStatus {
   workspaceBanner?: import("@/lib/place-banner").BannerSummary | null;
   xai?: SavedKey;
   mistral?: SavedKey;
+  minimax?: SavedKey;
   cerebras?: SavedKey;
   groq?: SavedKey;
   greenference?: SavedKey;

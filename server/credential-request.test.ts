@@ -28,6 +28,7 @@ const MAPPINGS: Array<[ConfigCredentialTargetId, CredentialConfig]> = [
   ["anthropicApiKey", { anthropic: { key: "secret", everyClaudeBot: false } }],
   ["openrouterApiKey", { openrouter: { key: "secret" } }],
   ["mistralApiKey", { mistral: { key: "secret" } }],
+  ["minimaxApiKey", { minimax: { key: "secret" } }],
   ["cerebrasApiKey", { cerebras: { key: "secret" } }],
   ["groqApiKey", { groq: { key: "secret" } }],
   ["greenferenceApiKey", { greenference: { key: "secret" } }],

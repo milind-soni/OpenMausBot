@@ -47,7 +47,7 @@ export interface KeyTarget {
 }
 
 export type KeyId =
-  | "openai" | "anthropic" | "xai" | "openrouter" | "mistral" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta" | "deepseek" | "opencodeGo" | "opencodeProviders"
+  | "openai" | "anthropic" | "xai" | "openrouter" | "mistral" | "minimax" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta" | "deepseek" | "opencodeGo" | "opencodeProviders"
   | "ollama" | "lmStudio" | "openaiCompat" | "liveCalls" | "liveKey" | "elevenlabs" | "fishAudio" | "geminiTts" | "box" | "vps" | "onePassword" | "composio" | "treg" | "postiz"
   | "jev" | "openrouterHelper" | "workersAi" | "customDecider" | "imageOpenai" | "imageGemini" | "imageCustom";
 
@@ -74,7 +74,7 @@ function flag(saved: SavedKey | undefined): SavedState {
   return { configured: saved?.configured === true, ...(saved?.configured && saved.last4 ? { last4: saved.last4 } : {}) };
 }
 
-type TopLevelKey = "openai" | "openrouter" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta" | "deepseek" | "treg";
+type TopLevelKey = "openai" | "openrouter" | "xai" | "mistral" | "minimax" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta" | "deepseek" | "treg";
 
 function providerKey(name: TopLevelKey, rest: Omit<KeyTarget, "patch" | "saved">): KeyTarget {
   return { patch: (value) => ({ [name]: { key: value } }), saved: (config) => flag(config[name]), ...rest };
@@ -101,6 +101,9 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
   { id: "mistral", section: "ai", labelKey: "keys.mistral.label", purposeKey: "keys.purpose.mistral", name: "Mistral", env: ["MISTRAL_API_KEY"],
     words: ["mistral"], mark: provider("mistral", "mistral"), kind: "key",
     target: providerKey("mistral", { slot: "mistralApiKey", placeholder: "…", placeholderKey: "keys.mistral.placeholder", href: "https://console.mistral.ai/api-keys", test: "mistral", analytics: "mistral" }) },
+  { id: "minimax", section: "ai", labelKey: "keys.minimax.label", purposeKey: "keys.purpose.minimax", name: "MiniMax", env: ["MINIMAX_API_KEY"],
+    words: ["minimax", "min max", "m2", "m3"], mark: provider("minimax"), kind: "key",
+    target: providerKey("minimax", { slot: "minimaxApiKey", placeholder: "…", placeholderKey: "keys.minimax.placeholder", href: "https://platform.minimax.io/api-key", analytics: "minimax" }) },
   { id: "cerebras", section: "ai", labelKey: "keys.cerebras.label", purposeKey: "keys.purpose.cerebras", name: "Cerebras", env: ["CEREBRAS_API_KEY"],
     words: ["cerebras", "fast"], mark: provider("cerebras"), kind: "key",
     target: providerKey("cerebras", { slot: "cerebrasApiKey", placeholder: "csk-…", href: "https://cloud.cerebras.ai/", test: "cerebras", analytics: "cerebras", shape: /^csk-/ }) },

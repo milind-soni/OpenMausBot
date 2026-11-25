@@ -5,6 +5,7 @@ export const WORKSPACE_CREDENTIALS = [
   { section: "anthropic", field: "key", name: "anthropicApiKey", env: "OMB_ANTHROPIC_API_KEY" },
   { section: "openrouter", field: "key", name: "openrouterApiKey", env: "OMB_OPENROUTER_API_KEY" },
   { section: "mistral", field: "key", name: "mistralApiKey", env: "MISTRAL_API_KEY" },
+  { section: "minimax", field: "key", name: "minimaxApiKey", env: "MINIMAX_API_KEY" },
   { section: "cerebras", field: "key", name: "cerebrasApiKey", env: "CEREBRAS_API_KEY" },
   { section: "groq", field: "key", name: "groqApiKey", env: "OMB_GROQ_API_KEY" },
   { section: "greenference", field: "key", name: "greenferenceApiKey", env: "OMB_GREENFERENCE_API_KEY" },

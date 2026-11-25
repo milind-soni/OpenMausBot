@@ -176,6 +176,7 @@ const AI_PROVIDER_KEYS = [
   ["anthropic", "anthropicApiKey", "OMB_ANTHROPIC_API_KEY"],
   ["openrouter", "openrouterApiKey", "OMB_OPENROUTER_API_KEY"],
   ["mistral", "mistralApiKey", "MISTRAL_API_KEY"],
+  ["minimax", "minimaxApiKey", "MINIMAX_API_KEY"],
   ["cerebras", "cerebrasApiKey", "CEREBRAS_API_KEY"],
   ["groq", "groqApiKey", "OMB_GROQ_API_KEY"],
   ["greenference", "greenferenceApiKey", "OMB_GREENFERENCE_API_KEY"],
