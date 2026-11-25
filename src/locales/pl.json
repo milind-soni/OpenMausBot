@@ -1977,7 +1977,7 @@
   "chat.unpin": "Odepnij",
   "chat.pinnedJump": "Przejdź do przypiętej wiadomości",
   "chat.you": "Ty",
-  "chat.peer.asked": "zapytanie przez ask_bot",
+  "chat.peer.asked": "zapytał",
   "chat.peer.handedTask": "przekazanie zadania",
   "chat.peer.openedThread": "otwarcie tego wątku",
   "chat.peer.requested": "wysłane żądanie",
