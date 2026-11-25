@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Check, Loader2, MoreHorizontal, Plus } from "lucide-react";
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { useShowInstances } from "@/state/use-show-instances";
@@ -77,7 +77,7 @@ function summaryFor(group: AccountGroup, accounts: InstanceInfo[]): EngineCardSu
   };
 }
 
-function AccountMenu({ group, instance, onRename }: { group: AccountGroup; instance: InstanceInfo; onRename: () => void }) {
+function AccountMenu({ group, instance, signingIn, onRename }: { group: AccountGroup; instance: InstanceInfo; signingIn: boolean; onRename: () => void }) {
   const { state } = useStore();
   const showInstances = useShowInstances();
   const [open, setOpen] = useState(false);
@@ -133,7 +133,7 @@ function AccountMenu({ group, instance, onRename }: { group: AccountGroup; insta
       </button>
       {open && (
         <div role="menu" className={cn("absolute right-0 top-full z-40 mt-1 w-[220px] overflow-hidden text-[13px]", MENU_SHEET)}>
-          <button type="button" role="menuitem" className={cn(item, "text-ink")} onClick={() => { setOpen(false); onRename(); }}>{t("accounts.rename")}</button>
+          <button type="button" role="menuitem" disabled={signingIn} className={cn(item, "text-ink")} onClick={() => { setOpen(false); onRename(); }}>{t("accounts.rename")}</button>
           {canSignOut && <button type="button" role="menuitem" className={cn(item, "text-ink")} onClick={() => { setOpen(false); setConfirm("signOut"); }}>{t("accounts.signOut")}</button>}
           {canHide && <button type="button" role="menuitem" disabled={usedBy > 0} title={t("engines.hideHint")} className={cn(item, "text-ink")} onClick={() => { setOpen(false); void run("hide"); }}>{t("engines.hide")}</button>}
           {(canRemove || canHide) && usedBy > 0 && <p className="px-3 pb-1 pt-0.5 text-[11px] leading-snug text-ink-secondary">{t("accounts.inUse", { count: String(usedBy) })}</p>}
@@ -209,7 +209,13 @@ function AccountRow({ group, instance, several, signingIn, onSignIn, onSignInDon
 }) {
   const [renaming, setRenaming] = useState(false);
   const signInButton = useRef<HTMLButtonElement>(null);
-  const signInPanel = useRef<HTMLDivElement>(null);
+  const signInPanel = useRef<HTMLDivElement | null>(null);
+  const focusWasInPanel = useRef(false);
+  const panelRef = useCallback((node: HTMLDivElement | null) => {
+    signInPanel.current = node;
+    if (!node) return;
+    return () => { focusWasInPanel.current = node.contains(document.activeElement); };
+  }, []);
   const wasSigningIn = useRef(false);
   const state = accountState(instance);
   const account = instance.snapshot.account;
@@ -228,7 +234,7 @@ function AccountRow({ group, instance, several, signingIn, onSignIn, onSignInDon
   useEffect(() => {
     const opened = signingIn && !wasSigningIn.current, closed = !signingIn && wasSigningIn.current;
     wasSigningIn.current = signingIn;
-    if (closed && document.activeElement === document.body) signInButton.current?.focus();
+    if (closed && focusWasInPanel.current) signInButton.current?.focus();
     if (opened) requestAnimationFrame(() => signInPanel.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus());
   }, [signingIn]);
 
@@ -251,13 +257,13 @@ function AccountRow({ group, instance, several, signingIn, onSignIn, onSignInDon
                 {t("accounts.signIn")}
               </button>
             )}
-            <AccountMenu group={group} instance={instance} onRename={() => setRenaming(true)} />
+            <AccountMenu group={group} instance={instance} signingIn={signingIn} onRename={() => setRenaming(true)} />
           </>
         )}
       </div>
       {setsUp && <div data-account-setup={instance.instanceId} className="pl-9"><EngineSetup instance={instance} unframed /></div>}
       {signingIn && !setsUp && (
-        <div ref={signInPanel} className="pl-9">
+        <div ref={panelRef} className="pl-9">
           {group === "claude"
             ? <>
               <ClaudeSignIn instanceId={instance.instanceId} autoStart onDone={onSignInDone} />

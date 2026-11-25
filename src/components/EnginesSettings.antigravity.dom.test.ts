@@ -11,6 +11,7 @@ const fixture = vi.hoisted(() => ({
   startGate: null as Promise<void> | null,
   completeGate: null as Promise<void> | null,
   cancelGate: null as Promise<void> | null,
+  refreshGate: null as Promise<void> | null,
   opened: [] as string[],
   cancelFails: false,
   modelsFail: false,
@@ -20,7 +21,7 @@ vi.mock("@/state/store", async (original) => ({
   useStore: () => ({
     state: fixture.state,
     dispatch: (action: { type: string; instances?: InstanceInfo[] }) => { if (action.type === "instances" && action.instances) fixture.state = { ...fixture.state, instances: action.instances }; },
-    refreshInstances: async () => {}, refreshModels: async () => { if (fixture.modelsFail) throw new Error("Could not read the models."); },
+    refreshInstances: async () => { if (fixture.refreshGate) await fixture.refreshGate; }, refreshModels: async () => { if (fixture.modelsFail) throw new Error("Could not read the models."); },
   }),
   api: async (path: string, init?: { method?: string; body?: string }) => {
     if (init?.method) fixture.calls.push({ path, method: init.method, body: init.body ? JSON.parse(init.body) : undefined });
@@ -64,6 +65,7 @@ beforeEach(() => {
   fixture.startGate = null;
   fixture.completeGate = null;
   fixture.cancelGate = null;
+  fixture.refreshGate = null;
   fixture.opened = [];
   fixture.cancelFails = false;
   fixture.modelsFail = false;
@@ -82,6 +84,9 @@ const buttons = (scope: ParentNode, label: string) => [...scope.querySelectorAll
 const click = async (target: Element | undefined) => { expect(target).toBeTruthy(); await act(async () => { (target as HTMLElement).click(); }); };
 const row = (instanceId: string) => container.querySelector(`[data-account="${instanceId}"]`)!;
 const rows = () => [...container.querySelectorAll('[data-accounts="antigravity"] [data-account]')].map((item) => item.getAttribute("data-account"));
+const usable = (scope: ParentNode) => [...scope.querySelectorAll<HTMLButtonElement | HTMLInputElement>("button, input")]
+  .filter((item) => !item.disabled && item.getAttribute("aria-disabled") !== "true").map((item) => item.textContent || item.getAttribute("aria-label"));
+const gate = () => { let open!: () => void; const promise = new Promise<void>((resolve) => { open = resolve; }); return { promise, open: () => act(async () => { open(); await promise; }) }; };
 const startCalls = () => fixture.calls.filter((call) => call.path.endsWith("/auth/start")).map((call) => call.path);
 async function pasteRedirect(instanceId: string) {
   const input = row(instanceId).querySelector<HTMLInputElement>("[data-redirect-paste] input")!;
@@ -158,16 +163,61 @@ describe("Google Gemini (Antigravity) accounts share one card", () => {
     expect(buttons(row("antigravity"), "Sign in")).toHaveLength(1);
   });
 
-  it("opens no Google page for a sign-in cancelled before it started, and ends that flow", async () => {
+  it("opens no Google page for a sign-in cancelled before it started, and keeps it until that flow is ended", async () => {
     fixture.state.instances = [google("antigravity", "Personal", { authenticated: false })];
-    let start!: () => void;
-    fixture.startGate = new Promise((resolve) => { start = resolve; });
+    const start = gate();
+    fixture.startGate = start.promise;
     await render();
     await click(buttons(row("antigravity"), "Sign in")[0]);
     await click(buttons(row("antigravity"), "Cancel")[0]);
-    await act(async () => { start(); await fixture.startGate; });
+    expect(row("antigravity").querySelector("[data-account-sign-in]")).toBeTruthy();
+    expect(usable(row("antigravity").querySelector("[data-account-sign-in]")!)).toEqual([]);
+    await start.open();
     expect(fixture.opened).toEqual([]);
     expect(fixture.calls.at(-1)).toEqual({ path: "/api/instances/antigravity/auth/cancel", method: "POST", body: { flowId: "flow-antigravity" } });
+    expect(row("antigravity").querySelector("[data-account-sign-in]")).toBeNull();
+  });
+
+  it("keeps a sign-in cancelled before it started open with its Google link when the server refuses the cancel", async () => {
+    fixture.state.instances = [google("antigravity", "Personal", { authenticated: false })];
+    fixture.cancelFails = true;
+    const start = gate();
+    fixture.startGate = start.promise;
+    await render();
+    await click(buttons(row("antigravity"), "Sign in")[0]);
+    await click(buttons(row("antigravity"), "Cancel")[0]);
+    await start.open();
+    const panel = row("antigravity").querySelector("[data-account-sign-in]")!;
+    expect(panel.textContent).toContain("The sign-in is finishing. Try again in a moment.");
+    expect(usable(panel)).toContain("Open Google sign-in again");
+    expect(usable(panel)).toContain("Cancel");
+    expect(fixture.opened).toEqual([]);
+  });
+
+  it("keeps the sign-in's controls held until the cancel answers, even when a status check ends first", async () => {
+    fixture.state.instances = [google("antigravity", "Personal", { authenticated: false })];
+    await render();
+    await click(buttons(row("antigravity"), "Sign in")[0]);
+    const refresh = gate(), cancel = gate();
+    fixture.refreshGate = refresh.promise;
+    fixture.cancelGate = cancel.promise;
+    await click(buttons(row("antigravity"), "I finished signing in")[0]);
+    await click(buttons(row("antigravity"), "Cancel")[0]);
+    await refresh.open();
+    expect(usable(row("antigravity").querySelector("[data-account-sign-in]")!)).toEqual([]);
+    await cancel.open();
+    expect(row("antigravity").querySelector("[data-account-sign-in]")).toBeNull();
+  });
+
+  it("offers no Rename while the account is signing in", async () => {
+    fixture.state.instances = [google("antigravity", "Personal", { authenticated: false })];
+    await render();
+    await click(container.querySelector('[aria-label="Options for Personal"]') ?? undefined);
+    expect(row("antigravity").querySelector<HTMLButtonElement>('[role="menuitem"]')?.disabled).toBe(false);
+    await click(container.querySelector('[aria-label="Options for Personal"]') ?? undefined);
+    await click(buttons(row("antigravity"), "Sign in")[0]);
+    await click(container.querySelector('[aria-label="Options for Personal"]') ?? undefined);
+    expect(buttons(row("antigravity"), "Rename")[0]?.disabled).toBe(true);
   });
 
   it("closes the panel once the pasted redirect signs the account in, before its status is read again", async () => {
@@ -186,8 +236,27 @@ describe("Google Gemini (Antigravity) accounts share one card", () => {
     await click(buttons(row("antigravity"), "Sign in")[0]);
     await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
     expect(row("antigravity").querySelector("[data-account-sign-in]")?.contains(document.activeElement)).toBe(true);
+    const cancel = gate();
+    fixture.cancelGate = cancel.promise;
+    buttons(row("antigravity"), "Cancel")[0]!.focus();
     await click(buttons(row("antigravity"), "Cancel")[0]);
+    expect(document.activeElement).toBe(buttons(row("antigravity"), "Cancel")[0]);
+    await cancel.open();
     expect(document.activeElement).toBe(buttons(row("antigravity"), "Sign in")[0]);
+  });
+
+  it("leaves focus on the page when it left the sign-in before the cancel answered", async () => {
+    fixture.state.instances = [google("antigravity", "Personal", { authenticated: false })];
+    await render();
+    await click(buttons(row("antigravity"), "Sign in")[0]);
+    await nextFrame();
+    const cancel = gate();
+    fixture.cancelGate = cancel.promise;
+    await click(buttons(row("antigravity"), "Cancel")[0]);
+    (document.activeElement as HTMLElement).blur();
+    await cancel.open();
+    expect(row("antigravity").querySelector("[data-account-sign-in]")).toBeNull();
+    expect(document.activeElement).toBe(document.body);
   });
 
   it("leaves focus where it is when another account's sign-in finishes", async () => {
@@ -228,7 +297,7 @@ describe("Google Gemini (Antigravity) accounts share one card", () => {
     await pasteRedirect("antigravity");
     await click(buttons(row("antigravity"), "Cancel")[0]);
     const panel = row("antigravity").querySelector("[data-account-sign-in]")!;
-    expect([...panel.querySelectorAll("button")].filter((button) => !button.disabled).map((button) => button.textContent)).toEqual([]);
+    expect(usable(panel)).toEqual([]);
     await act(async () => { cancelled(); await fixture.cancelGate; });
     expect(row("antigravity").querySelector("[data-account-sign-in]")).toBeNull();
   });
@@ -250,8 +319,8 @@ describe("Google Gemini (Antigravity) accounts share one card", () => {
     await click(buttons(row("antigravity"), "Sign in")[0]);
     await pasteRedirect("antigravity");
     await click(buttons(row("antigravity"), "Send redirect")[0]);
-    expect(buttons(row("antigravity"), "Cancel")[0]?.disabled).toBe(true);
-    expect(buttons(row("antigravity"), "I finished signing in")[0]?.disabled).toBe(true);
+    expect(usable(row("antigravity"))).not.toContain("Cancel");
+    expect(usable(row("antigravity"))).not.toContain("I finished signing in");
     await act(async () => { send(); await fixture.completeGate; });
   });
 
