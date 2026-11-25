@@ -10,8 +10,19 @@ import type { Json } from "./agents-client.ts";
 
 /** The proxy's switch: "1" lists through the bridge, anything else lists the whole catalog. */
 export const TOOL_BRIDGE_ENV = "OMB_AGENTS_TOOL_BRIDGE";
-/** The native Antigravity CLI file a bridged turn was decided for; the driver starts the turn only on that same file. */
-export const BRIDGE_CLI_ENV = "OMB_AGENTS_BRIDGE_CLI";
+/** The native Antigravity CLI file each thread's bridged turn was decided for, kept on the server: the driver starts the
+ * turn only on that same file. Oldest first, capped as the bridged-thread marks are. */
+const BRIDGED_CLIS = new Map<string, string>();
+const BRIDGED_CLIS_MAX = 5_000;
+
+export function rememberBridgedCli(threadId: string, executablePath: string | undefined): void {
+  BRIDGED_CLIS.delete(threadId);
+  if (executablePath === undefined) return;
+  BRIDGED_CLIS.set(threadId, executablePath);
+  if (BRIDGED_CLIS.size > BRIDGED_CLIS_MAX) BRIDGED_CLIS.delete(BRIDGED_CLIS.keys().next().value!);
+}
+
+export const bridgedCliFor = (threadId: string): string | undefined => BRIDGED_CLIS.get(threadId);
 export const FIND_TOOL = "find_tool";
 export const USE_TOOL = "use_tool";
 

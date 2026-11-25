@@ -1,6 +1,7 @@
 // The MCP side of the offline native Antigravity CLI stand-in, as measured against 1.5.14 and 1.5.16 over ACP:
-//   - every session/new and session/resume server is started over stdio, its whole tools/list is read, and each tool is
-//     written to <state>/mcp/<server>/<tool>.json as {name, description, parameters};
+//   - every session/new and session/resume server, a stdio command or an `http` URL (which the CLI takes though its
+//     initialize advertises no MCP transport), has its whole tools/list read, and each tool is written to
+//     <state>/mcp/<server>/<tool>.json as {name, description, parameters};
 //   - the model sees every tool eagerly, and when the session's tool JSON passes the shared budget (between 58,700 and
 //     60,600 bytes of those files, google-antigravity/antigravity-cli#1530) the largest are dropped, largest first, with no
 //     lazy fallback and no call_mcp_tool;
@@ -24,6 +25,17 @@ export interface AcpStdioServer {
   args?: string[];
   env?: Array<{ name: string; value: string }>;
 }
+
+export interface AcpHttpServer {
+  type: "http";
+  name: string;
+  url: string;
+  headers?: Array<{ name: string; value: string }>;
+}
+
+export type AcpMcpServer = AcpStdioServer | AcpHttpServer;
+
+const isHttp = (server: AcpMcpServer): server is AcpHttpServer => (server as AcpHttpServer).type === "http";
 
 export const DEFAULT_TOOL_BUDGET = 60_000;
 
@@ -55,8 +67,8 @@ export function droppedTools(servers: ReadonlyArray<{ name: string; tools: reado
 export class ServerNames {
   private readonly registered = new Map<string, string>();
 
-  nameFor(server: AcpStdioServer): string {
-    const key = JSON.stringify([server.command, server.args ?? [], server.env ?? []]);
+  nameFor(server: AcpMcpServer): string {
+    const key = isHttp(server) ? JSON.stringify([server.url, server.headers ?? []]) : JSON.stringify([server.command, server.args ?? [], server.env ?? []]);
     const first = this.registered.get(server.name);
     if (first === undefined) {
       this.registered.set(server.name, key);
@@ -71,14 +83,15 @@ type Json = Record<string, unknown>;
 export class McpConnection {
   readonly tools: McpTool[] = [];
   readonly name: string;
-  readonly server: AcpStdioServer;
-  private readonly child: ChildProcess;
+  readonly server: AcpMcpServer;
+  private readonly child: ChildProcess | undefined;
   private nextId = 1;
   private readonly waiting = new Map<number, (message: Json) => void>();
 
-  private constructor(name: string, server: AcpStdioServer, cwd: string) {
+  private constructor(name: string, server: AcpMcpServer, cwd: string) {
     this.name = name;
     this.server = server;
+    if (isHttp(server)) return;
     const env = { ...process.env, ...Object.fromEntries((server.env ?? []).map(({ name, value }) => [name, value])) };
     this.child = spawn(server.command, server.args ?? [], { cwd, env, stdio: ["pipe", "pipe", "ignore"] });
     this.child.on("error", () => this.failAll());
@@ -94,10 +107,10 @@ export class McpConnection {
     });
   }
 
-  static async open(name: string, server: AcpStdioServer, cwd: string, clientVersion: string): Promise<McpConnection> {
+  static async open(name: string, server: AcpMcpServer, cwd: string, clientVersion: string): Promise<McpConnection> {
     const connection = new McpConnection(name, server, cwd);
     await connection.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "antigravity", version: clientVersion } });
-    connection.child.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
+    connection.notify("notifications/initialized");
     let cursor: unknown;
     do {
       const listed = await connection.request("tools/list", cursor === undefined ? {} : { cursor });
@@ -110,6 +123,7 @@ export class McpConnection {
 
   request(method: string, params: unknown, timeoutMs = 60_000): Promise<Json> {
     const id = this.nextId++;
+    if (isHttp(this.server)) return this.post({ jsonrpc: "2.0", id, method, params }, timeoutMs);
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.waiting.delete(id);
@@ -119,14 +133,38 @@ export class McpConnection {
         clearTimeout(timer);
         resolve(message);
       });
-      if (!this.child.stdin?.writable) return this.waiting.get(id)?.({ error: { code: -32000, message: "the server has exited" } });
+      if (!this.child?.stdin?.writable) return this.waiting.get(id)?.({ error: { code: -32000, message: "the server has exited" } });
       this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
     });
   }
 
+  private notify(method: string): void {
+    const message = { jsonrpc: "2.0", method };
+    if (isHttp(this.server)) void this.post(message, 10_000);
+    else this.child?.stdin?.write(`${JSON.stringify(message)}\n`);
+  }
+
+  /** One message to an `http` server, as streamable HTTP: the reply comes as JSON or as server-sent events. */
+  private async post(message: Json, timeoutMs: number): Promise<Json> {
+    const server = this.server as AcpHttpServer;
+    const headers = { "content-type": "application/json", accept: "application/json, text/event-stream",
+      ...Object.fromEntries((server.headers ?? []).map(({ name, value }) => [name, value])) };
+    try {
+      const response = await fetch(server.url, { method: "POST", headers, body: JSON.stringify(message), signal: AbortSignal.timeout(timeoutMs) });
+      const text = await response.text();
+      if (!response.ok) return { error: { code: -32000, message: `HTTP ${response.status}` } };
+      if (!text.trim()) return {};
+      if (!response.headers.get("content-type")?.startsWith("text/event-stream")) return JSON.parse(text) as Json;
+      const events = text.split("\n").filter((line) => line.startsWith("data: ")).map((line) => JSON.parse(line.slice(6)) as Json);
+      return events.find((event) => event.id === message.id) ?? events.at(-1) ?? {};
+    } catch (error) {
+      return { error: { code: -32000, message: String(error) } };
+    }
+  }
+
   close(): void {
-    this.child.stdin?.end();
-    this.child.kill();
+    this.child?.stdin?.end();
+    this.child?.kill();
   }
 
   private failAll(): void {
@@ -147,10 +185,10 @@ export class SessionTools {
     this.dropped = dropped;
   }
 
-  static async mount(servers: readonly AcpStdioServer[], options: { names: ServerNames; cwd: string; stateDir: string; budget: number; version: string }): Promise<SessionTools> {
+  static async mount(servers: readonly AcpMcpServer[], options: { names: ServerNames; cwd: string; stateDir: string; budget: number; version: string }): Promise<SessionTools> {
     const connections: McpConnection[] = [];
     for (const server of servers) {
-      if (!server || typeof server.command !== "string") continue;
+      if (!server || (isHttp(server) ? typeof server.url !== "string" : typeof server.command !== "string")) continue;
       connections.push(await McpConnection.open(options.names.nameFor(server), server, options.cwd, options.version));
     }
     for (const connection of connections) {
@@ -168,6 +206,11 @@ export class SessionTools {
   visible(): string[] {
     return this.connections.flatMap((connection) => connection.tools.filter((tool) => !this.dropped.has(`${connection.name}/${tool.name}`))
       .map((tool) => nativeName(connection.name, tool.name)));
+  }
+
+  /** How each server was reached: `http` or `stdio`. */
+  transports(): Record<string, "http" | "stdio"> {
+    return Object.fromEntries(this.connections.map((connection) => [connection.server.name, isHttp(connection.server) ? "http" : "stdio"]));
   }
 
   /** Bytes of every tool definition the servers listed, before the budget. */

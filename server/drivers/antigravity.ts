@@ -57,7 +57,7 @@ import {
 } from "./antigravity-runtime.ts";
 import { ANTIGRAVITY_NATIVE_CLI } from "./antigravity-cli-install.ts";
 import { acpFileEditWithin } from "./permission-command.ts";
-import { agentsToolBridged, BRIDGE_CLI_ENV } from "./agents-bridge.ts";
+import { agentsToolBridged, bridgedCliFor } from "./agents-bridge.ts";
 import { releaseOf, rememberUnbridgeable } from "./antigravity-bridge-memory.ts";
 import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
 import { AntigravityProcesses } from "./antigravity-processes.ts";
@@ -230,7 +230,7 @@ const support: AcpSupport = {
       return ` The tool bridge stays on for Antigravity CLI ${release}: its record could not be saved.`;
     }
   },
-  launchRefusal: (turn, launch) => agentsToolBridged(turn.integrations?.agents) && turn.integrations?.agents?.env?.[BRIDGE_CLI_ENV] !== launch.command
+  launchRefusal: (turn, launch) => agentsToolBridged(turn.integrations?.agents) && bridgedCliFor(turn.threadId) !== launch.command
     ? "Google Antigravity CLI changed while this message was being set up. Send it again."
     : undefined,
 

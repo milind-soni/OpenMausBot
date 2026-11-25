@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { rememberUnbridgeable } from "./drivers/antigravity-bridge-memory.ts";
 import { agentsToolBridgeRefusal, bridgedAgents, engineBridgeRefusal, type BridgeEngine, type EngineHost } from "./agents-bridge-switch.ts";
-import { BRIDGE_CLI_ENV, TOOL_BRIDGE_ENV } from "./drivers/agents-bridge.ts";
+import { bridgedCliFor, TOOL_BRIDGE_ENV } from "./drivers/agents-bridge.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
 const WINDOWS = process.platform === "win32";
@@ -48,16 +48,18 @@ describe("bridging a native Antigravity account's turn", () => {
   it("is on with no switch, and writes the CLI it was decided for", () => {
     const { engine, host } = setup();
     expect(decided(engine, host)).toBeNull();
-    const agents = bridgedAgents("thread-1", { env: { [BRIDGE_CLI_ENV]: "/stale" } }, {}, bot, engine, {}, host);
-    expect(agents?.env).toEqual({ [TOOL_BRIDGE_ENV]: "1", [BRIDGE_CLI_ENV]: CLI });
+    const agents = bridgedAgents("thread-1", { env: {} }, {}, bot, engine, {}, host);
+    expect(agents?.env).toEqual({ [TOOL_BRIDGE_ENV]: "1" });
+    expect(bridgedCliFor("thread-1")).toBe(CLI);
   });
 
   it("is off when the switch is set off outright, by the operator or in config.json", () => {
     const { engine, host } = setup();
     expect(decided(engine, host, {}, { [TOOL_BRIDGE_ENV]: "0" })).toBe("the switch is off");
     expect(decided(engine, host, { features: { agentsToolBridge: false } })).toBe("the switch is off");
-    expect(bridgedAgents("thread-2", { env: { [BRIDGE_CLI_ENV]: "/stale" } }, { features: { agentsToolBridge: false } }, bot, engine, {}, host)?.env)
-      .toEqual({ [TOOL_BRIDGE_ENV]: "0" });
+    bridgedAgents("thread-2", { env: {} }, {}, bot, engine, {}, host);
+    expect(bridgedAgents("thread-2", { env: {} }, { features: { agentsToolBridge: false } }, bot, engine, {}, host)?.env).toEqual({ [TOOL_BRIDGE_ENV]: "0" });
+    expect(bridgedCliFor("thread-2")).toBeUndefined();
   });
 
   it("is off for a bot with a tool selection", () => {

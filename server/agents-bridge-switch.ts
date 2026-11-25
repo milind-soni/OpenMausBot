@@ -10,7 +10,7 @@ import { parseToolScope } from "../shared/tool-scope.ts";
 
 import { antigravityNativeRelease, antigravityRefusal, dropsToolsPastBudget, type NativeCliRelease } from "./agents-bridge-antigravity.ts";
 import { bridgedCallName } from "./agents-bridge-names.ts";
-import { BRIDGE_CLI_ENV, TOOL_BRIDGE_ENV } from "./drivers/agents-bridge.ts";
+import { rememberBridgedCli, TOOL_BRIDGE_ENV } from "./drivers/agents-bridge.ts";
 import { decodeInjectId } from "./drivers/local-inject.ts";
 import { onThisNetwork } from "./drivers/openai-compat.ts";
 import { claudeCliSupports, parseClaudeCliVersion, resolveClaudeConfigDir } from "./drivers/claude.ts";
@@ -381,15 +381,15 @@ export function bridgedAgents<Agents extends { env: Record<string, string> }>(
   host?: EngineHost,
 ): Agents | undefined {
   BRIDGED_THREADS.delete(threadId);
+  rememberBridgedCli(threadId, undefined);
   if (!agents) return undefined;
   const decided = agentsToolBridgeEnv(cfg, bot, engine, env, host);
   if (decided[TOOL_BRIDGE_ENV] === "1") {
     BRIDGED_THREADS.add(threadId);
     if (BRIDGED_THREADS.size > BRIDGED_THREADS_MAX) BRIDGED_THREADS.delete(BRIDGED_THREADS.values().next().value!);
   }
-  const { [BRIDGE_CLI_ENV]: _inherited, ...rest } = agents.env;
-  const release = decided[TOOL_BRIDGE_ENV] === "1" && engine?.nativeCli ? { [BRIDGE_CLI_ENV]: engine.nativeCli.executablePath } : {};
-  return { ...agents, env: { ...rest, ...decided, ...release } };
+  rememberBridgedCli(threadId, decided[TOOL_BRIDGE_ENV] === "1" ? engine?.nativeCli?.executablePath : undefined);
+  return { ...agents, env: { ...agents.env, ...decided } };
 }
 
 /** Decides a turn and writes the decision into its integrations in place; call once the turn's folder is

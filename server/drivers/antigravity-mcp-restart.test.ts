@@ -9,7 +9,7 @@ import type { ProviderInstance } from "../contracts.ts";
 import { nativeFixture } from "../testing/antigravity-native-fixture.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { recordEvents } from "../testing/events.ts";
-import { BRIDGE_CLI_ENV, TOOL_BRIDGE_ENV } from "./agents-bridge.ts";
+import { rememberBridgedCli, TOOL_BRIDGE_ENV } from "./agents-bridge.ts";
 import { antigravityProfileDirectory } from "./antigravity-acp.ts";
 import { AntigravityDriver } from "./antigravity.ts";
 
@@ -53,7 +53,8 @@ describe.skipIf(WINDOWS)("a native Antigravity session whose MCP servers change"
       return recorder.events.slice(from).flatMap((event) => event.type === "item.completed" ? [String((event as { text?: unknown }).text ?? "")] : []).join("");
     };
     const unbridged = { [TOOL_BRIDGE_ENV]: "0" };
-    const bridged = { [TOOL_BRIDGE_ENV]: "1", [BRIDGE_CLI_ENV]: fixture.executable };
+    rememberBridgedCli("restart", fixture.executable);
+    const bridged = { [TOOL_BRIDGE_ENV]: "1" };
     // The turn's own sessions: the driver's model probe opens one with no servers.
     const sessionsOpened = () => {
       const entries = fixture.entries();

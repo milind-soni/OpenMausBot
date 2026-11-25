@@ -8,7 +8,7 @@ import { ensureDirs } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { recordEvents } from "../testing/events.ts";
-import { BRIDGE_CLI_ENV, TOOL_BRIDGE_ENV } from "./agents-bridge.ts";
+import { rememberBridgedCli, TOOL_BRIDGE_ENV } from "./agents-bridge.ts";
 import { AntigravityDriver } from "./antigravity.ts";
 import { unbridgeableFile, unbridgeableVersions } from "./antigravity-bridge-memory.ts";
 
@@ -66,7 +66,8 @@ describe.skipIf(WINDOWS)("an Antigravity permission request on a turn whose agen
     });
     instances.push(instance);
     const bridged = options.bridged !== false;
-    const agents = { command: process.execPath, args: ["-e", ""], env: { [TOOL_BRIDGE_ENV]: bridged ? "1" : "0", ...(bridged ? { [BRIDGE_CLI_ENV]: options.decidedCli ?? executable } : {}) } };
+    const agents = { command: process.execPath, args: ["-e", ""], env: { [TOOL_BRIDGE_ENV]: bridged ? "1" : "0" } };
+    rememberBridgedCli(name, bridged ? options.decidedCli ?? executable : undefined);
     const recorder = recordEvents(instance.adapter);
     const { turnId } = await instance.adapter.sendTurn({ threadId: name, text: "hello", ...(options.approvalMode === "auto" ? {} : { approvalMode: options.approvalMode }), cwd: directory, integrations: { agents, ...(options.mountData ? { data: { command: process.execPath, args: ["-e", ""], env: {} } } : {}) } });
     const first = await recorder.until((event) => event.turnId === turnId && (event.type === "request.opened" || event.type === "turn.completed"));

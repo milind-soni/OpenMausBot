@@ -35,7 +35,7 @@ import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "no
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
-import { DEFAULT_TOOL_BUDGET, ServerNames, SessionTools, type AcpStdioServer } from "./fake-antigravity-mcp.ts";
+import { DEFAULT_TOOL_BUDGET, ServerNames, SessionTools, type AcpMcpServer } from "./fake-antigravity-mcp.ts";
 
 const argv = process.argv.slice(2);
 const version = process.env.FAKE_AGY_VERSION ?? "1.5.14";
@@ -135,7 +135,7 @@ const cancels = new Map<string, () => void>();
 let clientRequests = 0;
 let toolCalls = 0;
 
-type Params = { sessionId?: string; configId?: string; value?: string; cwd?: string; mcpServers?: AcpStdioServer[]; prompt?: Array<{ type?: string; text?: string }> };
+type Params = { sessionId?: string; configId?: string; value?: string; cwd?: string; mcpServers?: AcpMcpServer[]; prompt?: Array<{ type?: string; text?: string }> };
 
 function askClient(method: string, params: unknown): Promise<{ result?: unknown; error?: unknown }> {
   const id = String(++clientRequests);
@@ -149,7 +149,7 @@ async function mountTools(sessionId: string, params: Params): Promise<void> {
   sessionTools.get(sessionId)?.close();
   const mounted = await SessionTools.mount(params.mcpServers ?? [], { names: serverNames, cwd: params.cwd ?? process.cwd(), stateDir, budget, version });
   sessionTools.set(sessionId, mounted);
-  log({ event: "tools", sessionId, bytes: mounted.bytes(), visible: mounted.visible(), hidden: mounted.hidden() });
+  log({ event: "tools", sessionId, transports: mounted.transports(), bytes: mounted.bytes(), visible: mounted.visible(), hidden: mounted.hidden() });
 }
 
 const update = (sessionId: string, value: Record<string, unknown>) => out({ method: "session/update", params: { sessionId, update: value } });
