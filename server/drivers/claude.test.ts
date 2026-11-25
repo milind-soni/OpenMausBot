@@ -4899,7 +4899,7 @@ describe("ClaudeDriver resume recovery (fake CLI)", () => {
       await instance.adapter.sendTurn({ threadId: "t-logged", text: "what now?", resumeCursor: "an-outside-session", recoveryText: REBUILD });
       await recorder.until((e) => e.type === "turn.completed");
       const lines = logged.mock.calls.map((call) => String(call[0]));
-      expect(lines.find((line) => line.includes("could not resume session an-outside-session"))).toMatch(/^claude \(claude-test\): could not resume session an-outside-session for thread t-logged, starting a new one: claude exited \d+ before result/u);
+      expect(lines.find((line) => line.includes("could not resume session an-outside-session"))).toMatch(/^claude \(claude-test\): could not resume session an-outside-session for thread t-logged, starting a new one: No conversation found with session ID: an-outside-session$/u);
     } finally {
       logged.mockRestore();
     }
