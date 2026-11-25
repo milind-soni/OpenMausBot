@@ -10,6 +10,7 @@ import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerive
 import { BotConversations } from "./Conversations";
 import { BotKeeps } from "./Keeps";
 import type { SimplePageId } from "./page-registry";
+import { TryAsking } from "./TryAsking";
 import { CardLabel, RowIcon, rowCls, RowText } from "./rows";
 import { useStoreSelector } from "@/state/store-select";
 import { newChatBot } from "@/state/new-chat";
@@ -91,6 +92,8 @@ export function DetailsTab({ bot, derived, onOpen }: {
       <BotKeeps bot={bot} routines={derived.botRoutines} onOpen={onOpen} />
 
       <BotConversations bot={bot} />
+
+      <TryAsking bot={bot} />
 
       {conversationItems.length > 0 && (
         <section data-panel-card="conversation">
