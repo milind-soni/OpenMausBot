@@ -38,7 +38,7 @@ import type { UsageTrigger } from "../usage-ledger.ts";
 import { parseMentionPicks } from "../../shared/room-mentions.ts";
 import { sameNameRefusal, sameNameRefusalForBots } from "../same-name-mentions.ts";
 import { conversationLanguage } from "../server-lines.ts";
-import { bulkDeleteThreadIds, type BulkDeleteRefusal } from "./bulk-delete.ts";
+import { bulkDeleteThreadIds, outsideClosedScope, type BulkDeleteRefusal } from "./bulk-delete.ts";
 import { FORK_BUSY, FORK_NO_TEXT, parseForkRequest } from "./fork-request.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { sawThread } from "../thread-presence.ts";
@@ -217,8 +217,9 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       const refused: BulkDeleteRefusal[] = [];
       for (const threadId of parsed.threadIds) {
         const refusal = deleteRefusal(auth, group.id, threadId);
-        if (!refusal) allowed.push(threadId);
-        else refused.push({ threadId, reason: refusal.status === 409 ? "busy" : "not-found" });
+        if (refusal) refused.push({ threadId, reason: refusal.status === 409 ? "busy" : "not-found" });
+        else if (parsed.scope === "closed" && outsideClosedScope(store.groupTaskByThread(group.id, threadId))) refused.push({ threadId, reason: "not-closed" });
+        else allowed.push(threadId);
       }
       if (allowed.length >= (group.tasks?.length ?? 1)) return json(res, 400, { error: "a channel keeps at least one task" });
       const result = deleteGroupTasks(group.id, allowed);

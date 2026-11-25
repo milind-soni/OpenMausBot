@@ -8,7 +8,7 @@ import { SIDEBAR_AND_PANEL_FIT } from "./use-media-query";
 
 /** A file from a message, shown beside the chat. Renderer-only: nothing about it is stored or sent anywhere. */
 export interface FilePreview {
-  kind: "html" | "markdown" | "table" | "changes";
+  kind: "html" | "markdown" | "text" | "table" | "changes";
   path: string;
   shownPath?: string;
   name: string;

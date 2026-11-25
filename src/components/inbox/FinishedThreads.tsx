@@ -6,7 +6,7 @@ import type { Bot, Group, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { roomThreadSpeakerId, roomThreadWorking } from "@/lib/room-threads";
-import { attentionOwnerName, isOpenThread, openThreadRow, type AttentionThread, type OpenThread } from "../SidebarBotActivity";
+import { AttentionFace, attentionOwnerName, isOpenThread, openThreadRow, type AttentionThread, type BotFace, type OpenThread } from "../SidebarBotActivity";
 import { formatUpdatedAt, threadRecency, threadUpdatedLabel } from "../SidebarThreadRow";
 
 export const FINISHED_LIMIT = 10;
@@ -54,9 +54,11 @@ export function finishedThreads(bots: readonly Bot[], groups: readonly Group[] =
   return found.sort((a, b) => b.at - a.at).slice(0, limit).map(({ at: _at, ...row }) => row);
 }
 
-export function FinishedThreads({ rows, now, current, onOpen }: {
+export function FinishedThreads({ rows, faces, now, current, onOpen }: {
   /** From finishedThreads: the read conversations, without the ones the pinned section at the top already shows. */
   rows: readonly FinishedThread[];
+  /** The bots' pictures, from botFaces: each row leads with its own. */
+  faces: readonly BotFace[];
   /** The clock the row's last-activity label is relative to. */
   now: number;
   /** The conversation the chat window has open, marked like a selected sidebar row. */
@@ -78,7 +80,7 @@ export function FinishedThreads({ rows, now, current, onOpen }: {
           <button key={`${row.kind}-${row.kind === "bot" ? row.botId : row.groupId}-${row.task.threadId}`} type="button" aria-label={label} title={label}
             aria-current={open ? "page" : undefined} data-open-thread={open || undefined} onClick={() => onOpen(row)}
             className={cn("flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[13px] text-ink hover:bg-menu-hover", open && openThreadRow)}>
-            <CheckCircle2 size={16} aria-hidden="true" className="shrink-0 text-ink-tertiary" />
+            <AttentionFace entry={row} faces={faces} Icon={CheckCircle2} iconClass="text-ink-tertiary" />
             <span className="min-w-0 flex-1">
               <span className="block truncate">{row.task.title}</span>
               <span className="block truncate text-[11px] text-ink-secondary">

@@ -363,10 +363,11 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
 // source: the original a delivered copy came from, offered on right-click (Show in Finder) like in the gallery.
 function LocalFileLink({ filePath, shownPath, shownName, name, source, children, message }: { filePath: string; shownPath: string; shownName: string; name?: string; source?: string; children?: ReactNode; message?: MessageAttachmentContext }) {
   const save = useLocalFileSave(filePath, name, message);
-  const preview = useHtmlPreview(filePath, shownName, message, shownPath);
   const revealMenu = useRevealOriginalMenu();
   const fileOutsideWorkspace = useMessageFileOutsideWorkspace(filePath, message);
   const revealHere = typeof window !== "undefined" && Boolean(window.ogb?.revealInFolder) && !window.ogb?.remoteClient?.active;
+  // A text file outside the chat's folder keeps Show in folder, so where the desktop app checks, the preview waits for it.
+  const preview = useHtmlPreview(filePath, shownName, message, shownPath, fileOutsideWorkspace === false || !(revealHere && canRevealHostPath(filePath)));
   const revealOnClick = fileOutsideWorkspace === true && canRevealHostPath(shownPath) && revealHere;
   const [revealProblem, setRevealProblem] = useState("");
   if (!message) {

@@ -1,6 +1,5 @@
 // Connection requests become OpenMausBot chat cards: the agent never authors an auth URL and credentials never pass
 // through its transcript. stdout is the MCP transport: never log there.
-import readline from "node:readline";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import {
@@ -20,6 +19,7 @@ import { AUTH_CONFIG_ID } from "../shared/connector-availability.ts";
 import { fitToolListResult } from "./mcp-tool-schema.ts";
 import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
 import { capToolListResult, toolLimitFromEnv } from "./tool-count-limit.ts";
+import { readStdioLines } from "./stdio-lines.ts";
 
 type Json = Record<string, unknown>;
 
@@ -394,8 +394,7 @@ async function handle(received: Json): Promise<void> {
   }
 }
 
-const input = readline.createInterface({ input: process.stdin, terminal: false });
-input.on("line", (line) => {
+readStdioLines(process.stdin, (line) => {
   const trimmed = line.trim();
   if (!trimmed) return;
   let message: Json;
@@ -430,5 +429,4 @@ input.on("line", (line) => {
     if (method === "tools/call") send(textResult(message.id, messageText, true));
     else send(jsonRpcError(message.id, messageText));
   });
-});
-input.on("close", () => process.exit(0));
+}, () => process.exit(0));
