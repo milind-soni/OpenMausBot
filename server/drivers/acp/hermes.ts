@@ -11,6 +11,7 @@ import { findCliCandidates, harnessHome, resolveCliSpawn, splitCliString, whichW
 import { killCliTree, resolveCli, spawnCli } from "../../procs.ts";
 import { decodeInjectId, hostApiKey, INJECT_SEP, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { hermesPermissionRequest } from "./hermes-mcp-trust.ts";
 import { selectAdvertisedMode } from "./session-modes.ts";
 
 const EMPTY: ModelCatalog = { default: "", options: [] };
@@ -440,6 +441,7 @@ const support: AcpSupport = {
   // Hermes keeps the first MCP server it registers under a name for the process's life, so a new bearer needs a fresh process.
   restartOnMcpChange: true,
   sessionScopedApproval: true,
+  permissionRequest: hermesPermissionRequest,
   resendsReasoningReply: true,
   steer: { command: "steer", answer: hermesSteerAnswer },
   transformEnv: (env) => {
