@@ -59,7 +59,7 @@ import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
 import { MAX_QUESTION_TEXT, parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../../shared/ask-question.ts";
 
 import { appendNative } from "../native.ts";
-import { acpAnswersAlone, acpSessionOperationKey, acpShellRequest, permissionLaunchCwd } from "../permission-command.ts"; import { acpReadPaths } from "../../own-file-reads.ts";
+import { acpAnswersAlone, acpSessionOperationKey, acpShellRequest, permissionLaunchCwd } from "../permission-command.ts"; import { bridgedPermission } from "./bridged-permission.ts"; import { agentsToolBridged } from "../agents-bridge.ts"; import { CATALOG_TOOL_NAMES } from "../../agents-bridge-names.ts"; import { acpReadPaths } from "../../own-file-reads.ts";
 import { openQuestionRequest, questionRequestFor, type AcpQuestionRequest } from "./question-requests.ts";
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
 import { acpToolEndEvents } from "./tool-items.ts";
@@ -188,6 +188,12 @@ export interface AcpSupport extends AcpDriverHooks {
   resumeMethod?: "load" | "resume";
   /** Some agents acknowledge a live load without applying new MCP credentials. */
   restartOnMcpChange?: boolean; /** The turn's MCP servers come from launcher-owned configuration, not ACP session parameters. */ mcpServersFromLaunch?: boolean;
+  /** Whether a turn whose MCP servers differ from the live session's starts a new process, read after resolveCommand: an
+   *  agent that renames a server registered again in one process. Unlike restartOnMcpChange, a new system prompt alone
+   *  keeps the process. */
+  restartsOnMcpServersChange?(instanceId: string): boolean;
+  /** Why this turn must not start on the command resolveCommand chose, or undefined. */
+  launchRefusal?(turn: SendTurnInput, launch: { command: string }): string | undefined;
   /** How the agent takes a person's message into its running turn; without it a message sent mid-turn waits for the next. */
   steer?: AcpSteerSupport;
   /** hermes-agent 0.22.4 re-sends a streamed reply whole under its messageId, as its `💭` reasoning block, a blank line,
@@ -284,7 +290,7 @@ const LOAD_SESSION_TIMEOUT = 120_000;
 const ACP_STUCK_AFTER_MS = 180_000;
 const SHARED_SESSIONS_MAX = 6, SHARED_SESSIONS_LIFETIME = 12;
 /** Closing a session for these leaves its process fit for other threads' sessions; any other reason retires it. */
-const HEALTHY_CLOSE = new Set(["idle", "reset", "contract", "stop", "stopAll", "dispose", "approval-unconfirmed"]);
+const HEALTHY_CLOSE = new Set(["idle", "reset", "contract", "mcp-servers", "stop", "stopAll", "dispose", "approval-unconfirmed"]);
 /** ACP agents may compact their history silently; re-send the full prompt after this many bare turns. */
 const ACP_PROMPT_RE_ANCHOR_TURNS = 8;
 function isHermesReasoningReplay(chunk: string, streamed: string): boolean {
@@ -406,7 +412,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
 
       const backgroundEnds = new Map<string, Promise<void>>(), endBackground = (threadId: string, session: AcpSession) => support.backgroundWork && !backgroundEnds.has(threadId) && session.child.exitCode === null
         && backgroundEnds.set(threadId, support.backgroundWork.end(session, (m, p, t) => session.host.request(null, m, p, t)).then(async (ended) => { if (ended === false) await endUncancelled(threadId, session); }).finally(() => backgroundEnds.delete(threadId)));
-      const closeSession = (threadId: string, why: string) => {
+      const closeSession = (threadId: string, why: string, options: { retire?: boolean } = {}) => {
         const session = sessions.get(threadId);
         if (!session || session.closing) return;
         session.closing = true;
@@ -426,7 +432,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         }
         host.draining = true;
         // EOF is no guaranteed exit: Qwen is tracked before another turn can resume its history.
-        if (support.restartOnMcpChange) void retireChild(threadId, session.child);
+        if (support.restartOnMcpChange || options.retire) void retireChild(threadId, session.child);
         else void (leaving.add(session.child), stopEngineTree(session.child, 5_000, 5_000).then((stopped) => stopped && leaving.delete(session.child)));
       };
       // A session that ignores session/cancel goes on working, and EOF on stdin does not stop it either. Only a confirmed
@@ -576,12 +582,21 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           const params = support.permissionRequest ? support.permissionRequest(msg.params ?? {}) : msg.params ?? {};
           current.flushAssistantText();
           const options: Array<{ optionId?: string; kind?: string; name?: string }> = Array.isArray(params.options) ? params.options : [];
+          const bridged = bridgedPermission(params.toolCall ?? {}, agentsToolBridged(current.turn.integrations?.agents), CATALOG_TOOL_NAMES);
+          // Security: a bridged use_tool covers whichever tool it names, so it is answered once and only once.
+          const onceOnly = bridged.kind !== "ordinary";
           const optionFor = (want: "allow" | "reject") =>
             options.find((o) => o.kind === `${want}_once` && typeof o.optionId === "string")?.optionId
-              ?? options.find((o) => String(o.kind ?? "").startsWith(want) && typeof o.optionId === "string")?.optionId
+              ?? (onceOnly ? undefined : options.find((o) => String(o.kind ?? "").startsWith(want) && typeof o.optionId === "string")?.optionId)
               ?? null;
-          const optionAlways = options.find((o) => o.kind === "allow_always" && typeof o.optionId === "string")?.optionId ?? null;
+          const optionAlways = onceOnly ? null : options.find((o) => o.kind === "allow_always" && typeof o.optionId === "string")?.optionId ?? null;
           const cancelled = { outcome: { outcome: "cancelled" } };
+          // ACP means "cancelled" only while cancelling the prompt turn, so an agent may then wait for
+          // session/cancel (Antigravity does): end the turn.
+          const answerAlone = (optionId: string | null) => {
+            send({ jsonrpc: "2.0", id: msg.id, result: optionId ? { outcome: { outcome: "selected", optionId } } : cancelled });
+            if (!optionId && onceOnly && session.current === current) active.get(threadId)?.interrupt();
+          };
           const missing = (want: string) =>
             emit({
               ...base(threadId, current.turnId),
@@ -589,15 +604,25 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               message: `${support.displayName} offered no "${want}" permission option — cancelling the request instead of guessing`,
             });
 
-          const toolCall = params.toolCall ?? {};
+          if (bridged.kind === "refuse" || bridged.kind === "find") {
+            const optionId = optionFor(bridged.kind === "find" ? "allow" : "reject");
+            if (!optionId) missing(bridged.kind === "find" ? "allow" : "reject");
+            if (bridged.kind === "refuse") {
+              emit({ ...base(threadId, current.turnId), type: "runtime.error", message: `${support.displayName} asked to run an agents tool through the tool bridge in a form this version does not know, so it was refused` });
+            }
+            answerAlone(optionId);
+            if (bridged.kind === "refuse" && optionId && session.current === current) active.get(threadId)?.interrupt();
+            return;
+          }
+          const toolCall = bridged.kind === "use" ? bridged.toolCall as any : params.toolCall ?? {};
           const isQuestion = String(toolCall.toolCallId ?? "").startsWith("interaction_");
           if ((support.allowsAlone?.(instanceId, current.turn, toolCall) || (current.turnConfig.fullAuto && current.turn.approvalMode === undefined)) && !isQuestion && acpAnswersAlone(toolCall.rawInput)) {
             const allow = optionFor("allow");
             if (!allow) missing("allow");
-            return send({ jsonrpc: "2.0", id: msg.id, result: allow ? { outcome: { outcome: "selected", optionId: allow } } : cancelled });
+            return answerAlone(allow);
           }
           const kind = String(toolCall.kind ?? "");
-          const operationKey = isQuestion || current.controlsHost ? null : acpSessionOperationKey(toolCall);
+          const operationKey = isQuestion || current.controlsHost || onceOnly ? null : acpSessionOperationKey(toolCall);
           if (operationKey && acpAnswersAlone(toolCall.rawInput) && sessionAllows.get(threadId)?.has(operationKey)) {
             const allow = optionFor("allow");
             if (allow) {
@@ -626,7 +651,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             if (!current.asks.delete(requestId)) return "unavailable";
             clearTimeout(timer);
             const want = behavior === "allow" ? "allow" : "reject";
-            const forSession = want === "allow" && always === true && !isQuestion && !current.controlsHost;
+            const forSession = want === "allow" && always === true && !isQuestion && !current.controlsHost && !onceOnly;
             const picked = askQuestions
               ? questionAnswersByQuestion(message ?? "", askQuestions)[askQuestions[0]!.question] ?? message
               : message;
@@ -688,7 +713,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             choices: askQuestions?.[0]?.options.map(option => option.label) ?? (isQuestion ? questionChoices : undefined),
             ...(askQuestions ? { questions: askQuestions } : {}),
             approvalScope: current.controlsHost ? "local-computer" : undefined,
-            allowSession: !isQuestion && !current.controlsHost ? true : undefined,
+            allowSession: !isQuestion && !current.controlsHost && !onceOnly ? true : undefined,
           });
         };
 
@@ -805,6 +830,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           cwd,
           contractKey,
           sessionKey: null,
+          mcpServersKey: null,
           get sessionId() { return acp.sessionId; },
           set sessionId(id: string | null) { acp.sessionId = id; },
           sessionConfigResult: null, modeVersion: 0,
@@ -910,6 +936,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           launch = support.resolveCommand
             ? await support.resolveCommand(env, turnConfig, instanceId)
             : { command: turnConfig.cli };
+          const refusal = support.launchRefusal?.(turn, launch);
+          if (refusal) throw new Error(refusal);
         } catch (error) {
           requireRunning();
           emit({ ...base(threadId, turnId), type: "turn.started" });
@@ -956,7 +984,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         }
         const pooled = sessions.get(threadId);
         let session: AcpSession;
-        if (pooled && !pooled.dead && !pooled.closing && pooled.contractKey === contractKey && !stderrFailureOf(pooled.host)
+        const mcpServersChanged = pooled?.mcpServersKey != null && pooled.mcpServersKey !== sessionKey && support.restartsOnMcpServersChange?.(instanceId) === true;
+        if (pooled && !pooled.dead && !pooled.closing && pooled.contractKey === contractKey && !stderrFailureOf(pooled.host) && !mcpServersChanged
             && (!support.restartOnMcpChange || pooled.sessionKey === liveSessionKey(sessionKey, sessionSystem(support, pooled.initResult, instanceId, turn)))) {
           stopIdleClose(`${instanceId}\0${threadId}`, pooled.idleTimer); // busy again: no longer idle
           pooled.idleTimer = null;
@@ -964,7 +993,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         } else {
           if (pooled) {
             if (pooled.dead) sessions.delete(threadId);
-            else closeSession(threadId, "contract");
+            else closeSession(threadId, mcpServersChanged ? "mcp-servers" : "contract", { retire: mcpServersChanged });
           }
           const joining = sharedHost(hostKey, threadId, cwd);
           const admittingAt = Date.now();
@@ -1142,7 +1171,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                       if (result) {
                         loaded = true;
                         session.sessionId = cursor;
-                        session.sessionKey = liveSessionKey(sessionKey, heldSystem());
+                        session.sessionKey = liveSessionKey(sessionKey, heldSystem()); session.mcpServersKey = sessionKey;
                         receiveModelVariants(result, true);
                       }
                     },
@@ -1181,7 +1210,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               }
               await sessionNewRetried(() => request("session/new", { cwd, mcpServers: support.mcpServersFromLaunch ? [] : acpSessionMcpServers(mcpServers, ownMcp, init, support.takesUnadvertisedHttpMcp), ...selectionParams, ...support.sessionSetupParams?.(init, heldSystem()) }, support.sessionSetupTimeoutMs ?? NEW_SESSION_TIMEOUT, (result) => {
                 session.sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
-                session.sessionKey = liveSessionKey(sessionKey, heldSystem());
+                session.sessionKey = liveSessionKey(sessionKey, heldSystem()); session.mcpServersKey = sessionKey;
                 receiveModelVariants(result, true);
               }), () => session.child.exitCode === null && !session.closing && !session.dead); // a busy machine: once more, then plain words
               break;

@@ -8,8 +8,9 @@ import { dirname, join } from "node:path";
 
 import { parseToolScope } from "../shared/tool-scope.ts";
 
+import { antigravityRefusal, dropsToolsPastBudget, type NativeCliRelease } from "./agents-bridge-antigravity.ts";
 import { bridgedCallName } from "./agents-bridge-names.ts";
-import { TOOL_BRIDGE_ENV } from "./drivers/agents-bridge.ts";
+import { BRIDGE_CLI_ENV, TOOL_BRIDGE_ENV } from "./drivers/agents-bridge.ts";
 import { decodeInjectId } from "./drivers/local-inject.ts";
 import { onThisNetwork } from "./drivers/openai-compat.ts";
 import { claudeCliSupports, parseClaudeCliVersion, resolveClaudeConfigDir } from "./drivers/claude.ts";
@@ -56,6 +57,10 @@ export interface BridgeEngine {
   version?: string | null;
   /** The turn's launch folder; absent when the engine falls back to its default. */
   cwd?: string;
+  /** The native Antigravity CLI release the turn would start. */
+  nativeCli?: NativeCliRelease;
+  /** The names of the person's own MCP servers mounted on the turn. */
+  customMcpServers?: readonly string[];
 }
 
 /** A turn's engine from its live instance, the instance configs, its last snapshot and its folder. */
@@ -64,6 +69,7 @@ export function turnEngine(
   configs: Record<string, { config?: unknown; environment?: Record<string, string> } | undefined>,
   snapshot: { version?: string | null } | undefined,
   cwd: string | undefined,
+  turn: { nativeCli?: NativeCliRelease; customMcpServers?: readonly string[] } = {},
 ): BridgeEngine {
   const { config, environment } = configs[instance.instanceId] ?? {};
   return {
@@ -73,6 +79,8 @@ export function turnEngine(
     ...(environment !== undefined ? { environment } : {}),
     ...(snapshot?.version != null ? { version: snapshot.version } : {}),
     ...(cwd !== undefined ? { cwd } : {}),
+    ...(turn.nativeCli ? { nativeCli: turn.nativeCli } : {}),
+    ...(turn.customMcpServers ? { customMcpServers: turn.customMcpServers } : {}),
   };
 }
 
@@ -80,6 +88,8 @@ export function turnEngine(
 export interface EngineHost {
   home: string;
   managedPolicyFiles: readonly string[];
+  /** A native Antigravity account's profile, in place of the one the driver prepares. */
+  antigravityProfile?: string;
 }
 
 const CHAT_RUNTIME_DRIVERS: ReadonlySet<string> = new Set(["cerebras", "greenference", "modelgo", "grok", "groq", "meta", "minimax", "mistral", "openai-compat"]);
@@ -257,6 +267,8 @@ function claudeRefusal(cfg: BridgeConfig, engine: BridgeEngine, env: NodeJS.Proc
  *               block a call by the name it sees.
  *   ACP agents  keep their own permissions: one "always allow" for use_tool would cover every hidden
  *               tool, hidden reads would lose their read-only marks, and Grok has a native use_tool.
+ *               Google's native Antigravity CLI is the exception (antigravityRefusal): it offers allow_once
+ *               only, the ACP driver approves a bridged use_tool as the tool it names, and its hooks are read here.
  *   the rest    have not been shown to qualify. */
 export function engineBridgeRefusal(
   cfg: BridgeConfig,
@@ -268,6 +280,7 @@ export function engineBridgeRefusal(
   const { driverKind } = engine;
   if (driverKind === "claudeAgent") return claudeRefusal(cfg, engine, env, host);
   if (CHAT_RUNTIME_DRIVERS.has(driverKind)) return null;
+  if (driverKind === "antigravityAgent") return antigravityRefusal(engine, host);
   if (driverKind === "codex") return "Codex reads its own layered configuration and hooks, which this version does not examine";
   if (driverKind === "piAgent") return "Pi loads the person's own extensions, which can block a tool by its name, and this version does not examine them";
   return "this engine keeps its own tool permissions";
@@ -296,7 +309,9 @@ export function agentsToolBridgeRefusal(
 ): string | null {
   try {
     const localModel = runsLocalModel(bot, engine);
-    if (!agentsToolBridgeEnabled(cfg, env) && (env[TOOL_BRIDGE_ENV] === "0" || !localModel)) return "the switch is off";
+    // A turn that would otherwise lose tools is bridged unless the switch is set off outright.
+    const needsBridge = localModel || (dropsToolsPastBudget(engine) && cfg.features?.agentsToolBridge !== false);
+    if (!agentsToolBridgeEnabled(cfg, env) && (env[TOOL_BRIDGE_ENV] === "0" || !needsBridge)) return "the switch is off";
     if (!localModel && claudeDefersAgentsTools(engine, env, host)) return "Claude Code defers the agents tools on this turn";
     // Security: selection gates match the name in the call, so any selection, even one that permits
     // everything or cannot be read, means no bridge.
@@ -357,7 +372,9 @@ export function bridgedAgents<Agents extends { env: Record<string, string> }>(
     BRIDGED_THREADS.add(threadId);
     if (BRIDGED_THREADS.size > BRIDGED_THREADS_MAX) BRIDGED_THREADS.delete(BRIDGED_THREADS.values().next().value!);
   }
-  return { ...agents, env: { ...agents.env, ...decided } };
+  const { [BRIDGE_CLI_ENV]: _inherited, ...rest } = agents.env;
+  const release = decided[TOOL_BRIDGE_ENV] === "1" && engine?.nativeCli ? { [BRIDGE_CLI_ENV]: engine.nativeCli.executablePath } : {};
+  return { ...agents, env: { ...rest, ...decided, ...release } };
 }
 
 /** Decides a turn and writes the decision into its integrations in place; call once the turn's folder is

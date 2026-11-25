@@ -10,6 +10,8 @@ import type { Json } from "./agents-client.ts";
 
 /** The proxy's switch: "1" lists through the bridge, anything else lists the whole catalog. */
 export const TOOL_BRIDGE_ENV = "OMB_AGENTS_TOOL_BRIDGE";
+/** The native Antigravity CLI file a bridged turn was decided for; the driver starts the turn only on that same file. */
+export const BRIDGE_CLI_ENV = "OMB_AGENTS_BRIDGE_CLI";
 export const FIND_TOOL = "find_tool";
 export const USE_TOOL = "use_tool";
 
@@ -66,8 +68,8 @@ function record(value: unknown): value is Json {
 }
 
 /** The agents server's prefix on its tools, per engine: Claude `mcp__agents__`, ACP `agents__`, the chat
- * runtime and Pi `agents_`, Codex none. */
-export const SERVER_PREFIXES = ["", "mcp__agents__", "agents__", "agents_"] as const;
+ * runtime and Pi `agents_`, Codex none, and native Antigravity 1.5.x `mcp_agents_` (its titles `Run mcp_agents_`). */
+export const SERVER_PREFIXES = ["", "mcp__agents__", "agents__", "agents_", "mcp_agents_", "Run mcp_agents_"] as const;
 
 /** Security: a tool the host classifies as outbound under any engine's spelling is always listed and never
  * run through use_tool. Derived from the classifier, so a new outbound tool cannot be hidden by omission. */

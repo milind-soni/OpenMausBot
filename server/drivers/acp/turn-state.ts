@@ -59,6 +59,8 @@ export interface AcpSession {
   /** mcpServers the native session was built with. They ride session/new and session/load, not argv,
    *  and bearer tokens rotate every turn, so a change re-establishes the session on the same child. */
   sessionKey: string | null;
+  /** The turn's MCP servers part of sessionKey, without the held system prompt's hash. */
+  mcpServersKey: string | null;
   sessionId: string | null;
   sessionConfigResult: any;
   /** Monotonic counter incremented on live `current_mode_update` notifications so an in-flight `session/set_mode` response cannot overwrite a newer server update. */

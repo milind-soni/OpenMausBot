@@ -57,6 +57,7 @@ import {
 } from "./antigravity-runtime.ts";
 import { ANTIGRAVITY_NATIVE_CLI } from "./antigravity-cli-install.ts";
 import { acpFileEditWithin } from "./permission-command.ts";
+import { agentsToolBridged, BRIDGE_CLI_ENV } from "./agents-bridge.ts";
 import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
 import { AntigravityProcesses } from "./antigravity-processes.ts";
 import { VERIFICATION_TEMP_KEY, scheduleAntigravityTempSweep } from "./antigravity-temp.ts";
@@ -214,6 +215,13 @@ const support: AcpSupport = {
   clientReadRoots: (turn) => (turn.skillFiles ?? []).map(dirname),
   sanitizeToolPayload: true,
   updateFilter: antigravityUpdateFilter,
+
+  // 1.5.16 renames a server it registers again in one process (mcp_agents_<hex>_<tool>), so a new set of MCP servers
+  // gets a new process, which keeps the names the approval path recognises.
+  restartsOnMcpServersChange: (instanceId) => launched.get(instanceId)?.nativeCli === true,
+  launchRefusal: (turn, launch) => agentsToolBridged(turn.integrations?.agents) && turn.integrations?.agents?.env?.[BRIDGE_CLI_ENV] !== launch.command
+    ? "Google Antigravity CLI changed while this message was being set up. Send it again."
+    : undefined,
 
   resolveCommand: async (env, config, instanceId) => {
     const runtime = await resolveAntigravityRuntime(config.cli, env);
