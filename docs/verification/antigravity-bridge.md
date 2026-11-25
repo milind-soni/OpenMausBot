@@ -35,6 +35,9 @@ script exits non-zero on any failed check and writes `report.json`:
 
 ## Limits
 
+macOS and Linux: the stand-in is installed as a POSIX shell script, as the
+app's own tests install it.
+
 The stand-in reproduces the measured behaviour, not Google's model. The real
 CLI's behaviour behind it (budget, names, hooks, rules, resume) was measured on
 1.5.16 with scripts kept out of the repository.

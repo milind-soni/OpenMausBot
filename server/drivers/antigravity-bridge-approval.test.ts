@@ -101,6 +101,14 @@ describe.skipIf(WINDOWS)("an Antigravity permission request on a turn whose agen
     expect(result).toMatchObject({ card: false, answer: "cancelled", completed: true });
   }, 90_000);
 
+  it("cancels a use_tool offered only an always-allow at Ask too, with no card nobody could allow", async () => {
+    const result = await asked("use-always-only-ask", {
+      approvalMode: "edits", toolCall: native("use_tool", { name: "list_threads", arguments: {} }),
+      permissionOptions: [{ optionId: "always", kind: "allow_always" }, { optionId: "deny", kind: "reject_once" }],
+    });
+    expect(result).toMatchObject({ card: false, answer: "cancelled", completed: true });
+  }, 90_000);
+
   it("shows a use_tool card under the tool it names, with no allow for the session", async () => {
     const result = await asked("use-ask", { approvalMode: "edits", toolCall: native("use_tool", { name: "list_threads", arguments: { limit: 3 } }) });
     expect(result.card).toBe(true);
@@ -119,6 +127,7 @@ describe.skipIf(WINDOWS)("an Antigravity permission request on a turn whose agen
     ["a kind other than other", native("use_tool", { name: "list_threads" }, { kind: "edit" })],
     ["Claude's spelling", { toolCallId: "call_1", title: "mcp__agents__use_tool", kind: "other", rawInput: { name: "list_threads" } }],
     ["a server the turn did not mount, carrying use_tool's input", { toolCallId: "call_1", name: "mcp_ghost_run", title: "Run mcp_ghost_run", kind: "other", rawInput: { name: "vm_exec", arguments: { command: "ls" } } }],
+    ["an unknown name carrying use_tool's input with null arguments", { toolCallId: "call_1", name: "agents/use_tool", title: "agents/use_tool", kind: "other", rawInput: { name: "list_threads", arguments: null } }],
     ["an unknown name carrying use_tool's input", { toolCallId: "call_1", name: "agents/use_tool", title: "agents/use_tool", kind: "other", rawInput: { name: "vm_exec", arguments: { command: "ls" } } }],
   ])("refuses %s on full access and ends the turn", async (label, toolCall) => {
     const result = await asked(`refuse-${label.replaceAll(/\W+/gu, "-")}`, { approvalMode: "auto", toolCall });

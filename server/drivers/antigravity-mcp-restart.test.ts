@@ -44,9 +44,9 @@ describe.skipIf(WINDOWS)("a native Antigravity session whose MCP servers change"
     instances.push(instance);
     const recorder = recordEvents(instance.adapter);
     let resumeCursor: string | undefined;
-    const turn = async (system: string, env: Record<string, string>) => {
+    const turn = async (system: string, env: Record<string, string>, sessionReset = false) => {
       const from = recorder.events.length;
-      const { turnId } = await instance.adapter.sendTurn({ threadId: "restart", text: "fake-agy: tools", system, cwd: directory, resumeCursor, integrations: { agents: agentsServer(env) } });
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "restart", text: "fake-agy: tools", system, cwd: directory, resumeCursor, sessionReset, integrations: { agents: agentsServer(env) } });
       await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId, 60_000);
       const started = recorder.events.slice(from).find((event) => event.type === "session.started") as { sessionId?: string } | undefined;
       resumeCursor = started?.sessionId ?? resumeCursor;
@@ -83,6 +83,15 @@ describe.skipIf(WINDOWS)("a native Antigravity session whose MCP servers change"
     const back = sessionsOpened();
     expect(back[back.length - 1]).toMatchObject({ method: "session/resume" });
     expect(pidOf(back[back.length - 1]!)).not.toBe(pidOf(resumed));
+
+    // A reset that comes with new servers, as after rewinding the conversation.
+    expect(await turn("second prompt", bridged, true)).toMatch(/TOOLS mcp_agents_read_notes(?!_)/u);
+    const reset = sessionsOpened().at(-1)!;
+    expect(reset).toMatchObject({ method: "session/new" });
+    const afterReset = fixture.entries();
+    const resetExited = afterReset.findIndex((entry) => entry.event === "exited" && entry.pid === pidOf(back[back.length - 1]!));
+    expect(resetExited).toBeGreaterThanOrEqual(0);
+    expect(afterReset.findIndex((entry) => entry.event === "started" && entry.pid === pidOf(reset))).toBeGreaterThan(resetExited);
   }, 120_000);
 });
 

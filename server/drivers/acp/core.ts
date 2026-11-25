@@ -947,7 +947,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const sessionKey = JSON.stringify([mcpServers, turn.toolScope ?? null, inheritedScopeFingerprint]);
 
         if (turn.sessionReset) {
-          closeSession(threadId, "reset");
+          closeSession(threadId, "reset", { retire: support.restartsOnMcpServersChange?.(instanceId) === true });
           sessionAllows.delete(threadId);
         }
         const pooled = sessions.get(threadId);

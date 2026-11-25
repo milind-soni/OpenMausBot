@@ -48,7 +48,7 @@ export function bridgedPermission(toolCall: ToolCall, bridged: boolean, catalog:
     const elsewhere = names.length > 0 && names.every((name) => others.some((server) => name.startsWith(`mcp_${server}_`)));
     if (direct || elsewhere) return { kind: "ordinary" };
     const input = record(toolCall.rawInput) ? toolCall.rawInput : {};
-    const shaped = typeof input.name === "string" && catalog.has(input.name) && (input.arguments === undefined || record(input.arguments));
+    const shaped = typeof input.name === "string" && catalog.has(input.name) && (input.arguments == null || record(input.arguments));
     return shaped ? { kind: "refuse" } : { kind: "ordinary" };
   }
   const tool = recorded[0];
@@ -67,10 +67,12 @@ export function bridgedPermission(toolCall: ToolCall, bridged: boolean, catalog:
   };
 }
 
-/** How the driver answers a bridged request itself, with no card: find_tool allowed once, a refused spelling rejected.
+/** How the driver answers a bridged request itself, with no card: find_tool allowed once, a refused spelling rejected,
+ * and a use_tool that offers no allow_once cancelled, since no answer to its card could allow it.
  * `end` ends the turn: after a refusal, or when the agent offered no option to answer with. */
 export function bridgedAlone(permission: BridgedPermission, optionFor: (want: "allow" | "reject") => string | null, agent: string):
   { optionId: string | null; missing?: "allow" | "reject"; note?: string; end: boolean } | undefined {
+  if (permission.kind === "use") return optionFor("allow") ? undefined : { optionId: null, missing: "allow", end: true };
   if (permission.kind !== "refuse" && permission.kind !== "find") return undefined;
   const want = permission.kind === "find" ? "allow" : "reject";
   const optionId = optionFor(want);
