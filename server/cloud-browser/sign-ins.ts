@@ -122,6 +122,23 @@ export async function carryIn(cdp: Cdp, state: { cookies: readonly unknown[]; or
   return { cookies: cookies.length, refused, origins: carried, set };
 }
 
+/** The home's session cookies (no expiry: Chrome keeps them only while it runs) that the profile no longer has, set again
+ * one at a time. Only these: a cookie the profile has, or one the session set since, is never replaced. */
+export async function restoreSessionCookies(cdp: Cdp, home: readonly unknown[], current: readonly SavedCookie[]): Promise<SavedCookie[]> {
+  const have = new Set(current.map(cookieId));
+  const missing = home.filter(isSavedCookie).filter((cookie) => (cookie.session === true || (typeof cookie.expires === "number" && cookie.expires < 0)) && !have.has(cookieId(cookie)));
+  const set: SavedCookie[] = [];
+  for (const cookie of missing.slice(0, MAX_COOKIES)) {
+    try {
+      await cdp.send("Storage.setCookies", { cookies: [cookieParam(cookie)] });
+      set.push(cookie);
+    } catch {
+      // Refused by Chrome: left out, as at a carry.
+    }
+  }
+  return set;
+}
+
 /** The sandbox's cookies as the home saves them (Chrome's own shape, as agent-browser writes it), at most MAX_COOKIES. */
 export async function carryOut(cdp: Cdp): Promise<SavedCookie[]> {
   const { cookies } = await cdp.send("Storage.getCookies", {}) as { cookies?: unknown[] };

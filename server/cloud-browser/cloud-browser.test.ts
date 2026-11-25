@@ -226,25 +226,82 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
 
   it("pushes the provider's own auto-stop ahead while a browser is used, at most every 10 minutes, so it stops the sandbox only when unused", async () => {
     const cloud = browser();
-    const cdpUrl = urlOf(await cloud.open(request()));
+    urlOf(await cloud.open(request()));
     const patches = () => fake.requests.filter((one) => one.method === "PATCH" && one.body?.ttlSeconds !== undefined).map((one) => one.body);
-    await act(cdpUrl, 1);
     clock += 60_000;
+    cloud.touch("bot-scout");
     await cloud.closeIdle();
     expect(patches()).toEqual([{ ttlSeconds: SANDBOX_IDLE_TTL_SECONDS }]);
     expect(Number.isInteger(patches()[0]?.ttlSeconds), "the provider takes a non-number as an hour").toBe(true);
     clock += 60_000;
-    await act(cdpUrl, 1);
+    cloud.touch("bot-scout");
     await cloud.closeIdle();
     expect(patches(), "at most every 10 minutes").toHaveLength(1);
-    clock += TTL_REFRESH_MS;
-    await act(cdpUrl, 1);
-    await cloud.closeIdle();
-    expect(patches()).toHaveLength(2);
+    // A turn holds the browser for a long call: that is use too.
     held = true;
     clock += TTL_REFRESH_MS;
     await cloud.closeIdle();
+    expect(patches()).toHaveLength(2);
+    held = false;
+    clock += TTL_REFRESH_MS;
+    await cloud.closeIdle();
+    expect(cloud.active("bot-scout"), "unused since: closed").toBeNull();
     expect(patches(), "unused since: the deadline is left to run out").toHaveLength(2);
+  });
+
+  it("closes a session whose attached engine sends keepalives forever: only a bot's call, a turn or a person counts as use", async () => {
+    const cloud = browser();
+    const cdpUrl = urlOf(await cloud.open(request()));
+    // The engine stays attached after its turn ended without a close, and keeps the connection alive.
+    const engine = new WebSocket(cdpUrl);
+    await new Promise<void>((resolve, reject) => { engine.once("open", () => resolve()); engine.once("error", reject); });
+    const keepalive = async () => { engine.send(JSON.stringify({ id: Math.random() })); await new Promise((resolve) => engine.once("message", resolve)); };
+    const patchesBefore = fake.requests.filter((one) => one.method === "PATCH").length;
+    for (let minute = 0; minute < 2; minute++) {
+      clock += 60_000;
+      await keepalive();
+      await cloud.closeIdle();
+    }
+    // A bot's call at minute 2 is real use: the 3 minutes count from it.
+    cloud.touch("bot-scout");
+    for (let minute = 0; minute < 2; minute++) {
+      clock += 60_000;
+      await keepalive();
+      await cloud.closeIdle();
+    }
+    expect(cloud.active("bot-scout"), "2 minutes after the last call").not.toBeNull();
+    clock += 60_000;
+    await keepalive();
+    await cloud.closeIdle();
+    expect(cloud.active("bot-scout"), "3 minutes after the last call, keepalives or not").toBeNull();
+    expect(engineClosed).toEqual(["bot-scout"]);
+    expect(fake.quits().at(-1)).toBe("quit-all");
+    expect(used.at(-1)).toEqual([BROWSER_SANDBOX_OWNER, 1_000]);
+    expect(fake.requests.filter((one) => one.method === "PATCH").length - patchesBefore, "keepalives never push the provider's deadline").toBeLessThanOrEqual(1);
+    engine.terminate();
+  });
+
+  it("sets the home's session cookies again after the sandbox's Chrome restarted, and touches nothing else of the profile", async () => {
+    const home = memorySignIns({ cookies: [SIGNED_IN], origins: [] });
+    const cloud = browser({ signIns: home.store });
+    urlOf(await cloud.open(request()));
+    clock += CLOUD_BROWSER_IDLE_MS;
+    await cloud.closeIdle();
+    // A stop and a new machine: Chrome restarted, so its session cookie is gone; a persistent one made in the sandbox stays.
+    const key = profileKey("scout");
+    fake.cookies.set(key, [{ name: "kept", value: "k", domain: "kept.example", path: "/", expires: 2_000_000_000 }]);
+    const clears = fake.commands.filter((one) => one.method === "Storage.clearCookies").length;
+    urlOf(await cloud.open(request()));
+    expect(fake.cookies.get(key)?.map((cookie) => cookie.name).sort()).toEqual(["kept", "sid"]);
+    expect(fake.commands.filter((one) => one.method === "Storage.clearCookies").length, "the profile is not cleared").toBe(clears);
+  });
+
+  it("stops the browser sandbox through the cloud computers' sleep without sending it a shell command", async () => {
+    fake.requests.length = 0;
+    const { sleepBoat } = await import("../boat.ts");
+    await sleepBoat({} as AppConfig, BROWSER_SANDBOX_OWNER);
+    expect(fake.requests.filter((one) => one.path.endsWith("/commands")), "no QUIESCE: its pre-stop hook closes its Chromes").toEqual([]);
+    expect(fake.requests.filter((one) => one.path.endsWith("/stop"))).toHaveLength(1);
   });
 
   it("takes back a sandbox that is still stopping: one resume, no start counted, no question to the relay", async () => {
@@ -318,6 +375,7 @@ describe("a personal Cloud's bot browsers in the Cloud's browser sandbox", () =>
     expect(engineClosed, "a browser a turn holds stays").toEqual([]);
     held = false;
     await cloud.close("bot-writer");
+    clock += CLOUD_BROWSER_IDLE_MS;
     expect(fake.quits().at(-1), "the other bot's Chrome keeps running").toBe(`quit:${profileKey("writer")}`);
     expect(used.at(-1)).toEqual([BROWSER_SANDBOX_OWNER, CLOUD_BROWSER_IDLE_MS]);
     await cloud.closeIdle();
@@ -638,9 +696,9 @@ describe("a bot's sign-ins between the home and its sandbox profile", () => {
     expect(cloud.report().held).toBeNull();
     clock += CLOUD_BROWSER_IDLE_MS;
     await cloud.closeIdle();
-    const sets = fake.commands.filter((one) => one.method === "Storage.setCookies").length;
+    const carries = fake.commands.filter((one) => one.method === "Storage.clearCookies").length;
     urlOf(await cloud.open(request()));
-    expect(fake.commands.filter((one) => one.method === "Storage.setCookies").length).toBe(sets);
+    expect(fake.commands.filter((one) => one.method === "Storage.clearCookies").length, "the same copy is not carried again").toBe(carries);
   });
 
   it("when Chrome takes nothing of the home's copy, opens in the home, never as a sandbox failure, and wakes the sandbox for it again only once the copy changes", async () => {
@@ -662,6 +720,8 @@ describe("a bot's sign-ins between the home and its sandbox profile", () => {
     const home = memorySignIns(null);
     const cloud = browser({ signIns: home.store });
     const cdpUrl = urlOf(await cloud.open(request()));
+    // A long turn holds the browser all along.
+    held = true;
     clock += SIGN_IN_SYNC_MS;
     await act(cdpUrl, 1);
     await cloud.closeIdle();

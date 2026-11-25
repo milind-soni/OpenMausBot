@@ -256,6 +256,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     annotate: (spec, result) => passkeyAnnotation(chromeEngine.onPane(spec) ? "pane" : CLOUD_HOME ? "cloud" : DESKTOP_MANAGED ? "desktop" : "server")(spec, result),
     // agent-browser's own error names only the CDP connection; the door knows what went wrong on the way.
     afterCall: (session, spec, answer) => {
+      cloudBrowser?.touch(session);
       const result = withSandboxNotes(session, withCeilingNote(session, answer));
       const failed = result as { isError?: unknown; content?: unknown };
       const found = failed?.isError === true && viaDoor(session, spec) ? doors?.problem(session) : null;
@@ -290,7 +291,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       if (spec) await closeBrowser(session, spec);
       await agentBrowserRuntime.close(session);
     },
-    held: (session) => !turnResources.free(`browser:${session}`),
+    // Real use only: a turn holding the browser, a call running in it, or a person watching or driving it.
+    held: (session) => !turnResources.free(`browser:${session}`) || agentBrowserRuntime.working(session) || agentBrowserRuntime.spare(session) === null,
     folder: (botId) => deps.cloudBrowser?.folder?.(botId) ?? null,
     // The home's saved sign-ins: agent-browser's encrypted restore file, under this server's key only.
     signIns: {

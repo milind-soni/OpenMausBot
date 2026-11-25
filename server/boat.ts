@@ -753,9 +753,9 @@ const QUIESCE_BROWSER = [
   'for i in 1 2 3 4 5 6 7 8; do if ! pgrep -x chrome >/dev/null 2>&1 && ! pgrep -x google-chrome >/dev/null 2>&1 && ! pgrep -x chromium >/dev/null 2>&1 && ! pgrep -x chromium-browser >/dev/null 2>&1; then break; fi; sleep 0.25; done',
 ].join("; ");
 
-async function stopBoat(cfg: AppConfig, boxId: string): Promise<void> {
+async function stopBoat(cfg: AppConfig, boxId: string, browserSandbox = false): Promise<void> { // The Cloud's browser sandbox closes its Chromes itself before a stop (its pre-stop hook): no shell command goes to it.
   assertBoatNotDeleting(boxId);
-  await runCommand(cfg, boxId, QUIESCE_BROWSER, { timeoutMs: 5_000 }).catch(() => null);
+  if (!browserSandbox) await runCommand(cfg, boxId, QUIESCE_BROWSER, { timeoutMs: 5_000 }).catch(() => null);
   const stopped = await boatJson(cfg, `/sandboxes/${boxId}/stop`, { method: "POST" });
   if (!stopped.ok) {
     throw Object.assign(new Error(boatErrorMessage(stopped.status, "boat sleep", stopped.body, usesIncludedBoat(cfg))), { status: stopped.status });
@@ -1162,7 +1162,7 @@ export async function sleepBoat(cfg: AppConfig, botId: string) {
   cfg = snapshotBoatConfig(cfg);
   const boat = await findBoat(cfg, botId);
   if (!boat) throw new Error("no computer for this bot");
-  await stopBoat(cfg, boat.id);
+  await stopBoat(cfg, boat.id, botId === "browser");
   forgetBoatId(boat.id);
   return { ok: true };
 }

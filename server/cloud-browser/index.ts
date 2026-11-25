@@ -32,7 +32,8 @@ export interface CloudBrowserDeps {
   used(owner: string, windowMs: number): void;
   /** Closes the session's browser engine in the home (its connection to the sandbox goes with it). */
   closeEngine(session: string): Promise<unknown>;
-  /** A turn holds this session's browser now: it is not closed for being idle. */
+  /** A turn holds this session's browser, a call runs in it, or a person watches or drives it: real use, which keeps it open.
+   * Bytes on the connection are not: the attached engine's keepalives and the companion's own reads never count. */
   held(session: string): boolean;
   /** The home's saved sign-ins (agent-browser's restore file), carried in and back; null keeps them apart. */
   signIns?: SignInStore | null;
@@ -84,6 +85,8 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
   const pendingSessions = new Map<string, Promise<Opened>>();
   const closing = new Set<string>();
   const companions = new Map<string, SandboxCompanion>();
+  /** When each session was last really used (opened, a bot's call, held by a turn, a person): the only activity that counts. */
+  const lastUse = new Map<string, number>();
   /** What a closed session's companion still had to say (a last download retry), for that session's next call. */
   const leftNotes = new Map<string, string[]>();
   /** One wake of the sandbox at a time, shared by every bot opening meanwhile. */
@@ -204,6 +207,7 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
       rails.setCarryBad(key, null);
       companions.set(request.session, companion);
       sessions.set(request.session, request.botId);
+      lastUse.set(request.session, now());
       rails.opened();
       startSweep();
       log(`browser ${request.session}: opened in the Cloud's browser sandbox${box.started ? " (started for it)" : ""}`);
@@ -278,6 +282,7 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
       const notes = companion?.takeNotes() ?? [];
       if (notes.length) leftNotes.set(session, notes);
       companions.delete(session);
+      lastUse.delete(session);
       await deps.closeEngine(session).catch(() => undefined);
       doors.close(session);
       sessions.delete(session);
@@ -294,7 +299,7 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
   async function refreshTtl(at: number): Promise<void> {
     const ops = deps.ops();
     if (!ops || !boxId || at - ttlRefreshedAt < TTL_REFRESH_MS) return;
-    const used = doors.sessions().some((session) => (doors.lastActivity(session) ?? 0) > ttlRefreshedAt);
+    const used = [...lastUse.values()].some((at) => at > ttlRefreshedAt);
     if (!used) return;
     ttlRefreshedAt = at;
     await ops.refreshTtl(boxId, SANDBOX_IDLE_TTL_SECONDS).catch(() => undefined);
@@ -302,12 +307,13 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
 
   async function closeIdle(): Promise<void> {
     const at = now();
-    await refreshTtl(at);
     await Promise.all([...companions.values()].map((companion) => companion.periodic()));
     await Promise.all(doors.sessions().map(async (session) => {
-      const last = doors.lastActivity(session);
-      if (last !== null && at - last >= CLOUD_BROWSER_IDLE_MS && !deps.held(session)) await close(session);
+      if (deps.held(session)) { lastUse.set(session, at); return; }
+      const last = lastUse.get(session);
+      if (last !== undefined && at - last >= CLOUD_BROWSER_IDLE_MS) await close(session);
     }));
+    await refreshTtl(at);
     if (doors.sessions().length === 0 && sweep) { clearInterval(sweep); sweep = null; }
   }
 
@@ -322,6 +328,8 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
     /** The engine's address for a session running in the sandbox, or null. */
     active: (session: string): string | null => doors.url(session),
     attached: (session: string): boolean => doors.url(session) !== null,
+    /** A bot's call (or a person's action) in the session's browser: real use, which keeps it open and the sandbox awake. */
+    touch: (session: string): void => { if (lastUse.has(session)) lastUse.set(session, now()); },
     /** A browser is open or opening in the sandbox: its idle path must not stop it. */
     busy: (owner: string): boolean => owner === BROWSER_SANDBOX_OWNER && bots().size > 0,
     close,
@@ -353,6 +361,7 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
       for (const companion of companions.values()) companion.close();
       companions.clear();
       doors.closeAll();
+      lastUse.clear();
       sessions.clear();
     },
   };

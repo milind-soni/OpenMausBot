@@ -8,7 +8,7 @@ import type { Cdp, CdpEvent } from "../browser-sites.ts";
 import { DOWNLOAD_LIMITS, safeFileName } from "../browser/cdp/downloads.ts";
 import type { CloudBrowserRails } from "./rails.ts";
 import type { ComputerOps } from "./remote.ts";
-import { carryIn, carryOut, cookieChanges, mergeCookies, type SavedCookie } from "./sign-ins.ts";
+import { carryIn, carryOut, cookieChanges, mergeCookies, restoreSessionCookies, type SavedCookie } from "./sign-ins.ts";
 
 /** Where a download lands in the bot's working folder. */
 export const DOWNLOADS_SUBFOLDER = "downloads";
@@ -103,7 +103,12 @@ export class SandboxCompanion {
       this.#baseline = carried.set;
       this.#deps.log(`browser ${session}: carried ${carried.cookies} saved cookies${carried.refused ? ` (${carried.refused} refused by Chrome and left out)` : ""} and ${carried.origins} sites' storage into the browser sandbox`);
     } else if (signIns) {
-      this.#baseline = await carryOut(this.#cdp);
+      const current = await carryOut(this.#cdp);
+      // The profile's Chrome restarted since the last carry (a stop, a new machine): its session cookies, which live only in
+      // a running Chrome, are gone. The home's are set again; nothing else of the profile is touched.
+      const restored = loaded ? await restoreSessionCookies(this.#cdp, loaded.state.cookies, current) : [];
+      if (restored.length) this.#deps.log(`browser ${session}: set ${restored.length} session cookies again after the browser sandbox's Chrome restarted`);
+      this.#baseline = [...current, ...restored];
     }
     this.#syncedAt = this.#now();
     await this.#cdp.send("Browser.setDownloadBehavior", { behavior: "allowAndName", downloadPath: this.downloadDir, eventsEnabled: true });
