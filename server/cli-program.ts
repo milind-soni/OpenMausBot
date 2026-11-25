@@ -28,3 +28,7 @@ export function noteProbeUnsettled(cli: string, open: boolean): void {
 /** Whether this CLI's last status check could not finish: a check again must run the program, never answer from a kept
  * copy of an earlier answer. */
 export const probeUnsettled = (cli: string): boolean => unsettled.has(cli);
+
+/** Whether any CLI's last status check could not finish. A probe may name its program otherwise than the check does (on
+ * Windows, by the path of the copy it found), so a kept answer waits until every open check has answered. */
+export const anyProbeUnsettled = (): boolean => unsettled.size > 0;

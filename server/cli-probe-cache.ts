@@ -15,7 +15,7 @@ import { basename, dirname, isAbsolute, join } from "node:path";
 import type { ExecFileOptions } from "node:child_process";
 
 import { writeFileAtomic } from "./atomic.ts";
-import { cliProgramFile, probeUnsettled } from "./cli-program.ts";
+import { anyProbeUnsettled, cliProgramFile, probeUnsettled } from "./cli-program.ts";
 import { splitCliString } from "./env-path.ts";
 import { execCli, outsideBoxOptions, resolveCli } from "./procs.ts";
 
@@ -147,7 +147,7 @@ export function createCliProbeCache(options: { file: string | null; appVersion: 
     const program = options.file && args.length === 1 && CACHED_ARGS.has(args[0]!) ? probedProgram(cli, opts) : null;
     const key = program ? probeKey(program, args, options.appVersion, platform) : null;
     // A check again after one that could not finish runs the program: an earlier answer never stands in for it.
-    const kept = key && !(options.unsettled ?? probeUnsettled)(cli) ? loaded().get(key) : undefined;
+    const kept = key && !(options.unsettled ?? unsettledNow)(cli) ? loaded().get(key) : undefined;
     if (kept) {
       queueMicrotask(() => cb(null, kept.stdout, kept.stderr));
       return;
@@ -165,6 +165,10 @@ export function createCliProbeCache(options: { file: string | null; appVersion: 
   };
   return { exec, forget() { entries = new Map(); save(); } };
 }
+
+/** A status check of this CLI, or of any, could not finish: on Windows a probe names the copy it found by its path while
+ * the check names the CLI as it is set, so no kept answer is given while any check is open. */
+const unsettledNow = (cli: string): boolean => probeUnsettled(cli) || anyProbeUnsettled();
 
 let shared: ReturnType<typeof createCliProbeCache> | null = null;
 

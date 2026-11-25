@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 const windows = process.platform === "win32";
 
 import { createCliProbeCache, probeCacheFile, probedProgram } from "./cli-probe-cache.ts";
+import { noteProbeUnsettled } from "./cli-program.ts";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -182,6 +183,25 @@ describe("engine probe answers kept between desktop starts", () => {
     expect(counted.calls).toHaveLength(2);
     unsettled = false;
     await ask(cache.exec, cliFor(bin, "engine"), ["--version"], bin);
+    expect(counted.calls).toHaveLength(2);
+  });
+
+  it("runs the program again while the status check could not finish, also when the probe names the CLI by another path", async () => {
+    const { bin, file } = place();
+    program(bin, "engine");
+    const counted = runner();
+    const cache = createCliProbeCache({ file, appVersion: "1", run: counted.run });
+    // The probe names the copy by its full path (as on Windows); the engine status check knows the CLI by its set name.
+    const byPath = join(bin, windows ? "engine.exe" : "engine");
+    await ask(cache.exec, byPath, ["--version"], bin);
+    try {
+      noteProbeUnsettled("engine", true);
+      await ask(cache.exec, byPath, ["--version"], bin);
+      expect(counted.calls).toHaveLength(2);
+    } finally {
+      noteProbeUnsettled("engine", false);
+    }
+    await ask(cache.exec, byPath, ["--version"], bin);
     expect(counted.calls).toHaveLength(2);
   });
 });
