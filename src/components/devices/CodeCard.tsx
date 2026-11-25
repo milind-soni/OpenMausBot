@@ -5,6 +5,7 @@ import { productName } from "@/lib/brand";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { codeUntil } from "@/lib/pairing-time";
+import { FirewallNotes } from "../HostFirewallNote";
 import { reachLine } from "../PhoneDevicesSection";
 import type { PhoneSetupController } from "../PhoneSetupFlow";
 import { PhoneSetupFlowView } from "../PhoneSetupFlow";
@@ -88,6 +89,8 @@ export function PhoneCodeInline({ c, started: asked = false }: { c: PhoneSetupCo
       noCode={<span data-pair-encrypted="" className="text-[13px] leading-[18px] text-ink-secondary">{t("devicesPage.addFlow.encryptedNoType")}</span>}>
       <CopyPhoneLink link={c.pairingLink} />
       <p data-pair-reach="" className="text-[12px] leading-4 text-ink-secondary">{reachLine(c.state)}</p>
+      {/* With the relay in the QR the phone pairs through it whatever a firewall says. */}
+      {!c.state.e2e?.descriptor?.r?.length && <FirewallNotes state={c.state} className="" />}
     </PhoneCodeCard>;
   }
   return <PhoneSetupFlowView controller={c} />;

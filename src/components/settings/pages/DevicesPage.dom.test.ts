@@ -612,6 +612,34 @@ describe("Add a device, in the page", () => {
     const foot = $("[data-pair-reach]")!;
     expect(foot.className).toContain("text-ink-secondary");
     expect($("[data-add-panel] [data-copy-link]")?.nextElementSibling).toBe(foot);
+    expect($("[data-host-firewall]")).toBeNull();
+  });
+
+  it("says when ufw likely drops the phone on Wi-Fi and gives the command, unless the relay is in the QR", async () => {
+    const descriptor = (relay: boolean) => (relay ? { v: 1 as const, k: "k", h: "h", r: ["relay1.openmausbot.com"] } : { v: 1 as const, k: "k" });
+    for (const relay of [false, true]) {
+      companion = { ...companion, port: 8810, lan: "192.168.1.5", hosts: ["192.168.1.5"], hostFirewall: "ufw", e2e: { enabled: true, relay: relay ? "connected" : "off", node: null, descriptor: descriptor(relay) } };
+      bridge.pairing.mockImplementation(async (open: boolean) => {
+        companion = { ...companion, pairing: open ? { code: "482913", token: `omb_pair_${"a".repeat(43)}`, expiresAt: NOW + 600_000 } : null };
+        return companion;
+      });
+      // oxlint-disable-next-line eslint/no-await-in-loop -- one page per case.
+      await render();
+      // oxlint-disable-next-line eslint/no-await-in-loop -- one page per case.
+      await click("[data-add-group=phones]");
+      expect($("[data-pair-qr]")).not.toBeNull();
+      const note = $("[data-add-panel] [data-host-firewall]");
+      if (relay) {
+        expect(note).toBeNull();
+      } else {
+        expect(note?.textContent).toContain("This computer's firewall (ufw) may block your phone on Wi-Fi.");
+        expect(note?.querySelector("code")?.textContent).toBe("sudo ufw allow 8810/tcp");
+        expect($("[data-pair-reach]")?.nextElementSibling).toBe(note);
+      }
+      // oxlint-disable-next-line eslint/no-await-in-loop -- one page per case.
+      await act(async () => root.unmount());
+      root = createRoot(host);
+    }
   });
 
   it("asks for the private network first when Add a computer comes before it, with the later steps shown but quiet", async () => {
