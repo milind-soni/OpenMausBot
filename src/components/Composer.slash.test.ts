@@ -6,6 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
 import { restoreComposerDraft } from "@/lib/drafts";
+import { newChatThreadId } from "@/state/new-chat";
 
 const dispatch = vi.hoisted(() => vi.fn());
 const ENGINE = "claude-3f0c2b1e-9d1a-4c55-8a51-0a3a6f1e2b7c";
@@ -60,8 +61,8 @@ describe("the / menu in the composer", () => {
     vi.unstubAllGlobals();
   });
 
-  function fill(text: string, caret = text.length) {
-    flushSync(() => restoreComposerDraft(draftId, { text, attachments: [] }));
+  function fill(text: string, caret = text.length, draft = draftId) {
+    flushSync(() => restoreComposerDraft(draft, { text, attachments: [] }));
     const input = container.querySelector("textarea")!;
     input.setSelectionRange(caret, caret);
     flushSync(() => input.dispatchEvent(new KeyboardEvent("keyup", { key: "/", bubbles: true })));
@@ -86,6 +87,18 @@ describe("the / menu in the composer", () => {
     expect(input.value).toBe("/fork");
     flushSync(() => dispatch.mock.calls[0]![0].onSuccess());
     expect(input.value).toBe("");
+  });
+
+  it("offers no /fork in a blank new chat, which has no thread to fork yet", () => {
+    const blank = newChatThreadId(bot.id);
+    const blankDraft = `bot:${bot.id}:${blank}`;
+    flushSync(() => root.render(createElement(Composer, { bot: { ...bot, threadId: blank } })));
+    fill("/", 1, blankDraft);
+    expect(labels()).toEqual(["/goal", "/learn", "/setup", "/burst", "/fork-release", "/standup"]);
+    const input = fill("/fork", 5, blankDraft);
+    press(input, "Enter");
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "forkMessage" }));
+    restoreComposerDraft(blankDraft, { text: "", attachments: [] });
   });
 
   it("chooses the highlighted skill when it also matches a complete /fork", () => {
