@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "@/state/store";
+import { SHARED_CHAT_TITLE } from "../../shared/wire";
 import { friendlyNowPhrases, madeKey, taskSubject, toolService } from "./friendly-activity";
 
 const running = (name: string, extra: Partial<NonNullable<Message["tool"]>> = {}): Message =>
@@ -77,6 +78,9 @@ describe("Simple mode's working line", () => {
     expect(taskSubject("Pasted notes for the trip", ['<pasted-text index="1">\nPasted notes for the trip\n</pasted-text>'])).toBeUndefined();
     expect(taskSubject("New task", [])).toBeUndefined();
     expect(taskSubject("New thread", [])).toBeUndefined();
+    expect(taskSubject(SHARED_CHAT_TITLE, [])).toBeUndefined();
+    // Cut short, the stand-in ends in "…" even when the message it came from is not loaded.
+    expect(taskSubject("Plan a 2-day food trip to Lisbon: where to eat, w…", [])).toBeUndefined();
     expect(taskSubject("  ", [])).toBeUndefined();
     expect(taskSubject(undefined, asked)).toBeUndefined();
   });

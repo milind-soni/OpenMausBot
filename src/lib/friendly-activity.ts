@@ -1,6 +1,7 @@
 import type { LocaleKey } from "@/locales";
 import type { Message } from "@/state/store";
 import type { LiveStatus } from "@/state/turn-status";
+import { SHARED_CHAT_TITLE } from "../../shared/wire";
 import { t } from "./i18n";
 import { turnNowPhrases, type LiveActivityPhrases } from "./live-activity";
 
@@ -51,15 +52,16 @@ export function madeKey(status: LiveStatus | null, message?: Message): LocaleKey
 /** Words that name only the tool: the conversation's subject says more. */
 const TOOL_TALK: ReadonlySet<LocaleKey> = new Set(["chat.friendly.code", "chat.friendly.commands"]);
 
-const UNTITLED = new Set(["New task", "New thread"]);
+/** Titles the app gives a conversation itself (task-title.ts localizes the last two). */
+const FACTORY_TITLES: ReadonlySet<string> = new Set(["New task", "New thread", SHARED_CHAT_TITLE]);
 
-/** The conversation's title as the name of the work, once it is more than a placeholder or the opening of one of the
- * person's own messages (the stand-in title a thread gets until its generated one arrives, pasted text included). */
+/** The conversation's title as the name of the work, once it is more than a factory title or the opening of one of the
+ * person's own messages (the stand-in title a thread gets until its generated one arrives, pasted text included; cut
+ * short, it ends in "…", which a generated title never does). */
 export function taskSubject(title: string | undefined, userTexts: readonly string[]): string | undefined {
   const name = title?.trim();
-  if (!name || UNTITLED.has(name)) return undefined;
-  const opening = name.replace(/…$/, "");
-  return userTexts.some((text) => text.includes(opening)) ? undefined : name;
+  if (!name || FACTORY_TITLES.has(name) || name.endsWith("…")) return undefined;
+  return userTexts.some((text) => text.includes(name)) ? undefined : name;
 }
 
 /** Simple mode's one rotating line for what the bot is doing now: plain words in place of file names, sizes and
