@@ -7,6 +7,10 @@ export const SET_MAIN_THREAD_TOOL = "set_main_thread";
 
 export async function callSetMainThreadTool(args: Json, context: ToolCallContext): Promise<ToolCallResult> {
   const clear = args.clear === true;
+  if (args.thread_id != null && typeof args.thread_id !== "string") {
+    return { text: "set_main_thread needs thread_id as a string from list_threads or start_thread; leave it out for this thread.", isError: true };
+  }
+  if (args.clear != null && typeof args.clear !== "boolean") return { text: "set_main_thread needs clear as true or false.", isError: true };
   const threadId = typeof args.thread_id === "string" ? args.thread_id.trim() : "";
   if (clear && threadId) return { text: "set_main_thread takes thread_id or clear, not both.", isError: true };
   const r = await context.client.api("/api/internal/main-thread", {
