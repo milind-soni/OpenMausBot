@@ -1026,6 +1026,7 @@
   "chat.sentMidTurnHint": "Gesendet, während der Bot arbeitete — er hat es vor seinem nächsten Schritt gesehen, im selben Zug.",
   "chat.showFull": "Ganze Nachricht zeigen",
   "chat.showLess": "Weniger zeigen",
+  "chat.checkWork.earlierAnswer": "Vor Prüfung {round}",
   "chat.generatedImage": "Erzeugtes Bild",
   "chat.regenerate": "Antwort neu erzeugen",
   "chat.previousVersion": "Vorherige Version",

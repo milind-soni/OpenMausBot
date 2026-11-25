@@ -2726,6 +2726,7 @@
   "chat.callSheet.keptSpoken": "Your requests, and what {name} said, did and answered. Nothing else you said on the call is kept.",
   "chat.showFull": "Show full message",
   "chat.showLess": "Show less",
+  "chat.checkWork.earlierAnswer": "Before check {round}",
   "chat.automationNote.followUp": "Following up on the wait: {label}",
   "chat.automationNote.followUpUnnamed": "Following up on a wait",
   "chat.automationNote.show": "Show instructions",

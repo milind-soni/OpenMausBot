@@ -2514,6 +2514,7 @@
   "chat.callSheet.keptSpoken": "Seus pedidos e o que {name} disse, fez e respondeu. Nada mais do que você disse na chamada fica salvo.",
   "chat.showFull": "Ver a mensagem inteira",
   "chat.showLess": "Mostrar menos",
+  "chat.checkWork.earlierAnswer": "Antes da verificação {round}",
   "chat.automationNote.followUp": "Continuação da espera: {label}",
   "chat.automationNote.followUpUnnamed": "Continuação de uma espera",
   "chat.automationNote.show": "Mostrar instruções",
