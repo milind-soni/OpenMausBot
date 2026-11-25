@@ -76,15 +76,16 @@ export function orphanedRuntimeProcesses(rows: RuntimeProcessRow[], runtimesRoot
 }
 
 /** The folder goes in through the environment, so no path is ever quoted into the script. */
-const WINDOWS_RUNTIME_PROCESSES = "$r = $env:OMB_AGY_RUNTIMES.TrimEnd('\\') + '\\'; $all = @(Get-CimInstance Win32_Process); $by = @{}; foreach ($p in $all) { $by[$p.ProcessId] = $p }"
+const WINDOWS_RUNTIME_PROCESSES = "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; $r = $env:OMB_AGY_RUNTIMES.TrimEnd('\\') + '\\'; $all = @(Get-CimInstance Win32_Process); $by = @{}; foreach ($p in $all) { $by[$p.ProcessId] = $p }"
   + " ; ConvertTo-Json -Compress -InputObject @($all | Where-Object { $_.CreationDate -and $_.ExecutablePath -and $_.ExecutablePath.StartsWith($r, [StringComparison]::OrdinalIgnoreCase) }"
   + " | ForEach-Object { $q = $by[$_.ParentProcessId]; [pscustomobject]@{ ProcessId = $_.ProcessId; ExecutablePath = $_.ExecutablePath;"
   + " Started = $_.CreationDate.ToUniversalTime().ToString('o'); ParentStarted = $(if ($q -and $q.CreationDate) { $q.CreationDate.ToUniversalTime().ToString('o') }) } })";
 
 /** Each `pid=started` is stopped with its tree only while that pid still runs the process that was listed, and waited for:
- * its unpacked folder stays locked until it has exited. */
+ * its unpacked folder stays locked until it has exited. Writes the pid of each one stopped and gone, one per line. */
 const WINDOWS_STOP_PROCESSES = "foreach ($e in $env:OMB_AGY_STOP.Split(' ')) { $id, $s = $e.Split('='); $p = Get-CimInstance Win32_Process -Filter ('ProcessId=' + [uint32]$id)"
-  + "; if ($p -and $p.CreationDate -and $p.CreationDate.ToUniversalTime().ToString('o') -eq $s) { taskkill /PID $id /T /F | Out-Null; Wait-Process -Id $id -Timeout 10 -ErrorAction SilentlyContinue } }";
+  + "; if ($p -and $p.CreationDate -and $p.CreationDate.ToUniversalTime().ToString('o') -eq $s) { taskkill /PID $id /T /F | Out-Null"
+  + "; if ($LASTEXITCODE -eq 0) { Wait-Process -Id $id -Timeout 10 -ErrorAction SilentlyContinue; if (-not (Get-Process -Id $id -ErrorAction SilentlyContinue)) { $id } } } }; exit 0";
 
 type PowerShell = (script: string, env: NodeJS.ProcessEnv) => Promise<string | null>;
 
@@ -96,7 +97,7 @@ const powershell: PowerShell = (script, env) => new Promise((done) => {
 
 function listedRows(listing: string | null): RuntimeProcessRow[] {
   let rows: unknown;
-  try { rows = JSON.parse(listing ?? ""); } catch { return []; }
+  try { rows = JSON.parse((listing ?? "").replace(/^\uFEFF/, "")); } catch { return []; }
   return (Array.isArray(rows) ? rows : [rows]).flatMap((row) => {
     const { ProcessId: pid, ExecutablePath: path, Started: started, ParentStarted: parentStarted } = (row ?? {}) as Record<string, unknown>;
     if (!Number.isInteger(pid) || typeof path !== "string" || typeof started !== "string" || !started) return [];
@@ -111,7 +112,7 @@ export interface OrphanStopOptions {
 }
 
 /** Windows keeps a child running when its parent ends: each runtime a crashed or killed server left behind keeps its memory
- * and its unpacked folder (0.3-1.3 GB) until it is stopped. Resolves to how many were stopped, 0 when stopping failed. */
+ * and its unpacked folder (0.3-1.3 GB) until it is stopped. Resolves to how many were stopped and have exited. */
 export async function stopOrphanedAntigravityRuntimes(options: OrphanStopOptions = {}): Promise<number> {
   if ((options.platform ?? process.platform) !== "win32") return 0;
   const run = options.run ?? powershell;
@@ -119,7 +120,8 @@ export async function stopOrphanedAntigravityRuntimes(options: OrphanStopOptions
   const orphans = orphanedRuntimeProcesses(listedRows(await run(WINDOWS_RUNTIME_PROCESSES, { OMB_AGY_RUNTIMES: root })), root);
   if (!orphans.length) return 0;
   const stopped = await run(WINDOWS_STOP_PROCESSES, { OMB_AGY_STOP: orphans.map(({ pid, started }) => `${pid}=${started}`).join(" ") });
-  return stopped === null ? 0 : orphans.length;
+  const gone = new Set(stopped?.split(/\s+/));
+  return orphans.filter(({ pid }) => gone.has(String(pid))).length;
 }
 
 let orphansStopped: Promise<number> | undefined;

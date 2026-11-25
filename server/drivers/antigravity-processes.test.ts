@@ -56,7 +56,7 @@ describe("runtimes an earlier server left running on Windows", () => {
   });
 
   it("stops each orphan once with the start time it was listed with", async () => {
-    const run = vi.fn(async (_script: string, env: NodeJS.ProcessEnv) => env.OMB_AGY_RUNTIMES === undefined ? "" : JSON.stringify([
+    const run = vi.fn(async (_script: string, env: NodeJS.ProcessEnv) => env.OMB_AGY_RUNTIMES === undefined ? "41\r\n" : JSON.stringify([
       { ProcessId: 41, ExecutablePath: `${release}\\agy_acp_server.exe`, Started: "2026-11-21T08:00:00.0000000Z", ParentStarted: null },
       { ProcessId: 42, ExecutablePath: `${release}\\localharness_external.exe`, Started: "2026-11-21T08:00:01.0000000Z", ParentStarted: "2026-11-21T08:00:00.0000000Z" },
       { ProcessId: 43, ExecutablePath: `${release}\\agy_acp_server.exe`, Started: "2026-11-25T08:00:00.0000000Z", ParentStarted: "2026-11-25T07:00:00.0000000Z" },
@@ -66,6 +66,22 @@ describe("runtimes an earlier server left running on Windows", () => {
     expect(run.mock.calls[0]![1]).toEqual({ OMB_AGY_RUNTIMES: `${dataDir}${sep}tools${sep}antigravity-acp` });
     expect(run.mock.calls[1]![1]).toEqual({ OMB_AGY_STOP: "41=2026-11-21T08:00:00.0000000Z" });
     expect(run.mock.calls[1]![0]).toContain("taskkill /PID $id /T /F");
+  });
+
+  it("counts only the runtimes the stop confirms are gone", async () => {
+    const listed = (pid: number) => ({ ProcessId: pid, ExecutablePath: `${release}\\agy_acp_server.exe`, Started: "2026-11-21T08:00:00.0000000Z", ParentStarted: null });
+    for (const [confirmed, count] of [["", 0], ["41\r\n", 1], ["41\r\n42\r\n99\r\n", 2]] as const) {
+      const run = vi.fn(async (_script: string, env: NodeJS.ProcessEnv) => env.OMB_AGY_RUNTIMES === undefined ? confirmed : JSON.stringify([listed(41), listed(42)]));
+      expect(await stopOrphanedAntigravityRuntimes({ platform: "win32", dataDir, run })).toBe(count);
+    }
+  });
+
+  it("reads a data folder with non-ASCII letters the way PowerShell writes it", async () => {
+    const homeDir = "C:\\Users\\René\\.openmausbot";
+    const listing = `\uFEFF${JSON.stringify([{ ProcessId: 41, ExecutablePath: `${homeDir}\\tools\\antigravity-acp\\win32-x64\\agy_acp_server.exe`, Started: "2026-11-21T08:00:00.0000000Z", ParentStarted: null }])}`;
+    const run = vi.fn(async (_script: string, env: NodeJS.ProcessEnv) => env.OMB_AGY_RUNTIMES === undefined ? "41" : listing);
+    expect(await stopOrphanedAntigravityRuntimes({ platform: "win32", dataDir: homeDir, run })).toBe(1);
+    expect(run.mock.calls[0]![0]).toContain("[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false");
   });
 
   it("counts none stopped when the stop itself fails", async () => {
