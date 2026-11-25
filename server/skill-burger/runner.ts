@@ -134,13 +134,19 @@ export function resolve(node: unknown, args: Record<string, unknown>, results: R
 
 const asText = (value: unknown): string => (value === undefined || value === null ? "" : typeof value === "string" ? value : JSON.stringify(value));
 
+function asNumber(value: unknown): number {
+  if (typeof value !== "number" && (typeof value !== "string" || !value.trim())) return NaN;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : NaN;
+}
+
 function compare(left: unknown, op: string, right: unknown): boolean {
   switch (op) {
     case "exists": return left !== undefined && left !== null && left !== "" && !(Array.isArray(left) && left.length === 0);
     case "eq": return asText(left) === asText(right);
     case "ne": return asText(left) !== asText(right);
-    case "gt": return Number(left) > Number(right);
-    case "lt": return Number(left) < Number(right);
+    case "gt": return asNumber(left) > asNumber(right);
+    case "lt": return asNumber(left) < asNumber(right);
     default: return false;
   }
 }

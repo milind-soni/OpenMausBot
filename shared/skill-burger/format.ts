@@ -17,6 +17,7 @@ const ref = z.union([
 ]);
 export type WorkflowRef = z.infer<typeof ref>;
 
+/** Numeric gt/lt rules compare finite numbers or nonempty numeric strings. Other values do not match. */
 const condition = z.object({
   $step: z.string(), path: z.string().max(200).optional(), op: z.enum(["eq", "ne", "gt", "lt", "exists"]), value: z.unknown().optional(),
 }).strict();
