@@ -380,6 +380,14 @@ describe("the unread section", () => {
     expect(rows.unreadBots.map((bot) => bot.id)).toEqual(["a", "b"]);
   });
 
+  it("keeps a held bot that still waits on the person in its question's place among the waiting bots", () => {
+    const asking = (id: string, askedAt: number) => ({ id, unread: false, messages: [{ at: askedAt }],
+      tasks: [{ activity: "waiting-on-you", updatedAt: askedAt, createdAt: 1 }] });
+    const saved = { pinnedBots: [], sectionChiefs: [], sectionedBots: [asking("a", 30), asking("b", 50)], unsectionedBots: [] };
+    const rows = sidebarBotRows(saved, () => false, true, { id: "a", since: 100 }, () => true);
+    expect(rows.unreadBots.map((bot) => bot.id)).toEqual(["b", "a"]);
+  });
+
   it("counts a bot unread exactly as its row's dot does: a routine run or an archived conversation does not", () => {
     const parts = {
       sectionChiefs: [],

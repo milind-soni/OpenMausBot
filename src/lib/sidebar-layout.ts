@@ -197,13 +197,13 @@ export function nextUnreadHold(held: UnreadHold | null, openId: string | null, u
 
 /** Bots showing unread or `waiting` on the person (a question for them) leave their department or the main list for one
  * list of their own, the waiting ones first and then newest first, and go back once read and answered; `held` stays
- * listed where it was. Pinned bots and the main Chief keep their place above it. Only how the list is shown changes. */
+ * listed where it was (a waiting one keeps it anyway: reading does not move its question). Pinned bots and the main Chief keep their place above it. Only how the list is shown changes. */
 export function unreadBotsApart<T extends UnreadListBot>(parts: { sectionChiefs: T[]; sectionedBots: T[]; unsectionedBots: T[] }, enabled = true, held: UnreadHold | null = null, waiting: (bot: T) => boolean = () => false) {
   if (!enabled) return { ...parts, unreadBots: [] as T[] };
   const listed = (bot: T) => botShowsUnread(bot) || waiting(bot) || bot.id === held?.id;
   const inPlace = (bots: T[]) => bots.filter((bot) => !listed(bot));
   const unreadBots = [...parts.unsectionedBots, ...parts.sectionChiefs, ...parts.sectionedBots].filter(listed)
-    .map((bot) => { const asks = waiting(bot); return { bot, asks, since: held && bot.id === held.id && !botShowsUnread(bot) ? held.since : unreadSince(bot, asks) }; })
+    .map((bot) => { const asks = waiting(bot); return { bot, asks, since: !asks && held && bot.id === held.id && !botShowsUnread(bot) ? held.since : unreadSince(bot, asks) }; })
     .sort((a, b) => Number(b.asks) - Number(a.asks) || b.since - a.since).map(({ bot }) => bot);
   return { unreadBots, sectionChiefs: inPlace(parts.sectionChiefs), sectionedBots: inPlace(parts.sectionedBots), unsectionedBots: inPlace(parts.unsectionedBots) };
 }
