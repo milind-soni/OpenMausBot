@@ -10358,8 +10358,6 @@
   "settings.features.skillBurgerLine": "把机器人的一次运行保存为可再次运行的步骤",
   "settings.features.threadTabs": "对话标签页",
   "settings.features.threadTabsLine": "在聊天上方以标签页显示机器人的对话",
-  "settings.features.roomFeed": "群组动态",
-  "settings.features.roomFeedLine": "将群组聊天的对话列成一个动态，打开的对话显示在旁边",
   "settings.features.error": "无法保存。请检查网络连接后重试。",
   "chat.botExchange.open": "打开 {asker} 与 {helper} 的交流",
   "chat.botExchange.teammate": "一位队友",

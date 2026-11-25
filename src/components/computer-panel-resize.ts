@@ -20,15 +20,17 @@ function readPanelWidth(key: string, fallback: number): number {
 
 /** The panel and the chat beside it share the room in the window's row, so the
  * panel can take everything but the chat's minimum width. */
-function measureMaxWidth(panel: HTMLElement, chat: HTMLElement | null): number {
+function measureMaxWidth(panel: HTMLElement, chat: HTMLElement | null, chatMin = CHAT_MIN_WIDTH): number {
   if (!chat) return PANEL_MAX_WIDTH;
-  return Math.max(PANEL_MIN_WIDTH, panel.offsetWidth + chat.offsetWidth - CHAT_MIN_WIDTH);
+  return Math.max(PANEL_MIN_WIDTH, panel.offsetWidth + chat.offsetWidth - chatMin);
 }
 
 /** The computer panel's drag edge: a pointer drag or the arrow keys resize the
  * panel up to the room the chat leaves, and the width is remembered across opens
- * (under `key`, for a panel that keeps its own). */
-export function useComputerPanelResize({ key = PANEL_WIDTH_KEY, defaultWidth = PANEL_DEFAULT_WIDTH }: { key?: string; defaultWidth?: number } = {}) {
+ * (under `key`, for a panel that keeps its own). `chatMin` is what the chat beside it keeps at least. */
+export function useComputerPanelResize({ key = PANEL_WIDTH_KEY, defaultWidth = PANEL_DEFAULT_WIDTH, chatMin = CHAT_MIN_WIDTH }: { key?: string; defaultWidth?: number; chatMin?: number } = {}) {
+  const chatMinRef = useRef(chatMin);
+  chatMinRef.current = chatMin;
   const [chosenWidth, setChosenWidth] = useState(() => readPanelWidth(key, defaultWidth));
   const [maxWidth, setMaxWidth] = useState(PANEL_MAX_WIDTH);
   const panelWidth = Math.min(chosenWidth, maxWidth);
@@ -74,7 +76,7 @@ export function useComputerPanelResize({ key = PANEL_WIDTH_KEY, defaultWidth = P
         chat = current;
       }
       setSeparatorWidth(panel.offsetWidth);
-      if (panel.offsetWidth > 0) setMaxWidth(measureMaxWidth(panel, chat));
+      if (panel.offsetWidth > 0) setMaxWidth(measureMaxWidth(panel, chat, chatMinRef.current));
     };
     const resizes = new ResizeObserver(read);
     resizes.observe(panel);
