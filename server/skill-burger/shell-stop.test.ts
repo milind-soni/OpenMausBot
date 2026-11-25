@@ -78,7 +78,7 @@ it.runIf(process.platform === "linux").each(["abort", "overflow", "timeout"])("s
     if (reason === "timeout") {
       expect(await bounded(workflowRun!, "workflow timeout")).toMatchObject({ ok: false, error: { type: "timeout", step: "shell" } });
       expect(existsSync(join(cwd, "later.txt"))).toBe(false);
-      if (!held!.destroyed) held!.write("go");
+      if (!held!.destroyed && !held!.writableEnded) held!.write("go");
       const after = await bounded(Promise.race([wrote, closed!.then(() => "closed")]), "child after timeout");
       expect(existsSync(join(cwd, "after-timeout.txt"))).toBe(false);
       expect(after).toBe("closed");
