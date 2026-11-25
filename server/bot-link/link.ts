@@ -537,7 +537,8 @@ export function createBotLink(deps: BotLinkDeps) {
       if (files.length) deps.files?.crossed(node.id, "sent", { botId: address.botId, name: frame.from.name }, files);
       work.child = node.id;
       state.work[frame.id] = work;
-      deps.handed?.({ botId: bot.id, threadId, from: frame.from.name, text: frame.text });
+      // A room's turn for a member of this place is not a hand-off to the bot (its work thread is named after the room).
+      if (!frame.thread.includes(":room:")) deps.handed?.({ botId: bot.id, threadId, from: frame.from.name, text: frame.text });
       save();
       coordinator.endTurn(root, { ok: true, text: "" });
       if (frame.mode === "notify") recordResult(frame.id, { ok: true, text: "" });

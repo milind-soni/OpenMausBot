@@ -439,7 +439,6 @@
   "server.rooms.compactedRequested": "compacted {bot}'s context ({percent}% full): fresh session with the room's recent messages",
   "server.rooms.compactedThreshold": "{bot}'s context was {percent}% full: compacted to a fresh session with the room's recent messages",
   "server.teammates.sent": "Sent to {bot}",
-  "server.teammates.askedMe": "{bot} asked me: {title}",
   "server.checkBack.pending": "Will check back {when}",
   "server.checkBack.started": "Checked back {when}",
   "server.checkBack.cancelled": "Check-back cancelled",

@@ -19,7 +19,7 @@ function fakeStore(threads: Record<string, { title: string; unread?: boolean }>)
 describe("the hand-off line in a helper's main chat", () => {
   it("says who asked and for what, opens the hand-off thread, and marks the main chat unread", () => {
     const { store, appended, patched } = fakeStore({ main: { title: "Garden" }, work: { title: "Octopus facts" } });
-    const id = postHandedLine({ store, mainThread: () => "main", language: () => undefined },
+    const id = postHandedLine({ store, mainThread: () => "main" },
       { botId: "sage", threadId: "work", from: "Mochi", text: "Find three octopus facts", title: "Octopus facts" });
     expect(id).toBe("m1");
     expect(appended).toEqual([{ threadId: "main", message: {
@@ -30,17 +30,9 @@ describe("the hand-off line in a helper's main chat", () => {
     expect(patched).toEqual([{ botId: "sage", threadId: "main", patch: { unread: true } }]);
   });
 
-  it("writes the line in the main chat's language", () => {
-    const { store } = fakeStore({ main: { title: "Garden" }, work: { title: "Octopus facts" } });
-    const asked: string[] = [];
-    postHandedLine({ store, mainThread: () => "main", language: (threadId) => { asked.push(threadId); return undefined; } },
-      { botId: "sage", threadId: "work", from: "Mochi", text: "Octopus facts" });
-    expect(asked).toEqual(["main"]);
-  });
-
   it("leaves nothing when the work runs in the main chat itself, or either thread is gone", () => {
     const { store, appended, patched } = fakeStore({ main: { title: "Garden" }, work: { title: "Work" } });
-    const deps = { store, mainThread: () => "main", language: () => undefined };
+    const deps = { store, mainThread: () => "main" };
     expect(postHandedLine(deps, { botId: "sage", threadId: "main", from: "Mochi", text: "x" })).toBeUndefined();
     expect(postHandedLine(deps, { botId: "sage", threadId: "gone", from: "Mochi", text: "x" })).toBeUndefined();
     expect(postHandedLine({ ...deps, mainThread: () => undefined }, { botId: "sage", threadId: "work", from: "Mochi", text: "x" })).toBeUndefined();

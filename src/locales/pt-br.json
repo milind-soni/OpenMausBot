@@ -420,7 +420,6 @@
   "server.rooms.compactedRequested": "Compactamos o contexto de {bot} ({percent}% ocupado): nova sessão com as mensagens recentes do grupo",
   "server.rooms.compactedThreshold": "Compactamos o contexto de {bot}, que estava {percent}% ocupado: nova sessão com as mensagens recentes do grupo",
   "server.teammates.sent": "Enviado para {bot}",
-  "server.teammates.askedMe": "{bot} me pediu: {title}",
   "server.checkBack.pending": "Vai verificar de novo: {when}",
   "server.checkBack.started": "Verificou de novo: {when}",
   "server.checkBack.cancelled": "Verificação cancelada",

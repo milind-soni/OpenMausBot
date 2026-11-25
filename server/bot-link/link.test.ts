@@ -939,6 +939,8 @@ describe("the link between a computer and its Cloud", () => {
     expect(turns[1]!.text).not.toContain("how many orders");
     expect(turns[1]!.threadId).toBe(turns[0]!.threadId);
     expect(computer.said(room.id).at(-1)).toBe("Analyst: 3 returns.");
+    // A room turn is not a hand-off to the bot: its main chat gets no line for it.
+    expect(cloud.handed).toEqual([]);
     // A report made twice, as after a restart between the two, leaves one line.
     const child = computer.coordinator.all().find((node) => node.botId === onCloud("cloud-analyst") && node.status === "completed")!;
     expect(computer.rooms.reply(child, undefined, "Analyst")).toBe(true);

@@ -434,6 +434,8 @@ it("leaves one quiet line in the teammate's main chat for a hand-off, which open
   expect(leadBot.tasks.find((task: any) => task.threadId === f.lead.activeTaskId).unread).toBe(true);
   // The hand-off ran in its own thread; the main chat took no turn for the line.
   expect(f.evidence().filter((turn: any) => turn.botId === f.lead.id).map((turn: any) => turn.threadId)).toEqual([child.threadId]);
+  // The hand-off's own turn, which started after the line was written, does not read it either.
+  expect(told(f.evidence().find((turn: any) => turn.botId === f.lead.id))).not.toContain("asked me");
 
   await f.cli("send", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--text", "Hello there");
   expect((await f.cli("wait", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--timeout", "30")).status).toBe("settled");

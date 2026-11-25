@@ -655,9 +655,12 @@ describe("coordinate_bots on a teammate", () => {
       // The review turn quotes the requests, gate markers included, so the engine files its prompt under the first request's gate.
       expect(promptsOf(gate(1)).at(-1)?.message.content).toContain("Your downstream room requests have settled");
       expect(stream.frames.filter((frame) => frame.kind === "notify" && frame.notification?.botId === qa.id)).toEqual([]);
-      expect((await botState(qa.id)).tasks.filter((task: any) => task.unread)).toEqual([]);
+      // The person's conversation with the teammate only gets one quiet line per hand-off, each opening the work thread,
+      // and the unread mark that comes with it; the work stays in its own thread.
+      expect((await botState(qa.id)).tasks.filter((task: any) => task.unread).map((task: any) => task.threadId)).toEqual([qa.threadId]);
       expect((await botState(qa.id)).threadId).toBe(qa.threadId);
-      expect(await messages(qa.threadId)).toEqual(originalConversation);
+      const handedLine = expect.objectContaining({ role: "bot", kind: "activity", threadRef: expect.objectContaining({ botId: qa.id, threadId: thread }), tool: expect.objectContaining({ nameCode: "chat.notice.askedMe" }) });
+      expect(await messages(qa.threadId)).toEqual([...originalConversation, handedLine, handedLine, handedLine]);
     } finally {
       stream.close();
       await cleanup([pm.id, qa.id]);
@@ -734,7 +737,8 @@ describe("coordinate_bots on a teammate", () => {
       expect((await messages(pm.threadId)).some(message => message.roomRequest?.id === opened.id && message.roomRequest.phase === "result" && message.tool?.ok === false)).toBe(true);
       release(hold.threadId);
       await expect.poll(async () => (await taskOf(qa.id, hold.threadId))?.busy, { timeout: 15_000 }).toBe(false);
-      expect(await messages(qa.threadId)).toEqual(originalConversation);
+      // Nothing of the work fell back into Quinn's own conversation: only the hand-off's quiet line is there.
+      expect(await messages(qa.threadId)).toEqual([...originalConversation, expect.objectContaining({ kind: "activity", threadRef: expect.objectContaining({ threadId: opened.threadId }) })]);
     } finally {
       await cleanup([pm.id, qa.id]);
       expect((await api("PUT", "/api/config", { threads: { maxConcurrentPerBot: 2 } })).status).toBe(200);
