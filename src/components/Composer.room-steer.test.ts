@@ -84,4 +84,10 @@ describe("a queued message in a working room", () => {
     expect(container.textContent).toContain("Queued. Sends when the room's current turn finishes.");
     expect(dispatched()).not.toContain("interruptGroup");
   });
+
+  it("keeps the context menu beside Stop, for the members that are not the one at work", () => {
+    render(room(member.id));
+    expect(container.querySelector('[data-composer-actions] button[aria-label="Stop this turn"]')).not.toBeNull();
+    expect(container.querySelector("[data-composer-context]")).not.toBeNull();
+  });
 });

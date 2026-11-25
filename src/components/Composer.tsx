@@ -236,7 +236,7 @@ export function Composer({
   const { recording, ready: micReady, speechError, toggle: toggleMic, stop: stopDictation } = useComposerDictation({ draftId, text, onText: editText });
   const fork = useComposerFork({ ownerId: forkOwnerId, kind: group ? "group" : "bot", threadId,
     branchLeafId: group ? undefined : bot?.activeLeafId ?? undefined, draftId, text, editText, stopDictation });
-  const micShown = !locked && !busy && micReady;
+  const micShown = !locked && micReady;
   const [caret, setCaret] = useState(0);
   const shellRef = useRef<HTMLDivElement>(null);
   const tall = useTallPill(shellRef, simpleDock);
@@ -525,8 +525,9 @@ export function Composer({
   const calling = callTarget !== undefined && (onCall === callTarget || (isLiveCallRunning(media.phase) && media.botId === callTarget));
   const mayAct = useMayAct(), mayStop = !sharedChat || mayAct(profile?.tasks?.find((task) => task.threadId === threadId)?.askedBy);
   const stoppable = (busy || Boolean(!group && bot?.waitingForTeammates)) && mayStop;
-  const stopInSlot = simpleDock && stoppable && !locked && !hasContent && !calling;
-  const callShown = singleRow || !hasContent || busy || Boolean(!group && bot?.waitingForTeammates) || calling;
+  // Each control keeps its place: in a bot chat Stop takes the context ring's place while a turn runs, since a partial ring beside
+  // it reads as a loading spinner, and Send takes Call's place. A room keeps its menu: it reads and compacts the other members too.
+  const callShown = singleRow || !hasContent || calling;
   const slot = slotColors(bot?.color, Boolean(group));
   // A bot at work: Enter does the chosen follow-up and Ctrl/⌘ with it the other one. A room joins in when its speaking engine can steer,
   // without the send menu: a room's turn has no restart.
@@ -928,24 +929,18 @@ export function Composer({
               onPin={pinPlace} />
           )}
           <div data-composer-actions className={cn("flex items-center", simpleDock ? "gap-2" : "gap-1", stacked && "ms-auto")}>
-          {(simpleDock ? stoppable : busy && mayStop) && !locked && (
+          {stoppable && (
           <button
             onClick={interruptTurn}
             aria-label={t("chat.stopTurn")}
-            data-composer-stop={simpleDock ? (stopInSlot ? "slot" : "beside") : undefined}
-            className={cn(
-              "flex shrink-0 items-center justify-center rounded-full",
-              !simpleDock ? "size-8 text-ink-secondary hover:bg-raised hover:text-ink"
-                : stopInSlot ? cn("size-7", slot.button.className)
-                : SIMPLE_CONTROL,
-            )}
-            style={stopInSlot ? slot.button.style : undefined}
+            data-composer-stop
+            className={cn("flex shrink-0 items-center justify-center rounded-full", simpleDock ? SIMPLE_CONTROL : "size-8 text-ink-secondary hover:bg-raised hover:text-ink")}
             title={t("chat.stop")}
           >
             <Square size={simpleDock ? 10 : 14} className="fill-current" />
           </button>
         )}
-        {!locked && <ComposerContextMenu bot={bot} group={group} members={members} className={cn(simpleDock ? "size-7" : "size-8", advanced || singleRow ? "text-ink-secondary hover:bg-raised hover:text-ink" : SIMPLE_CONTROL)} />}
+        {!locked && !(stoppable && !group) && <ComposerContextMenu bot={bot} group={group} members={members} className={cn(simpleDock ? "size-7" : "size-8", advanced || singleRow ? "text-ink-secondary hover:bg-raised hover:text-ink" : SIMPLE_CONTROL)} />}
         {micShown && (
           <button
             onClick={toggleMic}
@@ -962,6 +957,7 @@ export function Composer({
             <Mic size={16} className="[&_rect]:fill-current" />
           </button>
         )}
+        {!group && busy && !locked && !(hasContent && !fork.command) && <span aria-hidden data-composer-follow-up-slot className={cn("shrink-0", simpleDock ? "-me-2 w-5" : "-me-1 w-6")} />}
         {callShown && bot && !group && <CallButton bot={bot} placement="composer" fill={advanced || singleRow ? undefined : slot.fill} ink={slot.ink} inverse={singleRow} modeMenu={!stacked} />}
         {callShown && group && !advanced && <GroupCallButton group={group} members={members ?? []} placement="composer" fill={slot.fill} ink={slot.ink} />}
         {hasContent && !locked && (

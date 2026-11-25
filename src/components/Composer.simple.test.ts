@@ -223,22 +223,25 @@ describe("the Simple composer in a bot chat", () => {
     expectBotButton(sendButton(), "yellow");
   });
 
-  it("keeps Call beside Stop while the bot works, including while typing", () => {
+  it("keeps Stop beside Call while the bot works, in place of the context ring, and lets Send take Call's place once there is text", () => {
+    render({ bot });
+    expect(container.querySelector("[data-composer-context]")).not.toBeNull();
     const busy = { ...bot, busy: true };
     render({ bot: busy });
-    const slot = container.querySelector<HTMLButtonElement>('[data-composer-stop="slot"]')!;
-    expect(slot.getAttribute("aria-label")).toBe("Stop this turn");
-    expectBotButton(slot, "purple");
+    const stop = container.querySelector<HTMLButtonElement>("[data-composer-stop]")!;
+    expect(stop.getAttribute("aria-label")).toBe("Stop this turn");
+    expect(stop.className.split(" ")).toEqual(expect.arrayContaining(["size-7", "bg-ink/[0.06]"]));
     expect(fixture.call).toMatchObject({ bot: { id: "atlas" }, placement: "composer" });
-    click(slot);
+    expect(container.querySelector("[data-composer-context]")).toBeNull();
+    click(stop);
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "interrupt", botId: "atlas", threadId: "atlas-thread" });
 
     restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "and also this", attachments: [] });
     fixture.call = null;
     render({ bot: busy });
-    expect(container.querySelector('[data-composer-stop="beside"]')).not.toBeNull();
-    expect(container.querySelector('[data-composer-stop="slot"]')).toBeNull();
-    expect(fixture.call).toMatchObject({ bot: { id: "atlas" }, placement: "composer" });
+    expect(container.querySelectorAll("[data-composer-stop]")).toHaveLength(1);
+    expect(fixture.call).toBeNull();
+    expectBotButton(container.querySelector<HTMLElement>("[data-composer-follow-up] > button:last-child"), "purple");
   });
 
   it("shows the approval level as a chip only while this conversation overrides the bot, in the panel's words", () => {
@@ -336,12 +339,18 @@ describe("the Simple composer beside Advanced", () => {
   });
 });
 
-it.each([false, true])("keeps Call for a shared viewer without Stop permission (waiting for teammates: %s)", waiting => {
+it.each([false, true])("shows no Stop to a shared viewer without Stop permission, with Call in the end place while the box is empty (waiting for teammates: %s)", waiting => {
   fixture.admin = false;
   fixture.config = { team: true };
   const shared: Bot = { ...bot, tasks: [{ threadId: bot.threadId, title: "Shared", createdAt: 1, busy: !waiting, waitingForTeammates: waiting, askedBy: { id: "other-person", name: "Other person" } }] };
-  restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "Follow-up from another viewer", attachments: [] });
   render({ bot: shared });
   expect(container.querySelector('[aria-label="Stop this turn"]')).toBeNull();
   expect(fixture.call).toMatchObject({ bot: { id: "atlas" }, placement: "composer" });
+
+  fixture.call = null;
+  restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "Follow-up from another viewer", attachments: [] });
+  render({ bot: shared });
+  expect(container.querySelector('[aria-label="Stop this turn"]')).toBeNull();
+  expect(fixture.call).toBeNull();
+  expect(container.querySelector(`[aria-label="${waiting ? "Send message" : "Sends when Atlas is done"}"]`)).not.toBeNull();
 });

@@ -218,11 +218,15 @@ describe("the Advanced composer in a bot chat", () => {
     expect(keys().some((key) => key?.startsWith("call:"))).toBe(false);
   });
 
-  it("keeps Stop and the call button while the bot works, with a queued message waiting to send", () => {
-    restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "and also this", attachments: [] });
+  it("keeps Stop while the bot works, and lets Send take the call button's place once there is text", () => {
     render({ bot: { ...bot, busy: true } });
     expect(container.querySelector('button[aria-label="Stop this turn"]')).not.toBeNull();
     expect(fixture.call).toMatchObject({ placement: "composer", modeMenu: false });
+    fixture.call = null;
+    restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "and also this", attachments: [] });
+    render({ bot: { ...bot, busy: true } });
+    expect(container.querySelectorAll('button[aria-label="Stop this turn"]')).toHaveLength(1);
+    expect(fixture.call).toBeNull();
   });
 
   it("keeps the model in the footer while setup holds the field, with the tools put away", () => {
