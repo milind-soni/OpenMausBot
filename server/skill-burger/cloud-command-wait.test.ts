@@ -181,7 +181,7 @@ it.skipIf(process.platform === "win32")("keeps the completed foreground-relay pa
 it.skipIf(process.platform === "win32")("stops following on caller cancellation without publishing or starting again", async () => {
   const h = await startedRun();
   expect(h.observed).toBe("following");
-  const stopped = expect(h.running).rejects.toMatchObject({ name: "AbortError" });
+  const stopped = expect(h.running).resolves.toMatchObject({ ok: true, status: "cancelled" });
   h.abort.abort();
   await stopped;
   expect(h.artifact()).toBe(false);

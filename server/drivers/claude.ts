@@ -1294,7 +1294,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (spare && (taken() || ownHttp)) { cleanupUnownedLaunch(); return { turnId: "" }; }
       let child: ReturnType<typeof spawnCli>;
       try {
-        child = spawnCli(cliToLaunch(config.cli, launchCli), args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { ...(broker ? { rw: [broker.socketPath] } : {}), ...(hookTokenPath ? { ro: [dirname(hookTokenPath)] } : {}) } }, "bot");
+        child = spawnCli(cliToLaunch(config.cli, launchCli), args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { engine: DRIVER_KIND, ...(broker ? { rw: [broker.socketPath] } : {}), ...(hookTokenPath ? { ro: [dirname(hookTokenPath)] } : {}) } }, "bot");
       } catch (error) {
         cleanupUnownedLaunch();
         throw error;

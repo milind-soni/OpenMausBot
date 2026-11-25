@@ -196,7 +196,7 @@ function runOpenCodeModelsVerbose(
     execCliBoxed(
       cli,
       ["models", "--verbose"],
-      { timeout: 20_000, maxBuffer: 8 * 1024 * 1024, env: environment, box: { allowEnv } },
+      { timeout: 20_000, maxBuffer: 8 * 1024 * 1024, env: environment, box: { allowEnv, engine: "opencodeGo" } },
       (error, stdout, stderr) => {
         if (error) {
           reject(Object.assign(new Error(stderr?.trim() || error.message, { cause: error }), {
@@ -218,7 +218,7 @@ const MODELS_REFRESH_TIMEOUT_MS = 75_000;
 
 function refreshOpenCodeModelCache(cli: string, environment: Record<string, string | undefined>, allowEnv: readonly string[]): Promise<boolean> {
   return new Promise((resolve) => {
-    execCliBoxed(cli, ["models", "--refresh"], { timeout: MODELS_REFRESH_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, env: environment, box: { allowEnv } }, (error) => resolve(!error));
+    execCliBoxed(cli, ["models", "--refresh"], { timeout: MODELS_REFRESH_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, env: environment, box: { allowEnv, engine: "opencodeGo" } }, (error) => resolve(!error));
   });
 }
 

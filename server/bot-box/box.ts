@@ -22,6 +22,7 @@ import { procHidepid } from "./hidepid.ts";
 import { DENIED_SYSCALLS, seccompBytes, seccompSupported } from "./seccomp.ts";
 import { RELAY_SOCKET_NAME, TEAM_FOLDER_KEPT, boxUploadsConversation, boxUploadsDir, teamFolderOf, under, bwrapArgs, inBoxSocket, planBox, taskWorkspaceIds, type BoxAudience, type BoxBridge, type BoxPlan, type BoxRequest, type BoxSetup } from "./plan.ts";
 import { openBoxRelay, type BoxRelay } from "./relay.ts";
+import { signInMasks } from "./sign-in-masks.ts";
 import { CACHE_ROOT_SWITCH, ensureToolCacheRoot, toolCacheEnvironment, toolCacheRoot, toolCachesOn } from "./tool-caches.ts";
 
 /** The loopback port inside a box that reaches the egress gate. The harness gate sits at the server's own port. */
@@ -153,7 +154,8 @@ export class BoxRunner {
     const request: BoxRequest = { ...given, ...(lent.length ? { rw: [...(given.rw ?? []), ...lent] } : {}), ...(audience ? { audience } : {}) };
     const extraFds: number[] = [];
     const seccomp = this.options.seccompFile && !this.options.setup.mutate?.has("no-seccomp") ? this.options.seccompFile : null;
-    const plan = planBox({ ...this.options.setup, seccompFd: seccomp ? BOX_SECCOMP_FD : undefined }, request);
+    const signIns = request.home ? undefined : signInMasks({ home: this.options.setup.home, dataDir: this.options.setup.dataDir, env: request.env, engine: request.engine });
+    const plan = planBox({ ...this.options.setup, seccompFd: seccomp ? BOX_SECCOMP_FD : undefined }, request, signIns);
     const mutate = this.options.setup.mutate;
     const env = mutate?.has("env-all")
       ? Object.fromEntries(Object.entries(request.env).filter((entry): entry is [string, string] => entry[1] !== undefined))
