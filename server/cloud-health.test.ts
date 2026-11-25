@@ -284,6 +284,14 @@ describe("the ledger", () => {
     noteStartFailure(recovered, "overloaded", w.now());
     w.fail(opencode, {}, recovered);
     expect(incidents(w).find((incident) => incident.code === "start_overloaded")).toMatchObject({ count: 4 });
+    // A provider refusal noted, then the backup AI's start on the same thread refused for sign-in: the row stays an auth failure.
+    const backup = thread("backup");
+    w.emit(backup, { type: "turn.started" }, "opencodeGo");
+    noteStartFailure(backup, "provider", w.now());
+    w.fail("Authentication required: not logged in", { setup: true }, backup);
+    w.emit(backup, { type: "turn.completed", ok: false, stopReason: "auth_required" }, "opencodeGo");
+    expect(incidents(w).find((incident) => incident.code === "auth_required")).toMatchObject({ count: 2 });
+    expect(incidents(w).find((incident) => incident.code === "start_provider")).toMatchObject({ count: 1 });
     expect(Object.values(START_CODES).every((code) => /^[a-z0-9][a-z0-9_-]{0,47}$/.test(code))).toBe(true);
   });
 

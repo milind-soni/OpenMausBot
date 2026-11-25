@@ -14,6 +14,9 @@ export function noteStartFailure(threadId: string, why: StartFailureClass, at = 
   if (noted.size > CAP) noted.delete(noted.keys().next().value as string);
 }
 
+/** A start on this thread failed for a reason that keeps its own code (a sign-in): any earlier note goes. */
+export function clearStartFailure(threadId: string): void { noted.delete(threadId); }
+
 /** This thread's start failure noted within START_FAILURE_KEEP_MS of `at`, taken (a second row doesn't get it). */
 export function takeStartFailure(threadId: string, at = Date.now()): StartFailureClass | null {
   const found = noted.get(threadId);

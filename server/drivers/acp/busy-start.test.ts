@@ -111,6 +111,10 @@ describe("why a start failed, for the health report", () => {
     const signIn = Object.assign(new Error("Authentication required"), { acpSignInRequired: true });
     expect(startFailureClass(signIn)).toBeNull();
     expect(startFailureClass(new Error("400 invalid request"))).toBeNull();
+    // A later start on the thread refused for sign-in takes the earlier note back: its row keeps its auth code.
+    await sessionNewRetried(() => Promise.reject(outage()), () => true, deps().deps, "backup-thread").catch(() => {});
+    await sessionNewRetried(() => Promise.reject(signIn), () => true, deps().deps, "backup-thread").catch(() => {});
+    expect(takeStartFailure("backup-thread", 0)).toBeNull();
     // Without a thread nothing is noted (and nothing else changes).
     await sessionNewRetried(() => Promise.reject(outage()), () => true, deps().deps).catch(() => {});
     expect(takeStartFailure("outage-thread", 0)).toBeNull();

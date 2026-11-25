@@ -7,7 +7,7 @@
 // before: a provider outage (a 429, "503 overloaded") keeps its own words, and a backup AI still starts where one may.
 // Our own limits stay as they are (session/new may take NEW_SESSION_TIMEOUT); a timeout is never asked again, which would
 // double the wait.
-import { noteStartFailure } from "../../engine-start-failures.ts";
+import { clearStartFailure, noteStartFailure } from "../../engine-start-failures.ts";
 import { engineMemory } from "../../engine-memory.ts";
 import { machinePressure } from "../../machine-pressure.ts";
 import { classifyError } from "../retry.ts";
@@ -76,8 +76,11 @@ export async function sessionNewRetried<T>(send: () => Promise<T>, alive: () => 
   /** The pressure read at the start, else now: a Cloud pressed at any point of the start. */
   const during = () => atStart ?? deps.pressure();
   const failed = (error: unknown) => {
-    const why = threadId === undefined ? null : startFailureClass(error);
-    if (why && threadId !== undefined) noteStartFailure(threadId, why, deps.now());
+    if (threadId === undefined) return error;
+    // A start that failed for another reason (a sign-in, a request problem) takes back an earlier start's note on the thread
+    // (the backup AI's start after a provider refusal): its row keeps its own code.
+    const why = startFailureClass(error);
+    if (why) noteStartFailure(threadId, why, deps.now()); else clearStartFailure(threadId);
     return error;
   };
   try {

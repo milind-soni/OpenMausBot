@@ -167,7 +167,9 @@ export function createCloudHealthLedger(options: { botOf?: (threadId: string) =>
       if (place && PLACES.has(place)) return record("place", place, engine, message.at, botId, threadId);
       const started = takeStartFailure(threadId, message.at), notice = message.tool?.nameCode ? START_NOTICES.get(message.tool.nameCode) : undefined;
       if (notice) return record("turn", notice, engine, message.at, botId, threadId);
-      if (started) return record("turn", started === "overloaded" ? START_CODES.overloaded : START_CODES.provider, engine, message.at, botId, threadId);
+      // A refused sign-in keeps its auth code whatever a start noted (the Admin's engine-auth alert reads it).
+      const signIn = message.tool?.nameCode === "chat.notice.engineSignedOut" || classifiedCode(cause) === "auth";
+      if (started && !signIn) return record("turn", started === "overloaded" ? START_CODES.overloaded : START_CODES.provider, engine, message.at, botId, threadId);
       const fixed = fixedCode(cause);
       if (fixed) return record("turn", fixed, engine, message.at, botId, threadId);
       if (pending.size >= PENDING_CAP) settle(pending.keys().next().value as string);
