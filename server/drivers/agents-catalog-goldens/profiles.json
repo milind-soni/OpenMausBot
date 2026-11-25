@@ -1850,8 +1850,8 @@
     ]
   },
   "skills+shared+voice+x+team+board": {
-    "bytes": 73047,
-    "sha256": "2f3f652b40d486453150cf1ddc7107401ec34c8f363502c2f15d842d9a4e4126",
+    "bytes": 73149,
+    "sha256": "c74a780ae454c2b44a9c8ae69d133492b142cc83eb6151e79b32b17796f87894",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
