@@ -98,7 +98,7 @@ describe("compactConversation", () => {
         return options.engineCompact === "stale" ? "stale" : options.engineCompact ? "done" : "skipped";
       },
       resumesSession: () => options.resumes ?? true,
-      currentSelection: () => ({ instanceId: "engine", model: "model" }),
+      instance: () => undefined, confirmDelivery: () => undefined, currentSelection: () => ({ instanceId: "engine", model: "model" }),
       generateText: options.generateText ?? (() => undefined),
       claimIsCurrent: options.claimIsCurrent ?? (() => true),
       controllers: new Map(),
@@ -226,5 +226,174 @@ describe("compactConversation", () => {
     const done = setup({ tokens: 50_000, engineCompact: true });
     await done.run(true);
     expect(done.summarizing).toEqual([]);
+  });
+});
+
+describe("noteEngineCompaction", () => {
+  const bot = { id: "bot" } as BotRecord;
+  const thread = "thread";
+  function setup(options: { nativeCompaction?: boolean; noCompactSession?: boolean; cursor?: string; handed?: { session: string; through: string }; lastInstance?: string } = {}) {
+    const messages: Message[] = [0, 1].flatMap((index) => [
+      { id: `u${index}`, role: "user", kind: "text", text: `ask ${index}`, at: index * 2 } as Message,
+      { id: `b${index}`, role: "bot", kind: "text", text: `answer ${index}`, at: index * 2 + 1 } as Message,
+    ]);
+    const patches: Array<Record<string, unknown>> = [];
+    const notices: unknown[] = [];
+    const instanceId = "engine";
+    const task = {
+      lastInstanceId: options.lastInstance ?? instanceId,
+      resumeCursors: { engine: options.cursor ?? "s1" },
+      handedMessages: options.handed ? { engine: { session: options.handed.session, through: options.handed.through, ids: [] } } : undefined,
+    };
+    const confirmed: Array<[string, string | undefined, string]> = [];
+    const deps: Pick<ConversationCompactionDeps, "store" | "directContext" | "instance" | "confirmDelivery"> = {
+      confirmDelivery: (threadId, turnId, id) => { confirmed.push([threadId, turnId, id]); },
+      store: {
+        taskByThread: () => task as never,
+        activePath: () => messages,
+        patchTask: (_botId: string, _threadId: string, patch: Record<string, unknown>) => { patches.push(patch); return undefined as never; },
+      } as never,
+      directContext: (_bot, _thread, all) => all.filter((m) => m.kind === "text").map((m) => ({ id: m.id, role: m.role === "user" ? "user" as const : "assistant" as const, text: m.text ?? "" })),
+      instance: (id) => {
+        if (id !== instanceId) return undefined;
+        const capabilities: { nativeCompaction?: boolean } = {};
+        if (options.nativeCompaction) capabilities.nativeCompaction = true;
+        const adapter: { capabilities: { nativeCompaction?: boolean }; compactSession?: () => undefined } = { capabilities };
+        if (!options.noCompactSession) adapter.compactSession = () => undefined;
+        return { instanceId: id, driverKind: "engine", adapter };
+      },
+    };
+    const note = (direct = true, reported?: string) => createConversationCompaction(deps as never).noteEngineCompaction(direct ? bot : undefined, thread, "turn-1", reported, () => notices.push({}));
+    return { note, patches, notices, confirmed };
+  }
+
+  it("writes the boundary of a session its engine keeps, through what it had received, beside the notice", () => {
+    const engine = setup({ handed: { session: "s1", through: "b1" } });
+    engine.note();
+    expect(engine.patches).toEqual([{ engineCompacted: { instanceId: "engine", session: "s1", throughId: "b1" } }]);
+    expect(engine.notices).toHaveLength(1);
+    expect(engine.confirmed).toEqual([["thread", "turn-1", "engine"]]);
+  });
+
+  it("only notices, for an engine that folds for itself or offers no compaction of its session", () => {
+    const codex = setup({ nativeCompaction: true });
+    codex.note();
+    const pi = setup({ noCompactSession: true });
+    pi.note();
+    expect(codex.patches).toEqual([]);
+    expect(pi.patches).toEqual([]);
+    expect(codex.confirmed).toEqual([]);
+    expect(pi.confirmed).toEqual([]);
+    expect(codex.notices).toHaveLength(1);
+    expect(pi.notices).toHaveLength(1);
+  });
+
+  it("writes nothing when the delivery record is unusable for the session the cursor names, or says none", () => {
+    const other = setup({ handed: { session: "s0", through: "b1" } });
+    other.note();
+    const editedAway = setup({ handed: { session: "s1", through: "edited-away" } });
+    editedAway.note();
+    const none = setup({});
+    none.note();
+    expect(other.patches).toEqual([]);
+    expect(editedAway.patches).toEqual([]);
+    expect(none.patches).toEqual([]);
+    expect(other.notices).toHaveLength(1);
+    expect(none.notices).toHaveLength(1);
+  });
+
+  it("takes the instance the event names over the one the task last ran on", () => {
+    const engine = setup({ lastInstance: "moved-on", handed: { session: "s1", through: "b1" } });
+    engine.note(true, "engine");
+    expect(engine.patches).toEqual([{ engineCompacted: { instanceId: "engine", session: "s1", throughId: "b1" } }]);
+  });
+
+  it("writes nothing for a thread that is not a direct conversation, or an instance no longer there", () => {
+    const room = setup({ handed: { session: "s1", through: "b1" } });
+    room.note(false);
+    const gone = setup({ lastInstance: "moved-on", handed: { session: "s1", through: "b1" } });
+    gone.note();
+    expect(room.patches).toEqual([]);
+    expect(gone.patches).toEqual([]);
+    expect(room.notices).toHaveLength(1);
+    expect(gone.notices).toHaveLength(1);
+  });
+});
+
+describe("compactConversation on an engine that compacts in place only when asked", () => {
+  const bot = { id: "bot" } as BotRecord;
+  const thread = "thread";
+  /** Eight messages of `size` bytes each (the last pair `tail` bytes), on a meter-reading engine with no compaction of its own. */
+  function setup(options: { size?: number; tail?: number; engineCompacted?: { instanceId: string; session: string; throughId: string }; cursor?: string;
+    resumes?: boolean; coordinationResumed?: boolean; handed?: { session: string; through: string } }) {
+    const size = options.size ?? 60_000, tail = options.tail ?? size;
+    const messages: Message[] = [0, 1, 2, 3].flatMap((index) => [
+      { id: `u${index}`, role: "user", kind: "text", text: "u".repeat(index === 3 ? tail : size), at: index * 2 } as Message,
+      { id: `b${index}`, role: "bot", kind: "text", text: "b".repeat(index === 3 ? tail : size), at: index * 2 + 1 } as Message,
+    ]);
+    const boundaries: unknown[] = [];
+    const task = { resumeCursors: { engine: options.cursor ?? "s1" }, engineCompacted: options.engineCompacted,
+      handedMessages: options.handed ? { engine: { session: options.handed.session, through: options.handed.through, ids: [] } } : undefined };
+    const deps: ConversationCompactionDeps = {
+      store: {
+        taskByThread: () => task as never,
+        activePath: () => messages,
+        patchTask: () => undefined as never,
+        appendMessage: (_threadId: string, message: Partial<Message>) => { const made = { id: `m${messages.length}`, ...message } as Message; messages.push(made); return made; },
+      } as never,
+      context: () => undefined,
+      directContext: (_bot, _thread, all) => all.filter((m) => m.kind === "text").map((m) => ({ id: m.id, role: m.role === "user" ? "user" as const : "assistant" as const, text: m.text ?? "" })),
+      latestCompaction: () => undefined,
+      nativeCompactTokens: () => undefined,
+      engineCompactionOn: () => true,
+      engineCompact: async (_target, _signal, check) => { boundaries.push(check.boundary?.()); return "done"; },
+      resumesSession: () => options.resumes ?? true,
+      instance: () => undefined, confirmDelivery: () => undefined, currentSelection: () => ({ instanceId: "engine", model: "model" }),
+      generateText: () => undefined,
+      claimIsCurrent: () => true,
+      controllers: new Map(),
+      cancelled: (reason) => new Error(reason),
+      idleFraction: 0.85,
+    };
+    const instance = { instanceId: "engine", driverKind: "antigravityAgent", adapter: { capabilities: { contextReading: "meter" as const }, compactSession: () => undefined } };
+    const run = (manual: boolean) => createConversationCompaction(deps)({ bot, threadId: thread, generation: "g", instance, model: "model", excludedIds: new Set(), manual,
+      ...(options.coordinationResumed ? { coordinationResumed: true } : {}) });
+    const folds = () => messages.filter((m) => m.kind === "compaction");
+    return { run, folds, boundaries };
+  }
+  const compacted = { instanceId: "engine", session: "s1", throughId: "b2" };
+
+  it("Compact now asks it, handing over the last message its session received in order, and nothing when no record says", async () => {
+    const asked = setup({ handed: { session: "s1", through: "b3" } });
+    await asked.run(true);
+    expect(asked.boundaries).toEqual([{ instanceId: "engine", session: "s1", throughId: "b3" }]);
+    expect(asked.folds()).toHaveLength(0);
+    const unknown = setup({ handed: { session: "s0", through: "b3" } });
+    await unknown.run(true);
+    expect(unknown.boundaries).toEqual([undefined]);
+  });
+
+  it("times the fold by the history after the point its session was compacted, while the next turn carries on that session", async () => {
+    const over = setup({});
+    await over.run(false);
+    expect(over.folds()).toHaveLength(1);
+    const kept = setup({ engineCompacted: compacted });
+    await kept.run(false);
+    expect(kept.folds()).toHaveLength(0);
+  });
+
+  it("folds the whole history once what came after the compaction outgrows the budget", async () => {
+    const grown = setup({ size: 10_000, tail: 230_000, engineCompacted: compacted });
+    await grown.run(false);
+    expect(grown.folds()).toHaveLength(1);
+    expect(grown.folds()[0]!.compaction).toMatchObject({ tokensBefore: Math.ceil((6 * 10_000 + 2 * 230_000) / 4) });
+  });
+
+  it("times the fold by the whole history when the next turn would not carry on the compacted session", async () => {
+    for (const away of [{ cursor: "s2" }, { resumes: false }, { coordinationResumed: true }, { engineCompacted: { ...compacted, instanceId: "other" } }]) {
+      const moved = setup({ engineCompacted: compacted, ...away });
+      await moved.run(false);
+      expect(moved.folds()).toHaveLength(1);
+    }
   });
 });

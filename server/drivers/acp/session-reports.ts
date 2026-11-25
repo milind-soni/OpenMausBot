@@ -14,6 +14,11 @@ export interface UsageState {
   usagePeak: number | null;
   usageLast: number | null;
   usageCompacted: boolean;
+  /** The native Antigravity CLI 1.5.15 compacts its session at a turn's start without telling; this turn's readings after its prompt show it. */
+  turnPeak: number | null;
+  turnSize: number | null;
+  turnBlind: boolean;
+  collapsedInTurn: boolean;
 }
 
 export interface SessionReport {
@@ -31,12 +36,33 @@ function readUsage(update: any, turn: UsageState): SessionReport {
   turn.usageLast = used;
   if (!Number.isFinite(used)) return {};
   const size = update.size ?? update.usage?.size;
+  const windowed = typeof size === "number" && Number.isFinite(size) && size > 0;
+  if (windowed) watchTurnCollapse(turn, used, size);
   return {
     context: {
       contextTokens: used,
-      ...(typeof size === "number" && Number.isFinite(size) && size > 0 ? { contextWindow: size } : {}),
+      ...(windowed ? { contextWindow: size } : {}),
     },
   };
+}
+
+export function blindTurn(turn: UsageState): void {
+  turn.turnBlind = true;
+  turn.collapsedInTurn = false;
+  turn.turnSize = null;
+  turn.turnPeak = null;
+}
+
+function watchTurnCollapse(turn: UsageState, used: number, size: number): void {
+  if (turn.turnBlind) return;
+  if (turn.turnSize === null) {
+    turn.turnSize = size;
+    turn.turnPeak = used;
+    return;
+  }
+  if (turn.turnSize !== size) return blindTurn(turn);
+  if (turn.turnPeak !== null && used < turn.turnPeak * ACP_COMPACTION_COLLAPSE_RATIO) turn.collapsedInTurn = true;
+  if (turn.turnPeak === null || used > turn.turnPeak) turn.turnPeak = used;
 }
 
 /** Hermes (hermes-agent acp_adapter at 38570c3) rotates its session on compression and sends a `session_info_update` whose

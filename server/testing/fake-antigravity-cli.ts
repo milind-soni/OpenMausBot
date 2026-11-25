@@ -4,7 +4,9 @@
 // <gemini-dir>/antigravity-acp/antigravity-oauth-token, which stands for the OS keyring.
 //   - ACP over stdio: `initialize` names "Antigravity ACP Server" and offers `logout` and `session/close`; `authenticate`
 //     always fails; `session/new` answers -32000 "Authentication required" until signed in, then offers a mode and the
-//     models (one is specific to the account); `session/prompt` streams one reply; `logout` forgets the sign-in.
+//     models (one is specific to the account); `session/new` and `session/resume` then advertise the slash commands;
+//     `session/prompt` streams one reply, and one whose first block is `/compact` compacts as 1.5.14 does (no reply, one
+//     `usage_update`, `end_turn` with the summary call's usage); `logout` forgets the sign-in.
 //   - `acp --login`: prints the sign-in link and the paste prompt on stdout, reads one line from stdin, and exits 0 after
 //     writing the sign-in when the line is (or its `code` is) the accepted code, 1 otherwise. It opens no browser.
 // Env knobs (all optional):
@@ -21,6 +23,21 @@
 //   FAKE_AGY_KEYRING        a folder that stands for the OS keyring: the sign-in is kept there, one entry per --gemini-dir,
 //                           and only `logout` removes it; ignored while SSH_CONNECTION is set, as the real CLI ignores the
 //                           keyring then
+//   FAKE_AGY_COMMANDS       the slash commands advertised, comma separated (default goal,compact,plan,learn)
+//   FAKE_AGY_USAGE          1: an ordinary prompt reports `usage_update` and its usage, as 1.5.14 does
+//   FAKE_AGY_AUTO_COMPACT   1: a turn the CLI compacts at its start, as 1.5.15 does near the model's limit: one usage_update
+//                           at the pre-compaction size (the summary call itself), the reply, then one far below it, same window
+//   FAKE_AGY_AUTO_COMPACT_AT  compact only a turn whose reading so far is at least this (default 0: every turn)
+//   FAKE_AGY_AUTO_COMPACT_THEN  after the compaction's low reading: window (one more reading in a window twice as large) | model
+//                           (a config_option_update that switches the session's model)
+//   FAKE_AGY_FLOW           plain (default) | system-first (a <SYSTEM_MESSAGE> block, then "Done.") | system-only (a reply of only a <SYSTEM_MESSAGE> block) | tool-done (reply, one
+//                           tool, reasoning, then "Done.") | tool-system (the same, ending in a <SYSTEM_MESSAGE> block)
+//   FAKE_AGY_PROMPT_ERROR   1: answer the prompt with an RPC error after its reply
+//   FAKE_AGY_ANSWER_GATE    hold the prompt's answer (after its readings and reply) until this file exists; a session/cancel
+//                           that arrives while it is held answers the prompt cancelled
+//   FAKE_AGY_COMPACT        how `/compact` is answered: reply (as an ordinary message, 777 output tokens) | bare (`end_turn` alone) |
+//                           usage-only (no `usage_update`) | usage-after (the `usage_update` follows the answer) | error |
+//                           exit | hang (answers `cancelled` on session/cancel) | hang-ignore-cancel
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -105,6 +122,15 @@ const failure = (id: unknown, code: number, message: string) => out({ id, error:
 let mode = "default";
 let model = "fixture-base-model";
 let sessions = 0;
+let used = 9_000;
+let held: { id: unknown; sessionId?: string; gate?: boolean } | null = null;
+const WINDOW = 1_048_576;
+const commands = (process.env.FAKE_AGY_COMMANDS ?? "goal,compact,plan,learn").split(",").filter(Boolean);
+const update = (sessionId: string | undefined, body: Record<string, unknown>) => out({ method: "session/update", params: { sessionId, update: body } });
+const advertise = (sessionId: string) => update(sessionId, {
+  sessionUpdate: "available_commands_update", availableCommands: commands.map((name) => ({ name, description: `fixture ${name}` })),
+});
+const usage = (input: number, output: number) => ({ inputTokens: input, outputTokens: output, cachedReadTokens: 0, cachedWriteTokens: 0, totalTokens: input + output });
 
 const configOptions = () => [
   { id: "mode", name: "Mode", type: "select", currentValue: mode, options: [{ value: "default", name: "Default" }, { value: "plan", name: "Plan" }] },
@@ -115,10 +141,11 @@ const configOptions = () => [
 ];
 
 createInterface({ input: process.stdin }).on("line", async (line) => {
-  let message: { id?: unknown; method?: string; params?: { sessionId?: string; configId?: string; value?: string } };
+  let message: { id?: unknown; method?: string; params?: { sessionId?: string; configId?: string; value?: string; prompt?: Array<{ type?: string; text?: string }> } };
   try { message = JSON.parse(line); } catch { return; }
   if (!message.method) return;
-  log({ method: message.method, signedIn: signedIn() });
+  const first = message.method === "session/prompt" ? message.params?.prompt?.[0]?.text : undefined;
+  log({ method: message.method, signedIn: signedIn(), ...(first === undefined ? {} : { prompt: first }) });
   switch (message.method) {
     case "initialize":
       if (process.env.FAKE_AGY_HANG === "initialize") return;
@@ -153,16 +180,94 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
       if (!signedIn()) return failure(message.id, -32000, "Authentication required");
       sessions += 1;
       result(message.id, { sessionId: `fixture-session-${process.pid}-${sessions}`, configOptions: configOptions() });
+      advertise(`fixture-session-${process.pid}-${sessions}`);
+      break;
+    case "session/resume":
+      if (!signedIn()) return failure(message.id, -32000, "Authentication required");
+      result(message.id, { sessionId: message.params?.sessionId, configOptions: configOptions() });
+      advertise(String(message.params?.sessionId));
+      break;
+    case "session/cancel":
+      if (held && (process.env.FAKE_AGY_COMPACT === "hang" || held.gate)) {
+        result(held.id, { stopReason: "cancelled" });
+        held = null;
+      }
       break;
     case "session/set_config_option":
       if (message.params?.configId === "mode") mode = String(message.params.value);
       if (message.params?.configId === "model") model = String(message.params.value);
       result(message.id, { configOptions: configOptions() });
       break;
-    case "session/prompt":
-      out({ method: "session/update", params: { sessionId: message.params?.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "fixture reply" } } } });
-      result(message.id, { stopReason: "end_turn" });
+    case "session/prompt": {
+      const sessionId = message.params?.sessionId;
+      const answersCompact = first?.trim() === "/compact";
+      if (answersCompact && process.env.FAKE_AGY_COMPACT !== "reply") {
+        const how = process.env.FAKE_AGY_COMPACT ?? "";
+        if (how === "exit") process.exit(4);
+        if (how === "error") return failure(message.id, -32603, "compaction failed");
+        if (how === "hang" || how === "hang-ignore-cancel") { held = { id: message.id, sessionId }; return; }
+        if (how === "bare") return result(message.id, { stopReason: "end_turn" });
+        const summary = usage(used, 500);
+        if (how === "usage-after") {
+          process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn", usage: summary } })}\n${JSON.stringify({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "usage_update", used: used + 500, size: WINDOW } } })}\n`);
+        } else {
+          if (how !== "usage-only") update(sessionId, { sessionUpdate: "usage_update", used: used + 500, size: WINDOW });
+          result(message.id, { stopReason: "end_turn", usage: summary });
+        }
+        used = 2_000;
+        break;
+      }
+      const say = (text: string) => update(sessionId, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+      const readings = process.env.FAKE_AGY_USAGE === "1";
+      const auto = process.env.FAKE_AGY_AUTO_COMPACT === "1" && used >= Number(process.env.FAKE_AGY_AUTO_COMPACT_AT ?? 0);
+      const internal = "<SYSTEM_MESSAGE>a fixture internal notification</SYSTEM_MESSAGE>";
+      const finish = () => result(message.id, { stopReason: "end_turn", ...(readings ? { usage: answersCompact ? usage(used - 777, 777) : usage(used - 20, 20) } : {}) });
+      if (auto) update(sessionId, { sessionUpdate: "usage_update", used, size: WINDOW });
+      const flow = process.env.FAKE_AGY_FLOW ?? "plain";
+      if (flow === "system-only") {
+        say(internal);
+      } else if (flow === "system-first") {
+        say(internal);
+        say("Done.");
+      } else {
+        say("fixture reply");
+        if (flow === "tool-done" || flow === "tool-system") {
+          update(sessionId, { sessionUpdate: "tool_call", toolCallId: "fixture-tool", title: "fixture tool", rawInput: { command: "fixture" } });
+          update(sessionId, { sessionUpdate: "tool_call_update", toolCallId: "fixture-tool", status: "completed" });
+          update(sessionId, { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "fixture reasoning" } });
+          say(flow === "tool-done" ? "Done." : internal);
+        }
+      }
+      if (readings && !auto) {
+        used += 1_000;
+        update(sessionId, { sessionUpdate: "usage_update", used, size: WINDOW });
+      }
+      if (auto) {
+        used = 2_000;
+        update(sessionId, { sessionUpdate: "usage_update", used, size: WINDOW });
+        if (process.env.FAKE_AGY_AUTO_COMPACT_THEN === "model") {
+          model = model === accountModel ? "fixture-base-model" : accountModel;
+          update(sessionId, { sessionUpdate: "config_option_update", configOptions: configOptions() });
+        }
+        if (process.env.FAKE_AGY_AUTO_COMPACT_THEN === "window") update(sessionId, { sessionUpdate: "usage_update", used: used + 500, size: WINDOW * 2 });
+      }
+      if (process.env.FAKE_AGY_PROMPT_ERROR === "1") return failure(message.id, -32603, "fake antigravity: the upstream model call failed");
+      const gate = process.env.FAKE_AGY_ANSWER_GATE;
+      if (gate) {
+        held = { id: message.id, sessionId, gate: true };
+        const wait = setInterval(() => {
+          if (held?.id !== message.id) { clearInterval(wait); return; }
+          if (!existsSync(gate)) return;
+          clearInterval(wait);
+          held = null;
+          finish();
+        }, 20);
+        wait.unref?.();
+        break;
+      }
+      finish();
       break;
+    }
     default:
       result(message.id, {});
   }

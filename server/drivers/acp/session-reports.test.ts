@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DATA_DIR, loadConfig, parseConfigPatch, saveConfig } from "../../config.ts";
 import { acpPlanLinesEnabled, hermesCompaction, planLine, readSessionReport, type UsageState } from "./session-reports.ts";
 
-const turn = (usagePeak: number | null = null): UsageState => ({ usagePeak, usageLast: null, usageCompacted: false });
+const turn = (usagePeak: number | null = null): UsageState => ({ usagePeak, usageLast: null, usageCompacted: false, turnPeak: null, turnSize: null, turnBlind: false, collapsedInTurn: false });
 /** A pooled process's session record, as far as the reader looks at it. */
 const live = (sessionId: string | null = "session-1") => ({ sessionId });
 const usage = (fields: object) => ({ sessionUpdate: "usage_update", ...fields });
@@ -24,19 +24,19 @@ describe("readSessionReport: usage_update", () => {
     for (const used of [0, -48_000, "48000", null, undefined, Number.NaN]) {
       const state = turn(100_000);
       expect(readSessionReport(usage({ used, size: 200_000 }), undefined, state, live()), String(used)).toEqual({});
-      expect(state).toEqual({ usagePeak: 100_000, usageLast: null, usageCompacted: false });
+      expect(state).toEqual({ usagePeak: 100_000, usageLast: null, usageCompacted: false, turnPeak: null, turnSize: null, turnBlind: false, collapsedInTurn: false });
     }
   });
 
   it("keeps the turn's peak and marks a collapse below it as a compaction", () => {
     const state = turn();
     readSessionReport(usage({ used: 120_000 }), undefined, state, live());
-    expect(state).toEqual({ usagePeak: 120_000, usageLast: 120_000, usageCompacted: false });
+    expect(state).toEqual({ usagePeak: 120_000, usageLast: 120_000, usageCompacted: false, turnPeak: null, turnSize: null, turnBlind: false, collapsedInTurn: false });
     // an ordinary dip stays above 60% of the peak
     readSessionReport(usage({ used: 100_000 }), undefined, state, live());
-    expect(state).toEqual({ usagePeak: 120_000, usageLast: 100_000, usageCompacted: false });
+    expect(state).toEqual({ usagePeak: 120_000, usageLast: 100_000, usageCompacted: false, turnPeak: null, turnSize: null, turnBlind: false, collapsedInTurn: false });
     readSessionReport(usage({ used: 45_000 }), undefined, state, live());
-    expect(state).toEqual({ usagePeak: 120_000, usageLast: 45_000, usageCompacted: true });
+    expect(state).toEqual({ usagePeak: 120_000, usageLast: 45_000, usageCompacted: true, turnPeak: null, turnSize: null, turnBlind: false, collapsedInTurn: false });
   });
 
   it("says nothing about updates it does not read", () => {
@@ -44,7 +44,61 @@ describe("readSessionReport: usage_update", () => {
     for (const update of [undefined, null, "usage_update", {}, { sessionUpdate: "agent_message_chunk", used: 5 }]) {
       expect(readSessionReport(update, undefined, state, live()), JSON.stringify(update)).toEqual({});
     }
-    expect(state).toEqual({ usagePeak: 100_000, usageLast: null, usageCompacted: false });
+    expect(state).toEqual({ usagePeak: 100_000, usageLast: null, usageCompacted: false, turnPeak: null, turnSize: null, turnBlind: false, collapsedInTurn: false });
+  });
+});
+
+describe("readSessionReport: the turn's own collapse watch", () => {
+  it("marks a same-window collapse below the share of the turn's peak", () => {
+    const state = turn();
+    readSessionReport(usage({ used: 64_872, size: 131_072 }), undefined, state, live());
+    expect(state).toMatchObject({ turnPeak: 64_872, turnSize: 131_072, collapsedInTurn: false });
+    readSessionReport(usage({ used: 11_190, size: 131_072 }), undefined, state, live());
+    expect(state).toMatchObject({ turnPeak: 64_872, turnSize: 131_072, collapsedInTurn: true });
+  });
+
+  it("stays watching the turn alone: a peak preset before it, or its own monotonic readings, judge nothing", () => {
+    const state = turn(200_000);
+    readSessionReport(usage({ used: 10_000, size: 131_072 }), undefined, state, live());
+    readSessionReport(usage({ used: 11_000, size: 131_072 }), undefined, state, live());
+    expect(state).toMatchObject({ usageCompacted: true, turnPeak: 11_000, turnSize: 131_072, collapsedInTurn: false });
+  });
+
+  it("ends the watch for good once a reading arrives in another window", () => {
+    const state = turn();
+    readSessionReport(usage({ used: 64_872, size: 131_072 }), undefined, state, live());
+    readSessionReport(usage({ used: 50_000, size: 1_048_576 }), undefined, state, live());
+    readSessionReport(usage({ used: 1_000, size: 1_048_576 }), undefined, state, live());
+    expect(state).toMatchObject({ turnSize: null, turnPeak: null, turnBlind: true, collapsedInTurn: false });
+  });
+
+  it("takes no part in the watch: a reading without a window, or with no count at all", () => {
+    const state = turn();
+    readSessionReport(usage({ used: 64_872, size: 131_072 }), undefined, state, live());
+    readSessionReport(usage({ used: 0, size: 131_072 }), undefined, state, live());
+    readSessionReport(usage({ used: 5_000 }), undefined, state, live());
+    expect(state).toMatchObject({ turnPeak: 64_872, turnSize: 131_072, collapsedInTurn: false });
+    // the next reading with a window still compares against the peak those usable readings set
+    readSessionReport(usage({ used: 50_000, size: 131_072 }), undefined, state, live());
+    expect(state.collapsedInTurn).toBe(false);
+  });
+
+  it("forgets a collapse already seen once a reading arrives in another window", () => {
+    const state = turn();
+    readSessionReport(usage({ used: 64_872, size: 131_072 }), undefined, state, live());
+    readSessionReport(usage({ used: 11_190, size: 131_072 }), undefined, state, live());
+    expect(state.collapsedInTurn).toBe(true);
+    readSessionReport(usage({ used: 12_000, size: 262_144 }), undefined, state, live());
+    expect(state).toMatchObject({ turnBlind: true, collapsedInTurn: false });
+  });
+
+  it("needs the drop below the share, not merely any dip", () => {
+    const state = turn();
+    readSessionReport(usage({ used: 100_000, size: 131_072 }), undefined, state, live());
+    readSessionReport(usage({ used: 60_000, size: 131_072 }), undefined, state, live());
+    expect(state.collapsedInTurn).toBe(false);
+    readSessionReport(usage({ used: 59_999, size: 131_072 }), undefined, state, live());
+    expect(state.collapsedInTurn).toBe(true);
   });
 });
 
@@ -220,6 +274,6 @@ describe("readSessionReport: plan", () => {
     // a plan is not a compaction and not a reply
     const state = turn();
     readSessionReport(plan(["pending", "Tell the team"]), undefined, state, session, on);
-    expect(state).toEqual({ usagePeak: null, usageLast: null, usageCompacted: false });
+    expect(state).toEqual({ usagePeak: null, usageLast: null, usageCompacted: false, turnPeak: null, turnSize: null, turnBlind: false, collapsedInTurn: false });
   });
 });

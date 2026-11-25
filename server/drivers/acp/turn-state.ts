@@ -4,6 +4,7 @@ import type { RequestOutcome, SendTurnInput } from "../../contracts.ts";
 import type { spawnCli } from "../../procs.ts";
 import { noticeFailure } from "../../chat-notices.ts";
 import { errorReplyFailure, type ErrorReplyFailure } from "../engine-errors.ts";
+import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
 import type { AcpConfig } from "./core.ts";
 import type { AcpDriverHooks } from "./driver-hooks.ts";
 import type { AcpHost, AcpLink } from "./host.ts"; import type { AppliedConfig } from "./applied-config.ts";
@@ -30,6 +31,10 @@ export interface AcpTurn {
     usagePeak: number | null;
     usageLast: number | null;
     usageCompacted: boolean;
+    turnPeak: number | null;
+    turnSize: number | null;
+    turnBlind: boolean;
+    collapsedInTurn: boolean;
     /** A chunk the driver read as a failed model call, kept out of `text` while it is the agent's last words. */
     failedChunk: { chunk: string; failure: string } | null;
     /** Stop went unanswered: only the cancel timeout settles the turn, once its session is closed or its process gone. */
@@ -78,8 +83,12 @@ export interface AcpSession {
   settledAt?: number;
   /** The slash commands the agent last advertised for this session. */
   commands?: ReadonlySet<string>;
+  commandsSession?: string;
   fallbackNotice?: string;
   launchModel?: string;
+  /** The slash command that compacts this session in place, from the launch that started its process. */
+  compactCommand?: string;
+  lastModel?: string;
   /** The effort the session runs: its process's launch argv's, or the last one configureSession applied. */
   effort?: SendTurnInput["effort"];
 }
@@ -130,10 +139,20 @@ export function trackThoughtAfterTool(state: AcpTurn["state"]): void {
   if (state.toolsSinceShown) state.thoughtSinceTool = true;
 }
 
+export function takeAssistantText(state: AcpTurn["state"]): string | null {
+  const raw = state.text;
+  state.text = "";
+  const text = stripLeakedSystemHarnessMessages(raw);
+  if (!text.trim()) return null;
+  trackAssistantWords(state);
+  return text;
+}
+
 export interface AcpTurnEnd {
   ok: boolean;
   stopReason: string | null;
   error?: Omit<ErrorReplyFailure, "stopReason">;
+  finalText: string | null;
 }
 
 /** How a settling turn ends, once its last text is out. A Stop the agent answers with end_turn (OpenCode does) is the
@@ -144,13 +163,13 @@ export interface AcpTurnEnd {
 export function endTurn(current: AcpTurn, ok: boolean, stopReason: string | null, ai: string): AcpTurnEnd {
   const ended = ok && stopReason === null;
   const errorReply = ended && !current.state.stopped && !current.state.repliedText ? errorReplyFailure(ai, current.state.text) : null;
-  if (!errorReply) current.flushAssistantText();
-  if (ended && current.state.stopped) return { ok, stopReason: "cancelled" };
+  const finalText = errorReply ? null : takeAssistantText(current.state);
+  if (ended && current.state.stopped) return { ok, stopReason: "cancelled", finalText };
   if (errorReply) {
     const { stopReason: failed, ...error } = errorReply;
-    return { ok: false, stopReason: failed, error };
+    return { ok: false, stopReason: failed, error, finalText: null };
   }
-  if (ended && !current.state.producedItem) return { ok: false, stopReason: "empty_turn", error: noticeFailure("chat.notice.acpEmpty", { provider: ai }) };
-  if (ended && current.state.repliedText && current.state.thoughtSinceTool) return { ok: false, stopReason: "ended_after_tools", error: noticeFailure("chat.notice.acpEndedAfterTools", { provider: ai }) };
-  return { ok, stopReason };
+  if (ended && !current.state.producedItem) return { ok: false, stopReason: "empty_turn", error: noticeFailure("chat.notice.acpEmpty", { provider: ai }), finalText };
+  if (ended && current.state.repliedText && current.state.thoughtSinceTool) return { ok: false, stopReason: "ended_after_tools", error: noticeFailure("chat.notice.acpEndedAfterTools", { provider: ai }), finalText };
+  return { ok, stopReason, finalText };
 }

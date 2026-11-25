@@ -635,6 +635,15 @@ describe("ACP turns (fake CLI)", () => {
     expect(await send("turn 4")).toBe("turn 4");
   });
 
+  it("says nothing about a collapse within a turn on an engine with no compaction command of its own", async () => {
+    const { usage, send } = await usageThread("silent-collapse");
+    usage(120000, 40000);
+    expect(await send("turn 1")).toBe(FULL + "\n\nturn 1");
+    const contexts = recorder.events.flatMap((event) => event.type === "thread.token-usage.updated" && event.contextTokens !== undefined ? [event.contextTokens] : []);
+    expect(contexts).toEqual([120_000, 40_000]);
+    expect(recorder.events.some((event) => event.type === "context.compacted")).toBe(false);
+  });
+
   it.each([40000, 75000])("invalidates a rejected prompt's receipt only after compaction (usage: %s)", async (used) => {
     const failureFile = join(scratch, "compaction-failure.json");
     process.env.FAKE_ACP_RPC_FAILURE_FILE = failureFile;

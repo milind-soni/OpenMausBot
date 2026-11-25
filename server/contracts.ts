@@ -380,7 +380,10 @@ export type IdleCompactResult =
 
 export type EngineCompactResult =
   | { ok: true; usage: { input: number; output: number; cachedInput: number } | null; model: string | null }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string; usage?: { input: number; output: number; cachedInput: number }; model?: string | null;
+      /** The engine's session took something the conversation does not show (it answered the request as a message), so
+       * no turn may carry it on. */
+      sessionChanged?: true };
 
 export type SteerOutcome = "steered" | "refused" | "indeterminate";
 

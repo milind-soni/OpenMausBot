@@ -296,16 +296,26 @@ export class Handoffs {
       if (pending.replaced) this.store.write(pending.botId, event.threadId, pending.instanceId, { ids: [] });
       return;
     }
-    if ((actedOn(event) || (event.type === "turn.completed" && event.ok)) && !pending.accepted) {
-      pending.accepted = true;
-      pending.turnId ??= event.turnId;
-      this.accept(event.threadId, pending);
-    }
+    if (actedOn(event) || (event.type === "turn.completed" && event.ok)) this.acceptOnce(event.threadId, pending, event.turnId);
     if (event.type !== "turn.completed") return;
     this.pending.delete(event.threadId);
     const turnId = event.turnId ?? pending.turnId;
     if (pending.accepted) this.add(event.threadId, pending, [...(turnId ? this.store.replies(event.threadId, turnId) : []), ...pending.authored]);
     this.settle(event.threadId, pending);
+  }
+
+  /** The in-flight turn's prompt is known delivered by something other than an event of its own stream. */
+  confirm(threadId: string, turnId: string | undefined, instanceId: string): void {
+    const pending = this.pending.get(threadId);
+    if (!pending?.dispatched || instanceId !== pending.instanceId || (pending.turnId && turnId && turnId !== pending.turnId)) return;
+    this.acceptOnce(threadId, pending, turnId);
+  }
+
+  private acceptOnce(threadId: string, pending: PendingHandoff, turnId: string | undefined): void {
+    if (pending.accepted) return;
+    pending.accepted = true;
+    pending.turnId ??= turnId;
+    this.accept(threadId, pending);
   }
 
   private settle(threadId: string, pending: PendingHandoff): void {

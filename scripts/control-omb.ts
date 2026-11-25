@@ -2,6 +2,7 @@
 // The openmausbot headless verbs for verifying an isolated fixture. A verb that
 // changes something never runs on a server it merely found.
 import { spawn, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
@@ -15,6 +16,7 @@ import { launchUi, runControlOmbUi } from "./testing/control-omb-ui.ts";
 import { removeTempDir, waitForExit } from "../server/testing/cleanup.ts";
 import { hostTimeout } from "../server/testing/host-timeout.ts";
 import { freePortBlock } from "../server/testing/ports.ts";
+import { fakeAntigravityScript } from "../server/testing/antigravity-native-fixture.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 /** Outside the bot name pool, so no suite can plan a bot that collides with the
@@ -285,6 +287,16 @@ export function verificationServerArgs(childEnv: NodeJS.ProcessEnv): string[] {
   ];
 }
 
+function signedInFakeAntigravity(dataDir: string, instanceId: string): string {
+  const executable = join(dataDir, "fake-antigravity", "antigravity");
+  mkdirSync(dirname(executable), { recursive: true });
+  writeFileSync(executable, fakeAntigravityScript(), { mode: 0o755 });
+  const profile = join(dataDir, "providers", "antigravity", createHash("sha256").update(instanceId).digest("hex"), "antigravity-acp");
+  mkdirSync(profile, { recursive: true });
+  writeFileSync(join(profile, "antigravity-oauth-token"), "{}\n", { mode: 0o600 });
+  return executable;
+}
+
 /** Start one foreground-owned, fake-engine server with no access to user data. */
 export async function launchVerificationServer(
   parentEnv: NodeJS.ProcessEnv = process.env,
@@ -296,7 +308,7 @@ export async function launchVerificationServer(
   enterprise?: { dir: string; licenseKey: string },
   room?: { scripted: boolean },
   /** Optional repository-owned fake providers for multi-engine setup checks. */
-  extraProviders: Array<"codex" | "cline" | "copilot" | "customAcp" | "opencode" | "kimi" | "grok"> = [],
+  extraProviders: Array<"codex" | "cline" | "copilot" | "customAcp" | "opencode" | "kimi" | "grok" | "antigravity"> = [],
   /** Programmatic tests only: an owned loopback Boat provider, never a live account. */
   boatFixtureApi?: string,
   /** Programmatic web UI qualification against the fixture's static server. */
@@ -350,6 +362,11 @@ export async function launchVerificationServer(
       ...(extraProviders.includes("codex") ? { codex: {
         driver: "codex", displayName: "Verification Codex", config: { cli: fileURLToPath(new URL("../server/testing/fake-codex-app-server.ts", import.meta.url)) },
         environment: Object.fromEntries(Object.entries(parentEnv).filter(([key, value]) => key.startsWith("FAKE_CODEX_") && value)),
+      } } : {}),
+      ...(extraProviders.includes("antigravity") ? { antigravity: {
+        driver: "antigravityAgent", displayName: "Verification Antigravity", config: { cli: signedInFakeAntigravity(dataDir, "antigravity"), fullAuto: false },
+        environment: { ...Object.fromEntries(Object.entries(parentEnv).filter(([key, value]) => key.startsWith("FAKE_AGY_") && value)),
+          FAKE_AGY_LOG: join(dataDir, "fake-antigravity.log"), FAKE_AGY_KEYRING: "" },
       } } : {}),
       ...(extraProviders.includes("cline") ? { cline: {
         driver: "clineAgent", displayName: "Verification Cline",
