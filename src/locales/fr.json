@@ -3921,7 +3921,18 @@
   "remote.tailscale.needsApproval": "Cet ordinateur attend d'être approuvé sur votre réseau Tailscale. Approuvez-le dans la console d'administration Tailscale, puis réessayez.",
   "together.switch.title": "Cet ordinateur et Mon Cloud ensemble",
   "together.switch.line": "Désactivé par défaut. Les bots du Cloud et ceux de cet ordinateur s'affichent dans une seule liste, et chacun s'ouvre là où il se trouve.",
+  "together.switch.commands": "L'activer permet aussi aux bots de Mon Cloud d'exécuter des commandes sur cet ordinateur ; vous pouvez désactiver cela depuis l'icône OpenMausBot.",
   "together.switch.failed": "Impossible d'enregistrer. Réessayez.",
+  "together.mark.workingCloud": "Travaille sur Mon Cloud en ce moment",
+  "together.mark.workingComputer": "Travaille sur cet ordinateur en ce moment",
+  "together.mark.asleep": "Mon Cloud est en veille. Ouvrir {name} le réveille.",
+  "together.mark.offlineCloud": "Mon Cloud est injoignable pour le moment. {name} reprendra dès son retour.",
+  "together.line.asleep": "Mon Cloud est en veille. Ouvrez-le pour voir ses bots.",
+  "together.mark.livesCloud": "Vit sur Mon Cloud",
+  "together.mark.livesComputer": "Vit sur cet ordinateur",
+  "together.mark.livesOn": "Vit sur {place}",
+  "together.mark.workingOn": "Travaille sur {place} en ce moment",
+  "together.mark.offline": "{place} est injoignable pour le moment. {name} reprendra dès son retour.",
   "imageGen.complexity.label": "Niveau de détail",
   "imageGen.complexity.help": "Le niveau de détail des images GPT-Image-2.6. Plus bas, c'est plus simple et plus rapide.",
   "imageGen.complexity.low": "Faible",
@@ -4057,5 +4068,7 @@
   "phone.reach.offAdding": "Désactivé · Ajouter un téléphone les active",
   "settings.nav.devicesNeedYou": "Un appareil ou le réseau privé a besoin de vous",
   "settings.nav.phoneConnectedAllClear": "Un téléphone est connecté, et rien n’a besoin de vous",
-  "keys.vps.ownServer": "Votre propre serveur (SSH)"
+  "keys.vps.ownServer": "Votre propre serveur (SSH)",
+  "chat.notice.cloudBusyStart": "Ce Cloud est trop occupé pour démarrer l'IA en ce moment, donc cette tâche n'a pas été exécutée. Attendez une minute et renvoyez-la, arrêtez une tâche lourde en cours ou passez à un plan supérieur pour avoir plus de place.",
+  "chat.notice.cloudOutOfCpu": "Votre Cloud a manqué de CPU pour cette tâche, donc l'IA n'a pas pu démarrer et rien n'a été exécuté. Attendez une minute et renvoyez-la, arrêtez une tâche lourde en cours ou passez à un plan supérieur pour avoir plus de CPU."
 }

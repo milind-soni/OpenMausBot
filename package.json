@@ -15,7 +15,7 @@
   "license": "Apache-2.0",
   "desktopName": "com.openmausbot.app.desktop",
   "type": "module",
-  "main": "electron/main.mjs",
+  "main": "electron/boot.mjs",
   "engines": {
     "node": ">=24"
   },

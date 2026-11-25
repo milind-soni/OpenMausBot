@@ -36,7 +36,7 @@ import { toolSchemaProfileFor } from "../tool-schema-profile.ts";
 import { classifyContinuable, writeTurnHandoff } from "../turn-continuation.ts";
 import { KEY_REJECTED_REASON, keyRejected, noteKeyAccepted, noteKeyRejected, rejectsKey } from "../key-rejections.ts";
 import { FETCH_LIMIT_MS, fetchPastLimit, prepareChatModel } from "./openai-chat-fetch.ts";
-import { announcesAction } from "./chat-announcement.ts";
+import { announcesAction } from "./chat-announcement.ts"; import { shellOff } from "./shell-off.ts";
 export interface OpenAIChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string | ChatContentPart[] | null;
@@ -552,7 +552,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     if (sessionGrants.size > MAX_DELIVERED_THREADS) sessionGrants.delete(sessionGrants.keys().next().value!);
     const approval = createChatToolApproval({
       signal: abort.signal,
-      granted: turn.guestConfined ? undefined : granted,
+      granted: shellOff(turn) ? undefined : granted,
       open: (ask) => emit({
         ...base(turn.threadId, turnId), type: "request.opened", requestType: "permission",
         requestId: ask.id, tool: ask.tool, summary: ask.summary, allowSession: ask.grant !== undefined,

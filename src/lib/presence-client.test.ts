@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { setLanguageChoice } from "./language-preference";
-import { duePing, openTarget, PRESENCE_MIN_INTERVAL_MS, presenceBody, shownLanguage } from "./presence-client";
+import { composerKey, duePing, dueTyping, openTarget, PRESENCE_MIN_INTERVAL_MS, presenceBody, shownLanguage } from "./presence-client";
 
 describe("presence client", () => {
   it("sends the device's zone and the app's language with the desktop source", () => {
@@ -20,6 +20,27 @@ describe("presence client", () => {
     expect(duePing(null, 1_000)).toBe(true);
     expect(duePing(1_000, 1_000 + PRESENCE_MIN_INTERVAL_MS - 1)).toBe(false);
     expect(duePing(1_000, 1_000 + PRESENCE_MIN_INTERVAL_MS)).toBe(true);
+  });
+
+  it("says typing only with the chat it is typed in", () => {
+    expect(presenceBody("UTC", "en", "thread-1", true)).toEqual({ source: "desktop", timeZone: "UTC", language: "en", threadId: "thread-1", typing: true });
+    expect(presenceBody("UTC", "en", undefined, true)).toEqual({ source: "desktop", timeZone: "UTC", language: "en" });
+  });
+
+  it("knows a key in a chat's composer from any other key or event", () => {
+    const composer = { closest: (selector: string) => (selector === "[data-composer-row]" ? {} : null) };
+    expect(composerKey({ type: "keydown", target: composer as unknown as EventTarget })).toBe(true);
+    expect(composerKey({ type: "pointerdown", target: composer as unknown as EventTarget })).toBe(false);
+    expect(composerKey({ type: "keydown", target: { closest: () => null } as unknown as EventTarget })).toBe(false);
+    expect(composerKey({ type: "keydown", target: null })).toBe(false);
+    expect(composerKey(undefined)).toBe(false);
+  });
+
+  it("tells typing in a chat at once, then once a minute there, and at once in another chat", () => {
+    expect(dueTyping(null, "t1", 1_000)).toBe(true);
+    expect(dueTyping({ threadId: "t1", at: 1_000 }, "t1", 1_000 + PRESENCE_MIN_INTERVAL_MS - 1)).toBe(false);
+    expect(dueTyping({ threadId: "t1", at: 1_000 }, "t2", 1_001)).toBe(true);
+    expect(dueTyping({ threadId: "t1", at: 1_000 }, "t1", 1_000 + PRESENCE_MIN_INTERVAL_MS)).toBe(true);
   });
 
   it("reads only a well-formed open target from the answer", () => {

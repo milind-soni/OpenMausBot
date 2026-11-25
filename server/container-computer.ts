@@ -242,11 +242,11 @@ export interface ContainerRuntimeStatus {
   daemonUp: boolean;
 }
 
-/** Inspects only the host runtime: never opens a container, calls Cua, or reads a screenshot. */
-export async function containerRuntimeStatus(
-  runner: CommandRunner = sh,
-  platform: NodeJS.Platform = process.platform,
-): Promise<ContainerRuntimeStatus> {
+let hostRuntimeRead: Promise<ContainerRuntimeStatus> | null = null; /** Inspects only the host runtime: never opens a container, calls Cua, or reads a screenshot. Callers at one moment share one read (the Local VM's availability and its recovery both ask at start). */
+export function containerRuntimeStatus(runner: CommandRunner = sh, platform: NodeJS.Platform = process.platform): Promise<ContainerRuntimeStatus> {
+  return runner !== sh || platform !== process.platform ? readContainerRuntimeStatus(runner, platform) : (hostRuntimeRead ??= readContainerRuntimeStatus(runner, platform).finally(() => { hostRuntimeRead = null; }));
+}
+async function readContainerRuntimeStatus(runner: CommandRunner, platform: NodeJS.Platform): Promise<ContainerRuntimeStatus> {
   // Podman is the supported Windows VM lane and owns the pinned image; Docker-first would pick an unrelated image store.
   const candidates: Runtime[] = platform === "win32"
     ? ["podman", "docker"]

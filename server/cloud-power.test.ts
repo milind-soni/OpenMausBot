@@ -326,3 +326,21 @@ describe("a hand-off between bots", () => {
     expect(existsSync(join(h.dataDir, "cloud-sleep.json"))).toBe(true);
   });
 });
+
+describe("a suspend too short for the clock to notice", () => {
+  it("the request that woke it ends the sleep when it is someone using the home; a background one is still told it sleeps", () => {
+    const { power, pass, jump } = home();
+    pass(CLOUD_IDLE_AWAKE_MS + 5_000);
+    expect(power.prepareSleep()).toMatchObject({ ok: true });
+    jump(12_000);
+    const res = { once: () => {} };
+    const link = "/api/bot-link/sync";
+    power.arrived(link, { "x-omb-background": "1" });
+    power.request(link, { "x-omb-background": "1" }, res as never);
+    expect(power.sleeping()).toBe(true);
+    expect(power.report().lastActivityAt).toBeNull();
+    power.arrived(link, {});
+    power.request(link, {}, res as never);
+    expect(power.sleeping()).toBe(false);
+  });
+});

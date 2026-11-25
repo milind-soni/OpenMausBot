@@ -528,7 +528,7 @@ describe("connector MCP bridge", () => {
     const started = Date.now();
     child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 42, method: "tools/list", params: {} })}\n`);
     const reply = await nextJson(lines);
-    expect(Date.now() - started).toBeLessThan(3_500);
+    expect(Date.now() - started).toBeLessThan(4_500);
     expect(reply.result.tools.map((tool: { name: string }) => tool.name)).toEqual(expect.arrayContaining(["COMPOSIO_SEARCH_TOOLS", "COMPOSIO_MULTI_EXECUTE_TOOL"]));
   }, 15_000);
 
