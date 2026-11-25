@@ -115,7 +115,18 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
     expect(menuOf(createElement(ChatMoreMenu, { bot: fresh })).items.find((one) => one.key === "start-fresh")!.disabled).toBe(true);
   });
 
-  it("starts a new thread with the bot", () => {
+  it("starts a new thread with the bot and displays the platform shortcut hint", () => {
+    const win = globalThis.window as { ogb?: { platform?: string } };
+    try {
+      for (const [platform, expected] of [["darwin", "⌘ ⇧ N"], ["win32", "Ctrl Shift N"], ["linux", "Ctrl Shift N"]] as const) {
+        win.ogb = { platform };
+        const menu = menuOf(createElement(ChatMoreMenu, { bot }));
+        const newThread = menu.items.find((item) => item.key === "new-thread")!;
+        expect(renderToStaticMarkup(createElement("div", null, newThread.trailing))).toContain(expected);
+      }
+    } finally {
+      delete win.ogb;
+    }
     const menu = menuOf(createElement(ChatMoreMenu, { bot }));
     menu.items.find((item) => item.key === "new-thread")!.onSelect();
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "newTask", botId: "pepper" });
