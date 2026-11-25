@@ -421,7 +421,7 @@ describe("the bot panel in Simple mode", () => {
     expect(shown(panel(makeBot(), "access"))).toEqual({ tab: "computer", page: undefined });
   });
 
-  it("shows no switch on any tab, and on Bot settings only Notifications and Bot API's: memory, upkeep, browser, record steps and Work until done live elsewhere", () => {
+  it("shows no switch on any tab, and on Bot settings only Notifications, Bot API and Automatic memory: browser, record steps and Work until done live elsewhere", () => {
     const bot = makeBot();
     expect(switches(panel(bot).html)).toBe(0);
     expect(panel(bot).html).not.toContain('aria-label="Work until done"');
@@ -433,9 +433,10 @@ describe("the bot panel in Simple mode", () => {
     }
     click(find(panel(bot), "data-panel-gear"));
     const settings = panel(bot).html;
-    expect(switches(settings)).toBe(2);
+    expect(switches(settings)).toBe(3);
     expect(settings).toContain('aria-label="Notifications"');
     expect(settings).toContain('aria-label="Let apps talk to this bot"');
+    expect(settings).toContain('data-panel-row="memory-upkeep"');
   });
 });
 
@@ -840,8 +841,9 @@ describe("the Bot settings page", () => {
       .map((marker) => rendered.html.indexOf(marker));
     expect(order.every((index) => index > -1)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(switches(rendered.html)).toBe(2);
+    expect(switches(rendered.html)).toBe(3);
     expect(rendered.html).toContain('aria-label="Let apps talk to this bot"');
+    expect(rendered.html).toContain('data-panel-row="memory-upkeep"');
     expect(rendered.html.match(/pl-\[38px\]/g)).toHaveLength(5);
     for (const gone of ['data-panel-row="always-allow"', 'data-panel-row="slack"', 'data-panel-page="visibility"']) expect(rendered.html, gone).not.toContain(gone);
   });
