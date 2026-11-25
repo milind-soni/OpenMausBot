@@ -140,9 +140,9 @@ describe.skipIf(WINDOWS)("an Antigravity permission request on a turn whose agen
     expect(unbridgeableVersions()).toEqual(["1.5.16"]);
   }, 90_000);
 
-  it("rejects another tool that carries use_tool's input for this call only, and leaves its release bridged", async () => {
-    const ghost = { toolCallId: "call_1", name: "mcp_ghost_run", title: "Run mcp_ghost_run", kind: "other", rawInput: { name: "vm_exec", arguments: { command: "ls" } } };
-    const result = await asked("shape-only", { approvalMode: "auto", version: "1.5.21", toolCall: ghost });
+  it.each(["other", "edit", undefined])("rejects another tool that carries use_tool's input for this call only, whatever its kind (%s), and leaves its release bridged", async (kind) => {
+    const ghost = { toolCallId: "call_1", name: "mcp_ghost_run", title: "Run mcp_ghost_run", ...(kind ? { kind } : {}), rawInput: { name: "vm_exec", arguments: { command: "ls" } } };
+    const result = await asked(`shape-only-${kind ?? "none"}`, { approvalMode: "auto", version: "1.5.21", toolCall: ghost });
     expect(result).toMatchObject({ card: false, answer: "deny" });
     expect(result.errors.some((message) => message.includes("tool bridge"))).toBe(false);
     expect(unbridgeableVersions()).not.toContain("1.5.21");

@@ -202,6 +202,7 @@ async function callTool(sessionId: string, target: string, argsText: string): Pr
 
 async function prompt(id: unknown, params: Params): Promise<void> {
   const sessionId = params.sessionId ?? "";
+  cancelledEarly.delete(sessionId);
   const text = (params.prompt ?? []).filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n");
   const lines = [...text.matchAll(/^fake-agy:[ \t]*(\S+)[ \t]*(\S*)[ \t]*(.*)$/gmu)];
   if (lines.length === 0) {

@@ -153,7 +153,10 @@ export class McpConnection {
 
   private async notify(method: string): Promise<void> {
     const message = { jsonrpc: "2.0", method };
-    if (isHttp(this.server)) await this.post(message, 10_000);
+    if (isHttp(this.server)) {
+      const answered = await this.post(message, 10_000);
+      if (answered.error) throw new Error(`${this.name}: ${method} failed: ${JSON.stringify(answered.error)}`);
+    }
     else this.child?.stdin?.write(`${JSON.stringify(message)}\n`);
   }
 
