@@ -99,6 +99,7 @@ export const SETTINGS_PLACES = [
   {"id":"bubbles","path":"Settings → Appearance → Use the bot's color for my messages","words":["message color","my messages","bubbles"]},
   {"id":"tool-calls","path":"Settings → Appearance → Chat","words":["tool calls","this run","chat width","font","typeface"]},
   {"id":"layout","path":"Settings → Appearance → Layout","words":["show your computers","rail","window frame","title bar","threads","tools layout","pinned","circles","universal pins","pinned panels"],"advanced":true},
+  {"id":"memory-upkeep-switch","path":"Settings → Features → Automatic memory","words":["memory upkeep","automatic memory","memory","remember","learn","learning","tidy"]},
   {"id":"skill-burger-switch","path":"Settings → Features → Skill Burger","words":["skill burger","skill burgers","burger","saved runs","workflows"]},
   {"id":"thread-tabs","path":"Settings → Features → Thread tabs","words":["tabs","threads"]},
   {"id":"room-feed","path":"Settings → Features → Room feed","words":["feed","room threads","rooms"]},
