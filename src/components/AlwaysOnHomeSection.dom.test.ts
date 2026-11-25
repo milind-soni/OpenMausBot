@@ -100,6 +100,14 @@ describe("on the spare computer", () => {
     expect(text()).toContain("Starts its server again if it crashes");
     expect(text()).toContain("Keeps running when its window is closed");
     await vi.waitFor(() => expect($("[data-always-on-status]")?.textContent).toBe("Home is on · reachable from 2 devices"));
+    // The Mac's own settings to check sit folded under one quiet button.
+    const toggle = $<HTMLButtonElement>("[data-always-on-system-toggle]")!;
+    expect(toggle.textContent).toBe("Mac settings to check");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(document.getElementById(toggle.getAttribute("aria-controls")!)?.hidden).toBe(true);
+    flushSync(() => toggle.click());
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect($<HTMLElement>("[data-always-on-system]")?.hidden).toBe(false);
     expect($("[data-always-on-system]")?.textContent).toContain("System Settings → Energy → Start up automatically after a power failure");
     expect($("[data-always-on-system]")?.textContent).not.toContain("power is connected");
     expect($("[data-always-on-system]")?.textContent).toContain("Automatically log in as");

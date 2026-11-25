@@ -200,7 +200,8 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
     if (m && method === "GET") {
       const group = store.group(m[1]);
       if (!group || group.dm) return json(res, 404, { error: "no such room" });
-      const threadIds = (group.tasks ?? [{ threadId: group.threadId, archivedAt: undefined }]).filter((task) => task.archivedAt === undefined && (deps.threadShown?.(auth, task.threadId) ?? true))
+      const archived = url.searchParams.get("archived") === "1";
+      const threadIds = (group.tasks ?? [{ threadId: group.threadId, archivedAt: undefined }]).filter((task) => (archived || task.archivedAt === undefined) && (deps.threadShown?.(auth, task.threadId) ?? true))
         .map((task) => task.threadId);
       return json(res, 200, { threads: roomThreadSummaries(threadIds) } satisfies RoomThreadSummariesResponse);
     }

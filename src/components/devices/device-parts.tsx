@@ -26,7 +26,12 @@ export const routeOf = (device: Device): string | null => {
 /** What the mark shows: a device that can't be reached or needs a step is marked as needing the person, even while away. */
 export const markOf = (device: Device): Device["status"] => (device.note && device.note !== "reconnecting" ? "attention" : device.status);
 
-/** "● Online · Same network": the state in a mark and words, then how it connects, in one line that wraps. */
+export const needsPerson = (device: Device) => markOf(device) === "attention";
+/** The devices that need the person first; the rest keep their order. */
+export const needsFirst = (devices: readonly Device[]): Device[] => [...devices.filter(needsPerson), ...devices.filter((device) => !needsPerson(device))];
+
+/** "● Online · Same network": the state in a mark and words, then how it connects, in one line that wraps. A state nothing
+ * here checks has a grey dot, so every row's words start at one edge. */
 export function StatusLine({ device, now, className }: { device: Device; now: number; className?: string }) {
   const words = statusText(device, now);
   const route = routeOf(device);
@@ -34,7 +39,9 @@ export function StatusLine({ device, now, className }: { device: Device; now: nu
   const mark = markOf(device);
   return (
     <span data-device-state={mark} className={cn("flex min-w-0 items-start gap-1.5 text-[13px] leading-[18px]", className)}>
-      {mark !== "unknown" && <span className="flex h-[18px] w-3.5 shrink-0 items-center"><StatusMark status={mark} /></span>}
+      <span className="flex h-[18px] w-3.5 shrink-0 items-center">
+        {mark === "unknown" ? <span aria-hidden="true" data-device-unchecked="" className="size-2 shrink-0 rounded-full bg-ink-tertiary" /> : <StatusMark status={mark} />}
+      </span>
       <span className="min-w-0">
         {words && <span className={mark === "attention" ? "text-ink" : "text-ink-secondary"}>{words}</span>}
         {words && route && <span aria-hidden="true" className="text-ink-tertiary @max-[479px]/rows:hidden">{" · "}</span>}

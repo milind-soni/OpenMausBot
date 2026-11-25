@@ -71,7 +71,7 @@ export function useOtherPlaces(page?: string): OtherPlace[] {
       setListed(state.environments.filter((entry) => entry.id !== state.activeId).map((entry) => ({
         key: entry.id,
         name: entry.kind === "local" && !entry.dataDir ? t("rail.thisComputer") : entry.name,
-        kind: entry.kind === "remote" ? "cloud" as const : "computer" as const,
+        kind: entry.kind !== "remote" ? "computer" as const : entry.home || entry.cloud ? "cloud" as const : "server" as const,
         color: entry.color ?? null,
         open: () => void environments.switch(entry.id),
       })));
