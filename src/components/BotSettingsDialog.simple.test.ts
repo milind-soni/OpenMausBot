@@ -604,7 +604,7 @@ describe("the avatar editor", () => {
     expect(patch).toHaveBeenLastCalledWith({ mascotFaceColor: "white" });
   });
 
-  it("offers Fluffy only on an engine-drawn body, and Flat clears it", () => {
+  it("offers the finishes only on an engine-drawn body, and Flat clears one", () => {
     const fur = (bot: Bot) => {
       const props = ofType(editor(bot), MascotMaterialPicker)!.props as Parameters<typeof MascotMaterialPicker>[0];
       return capture(() => MascotMaterialPicker(props));
@@ -618,10 +618,12 @@ describe("the avatar editor", () => {
     const choices = segment(bare, "data-avatar-material");
     expect(choices.value).toBe("off");
     expect(choices.options.map((option) => [option.value, option.label])).toEqual([
-      ["off", "Flat"], ["fluffy", "Fluffy"],
+      ["off", "Flat"], ["matte", "Matte"], ["metallic", "Metallic"], ["fluffy", "Fluffy"],
     ]);
-    choices.onChange("fluffy");
-    expect(patch).toHaveBeenLastCalledWith({ mascotMaterial: "fluffy" });
+    for (const finish of ["matte", "metallic", "fluffy"]) {
+      choices.onChange(finish);
+      expect(patch).toHaveBeenLastCalledWith({ mascotMaterial: finish });
+    }
     fresh();
     const furred = segment(fur(makeBot({ mascotBody: "obj-mug", mascotMaterial: "fluffy" })), "data-avatar-material");
     expect(furred.value).toBe("fluffy");

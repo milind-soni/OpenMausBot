@@ -7631,6 +7631,8 @@
   "botIdentity.faceColor.default": "Body default",
   "botIdentity.material": "Finish",
   "botIdentity.material.off": "Flat",
+  "botIdentity.material.matte": "Matte",
+  "botIdentity.material.metallic": "Metallic",
   "botIdentity.material.fluffy": "Fluffy",
   "botIdentity.avatar": "Avatar",
   "botIdentity.resetMascot": "Reset mascot",

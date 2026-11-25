@@ -30,8 +30,9 @@ export interface AvatarOptions {
   /** Eye color: #rgb or #rrggbb, or any CSS color. Defaults to a near-black ink. */
   eyeColor?: string;
   /**
-   * The body's finish: 'flat' (default), or 'fluffy' for a coat of fur with the eyes set into it.
-   * Fluffy needs the canvas renderer and WebGL2; without them the avatar draws flat.
+   * The body's finish: 'flat' (default), 'fluffy' for a coat of fur with the eyes set into it, or
+   * 'matte' or 'metallic' for the same surface lit bare. All but flat need the canvas renderer and
+   * WebGL2; without them the avatar draws flat.
    */
   material?: AvatarMaterial;
   /** Volume amount 0..14 (6 = natural depth, 0 = flat). */
@@ -244,8 +245,8 @@ export function mountAvatar(host: HTMLElement, initial: AvatarOptions): MountedA
     lastStill = '';
   };
 
-  /** Whether the avatar is painted in fluffy: on a canvas, live or still. */
-  const fluffy = () => opts.material === 'fluffy' && opts.renderer !== 'scene' && canvasSupported();
+  /** Whether the avatar is painted with a lit finish (MausBot: fluffy, matte or metallic): on a canvas, live or still. */
+  const fluffy = () => opts.material !== undefined && opts.material !== 'flat' && opts.renderer !== 'scene' && canvasSupported();
 
   const paint = (p: AvatarOptions, options: RenderOptions) => {
     if (scene || lastStill) clear();
