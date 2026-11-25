@@ -36,7 +36,7 @@ export interface BotLinkHostDeps {
   /** A work thread a far bot opened here is named from the job it handed, behind "@Sender · ". */
   titleHanded?(botId: string, threadId: string, brief: string, prefix: string): void;
   /** One line in the receiving bot's main chat for each hand-off the other place sends it (server/host/handed-line.ts). */
-  handedLine?(input: { botId: string; threadId: string; from: string; text: string }): void;
+  handedLine?(input: { botId: string; threadId: string; from: { botId: string; name: string }; text: string }): void;
   refusal(bot: BotRecord): string | null;
   /** Why this bot cannot take work from the other place now (server/bot-link/far-side.ts), or null. */
   acceptRefusal?(bot: BotRecord): string | null;

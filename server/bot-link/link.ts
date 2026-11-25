@@ -134,7 +134,7 @@ export interface BotLinkDeps {
   openThread(bot: LocalBot, title: string, opener: { botId: string; name: string; threadId: string }, brief: string): string | undefined;
   hasThread(botId: string, threadId: string): boolean;
   /** Work from the other place reached `botId`'s thread `threadId`: its main chat may say so (server/host/handed-line.ts). */
-  handed?(input: { botId: string; threadId: string; from: string; text: string }): void;
+  handed?(input: { botId: string; threadId: string; from: { botId: string; name: string }; text: string }): void;
   personName(threadId: string): string | undefined;
   /** "Sent to …" in the requester's conversation. */
   sentRow(input: { sender: LocalBot; threadId: string; recipient: { id: string; name: string }; workThreadId: string; nodeId: string; reason?: string; doneWhen?: string;
@@ -538,7 +538,11 @@ export function createBotLink(deps: BotLinkDeps) {
       work.child = node.id;
       state.work[frame.id] = work;
       // A room's turn for a member of this place is not a hand-off to the bot (its work thread is named after the room).
-      if (!frame.thread.includes(":room:")) deps.handed?.({ botId: bot.id, threadId, from: frame.from.name, text: frame.text });
+      // A failure there never stops the work: it is logged, and the hand-off goes on.
+      if (!frame.thread.includes(":room:")) {
+        try { deps.handed?.({ botId: bot.id, threadId, from: { botId: address.botId, name: frame.from.name }, text: frame.text }); }
+        catch (error) { log(`bot link: the hand-off line for ${frame.id} was not written (${said(error)})`); }
+      }
       save();
       coordinator.endTurn(root, { ok: true, text: "" });
       if (frame.mode === "notify") recordResult(frame.id, { ok: true, text: "" });

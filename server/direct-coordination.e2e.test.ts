@@ -428,10 +428,12 @@ it("leaves one quiet line in the teammate's main chat for a hand-off, which open
   const lines = (await f.messages(f.lead.activeTaskId)).filter((message: any) => message.threadRef?.threadId === child.threadId);
   expect(lines).toHaveLength(1);
   expect(lines[0]).toMatchObject({ role: "bot", kind: "activity", threadRef: { botId: f.lead.id, threadId: child.threadId, title: "Octopus facts" },
-    tool: { name: "Clive asked me: Octopus facts", ok: true, nameCode: "chat.notice.askedMe", nameParams: { bot: "Clive", title: "Octopus facts" } } });
+    tool: { name: "Clive asked me: Octopus facts", ok: true, nameCode: "chat.notice.askedMe", nameParams: { bot: "Clive", title: "Octopus facts" } },
+    askedBy: { botId: f.chief.id, name: "Clive", threadIds: [child.threadId] } });
   expect(lines[0].tool).not.toHaveProperty("itemId");
+  // A record, not an announcement: the lead's main chat is not marked unread for it.
   const leadBot = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id);
-  expect(leadBot.tasks.find((task: any) => task.threadId === f.lead.activeTaskId).unread).toBe(true);
+  expect(leadBot.tasks.find((task: any) => task.threadId === f.lead.activeTaskId).unread).toBeFalsy();
   // The hand-off ran in its own thread; the main chat took no turn for the line.
   expect(f.evidence().filter((turn: any) => turn.botId === f.lead.id).map((turn: any) => turn.threadId)).toEqual([child.threadId]);
   // The hand-off's own turn, which started after the line was written, does not read it either.

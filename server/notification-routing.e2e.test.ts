@@ -530,10 +530,8 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
       const consult = await consultation(asked.body.receipts[0].requestId);
       expect(consult.threadId).not.toBe(peer.threadId);
       await expect.poll(() => handoffs().find((node) => node.id === consult.id)?.status, { timeout: 20_000 }).toBe("completed");
-      // The hand-off's quiet line marks Vellum's chat unread; read it, so the mark below is the person's own message.
-      expect((await botState(peer.id))?.unread).toBe(true);
-      expect((await api("POST", `/api/bots/${peer.id}/read`, { reason: "select" })).status).toBeLessThan(300);
-      await expect.poll(async () => (await botState(peer.id))?.unread, { timeout: 10_000 }).toBeFalsy();
+      // The hand-off is recorded in Vellum's chat, not announced: nothing there is unread.
+      expect((await botState(peer.id))?.unread).toBeFalsy();
 
       expect((await api("POST", `/api/bots/${peer.id}/messages`, { text: "and for me?" })).status).toBe(202);
       const frame = await stream.until(
@@ -570,10 +568,8 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
       expect(asked.body.receipts[0]).toMatchObject({ botId: peer.id, outcome: "queued" });
       const consult = await consultation(asked.body.receipts[0].requestId);
       expect(consult.threadId).not.toBe(peer.threadId);
-      // The hand-off's quiet line marks Folio's chat unread; read it, so the mark below is the person's own message.
-      expect((await botState(peer.id))?.unread).toBe(true);
-      expect((await api("POST", `/api/bots/${peer.id}/read`, { reason: "select" })).status).toBeLessThan(300);
-      await expect.poll(async () => (await botState(peer.id))?.unread, { timeout: 10_000 }).toBeFalsy();
+      // The hand-off is recorded in Folio's chat, not announced: nothing there is unread.
+      expect((await botState(peer.id))?.unread).toBeFalsy();
 
       expect((await api("PATCH", `/api/bots/${peer.id}`, {
         modelSelection: { instanceId: "quick", model: "claude-sonnet-5" },
