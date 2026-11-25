@@ -4,6 +4,7 @@ import { useTurnLive } from "@/state/turn-status";
 import { t } from "@/lib/i18n";
 import { sidebarMessage, sidebarStatus, turnNowPhrases } from "@/lib/live-activity";
 import { madeKey } from "@/lib/friendly-activity";
+import { useAdvancedMode } from "@/lib/interface-mode";
 
 /** How long a sidebar line holds one phrase before it may show the next, so a busy bot's row doesn't flicker. */
 export const SIDEBAR_PHRASE_HOLD_MS = 5000;
@@ -35,8 +36,8 @@ export function SidebarWorkingStep({ bot, last }: { bot: Pick<Bot, "threadId" | 
   const threadId = workingThreadId(bot);
   const live = useTurnLive(threadId);
   const message = threadId === bot.threadId ? last : undefined;
-  // A page or write-up says what it makes ("Putting the page together"), still without the file's name.
-  const made = madeKey(live.status, message);
+  // Simple mode: a page or write-up says what it makes ("Putting the page together"), still without the file's name.
+  const made = useAdvancedMode() ? null : madeKey(live.status, message);
   const phrase = made ? t(made) : turnNowPhrases(sidebarStatus(live.status), sidebarMessage(message))?.phrases[0];
   const shown = useHeldText(phrase ?? t("chat.activity.thinking"));
   return <span dir="auto" data-sidebar-working-phrase="" className="truncate">{shown}</span>;

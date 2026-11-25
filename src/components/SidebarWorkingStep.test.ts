@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeEvent } from "../../shared/runtime-events";
 import type { Message } from "@/state/store";
 import { noteTurnEvent, resetTurnLive } from "@/state/turn-status";
+import { setAdvancedMode } from "@/lib/interface-mode";
 import { SidebarWorkingStep, useHeldText } from "./SidebarWorkingStep";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -41,6 +42,18 @@ describe("sidebar working line", () => {
       type: "turn.progress", activity: "write", itemId: "w2", file: "lisbon-trip.md" } as RuntimeEvent);
     act(() => root.render(createElement(SidebarWorkingStep, { bot: { ...bot, threadId: "t-other" } })));
     expect(phrase()).toBe("Writing it up");
+  });
+
+  it("keeps Advanced mode's words for a page as they were", () => {
+    setAdvancedMode(true);
+    try {
+      const write: Message = { id: "w", at: 1, role: "bot", kind: "activity", tool: { name: "Write", step: { activity: "write", target: "lisbon.html" } } };
+      act(() => root.render(createElement(SidebarWorkingStep, { bot, last: write })));
+      expect(phrase()).toBe("Writing a file");
+    } finally {
+      setAdvancedMode(false);
+      localStorage.clear();
+    }
   });
 
   it("keeps the kind of step for code", () => {

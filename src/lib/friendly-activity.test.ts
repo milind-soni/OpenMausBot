@@ -50,17 +50,29 @@ describe("Simple mode's working line", () => {
     expect(friendlyNowPhrases({ activity: "write", file: "build.py", itemId: "w" }).phrases).toEqual(["Writing some code"]);
     // The engine's report wins over a call still showing in the chat, as for the rest of the line.
     expect(friendlyNowPhrases({ activity: "thinking" }, running("Write", { step: { activity: "write", target: "page.html" } })).phrases[0]).toBe("Thinking it through");
+    // The bot's own notes, a project's files and plain text are not a write-up for the person.
+    for (const file of ["MEMORY.md", "SOUL.md", "README.md", "notes.md", "todo.md", "2026-11-26.md", ".plan.md", "requirements.txt", "robots.txt", "notes.txt"]) {
+      expect(friendlyNowPhrases({ activity: "write", file, itemId: "w" }).phrases, file).toEqual(["Writing some code"]);
+    }
+    for (const path of ["/work/.claude/plan.md", "/bots/kiwi/memory/trip.md", "/bots/kiwi/skills/trip/guide.md", "C:\\Users\\ana\\.claude\\plan.md", "d:\\bots\\kiwi\\memory\\trip.md"]) {
+      expect(madeKey(null, running("Write", { input: JSON.stringify({ file_path: path, content: "# Notes" }), step: { activity: "write", target: path.split(/[\\/]/).pop()! } })), path).toBeNull();
+    }
+    expect(madeKey(null, running("Write", { input: JSON.stringify({ file_path: "C:\\Users\\ana\\Documents\\trip-plan.md" }), step: { activity: "write", target: "trip-plan.md" } }))).toBe("chat.friendly.writeup");
+    expect(madeKey(null, running("Write", { input: JSON.stringify({ file_path: "/work/lisbon/trip-plan.md", content: "# Lisbon" }), step: { activity: "write", target: "trip-plan.md" } }))).toBe("chat.friendly.writeup");
     // A finished call says nothing about now.
     expect(madeKey(null, running("Write", { ok: true, step: { activity: "write", target: "page.html" } }))).toBeNull();
   });
 
   it("names the conversation's work in place of words that only name the tool", () => {
     const subject = "Lisbon food trip";
-    expect(friendlyNowPhrases(null, undefined, subject)).toEqual({ phase: "friendly:task:Lisbon food trip", phrases: ["Working on Lisbon food trip"] });
-    expect(friendlyNowPhrases({ activity: "thinking" }, undefined, subject).phrases).toEqual(["Working on Lisbon food trip"]);
-    expect(friendlyNowPhrases({ activity: "write", file: "build.py", itemId: "w" }, undefined, subject).phrases).toEqual(["Working on Lisbon food trip"]);
-    expect(friendlyNowPhrases({ activity: "command", itemId: "x" }, undefined, subject).phrases).toEqual(["Working on Lisbon food trip"]);
-    expect(friendlyNowPhrases(null, running("Bash"), subject).phrases).toEqual(["Working on Lisbon food trip"]);
+    const work = "Working on Lisbon food trip";
+    // The work leads, and the usual words still rotate after it so a long turn's line never sits still.
+    expect(friendlyNowPhrases(null, undefined, subject)).toEqual({ phase: "friendly:task:Lisbon food trip",
+      phrases: [work, "Thinking it through", "Mulling it over", "Working on it", "Chipping away"] });
+    expect(friendlyNowPhrases({ activity: "thinking" }, undefined, subject).phrases[0]).toBe(work);
+    expect(friendlyNowPhrases({ activity: "write", file: "build.py", itemId: "w" }, undefined, subject).phrases).toEqual([work, "Writing some code"]);
+    expect(friendlyNowPhrases({ activity: "command", itemId: "x" }, undefined, subject).phrases).toEqual([work, "Running a few commands"]);
+    expect(friendlyNowPhrases(null, running("Bash"), subject).phrases).toEqual([work, "Running a few commands"]);
     // What says more than the tool stays: a page, a search, a reply, a service, the team.
     expect(friendlyNowPhrases({ activity: "write", file: "lisbon.html", itemId: "w" }, undefined, subject).phrases).toEqual(["Putting the page together"]);
     expect(friendlyNowPhrases({ activity: "web", itemId: "s", target: "pastelarias Belém" }, undefined, subject).phrases).toEqual(["Searching the web for “pastelarias Belém”"]);
@@ -82,6 +94,20 @@ describe("Simple mode's working line", () => {
     // Cut short, the stand-in ends in "…" even when the message it came from is not loaded.
     expect(taskSubject("Plan a 2-day food trip to Lisbon: where to eat, w…", [])).toBeUndefined();
     expect(taskSubject("  ", [])).toBeUndefined();
+    expect(taskSubject("Conversation", [])).toBeUndefined();
+    // Titles the app makes for hand-offs, rooms and routines: the hand-off's prefix is dropped, the rest is not the work.
+    expect(taskSubject("@Pepper · Lisbon restaurant shortlist", [])).toBe("Lisbon restaurant shortlist");
+    expect(taskSubject("@Pepper · work", [])).toBeUndefined();
+    expect(taskSubject("From Pepper", [])).toBeUndefined();
+    expect(taskSubject("Planning room · find a date", [])).toBeUndefined();
+    expect(taskSubject("Weekly digest · Results", [])).toBeUndefined();
+    // A brief cut at 60 characters, and a fork named from a bot's message.
+    expect(taskSubject("Find three restaurants near Alfama open on Sunday nights and", [])).toBeUndefined();
+    expect(taskSubject("# Day 1: Baixa and Alfama", [])).toBeUndefined();
+    expect(taskSubject("Here's your two-day plan:", ["Here's your two-day plan:\n- Day 1"])).toBeUndefined();
+    // A question reads as the work, without its question mark.
+    expect(taskSubject("Best pastries in Lisbon?", [])).toBe("Best pastries in Lisbon");
+    expect(taskSubject("What should I eat in Lisbon?", ["What should I eat in Lisbon?"])).toBeUndefined();
     expect(taskSubject(undefined, asked)).toBeUndefined();
   });
 });

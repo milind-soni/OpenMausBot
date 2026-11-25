@@ -123,6 +123,20 @@ describe("Simple mode's working line", () => {
     expect(statusLine()).toBe("Writing some code");
   });
 
+  it("rotates the work with the usual words over a long turn, and comes back to it", () => {
+    mode.advanced = false;
+    engine({ type: "turn.started" });
+    render(busyBot([ask]));
+    expect(statusLine()).toBe("Working on Dashboard");
+    const seen = new Set<string>();
+    for (let i = 0; i < 12; i++) {
+      act(() => void vi.advanceTimersByTime(6_500));
+      seen.add(statusLine()!);
+    }
+    expect(seen).toContain("Working on Dashboard");
+    expect([...seen].some((line) => ["Thinking it through", "Mulling it over", "Working on it", "Chipping away"].includes(line))).toBe(true);
+  });
+
   it("says Teammates working while the bot waits on its teammates", () => {
     mode.advanced = false;
     const waiting = busyBot([ask, intro], false);

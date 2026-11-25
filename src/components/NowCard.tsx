@@ -51,7 +51,7 @@ export function useTurnNow(bot: Pick<Bot, "id" | "name" | "threadId" | "tasks">,
   const title = bot.tasks?.find((task) => task.threadId === bot.threadId)?.title;
   // Simple mode only, and once per title or loaded page of messages, never per frame.
   const subject = useMemo(() => advanced ? undefined
-    : taskSubject(title, messages.flatMap((message) => message.role === "user" && message.text ? [message.text] : [])), [advanced, title, messages]);
+    : taskSubject(title, messages.flatMap((message) => message.text ? [message.text] : [])), [advanced, title, messages]);
   const shown = advanced ? exact : friendlyNowPhrases(status, lastMessage, subject);
   const steps = useMemo(() => nowSteps(messages, status), [messages, status]);
   const quiet = status && "quiet" in status ? status.quiet : undefined;
