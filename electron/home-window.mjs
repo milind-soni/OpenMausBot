@@ -10,7 +10,7 @@
 // Admin's team pairing (its claims are the Admin's), never an address a page supplied.
 import { cloudHomeConnectUrl, cloudSetupOf, cloudUnreachableCause, cloudUnreachableText, machineSetup, readyCloudOrigin } from "./cloud-home.mjs";
 import { cloudMachine, cloudState, myCloudOf, otherOwnClouds, ownCloud } from "./cloud-list.mjs";
-import { cloudOperationAt, OPERATION_REFRESH_MS } from "./cloud-operation.mjs";
+import { cloudOperationAt, OPERATION_FRESH_MS, OPERATION_REFRESH_MS } from "./cloud-operation.mjs";
 import { asleepAnswer, BACKGROUND_HEADERS, openSleepingCloud, SIGNED_IN_MS } from "./cloud-power.mjs";
 import nativeText from "./native-text.cjs";
 import { createPairWait, nameNotFound } from "./home-pairing.mjs";
@@ -852,11 +852,11 @@ export function createHomeWindow(deps) {
     homePage,
     /** The operation the Admin says has the place on screen down now (cloud-operation.mjs), else null: its own page asks while
      * its live stream is down, so it can say "Updating My Cloud" instead of "unable to connect". The session is read again
-     * first when the last read is OPERATION_REFRESH_MS old or more (the Admin is the one that knows; the place doesn't answer). */
+     * first when the last read is OPERATION_FRESH_MS old or more (the Admin is the one that knows; the place doesn't answer). */
     async operation() {
       const origin = placeOrigin(), current = state();
       if (!origin || current?.status !== "connected") return null;
-      if (!(now() - (current.verifiedAt ?? 0) < OPERATION_REFRESH_MS)) await Promise.resolve(account()?.refresh?.()).catch(() => {});
+      if (!(now() - (current.verifiedAt ?? 0) < OPERATION_FRESH_MS)) await Promise.resolve(account()?.refresh?.()).catch(() => {});
       return cloudOperationAt(state(), origin);
     },
     updating(event) {

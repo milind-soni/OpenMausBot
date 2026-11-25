@@ -79,10 +79,13 @@ test("the Cloud's own page asks what has it down: the Admin's word for the place
   assert.deepEqual(await w.home.operation(), UPDATE);
   w.state = { ...connected(), verifiedAt: 1_000_000 };
   assert.equal(await w.home.operation(), null);
-  // An old read is read again first when the account can (this fixture's can't): it still answers what it has, never throws.
-  const stale = world({ state: { ...connected({ operation: UPDATE }), verifiedAt: 1 } });
+  assert.equal(w.refreshes, 0, "a fresh read is not read again");
+  // An old read is read again first, so the page gets the Admin's word as of now: here the update has just begun.
+  const stale = world({ state: { ...connected(), verifiedAt: 1 } });
   await stale.home.refresh();
+  stale.refreshed = { ...connected({ operation: UPDATE }), verifiedAt: stale.clock };
   assert.deepEqual(await stale.home.operation(), UPDATE);
+  assert.equal(stale.refreshes, 1);
   const signedOut = world({ state: { status: "signed-out" } });
   assert.equal(await signedOut.home.operation(), null);
 });

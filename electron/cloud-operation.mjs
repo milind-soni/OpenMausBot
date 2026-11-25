@@ -6,6 +6,9 @@
 export const CLOUD_OPERATION_KINDS = Object.freeze(["update", "resize", "move", "disk", "restore", "start"]);
 /** While the Admin says an operation has a Cloud down, its session is read this often, so the window follows it closely. */
 export const OPERATION_REFRESH_MS = 15_000;
+/** The Cloud's own page asks every 10 s while its live stream is down (src/lib/cloud-work.ts): a session older than this is read
+ * again first, so each ask gets a fresh word. */
+export const OPERATION_FRESH_MS = 8_000;
 
 const KIND = /^[a-z][a-z-]{0,23}$/;
 const record = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
