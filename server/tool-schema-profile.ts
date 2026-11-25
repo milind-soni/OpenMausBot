@@ -317,11 +317,19 @@ export function fitToolListForBudget<Tool extends { name: string; inputSchema?: 
   const schemas = new Map(list.map((tool) => [tool, schemaOf(tool)]));
   const bytesOf = (item: { name: string; inputSchema?: unknown }) =>
     Buffer.byteLength(JSON.stringify({ ...item, inputSchema: schemas.get(item as Tool) ?? item.inputSchema }) ?? "");
-  const total = () => list.reduce((sum, tool) => sum + bytesOf(tool), 0);
-  const from = total();
+  // Each tool's size is measured again only when its own schema changes, so a long list is not re-measured per step.
+  const sizes = new Map(list.map((tool) => [tool, bytesOf(tool)]));
+  let total = [...sizes.values()].reduce((sum, bytes) => sum + bytes, 0);
+  const from = total;
   if (from <= profile.maxListBytes) return list;
   const budget: number = profile.maxListBytes;
-  const shrink = (schema: Json, step: (schema: Json) => void) => { step(schema); return total() <= budget; };
+  const shrink = (tool: Tool, schema: Json, step: (schema: Json) => void) => {
+    step(schema);
+    const bytes = bytesOf(tool);
+    total += bytes - sizes.get(tool)!;
+    sizes.set(tool, bytes);
+    return total <= budget;
+  };
   const steps: ReadonlyArray<(schema: Json) => void> = [
     (schema) => { for (let depth = schemaDepth(schema); depth >= 3; depth -= 1) shortenDescriptions(schema, depth, 0); },
     (schema) => shortenDescriptions(schema, 0, 300),
@@ -333,14 +341,14 @@ export function fitToolListForBudget<Tool extends { name: string; inputSchema?: 
   outer: for (const step of steps) {
     for (const tool of list) {
       const schema = schemas.get(tool);
-      if (schema && shrink(schema, step)) break outer;
+      if (schema && shrink(tool, schema, step)) break outer;
     }
   }
   const fitted = list.map((tool) => {
     const schema = schemas.get(tool);
     return schema ? { ...tool, inputSchema: schema } : tool;
   });
-  log?.(`fitted the tool list to ${profile.provider}'s list budget (${from} → ${total()} bytes)`);
+  log?.(`fitted the tool list to ${profile.provider}'s list budget (${from} → ${total} bytes)`);
   return fitted;
 
   function replace(schema: Json, top: Json): void {
