@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { activityRegistrationSchema, FALLBACK_VISUAL, PhoneActivity } from "./phone-activity.ts";
-import { PhonePush } from "./phone-push.ts";
+import { PhonePush, PUSH_DEVICE_LOW_MAX } from "./phone-push.ts";
 
 const CREDENTIAL = `omb_install_${"a".repeat(22)}.${"b".repeat(43)}`;
 const START = "5a".repeat(40);
@@ -23,7 +23,7 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dataDir, { recursive: true, force: true }));
 
-function harness(options: { enabled?: boolean; live?: Set<string>; openAsks?: Set<string>; answers?: Array<{ status: number; error?: string }> } = {}) {
+function harness(options: { enabled?: boolean; available?: boolean; live?: Set<string>; openAsks?: Set<string>; answers?: Array<{ status: number; error?: string }> } = {}) {
   const calls: Call[] = [];
   const answers = [...(options.answers ?? [])];
   const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -49,6 +49,7 @@ function harness(options: { enabled?: boolean; live?: Set<string>; openAsks?: Se
   const activity = new PhoneActivity({
     dataDir, push, hasOpenAsk: (botId) => openAsks.has(botId), bot: (botId) => bots.get(botId), botOfThread: (threadId) => (threadId.startsWith("th_") ? "bot_1" : undefined),
     now: () => clock, log: () => {}, timers: { set: () => ({}), clear: () => {} },
+    ...(options.available === undefined ? {} : { available: () => options.available! }),
   });
   const activityCalls = () => calls.filter((call) => call.path.endsWith("/push/activity")).map((call) => call.body);
   /** The bot works (or stops), a frame says so, and its frames settle. */
@@ -74,6 +75,16 @@ describe("registering a phone's activities", () => {
     expect(await activity.register(IPHONE, registration({ startToken: START }))).toBe("off");
     expect(activity.registration(IPHONE)).toBeNull();
     await step({ busy: true });
+    expect(calls).toEqual([]);
+  });
+
+  it("is not offered where a bot's state is everyone's (a Team Cloud): keeps nothing, registers nothing, pushes nothing", async () => {
+    const { activity, calls, step } = harness({ available: false, live: new Set() });
+    expect(await activity.register(IPHONE, registration({ startToken: START, activities: [{ botId: "bot_1", token: ACT }] }))).toBe("off");
+    expect(activity.registration(IPHONE)).toBeNull();
+    await step({ ask: true }, notify("approval"), everyone);
+    await step({ busy: true }, runtime("turn.started"), everyone);
+    await step({ busy: false, ask: false }, runtime("turn.completed"), everyone);
     expect(calls).toEqual([]);
   });
 
@@ -166,6 +177,18 @@ describe("pushing a bot's activity while the app is closed", () => {
     await step({ busy: true }, runtime("turn.started"));
     // Never an update for a kind the phone did not ask for; only the one end for what its app may have drawn.
     expect(activityCalls().map((body) => body.event)).toEqual(["end"]);
+  });
+
+  it("counts its pushes against the phone's hourly cap, at the lower priority, leaving the rest for its alerts", async () => {
+    const { push, activity, activityCalls, calls, step } = harness();
+    await push.register(ANDROID, { platform: "fcm", token: FCM });
+    await activity.register(ANDROID, registration({ ongoing: true }));
+    for (let change = 0; change < PUSH_DEVICE_LOW_MAX + 5; change += 1) await step({ busy: change % 2 === 0 }, runtime(change % 2 === 0 ? "turn.started" : "turn.completed"));
+    expect(activityCalls()).toHaveLength(PUSH_DEVICE_LOW_MAX);
+    // An approval still reaches the phone.
+    push.offer({ notification: { kind: "approval", botId: "bot_1", botName: "Scout", threadId: "th_1" }, seq: 1 }, everyone);
+    await push.flush();
+    expect(calls.filter((call) => call.path.endsWith("/push/send"))).toHaveLength(1);
   });
 
   it("drops an activity token the provider calls dead", async () => {

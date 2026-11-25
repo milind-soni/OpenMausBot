@@ -5,8 +5,8 @@ import { describe, expect, it } from "vitest";
 import { createAuth } from "../src/auth";
 import { readConfig } from "../src/config";
 import { createWorker } from "../src/index";
-import { PUSH_DEVICE_LIMIT, PUSH_DEVICE_SEND_LIMIT, PUSH_REGISTER_LIMIT } from "../src/push";
-import { CLOUD_HOME_FLEET_SEND_LIMIT, FLEET_ID } from "../src/push-cloud-homes";
+import { PUSH_DEVICE_LIMIT, PUSH_DEVICE_SEND_LIMIT, PUSH_REGISTER_LIMIT, PUSH_SEND_LIMIT } from "../src/push";
+import { CLOUD_HOME_FLEET_SEND_LIMIT, CLOUD_HOME_SEND_LIMIT, FLEET_ID } from "../src/push-cloud-homes";
 import fixture from "./fixtures/cloud-home-push.json";
 
 const BASE_URL = "https://auth.openmausbot.test";
@@ -185,6 +185,22 @@ describe("phone push for Cloud homes (the Admin's machine routes)", () => {
       .bind(CLOUD_HOME_FLEET_SEND_LIMIT, now, FLEET_ID).run();
     expect((await home(worker, testEnv, OTHER, "send", alert(TOKEN_B))).status).toBe(429);
     expect(await count("SELECT COUNT(*) AS n FROM machine_push_rate_limits WHERE machine_id = ? AND action = 'push_send'", OTHER)).toBe(0);
+  });
+
+  it("gives each machine 1% of the fleet's sends an hour, below an installation's own limit", async () => {
+    expect(CLOUD_HOME_SEND_LIMIT).toBe(CLOUD_HOME_FLEET_SEND_LIMIT / 100);
+    expect(CLOUD_HOME_SEND_LIMIT).toBeLessThan(PUSH_SEND_LIMIT);
+    const worker = createWorker(fetch, fakeApns().fetch);
+    const testEnv = await pushEnv();
+    expect((await home(worker, testEnv, MACHINE, "register", registration())).status).toBe(200);
+    expect((await home(worker, testEnv, OTHER, "register", registration(TOKEN_B))).status).toBe(200);
+    const now = Date.now();
+    await env.DB.prepare("INSERT INTO machine_push_rate_limits (machine_id, action, window_started_at, attempts, updated_at) VALUES (?, 'push_send', ?, ?, ?)")
+      .bind(MACHINE, now, CLOUD_HOME_SEND_LIMIT - 1, now).run();
+    expect((await home(worker, testEnv, MACHINE, "send", alert())).status).toBe(202);
+    expect((await home(worker, testEnv, MACHINE, "send", alert())).status).toBe(429);
+    // Another home's share is its own.
+    expect((await home(worker, testEnv, OTHER, "send", alert(TOKEN_B))).status).toBe(202);
   });
 
   it("keeps at most 50 tokens a machine, as for an installation", async () => {
