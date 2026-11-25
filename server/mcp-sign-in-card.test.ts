@@ -417,6 +417,21 @@ describe("the Sign in card", () => {
     expect(f.cards.parkedAnswer({ ...f.current(card).connector!, resumed: true })).toBeNull();
   });
 
+  it("a discovery that fails for now leaves the card for another tap and tells the bot nothing", async () => {
+    const f = await setup();
+    const oauth = await startFakeOAuth();
+    const mcp = await startFakeHttpMcp({ acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge });
+    fixtures.push(mcp);
+    f.cfg.mcpServers!.linear = { type: "http", url: mcp.url, headers: {}, enabled: true } as never;
+    const { card } = await f.signIn();
+    await oauth.close();
+    const refused = await f.authorize(card);
+    expect(refused).toMatchObject({ status: 400, body: { code: "not-oauth" } });
+    expect(f.current(card).connector!.status).not.toBe("failed");
+    expect(f.current(card).connector!.error).toBeUndefined();
+    expect(f.answers).toEqual([]);
+  });
+
   it("dismiss cancels the flow and resumes with the not-signed-in text", async () => {
     const f = await setup();
     const { card } = await f.signIn();

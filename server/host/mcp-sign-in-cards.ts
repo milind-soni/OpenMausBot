@@ -171,9 +171,10 @@ export function createMcpSignInCards(deps: McpSignInCardDeps) {
     } catch (error) {
       if (error instanceof McpSignInError) return { status: error.status, body: { error: error.message } };
       if (error instanceof McpOAuthError) {
-        // A busy port frees up; the other failures last until the server is set up differently.
+        // Only a server that registers no apps stays refused until it is set up differently. "not-oauth" also covers a
+        // discovery request that failed for now, and a busy port frees up: those leave the card for another tap.
         const now = find(threadId, card.id);
-        if (error.code === "port-busy" || !now || now.connector.dismissed) return { status: 400, body: { error: error.message, code: error.code } };
+        if (error.code !== "no-registration" || !now || now.connector.dismissed) return { status: 400, body: { error: error.message, code: error.code } };
         return unreachable(threadId, now, { status: 400, reason: () => error.message }, { code: error.code });
       }
       return { status: 502, body: { error: error instanceof Error ? error.message : "Sign-in could not start." } };
