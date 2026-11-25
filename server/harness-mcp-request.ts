@@ -5,6 +5,7 @@ import { EMAIL_INSTRUCTIONS } from "./email/instructions.ts";
 import { PHONE_INSTRUCTIONS, PHONE_RECOVERY } from "./phones/instructions.ts";
 import { HARNESS_PROXY_TIMEOUT_MS, HARNESS_PROXY_TIMEOUTS_MS } from "./harness-budget.ts";
 import { capToolListResult } from "./tool-count-limit.ts";
+import { toolsListResultForShareProfile } from "./tool-list-budget.ts";
 
 export const MAX_INPUT_BYTES = 1_048_576;
 export const MAX_OUTPUT_BYTES = 16_777_216;
@@ -63,7 +64,7 @@ async function boundedJson(response: Response, name: string): Promise<unknown> {
 
 export async function harnessMcpRequest(
   frame: unknown,
-  connection: { url: string; token: string; kind: HarnessMcpKind; toolLimit?: number },
+  connection: { url: string; token: string; kind: HarnessMcpKind; toolLimit?: number; schemaProfile?: unknown },
 ): Promise<unknown | undefined> {
   if (!frame || typeof frame !== "object" || Array.isArray(frame)) return failure(null, null, "Invalid request.", -32600);
   const message = frame as { id?: RpcId; jsonrpc?: unknown; method?: unknown; params?: unknown };
@@ -96,8 +97,9 @@ export async function harnessMcpRequest(
     if (!response.ok || !payload || typeof payload !== "object" || !Object.hasOwn(payload, "result")) {
       throw new Error(typeof payload?.error === "string" ? payload.error.slice(0, 2_000) : `${name} server is unavailable. Start a new bot turn or try again.`);
     }
+    const log = (line: string) => console.warn(`[${connection.kind}] ${line}`);
     const result = message.method === "tools/list"
-      ? capToolListResult(payload.result, connection.toolLimit, (line) => console.warn(`[${connection.kind}] ${line}`)) : payload.result;
+      ? toolsListResultForShareProfile(capToolListResult(payload.result, connection.toolLimit, log), connection.schemaProfile, log) : payload.result;
     return { jsonrpc: "2.0", id, result };
   } catch (error) {
     return failure(id, message.method, unansweredText(error, name, HARNESS_PROXY_TIMEOUTS_MS[connection.kind] ?? HARNESS_PROXY_TIMEOUT_MS) + RECOVERY[connection.kind]);

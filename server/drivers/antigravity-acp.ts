@@ -32,6 +32,7 @@ import { delimiter, isAbsolute, join, resolve } from "node:path";
 
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
 import { writeFileAtomic } from "../atomic.ts";
+import { ANTIGRAVITY_CLI_TOOL_BUDGET } from "../tool-list-budget.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import { BOX_SSH_CONNECTION } from "../bot-box/env.ts";
 import type { BoxRelay } from "../bot-box/relay.ts";
@@ -784,6 +785,12 @@ export function antigravityTakesSystemPrompt(initialized: any): boolean {
  * whose process starts slowly loses its tools; a URL answers in milliseconds. */
 export function antigravityCliTakesHttpMcp(initialized: unknown): boolean {
   return (initialized as { agentInfo?: { name?: unknown } } | null | undefined)?.agentInfo?.name === "Antigravity ACP Server";
+}
+
+/** The native CLI shows the model every MCP tool of a session and, past one budget for all their definitions, leaves out
+ * the largest silently (google-antigravity/antigravity-cli#1530); agy_acp_server lists them lazily and has none. */
+export function antigravityCliToolBudget(initialized: unknown): number | undefined {
+  return antigravityCliTakesHttpMcp(initialized) ? ANTIGRAVITY_CLI_TOOL_BUDGET : undefined;
 }
 
 /** The agy CLI has no harness sibling and serves ACP through its `acp` subcommand. It joins `--app-data-dir` beneath

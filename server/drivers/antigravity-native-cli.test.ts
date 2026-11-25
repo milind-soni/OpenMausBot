@@ -505,10 +505,13 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
     const byName = Object.fromEntries(sent.map((server) => [server.name, server]));
     if (own === "url") {
       expect(byName.agents).toMatchObject({ type: "http", url: `${harness}/api/internal/mcp-http/agents` });
-      expect(byName.browser).toEqual({ type: "http", name: "browser", url: `${harness}/api/internal/mcp-http/browser`, headers: [{ name: "authorization", value: "Bearer synthetic-browser-capability" }] });
+      // With its share of the CLI's session-wide tool budget.
+      expect(byName.browser).toEqual({ type: "http", name: "browser", url: `${harness}/api/internal/mcp-http/browser`,
+        headers: [{ name: "authorization", value: "Bearer synthetic-browser-capability" }, { name: "x-omb-tool-share", value: expect.stringMatching(/^listShare:\d+$/) }] });
     } else {
       expect(byName.agents).toMatchObject({ command: process.execPath, args: agents.args });
       expect(byName.browser).toMatchObject({ command: process.execPath, args: browser.args });
+      expect(JSON.stringify([byName.agents, byName.browser])).not.toContain("listShare:");
     }
     expect(byName.composio).toMatchObject({ command: process.execPath, args: composio.args });
     expect(byName.notes).toEqual({ name: "notes", command: process.execPath, args: notes.args, env: [] });
