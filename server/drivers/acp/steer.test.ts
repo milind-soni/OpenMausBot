@@ -256,7 +256,7 @@ describe("acpPromptSteering", () => {
       }
     });
 
-    it("refuses a steer still out when the turn is stopped before the agent takes it", async () => {
+    it("calls a steer still out indeterminate, never refused, when the turn is stopped before the agent decides it", async () => {
       let live = true;
       const sent: Array<{ answer: (reply: unknown) => void }> = [];
       const steering = acpPromptSteering(() => live, () => new Promise((resolve) => { sent.push({ answer: resolve }); }), { rejected }, () => live);
@@ -264,10 +264,22 @@ describe("acpPromptSteering", () => {
       await tick();
       live = false;
       sent[0]!.answer({ stopReason: "cancelled" });
-      expect(await outcome).toBe("refused");
+      expect(await outcome).toBe("indeterminate");
       const ended = steering.promptAnswered();
       await ended;
       expect(steering.replies).toEqual([{ stopReason: "cancelled" }]);
+    });
+
+    it("calls a steer indeterminate when the agent answers the carrying prompt only after a Stop: it may have taken the steer", async () => {
+      let live = true;
+      const refused = vi.fn();
+      const steering = acpPromptSteering(() => live, () => new Promise(() => {}), { rejected }, () => live);
+      const outcome = steering.steer("use pytest", { refused });
+      await tick();
+      live = false;
+      void steering.promptAnswered();
+      expect(await outcome).toBe("indeterminate");
+      expect(refused).not.toHaveBeenCalled();
     });
 
     it("calls a steer still out indeterminate, never refused, when the turn ends and its requests fail", async () => {
