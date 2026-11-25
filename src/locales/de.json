@@ -4397,6 +4397,8 @@
   "settings.page.features": "Funktionen",
   "settings.features.skillBurger": "Skill Burger",
   "settings.features.skillBurgerLine": "Speichert den Lauf eines Bots als Schritte, die du erneut ausführen kannst",
+  "settings.features.memoryUpkeep": "Automatisches Gedächtnis",
+  "settings.features.memoryUpkeepLine": "Bots erkennen Fakten in deinen Chats, speichern sie und räumen ihre Notizen jede Nacht auf. Wenn aus, speichern Bots nur, worum du sie bittest.",
   "settings.features.threadTabs": "Thread-Tabs",
   "settings.features.threadTabsLine": "Zeigt die Threads eines Bots als Tabs über dem Chat",
   "settings.features.roomFeed": "Raum-Feed",

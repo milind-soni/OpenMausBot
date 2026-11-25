@@ -4024,6 +4024,8 @@
   "settings.page.features": "Fonctionnalités",
   "settings.features.skillBurger": "Skill Burger",
   "settings.features.skillBurgerLine": "Enregistre l'exécution d'un bot en étapes que tu peux relancer",
+  "settings.features.memoryUpkeep": "Mémoire automatique",
+  "settings.features.memoryUpkeepLine": "Les bots repèrent des faits dans vos discussions, les enregistrent et rangent leurs notes chaque nuit. Désactivée, ils n'enregistrent que ce que vous leur demandez.",
   "settings.features.threadTabs": "Onglets de fils",
   "settings.features.threadTabsLine": "Affiche les fils d'un bot en onglets au-dessus du chat",
   "settings.features.roomFeed": "Fil du salon",

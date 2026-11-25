@@ -146,6 +146,13 @@ describe("MemoryUpkeepCard", () => {
     expect(markup).not.toContain("Tidy up now");
   });
 
+  it("locks the switch off and says where to turn it on while it is off for all bots", () => {
+    const markup = render(createElement(MemoryUpkeepCard, { enabled: false, offForAll: true, status: null, tidying: false, onToggle: noop, onTidy: noop }));
+    expect(markup).toContain("Off for all bots in Settings → Features.");
+    expect(markup).toMatch(/<button disabled=""[^>]*role="switch" aria-checked="false"/);
+    expect(markup).not.toContain("Tidy up now");
+  });
+
   it("shows the last tidy-up and says when the engine cannot run the model steps", () => {
     const markup = render(createElement(MemoryUpkeepCard, {
       enabled: true,

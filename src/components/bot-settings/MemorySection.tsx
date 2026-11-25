@@ -32,7 +32,7 @@ import {
 import { localizedRelativeTime } from "@/lib/relative-time";
 import { shortPath } from "@/lib/short-path";
 import { activeLocale, t } from "@/lib/i18n";
-import { roomMemoryCaptureEnabled } from "@/lib/feature-flags";
+import { memoryUpkeepEnabled, roomMemoryCaptureEnabled } from "@/lib/feature-flags";
 import { api, ApiError, type Bot, type ConfigStatus } from "@/state/store";
 import { Switch } from "../SettingsPrimitives";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
@@ -122,12 +122,14 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
   const [saving, setSaving] = useState(false);
   const [reverting, setReverting] = useState<string | null>(null);
   const [newTopic, setNewTopic] = useState("");
-  const upkeep = useMemoryUpkeepStatus(bot, active && bot.memoryEnabled !== false && bot.memoryUpkeep !== false);
   const [tidying, setTidying] = useState(false);
   const [lendingReview, setLendingReview] = useState<LendingReview | null>(null);
   const [lendingReviewStale, setLendingReviewStale] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
+  const allBots = memoryUpkeepEnabled(state.config);
+  const upkeepOn = allBots && bot.memoryUpkeep !== false;
+  const upkeep = useMemoryUpkeepStatus(bot, active && bot.memoryEnabled !== false && upkeepOn);
   const learnFromRooms = roomMemoryCaptureEnabled(state.config);
   const [roomsSaving, setRoomsSaving] = useState(false);
   const [roomsError, setRoomsError] = useState("");
@@ -350,13 +352,14 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
       {overview && <MemoryGauge index={overview.index} />}
 
       {bot.memoryEnabled !== false && <MemoryUpkeepCard
-        enabled={bot.memoryUpkeep !== false}
+        enabled={upkeepOn}
+        offForAll={!allBots}
         status={upkeep.status}
         tidying={tidying}
         onToggle={toggleUpkeep}
         onTidy={() => void tidyNow()}
         rooms={{ enabled: learnFromRooms, saving: roomsSaving, error: roomsError, onToggle: () => void toggleRooms() }}
-        model={active && bot.memoryUpkeep !== false
+        model={active && upkeepOn
           ? <MemoryModelSetting key={bot.id} bot={bot} upkeep={upkeep} className="mt-3 border-t border-hairline/40" /> : undefined}
       />}
 
@@ -488,8 +491,10 @@ export function MemoryUpkeepCard({
   onTidy,
   rooms,
   model,
+  offForAll = false,
 }: {
   enabled: boolean;
+  offForAll?: boolean;
   status: UpkeepStatus | null;
   tidying: boolean;
   onToggle: () => void;
@@ -503,8 +508,9 @@ export function MemoryUpkeepCard({
         <div className="min-w-0">
           <div className="text-[15px] font-medium text-ink">{t("memory.upkeep.title")}</div>
           <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">{t("memory.upkeep.help")}</p>
+          {offForAll && <p data-memory-upkeep-off-for-all="" className="mt-1 text-[13px] leading-relaxed text-ink-secondary">{t("memory.upkeep.offForAll")}</p>}
         </div>
-        <Switch checked={enabled} aria-label={t("memory.upkeep.title")} onClick={onToggle} />
+        <Switch checked={enabled} disabled={offForAll} aria-label={t("memory.upkeep.title")} onClick={onToggle} />
       </div>
       {model}
       {enabled && rooms && (

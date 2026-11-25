@@ -6616,6 +6616,8 @@
   "settings.page.features": "Funciones",
   "settings.features.skillBurger": "Skill Burger",
   "settings.features.skillBurgerLine": "Guarda la ejecución de un bot como pasos que puedes volver a ejecutar",
+  "settings.features.memoryUpkeep": "Memoria automática",
+  "settings.features.memoryUpkeepLine": "Los bots detectan datos en tus chats, los guardan y ordenan sus notas cada noche. Si está desactivada, solo guardan lo que les pidas.",
   "settings.features.threadTabs": "Pestañas de hilos",
   "settings.features.threadTabsLine": "Muestra los hilos de un bot como pestañas sobre el chat",
   "settings.features.roomFeed": "Feed de la sala",

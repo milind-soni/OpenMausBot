@@ -3876,6 +3876,8 @@
   "settings.page.features": "सुविधाएँ",
   "settings.features.skillBurger": "Skill Burger",
   "settings.features.skillBurgerLine": "किसी बॉट के रन को ऐसे चरणों के रूप में सहेजें जिन्हें आप फिर से चला सकें",
+  "settings.features.memoryUpkeep": "अपने-आप याद रखना",
+  "settings.features.memoryUpkeepLine": "बॉट आपकी चैट में तथ्य पहचानते हैं, उन्हें सहेजते हैं और हर रात अपने नोट्स व्यवस्थित करते हैं। बंद होने पर बॉट सिर्फ़ वही सहेजते हैं जो आप कहें।",
   "settings.features.threadTabs": "थ्रेड टैब",
   "settings.features.threadTabsLine": "चैट के ऊपर बॉट के थ्रेड टैब के रूप में दिखाएँ",
   "settings.features.roomFeed": "रूम फ़ीड",

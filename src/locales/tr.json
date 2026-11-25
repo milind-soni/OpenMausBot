@@ -6111,6 +6111,8 @@
   "settings.page.features": "Özellikler",
   "settings.features.skillBurger": "Skill Burger",
   "settings.features.skillBurgerLine": "Bir botun çalışmasını yeniden çalıştırabileceğin adımlar olarak kaydeder",
+  "settings.features.memoryUpkeep": "Otomatik bellek",
+  "settings.features.memoryUpkeepLine": "Botlar sohbetlerinizdeki bilgileri fark eder, kaydeder ve her gece notlarını düzenler. Kapalıyken yalnızca sizin istediğinizi kaydederler.",
   "settings.features.threadTabs": "Konuşma sekmeleri",
   "settings.features.threadTabsLine": "Bir botun konuşmalarını sohbetin üstünde sekmeler olarak gösterir",
   "settings.features.roomFeed": "Oda akışı",

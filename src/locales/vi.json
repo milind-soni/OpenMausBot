@@ -6111,6 +6111,8 @@
   "settings.page.features": "Tính năng",
   "settings.features.skillBurger": "Skill Burger",
   "settings.features.skillBurgerLine": "Lưu một lần chạy của bot thành các bước bạn có thể chạy lại",
+  "settings.features.memoryUpkeep": "Bộ nhớ tự động",
+  "settings.features.memoryUpkeepLine": "Bot nhận ra thông tin trong các cuộc trò chuyện, lưu lại và sắp xếp ghi chú mỗi đêm. Khi tắt, bot chỉ lưu những gì bạn yêu cầu.",
   "settings.features.threadTabs": "Thẻ luồng",
   "settings.features.threadTabsLine": "Hiển thị các luồng của bot thành thẻ phía trên khung chat",
   "settings.features.roomFeed": "Bảng tin phòng",

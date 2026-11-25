@@ -4296,6 +4296,8 @@
   "settings.page.features": "Функції",
   "settings.features.skillBurger": "Skill Burger",
   "settings.features.skillBurgerLine": "Зберігає роботу бота як кроки, які можна запустити знову",
+  "settings.features.memoryUpkeep": "Автоматична пам'ять",
+  "settings.features.memoryUpkeepLine": "Боти помічають факти у ваших чатах, зберігають їх і щоночі впорядковують нотатки. Якщо вимкнено, вони зберігають лише те, що ви попросите.",
   "settings.features.threadTabs": "Вкладки гілок",
   "settings.features.threadTabsLine": "Показує гілки бота вкладками над чатом",
   "settings.features.roomFeed": "Стрічка кімнати",

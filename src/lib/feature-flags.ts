@@ -1,7 +1,7 @@
 import { t } from "./i18n";
 
 export interface FeatureFlagConfig {
-  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean; usbPhoneTakeover?: boolean; skillBurger?: boolean; threadTabs?: boolean; roomFeed?: boolean; teamBoard?: boolean };
+  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean; usbPhoneTakeover?: boolean; skillBurger?: boolean; threadTabs?: boolean; roomFeed?: boolean; teamBoard?: boolean; memoryUpkeep?: boolean };
   browserEngine?: { kind: "engine" | "unavailable"; reason?: string; installable?: boolean; installing?: boolean; installError?: string };
 }
 
@@ -112,4 +112,9 @@ export function roomFeedEnabled(config: FeatureFlagConfig | null | undefined): b
 
 export function teamBoardEnabled(config: FeatureFlagConfig | null | undefined): boolean {
   return config?.features?.teamBoard === true;
+}
+
+/** The switch for every bot's automatic memory; each bot's own switch counts only while this is on. */
+export function memoryUpkeepEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.memoryUpkeep !== false;
 }

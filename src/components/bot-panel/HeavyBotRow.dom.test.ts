@@ -5,12 +5,15 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
 
-const fixture = vi.hoisted(() => ({ api: vi.fn(), dispatch: vi.fn(), heavy: [] as boolean[] }));
-vi.mock("@/state/store", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/state/store")>()),
-  api: (...args: unknown[]) => fixture.api(...args),
-  useStore: () => ({ dispatch: fixture.dispatch }),
-}));
+const fixture = vi.hoisted(() => ({ api: vi.fn(), dispatch: vi.fn(), heavy: [] as boolean[], memoryUpkeep: undefined as boolean | undefined }));
+vi.mock("@/state/store", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/state/store")>();
+  return {
+    ...original,
+    api: (...args: unknown[]) => fixture.api(...args),
+    useStore: () => ({ state: { ...original.initialState, config: { features: { memoryUpkeep: fixture.memoryUpkeep } } }, dispatch: fixture.dispatch }),
+  };
+});
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => false, readAdvancedMode: () => false, setAdvancedMode: vi.fn() }));
 
 const { HeavyBotRow } = await import("./HeavyBotRow");
@@ -27,6 +30,7 @@ const render = async (patch?: Partial<Bot>) => { await act(async () => root.rend
 beforeEach(() => {
   fixture.dispatch = vi.fn();
   fixture.heavy = [];
+  fixture.memoryUpkeep = undefined;
   fixture.api.mockReset();
   fixture.api.mockImplementation(async (path: string) => path.endsWith("/system-prompt") ? { heavy: fixture.heavy.shift() ?? false } : { report: {} });
   host = document.createElement("div");
@@ -60,6 +64,14 @@ it("asks nothing when memory or its upkeep is off, since a tidy-up could not run
   fixture.heavy = [true, true];
   await render({ memoryUpkeep: false });
   await render({ memoryEnabled: false });
+  expect(fixture.api).not.toHaveBeenCalled();
+  expect(host.querySelector("[data-panel-row=heavy]")).toBeNull();
+});
+
+it("asks nothing while automatic memory is off for all bots", async () => {
+  fixture.heavy = [true];
+  fixture.memoryUpkeep = false;
+  await render();
   expect(fixture.api).not.toHaveBeenCalled();
   expect(host.querySelector("[data-panel-row=heavy]")).toBeNull();
 });

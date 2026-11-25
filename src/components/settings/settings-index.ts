@@ -259,6 +259,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "bubbles", page: "appearance", anchor: "look", labelKey: "settings.userBubbles.simpleTitle", synonyms: ["message color", "my messages", "bubbles"] },
   { id: "tool-calls", page: "appearance", anchor: "chat", labelKey: "settings.appearance.chat", synonyms: ["tool calls", "this run", "chat width", "font", "typeface"] },
   { id: "layout", page: "appearance", anchor: "appearance", labelKey: "settings.appearance.layout", advanced: true, synonyms: ["show your computers", "rail", "window frame", "title bar", "threads", "tools layout", "pinned", "circles", "universal pins", "pinned panels"] },
+  { id: "memory-upkeep-switch", page: "features", anchor: "features", labelKey: "settings.features.memoryUpkeep", topFor: ["memory upkeep", "automatic memory"], synonyms: ["memory", "remember", "learn", "learning", "tidy"] },
   { id: "skill-burger-switch", page: "features", anchor: "features", labelKey: "settings.features.skillBurger", topFor: ["skill burger", "skill burgers"], synonyms: ["burger", "saved runs", "workflows"] },
   { id: "thread-tabs", page: "features", anchor: "features", labelKey: "settings.features.threadTabs", synonyms: ["tabs", "threads"] },
   { id: "room-feed", page: "features", anchor: "features", labelKey: "settings.features.roomFeed", synonyms: ["feed", "room threads", "rooms"] },

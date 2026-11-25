@@ -7,6 +7,7 @@ import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { SettingRow, SettingsGroup, SettingsRows, Switch } from "../../SettingsPrimitives";
 
 const COPY: Record<Feature, { title: LocaleKey; line: LocaleKey }> = {
+  memoryUpkeep: { title: "settings.features.memoryUpkeep", line: "settings.features.memoryUpkeepLine" },
   skillBurger: { title: "settings.features.skillBurger", line: "settings.features.skillBurgerLine" },
   threadTabs: { title: "settings.features.threadTabs", line: "settings.features.threadTabsLine" },
   roomFeed: { title: "settings.features.roomFeed", line: "settings.features.roomFeedLine" },
@@ -47,6 +48,7 @@ export function FeaturesPage() {
   return (
     <SettingsGroup block="features">
       <SettingsRows>
+        <FeatureRow name="memoryUpkeep" />
         <FeatureRow name="skillBurger" />
         <FeatureRow name="threadTabs" />
         <FeatureRow name="roomFeed" />
