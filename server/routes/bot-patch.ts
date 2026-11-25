@@ -285,6 +285,10 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
             if (!engine.adapter.capabilities.modelVariants) {
               return json(res, 400, { error: `model variants are not offered by fallback engine "${row.instanceId}"` });
             }
+            const variants = engine.models.options.find((option) => option.id === model)?.variants;
+            if (variants?.length && !variants.some((candidate) => candidate.id === row.variant)) {
+              return json(res, 400, { error: `variant "${row.variant}" is not offered for fallback model "${model}"` });
+            }
             variant = row.variant;
           }
           if (chain.some((seen) => seen.instanceId === row.instanceId && seen.model === model)) continue;

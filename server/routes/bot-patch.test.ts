@@ -608,7 +608,7 @@ describe("PATCH /api/bots/:id fallback", () => {
         adapter: { capabilities: { modelVariants: true } },
         models: {
           default: "gemini-4-neon",
-          options: [{ id: "gemini-4-neon", label: "Gemini 4 Neon" }],
+          options: [{ id: "gemini-4-neon", label: "Gemini 4 Neon", variants: [{ id: "medium", label: "Medium" }, { id: "high", label: "High" }] }],
         },
       } as unknown as ProviderInstance],
     ]);
@@ -622,6 +622,9 @@ describe("PATCH /api/bots/:id fallback", () => {
 
     const badVariantOnEffortEngine = await patch(bot.id, { fallback: [{ instanceId: "codex", model: "gpt-6", variant: "medium" }] });
     expect(badVariantOnEffortEngine.status).toBe(400);
+
+    const badModelVariant = await patch(bot.id, { fallback: [{ instanceId: "agy", model: "gemini-4-neon", variant: "turbo" }] });
+    expect(badModelVariant.status).toBe(400);
 
     const badBoth = await patch(bot.id, { fallback: [{ instanceId: "agy", model: "gemini-4-neon", effort: "medium", variant: "medium" }] });
     expect(badBoth.status).toBe(400);

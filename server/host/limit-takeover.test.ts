@@ -113,6 +113,12 @@ describe("which AI carries on while one is limited", () => {
       scope: "engine",
       resetsAt: NOW + HOUR,
     });
+
+    // When the same engine's default model is also in the configured backup list with saved reasoning,
+    // model/credits failover must keep that saved reasoning rather than shadowing it with a plain default.
+    const sameEngineDefaultBackup: ModelSelection = { instanceId: "claude", model: "claude-opus-5-5", effort: "high" };
+    const modelScoped = takeover({ chosen: () => [sameEngineDefaultBackup, variantBackup] }).instance;
+    expect(modelScoped.backups("kai", on("claude", "claude-sonnet-5"), "model")).toEqual([sameEngineDefaultBackup, variantBackup]);
   });
 
   it("picks no other AI by itself: with no backup chosen the bot waits for the reset", () => {

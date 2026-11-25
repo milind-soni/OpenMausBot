@@ -219,8 +219,12 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
       else out.push(pick);
     };
     const picked = chosen ?? deps.chosen(botId);
-    if ((scope === "model" || scope === "credits") && picked.length) add({ instanceId: current.instanceId, model: current.models.default });
-    for (const selection of chosen ?? (scope === "signed-out" ? deps.signedOutChosen?.(botId) ?? picked : picked)) add(selection);
+    const list = chosen ?? (scope === "signed-out" ? deps.signedOutChosen?.(botId) ?? picked : picked);
+    if ((scope === "model" || scope === "credits") && picked.length) {
+      const configuredDefault = list.find((entry) => entry.instanceId === current.instanceId && entry.model === current.models.default);
+      add(configuredDefault ?? { instanceId: current.instanceId, model: current.models.default });
+    }
+    for (const selection of list) add(selection);
     return { backups: out, skipped: left };
   }
 

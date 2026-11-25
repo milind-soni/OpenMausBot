@@ -189,6 +189,19 @@ describe("a bot's backup AIs in Simple", () => {
       configured.dispatchEvent(new Event("change", { bubbles: true }));
     });
     expect(onChange).toHaveBeenCalledWith([{ instanceId: "codex", model: "gpt-5.5" }]);
+
+    // A saved variant remains visible and clearable even if its engine is no longer available.
+    onChange.mockReset();
+    render([{ instanceId: "missing-engine", model: "gemini-4-neon", variant: "medium" }]);
+    const orphaned = host.querySelector<HTMLSelectElement>('select[aria-label="Reasoning for gemini-4-neon"]');
+    expect(orphaned).not.toBeNull();
+    expect(orphaned!.value).toBe("medium");
+    expect([...orphaned!.options].map((option) => option.textContent)).toEqual(["Provider default", "medium (unverified)"]);
+    flushSync(() => {
+      orphaned!.value = "";
+      orphaned!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(onChange).toHaveBeenCalledWith([{ instanceId: "missing-engine", model: "gemini-4-neon" }]);
   });
 
   it("closes its menu on Escape without letting the key close the panel", async () => {

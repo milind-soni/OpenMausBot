@@ -31,8 +31,8 @@ export function BackupReasoningSelect({
   className?: string;
   variant?: "field" | "quiet";
 }) {
-  if (instance?.capabilities?.modelVariants) {
-    const options = instance.models.options.find((option) => option.id === entry.model)?.variants ?? [];
+  if (instance?.capabilities?.modelVariants || entry.variant !== undefined) {
+    const options = instance?.models.options.find((option) => option.id === entry.model)?.variants ?? [];
     const missing = entry.variant !== undefined && !options.some((option) => option.id === entry.variant);
     if (!options.length && entry.variant === undefined) return null;
     const choose = (value: string) => {
@@ -55,7 +55,7 @@ export function BackupReasoningSelect({
           </option>
         )}
         {options.map((option) => (
-          <option key={option.id} value={option.id}>{variantLabel(option, instance.driverKind)}</option>
+          <option key={option.id} value={option.id}>{variantLabel(option, instance?.driverKind)}</option>
         ))}
       </Select>
     );
