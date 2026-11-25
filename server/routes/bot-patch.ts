@@ -95,6 +95,7 @@ export interface BotPatchRouteDeps {
   turnBots?: { values(): Iterable<BotRecord> };
   /** A bot's model changed, from `before` to `after`, seen in `threadId` (host/no-terminal.ts says there what it takes away). */
   modelSwitched?(botId: string, threadId: string, before: ModelSelection, after: ModelSelection, routinesFollow: boolean): void;
+  vpsServerSwitched?(bot: BotRecord): void;
 }
 
 export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
@@ -727,6 +728,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           (freshBrowserBot.busy || browserRuntime.heldBy(currentBrowserSession(freshBrowserBot.id, freshBrowserBot.browserProfile)))) {
         return json(res, 409, { error: "Stop the bot and release browser control before changing its profile." });
       }
+      const beforeVpsAlias = freshBrowserBot ? vpsSshAliasForBot(cfg, freshBrowserBot) : null;
       // A mark goes out with its hold in one frame, below.
       delete patch.unread;
       if (Array.isArray(patch.alwaysAllow)) dropRemovedGrants(store, deps.turnBots?.values() ?? [], m[1], patch.alwaysAllow);
@@ -757,6 +759,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       if (normalizedSelection && existingBot) deps.modelSwitched?.(bot.id, movedTask?.threadId ?? existingBot.threadId, movedTask?.modelSelection ?? existingBot.modelSelection, normalizedSelection, true);
       if (existingBot) {
         settleBrowserChange(bot, { browserProfile: beforeBrowserProfile, browser: beforeBrowserEnabled }, { closeForBot: (id) => browserLive.closeForBot(id), forgetTemporaryBrowser });
+        if (vpsSshAliasForBot(cfg, bot) !== beforeVpsAlias) deps.vpsServerSwitched?.(bot);
       }
       const chiefChanges =
         body.chiefOfStaff === true || chiefMovedSections

@@ -108,7 +108,7 @@ function containerInspectTemplate(): string {
 const FAKE_DOCKER = `#!/bin/sh
 printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
 server=$(printf '%s' "$2" | sed 's|ssh://||')
-if [ -f "$FAKE_DOCKER_DIR/unreachable.$server" ]; then echo "ssh: Could not resolve hostname $server: nodename nor servname provided, or not known" >&2; exit 255; fi
+if [ -f "$FAKE_DOCKER_DIR/unreachable.$server" ]; then echo "error during connect: stderr=ssh: Could not resolve hostname $server: nodename nor servname provided, or not known" >&2; exit 255; fi
 if [ -f "$FAKE_DOCKER_DIR/hold" ]; then
   : > "$FAKE_DOCKER_DIR/started"
   while [ -f "$FAKE_DOCKER_DIR/hold" ]; do sleep 0.05; done
@@ -281,7 +281,7 @@ global.setTimeout = (fn, ms, ...args) => schedule(fn, ms === ${TEST_IDLE_MINUTES
     await removeTempDir(home);
   });
 
-  it("renews the current server's idle window when the previous server's viewer drops", async () => {
+  it("closes the old viewer on a server switch, opens a fresh tunnel, and renews the idle window when the viewer drops", async () => {
     const dir = dirname(dockerLog);
     const template = join(dir, "container.json.tpl");
     const original = readFileSync(template, "utf8");
@@ -295,12 +295,19 @@ global.setTimeout = (fn, ms, ...args) => schedule(fn, ms === ${TEST_IDLE_MINUTES
       const { bot } = (await api("POST", "/api/bots")).body;
       const path = `/api/bots/${bot.id}`;
       expect((await api("PATCH", path, { computer: "cloud", cloudBackend: "vps" })).status).toBe(200);
-      expect((await api("POST", `${path}/computer/join?threadId=${bot.threadId}`, {})).status).toBe(200);
+      const oldJoin = await api("POST", `${path}/computer/join?threadId=${bot.threadId}`, {});
+      expect(oldJoin.status).toBe(200);
       writeFileSync(unreachable, "");
       expect((await api("PATCH", path, { vpsAlias: "alpha-vps" })).status).toBe(200);
-      expect((await api("POST", `${path}/computer/provision`, {})).status).toBe(200);
-      const stopped = () => readFileSync(dockerLog, "utf8").includes(`ssh://alpha-vps stop ${CONTAINER_ID}`);
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      const newJoin = await api("POST", `${path}/computer/join?threadId=${bot.threadId}`, {});
+      expect(newJoin.status).toBe(200);
+      expect(newJoin.body.joinUrl).not.toBe(oldJoin.body.joinUrl);
+      const stopped = () => {
+        const log = readFileSync(dockerLog, "utf8");
+        const stopAt = log.lastIndexOf(`ssh://alpha-vps stop ${CONTAINER_ID}`);
+        return stopAt >= 0 && log.slice(stopAt).includes(`ssh://alpha-vps inspect ${vpsContainerName(bot.id)}`);
+      };
+      await new Promise(resolve => setTimeout(resolve, 3000));
       const droppedAt = performance.now();
       process.kill(Number(readFileSync(join(dir, "viewer.pid"), "utf8")));
       await until(async () => stopped(), "idle stop on the new server", 8000);
@@ -310,7 +317,74 @@ global.setTimeout = (fn, ms, ...args) => schedule(fn, ms === ${TEST_IDLE_MINUTES
       writeFileSync(template, original);
       await api("PATCH", "/api/config", { vpsIdle: { timeoutMinutes: 480 } });
     }
-  }, 20_000);
+  }, 25_000);
+
+  it("idle-stops an already-running desktop on the new server after a per-bot or default-server switch", async () => {
+    const dir = dirname(dockerLog);
+    const template = join(dir, "container.json.tpl");
+    const original = readFileSync(template, "utf8");
+    const container = JSON.parse(original);
+    container[0].Config.Labels[VPS_ENVIRONMENT_LABEL] = loadEnvironmentId(join(home, ".openmausbot"));
+    const running = () => writeFileSync(template, JSON.stringify(container));
+    const downA = join(dir, "unreachable.production-vps");
+    const downB = join(dir, "unreachable.alpha-vps");
+    try {
+      expect((await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } })).status).toBe(200);
+      expect((await api("PATCH", "/api/config", { vpsIdle: { timeoutMinutes: TEST_IDLE_MINUTES } })).status).toBe(200);
+      const { bot } = (await api("POST", "/api/bots")).body;
+      const path = `/api/bots/${bot.id}`;
+      expect((await api("PATCH", path, { computer: "cloud", cloudBackend: "vps" })).status).toBe(200);
+      const waitStoppedOnB = async (since: number, label: string) => {
+        await until(async () => {
+          const log = readFileSync(dockerLog, "utf8").slice(since);
+          const stopAt = log.indexOf(`ssh://alpha-vps stop ${CONTAINER_ID}`);
+          return stopAt >= 0 && log.slice(stopAt).includes(`ssh://alpha-vps inspect ${vpsContainerName(bot.id)}`)
+            && (await api("GET", `${path}/computer`)).body.container === "stopped";
+        }, label, 10_000);
+      };
+
+      running();
+      let since = readFileSync(dockerLog, "utf8").length;
+      expect((await api("POST", `${path}/computer/join?threadId=${bot.threadId}`, {})).status).toBe(200);
+      writeFileSync(downA, "");
+      expect((await api("PATCH", path, { vpsAlias: "alpha-vps" })).status).toBe(200);
+      expect((await api("POST", `${path}/computer/viewer-close?threadId=${bot.threadId}`, {})).status).toBe(200);
+      await waitStoppedOnB(since, "idle stop on B without starting B after the move");
+      rmSync(downA, { force: true });
+
+      running();
+      expect((await api("POST", `${path}/computer/provision`, {})).status).toBe(200);
+      writeFileSync(downB, "");
+      expect((await api("PATCH", path, { vpsAlias: null })).status).toBe(200);
+      rmSync(downB, { force: true });
+      expect((await api("POST", `${path}/computer/join?threadId=${bot.threadId}`, {})).status).toBe(200);
+      since = readFileSync(dockerLog, "utf8").length;
+      writeFileSync(downA, "");
+      expect((await api("PATCH", path, { vpsAlias: "alpha-vps" })).status).toBe(200);
+      expect((await api("POST", `${path}/computer/viewer-close?threadId=${bot.threadId}`, {})).status).toBe(200);
+      await waitStoppedOnB(since, "idle stop on B after visiting A and returning");
+      rmSync(downA, { force: true });
+
+      writeFileSync(downB, "");
+      expect((await api("PATCH", path, { vpsAlias: null })).status).toBe(200);
+      rmSync(downB, { force: true });
+      running();
+      expect((await api("POST", `${path}/computer/join?threadId=${bot.threadId}`, {})).status).toBe(200);
+      since = readFileSync(dockerLog, "utf8").length;
+      writeFileSync(downA, "");
+      expect((await api("PUT", "/api/config", { vps: { sshAlias: "alpha-vps" } })).status).toBe(200);
+      expect((await api("POST", `${path}/computer/viewer-close?threadId=${bot.threadId}`, {})).status).toBe(200);
+      await waitStoppedOnB(since, "idle stop on B after default-server switch");
+    } finally {
+      rmSync(downA, { force: true });
+      rmSync(downB, { force: true });
+      writeFileSync(template, original);
+      await api("PATCH", "/api/config", { vpsIdle: { timeoutMinutes: 480 } });
+      writeFileSync(downB, "");
+      await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } });
+      rmSync(downB, { force: true });
+    }
+  }, 45_000);
 
   it("recovers a transient VPS inspection failure through the real status route without provisioning", async () => {
     expect((await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } })).status).toBe(200);

@@ -256,6 +256,10 @@ export function closeVpsDesktopTunnel(botId: string) {
   return { closed: tunnel ? endViewerTunnel(botId, tunnel) : stopDesktopTunnel(botId) };
 }
 
+export function stopVpsDesktopTunnel(botId: string): boolean {
+  return stopDesktopTunnel(botId);
+}
+
 export function closeAllVpsDesktopTunnels(): void {
   for (const botId of new Set([...desktopTunnels.keys(), ...pendingDesktopTunnels.keys()])) stopDesktopTunnel(botId);
 }
@@ -546,6 +550,33 @@ async function computeVpsComputerStatus(
   status.problem = statusProblem(status);
   status.ready = status.problem === null;
   return status;
+}
+
+export async function vpsComputerRunning(
+  cfg: AppConfig,
+  botId: string,
+  runner: VpsCommandRunner = defaultRunner,
+): Promise<boolean> {
+  const alias = vpsSshAlias(snapshotVpsConfig(cfg));
+  if (!alias) return false;
+  const name = vpsContainerName(botId);
+  try {
+    const inspected = JSON.parse((await runner(vpsDockerArgs(alias, ["inspect", name]), { timeoutMs: 10_000 })).stdout) as Array<{
+      Config?: { Labels?: Record<string, string> };
+      State?: { Running?: boolean };
+    }>;
+    const detail = inspected[0];
+    const labels = detail?.Config?.Labels;
+    const environmentLabel = labels?.[VPS_ENVIRONMENT_LABEL];
+    return Boolean(
+      detail?.State?.Running &&
+      labels?.[VPS_MANAGED_LABEL] === "1" &&
+      labels?.[VPS_CONTAINER_LABEL] === name &&
+      (environmentLabel === undefined || environmentLabel === vpsEnvironmentId()),
+    );
+  } catch {
+    return false;
+  }
 }
 
 export async function vpsComputerStatus(

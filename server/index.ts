@@ -5607,12 +5607,21 @@ const localVmIdleMs = () => localVmIdleTimeoutMinutes(cfg) * 60_000;
 const LOCAL_VM_DESKTOP_WAIT_MS = 90_000;
 const localVmIdles = new Map<string, ComputerIdleTimer>();
 const vpsIdles = new Map<string, ComputerIdleTimer>();
+const vpsIdleGenerations = new Map<string, number>();
+
+function cancelVpsIdle(botId: string): number {
+  const generation = (vpsIdleGenerations.get(botId) ?? 0) + 1;
+  vpsIdleGenerations.set(botId, generation);
+  vpsIdles.get(botId)?.cancel();
+  vpsIdles.delete(botId);
+  return generation;
+}
 
 function touchVpsIdle(bot: BotRecord): void {
   const alias = vpsSshAliasForBot(cfg, bot);
   if (!alias) return;
   const id = bot.id;
-  vpsIdles.get(id)?.cancel();
+  cancelVpsIdle(id);
   const current = () => {
     const owner = store.bot(id);
     return owner && vpsSshAliasForBot(cfg, owner) === alias && vpsIdles.get(id) === timer;
@@ -5626,12 +5635,29 @@ function touchVpsIdle(bot: BotRecord): void {
     try {
       const status = await vps.vpsComputerAction("stop", { vps: { sshAlias: alias } }, id, undefined, () => Boolean(current()) && !inUse());
       if (status.container === "running") return "busy";
+      if (vpsIdles.get(id) === timer) vpsIdles.delete(id);
     } finally {
       release();
     }
   });
   vpsIdles.set(id, timer);
   timer.touch();
+}
+
+function vpsServerSwitched(bot: BotRecord): void {
+  const id = bot.id;
+  vps.stopVpsDesktopTunnel(id);
+  const generation = cancelVpsIdle(id);
+  if (bot.cloudBackend !== "vps") return;
+  const alias = vpsSshAliasForBot(cfg, bot);
+  if (!alias) return;
+  void vps.vpsComputerRunning({ vps: { sshAlias: alias } }, id).then((running) => {
+    if (!running || companyShutdown || vpsIdleGenerations.get(id) !== generation) return;
+    const current = store.bot(id);
+    if (current && current.cloudBackend === "vps" && vpsSshAliasForBot(cfg, current) === alias && !vpsIdles.has(id)) {
+      touchVpsIdle(current);
+    }
+  });
 }
 
 const meetingsHost = createMeetingsHost({ cfg, dataDir: DATA_DIR, store, startTurn: (botId, text, opts) => startTurn(botId, text, opts), threadBusy, power: () => cloudComputerPower, computerOwner: (bot) => botComputerControlKey(bot), routines: () => routines, log: (line) => console.warn(line) }, () => ({ personName: personNameIn, sendsFreely: (botId, threadId) => roomTurnLevels.forRequest(threadId, botId, () => sourceApprovalMode(botId, threadId)) === "full", outbound: () => outboundHold, markOutside: (threadId) => outsideLineage.mark(threadId), folder: (botId, threadId) => messageFileRootsForThread(botId, threadId).filter((root) => root !== ATTACHMENTS_DIR)[0] ?? null })); const cloudComputerPower = createCloudComputerPower({
@@ -9048,6 +9074,8 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           }
           stopScreenPoller(bot.id);
           activeVpsThreads.delete(bot.id);
+          vps.stopVpsDesktopTunnel(bot.id);
+          cancelVpsIdle(bot.id);
           lastReply.delete(bot.threadId);
           const target = perBotLocalVmTarget(bot.id);
           localVmIdles.get(target.key)?.cancel();
@@ -12026,7 +12054,7 @@ ROUTES.push(createBotSettingsRoutes({
   canManageCommandAllowlist, commandAllowlistResponse, cardAnswerRefusal, threadRead: teamMessages.seen, levelOf, personMarkThread: personRooms.personMarkThread, personHeldUnread: personRooms.personHeldUnread,
 }));
 const botOrderRoutes = createBotOrderRoutes({ store, visibleFor: (auth) => visibleTo(viewerFor(auth)), ...(botOrders ? { own: { person: botOrders.personOf, order: botOrders, told: (person, botIds) => broadcast({ kind: "bots.order", botIds }, { person }) } } : {}) }); ROUTES.push(createGroupOrderRoutes({ store, visibleFor: (auth) => visibleTo(viewerFor(auth)) }), botOrderRoutes, createBotAccessRoutes({ team: CLOUD_TEAM, people: teamOwners.people, store, levelOf, wireBot, publicGroupState, broadcast, audienceChanged, record: (auth, row) => appendAdminAction(DATA_DIR, { ...row, actor: decisionActorFor(auth) }), shared: createShareNotice({ people: () => teamOwners.people?.list() ?? [], profileName: (email) => teamHost.people.profile(personKey({ id: "", email })).name, store: () => store, inbox: () => teamMessages.inbox }) }), accessRequests.routes);
-const botPatchRoutes = createBotPatchRoutes({ turnBots: directTurnBots, modelSwitched: noTerminal.modelSwitched,
+const botPatchRoutes = createBotPatchRoutes({ turnBots: directTurnBots, modelSwitched: noTerminal.modelSwitched, vpsServerSwitched,
   store, cfg, registry, sessions, browserRuntime, browserLive, memoryUpkeep, cacheKeepWarm, hostedModels, supportsApprovalMode,
   routines: () => routines, activeVpsThreads,
   hostedWorkspace: HOSTED_WORKSPACE, hostedFullAccessRefusal: HOSTED_FULL_ACCESS_REFUSAL, desktopManaged: DESKTOP_MANAGED,
@@ -12249,7 +12277,7 @@ const postiz = createPostiz({ cfg: () => cfg, mcpOAuth, persistMcpServers: persi
   sharedComputers, sharedComputerControl, closeBrowser, browserEngineSwitched,
   hostedModels: Boolean(hostedModels),
   cloudHome: Boolean(CLOUD_HOME), cloudTeam: CLOUD_TEAM !== null, sharedMembership,
-  lendingEnabled: () => lendingEnabled() || ownerLends(), providerConfigs, localVmIdleMs, localVmIdles, vpsIdleMs, vpsIdles, localVmActiveThreads, localVmLifecycleBusy,
+  lendingEnabled: () => lendingEnabled() || ownerLends(), providerConfigs, localVmIdleMs, localVmIdles, vpsIdleMs, vpsIdles, vpsServerSwitched, localVmActiveThreads, localVmLifecycleBusy,
   localVmImageBusy: { get: () => localVmImageBusy },
   localVmModeChangeBusy: { set: (busy) => { localVmModeChangeBusy = busy; } },
   localVmModeChanging: sharedVm.modeChanging,
@@ -15019,12 +15047,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               ? desktopViewerUrl(`vps/${botId}`, bot.threadId) : result.joinUrl });
           }
           const action = m[2] === "provision" ? "provision" : m[2] === "remove" ? "remove" : "stop";
+          cancelVpsIdle(botId);
           const status = await vps.vpsComputerAction(action, vpsConfigForBot(cfg, bot), botId);
           if (status.container === "running") touchVpsIdle(bot);
-          else {
-            vpsIdles.get(botId)?.cancel();
-            vpsIdles.delete(botId);
-          }
+          else cancelVpsIdle(botId);
           return json(res, 200, status);
         } finally {
           releaseComputerLifecycle();
@@ -15244,7 +15270,7 @@ const gracefulShutdown = createGracefulShutdown({
       desktopViewer.closeAll();
       upgrades.close();
       for (const idle of localVmIdles.values()) idle.cancel();
-      for (const idle of vpsIdles.values()) idle.cancel();
+      for (const botId of new Set([...vpsIdles.keys(), ...vpsIdleGenerations.keys()])) cancelVpsIdle(botId);
       cloudComputerPower.close(); boatRecovery.close();
       vps.closeAllVpsDesktopTunnels();
       watchdog.stop();

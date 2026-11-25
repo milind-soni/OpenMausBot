@@ -44,7 +44,9 @@ import {
   vpsComputerJoin,
   vpsDesktopConnection,
   closeVpsDesktopTunnel,
+  stopVpsDesktopTunnel,
   closeAllVpsDesktopTunnels,
+  vpsComputerRunning,
   vpsComputerScreenshot,
   vpsComputerStatus,
   vpsComputerMcp,
@@ -1409,6 +1411,33 @@ describe("remote desktop tunnel ownership", () => {
       await vi.advanceTimersByTimeAsync(30_001);
       expect(child.kill).toHaveBeenCalledTimes(1);
     } finally { closeAllVpsDesktopTunnels(); vi.useRealTimers(); }
+  });
+
+  it("stops an open viewer tunnel on a server switch without firing onViewerClosed, so the next join opens a fresh tunnel", async () => {
+    const closed = vi.fn();
+    const { child, runner } = await openFixture(closed);
+    try {
+      const release = vpsDesktopConnection(BOT_ID)!.retain();
+      expect(stopVpsDesktopTunnel(BOT_ID)).toBe(true);
+      expect(child.killed).toBe(true);
+      release();
+      child.emit("close", 0);
+      expect(closed).not.toHaveBeenCalled();
+      expect(vpsDesktopConnection(BOT_ID)).toBeUndefined();
+      const next = await vpsComputerJoin({ vps: { sshAlias: "alpha-vps" } }, BOT_ID, runner, true);
+      expect(next.state).toBe("running");
+      expect(vpsDesktopConnection(BOT_ID)?.live()).toBe(true);
+    } finally { closeAllVpsDesktopTunnels(); }
+  });
+
+  it("checks whether a managed VPS desktop container is running without throwing on unreachable or missing hosts", async () => {
+    expect(await vpsComputerRunning(CONFIG, BOT_ID, fixture({ running: true }).runner)).toBe(true);
+    expect(await vpsComputerRunning(CONFIG, BOT_ID, fixture({ running: false }).runner)).toBe(false);
+    expect(await vpsComputerRunning(CONFIG, BOT_ID, fixture({ container: false }).runner)).toBe(false);
+    expect(await vpsComputerRunning(CONFIG, BOT_ID, fixture({ managed: false }).runner)).toBe(false);
+    expect(await vpsComputerRunning(CONFIG, BOT_ID, fixture({ environmentId: "another-installation" }).runner)).toBe(false);
+    expect(await vpsComputerRunning({}, BOT_ID, fixture().runner)).toBe(false);
+    expect(await vpsComputerRunning(CONFIG, BOT_ID, async () => { throw new Error("ssh: connect timeout"); })).toBe(false);
   });
 });
 
