@@ -1,47 +1,45 @@
 # Reactions
 
-A person reacts to a message from the chat's action row. A 👍 or 👎 on a bot's
-message is their reply to it and reaches that bot at once; ❤️ 😂 🎉 👀 never
-start a turn and reach the bot with the person's next message. The rule lives
-in `server/reactions.ts`, the route in `server/routes/reactions.ts`, and the
-reply itself goes the way a late answer to a question card goes
-(`server/person-replies.ts`).
+A person reacts to a message from the chat's action row. Every reaction on a
+bot's message is quiet feedback: no line is posted and no turn starts. The bot
+reads it once, in its next turn: in a 1:1 conversation ahead of the person's
+next message, in a room in its next turn in any of the room's conversations.
+A 👍 or 👎 still answers an open card (approve or deny, yes or no) and a line in
+a person's inbox. The rule lives in `server/reactions.ts` and the route in
+`server/routes/reactions.ts`.
 
 ## Server
 
 ```sh
-pnpm exec vitest run server/reactions.e2e.test.ts
+pnpm exec vitest run server/reactions.e2e.test.ts server/reactions.test.ts
 ```
 
 The first test starts the launcher-managed fixture with scripted fake-engine
-replies. The bot asks "I drafted the email to Sam. Shall I send it?"; a 👍
-through `POST /api/threads/ID/messages/ID/reactions` answers `delivery:
-"started"`, records `{ emoji: "👍", by: "user" }` on that message, and adds a
-user line `{ text: "👍", reaction: "👍", replyToId }` that the bot's next turn
-answers ("Sent it to Sam."). The engine's prompt for that turn says the person
-reacted 👍 to its earlier message, that 👍 means yes, go ahead when that
-message asked something or offered to do something, and only "got it" (no new
-work) when it just told them something, and quotes the message as untrusted
-data. A second 👍 with `on: true`, or taking the 👍 back and
-setting it again, delivers nothing: the bot already has that answer. A ❤️ on
-the reply answers `delivery: "noted"`, starts no turn, and opens the next typed
-turn's prompt with `(User reacted ❤️ to your message “Sent it to Sam.”.)`.
-Changing the question's 👍 to 👎 and back to 👍 starts a turn for each change,
-whose prompts read the 👎 as no and the 👍 as yes. The system prompt tells the
-bot to ask a plain yes or no in one sentence instead of a widget.
+replies. A 👍, taken back, then a 👎 on the bot's plan through
+`POST /api/threads/ID/messages/ID/reactions` answer `delivery: "noted"` (the
+take-back `"none"`), record `{ emoji: "👎", by: "user" }` on that message, add
+no line and start no turn: the engine has still had one prompt. The person's
+next message opens with `(User reacted 👎 to your message “Here is the plan for
+Friday: …”.)` exactly once, and the turn after that does not repeat it. The
+system prompt says a 👍/👎 reaches the bot as a note with the person's next
+message.
 
-Another test reacts 👍 to a new bot's greeting: the bot answers, and the
-conversation keeps its untitled name instead of being named "👍".
+Another test reacts 👍 to a new bot's greeting: nothing starts, and the
+conversation keeps its untitled name.
 
 The card test holds a turn open, raises two Bash approvals through the fake
 engine's permission broker and answers them with 👍 and 👎 on their cards: the
 engine receives `allow` and `deny`, and each card records
 `answeredBy: { kind: "loopback", via: "reaction" }`.
 
-The room test runs a room: a 👍 on Otter's question adds the room line
-`@Otter: 👍` and Otter answers; the room's conversation window shows the line
-as `User: [reacted 👍 to Otter: “Shall I post the launch note?”]` and, after a
-🎉, Otter's line with `(User reacted 🎉)` under it.
+The room test runs a room: a 👍 on Otter's question adds no line and starts no
+turn; Otter's next turn opens with `(User reacted 👍 to your message “Shall I
+post the launch note?”.)` once, and the room system prompt says such a note is
+quiet feedback that starts no new work. Otter's own lines in the transcript
+carry no reaction marks (other members still see `(User reacted 🎉)` under
+them). A ❤️ on Otter's line in the room's main conversation reaches Otter's next
+turn in another of the room's threads, once. These cross-thread notes are kept
+in memory: a restart drops the ones not yet told.
 
 Evidence is written beside the fixture's server log as
 `<server-log>.reactions.json`, `<server-log>.reaction-cards.json` and
@@ -54,8 +52,10 @@ pnpm exec vitest run server/bot-visibility.e2e.test.ts -t "reaction their own"
 ```
 
 Ada's and Bob's 👍 sit side by side with their names, Ada's 👎 replaces only
-her own, `GET /api/auth/session` returns each session's `reactor` key, and the
-three replies reach the bot attributed to the person who reacted.
+her own, `GET /api/auth/session` returns each session's `reactor` key, nothing
+is posted and the bot stays idle. The change streams to Bob, who sees the
+conversation; a reaction in a conversation Bob cannot see streams to Ada and
+never to him.
 
 ## Renderer
 
@@ -86,23 +86,23 @@ keyboard focus; hover it first with `ui eval` (a `pointerenter` with
 ```sh
 pnpm control:omb ui click --ui $H --ref @eN
 pnpm control:omb ui screenshot --ui $H --out .omb-scratch/verify-evidence/reactions-open.png
-pnpm control:omb ui click --ui $H --name "Thumbs up: yes, go ahead"
+pnpm control:omb ui click --ui $H --name "Thumbs down"
 pnpm control:omb ui wait-settle --ui $H --timeout 60
 pnpm control:omb ui snapshot --ui $H
 pnpm control:omb ui console --ui $H
 ```
 
 Expected: the open row is a toolbar named `Reactions` with six toggle buttons,
-`Thumbs up: yes, go ahead` first and focused. After the click the question has
-a group `Reactions` holding `Thumbs up: yes, go ahead: You`, no `👍` bubble is
-drawn, and the bot's next message `Sent it to Sam.` follows by itself. From the
+`Thumbs up` first and focused. After the click the question has a group
+`Reactions` holding `Thumbs down: You`, no bubble is drawn and the bot stays
+idle until the person writes again. From the
 keyboard, Enter on a focused **Add reaction** opens the row, Arrow keys move,
 Enter chooses and focus returns to the button. The console has no `error`
 entries.
 
 ![The reaction row open over a bot's question](evidence/reactions/open.png)
 
-![The question with a 👍 under it and the bot's reply after it](evidence/reactions/answered.png)
+![The bot's message with a 👎 under it, and no reply started](evidence/reactions/answered.png)
 
 The components themselves:
 

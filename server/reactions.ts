@@ -22,8 +22,9 @@ export interface ReactionDeps {
   store: Pick<Store, "bot" | "botByThread" | "groupByThread" | "messagesFor" | "setReaction">;
   /** A person's reaction set or cleared on a message, after it is stored. */
   noted?(threadId: string, message: Message, by: string): void;
-  /** `repeated`: that reply had reached the bot already. */
-  reply(input: { auth: RequestAuth; threadId: string; owner: BotRecord; target: ReplyTarget; answer: string; sendId: string }): Promise<{ queued: boolean; repeated?: true }>;
+  /** A 👍 or 👎 on a line of a person's inbox, passed back as their answer; null for any other line, which the bot
+   * reads as a note with its next turn. `repeated`: that answer had reached the bot already. */
+  reply(input: { auth: RequestAuth; threadId: string; owner: BotRecord; target: ReplyTarget; answer: string; sendId: string }): Promise<{ queued: boolean; repeated?: true }> | null;
   /** Answers the card the way a spoken yes or no on a call does, with the same checks on who may answer. */
   answerCard(input: { auth: RequestAuth; threadId: string; requestId: string } & CardReply): Promise<{ ok: true } | { ok: false; status: number; error: string }>;
   withdraw(threadId: string, owner: BotRecord, sendId: string): void;
@@ -52,7 +53,7 @@ export function cardReply(card: OptionCardData, answer: "yes" | "no"): CardReply
 /** One line with no brackets or parentheses: a person's name cannot close the note or start a line of its own. */
 const reactorName = (reaction: Entry, userName: PersonName) =>
   peerName((reaction.by === "user" ? personOf(userName, {}) : reaction.name ?? "Someone").replace(/[()]/g, " "));
-const feelings = (message: Message) => (message.reactions ?? []).filter((reaction) => !reactionAnswer(reaction.emoji));
+const feelings = (message: Message) => (message.reactions ?? []).filter((reaction) => !message.card || !reactionAnswer(reaction.emoji));
 
 const reactionNote = (message: Message, reaction: Entry, userName: PersonName) =>
   `(${reactorName(reaction, userName)} reacted ${reaction.emoji} to your message “${replyExcerpt(message.text!, 160)}”.)`;
@@ -145,9 +146,11 @@ export function createReactions(deps: ReactionDeps) {
       return "answered";
     }
     if ((target.kind !== "text" && target.kind !== "widget") || !target.text?.trim() || sent.latest === entry.emoji) return "none";
-    const receipt = await deps.reply({
+    const answered = deps.reply({
       auth, threadId, owner, target: { ...target, reactedWith: entry.emoji }, answer: entry.emoji, sendId: sent.sendId(entry),
     });
+    if (!answered) return "noted";
+    const receipt = await answered;
     return receipt.queued ? "queued" : receipt.repeated ? "none" : "started";
   }
 

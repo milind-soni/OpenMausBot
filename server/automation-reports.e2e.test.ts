@@ -257,16 +257,19 @@ it("puts the main chat under To review when a run ends on a question, even one p
   expect(saved.tasks.find((task: any) => task.threadId === done.threadId)).toMatchObject({ routineRunId: id, unread: false });
 }, 120_000);
 
-it("takes a 👍 on a run's question in the chat as the answer, with that report in hand", async () => {
+it("keeps a 👍 on a run's question quiet, and hands it to the chat's next turn with that report in hand", async () => {
   const s = await server();
   s.script([
     { key: "run", match: [s.header("Acme replies")], reply: "I drafted a reply to Acme's invoice question.\nNEEDS INPUT: Should I send it?" },
-    { key: "answer", match: ["reacted 👍"], reply: "Sent.", expectContextIncludes: ["[From routine ", "Acme replies", "Should I send it?"] },
+    { key: "answer", match: ["reacted 👍", "Go ahead."], reply: "Sent.", expectContextIncludes: ["[From routine ", "Acme replies", "Should I send it?"] },
   ]);
   const id = await s.runNow(await s.routine("Acme replies"));
   await s.reported(id, "posted");
   const [question] = await s.lines();
-  expect(await s.api("POST", `/api/threads/${s.main}/messages/${question.id}/reactions`, { emoji: "👍", on: true })).toMatchObject({ delivery: "started" });
+  const before = (await s.messages(s.main)).length;
+  expect(await s.api("POST", `/api/threads/${s.main}/messages/${question.id}/reactions`, { emoji: "👍", on: true })).toMatchObject({ delivery: "noted" });
+  expect(await s.messages(s.main)).toHaveLength(before);
+  await s.api("POST", `/api/bots/${s.bot.id}/messages`, { threadId: s.main, text: "Go ahead." }, 202);
   await s.cli("wait", "--bot", s.bot.id, "--task", s.main, "--timeout", "20");
   expect((await s.messages(s.main)).findLast((message) => message.role === "bot" && message.kind === "text")?.text).toBe("Sent.");
 }, 120_000);

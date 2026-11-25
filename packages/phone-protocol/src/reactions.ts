@@ -1,15 +1,16 @@
-// Reactions on chat messages. A 👍 or 👎 on a bot's message is the person's reply to it; the others say how they feel.
+// Reactions on chat messages. A 👍 or 👎 answers an open card or a line in a person's inbox; any other reaction, and a
+// 👍 or 👎 on any other bot message, is quiet feedback the bot reads with its next turn: no line is posted, no turn starts.
 
 /** Every reaction a client offers and the server accepts, in the order clients show them. */
 export const REACTIONS = ["👍", "👎", "❤️", "😂", "🎉", "👀"] as const;
 export type Reaction = (typeof REACTIONS)[number];
 
-/** What a reaction did, as POST /api/threads/:threadId/messages/:messageId/reactions reports it: a turn `started` with
- * it as the person's reply to that message, or the reply waits `queued` behind the running turn; the open card on the
- * message was `answered`; a feeling the bot reads with its next turn (`noted`); or nothing reached a bot. */
+/** What a reaction did, as POST /api/threads/:threadId/messages/:messageId/reactions reports it: an inbox line's answer
+ * `started` a turn where the line came from, or waits `queued` behind the running turn; the open card on the message was
+ * `answered`; feedback the bot reads with its next turn (`noted`); or nothing reached a bot. */
 export type ReactionDelivery = "started" | "queued" | "answered" | "noted" | "none";
 
-/** 👍 answers yes and 👎 answers no; any other reaction answers nothing. */
+/** On a card or an inbox line, 👍 answers yes and 👎 answers no; any other reaction answers nothing. */
 export function reactionAnswer(emoji: string | null | undefined): "yes" | "no" | null {
   return emoji === "👍" ? "yes" : emoji === "👎" ? "no" : null;
 }

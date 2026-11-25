@@ -44,8 +44,45 @@ function fixture(options: { queued?: boolean; refuse?: Error } = {}) {
   return { store, bot, calls, react, say };
 }
 
-describe("a reaction on a bot's message", () => {
-  it("records a 👍 and hands it to the bot as the person's reply to that message", async () => {
+describe("a 👍 or 👎 on any other bot message is quiet", () => {
+  it("records it, posts nothing and starts no turn: the bot reads it with its next turn", async () => {
+    const { store, bot } = fixture();
+    const replies: unknown[] = [];
+    const { react } = createReactions({ store, reply: (input) => { replies.push(input); return null; }, answerCard: async () => ({ ok: true }), withdraw: () => {} });
+    const asked = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "Here is the plan." });
+    const before = store.messagesFor(bot.threadId).length;
+    for (const emoji of ["👎", "👍"] as const) {
+      const result = await react({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji, reactor: ALICE });
+      expect(result.delivery).toBe("noted");
+      expect(result.message.reactions).toEqual([{ emoji, by: ALICE.by, name: ALICE.name, at: expect.any(Number) }]);
+    }
+    expect(replies).toHaveLength(2);
+    expect(store.messagesFor(bot.threadId)).toHaveLength(before);
+    const removed = await react({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji: "👍", reactor: ALICE, on: false });
+    expect(removed).toMatchObject({ delivery: "none", message: { reactions: undefined } });
+  });
+
+  it("reaches the bot's next turn once, and its turn after that no more", () => {
+    const line = (patch: Partial<Message>): Message => ({ id: "x", at: 0, role: "bot", kind: "text", text: "Here is the plan.", ...patch });
+    const path = [
+      line({ id: "b1", at: 1, reactions: [{ emoji: "👎", by: "p_mira", name: "Mira", at: 5 }] }),
+      line({ id: "u1", at: 6, role: "user", text: "Try again" }),
+      line({ id: "b2", at: 7, text: "Second plan." }),
+      line({ id: "u2", at: 8, role: "user", text: "Better" }),
+    ];
+    expect(withReactionNotes("Try again", path.slice(0, 2), new Set(["u1"]), "Milind"))
+      .toBe("(Mira reacted 👎 to your message “Here is the plan.”.)\n\nTry again");
+    expect(withReactionNotes("Better", path, new Set(["u2"]), "Milind")).toBe("Better");
+  });
+
+  it("is never a note on an open card, which it answers", () => {
+    const card = { id: "c1", at: 1, role: "bot", kind: "options", text: "Run it?", card: { requestId: "r1", options: [] }, reactions: [{ emoji: "👍", by: "user", at: 5 }] } as unknown as Message;
+    expect(withReactionNotes("Next", [card, { id: "u1", at: 6, role: "user", kind: "text", text: "Next" }], new Set(["u1"]), "Milind")).toBe("Next");
+  });
+});
+
+describe("a 👍 or 👎 on a line of a person's inbox", () => {
+  it("records a 👍 and passes it back as the person's answer to that line", async () => {
     const { store, bot, calls, react, say } = fixture();
     const asked = say();
     const result = await react({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji: "👍", reactor: { by: "user" } });
@@ -248,12 +285,13 @@ describe("a reaction in a room", () => {
     const asked = store.appendMessage(room.threadId, { role: "bot", kind: "text", text: "Shall I post it?", from });
     const { react } = createReactions({
       store,
-      reply: async (input) => { calls.replies.push(input); return { queued: false }; },
+      reply: (input) => { calls.replies.push(input); return null; },
       answerCard: async () => ({ ok: true }),
       withdraw: () => {},
     });
-    expect((await react({ auth: OWNER, threadId: room.threadId, messageId: asked.id, emoji: "👍", reactor: { by: "user" } })).delivery).toBe("started");
+    expect((await react({ auth: OWNER, threadId: room.threadId, messageId: asked.id, emoji: "👍", reactor: { by: "user" } })).delivery).toBe("noted");
     expect(calls.replies[0]?.owner.id).toBe(otter.id);
+    expect(store.messagesFor(room.threadId).filter((message) => message.role === "user")).toEqual([]);
     const unsigned = store.appendMessage(room.threadId, { role: "bot", kind: "text", text: "Who said this?" });
     expect((await react({ auth: OWNER, threadId: room.threadId, messageId: unsigned.id, emoji: "👍", reactor: { by: "user" } })).delivery).toBe("none");
     expect(calls.replies).toHaveLength(1);
@@ -338,6 +376,7 @@ describe("feelings the bot reads with its next turn", () => {
     ];
     expect(withReactionNotes("Thanks", path, new Set(["u2"]), "Milind")).toBe([
       "(Milind reacted ❤️ to your message “Here is the draft.”.)",
+      "(Someone reacted 👍 to your message “Here is the draft.”.)",
       "(Bob reacted 😂 to your message “Older note”.)",
       "",
       "Thanks",
@@ -371,7 +410,7 @@ describe("feelings the bot reads with its next turn", () => {
 
   it("shows a room's bot line with who felt what", () => {
     expect(roomReactionNote(line({ reactions: [{ emoji: "❤️", by: "user" }, { emoji: "👍", by: "p_bob", name: "Bob" }, { emoji: "🎉", by: "p_bob", name: "Bob" }] }), "Milind"))
-      .toBe("\n(Milind reacted ❤️, Bob reacted 🎉)");
+      .toBe("\n(Milind reacted ❤️, Bob reacted 👍, Bob reacted 🎉)");
     expect(roomReactionNote(line({ role: "user", reactions: [{ emoji: "❤️", by: "user" }] }), "Milind")).toBe("");
   });
 });

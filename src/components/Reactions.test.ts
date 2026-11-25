@@ -53,8 +53,8 @@ describe("the react button on a bot's message", () => {
     expect(button().getAttribute("aria-expanded")).toBe("true");
     expect(toolbar()?.getAttribute("aria-label")).toBe("Reactions");
     expect(choices().map((choice) => [choice.textContent, choice.getAttribute("aria-label"), choice.getAttribute("aria-pressed")])).toEqual([
-      ["👍", "Thumbs up: yes, go ahead", "false"],
-      ["👎", "Thumbs down: no, not that", "false"],
+      ["👍", "Thumbs up", "false"],
+      ["👎", "Thumbs down", "false"],
       ["❤️", "Heart", "false"],
       ["😂", "Laughing", "false"],
       ["🎉", "Celebrate", "false"],
@@ -181,7 +181,7 @@ describe("reaction chips under a message", () => {
     await render(createElement(ReactionChips, { threadId: "t1", message: reacted }));
     expect(host.querySelector('[role="group"]')?.getAttribute("aria-label")).toBe("Reactions");
     expect(chips().map((chip) => [chip.tagName, chip.textContent, chip.getAttribute("aria-label"), chip.getAttribute("aria-pressed"), chip.getAttribute("title")])).toEqual([
-      ["BUTTON", "👍2", "Thumbs up: yes, go ahead: You, alice@example.test", "true", "You, alice@example.test"],
+      ["BUTTON", "👍2", "Thumbs up: You, alice@example.test", "true", "You, alice@example.test"],
       ["BUTTON", "❤️", "Heart: Bob", "false", "Bob"],
     ]);
   });
@@ -202,7 +202,7 @@ describe("reaction chips under a message", () => {
     await render(createElement(ReactionChips, { threadId: "t1", message: reacted, canReact: false }));
     expect(host.querySelectorAll("button")).toHaveLength(0);
     expect(chips().map((chip) => [chip.getAttribute("role"), chip.getAttribute("aria-label")])).toEqual([
-      ["img", "Thumbs up: yes, go ahead: You, alice@example.test"],
+      ["img", "Thumbs up: You, alice@example.test"],
       ["img", "Heart: Bob"],
     ]);
   });
@@ -211,6 +211,26 @@ describe("reaction chips under a message", () => {
     const message: Message = { ...ASKED, reactions: [{ emoji: "👍", by: "p_bob", at: Date.now() }, { emoji: "❤️", by: "p_ada", at: 1 }, { emoji: "🎉", by: "p_cy" }] };
     await render(createElement(ReactionChips, { threadId: "t1", message }));
     expect(chips().map((chip) => chip.classList.contains("animate-pop-in"))).toEqual([true, false, false]);
+  });
+
+  it("counts 👍 and 👎 side by side, and takes the viewer's own 👎 back with a tap", async () => {
+    fixture.api.mockResolvedValue({ delivery: "none" });
+    const split: Message = { ...ASKED, reactions: [
+      { emoji: "👎", by: "user", at: 1 },
+      { emoji: "👍", by: "p_bob", name: "Bob", at: 2 },
+      { emoji: "👎", by: "p_ada", name: "Ada", at: 3 },
+    ] };
+    await render(createElement(ReactionChips, { threadId: "t1", message: split }));
+    expect(chips().map((chip) => [chip.textContent, chip.getAttribute("aria-label"), chip.getAttribute("aria-pressed")])).toEqual([
+      ["👍", "Thumbs up: Bob", "false"],
+      ["👎2", "Thumbs down: You, Ada", "true"],
+    ]);
+    await click(chips()[1]!);
+    expect(fixture.api.mock.calls[0]).toEqual(["/api/threads/t1/messages/m1/reactions", { method: "POST", body: JSON.stringify({ emoji: "👎", on: false }) }]);
+    expect(patched()[0]?.message.reactions).toEqual([
+      { emoji: "👍", by: "p_bob", name: "Bob", at: 2 },
+      { emoji: "👎", by: "p_ada", name: "Ada", at: 3 },
+    ]);
   });
 
   it("draws nothing for a message nobody reacted to", async () => {

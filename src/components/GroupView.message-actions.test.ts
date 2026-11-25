@@ -87,12 +87,12 @@ describe("room message actions", () => {
     const asked: Message = { ...text("a", "bot", "Shall I post it?"), reactions: [{ emoji: "👍", by: "p_ada", name: "Ada" }] };
     const open = markup([asked]);
     expect(open).toContain('aria-label="Add reaction"');
-    expect(open).toMatch(/<button[^>]*aria-label="Thumbs up: yes, go ahead: Ada"/);
+    expect(open).toMatch(/<button[^>]*aria-label="Thumbs up: Ada"/);
     fixture.canWrite = false;
     const closed = markup([asked]);
     expect(closed).not.toContain("Add reaction");
-    expect(closed).not.toMatch(/<button[^>]*aria-label="Thumbs up: yes, go ahead: Ada"/);
-    expect(closed).toMatch(/<span role="img" aria-label="Thumbs up: yes, go ahead: Ada"/);
+    expect(closed).not.toMatch(/<button[^>]*aria-label="Thumbs up: Ada"/);
+    expect(closed).toMatch(/<span role="img" aria-label="Thumbs up: Ada"/);
   });
 
   it("puts read aloud (with its setup hint while no voice is set up), raw markdown and pin in a room reply's more menu", () => {
