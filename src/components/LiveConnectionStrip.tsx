@@ -39,7 +39,8 @@ export function LiveConnectionStrip({ connected, hydrated }: { connected: boolea
     const helpTimer = setTimeout(() => { setHelp(true); noteRefusedRequest(); }, CONNECTION_HELP_AFTER_MS);
     return () => { clearTimeout(probe); clearTimeout(timer); clearTimeout(helpTimer); };
   }, [connected, asleep, online]);
-  const work = useCloudWork(!connected && !asleep && online);
+  // Asked only once the drop is long enough to say so (or a send got no answer), then less and less often (lib/cloud-work.ts).
+  const work = useCloudWork(!connected && !asleep && online, late);
   const now = useNow(Boolean(work));
   if (asleep) return null;
   const notice = !online ? "offline" : !connected && work ? "working" : !connected && late && (hydrated || help) ? "reconnecting" : null;

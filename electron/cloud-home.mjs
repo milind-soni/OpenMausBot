@@ -78,8 +78,9 @@ export function parseCloudSummary(input) {
   const homecoming = record(input.hold) ? parseHomecoming(input.hold.homecoming) : null;
   const hold = record(input.hold) && moment(input.hold.until) ? { until: input.hold.until, ...(homecoming ? { homecoming } : {}) } : null;
   const formerOrigins = parseFormerOrigins(input.formerOrigins, origin);
-  // Additive: an operation of the Admin's own has it down now (an update, resize, move, restore or start: cloud-operation.mjs).
-  const operation = ["ready", "provisioning", "failed"].includes(status) ? parseCloudOperation(input.operation) : null;
+  // Additive: an operation of the Admin's own has it down now (an update, its rollback, a resize, a move, a restore or a start:
+  // cloud-operation.mjs). Never on a failed Cloud, whatever an Admin sends: that keeps its own screen and its Try again.
+  const operation = ["ready", "provisioning"].includes(status) ? parseCloudOperation(input.operation) : null;
   return { status, ...(origin ? { origin } : {}), ...(formerOrigins.length ? { formerOrigins } : {}), ...(setup ? { setup } : {}), ...(retryAt ? { retryAt } : {}), ...(disk ? { disk } : {}), ...(unreachable ? { unreachable } : {}), ...(power ? { power } : {}),
     ...(input.moves === true ? { moves: true } : {}), ...(hold ? { hold } : {}), ...(operation ? { operation } : {}) };
 }

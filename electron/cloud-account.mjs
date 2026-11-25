@@ -108,7 +108,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
   let resetUsed = false, unsaved = false, stuckSince = null, reading = null;
   const save = record => (unsaved ? Promise.resolve() : store.write(record));
   let value = { status: "signed-out", message: "restoring" }, generation = 0, timer = null, closed = false, clearing = null, refreshing = null;
-  let verifiedUntil = 0, restoring = false, controller = new AbortController(), failures = 0;
+  let verifiedUntil = 0, restoring = false, controller = new AbortController(), failures = 0, failingUntil = 0;
   let plan = null, savedHint = null;
   /** The plan's own Cloud that Cancel and Keep act on, as the last verified session names it. */
   let renewalCloud = null;
@@ -151,7 +151,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     stopTimer();
     if (!closed) { timer = setTimer(() => { timer = null; void work().catch(() => {}); }, Math.max(1, delay)); timer?.unref?.(); }
   };
-  const reset = () => { generation++; stopTimer(); controller.abort(); controller = new AbortController(); pending = null; emailed = null; verifiedUntil = 0; failures = 0; return generation; };
+  const reset = () => { generation++; stopTimer(); controller.abort(); controller = new AbortController(); pending = null; emailed = null; verifiedUntil = 0; failures = 0; failingUntil = 0; return generation; };
   // `quiet`: another account is taking over (quiesce to reload): this sign-in's grant is still in memory, and nothing may ask for
   // it or write it over the one taking its place, whoever asks (a window coming to the front, Settings' Refresh).
   let quiet = false;
@@ -287,7 +287,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       }
       plan = hint ? { accountId: grant.account.id, ...hint } : null;
       renewalCloud = renewingCloud;
-      failures = 0;
+      failures = 0; failingUntil = 0;
       // A checkout the Admin still holds open, with none kept here (this app restarted mid-checkout): watched as this
       // app's own from first sight, so payment, setup and "ready" are followed as closely as before the restart.
       if (!opened && offer?.checkout && offer.checkout.openUntil > now() && access.status !== "active") {
@@ -313,10 +313,10 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     } catch (error) {
       if (!current(stamp)) return state();
       if (signInEnded(error)) { verifiedUntil = 0; failures = 0; stopTimer(); return publish(view("reauth-required", "access-ended")); }
-      failures++;
+      failures++; const wait = Math.min(retryDelay(failures), grant.expiresAt - now()); failingUntil = now() + Math.max(0, wait); // `failingUntil` below
       if (value.status === "connected") publish(value);
       else publish(view("unavailable", "unreachable"));
-      schedule(refresh, Math.min(retryDelay(failures), grant.expiresAt - now()));
+      schedule(refresh, wait);
     }
     return state();
   }
@@ -525,7 +525,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       return state();
     },
     cancel: () => { if (!pending && value.status !== "connecting") return Promise.resolve(state()); opened = null; return signOut(); },
-    refresh, signOut,
+    refresh, signOut, failingUntil: () => (failures > 0 ? failingUntil : 0), // a failing session read's next try: a caller waits for it
     /** Clear and sign in again: a saved sign-in this computer can't read or remove goes (never a working one), and isn't read again
      * this run. One that still can't be removed stays on disk; this run's next sign-in is kept in memory if it can't be saved. */
     async resetSaved() {

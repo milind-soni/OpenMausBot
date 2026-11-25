@@ -5,9 +5,9 @@ import test from "node:test";
 
 import { parseCloudSummary } from "./cloud-home.mjs";
 import { parseCloudList } from "./cloud-list.mjs";
-import { anyOperation, cloudOperationAt, OPERATION_REFRESH_MS, parseCloudOperation } from "./cloud-operation.mjs";
+import { anyOperation, cloudOperationAt, OPERATION_GRACE_MS, OPERATION_REFRESH_MS, operationEndsAt, parseCloudOperation } from "./cloud-operation.mjs";
 import { HOME_SCREEN_PATH } from "./home-window.mjs";
-import { CLIENT, CLIENT_A, CLOUD, connected, LOCAL, world } from "./fixtures/home-window-world.mjs";
+import { ACME, CLIENT, CLIENT_A, CLOUD, connected, LOCAL, TEAM, world } from "./fixtures/home-window-world.mjs";
 
 const UPDATE = { kind: "update", since: 1_000_000, until: 2_080_000, expectedAt: 1_180_000 };
 
@@ -52,18 +52,55 @@ test("My Cloud being updated: this computer's screen says so, never \"can't reac
   assert.equal(plain.home.view().screen, "offline");
 });
 
-test("a Cloud the Admin is starting again says so, never its setup or a failure, and its address is never looked up", async () => {
+test("a Cloud the Admin is starting again says so, never its setup, and its address is never looked up; a failed one keeps its own screen", async () => {
   const start = { kind: "start", since: 1_000_000, until: 2_800_000 };
-  for (const machine of [{ status: "provisioning", setup: { step: "starting" }, operation: start }, { status: "failed", operation: start }]) {
-    const w = world({ state: connected(machine) });
-    await w.home.show();
-    assert.deepEqual(w.home.view(), { screen: "working", operation: start }, machine.status);
-    assert.deepEqual(w.fetched, [], machine.status);
-  }
+  const w = world({ state: connected({ status: "provisioning", setup: { step: "starting" }, operation: start }) });
+  await w.home.show();
+  assert.deepEqual(w.home.view(), { screen: "working", operation: start });
+  assert.deepEqual(w.fetched, []);
   // Without the Admin's word: its setup, as before.
   const before = world({ state: connected({ status: "provisioning", setup: { step: "starting" } }) });
   await before.home.show();
   assert.equal(before.home.view().screen, "setup");
+  // Its start failed for good: the failed screen with its own words and its Try again, whatever an Admin sends with it.
+  assert.equal("operation" in parseCloudSummary({ state: "failed", operation: start }), false, "a failed Cloud has no operation");
+  const failed = world({ state: connected({ status: "failed", operation: start }) });
+  await failed.home.show();
+  assert.deepEqual(failed.home.view(), { screen: "plan", machine: "failed" });
+  assert.equal(cloudOperationAt(connected({ status: "failed", operation: start }), CLOUD), null);
+});
+
+test("the screen ends by itself 15 minutes past the operation's deadline by this computer's clock, whatever the Admin keeps saying", async () => {
+  const update = { kind: "update", since: 1_000_000, until: 1_000_000 + 18 * 60_000, expectedAt: 1_000_000 + 3 * 60_000 };
+  assert.equal(operationEndsAt(update, 1_000_000), update.until + OPERATION_GRACE_MS);
+  // A clock far ahead of the Admin's: never past its own span; far behind: still at most the span plus the grace.
+  assert.equal(operationEndsAt(update, update.until + 60 * 60_000), update.until + 60 * 60_000 + OPERATION_GRACE_MS);
+  assert.equal(operationEndsAt(update, 0), 18 * 60_000 + OPERATION_GRACE_MS);
+  const w = world({ cloud: { down: true }, state: connected({ operation: update }) });
+  const settle = async () => { for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve)); };
+  const look = async () => { await w.home.show(); await settle(); };
+  w.clock = update.since;
+  await look();
+  assert.equal(w.home.view().screen, "working");
+  // The Admin goes on saying it, and its `since` even moves on with each read: the end was fixed when it was first shown.
+  await w.later(update.until - w.clock + OPERATION_GRACE_MS - 60_000);
+  w.state = connected({ operation: { ...update, since: w.clock, until: w.clock + 18 * 60_000 } });
+  await look();
+  assert.equal(w.home.view().screen, "working", "inside its hard end");
+  await w.later(2 * 60_000);
+  w.state = connected({ operation: { ...update, since: w.clock, until: w.clock + 18 * 60_000 } });
+  await look();
+  assert.equal(w.home.view().screen, "offline", "past it: the plain \"couldn't reach\", with Try again");
+  // Once the Cloud answers, its next operation is a new outage.
+  w.cloud.down = false;
+  w.state = connected();
+  await look();
+  assert.equal(w.went.at(-1)[1], CLOUD);
+  w.cloud.down = true;
+  w.url = "";
+  w.state = connected({ operation: { ...update, since: w.clock, until: w.clock + 18 * 60_000 } });
+  await look();
+  assert.equal(w.home.view().screen, "working", "a new outage");
 });
 
 test("another Cloud of the person's own being moved: its screen names it", async () => {
@@ -73,7 +110,7 @@ test("another Cloud of the person's own being moved: its screen names it", async
   assert.deepEqual(w.home.view(), { screen: "working", operation: move, name: "Client A" });
 });
 
-test("the Cloud's own page asks what has it down: the Admin's word for the place on screen only, read again when it is old", async () => {
+test("the Cloud's own page asks what has it down: the Admin's word for the place on screen only, read again when it is old, never while the Admin is failing", async () => {
   const w = world({ state: { ...connected({ operation: UPDATE }), verifiedAt: 1_000_000 } });
   await w.home.refresh();
   assert.deepEqual(await w.home.operation(), UPDATE);
@@ -86,6 +123,26 @@ test("the Cloud's own page asks what has it down: the Admin's word for the place
   stale.refreshed = { ...connected({ operation: UPDATE }), verifiedAt: stale.clock };
   assert.deepEqual(await stale.home.operation(), UPDATE);
   assert.equal(stale.refreshes, 1);
+  // The Admin itself failing: the account's own retry wait is kept, however often the page asks.
+  const failing = world({ state: { ...connected(), verifiedAt: 1 } });
+  await failing.home.refresh();
+  failing.failingUntil = failing.clock + 30_000;
+  for (let i = 0; i < 3; i++) assert.equal(await failing.home.operation(), null);
+  assert.equal(failing.refreshes, 0);
+  failing.clock += 30_000;
+  await failing.home.operation();
+  assert.equal(failing.refreshes, 1, "read again once its wait is over");
   const signedOut = world({ state: { status: "signed-out" } });
   assert.equal(await signedOut.home.operation(), null);
+});
+
+test("a team's Cloud's own page is told its name with what has it down", async () => {
+  const move = { kind: "move", since: 1_000_000, until: 4_600_000 };
+  const w = world({ state: { ...connected(), teams: [ACME], clouds: [{ ...CLIENT_A, id: "t-acme", name: "Acme", teamId: ACME.id, origin: TEAM, operation: move }], verifiedAt: 1_000_000 } });
+  await w.home.show({ place: { team: ACME.id } });
+  assert.deepEqual(await w.home.operation(), { ...move, name: "Acme" });
+});
+
+test("a rollback is its own kind", () => {
+  assert.deepEqual(parseCloudOperation({ kind: "rollback", since: 5, until: 9, expectedAt: 7 }), { kind: "rollback", since: 5, until: 9, expectedAt: 7 });
 });

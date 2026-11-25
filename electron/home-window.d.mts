@@ -36,8 +36,9 @@ export interface HomeBridge {
   repair(): Promise<void>;
   /** My Cloud's own page only: the window reloaded it just now for its newer version. */
   updating?: boolean;
-  /** The place's own page only (absent elsewhere, and in an app before it): what the Admin says has it down now, or null. */
-  operation?(): Promise<import("./cloud-operation.mjs").CloudOperation | null>;
+  /** The place's own page only (absent elsewhere, and in an app before it): what the Admin says has it down now, with a team's or
+   * other Cloud's `name`, or null. */
+  operation?(): Promise<(import("./cloud-operation.mjs").CloudOperation & { name?: string }) | null>;
 }
 
 export type Home = ({ kind: "computer" } | { kind: "cloud"; origin: string } | { kind: "signin"; other?: true })
@@ -113,7 +114,7 @@ export interface HomeWindow {
   navigated(url: string): void;
   failed(url: string, code?: number): boolean;
   homePage(event: unknown): boolean;
-  operation(): Promise<import("./cloud-operation.mjs").CloudOperation | null>;
+  operation(): Promise<(import("./cloud-operation.mjs").CloudOperation & { name?: string }) | null>;
   /** Asked once by the home page as it loads: the window reloaded it just now for its newer version. */
   updating(event: unknown): boolean;
   screenPage(event: unknown): boolean;
