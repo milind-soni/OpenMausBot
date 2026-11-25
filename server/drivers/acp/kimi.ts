@@ -8,6 +8,7 @@ import type { ModelCatalog } from "../../contracts.ts";
 import type { DeviceSignIn, DeviceSignInState } from "../device-auth.ts";
 import { decodeInjectId, hostApiKey, LOCAL_HOSTS, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { selectAdvertisedMode } from "./session-modes.ts";
 import { currentEngineCatalog } from "../../model-manifest/manifest.ts";
 import { ENGINE_MODEL_ID } from "../../model-manifest/schema.ts";
 
@@ -580,6 +581,22 @@ const support: AcpSupport = {
   pickAuthMethod: () => null,
   authFailure: "continue",
   isAuthenticated: kimiSignedIn,
+
+  // kimi-code 2.4.1 runs a session in the `default_permission_mode` of ~/.kimi-code/config.toml ("yolo" or "auto" run
+  // shell commands without a permission request) while session/new and session/load still report currentModeId
+  // "default", so the mode is sent on every session, never only when the reported one differs. Every OMB level maps to a
+  // mode that asks; OMB answers the requests itself.
+  async configureSession({ request, sessionId, config, turn, sessionModes }) {
+    const modeId = (sessionModes && selectAdvertisedMode(sessionModes.availableModes, turn.approvalMode, config.fullAuto)) ?? "default";
+    try {
+      await request("session/set_mode", { sessionId, modeId });
+    } catch (error) {
+      const code = (error as { code?: unknown }).code;
+      // A Kimi without session/set_mode (-32601) or without this mode (-32602) keeps its own mode.
+      if (code === -32601 || code === -32602) return;
+      throw new Error(`Kimi rejected mode "${modeId}" via session/set_mode: ${(error as Error).message}`);
+    }
+  },
 
   buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
 };
