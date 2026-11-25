@@ -10,6 +10,9 @@ export type HomeView = { name?: string } & (
    * Admin knows of nothing wrong. `retryAt`: the Admin asked this app to wait (429), and it tries again by itself then. */
   | { screen: "offline"; reason?: string; cause?: "host" | "no_answer" | "network"; host?: string; retryAt?: number }
   | { screen: "signin"; other?: true }
+  /** An operation of the Admin's own has the place down now (an update, resize, move, restore or start): what it is, and when
+   * it is usually back, as the Admin says (cloud-operation.mjs). The window looks again by itself; nothing to press. */
+  | { screen: "working"; operation: import("./cloud-operation.mjs").CloudOperation }
   /** `member`: a team's User, who can't subscribe or pay for it and is sent to its owner. */
   | { screen: "plan"; machine: "stopped" | "payment-problem" | "failed"; member?: true }
   /** A Cloud the session's list says isn't running, so nothing looks up its address: it has ended (`deleteAt`: when its kept
@@ -33,6 +36,8 @@ export interface HomeBridge {
   repair(): Promise<void>;
   /** My Cloud's own page only: the window reloaded it just now for its newer version. */
   updating?: boolean;
+  /** The place's own page only (absent elsewhere, and in an app before it): what the Admin says has it down now, or null. */
+  operation?(): Promise<import("./cloud-operation.mjs").CloudOperation | null>;
 }
 
 export type Home = ({ kind: "computer" } | { kind: "cloud"; origin: string } | { kind: "signin"; other?: true })
@@ -108,6 +113,7 @@ export interface HomeWindow {
   navigated(url: string): void;
   failed(url: string, code?: number): boolean;
   homePage(event: unknown): boolean;
+  operation(): Promise<import("./cloud-operation.mjs").CloudOperation | null>;
   /** Asked once by the home page as it loads: the window reloaded it just now for its newer version. */
   updating(event: unknown): boolean;
   screenPage(event: unknown): boolean;

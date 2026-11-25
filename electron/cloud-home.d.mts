@@ -18,6 +18,8 @@ export interface CloudMachine {
   unreachable?: { cause: CloudUnreachableCause; since: number };
   /** Only for a plan that sleeps when idle: whether it is awake now, as the Admin says. */
   power?: import("./cloud-power.mjs").CloudPower;
+  /** An operation of the Admin's own has it down now: an update, resize, move, restore or start (cloud-operation.mjs). */
+  operation?: import("./cloud-operation.mjs").CloudOperation;
   /** The Admin lets this account's computer move to it now (its `moves` gate). */
   moves?: true;
   /** It ended (a trial not paid, a plan cancelled) and the Admin still holds it until it is deleted. `homecoming`: the one
