@@ -467,6 +467,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
           } catch (error) {
             console.warn("steer: could not queue a steer the agent turned down", error);
             store.appendMessage(bot.threadId, { role: "bot", kind: "activity", tool: failedNoticeTool("chat.notice.unreadMessage") });
+            store.patchTask(bot.id, bot.threadId, { unread: true });
           }
         };
         return json(res, 200, { ok: true, steered: true, threadId: bot.threadId, messages, queueIds });
