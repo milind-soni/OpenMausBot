@@ -307,7 +307,7 @@ const Bubble = memo(function Bubble({
   const speaker = user ? otherSpeaker(message, speakerViewer ?? null) : null;
   const ownBubbleStyle = speaker ? undefined : bubbleStyle;
   const [expanded, setExpanded] = useState(false), [folded, setFolded] = useState(false);
-  const focusedSearch = focus?.messageId === message.id && Boolean(focus.matchText);
+  const focusedHere = focus?.messageId === message.id, focusedSearch = focusedHere && Boolean(focus.matchText);
   const [viewRaw, setViewRaw] = useState(false);
   const speech = useSpeech();
   const speaking = speech.messageId === message.id && speech.status !== "idle";
@@ -361,8 +361,8 @@ const Bubble = memo(function Bubble({
     user && !webhookView && !expanded && (visibleText.length > USER_COLLAPSE_CHARS || visibleText.split("\n").length > USER_COLLAPSE_LINES);
   useEffect(() => {
     setFolded(false);
-    if (focusedSearch && (collapsible || peer)) setExpanded(true);
-  }, [focusedSearch, collapsible, Boolean(peer), focus?.nonce]);
+    if ((focusedSearch && (collapsible || peer)) || (focusedHere && earlierRound !== undefined)) setExpanded(true);
+  }, [focusedSearch, focusedHere, collapsible, Boolean(peer), earlierRound, focus?.nonce]);
 
   if (user && editing && !webhookView && !hasAttachments) {
     return (
@@ -374,7 +374,7 @@ const Bubble = memo(function Bubble({
 
   // A long request from another bot is one line until opened.
   const peerLong = peer ? peerPreview(text) : null;
-  if (peer && peerLong && !expanded && (!focusedSearch || folded)) return <div {...{ [MESSAGE_ROW]: "" }} className="group flex w-full flex-col items-start"><PeerLabel peer={peer} bots={bots} /><PeerCompactRow preview={peerLong} onOpen={() => setExpanded(true)} /></div>; if (earlierRound && !expanded && !focusedSearch) return <div {...{ [MESSAGE_ROW]: "" }} className="group flex w-full flex-col items-start"><PeerCompactRow label={t("chat.checkWork.earlierAnswer", { round: earlierRound })} preview={flatPreview(text)} testId="earlier-answer" onOpen={() => setExpanded(true)} /></div>;
+  if (peer && peerLong && !expanded && (!focusedSearch || folded)) return <div {...{ [MESSAGE_ROW]: "" }} className="group flex w-full flex-col items-start"><PeerLabel peer={peer} bots={bots} /><PeerCompactRow preview={peerLong} onOpen={() => setExpanded(true)} /></div>; if (earlierRound && !expanded) return <div {...{ [MESSAGE_ROW]: "" }} className="group flex w-full flex-col items-start"><PeerCompactRow label={t("chat.checkWork.earlierAnswer", { round: earlierRound })} preview={flatPreview(text)} testId="earlier-answer" onOpen={() => setExpanded(true)} /></div>;
   const forks = user && versions ? versions : [message];
   const versionIndex = forks.findIndex((v) => v.id === message.id);
   const switchTo = (v: Message | undefined) => {

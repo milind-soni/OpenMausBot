@@ -72,4 +72,30 @@ describe("Check before done rounds in the chat", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it.each([
+    ["a citation jump", undefined],
+    ["a search hit", "dusk"],
+  ])("opens a folded answer for %s, and Show less folds it again", (_name, matchText) => {
+    vi.stubGlobal("fetch", () => new Promise(() => {}));
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const focused: AppState = { ...state, focusMessage: { threadId: "pepper-thread", messageId: "first", ...(matchText ? { matchText } : {}), nonce: 1, consumed: false } };
+    const value = { state: focused, dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+    try {
+      flushSync(() => root.render(createElement(BotEditorStore, { value, children: createElement(ChatView, { bot }) })));
+      const folded = () => container.querySelector<HTMLButtonElement>("[data-testid=earlier-answer]");
+      expect(folded()).toBeNull();
+      const opened = container.querySelector(`[data-citation-source="first"]`)?.closest("[data-look=message-bot]");
+      expect(opened?.textContent).toContain("First summary, it says dusk.");
+      const less = [...opened!.querySelectorAll("button")].find((button) => button.textContent === t("chat.showLess"));
+      flushSync(() => less!.click());
+      expect(folded()).not.toBeNull();
+    } finally {
+      root.unmount();
+      container.remove();
+      vi.unstubAllGlobals();
+    }
+  });
 });
