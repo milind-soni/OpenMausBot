@@ -21,7 +21,10 @@ afterEach(() => { for (const folder of folders.splice(0)) rmSync(folder, { recur
 const tempDir = () => { const dir = mkdtempSync(join(tmpdir(), "omb-diagnose-")); folders.push(dir); return dir; };
 
 // Names a customer could have made: an email, a path with spaces, quotes, emoji, a secret-looking string, newlines.
-const AWKWARD = ["jane.doe@example.com", "Tax return 2026 (final).pdf", "my \"secret\" plan.txt", "🦄 notes", "sk-live-ABCDEF1234567890", "line\nbreak", "..hidden", "Downloads"];
+// Windows refuses `"` and control characters in a file name, so there the quoted and the two-line names become ones it allows.
+const WINDOWS = process.platform === "win32";
+const AWKWARD = ["jane.doe@example.com", "Tax return 2026 (final).pdf", WINDOWS ? "my 'secret' plan; 100% [final].txt" : "my \"secret\" plan.txt", "🦄 notes", "sk-live-ABCDEF1234567890",
+  WINDOWS ? "sk-live-QWERTY0987654321 & co, #2 {copy}" : "line\nbreak", "..hidden", "Downloads"];
 
 function homeFixture() {
   const home = tempDir(), data = join(home, ".openmausbot");
@@ -90,7 +93,8 @@ describe("the diagnose read", () => {
 });
 
 describe("the diagnose walk's budget", () => {
-  // A fake tree of 10 folders of 100,000 files each: far more than the budget allows.
+  // A fake tree of 10 folders of 100,000 files each: far more than the budget allows. Depth is counted on either separator,
+  // since the walk joins names with the platform's own (backslashes on Windows).
   const huge = (): { fs: DiagnoseFs; calls: () => number } => {
     let calls = 0;
     const stat = (directory: boolean): DiagnoseStat => ({ dev: 1, size: 4096, mtimeMs: T0, isDirectory: () => directory, isSymbolicLink: () => false });
@@ -98,7 +102,7 @@ describe("the diagnose walk's budget", () => {
       lstat: async (path) => { calls++; return stat(!/f\d+$/.test(path)); },
       opendir: async (path) => {
         calls++;
-        const depth = path.split("/").length, names = depth <= 3 ? Array.from({ length: 10 }, (_, i) => `d${i}`) : Array.from({ length: 100_000 }, (_, i) => `f${i}`);
+        const depth = path.split(/[\\/]/).length, names = depth <= 3 ? Array.from({ length: 10 }, (_, i) => `d${i}`) : Array.from({ length: 100_000 }, (_, i) => `f${i}`);
         let index = 0;
         return { read: async () => (index < names.length ? { name: names[index++]! } : null), close: async () => {} };
       },
