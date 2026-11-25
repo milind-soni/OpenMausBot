@@ -71,13 +71,22 @@ export function batchQuote(value: string): string {
  * browser runs. GetConsoleWindow and GetConsoleProcessList live in kernel32.dll; ShowWindow in user32.dll. The process
  * list of an allocated console names only cmd.exe and this PowerShell (at most 2); a console inherited from a terminal
  * or from agent-browser itself also holds those owners, so its list is longer and nothing is hidden. PowerShell adds no
- * console of its own, and this line holds no percent for cmd.exe to expand. Add-Type compiles a little C# on every
- * start; the alternative (shipping a prebuilt helper) outweighs it here. */
-const HIDE_OWN_CONSOLE = "powershell -NoProfile -NonInteractive -Command \"$p = Add-Type -MemberDefinition"
-  + " '[DllImport(\"kernel32.dll\")] public static extern IntPtr GetConsoleWindow();"
-  + " [DllImport(\"kernel32.dll\")] public static extern uint GetConsoleProcessList(uint[] ids, uint count);"
-  + " [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);'"
-  + " -Name W -Namespace M -PassThru; $h = $p::GetConsoleWindow(); $n = $p::GetConsoleProcessList([uint32[]]::new(32), 32);"
+ * console of its own, and this line holds no percent for cmd.exe to expand. Each inner quote is written as \" (backslash
+ * then quote): PowerShell reads a bare quote in the -Command argument as a quote toggle, so [DllImport("kernel32.dll")]
+ * would arrive without its quotes and Add-Type would fail; \" survives argv parsing as one literal quote. The helper is
+ * compiled once and cached in %LOCALAPPDATA%\OpenMausBot (written through a .tmp rename, so a half-written cache is
+ * never loaded); only the first browser start pays for the C# compile, and a broken or unwritable cache just costs the
+ * compile again. */
+const HIDE_OWN_CONSOLE = "powershell -NoProfile -NonInteractive -Command \"$d=[Environment]::GetFolderPath('LocalApplicationData')+'\\OpenMausBot';"
+  + " $t=$d+'\\HideConsole.dll'; $p=$null;"
+  + " if (Test-Path $t) { try { $p=[Reflection.Assembly]::LoadFrom($t).GetType('M.W') } catch {} }"
+  + " if (-not $p) { $p=Add-Type -MemberDefinition"
+  + " '[DllImport(\\\"kernel32.dll\\\")] public static extern IntPtr GetConsoleWindow();"
+  + " [DllImport(\\\"kernel32.dll\\\")] public static extern uint GetConsoleProcessList(uint[] ids, uint count);"
+  + " [DllImport(\\\"user32.dll\\\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);'"
+  + " -Name W -Namespace M -PassThru; New-Item -ItemType Directory -Force $d | Out-Null;"
+  + " Copy-Item $p.Assembly.Location ($t+'.tmp') -Force; Move-Item ($t+'.tmp') $t -Force };"
+  + " $h=$p::GetConsoleWindow(); $n=$p::GetConsoleProcessList([uint32[]]::new(32), 32);"
   + " if ($h -ne [IntPtr]::Zero -and $n -le 2) { $p::ShowWindow($h, 0) | Out-Null }\"";
 
 export function launcherScript(settings: LauncherSettings, platform: NodeJS.Platform = process.platform): string {

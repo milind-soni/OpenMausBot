@@ -72,7 +72,17 @@ describe("the launcher agent-browser runs instead of Chrome", () => {
   it("writes a Windows batch file that passes the engine's arguments through %* and escapes %", () => {
     const windowsUa = UA.replace("Macintosh; Intel Mac OS X 10_15_7", "Windows NT 10.0; Win64; x64");
     const script = launcherScript({ chrome: "C:\\Users\\Ada 100%\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe", userAgent: windowsUa, screen: { width: 1536, height: 864 }, timeZone: "UTC" }, "win32");
-    const hide = "powershell -NoProfile -NonInteractive -Command \"$p = Add-Type -MemberDefinition '[DllImport(\"kernel32.dll\")] public static extern IntPtr GetConsoleWindow(); [DllImport(\"kernel32.dll\")] public static extern uint GetConsoleProcessList(uint[] ids, uint count); [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);' -Name W -Namespace M -PassThru; $h = $p::GetConsoleWindow(); $n = $p::GetConsoleProcessList([uint32[]]::new(32), 32); if ($h -ne [IntPtr]::Zero -and $n -le 2) { $p::ShowWindow($h, 0) | Out-Null }\"";
+    const hide = "powershell -NoProfile -NonInteractive -Command \"$d=[Environment]::GetFolderPath('LocalApplicationData')+'\\OpenMausBot';"
+      + " $t=$d+'\\HideConsole.dll'; $p=$null;"
+      + " if (Test-Path $t) { try { $p=[Reflection.Assembly]::LoadFrom($t).GetType('M.W') } catch {} }"
+      + " if (-not $p) { $p=Add-Type -MemberDefinition"
+      + " '[DllImport(\\\"kernel32.dll\\\")] public static extern IntPtr GetConsoleWindow();"
+      + " [DllImport(\\\"kernel32.dll\\\")] public static extern uint GetConsoleProcessList(uint[] ids, uint count);"
+      + " [DllImport(\\\"user32.dll\\\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);'"
+      + " -Name W -Namespace M -PassThru; New-Item -ItemType Directory -Force $d | Out-Null;"
+      + " Copy-Item $p.Assembly.Location ($t+'.tmp') -Force; Move-Item ($t+'.tmp') $t -Force };"
+      + " $h=$p::GetConsoleWindow(); $n=$p::GetConsoleProcessList([uint32[]]::new(32), 32);"
+      + " if ($h -ne [IntPtr]::Zero -and $n -le 2) { $p::ShowWindow($h, 0) | Out-Null }\"";
     expect(script).toBe([
       "@echo off",
       hide,
@@ -80,8 +90,14 @@ describe("the launcher agent-browser runs instead of Chrome", () => {
       "",
     ].join("\r\n"));
     // The hiding line runs before Chrome, names only the right DLLs, and carries no percent for cmd.exe to expand.
+    // Inner quotes reach PowerShell as \" (a literal quote under its argv rules); a bare quote there would be read as a
+    // quote toggle and [DllImport(kernel32.dll)] would fail to compile. The helper is compiled once into a cache file.
     expect(script.split("\r\n")[1]).not.toContain("%");
     expect(hide).toContain("kernel32.dll");
+    expect(hide).toContain('\\"kernel32.dll\\"');
+    expect(hide).toContain('\\"user32.dll\\"');
+    expect(hide).toContain("Add-Type");
+    expect(hide).toContain("HideConsole.dll");
     expect(launcherPath("C:\\data", "win32")).toMatch(/chrome-launcher\.cmd$/u);
     expect(() => batchQuote("--user-agent=\"quoted\"")).toThrow(/quote/);
     expect(() => batchQuote("two\r\nlines")).toThrow(/line break/);
