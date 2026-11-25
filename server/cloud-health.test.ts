@@ -271,6 +271,19 @@ describe("the ledger", () => {
     w.fail("500 internal server error", {}, provider);
     w.emit(provider, { type: "turn.completed", ok: false, stopReason: "rpc_error" }, "opencodeGo");
     expect(incidents(w).find((incident) => incident.code === "server_error")).toMatchObject({ count: 2 });
+    // A start that failed without a row of its own (its turn just ended) leaves nothing for the thread's next turn.
+    noteStartFailure(provider, "provider", w.now());
+    w.emit(provider, { type: "turn.completed", ok: false, stopReason: "rpc_error" }, "opencodeGo");
+    w.emit(provider, { type: "turn.started" }, "opencodeGo");
+    w.fail("500 internal server error", {}, provider);
+    w.emit(provider, { type: "turn.completed", ok: false, stopReason: "rpc_error" }, "opencodeGo");
+    expect(incidents(w).find((incident) => incident.code === "server_error")).toMatchObject({ count: 3 });
+    // Too busy, noted by the start, though the row came without the plain line (startup recovery words it as the engine did).
+    const recovered = thread("recovered");
+    w.emit(recovered, { type: "turn.started" }, "opencodeGo");
+    noteStartFailure(recovered, "overloaded", w.now());
+    w.fail(opencode, {}, recovered);
+    expect(incidents(w).find((incident) => incident.code === "start_overloaded")).toMatchObject({ count: 4 });
     expect(Object.values(START_CODES).every((code) => /^[a-z0-9][a-z0-9_-]{0,47}$/.test(code))).toBe(true);
   });
 

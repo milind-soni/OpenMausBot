@@ -167,7 +167,7 @@ export function createCloudHealthLedger(options: { botOf?: (threadId: string) =>
       if (place && PLACES.has(place)) return record("place", place, engine, message.at, botId, threadId);
       const started = takeStartFailure(threadId, message.at), notice = message.tool?.nameCode ? START_NOTICES.get(message.tool.nameCode) : undefined;
       if (notice) return record("turn", notice, engine, message.at, botId, threadId);
-      if (started === "provider") return record("turn", START_CODES.provider, engine, message.at, botId, threadId);
+      if (started) return record("turn", started === "overloaded" ? START_CODES.overloaded : START_CODES.provider, engine, message.at, botId, threadId);
       const fixed = fixedCode(cause);
       if (fixed) return record("turn", fixed, engine, message.at, botId, threadId);
       if (pending.size >= PENDING_CAP) settle(pending.keys().next().value as string);
@@ -180,6 +180,9 @@ export function createCloudHealthLedger(options: { botOf?: (threadId: string) =>
         if (kind) remember(engines, event.threadId, kind, THREAD_CAP);
         tally(now(), "started");
       } else if (event.type === "turn.completed") {
+        // A start failure belongs to its own turn's failed row (written before this, on its runtime error): a turn that ended
+        // without one leaves nothing for a later turn's row.
+        takeStartFailure(event.threadId);
         if (pending.has(event.threadId)) return settle(event.threadId, event.stopReason);
         if (event.ok || !event.stopReason || !ROWLESS_STOPS.has(event.stopReason)) return;
         const at = now();

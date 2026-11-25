@@ -1,12 +1,12 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { IntervalHistogram } from "node:perf_hooks";
+import { createHistogram, type IntervalHistogram } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
 
 import { writeFileAtomic } from "../atomic.ts";
-import { createLoopStalls, loopStallCounts, markRequestArrival, REPORTED_WORST_MINUTES, requestArrivedBefore, STALL_RESOLUTION_MS, stallStats, timeBlocking } from "./loop-stalls.ts";
+import { countAtLeast, createLoopStalls, loopStallCounts, markRequestArrival, REPORTED_WORST_MINUTES, requestArrivedBefore, STALL_RESOLUTION_MS, stallStats, timeBlocking } from "./loop-stalls.ts";
 import { PERF_HEALTH_MAX_BYTES, perfHealth, stallLines } from "./perf-report.ts";
 
 const tally = { n: 0, ms: 0, maxMs: 0 };
@@ -145,6 +145,27 @@ describe("the loop stall recorder", () => {
     expect(loopStallCounts()).toEqual({ n: 3, worstMs: 0 });
     stalls.stop();
     expect(loopStallCounts()).toBeNull();
+  });
+
+  it("counts a real histogram's stalls exactly, not from its sparse percentile ranks, and lets the worst age by time through a long pause", () => {
+    const ms = (value: number) => Math.round((value + STALL_RESOLUTION_MS) * 1e6);
+    const real = createHistogram();
+    for (let i = 0; i < 495; i++) real.record(ms(0.2));
+    for (let i = 0; i < 5; i++) real.record(ms(1_500));
+    // Node's sparse ranks put the last short delay at 98.4375%, which read as eight stalls; the histogram itself says five.
+    expect(countAtLeast(real, ms(1_000))).toBe(5);
+    expect(countAtLeast(real, ms(2_000))).toBe(0);
+    const histogram = Object.assign(real, { enable: () => true, disable: () => true }) as unknown as IntervalHistogram;
+    let mono = 0, waited = 0;
+    const stalls = createLoopStalls({ histogram, monotonic: () => mono, idle: () => waited });
+    mono += 60_000; waited += 5_000;
+    stalls.roll();
+    expect(stalls.counts()).toEqual({ n: 5, worstMs: 1_500 });
+    // The process sleeps an hour: one roll, but the stall is an hour old and out of the last 15 minutes.
+    real.record(ms(0.2));
+    mono += 3_600_000; waited += 3_600_000;
+    stalls.roll();
+    expect(stalls.counts()).toEqual({ n: 5, worstMs: 0 });
   });
 
   it("starts a message's wait when its request arrived, only for that request and only if recent", async () => {

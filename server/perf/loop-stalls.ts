@@ -131,6 +131,19 @@ export const REPORTED_WORST_MINUTES = 15;
  * process started (it never falls, so the Admin keeps each hour's increase); `worstMs`, the longest delay in the last
  * REPORTED_WORST_MINUTES and the minute under way. A sleep or pause is not a stall. Null when no recorder runs. */
 export interface LoopStallCounts { n: number; worstMs: number }
+
+/** How many of a histogram's recorded intervals are `ns` or longer, exactly: the smallest rank whose value reaches `ns`, found by
+ * asking the histogram itself (about ten `percentile` calls). Its `percentiles` map holds sparse ranks only, which over-count. */
+export function countAtLeast(histogram: Pick<IntervalHistogram, "count" | "max" | "percentile">, ns: number): number {
+  const total = histogram.count;
+  if (!total || histogram.max < ns) return 0;
+  let low = 1, high = total;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (histogram.percentile((100 * (mid - 0.5)) / total) >= ns) high = mid; else low = mid + 1;
+  }
+  return total - low + 1;
+}
 let reportedCounts: (() => LoopStallCounts) | null = null;
 export const loopStallCounts = (): LoopStallCounts | null => reportedCounts?.() ?? null;
 
@@ -141,6 +154,8 @@ export function createLoopStalls(options: LoopStallsOptions = {}) {
   const monotonic = options.monotonic ?? (() => performance.now());
   const idle = options.idle ?? (options.monotonic ? () => null : loopIdleMs);
   const minutes: Minute[] = [];
+  /** When each kept minute ended (`monotonic`), so the reported worst stall ages by time, not by rolls: a sleep is one roll. */
+  const endedAt: number[] = [];
   let timer: ReturnType<typeof setInterval> | undefined, stalls = 0;
   let since = monotonic(), idleSince = idle(), lastSince = since, lastIdleSince = idleSince;
   /** The minute under way's longest delay when the loop worked less than half of it over this minute and the one before:
@@ -153,9 +168,11 @@ export function createLoopStalls(options: LoopStallsOptions = {}) {
   const roll = () => {
     const paused = pausedMs();
     const finished = minuteOf(histogram, current, resolutionMs, paused);
+    if (paused === null && finished.count) stalls += typeof histogram.percentile === "function"
+      ? countAtLeast(histogram, (REPORTED_STALL_MS + resolutionMs) * 1e6) : Math.round(finished.count * (1 - shareAtOrUnder(finished, REPORTED_STALL_MS)));
     minutes.push(finished);
-    stalls += finished.count ? Math.round(finished.count * (1 - shareAtOrUnder(finished, REPORTED_STALL_MS))) : 0;
-    if (minutes.length > MINUTES_KEPT) minutes.shift();
+    endedAt.push(monotonic());
+    if (minutes.length > MINUTES_KEPT) { minutes.shift(); endedAt.shift(); }
     histogram.reset();
     current = { saves: zero(), runtimeReads: zero() };
     [lastSince, lastIdleSince] = [since, idleSince];
@@ -164,8 +181,11 @@ export function createLoopStalls(options: LoopStallsOptions = {}) {
     if (paused !== null) options.resumed?.(Math.round(paused));
   };
   const longest = () => Math.max(minutes.at(-1)?.maxMs ?? 0, histogram.count ? lateMs(histogram.max, resolutionMs) : 0);
-  const counts = (): LoopStallCounts => ({ n: stalls, worstMs: Math.round(Math.max(0, ...minutes.slice(-REPORTED_WORST_MINUTES).map((minute) => minute.maxMs),
-    histogram.count && pausedMs() === null ? lateMs(histogram.max, resolutionMs) : 0)) });
+  const counts = (): LoopStallCounts => {
+    const from = monotonic() - REPORTED_WORST_MINUTES * minuteMs;
+    const recent = minutes.filter((_, index) => endedAt[index]! > from).map((minute) => minute.maxMs);
+    return { n: stalls, worstMs: Math.round(Math.max(0, ...recent, histogram.count && pausedMs() === null ? lateMs(histogram.max, resolutionMs) : 0)) };
+  };
   return {
     start() {
       if (timer) return;
