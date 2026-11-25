@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { OptionCardData } from "../shared/wire.ts";
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
-import { cardReply, createReactions, reactionSendPrefix, roomReactionNote, withReactionNotes, type ReactionDeps } from "./reactions.ts";
+import { cardReply, createReactions, createRoomReactionNotes, reactionSendPrefix, roomReactionNote, withReactionNotes, type ReactionDeps } from "./reactions.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import { Store, type Message } from "./store.ts";
 
@@ -373,5 +373,62 @@ describe("feelings the bot reads with its next turn", () => {
     expect(roomReactionNote(line({ reactions: [{ emoji: "❤️", by: "user" }, { emoji: "👍", by: "p_bob", name: "Bob" }, { emoji: "🎉", by: "p_bob", name: "Bob" }] }), "Milind"))
       .toBe("\n(Milind reacted ❤️, Bob reacted 🎉)");
     expect(roomReactionNote(line({ role: "user", reactions: [{ emoji: "❤️", by: "user" }] }), "Milind")).toBe("");
+  });
+});
+
+describe("a room member hears of reactions to its lines in its next turn anywhere in the room", () => {
+  function room() {
+    const { store } = fixture();
+    const scout = store.createBot({ name: "Scout" });
+    const otter = store.createBot({ name: "Otter" });
+    const group = store.createGroup("Launch", [scout.id, otter.id]);
+    const task = store.createGroupTask(group.id, "Pricing")!;
+    const notes = createRoomReactionNotes({ store });
+    const { react } = createReactions({
+      store, noted: notes.noted, reply: async () => ({ queued: false }), answerCard: async () => ({ ok: true }), withdraw: () => {},
+    });
+    const said = (threadId: string, text: string, bot = otter) =>
+      store.appendMessage(threadId, { role: "bot", kind: "text", text, from: { botId: bot.id, name: bot.name, color: bot.color } });
+    const feel = (threadId: string, messageId: string, emoji: "❤️" | "🎉", reactor = ALICE, on?: boolean) =>
+      react({ auth: OWNER, threadId, messageId, emoji, reactor, ...(on === undefined ? {} : { on }) });
+    return { store, scout, otter, group, task, notes, said, feel };
+  }
+
+  it("tells the member once, in a turn in another of the room's conversations, and starts no turn", async () => {
+    const { otter, scout, group, notes, said, feel } = room();
+    const posted = said(group.threadId, "Posted the launch note.");
+    expect((await feel(group.threadId, posted.id, "🎉")).delivery).toBe("noted");
+    expect(notes.take(group.id, scout.id, "Milind")).toBe("");
+    const note = notes.take(group.id, otter.id, "Milind");
+    expect(note).toBe("(alice@example.test reacted 🎉 to your message “Posted the launch note.”.)\n\n");
+    expect(notes.take(group.id, otter.id, "Milind")).toBe("");
+  });
+
+  it("says nothing of a reaction taken back", async () => {
+    const { otter, group, task, notes, said, feel } = room();
+    const first = said(task.threadId, "Draft one.");
+    await feel(task.threadId, first.id, "❤️");
+    await feel(task.threadId, first.id, "❤️");
+    expect(notes.take(group.id, otter.id, "Milind")).toBe("");
+  });
+
+  it("tells a reaction once even when someone else reacts to the same line afterwards", async () => {
+    const { otter, group, notes, said, feel } = room();
+    const posted = said(group.threadId, "Posted.");
+    await feel(group.threadId, posted.id, "❤️", ALICE);
+    expect(notes.take(group.id, otter.id, "Milind")).toContain("alice@example.test reacted ❤️");
+    await feel(group.threadId, posted.id, "🎉", BOB);
+    expect(notes.take(group.id, otter.id, "Milind")).toBe("(bob@example.test reacted 🎉 to your message “Posted.”.)\n\n");
+  });
+
+  it("keeps each person's reaction apart, by name", async () => {
+    const { otter, group, notes, said, feel } = room();
+    const posted = said(group.threadId, "Posted.");
+    await feel(group.threadId, posted.id, "❤️", ALICE);
+    await feel(group.threadId, posted.id, "🎉", BOB);
+    expect(notes.take(group.id, otter.id, "Milind").trim().split("\n")).toEqual([
+      "(alice@example.test reacted ❤️ to your message “Posted.”.)",
+      "(bob@example.test reacted 🎉 to your message “Posted.”.)",
+    ]);
   });
 });

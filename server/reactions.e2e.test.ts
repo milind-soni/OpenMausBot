@@ -197,7 +197,7 @@ it("in a room, gives the 👍 to the member that asked, by name", async () => {
   const scratch = mkdtempSync(join(tmpdir(), "omb-reaction-room-"));
   const promptLog = join(scratch, "prompts.jsonl");
   const fixture = await launchVerificationServer({
-    FAKE_CLAUDE_REPLIES: JSON.stringify(["Shall I post the launch note?", "Posted it.", "Noted."]),
+    FAKE_CLAUDE_REPLIES: JSON.stringify(["Shall I post the launch note?", "Posted it.", "Noted.", "On the pricing now."]),
     FAKE_CLAUDE_REPLY_STATE: join(scratch, "reply-state"),
     FAKE_CLAUDE_TOOL_CALLS: "[]",
     FAKE_CLAUDE_PROMPTS: promptLog,
@@ -246,7 +246,19 @@ it("in a room, gives the 👍 to the member that asked, by name", async () => {
     await settled("Noted.");
     const thanked = prompts()[2]!;
     evidence.push({ thanked });
-    expect(thanked).toMatch(/Otter: Posted it\.\n\(\S+ reacted 🎉\)/);
+    expect(thanked.match(/\(\S+ reacted 🎉 to your message “Posted it\.”\.\)/g)).toHaveLength(1);
+    expect(thanked).not.toMatch(/Otter: Posted it\.\n\(/);
+
+    expect(await api("POST", `/api/threads/${room.threadId}/messages/${posted.id}/reactions`, { emoji: "❤️", on: true }))
+      .toMatchObject({ delivery: "noted" });
+    expect(prompts()).toHaveLength(3);
+    const pricing = (await api("POST", `/api/groups/${room.id}/tasks`, { title: "Pricing" }, 201)).task;
+    await api("POST", `/api/groups/${room.id}/messages`, { threadId: pricing.threadId, text: "@Otter start on pricing." }, 202);
+    await expect.poll(async () => (await api("GET", `/api/threads/${pricing.threadId}/messages`)).messages
+      .some((message: any) => message.text === "On the pricing now."), { timeout: 20_000 }).toBe(true);
+    const elsewhere = prompts()[3]!;
+    evidence.push({ elsewhere });
+    expect(elsewhere.match(/reacted ❤️ to your message “Posted it\.”/g)).toHaveLength(1);
   } finally {
     writeFileSync(`${fixture.info.logPath}.reaction-room.json`, JSON.stringify(evidence, null, 2));
     await fixture.close();

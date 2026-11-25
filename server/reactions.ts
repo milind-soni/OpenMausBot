@@ -20,6 +20,8 @@ type Entry = NonNullable<Message["reactions"]>[number];
 
 export interface ReactionDeps {
   store: Pick<Store, "bot" | "botByThread" | "groupByThread" | "messagesFor" | "setReaction">;
+  /** A person's reaction set or cleared on a message, after it is stored. */
+  noted?(threadId: string, message: Message, by: string): void;
   /** `repeated`: that reply had reached the bot already. */
   reply(input: { auth: RequestAuth; threadId: string; owner: BotRecord; target: ReplyTarget; answer: string; sendId: string }): Promise<{ queued: boolean; repeated?: true }>;
   /** Answers the card the way a spoken yes or no on a call does, with the same checks on who may answer. */
@@ -52,6 +54,9 @@ const reactorName = (reaction: Entry, userName: PersonName) =>
   peerName((reaction.by === "user" ? personOf(userName, {}) : reaction.name ?? "Someone").replace(/[()]/g, " "));
 const feelings = (message: Message) => (message.reactions ?? []).filter((reaction) => !reactionAnswer(reaction.emoji));
 
+const reactionNote = (message: Message, reaction: Entry, userName: PersonName) =>
+  `(${reactorName(reaction, userName)} reacted ${reaction.emoji} to your message “${replyExcerpt(message.text!, 160)}”.)`;
+
 /** `turnIds`: the lines this turn carries. */
 export function withReactionNotes(text: string, path: readonly Message[], turnIds: ReadonlySet<string>, userName: PersonName): string {
   const start = path.findIndex((message) => turnIds.has(message.id));
@@ -60,8 +65,46 @@ export function withReactionNotes(text: string, path: readonly Message[], turnId
   const since = before.findLast((message) => message.role === "user" && !message.peerAsk)?.at ?? 0;
   const notes = before.flatMap((message) => message.role !== "bot" || message.from || !message.text ? [] : feelings(message)
     .filter((reaction) => (reaction.at ?? 0) > since)
-    .map((reaction) => `(${reactorName(reaction, userName)} reacted ${reaction.emoji} to your message “${replyExcerpt(message.text!, 160)}”.)`));
+    .map((reaction) => reactionNote(message, reaction, userName)));
   return notes.length ? `${notes.join("\n")}\n\n${text}` : text;
+}
+
+const ROOM_NOTES_KEPT = 20;
+
+/** A room member hears of each reaction to its own lines once, in its next turn in any of the room's conversations; the
+ * transcript it reads leaves them off its own lines. Kept in memory only, so a restart drops the ones not yet told. */
+export function createRoomReactionNotes(deps: { store: Pick<Store, "groupByThread" | "messagesFor"> }) {
+  const waiting = new Map<string, Map<string, { threadId: string; messageId: string; by: string; at: number }>>();
+  const memberKey = (groupId: string, botId: string) => `${groupId}\n${botId}`;
+
+  function noted(threadId: string, message: Message, by: string): void {
+    const group = deps.store.groupByThread(threadId);
+    if (!group || message.role !== "bot" || !message.from || !message.text) return;
+    const key = memberKey(group.id, message.from.botId);
+    const entries = waiting.get(key) ?? new Map();
+    const id = `${threadId}\n${message.id}\n${by}`;
+    const reaction = feelings(message).find((candidate) => candidate.by === by);
+    entries.delete(id);
+    if (reaction) entries.set(id, { threadId, messageId: message.id, by, at: reaction.at ?? 0 });
+    for (const old of [...entries.keys()].slice(0, Math.max(0, entries.size - ROOM_NOTES_KEPT))) entries.delete(old);
+    if (entries.size) waiting.set(key, entries);
+    else waiting.delete(key);
+  }
+
+  /** The notes for `botId`'s next turn in the room, once each. */
+  function take(groupId: string, botId: string, userName: PersonName): string {
+    const key = memberKey(groupId, botId);
+    const entries = waiting.get(key);
+    waiting.delete(key);
+    const notes = [...entries?.values() ?? []].flatMap(({ threadId, messageId, by, at }) => {
+      const message = deps.store.messagesFor(threadId).find((candidate) => candidate.id === messageId);
+      const reaction = message && feelings(message).find((candidate) => candidate.by === by && (candidate.at ?? 0) === at);
+      return message?.text && message.from?.botId === botId && reaction ? [reactionNote(message, reaction, userName)] : [];
+    });
+    return notes.length ? `${notes.join("\n")}\n\n` : "";
+  }
+
+  return { noted, take };
 }
 
 export function roomReactionNote(message: Message, userName: PersonName): string {
@@ -123,6 +166,7 @@ export function createReactions(deps: ReactionDeps) {
     const owner = recipient(target, threadId);
     const entry: Entry | null = next ? { emoji: next, by: reactor.by, ...(reactor.name ? { name: reactor.name } : {}), at: stamp() } : null;
     const message = store.setReaction(threadId, messageId, reactor.by, entry) ?? target;
+    deps.noted?.(threadId, message, reactor.by);
     if (!owner) return { message, delivery: "none" };
     const sent = answersSent(threadId, messageId, reactor.by);
     const withdrawPrevious = () => {
