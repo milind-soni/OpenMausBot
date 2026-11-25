@@ -22,13 +22,13 @@ import {
   revertMemoryChange,
   type MemoryJournalEntry,
 } from "../memory-journal.ts";
-import type { MemoryUpkeep } from "../memory-upkeep.ts";
+import { upkeepEnabled, type MemoryUpkeep } from "../memory-upkeep.ts";
 import { listLearnedFacts, removeLearned } from "../profile-learned.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface BotMemoryRouteDeps {
-  bot(id: string): { id: string; memoryUpkeep?: boolean } | null | undefined;
+  bot(id: string): { id: string; memoryUpkeep?: boolean; memoryEnabled?: boolean } | null | undefined;
   taskByThread(botId: string, threadId: string): { title?: string } | undefined;
   upkeep: Pick<MemoryUpkeep, "enabled" | "status" | "tidy">;
   /** The caller's About me: the server's profile's, or on a Team Cloud the signed-in person's own. */
@@ -225,7 +225,7 @@ export function createBotMemoryRoutes(deps: BotMemoryRouteDeps): RouteHandler {
       const bot = deps.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
       if (!deps.upkeep.enabled(bot)) {
-        return json(res, 409, { error: bot.memoryUpkeep === false ? "Switch on Memory upkeep for this bot first." : "Memory upkeep is off for every bot. Switch it on in Settings first." });
+        return json(res, 409, { error: !upkeepEnabled(bot) ? "Switch on Memory upkeep for this bot first." : "Memory upkeep is off for every bot. Switch it on in Settings first." });
       }
       const report = await deps.upkeep.tidy(bot.id);
       await flushMemoryJournal(bot.id);

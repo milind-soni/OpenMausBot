@@ -132,6 +132,20 @@ describe("the bot-memory module through the route table", () => {
     expect((await fetch(`${base}/api/bots/bot-123/memory/tidy`, { method: "POST" })).status).toBe(200);
   });
 
+  it("names the bot's own switch, not the one for every bot, when the bot's memory is off", async () => {
+    const base = await serve({
+      bot: (id) => ({ id, memoryUpkeep: true, memoryEnabled: false }),
+      upkeep: {
+        enabled: (bot) => upkeepEnabled(bot ?? undefined),
+        status: () => ({ modelSteps: false }),
+        tidy: async () => ({ at: 1, expired: 0, duplicates: 0, superseded: 0, deferred: 0, contradictionsChecked: false }),
+      },
+    });
+    const refused = await fetch(`${base}/api/bots/bot-123/memory/tidy`, { method: "POST" });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({ error: "Switch on Memory upkeep for this bot first." });
+  });
+
   it("removes learned facts through the current About me and save seams", async () => {
     const facts = planLearned({ botId: "bot-123", botName: "Memo" }, ["Prefers tea"], "", "2026-09-28");
     commitLearned(facts);
