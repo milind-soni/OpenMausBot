@@ -29,6 +29,8 @@ export function BotDeleteMenuItem({ deleting, onClick, className = "flex w-full 
 
 export function allThreadRows(bot: Bot) {
   return (bot.tasks ?? []).filter((task) => !task.routineRunId).map((task) => {
+    // A closed thread keeps its own state: the bot working in another thread must not make it look running.
+    if (task.closedBy) return { ...task, busy: task.busy ?? (task.activity === "working" || task.activity === "waiting-on-you"), activity: task.activity };
     const thread = currentTaskBot(bot, task.threadId);
     return { ...task, busy: thread.busy, activity: thread.activity };
   });
@@ -44,7 +46,7 @@ export const closedThreadRows = (rows: ThreadRows): ThreadRows =>
 const scopedRows = (rows: ThreadRows, scope: DeleteScope): ThreadRows => (scope === "closed" ? closedThreadRows(rows) : rows);
 
 export async function deleteAllThreads(bot: Bot, dispatch: Dispatch, scope: DeleteScope = "all"): Promise<void> {
-  const outcome = await deleteThreadsInBulk({ botId: bot.id }, scopedRows(allThreadRows(bot), scope).map((row) => row.threadId), dispatch);
+  const outcome = await deleteThreadsInBulk({ botId: bot.id }, scopedRows(allThreadRows(bot), scope).map((row) => row.threadId), dispatch, scope);
   dispatch({ type: "notice", notice: { kind: "note", botName: null, text: bulkDeleteOutcome(outcome) } });
 }
 

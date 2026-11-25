@@ -3425,6 +3425,7 @@
   "task.bulk.result": "Deleted: {count}.",
   "task.bulk.resultBusy": "Kept because they are running: {count}.",
   "task.bulk.resultMissing": "Already gone: {count}.",
+  "task.bulk.resultNotClosed": "Kept because they were reopened or pinned: {count}.",
   "task.bulk.resultError": "Stopped early: {message}",
   "task.bulk.retitle": "Name by content",
   "task.bulk.retitling": "Naming…",

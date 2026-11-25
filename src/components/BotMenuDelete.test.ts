@@ -76,7 +76,27 @@ describe("delete closed threads", () => {
 
     await deleteAllThreads(closedBot, dispatch, "closed");
 
-    expect(post).toHaveBeenLastCalledWith("/api/bots/maus/tasks/delete", { method: "POST", body: JSON.stringify({ threadIds: ["done", "old"] }) });
+    expect(post).toHaveBeenLastCalledWith("/api/bots/maus/tasks/delete", { method: "POST", body: JSON.stringify({ threadIds: ["done", "old"], scope: "closed" }) });
     expect(dispatch).toHaveBeenLastCalledWith({ type: "notice", notice: { kind: "note", botName: null, text: "Deleted: 2." } });
+  });
+
+  it("keeps an idle closed thread selectable while the bot works in another thread", () => {
+    const working = { ...closedBot, busy: true, activity: "working" as const };
+    expect(closedThreadRows(allThreadRows(working)).map((row) => row.threadId)).toEqual(["done", "old"]);
+  });
+
+  it("still leaves out a closed thread that is itself running", () => {
+    const tasks = closedBot.tasks!.map((task) => (task.threadId === "done" ? { ...task, activity: "working" as const } : task));
+    expect(closedThreadRows(allThreadRows({ ...closedBot, tasks })).map((row) => row.threadId)).toEqual(["old"]);
+  });
+
+  it("says how many were kept because they were reopened or pinned meanwhile", async () => {
+    const post = vi.mocked(api);
+    post.mockResolvedValueOnce({ deleted: ["old"], refused: [{ threadId: "done", reason: "not-closed" }], bot: { id: "maus" } });
+    const dispatch = vi.fn();
+
+    await deleteAllThreads(closedBot, dispatch, "closed");
+
+    expect(dispatch).toHaveBeenLastCalledWith({ type: "notice", notice: { kind: "note", botName: null, text: "Deleted: 1. Kept because they were reopened or pinned: 1." } });
   });
 });

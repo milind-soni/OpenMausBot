@@ -3212,6 +3212,7 @@
   "task.bulk.result": "Excluídas: {count}.",
   "task.bulk.resultBusy": "Mantidas por estarem em andamento: {count}.",
   "task.bulk.resultMissing": "Conversas que já não existiam: {count}.",
+  "task.bulk.resultNotClosed": "Mantidas por terem sido reabertas ou fixadas: {count}.",
   "task.bulk.resultError": "Parou antes do fim: {message}",
   "task.bulk.retitle": "Nomear pelo conteúdo",
   "task.bulk.retitling": "Nomeando…",
