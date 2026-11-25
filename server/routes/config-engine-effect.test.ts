@@ -122,7 +122,9 @@ describe("saving config and the engines' status", () => {
     expect(await save({ features: { showToolCalls: true } })).toEqual([200]);
     expect(await save({ profile: { name: "Ada" }, language: "de" })).toEqual([200]);
     expect(cfg).toMatchObject({ onboarding: { hintsSeen: ["welcome"] }, features: { showToolCalls: true }, profile: { name: "Ada" }, language: "de" });
-    expect(broadcasts()).toBe(3);
+    expect(await save({ features: { memoryUpkeep: false } })).toEqual([200]);
+    expect(cfg.features).toMatchObject({ showToolCalls: true, memoryUpkeep: false });
+    expect(broadcasts()).toBe(4);
     expect(forgotten()).toBe(0);
   });
 

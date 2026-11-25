@@ -8,6 +8,7 @@ import { recordMemoryChange } from "../memory-journal.ts";
 import { commitLearned, planLearned } from "../profile-learned.ts";
 import { requiredScope } from "../request-auth.ts";
 import { launchVerificationServer, type VerificationServer } from "../../scripts/control-omb.ts";
+import { upkeepEnabled } from "../memory-upkeep.ts";
 import { createBotMemoryRoutes, type BotMemoryRouteDeps } from "./bot-memory.ts";
 import { dispatchRoutes } from "./table.ts";
 
@@ -21,7 +22,7 @@ afterEach(async () => {
 async function serve(deps: Partial<BotMemoryRouteDeps> = {}, beforeDispatch?: (res: import("node:http").ServerResponse) => void): Promise<string> {
   const routes = [createBotMemoryRoutes({
     bot: (id) => BOTS[id], taskByThread: () => undefined,
-    upkeep: { status: () => ({ modelSteps: false }), tidy: async () => { throw new Error("unexpected tidy"); } },
+    upkeep: { enabled: upkeepEnabled, status: () => ({ modelSteps: false }), tidy: async () => { throw new Error("unexpected tidy"); } },
     aboutMe: () => "", saveAboutMe: () => { throw new Error("unexpected profile save"); },
     ...deps,
   })];
@@ -97,6 +98,7 @@ describe("the bot-memory module through the route table", () => {
     const base = await serve({
       bot: (id) => ({ id, memoryUpkeep: enabled }),
       upkeep: {
+        enabled: upkeepEnabled,
         status: () => ({ modelSteps: false, lastTidy: report }),
         tidy: async (id) => { tidied.push(id); return report; },
       },
@@ -109,6 +111,25 @@ describe("the bot-memory module through the route table", () => {
     expect(await (await fetch(`${base}/api/bots/bot-123/memory/upkeep`)).json()).toMatchObject({ enabled: false });
     expect((await fetch(`${base}/api/bots/bot-123/memory/tidy`, { method: "POST" })).status).toBe(409);
     expect(tidied).toEqual(["bot-123"]);
+  });
+
+  it("reports upkeep off and refuses tidying, naming the switch for every bot, when that one is off", async () => {
+    let everyBot = false;
+    const base = await serve({
+      bot: (id) => ({ id, memoryUpkeep: true }),
+      upkeep: {
+        enabled: (bot) => everyBot && upkeepEnabled(bot ?? undefined),
+        status: () => ({ modelSteps: false }),
+        tidy: async () => ({ at: 1, expired: 0, duplicates: 0, superseded: 0, deferred: 0, contradictionsChecked: false }),
+      },
+    });
+    expect(await (await fetch(`${base}/api/bots/bot-123/memory/upkeep`)).json()).toEqual({ enabled: false, modelSteps: false });
+    const refused = await fetch(`${base}/api/bots/bot-123/memory/tidy`, { method: "POST" });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({ error: "Memory upkeep is off for every bot. Switch it on in Settings first." });
+    everyBot = true;
+    expect(await (await fetch(`${base}/api/bots/bot-123/memory/upkeep`)).json()).toMatchObject({ enabled: true });
+    expect((await fetch(`${base}/api/bots/bot-123/memory/tidy`, { method: "POST" })).status).toBe(200);
   });
 
   it("removes learned facts through the current About me and save seams", async () => {

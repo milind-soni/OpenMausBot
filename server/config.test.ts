@@ -257,6 +257,12 @@ describe("configuration boundaries", () => {
     expect(parseConfigPatch(stored)).toEqual({ language: "en", features: { browser: true } });
   });
 
+  it("keeps the switch for every bot's memory upkeep in a stored config and an API patch, and refuses a non-boolean", () => {
+    expect(parseStoredConfig({ features: { memoryUpkeep: false } })).toEqual({ features: { memoryUpkeep: false } });
+    expect(parseConfigPatch({ features: { memoryUpkeep: true } })).toEqual({ features: { memoryUpkeep: true } });
+    expect(() => parseConfigPatch({ features: { memoryUpkeep: "off" } })).toThrow("memoryUpkeep");
+  });
+
   it("rejects malformed stored instances and API patches", () => {
     expect(() => parseStoredConfig({ instances: { claude: { driver: 42 } } })).toThrow("instances.claude.driver");
     expect(() => parseStoredConfig({ browserProfiles: [{ id: "../evil", name: "Unsafe" }] })).toThrow(

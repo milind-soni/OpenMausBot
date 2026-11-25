@@ -100,6 +100,9 @@ export function configEntries(deps: Pick<RegistryDeps, "cfg" | "saveConfig" | "b
       current: () => cfg().cacheKeepWarm ?? { enabled: false }, patch: (cacheKeepWarm) => ({ cacheKeepWarm }),
       says: ({ enabled, windowMinutes }) => (enabled ? `Keep prompt caches warm for ${windowMinutes ?? DEFAULT_WINDOW_MINUTES} minutes after each turn (spends tokens)` : "Stop keeping prompt caches warm"),
     }),
+    feature("bots.memoryUpkeep", "Automatic memory for all bots", "Bots note what they learn and tidy their memory on their own; off, no bot does, whatever its own switch says. Saving what you ask still works.",
+      "about-you", ["memory upkeep", "automatic memory", "memory", "remember", "learned by", "dream", "tidy"], "memoryUpkeep", true,
+      "Let bots keep their memory on their own, each by its own switch", "Stop every bot keeping its memory on its own"),
     feature("bots.skillAuthoring", "Bots write their own skills", "Bots may draft skills for your review.", "early", ["skills", "write skills", "early", "experimental"], "skillAuthoring", true,
       "Let bots draft skills for your review", "Stop bots drafting skills"),
     section({

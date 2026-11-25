@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import type { MemoryModelRun, MemoryModelStatus } from "../shared/memory-model.ts";
 import { writeFileAtomic } from "./atomic.ts";
-import { DATA_DIR } from "./config.ts";
+import { DATA_DIR, type AppConfig } from "./config.ts";
 import { CaptureBuffer, captureItemLimit, capturePrompt, captureSize, newCandidates, parseCandidates, statedInConversation, worthCapturing, type Candidate, type CaptureBatch, type CaptureTurn } from "./memory-capture.ts";
 import { DREAM_FIRST_LOOKBACK_MS, DREAM_MIN_CONVERSATIONS, dreamPrompt, parseDream, type DreamConversation } from "./memory-dream.ts";
 import { checkDreamFacts } from "./memory-fact-checks.ts";
@@ -50,6 +50,11 @@ export function upkeepEnabled(bot: Pick<UpkeepBot, "memoryUpkeep" | "memoryEnabl
   return Boolean(bot) && bot!.memoryUpkeep !== false && bot!.memoryEnabled !== false;
 }
 
+/** The switch for every bot at once: off, no bot keeps its memory on its own; on, each bot's own switch decides. On unless false. */
+export function memoryUpkeepEnabled(cfg: Pick<AppConfig, "features">): boolean {
+  return cfg.features?.memoryUpkeep !== false;
+}
+
 export interface UpkeepDeps {
   bots: () => readonly UpkeepBot[];
   bot: (id: string) => UpkeepBot | undefined;
@@ -66,6 +71,8 @@ export interface UpkeepDeps {
   dreamer?: () => string | undefined;
   quietMs: () => number;
   tidyHour: () => number;
+  /** The switch for every bot (`memoryUpkeepEnabled`), asked at each step like the bot's own. On when absent. */
+  globalOn?: () => boolean;
   writing?: <T>(botId: string, write: () => T) => T;
   now?: () => Date;
   log?: (line: string) => void;
@@ -259,6 +266,8 @@ export const NO_DREAM_ENGINE = "This bot's engine cannot make the background mod
 export const NO_TEXT_ENGINE = "This bot's engine cannot make the quick background model call upkeep uses, so only expired notes and exact duplicates are tidied.";
 
 export interface MemoryUpkeep {
+  /** This bot keeps its memory on its own: its switch and the one for every bot are both on. */
+  enabled(bot: Pick<UpkeepBot, "memoryUpkeep" | "memoryEnabled"> | null | undefined): boolean;
   noteTurn(botId: string, threadId: string, turn: CaptureTurn): void;
   flushThread(threadId: string): void;
   dropBot(botId: string): void;
@@ -288,6 +297,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
   let generation = 0;
   let paused = false;
   const cancelled = (started: number) => started !== generation || paused;
+  const on = <B extends Pick<UpkeepBot, "memoryUpkeep" | "memoryEnabled">>(bot: B | null | undefined): bot is B => (deps.globalOn?.() ?? true) && upkeepEnabled(bot ?? undefined);
   // Flushed chats wait here, also through a backup; one worker drains it, one capture call at a time.
   const queue: Waiting[] = [];
   let worker: Promise<void> | null = null;
@@ -344,7 +354,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
   const ask = (botId: string, engine: UpkeepEngine, prompt: string, timeoutMs?: number) => {
     const started = generation;
     return askModel(engine, prompt, timeoutMs, engine.memoryModel?.model ? (lastModel) => {
-      if (!cancelled(started) && upkeepEnabled(deps.bot(botId))) record(botId, { lastModel });
+      if (!cancelled(started) && on(deps.bot(botId))) record(botId, { lastModel });
     } : undefined);
   };
 
@@ -431,7 +441,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     const bot = deps.bot(id);
     const at = now().getTime();
     const off: CaptureReport = { at, added: 0, topics: 0, aboutMe: 0, note: "upkeep is off" };
-    if (!upkeepEnabled(bot)) return off;
+    if (!on(bot)) return off;
     const byThread = new Map<string, CaptureBatch>();
     for (const batch of batches) {
       const same = byThread.get(batch.threadId);
@@ -468,7 +478,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
       return { at, added: 0, topics: 0, aboutMe: 0, note: "deferred until the backup finishes" };
     }
     // Re-read after the await; from here to the journal rows there is no await, so no write interleaves.
-    if (!upkeepEnabled(deps.bot(id))) return off;
+    if (!on(deps.bot(id))) return off;
     const still = conversations.map((conversation) => allowed(conversation.threadId));
     if (!still.some(Boolean)) return refused;
     const filed = attribute(parseCandidates(answer, today, captureItemLimit(conversations.length)), conversations, still).flatMap((item) => {
@@ -574,7 +584,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     const candidates = organizeCandidates(first, today, core);
     if (!candidates.length) return 0;
     const answer = await ask(botId, engine, organizePrompt(candidates, memoryTopicIndex(botId), today));
-    if (answer === null || cancelled(started) || !upkeepEnabled(deps.bot(botId))) return 0;
+    if (answer === null || cancelled(started) || !on(deps.bot(botId))) return 0;
     const before = readRaw(botId, "MEMORY.md") ?? "";
     if (before !== first) return 0;
     const proposed = parseMoves(answer, candidates);
@@ -648,10 +658,10 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     const at = now().getTime();
     const today = memoryDate(now());
     const stopped: TidyReport = { at, expired: 0, duplicates: 0, superseded: 0, deferred: 0, contradictionsChecked: false, note: "Memory upkeep is off or paused; no further changes were made." };
-    if (cancelled(started) || !upkeepEnabled(bot)) return stopped;
+    if (cancelled(started) || !on(bot)) return stopped;
     ensureWorkspace(botId);
     const organized = await organize(botId);
-    if (cancelled(started) || !upkeepEnabled(deps.bot(botId))) return stopped;
+    if (cancelled(started) || !on(deps.bot(botId))) return stopped;
     const first = readRaw(botId, "MEMORY.md") ?? "";
     const engine = deps.engine(botId);
     const candidates = contradictionCandidates(first, today);
@@ -668,7 +678,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
         contradictionsChecked = true;
       }
     }
-    if (cancelled(started) || !upkeepEnabled(deps.bot(botId))) return stopped;
+    if (cancelled(started) || !on(deps.bot(botId))) return stopped;
     // Re-read after the await: if the notes changed, the model's line numbers are stale.
     const before = readRaw(botId, "MEMORY.md") ?? "";
     if (before !== first && contradictions.length) {
@@ -708,7 +718,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
           topicChecks++;
           topicCursor = topic.name;
           const answer = await ask(botId, engine, contradictionPrompt(topicCandidates), remaining);
-          if (cancelled(started) || !upkeepEnabled(deps.bot(botId))) return stopped;
+          if (cancelled(started) || !on(deps.bot(botId))) return stopped;
           if (readRaw(botId, path) !== topicBefore) {
             topicsDeferred++;
             continue;
@@ -769,7 +779,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     const bot = deps.bot(botId);
     const at = now().getTime();
     const report = (note: string, conversations = 0): DreamReport => ({ at, conversations, learned: [], outdated: [], ideas: [], aboutMe: 0, note });
-    if (cancelled(started) || !upkeepEnabled(bot)) return report("Memory upkeep is off or paused, so nothing was read.");
+    if (cancelled(started) || !on(bot)) return report("Memory upkeep is off or paused, so nothing was read.");
     if (!deps.conversations) return report("Dreaming is not available here.");
     const engine = deps.engine(botId);
     if (!engine?.generateText) {
@@ -788,7 +798,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     const first = readRaw(botId, "MEMORY.md") ?? "";
     const notebook = contradictionCandidates(first, today);
     const answer = await ask(botId, engine, dreamPrompt({ botName: bot.name, today, conversations, notebook, topics: memoryTopicIndex(botId) }), DREAM_TIMEOUT_MS);
-    if (cancelled(started) || !upkeepEnabled(deps.bot(botId))) return report("Memory upkeep was stopped, switched off or paused during the dream; no changes were made.", conversations.length);
+    if (cancelled(started) || !on(deps.bot(botId))) return report("Memory upkeep was stopped, switched off or paused during the dream; no changes were made.", conversations.length);
     if (answer === null) {
       const late = report("The dream did not answer in time.", conversations.length);
       record(botId, { lastDream: late });
@@ -869,7 +879,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     await batched(async () => {
       for (const bot of deps.bots()) {
         if (cancelled(started)) return;
-        if (!upkeepEnabled(bot) || deps.busy(bot.id)) continue;
+        if (!on(bot) || deps.busy(bot.id)) continue;
         if (due(bot.id)) {
           try {
             await tidy(bot.id);
@@ -889,8 +899,9 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
   }
 
   return {
+    enabled: on,
     noteTurn(botId, threadId, turn) {
-      if (!upkeepEnabled(deps.bot(botId))) return;
+      if (!on(deps.bot(botId))) return;
       if (!turn.person.trim() && !turn.bot.trim()) return;
       buffer.add(botId, threadId, turn);
     },
@@ -930,7 +941,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
       if (deps.restoreTurn) {
         try {
           for (const saved of takePending()) {
-            if (!upkeepEnabled(deps.bot(saved.botId))) continue;
+            if (!on(deps.bot(saved.botId))) continue;
             for (const turnId of saved.turnIds) {
               const turn = deps.restoreTurn(saved.botId, saved.threadId, turnId);
               if (turn && (turn.person.trim() || turn.bot.trim())) buffer.add(saved.botId, saved.threadId, { ...turn, turnId });

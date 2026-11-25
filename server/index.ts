@@ -120,7 +120,7 @@ import { signInCardText } from "./connector-card-text.ts";
 import { BOT_HELD_CODE, BOT_PAUSED_CODE } from "../shared/bot-limit.ts"; import { createBotHolds } from "./host/bot-holds.ts"; import { createBotHoldRoutes } from "./routes/bot-holds.ts"; import { createCliLogin } from "./routes/cli-login.ts"; import { createStarterAwake } from "./host/starter-awake.ts"; import { createStarterCaps } from "./host/starter-caps.ts"; import { createStarterRoutineWake, workInFlight, type StarterRoutineWake } from "./host/starter-routine-wake.ts"; import { createStarterAwakeRoutes } from "./routes/starter-awake.ts"; import { chiefOfStaffPrompt, chiefOfStaffSystemPrompt } from "./chief-of-staff.ts"; import { coordinateMessageMax, coordinateTooLong, reportBackTooLong } from "./too-long.ts"; import { chiefAbsentFrom, createChiefRooms } from "./host/chief-rooms.ts"; import { chiefLevel, readTeamRolesWith } from "./chief-level.ts"; import { defaultBotRefusal, ensureDefaultBot } from "./default-bot.ts";
 import { buildRecall, recallRooms, recallThreadIds, withRecalled } from "./recall.ts";
 import { hostTimeZone, takesTurnClock, turnClockLine, withTurnClock } from "./turn-clock.ts";
-import { createMemoryUpkeep, dreamConversations, upkeepEnabled } from "./memory-upkeep.ts";
+import { createMemoryUpkeep, dreamConversations, memoryUpkeepEnabled } from "./memory-upkeep.ts";
 import { createCacheKeepWarm, type KeepWarmStatus, type KeepWarmTarget } from "./cache-keepwarm.ts";
 import { createSkillReview, turnToolSteps } from "./skill-review.ts";
 import { createSideJobs, helperSelection } from "./side-jobs.ts";
@@ -5065,7 +5065,7 @@ const memoryUpkeep = createMemoryUpkeep({
   bots: () => { const paused = new Set(starterAwake.paused()); return store.bots.filter((bot) => !paused.has(bot.id) && !botHolds.held(bot.id)); },
   bot: (id) => store.bot(teamHost.baseBotId(id)) ?? undefined,
   engine: (botId) => sideJobs.text("memory", teamHost.baseBotId(botId)),
-  busy: (botId) => botHasActiveTurn(teamHost.baseBotId(botId)),
+  busy: (botId) => botHasActiveTurn(teamHost.baseBotId(botId)), globalOn: () => memoryUpkeepEnabled(cfg),
   addToAboutMe: (from, texts) => aboutMeFacts.learn(from, texts),
   sourceLabel: (botId, threadId) => memorySourceLabel({ room: store.groupByThread(threadId), task: store.taskByThread(teamHost.baseBotId(botId), threadId), threadId }),
   mayCapture: (botId, threadId) => {
@@ -5217,7 +5217,7 @@ const ROOM_CAPTURE_LINES = 12;
 /** A bot's memory reaches every chat it has, so a room fewer people can see never feeds it. */
 function roomCaptureAllowed(room: GroupRecord, bot: BotRecord | null | undefined): bot is BotRecord {
   if (!bot || !roomMemoryCaptureEnabled(cfg) || CLOUD_HOME || room.dm) return false;
-  return room.memberIds.includes(bot.id) && upkeepEnabled(bot) && roomFeedsBot(room, bot);
+  return room.memberIds.includes(bot.id) && memoryUpkeep.enabled(bot) && roomFeedsBot(room, bot);
 }
 
 function captureRoomTurnFor(threadId: string, botId: string, turnId: string): CaptureTurn | null {
@@ -5263,7 +5263,7 @@ bus.subscribe((event: RuntimeEvent) => {
       return;
     }
     const bot = store.botByThread(event.threadId);
-    if (!bot || !upkeepEnabled(bot) || isInternalTurn(event.threadId)
+    if (!bot || !memoryUpkeep.enabled(bot) || isInternalTurn(event.threadId)
       || isUnattended(bot.id, event.threadId) || routines?.runForThread(event.threadId) || threadScoped(bot.id, event.threadId)) return;
     if (CLOUD_PERSONAL && !cloudOwnerOnlyThread(event.threadId)) return;
     const turn = captureTurnFor(event.threadId, event.turnId);
@@ -11623,7 +11623,7 @@ function configStatus() {
       sharedComputers: sharedComputersEnabled(cfg),
       claudeUserMcp: claudeUserMcpEnabled(cfg),
       claudeUserSkills: claudeUserSkillsEnabled(cfg),
-      autoRecall: autoRecallEnabled(cfg),
+      autoRecall: autoRecallEnabled(cfg), memoryUpkeep: memoryUpkeepEnabled(cfg),
       roomMemoryCapture: roomMemoryCaptureEnabled(cfg),
       parallelRoomJobs: parallelRoomJobsEnabled(cfg),
       savedSteps: savedStepsEnabled(cfg), savedStepsHere: savedSteps.here(), skillBurger: skillBurgerEnabled(cfg), threadTabs: cfg.features?.threadTabs === true, roomFeed: cfg.features?.roomFeed === true, teamBoard: CLOUD_TEAM ? cfg.features?.teamBoard === true : undefined,

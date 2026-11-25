@@ -9,7 +9,7 @@ import { mergeTopicText, parseTopicHeader } from "./memory-topics.ts";
 import { applyMoves, MAX_MOVES, organizeCandidates, ORGANIZE_MARKER, organizePrompt, parseMoves } from "./memory-organize.ts";
 import { flushMemoryJournal, readMemoryJournal, revertMemoryChange } from "./memory-journal.ts";
 import { applyTidy, contradictionBudget, contradictionCandidates, contradictionPrompt, parseContradictions, planTidy } from "./memory-tidy.ts";
-import { createMemoryUpkeep, MAX_PENDING_THREADS, NO_TEXT_ENGINE, type UpkeepBot, type UpkeepEngine } from "./memory-upkeep.ts";
+import { createMemoryUpkeep, MAX_PENDING_THREADS, memoryUpkeepEnabled, NO_TEXT_ENGINE, type UpkeepBot, type UpkeepEngine } from "./memory-upkeep.ts";
 import { closeMessageDb } from "./message-db.ts";
 import { aboutMeLine, appendAboutMe, clearForgotten, commitLearned, listLearnedFacts, planLearned, rememberForgotten, removeLearned } from "./profile-learned.ts";
 import { ensureWorkspace, readMemoryTopic, workspaceDir, writeMemoryFile, writeMemoryTopic, WORKSPACES_DIR } from "./workspace.ts";
@@ -270,7 +270,8 @@ describe("the upkeep loop", () => {
   let organizePrompts: string[];
   let transcript: Map<string, CaptureTurn>;
 
-  const upkeep = () => createMemoryUpkeep({
+  const upkeep = (globalOn?: () => boolean) => createMemoryUpkeep({
+    globalOn,
     bots: () => [BOT],
     bot: (id) => (id === BOT.id ? BOT : undefined),
     engine: () => engine,
@@ -760,6 +761,39 @@ describe("the upkeep loop", () => {
     expect(memory()).toContain("Balance is 10");
     engine = null;
     expect((await upkeep().tidy(BOT.id)).note).toBe(NO_TEXT_ENGINE);
+  });
+
+  it("keeps no memory on its own while the switch for every bot is off, though the bot's own switch is on", async () => {
+    BOT.memoryUpkeep = true;
+    ensureWorkspace(BOT.id);
+    writeMemoryFile(BOT.id, "- 2026-09-01 · Trip · until 2026-09-02\n");
+    let everyBot = false;
+    const loop = upkeep(() => everyBot);
+    expect(loop.enabled(BOT)).toBe(false);
+    answers.push(JSON.stringify([{ text: "The person is vegetarian", kind: "preference", evidence: "I'm vegetarian", aboutUser: true, confidence: 0.9 }]));
+    expect(await loop.capture({ botId: BOT.id, threadId: "t1", turns: [{ person: "I'm vegetarian", bot: "Noted." }] })).toMatchObject({ added: 0, note: "upkeep is off" });
+    expect((await loop.tidy(BOT.id)).expired).toBe(0);
+    expect((await loop.dream(BOT.id)).note).toBe("Memory upkeep is off or paused, so nothing was read.");
+    clock = new Date(2026, 8, 25, 4, 0);
+    await loop.tick();
+    expect(loop.status(BOT.id).lastTidy).toBeUndefined();
+    expect(prompts).toEqual([]);
+    expect(aboutMeAdded).toEqual([]);
+    expect(memory()).toBe("- 2026-09-01 · Trip · until 2026-09-02\n");
+
+    everyBot = true;
+    expect(loop.enabled(BOT)).toBe(true);
+    await loop.tick();
+    expect(loop.status(BOT.id).lastTidy?.expired).toBe(1);
+    BOT.memoryUpkeep = false;
+    expect(loop.enabled(BOT)).toBe(false);
+  });
+
+  it("reads the switch for every bot as on unless it is false", () => {
+    expect(memoryUpkeepEnabled({})).toBe(true);
+    expect(memoryUpkeepEnabled({ features: {} })).toBe(true);
+    expect(memoryUpkeepEnabled({ features: { memoryUpkeep: true } })).toBe(true);
+    expect(memoryUpkeepEnabled({ features: { memoryUpkeep: false } })).toBe(false);
   });
 
   it("runs the nightly tidy once a day after the hour, never while the bot is busy", async () => {

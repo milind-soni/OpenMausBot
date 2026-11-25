@@ -11,7 +11,7 @@ const NO_ENGINE_EFFECT: Readonly<Record<string, typeof WHOLE | ReadonlySet<strin
   everyBotRules: WHOLE,
   onboarding: new Set(["completedAt", "version", "reelSeen", "hintsSeen", "firstTurnAt"]),
   profile: new Set(["name", "email", "aboutMe", "avatarUrl"]),
-  features: new Set(["showToolCalls"]),
+  features: new Set(["showToolCalls", "memoryUpkeep"]),
 };
 
 /** False only when every field the patch sets is known to leave every engine's status as it was. */
