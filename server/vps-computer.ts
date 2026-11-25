@@ -84,7 +84,7 @@ const pendingScreenshots = new Map<string, Promise<VpsScreenshot>>();
 const viewerConnections = new Map<string, { privateIp: string; password: string }>();
 const REMOTE_VIEWER_GRACE_MS = 30_000;
 const NATIVE_VIEWER_LIFETIME_MS = 8 * 60 * 60_000;
-type DesktopTunnel = { child: ReturnType<typeof spawn>; joinUrl: string; expiry: ReturnType<typeof setTimeout>; viewers: number; localViewer: boolean };
+type DesktopTunnel = { onViewerClosed?: () => void; child: ReturnType<typeof spawn>; joinUrl: string; expiry: ReturnType<typeof setTimeout>; viewers: number; localViewer: boolean };
 type TunnelStart = { cancelled: boolean; child?: ReturnType<typeof spawn> };
 const desktopTunnels = new Map<string, DesktopTunnel>();
 const pendingDesktopTunnels = new Map<string, { promise: Promise<DesktopTunnel>; start: TunnelStart }>();
@@ -240,16 +240,20 @@ function stopDesktopTunnel(botId: string, expected?: DesktopTunnel): boolean {
   return true;
 }
 
-export function closeVpsDesktopTunnel(botId: string, onClosed?: () => void) {
+function endViewerTunnel(botId: string, tunnel: DesktopTunnel): boolean {
+  if (!stopDesktopTunnel(botId, tunnel)) return false;
+  tunnel.onViewerClosed?.();
+  return true;
+}
+
+export function closeVpsDesktopTunnel(botId: string) {
   const tunnel = desktopTunnels.get(botId);
   if (tunnel?.viewers) {
     tunnel.localViewer = false;
     clearTimeout(tunnel.expiry);
     return { closed: false };
   }
-  const closed = stopDesktopTunnel(botId);
-  if (closed) onClosed?.();
-  return { closed };
+  return { closed: tunnel ? endViewerTunnel(botId, tunnel) : stopDesktopTunnel(botId) };
 }
 
 export function closeAllVpsDesktopTunnels(): void {
@@ -274,7 +278,7 @@ export function vpsDesktopConnection(botId: string) {
         tunnel.viewers--;
         if (!tunnel.viewers && !tunnel.localViewer && desktopTunnels.get(botId) === tunnel) {
           tunnel.expiry = setTimeout(() => {
-            stopDesktopTunnel(botId, tunnel);
+            endViewerTunnel(botId, tunnel);
           }, REMOTE_VIEWER_GRACE_MS);
           tunnel.expiry.unref();
         }
@@ -1064,6 +1068,7 @@ export async function vpsComputerJoin(
   botId: string,
   runner: VpsCommandRunner = defaultRunner,
   remoteViewer = false,
+  onViewerClosed?: () => void,
 ): Promise<{ joinUrl: string; state: "running" }> {
   cfg = snapshotVpsConfig(cfg);
   const alias = vpsSshAlias(cfg);
@@ -1071,7 +1076,7 @@ export async function vpsComputerJoin(
 
   let tunnel = desktopTunnels.get(botId);
   if (tunnel && (tunnel.child.exitCode !== null || tunnel.child.killed)) {
-    stopDesktopTunnel(botId, tunnel);
+    endViewerTunnel(botId, tunnel);
     tunnel = undefined;
   }
   if (!tunnel) {
@@ -1084,11 +1089,12 @@ export async function vpsComputerJoin(
     try { tunnel = await pending.promise; }
     finally { if (pendingDesktopTunnels.get(botId) === pending) pendingDesktopTunnels.delete(botId); }
   }
+  if (onViewerClosed) tunnel.onViewerClosed = onViewerClosed;
   if (!remoteViewer) tunnel.localViewer = true;
   if (!tunnel.viewers || tunnel.localViewer) {
     clearTimeout(tunnel.expiry);
     const current = tunnel;
-    tunnel.expiry = setTimeout(() => stopDesktopTunnel(botId, current), tunnel.localViewer ? NATIVE_VIEWER_LIFETIME_MS : REMOTE_VIEWER_GRACE_MS);
+    tunnel.expiry = setTimeout(() => endViewerTunnel(botId, current), tunnel.localViewer ? NATIVE_VIEWER_LIFETIME_MS : REMOTE_VIEWER_GRACE_MS);
     tunnel.expiry.unref();
   }
   return { joinUrl: tunnel.joinUrl, state: "running" };
@@ -1134,6 +1140,7 @@ async function startDesktopTunnel(cfg: AppConfig, botId: string, alias: string, 
     if (active?.child === child) {
       clearTimeout(active.expiry);
       desktopTunnels.delete(botId);
+      active.onViewerClosed?.();
     }
     if (!failure) failure = stderr.trim() || `SSH viewer tunnel exited ${code ?? "without a status"}`;
   });
@@ -1154,7 +1161,7 @@ async function startDesktopTunnel(cfg: AppConfig, botId: string, alias: string, 
   const joinUrl = `http://127.0.0.1:${localPort}/vnc.html#autoconnect=true&resize=scale&password=${encodeURIComponent(connection.password)}`;
   const tunnel: DesktopTunnel = {
     child, joinUrl, viewers: 0, localViewer: false,
-    expiry: setTimeout(() => stopDesktopTunnel(botId, tunnel), REMOTE_VIEWER_GRACE_MS),
+    expiry: setTimeout(() => endViewerTunnel(botId, tunnel), REMOTE_VIEWER_GRACE_MS),
   };
   tunnel.expiry.unref();
   desktopTunnels.set(botId, tunnel);
