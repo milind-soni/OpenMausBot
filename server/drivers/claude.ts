@@ -41,7 +41,7 @@ import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { askInputSummary, commandSummary, toolDetailPreview } from "../tool-summary.ts";
-import { classifyError, claudeResumeRefusal, computeBackoff, interruptibleDelay, mayResendTurn, retryableClaudeResume, USAGE_LIMIT } from "./retry.ts";
+import { classifyError, claudeResumeRefusal, claudeStderrResumeRefusal, computeBackoff, interruptibleDelay, mayResendTurn, retryableClaudeResume, USAGE_LIMIT } from "./retry.ts";
 import { claudeApiError, claudeApiErrorMessage, claudeLimitError, claudeLimitFacts, claudeLimitRefusal, claudeUsageLimit, claudeVersionTooOld, type ClaudeLimit } from "./claude-limits.ts";
 import { createOrgModelBlocks, modelSwapNotice, withOrgBlocks } from "./claude-model-access.ts";
 import { engineHomes } from "../engine-homes/engine-homes.ts";
@@ -1725,6 +1725,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             })();
             return;
           }
+          if (!session.resumeRefusal && sessionId && !session.sawInit) session.resumeRefusal = claudeStderrResumeRefusal(session.stderr, sessionId);
           const resumeFailure = retryableClaudeResume(session, session.turn, Boolean(sessionId), unverifiedDispatch);
           if (!quotaStop && resumeFailure && !retry.cancelled) {
             // Without this line a refused --resume looks like an ordinary new session in the logs.

@@ -497,7 +497,7 @@ describe("surface pin provenance against the real server", () => {
     await stop();
   }, 60_000);
 
-  it("clears a failed auto pin on a fresh request and keeps a person's pin", async () => {
+  it("clears a select_computer pin to a cloud computer that fails, and keeps a person's pin", async () => {
     await start();
     const { bot } = await apiOk("POST", "/api/bots", { name: "Failed place bot" });
     const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
@@ -516,13 +516,6 @@ describe("surface pin provenance against the real server", () => {
     boatDown = true;
     writeFileSync(finishFile, "finish");
     await until(() => lastRow(), row => row.startsWith("error:"));
-    await idle(bot.id, task.threadId);
-    expect(await lastRow()).toContain("Replay was blocked");
-    expect(savedTask(bot.id, task.threadId)).toMatchObject({ surface: "cloud", surfaceSource: "auto" });
-
-    resetTurn();
-    await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Open Chrome on the selected cloud computer.", threadId: task.threadId });
-    await until(() => lastRow(), row => row.includes("back on Auto"));
     await idle(bot.id, task.threadId);
     expect(await lastRow()).toBe("error: Cloud desktops can't start right now. It isn't anything you did. This conversation is back on Auto. Send your message again.");
     const cleared = savedTask(bot.id, task.threadId)!;
@@ -548,7 +541,7 @@ describe("surface pin provenance against the real server", () => {
     await stop();
   });
 
-  it("never takes a relayed line's conversation for where the person writes, when select_computer finishes its current turn", async () => {
+  it("never takes a relayed line's conversation for where the person writes, when select_computer continues its turn", async () => {
     await start();
     const { bot } = await apiOk("POST", "/api/bots", { name: "Relayed place bot" });
     // An Ask thread, as a Slack relay's guarded send expects.
@@ -577,7 +570,7 @@ describe("surface pin provenance against the real server", () => {
     await stop();
   });
 
-  it("keeps the selected browser without redispatching the interrupted hand-off", async () => {
+  it("lets a teammate's hand-off move to the built-in browser only, and returns the result from there", async () => {
     // The teammate runs on its own fixture engine, so its turn waits on its own gate while the asker's turn ends.
     const teammateDump = join(home, "teammate-dump.json"), teammateFinish = join(home, "teammate-finish");
     rmSync(teammateDump, { force: true });
@@ -617,13 +610,27 @@ describe("surface pin provenance against the real server", () => {
     const workThread = (await apiOk("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.id === tester.id)
       .tasks.find((task: any) => task.openedBy?.botId === asker.id).threadId as string;
     rmSync(teammateDump, { force: true });
+    // Hold the asker's own turn that resumes with the result, to check it is not offered the hand-off's browser move.
+    // Its first turn must have used up the finish gate before the gate is removed for the resumed turn.
+    await idle(asker.id, own.threadId);
+    rmSync(dumpFile, { force: true });
+    rmSync(finishFile, { force: true });
     writeFileSync(teammateFinish, "finish");
-    const messages = async () => (await apiOk("GET", `/api/threads/${workThread}/messages?limit=60`)).messages as any[];
-    expect(await until(messages, rows => rows.some(row => row.tool?.name?.includes("Replay was blocked")))).toBeTruthy();
+    const moved = await teammateTurn();
+    expect(JSON.stringify(moved.prompt)).toContain("Continue the handed-off request");
+    expect(moved.mcpConfig.mcpServers.browser).toBeDefined();
+    expect(savedTask(tester.id, workThread)).toMatchObject({ surface: "browser" });
+    const resumedToken = (await dump()).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const resumedOffer = await (await fetch(base + "/api/internal/computer/select", {
+      headers: { authorization: `Bearer ${resumedToken}` } })).json() as any;
+    expect(resumedOffer.canSelect).not.toBe(true);
+    writeFileSync(finishFile, "finish");
+    // The asker hears back from the browser turn, never from the turn that only asked to move.
+    const replies = async () => JSON.stringify((await apiOk("GET", `/api/threads/${own.threadId}/messages?limit=60`)).messages);
+    // "reply to: ..." is the fixture engine's own answer from the browser turn, not the prompt that started it.
+    expect(await until(replies, (text) => /reply to: [^"]*The computer selection is now the built-in browser/.test(text))).toBeTruthy();
     await idle(tester.id, workThread);
     await idle(asker.id, own.threadId);
-    expect(existsSync(teammateDump)).toBe(false);
-    expect(savedTask(tester.id, workThread)).toMatchObject({ surface: "browser" });
     await stop();
   }, 60_000);
 });

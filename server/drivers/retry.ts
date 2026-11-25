@@ -229,6 +229,12 @@ export function claudeResumeRefusal(message: string, turns: unknown, cursor: str
   return { message, sessionMissing: turns === 0 && message === `No conversation found with session ID: ${cursor}` };
 }
 
+// A CLI that exits on a dead cursor names it on stderr before init: the same refusal as the error result, so state A.
+export function claudeStderrResumeRefusal(stderr: string, cursor: string) {
+  const named = /(?:^|\n)(?:[\w-]+: )?No conversation found with session ID: (\S+)[ \t]*(?:\r?\n|$)/.exec(stderr)?.[1];
+  return named === cursor ? claudeResumeRefusal(`No conversation found with session ID: ${cursor}`, 0, cursor) : undefined;
+}
+
 export function retryableClaudeResume(
   session: { sawInit: boolean; resumeRefusal?: ReturnType<typeof claudeResumeRefusal> },
   turn: { answered?: boolean; sawStreamDelta: boolean },
