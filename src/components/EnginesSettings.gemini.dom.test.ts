@@ -222,7 +222,11 @@ describe("Settings → AI → Providers: ModelGo stands directly above Cursor, w
     await advanced();
     expect(cards().slice(0, 5)).toEqual(["grok", "kimi", "modelgo", "droid", "cursor"]);
     raised(cards());
-    fixture.state = { ...fixture.state, config: { managedPolicy: { organizationName: "Acme", companyModelsOnly: false, allowedEngines: ["groq"] } } };
+    const ready = { state: "available", authenticated: true } as const;
+    fixture.state = { ...fixture.state, instances: [grok, cursor, key("groq", "groq", ready), key("mistral", "mistral", ready), key("meta", "meta", ready), key("modelgo", "modelgo", ready)] };
+    await advanced();
+    expect(cards(), "set up, it is third among the ready ones").toEqual(["groq", "mistral", "modelgo", "meta", "grok", "cursor"]);
+    fixture.state = { ...fixture.state, instances: fleet, config: { managedPolicy: { organizationName: "Acme", companyModelsOnly: false, allowedEngines: ["groq"] } } };
     await advanced();
     expect(cards().slice(0, 4)).toEqual(["grok", "kimi", "droid", "cursor"]);
   });
