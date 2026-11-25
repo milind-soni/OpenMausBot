@@ -201,8 +201,7 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
     if (!current) return { backups: [], skipped: [] };
     const out: ModelSelection[] = [];
     const left: SkippedBackup[] = [];
-    const add = (selection: ModelSelection) => {
-      const pick = { instanceId: selection.instanceId, model: selection.model };
+    const add = (pick: ModelSelection) => {
       if (pick.instanceId === from.instanceId && pick.model === from.model) return;
       if ([...out, ...left.map((one) => one.selection)].some((known) => known.instanceId === pick.instanceId && known.model === pick.model)) return;
       if (pick.instanceId === from.instanceId && (scope === "engine" || scope === "signed-out")) {
@@ -214,7 +213,10 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
       else out.push(pick);
     };
     const picked = chosen ?? deps.chosen(botId);
-    if ((scope === "model" || scope === "credits") && picked.length) add({ instanceId: current.instanceId, model: current.models.default });
+    if ((scope === "model" || scope === "credits") && picked.length) {
+      const sameAccountDefault = picked.find((entry) => entry.instanceId === current.instanceId && entry.model === current.models.default);
+      add(sameAccountDefault ?? { instanceId: current.instanceId, model: current.models.default });
+    }
     for (const selection of chosen ?? (scope === "signed-out" ? deps.signedOutChosen?.(botId) ?? picked : picked)) add(selection);
     return { backups: out, skipped: left };
   }

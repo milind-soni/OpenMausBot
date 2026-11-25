@@ -65,6 +65,13 @@ function takeover(overrides: Partial<LimitTakeoverDeps> = {}, dir = freshDir()) 
 }
 
 describe("which AI carries on while one is limited", () => {
+  it("keeps the chosen reasoning when the first backup is also the same account's default model", () => {
+    const sameAccount = { ...on("codex", "gpt-6"), effort: "medium" } as const;
+    const other = { ...on("opencode", "go-default"), variant: "thinking" };
+    const { instance } = takeover({ chosen: () => [other, sameAccount] });
+    expect(instance.backups("kai", on("codex", "gpt-6-mini"), "model")).toEqual([sameAccount, other]);
+  });
+
   it("keeps a bot on OpenCode Zen's free models while only the Go subscription's meter is full", () => {
     const openCode = engine("opencode", "opencode", ["opencode-go/kimi-k2", "opencode/big-pickle"]);
     const clock = new LimitResetClock({ accounts: () => [{ id: "opencode", name: "OpenCode", driver: "opencode", environment: {} }], now: () => NOW });

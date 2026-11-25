@@ -3,7 +3,7 @@ import { supportsWorkspaceFiles } from "./workspace.ts";
 import type { ModelSelection } from "../shared/wire.ts";
 
 type Engine = { driverKind: string; capabilities: ProviderAdapter["capabilities"] };
-type Backup = Pick<ModelSelection, "instanceId" | "model">;
+type Backup = ModelSelection;
 
 /** The backups a bot's turn tries, in order, when its AI provably never started it: the bot's own list, which needs no
  * switch, or else the installation's one backup while Automatic recovery is on. */
