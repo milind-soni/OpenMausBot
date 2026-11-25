@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
 import { useHeldMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import { copyText } from "@/lib/copy-text";
-import { allThreadRows, BotDeleteMenuItem, useDeleteAllThreads } from "./BotMenuDelete";
+import { allThreadRows, BotDeleteMenuItem, closedThreadRows, useDeleteAllThreads } from "./BotMenuDelete";
 import { DemoteDefaultBotItem, HideDefaultBotItem } from "./DefaultBotControls";
 import { navigateThreadMenu } from "./BotProjects";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
@@ -265,7 +265,12 @@ export function BotContextMenu({
       if (!state.settingsOpen) dispatch({ type: "toggleSettings", open: true });
     });
     const owner = team && mayChangeOwner(bot, team) ? item(<Users size={16} className="text-ink-secondary" />, ownerMenuLabel(bot, team), () => pickOwnerOf(bot, team, shown)) : null;
-    const deleteAll = !member && allThreadRows(bot).length >= 2 ? [divider("more-threads"), item(<Trash2 size={16} />, t("task.deleteAllConversations"), () => clearThreads.ask(bot.id), { danger: true })] : [];
+    const rows = member ? [] : allThreadRows(bot);
+    const threadDeletes = [
+      ...(rows.length >= 2 ? [item(<Trash2 size={16} />, t("task.deleteAllConversations"), () => clearThreads.ask(bot.id), { danger: true })] : []),
+      ...(closedThreadRows(rows).length > 0 ? [item(<Trash2 size={16} />, t("task.deleteClosedConversations"), () => clearThreads.ask(bot.id, "closed"), { danger: true })] : []),
+    ];
+    const deleteAll = threadDeletes.length > 0 ? [divider("more-threads"), ...threadDeletes] : [];
     const readState = readingBotId === bot.id || botShowsUnread(bot)
       ? item(
         readingBotId === bot.id ? <Loader2 size={16} className="animate-spin text-ink-secondary" /> : <CheckCheck size={16} className="text-ink-secondary" />,
@@ -397,6 +402,7 @@ export function BotContextMenu({
         {item(<FolderPlus size={16} className="text-ink-secondary" />, t("folder.new"), () => onNewFolder(bot.id))}
       </>}
       {!member && item(<Trash2 size={16} />, t("task.deleteAll"), () => clearThreads.ask(bot.id), { danger: true })}
+      {!member && closedThreadRows(allThreadRows(bot)).length > 0 && item(<Trash2 size={16} />, t("task.deleteClosed"), () => clearThreads.ask(bot.id, "closed"), { danger: true })}
       {divider("threads")}
       {team && mayChangeOwner(bot, team) && item(<Users size={16} className="text-ink-secondary" />, ownerMenuLabel(bot, team), () => pickOwnerOf(bot, team, shown))}
       {remoteClient ? [
