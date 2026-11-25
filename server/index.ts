@@ -15012,9 +15012,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           }
           if (m[2] === "join") {
             const remote = auth.kind !== "loopback";
-            const result = await vps.vpsComputerJoin(vpsConfigForBot(cfg, bot), botId, undefined, remote, () => {
-              if (vpsIdles.has(botId)) touchVpsIdle(bot);
-            });
+            const result = await vps.vpsComputerJoin(vpsConfigForBot(cfg, bot), botId, undefined, remote,
+              () => vpsIdles.get(botId)?.touch());
             touchVpsIdle(bot);
             return json(res, 200, { ...result, joinUrl: remote
               ? desktopViewerUrl(`vps/${botId}`, bot.threadId) : result.joinUrl });
