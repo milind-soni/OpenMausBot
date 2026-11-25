@@ -34,27 +34,34 @@ async function sent(response, what) {
  *   oneHome: { journal(): unknown, keep: { state(): { shown: boolean, on: boolean, moved: boolean }, set(on: boolean): Promise<unknown> } },
  *   ownHome: { owns(place: any): boolean, offers(place: any): boolean, start(id: string): Promise<unknown>, active(): boolean, away(): boolean, refresh(): void },
  *   dismissed: { read(): unknown, write(value: unknown): void },
+ *   lastRead?: { read(): unknown, write(value: unknown): void },
  *   account?: () => ({ state(): any } | null),
  *   teamsRemembered?: { read(): unknown, write(value: unknown): void },
  *   tell(): void,
  *   log?(line: string): void,
  * }} deps `guard`: this computer's own page only. `cloud()`: My Cloud's address while it is ready, and whether it sleeps
  * now (a sleeping Cloud is never asked). `account()` and `teamsRemembered`: the person's teams, read as places that have
- * bots. `tell()`: the suggestion changed, so this computer's page asks again.
+ * bots. `lastRead`: each own place's bots as last read, kept across restarts. `tell()`: the suggestion changed, so this
+ * computer's page asks again.
  */
-export function installTwoPlacesMain({ ipcMain, guard, localRequest, fetch: fetchImpl, environments, cloud, oneHome, ownHome, dismissed, account = null, teamsRemembered = null, tell, log = () => {}, t = nativeText.englishText.t }) {
+export function installTwoPlacesMain({ ipcMain, guard, localRequest, fetch: fetchImpl, environments, cloud, oneHome, ownHome, dismissed, lastRead = null, account = null, teamsRemembered = null, tell, log = () => {}, t = nativeText.englishText.t }) {
   const put = (payload) => ({ method: "PUT", body: JSON.stringify(payload), signal: AbortSignal.timeout(10_000) });
   const teams = account && teamsRemembered ? teamPlaces({ account, fetch: fetchImpl, remembered: teamsRemembered }) : () => [];
   const places = () => {
     const out = [];
     const mine = cloud(), keep = oneHome.keep.state();
-    if (mine.origin && !mine.asleep) {
+    // A sleeping Cloud is still a place, told as it was last read, but it is never asked anything: that would wake it.
+    if (mine.origin) {
       const request = (route, init = {}) => fetchImpl(`${mine.origin}${route}`, { credentials: "include", cache: "no-store", redirect: "error", signal: AbortSignal.timeout(10_000), ...init,
         headers: { accept: "application/json", origin: mine.origin, ...BACKGROUND_HEADERS, ...init.headers } });
       out.push({ key: `cloud:${mine.origin}`, name: t("cloudSetup.myCloud"), kind: "cloud",
         read: async () => (cloud().asleep ? null : json(await request("/api/cloud-send?move=1"))),
-        tell: async (payload) => sent(await request(ROUTE, { ...put(payload), headers: { "content-type": "application/json" } }), t("cloudSetup.myCloud")),
-        ...(keep.on && !keep.moved ? { bring: () => oneHome.keep.set(false) } : {}) });
+        // Asleep since it was listed: still not told, as it is not read.
+        ...(mine.asleep ? {} : { tell: async (payload) => {
+          if (cloud().asleep) throw new Error(`${t("cloudSetup.myCloud")} is asleep`);
+          return sent(await request(ROUTE, { ...put(payload), headers: { "content-type": "application/json" } }), t("cloudSetup.myCloud"));
+        } }),
+        ...(keep.on && !keep.moved && !mine.asleep ? { bring: () => oneHome.keep.set(false) } : {}) });
     }
     for (const place of environments().filter((entry) => handSaved(entry) && ownHome.owns(entry))) {
       const server = serverRequests(place, fetchImpl);
@@ -65,23 +72,41 @@ export function installTwoPlacesMain({ ipcMain, guard, localRequest, fetch: fetc
     }
     return [...out, ...teams()];
   };
+  /** Who is signed in to the account the Cloud and teams come from; undefined while it is still being restored. */
+  const signedIn = () => {
+    const client = account?.();
+    if (!client) return { id: null, signedOut: false };
+    const state = client.state?.();
+    if (!state || typeof state !== "object") return undefined;
+    if (state.status === "signed-out") return state.message ? undefined : { id: null, signedOut: true };
+    const id = state.account?.id;
+    if (typeof id === "string" && id) return { id, signedOut: false };
+    return state.status === "connecting" ? undefined : { id: null, signedOut: false };
+  };
   const journal = () => parseJournal(oneHome.journal());
   /** This computer's bots moved: to My Cloud, or to a server of the person's own. */
   const moved = () => awayIn(journal()) || ownHome.away();
   const settled = () => !ownHome.active() && (!journal() || journal().phase === "back");
   let label = null;
   const twoPlaces = createTwoPlaces({
-    local: async () => (moved() ? null : json(await localRequest("/api/cloud-send?move=1", { signal: AbortSignal.timeout(10_000) }))),
+    // Null only once this computer's bots moved; no answer is an error, never "moved".
+    local: async () => {
+      if (moved()) return null;
+      const summary = await json(await localRequest("/api/cloud-send?move=1", { signal: AbortSignal.timeout(10_000) }));
+      if (!summary) throw new Error("no answer");
+      return summary;
+    },
     here: {
       name: async () => (label ??= (await json(await localRequest("/.well-known/openmausbot/environment", { signal: AbortSignal.timeout(10_000) })))?.label ?? null),
       tell: async (payload) => sent(await localRequest(ROUTE, { ...put(payload), headers: { "content-type": "application/json" } }), t("rail.thisComputer")),
     },
-    t, places, settled, quiet: () => !settled() && !moved(), dismissed, onChange: tell, log });
+    t, places, settled, quiet: () => !settled() && !moved(), dismissed, lastRead, account: signedIn, onChange: tell, log });
   installTwoPlaces({ ipcMain, guard, twoPlaces });
   let watched = "";
   const watch = setInterval(() => {
     ownHome.refresh();
-    const now = JSON.stringify([settled(), moved(), places().map((place) => [place.key, Boolean(place.bring)])]);
+    // A Cloud waking up can be told again: read at once, as when it used to appear only then.
+    const now = JSON.stringify([settled(), moved(), places().map((place) => [place.key, Boolean(place.bring), Boolean(place.tell)])]);
     if (now !== watched) { watched = now; void twoPlaces.refresh({ force: true }); } else void twoPlaces.refresh();
   }, WATCH_MS);
   watch.unref?.();

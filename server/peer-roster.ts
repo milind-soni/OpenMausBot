@@ -278,9 +278,18 @@ export const clip = (value: string, max: number): string => {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 };
 
-/** Brackets go too: "Scout]" would close the provenance note early and forge a speaker. */
+/** Brackets go too: "Scout]" would close the provenance note early and forge a speaker. So do bidi controls and
+ * zero-width characters, which would make a name read as something it isn't. */
 export function peerName(value: string): string {
-  return clip(value.replace(/[[\]]/g, " "), ROSTER_NAME_MAX);
+  return clip(value.replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/gu, "").replace(/[[\]]/g, " "), ROSTER_NAME_MAX);
+}
+
+/** The roster `prompt` with `line` (the bots of the person's other places) inside its markers, or the markers around it
+ * alone when there is no roster; unchanged when there is no line. */
+export function withElsewhere(prompt: TeamPrompt, line: string): TeamPrompt {
+  if (!line) return prompt;
+  const at = prompt.roster.lastIndexOf(ROSTER_CLOSE);
+  return { ...prompt, roster: at < 0 ? [prompt.roster, ROSTER_OPEN, line, ROSTER_CLOSE].filter(Boolean).join("\n") : `${prompt.roster.slice(0, at)}${line}\n${prompt.roster.slice(at)}` };
 }
 
 export function roomRosterLine(member: { name: string; title?: string }): string {
