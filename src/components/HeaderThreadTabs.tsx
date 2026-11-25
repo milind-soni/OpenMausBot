@@ -3,6 +3,7 @@ import { Pin, Plus, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { sameDrawnBot } from "@/lib/drawn-bots";
+import { useActiveLocale } from "@/lib/use-active-locale";
 import { nextRename } from "@/lib/rename";
 import { localizedTaskTitle } from "@/lib/task-title";
 import { useFeature } from "@/lib/use-feature";
@@ -55,6 +56,7 @@ const sameStrip = (a: StripProps, b: StripProps) => a.active === b.active && sam
   && a.bot.id === b.bot.id && a.bot.yourAccess === b.bot.yourAccess && sameDrawnBot(a.bot, b.bot);
 
 const Strip = memo(function Strip({ bot, tabs, active }: StripProps) {
+  useActiveLocale();
   const dispatch = useStoreDispatch();
   const panelOpen = useStoreSelector((state) => state.settingsOpen);
   const panelBeside = useStoreSelector((state) => state.settingsOpen || state.computerOpen || state.inspectorOpen);

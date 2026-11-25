@@ -2,6 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { setLocale } from "@/lib/i18n";
 import type { Bot, Task } from "@/state/store";
 
 const drawn = vi.hoisted(() => ({ avatars: 0 }));
@@ -43,5 +44,18 @@ describe("thread tab strip while a reply streams", () => {
     expect(selected()).toBe("t5");
     draw(kiwi({ threadId: "t5", name: "Kiwi Two" }));
     expect(document.querySelector("[data-thread-tabs-bot]")?.textContent).toBe("Kiwi Two");
+  });
+
+  it("draws its labels again in a new language, though the tabs did not change", () => {
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    draw(kiwi());
+    const list = () => document.querySelector('[role="tablist"]')?.getAttribute("aria-label");
+    expect(list()).toBe("Kiwi threads");
+    try {
+      act(() => { setLocale("pt-br"); });
+      expect(list()).toBe("Conversas de Kiwi");
+    } finally {
+      act(() => { setLocale("en"); });
+    }
   });
 });
