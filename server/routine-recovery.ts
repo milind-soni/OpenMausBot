@@ -214,7 +214,12 @@ function firstNotice(notices: RoutineOwnerNotice[], botId: string, cause: Routin
   return true;
 }
 
-/** What a failed attempt becomes. A queued run is changed in place; a failing one is the caller's to fail with `error`. */
+/** What a failed attempt becomes. A queued run is changed in place; a failing one is the caller's to fail with `error`.
+ * `canReplay` is the replay ledger's positive no-dispatch proof (confirmed:no-dispatch, failed, no recorded action).
+ * Intentional restriction: a provider failure reported after the prompt was taken (e.g. Cursor's in-reply HTTP 503,
+ * sent after session/prompt accepted the turn and possibly after tools ran) has no such proof, so the run fails
+ * closed with the replay-blocked line instead of the one automatic retry v0.1.180 gave it. In
+ * cursor-reply-failure.e2e.test.ts the turn also records a completed `tool:watch-1` action: execution provably occurred. */
 export function recoverRun(run: RoutineRun, failure: string, facts: RoutineFailureFacts, now: number, notices: RoutineOwnerNotice[], canReplay = () => true): RoutineRecovery {
   const verdict: RoutineFailureClass = run.target === "bot" ? classifyRoutineFailure(failure, facts) : { kind: "final" };
   const again = run.retried ? codedLine("error", "routines.server.failedAfterRetry", { failure }) : fittedLine("error", failure, facts.text);
