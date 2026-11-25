@@ -87,6 +87,13 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     await until(() => evaluate("document.querySelectorAll('[data-feed-thread]').length === 3"), "the feed to list the room's three threads");
     await until(() => evaluate("document.activeElement === document.querySelector('[data-room-feed-composer] textarea')"), "the cursor in the feed's composer after the room's +");
     expect(await current()).toBe(room.threadId);
+    // The sidebar's top + offers the same, for the room that is open.
+    await evaluate("document.activeElement.blur(); document.querySelector('button[aria-label=\"New or share\"]').click(); true");
+    await until(() => evaluate(`Boolean(document.querySelector('[data-plus-room-thread="${room.id}"]'))`), "New thread in the room on the + menu");
+    expect(await evaluate(`document.querySelector('[data-plus-room-thread="${room.id}"]').textContent`)).toBe("New thread in Launch room");
+    await evaluate(`document.querySelector('[data-plus-room-thread="${room.id}"]').click(); true`);
+    await until(() => evaluate("document.activeElement === document.querySelector('[data-room-feed-composer] textarea')"), "the cursor in the feed's composer after the top +");
+    expect(await current()).toBe(room.threadId);
     expect(await evaluate("[...document.querySelectorAll('[data-feed-thread]')].map((row) => row.textContent.includes('1 reply'))")).toEqual([true, true, true]);
     expect(await evaluate(`Boolean(document.querySelector('[aria-expanded][aria-label*="Launch room"]'))`)).toBe(false);
     await ui("screenshot", "--out", join(evidenceDir, "room-feed.png"));

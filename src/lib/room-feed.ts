@@ -1,7 +1,7 @@
 import { roomFeedEnabled } from "@/lib/feature-flags";
 import { roomNeedsSetup } from "@/lib/room-setup";
 import { SIDEBAR_INLINE } from "@/lib/use-media-query";
-import type { Action, AppState, Group } from "@/state/store";
+import { api, type Action, type AppState, type Group } from "@/state/store";
 
 export type FeedRoom = Pick<Group, "dm"> & { messages?: readonly unknown[] };
 type ThreadOwner = { id: string; threadId: string; dm?: boolean; tasks?: ReadonlyArray<{ threadId: string }> };
@@ -85,4 +85,43 @@ export function openThreadBeside(dispatch: (action: Action) => void, threadId: s
 export function feedPreview(group: Pick<Group, "tasks">): string | undefined {
   const said = (group.tasks ?? []).filter((task) => task.archivedAt === undefined && task.lastThreadOrderAt !== undefined);
   return said.sort((a, b) => (b.lastThreadOrderAt ?? 0) - (a.lastThreadOrderAt ?? 0))[0]?.title;
+}
+
+/** A room's threads still marked unread from before this place had the feed for everyone (`features.roomFeedSince`).
+ * The single transcript only ever read the thread on screen, so such marks were never going to clear on their own; the
+ * feed reads them once. A mark made since stays until its thread is opened. */
+export function staleUnreadThreads(group: Pick<Group, "tasks">, since: number | undefined): string[] {
+  if (typeof since !== "number" || !Number.isFinite(since)) return [];
+  return (group.tasks ?? []).filter((task) => task.unread === true && (task.updatedAt ?? task.lastThreadOrderAt ?? task.createdAt) < since)
+    .map((task) => task.threadId);
+}
+
+const CAUGHT_UP_KEY = "omb-room-feed-old-marks-read";
+const caughtUpHere = new Set<string>();
+
+/** True the first time a room asks on this device (and, without storage, in this window): its old marks are read once,
+ * so a thread the person marks unread again later keeps that mark. */
+export function firstFeedCatchUp(groupId: string, storage: Pick<Storage, "getItem" | "setItem"> | null = safeStorage()): boolean {
+  if (caughtUpHere.has(groupId)) return false;
+  caughtUpHere.add(groupId);
+  try {
+    const done = new Set<string>(JSON.parse(storage?.getItem(CAUGHT_UP_KEY) ?? "[]") as string[]);
+    if (done.has(groupId)) return false;
+    done.add(groupId);
+    storage?.setItem(CAUGHT_UP_KEY, JSON.stringify([...done]));
+  } catch { /* storage unavailable: once in this window */ }
+  return true;
+}
+
+function safeStorage(): Storage | null {
+  try { return typeof localStorage === "undefined" ? null : localStorage; } catch { return null; }
+}
+
+/** Reads those old marks through the room's read route, one at a time, so a failure keeps every read before it. */
+export async function readStaleUnread(groupId: string, threadIds: readonly string[], onGroup: (group: Partial<Group> & { id: string }) => void,
+  request: typeof api = api): Promise<void> {
+  for (const threadId of threadIds) {
+    const result = await request<{ group?: Partial<Group> & { id: string } }>(`/api/groups/${groupId}/read`, { method: "POST", body: JSON.stringify({ threadId }) });
+    if (result?.group) onGroup(result.group);
+  }
 }

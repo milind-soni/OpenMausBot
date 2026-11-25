@@ -4413,6 +4413,8 @@
   "room.feed.startFailed": "Der Thread konnte nicht begonnen werden. Prüfe deine Verbindung und versuche es erneut.",
   "room.feed.showArchived": "Archivierte Threads anzeigen",
   "room.feed.hideArchived": "Archivierte Threads ausblenden",
+  "room.feed.unreadAbove": "Ungelesener Thread weiter oben",
+  "room.feed.unreadBelow": "Ungelesener Thread weiter unten",
   "room.thread.panel": "Thread",
   "room.thread.close": "Thread schließen",
   "room.thread.resize": "Thread-Breite ändern",

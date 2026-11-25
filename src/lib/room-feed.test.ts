@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppState, Group } from "@/state/store";
 import { markVisibleGroupThreadsRead } from "@/state/read-visible";
 import { openThread, visibleNotificationThread } from "@/state/thread-navigation";
-import { feedPreview, feedThreadAction, openRoomThreadThen, openThreadBeside, roomFeedShows, takeFeedComposerWanted } from "./room-feed";
+import { feedPreview, feedThreadAction, openRoomThreadThen, openThreadBeside, firstFeedCatchUp, readStaleUnread, roomFeedShows, staleUnreadThreads, takeFeedComposerWanted } from "./room-feed";
 import { roomThreadAttention } from "./room-threads";
 
 const on = { features: { roomFeed: true } } as AppState["config"];
@@ -141,5 +141,37 @@ describe("a room thread's mark", () => {
     expect(roomThreadAttention(busy, busy.tasks![0]!, [{ id: "kiwi", activity: "working" }])).toEqual({ waiting: false, unread: true });
     expect(roomThreadAttention(busy, busy.tasks![1]!, [])).toEqual({ waiting: true, unread: false });
     expect(roomThreadAttention(busy, { ...busy.tasks![1]!, activity: undefined, unread: true }, [])).toEqual({ waiting: false, unread: true });
+  });
+});
+
+describe("unread marks from before the feed", () => {
+  const tasks = [
+    { threadId: "old-unread", title: "", createdAt: 1, updatedAt: 50, unread: true },
+    { threadId: "old-read", title: "", createdAt: 2, updatedAt: 60, unread: false },
+    { threadId: "new-unread", title: "", createdAt: 3, updatedAt: 150, unread: true },
+    { threadId: "no-stamp", title: "", createdAt: 40, unread: true },
+  ];
+
+  it("are the unread threads whose last line came before this place had the feed; later ones stay", () => {
+    expect(staleUnreadThreads({ tasks }, 100)).toEqual(["old-unread", "no-stamp"]);
+    expect(staleUnreadThreads({ tasks }, undefined)).toEqual([]);
+  });
+
+  it("are read through the room's read route, one at a time", async () => {
+    const calls: unknown[] = [];
+    const patched: unknown[] = [];
+    const request = (async (path: string, init?: RequestInit) => { calls.push([path, init?.body]); return { group: { id: "room", unread: false } }; }) as never;
+    await readStaleUnread("room", ["a", "b"], (group) => patched.push(group), request);
+    expect(calls).toEqual([["/api/groups/room/read", JSON.stringify({ threadId: "a" })], ["/api/groups/room/read", JSON.stringify({ threadId: "b" })]]);
+    expect(patched).toHaveLength(2);
+  });
+
+  it("are read once per room on this device, so a thread marked unread again later keeps its mark", () => {
+    const saved = new Map<string, string>();
+    const storage = { getItem: (key: string) => saved.get(key) ?? null, setItem: (key: string, value: string) => { saved.set(key, value); } };
+    expect(firstFeedCatchUp("room-a", storage)).toBe(true);
+    expect(firstFeedCatchUp("room-a", storage)).toBe(false);
+    expect(firstFeedCatchUp("room-b", storage)).toBe(true);
+    expect(JSON.parse(saved.get("omb-room-feed-old-marks-read")!)).toEqual(["room-a", "room-b"]);
   });
 });
