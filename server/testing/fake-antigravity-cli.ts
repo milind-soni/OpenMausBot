@@ -201,11 +201,15 @@ async function prompt(id: unknown, params: Params): Promise<void> {
   const lines = [...text.matchAll(/^fake-agy:[ \t]*(\S+)[ \t]*(\S*)[ \t]*(.*)$/gmu)];
   if (lines.length === 0) {
     say(sessionId, "fixture reply");
-    return result(id, { stopReason: "end_turn" });
+    result(id, { stopReason: "end_turn" });
+    return;
   }
   for (const [, verb, target, rest] of lines) {
     if (verb === "tools") say(sessionId, `TOOLS ${(sessionTools.get(sessionId)?.visible() ?? []).join(" ")}\n`);
-    else if (verb === "call" && !(await callTool(sessionId, target ?? "", rest ?? ""))) return result(id, { stopReason: "cancelled" });
+    else if (verb === "call" && !(await callTool(sessionId, target ?? "", rest ?? ""))) {
+      result(id, { stopReason: "cancelled" });
+      return;
+    }
   }
   result(id, { stopReason: "end_turn" });
 }
@@ -215,6 +219,7 @@ function exitSoon(code: number): void {
   log({ event: "exiting", delayMs: delay });
   setTimeout(() => {
     for (const tools of sessionTools.values()) tools.close();
+    log({ event: "exited" });
     process.exit(code);
   }, delay);
 }
@@ -242,6 +247,7 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
           promptCapabilities: { image: true },
           sessionCapabilities: { resume: {}, close: {} },
           auth: { logout: {} },
+          _meta: { antigravity: { tier: true, systemPrompt: { append: true } } },
         },
       });
       break;
