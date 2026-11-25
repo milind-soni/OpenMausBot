@@ -65,6 +65,30 @@ describe("the brief's cards", () => {
     expect(new Set(labels).size).toBe(2);
   });
 
+  it("disambiguate same-sender emails whose subjects collide or are missing", () => {
+    const sameSender: BriefFacts = { ...facts, emails: [
+      { messageId: "m1", threadId: "t1", from: "Ada <ada@x.test>", subject: "Q3 numbers", needsReply: true, why: "deadline" },
+      { messageId: "m2", threadId: "t2", from: "Ada <ada@x.test>", subject: "Q3 numbers", needsReply: true },
+      { messageId: "m3", threadId: "t3", from: "Ada <ada@x.test>", subject: "", needsReply: true },
+      { messageId: "m4", threadId: "t4", from: "Ada <ada@x.test>", subject: "", needsReply: true },
+    ] };
+    const parsed = parseWidgetInput(briefCard(sameSender).card);
+    expect(parsed.ok).toBe(true);
+    const labels = (JSON.stringify(parsed.ok ? parsed.value : null).match(/"label":"(Draft a reply to Ada|Dismiss Ada)[^"]*"/g) ?? []);
+    expect(labels).toHaveLength(8);
+    expect(new Set(labels).size).toBe(8);
+    expect(labels.join("\n")).toContain("Q3 numbers (2)");
+  });
+
+  it("keep the subject tag when a locale template renders the label", () => {
+    const sameSender: BriefFacts = { ...facts, emails: [
+      { messageId: "m1", threadId: "t1", from: "Ada <ada@x.test>", subject: "Q3 numbers", needsReply: true, why: "deadline" },
+      { messageId: "m2", threadId: "t2", from: "Ada <ada@x.test>", subject: "Lunch tomorrow", needsReply: true },
+    ] };
+    const subjects = texts(briefCard(sameSender).card).filter((text) => text.key === "brief.card.draftReply");
+    for (const text of subjects) expect(Object.keys(text.params ?? {}).sort()).toEqual(["subject", "who"]);
+  });
+
   it("name a routine's Open page button", () => {
     const card = briefCard({ ...facts, routines: [{ text: "Digest", note: "Done", page: "https://pages.example.com/p/1" }] }).card;
     const json = JSON.stringify(card);

@@ -191,18 +191,39 @@ function openEmailButton(email: BriefEmail, w: BriefWords): Node[] {
 }
 
 // Two emails from the same sender would get identical button labels, and the widget check refuses a card
-// whose buttons cannot be told apart; disambiguate those rows with a short subject tag.
-function emailRow(email: BriefEmail, w: BriefWords, disambiguate = false): Node {
+// whose buttons cannot be told apart; disambiguate those rows with a short subject tag. Rows that share a
+// subject — or have none — also collide, so each repeated tag gets an ordinal that does not depend on the
+// subject itself.
+const emailTag = (email: BriefEmail, w: BriefWords): string => (email.subject ? oneLine(email.subject, 24) : w.noSubject);
+function emailTagger(emails: BriefEmail[], w: BriefWords): (email: BriefEmail) => string {
+  const senders = new Map<string, number>();
+  for (const email of emails) {
+    const key = sender(email, BRIEF_TEXT.label, w);
+    senders.set(key, (senders.get(key) ?? 0) + 1);
+  }
+  const ordinals = new Map<string, number>();
+  const seen = new Map<BriefEmail, string>();
+  for (const email of emails) {
+    if ((senders.get(sender(email, BRIEF_TEXT.label, w)) ?? 0) <= 1) continue;
+    const key = `${sender(email, BRIEF_TEXT.label, w)}\n${emailTag(email, w)}`;
+    const count = (ordinals.get(key) ?? 0) + 1;
+    ordinals.set(key, count);
+    seen.set(email, count > 1 ? ` (${count})` : "");
+  }
+  return (email) => seen.get(email) ?? "";
+}
+function emailRow(email: BriefEmail, w: BriefWords, tag: string): Node {
+  const subject = emailTag(email, w);
+  const suffix = ` – ${subject}${tag}`;
   const who = sender(email, BRIEF_TEXT.label, w);
-  const tag = disambiguate && email.subject ? ` – ${oneLine(email.subject, 28)}` : "";
   const note = email.needsReply ? (email.why ? `${w.waitingOnReply} · ${email.why}` : w.waitingOnReply) : email.why ?? w.important;
   const whoWords = senderName(email.from).trim() ? who : words("brief.part.noSender");
   const line = words("brief.card.emailLine", { sender: senderName(email.from).trim() ? sender(email, BRIEF_TEXT.sender, w) : words("brief.part.noSender"), subject: email.subject || words("brief.part.noSubject") });
   const noteWords = inboxNoteWords(email.why, email.whyText, email.needsReply) ?? (email.needsReply ? (email.why ? words("brief.card.waitingReplyWhy", { why: email.why }) : words("brief.card.waitingReply")) : email.why ? undefined : words("brief.card.important"));
   return rowUnder(`${sender(email, BRIEF_TEXT.sender, w)}: ${email.subject || w.noSubject}`, note, [
-    button(`${w.draftReply(who)}${tag}`, { type: DRAFT_ACTION, payload: { messageId: email.messageId } }, true, words("brief.card.draftReply", { who: whoWords })),
+    button(`${w.draftReply(who)}${suffix}`, { type: DRAFT_ACTION, payload: { messageId: email.messageId } }, true, words("brief.card.draftReply", { who: whoWords, subject: suffix })),
     ...openEmailButton(email, w),
-    button(`${w.dismiss(who)}${tag}`, { type: DISMISS_ACTION, payload: { messageId: email.messageId } }, false, words("brief.card.dismissEmail", { who: whoWords })),
+    button(`${w.dismiss(who)}${suffix}`, { type: DISMISS_ACTION, payload: { messageId: email.messageId } }, false, words("brief.card.dismissEmail", { who: whoWords, subject: suffix })),
   ], { text: line, ...(noteWords ? { note: noteWords } : {}) });
 }
 
@@ -219,13 +240,13 @@ export function briefCard(facts: BriefFacts): BuiltCard {
     const key = sender(email, BRIEF_TEXT.label, w);
     senderCounts.set(key, (senderCounts.get(key) ?? 0) + 1);
   }
-  const ambiguous = (email: BriefEmail): boolean => (senderCounts.get(sender(email, BRIEF_TEXT.label, w)) ?? 0) > 1;
-  const needRows = [...replies.map((email) => emailRow(email, w, ambiguous(email))), ...facts.needs.map((row) => rowBeside(row.text, row.note, openButton(row.open, w), row.said))];
+  const tagOf = emailTagger(facts.emails, w);
+  const needRows = [...replies.map((email) => emailRow(email, w, tagOf(email))), ...facts.needs.map((row) => rowBeside(row.text, row.note, openButton(row.open, w), row.said))];
   const meetings = [...(facts.meetings ?? [])].sort((a, b) => a.start - b.start);
   const meetingRows = meetings.map((meeting) => rowBeside(`${clockTime(meeting.start, zone, language)} · ${meeting.title}`, "", joinButton(meeting, w.join),
     { text: words("brief.card.meetingLine", { time: moment(meeting.start, "clock", zone), title: meeting.title }) }));
   const waiting = facts.waiting === true ? w.waitingMany : facts.waiting ? w.waitingCount(facts.waiting) : undefined;
-  const importantRows = important.map((email) => emailRow(email, w, ambiguous(email)));
+  const importantRows = important.map((email) => emailRow(email, w, tagOf(email)));
   const waitingNotice = waiting ? [caption(waiting, facts.waiting === true ? words("brief.card.waitingMany") : words(facts.waiting === 1 ? "brief.card.waitingOne" : "brief.card.waitingOther", { count: facts.waiting || 0 }))] : [];
   const routineRows = facts.routines.map((row) => rowBeside(row.text, row.note, [...pageButton(row.page, w), ...openButton(row.open, w)], row.said));
   const ideaRows = (facts.ideas ?? []).map((row) => rowBeside(row.text, row.note, [], row.said));

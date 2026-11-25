@@ -36,7 +36,7 @@ describe("pt-BR brief rows", () => {
   });
 
   it("keeps app and bot details in sync with the catalog", () => {
-    expect(words.draftReply("Ada")).toBe(ptBr["brief.card.draftReply"].replace("{who}", "Ada"));
+    expect(words.draftReply("Ada")).toBe(ptBr["brief.card.draftReply"].replace("{who}", "Ada").replace("{subject}", ""));
     expect(words.couldNotRead("Gmail")).toBe(ptBr["brief.row.cantRead"].replace("{app}", "Gmail"));
     expect(words.unsortedNote("Scout")).toBe(ptBr["brief.row.unfencedNote"].replace("{name}", "Scout"));
     expect(words.unpreparedNote("Scout")).toBe(ptBr["brief.row.unpreparedNote"].replace("{name}", "Scout"));
