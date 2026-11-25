@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, TriangleAlert } from "lucide-react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { Switch } from "../SettingsPrimitives";
@@ -177,6 +178,64 @@ export function OpenAiCompatUrl() {
         {saving && <Loader2 size={13} aria-hidden="true" className="absolute right-2.5 top-1/2 -translate-y-1/2 animate-spin text-ink-secondary" />}
       </div>
       <p className="text-[12px] leading-4 text-ink-secondary">{t("keys.openaiCompat.urlHint")}</p>
+      {error && <div role="alert" className="text-[12px] leading-4 text-danger">{error}</div>}
+    </div>
+  );
+}
+
+/** Exposes tts.baseUrl in AI › Other services so stale voice server addresses can be viewed, changed, or cleared. */
+export function VoiceServerUrl() {
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields),
+    dispatch = useStoreDispatch();
+  const saved = state.config?.tts?.baseUrl?.trim() ?? "";
+  const [value, setValue] = useState(saved);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const savingRef = useRef(false);
+  useEffect(() => { setValue(saved); }, [saved]);
+
+  const trimmed = value.trim();
+  const dirty = trimmed !== saved;
+
+  const submit = (next: string) => {
+    if (savingRef.current) return;
+    if (next && !/^https?:\/\//i.test(next)) {
+      setError(t("voice.serverAddressError"));
+      return;
+    }
+    savingRef.current = true;
+    setSaving(true);
+    setError(null);
+    api("/api/config", { method: "PUT", body: JSON.stringify({ tts: { baseUrl: next } }) })
+      .then((status: ConfigStatus) => dispatch({ type: "configStatus", config: status }))
+      .catch((e: Error) => setError(e.message))
+      .finally(() => { savingRef.current = false; setSaving(false); });
+  };
+
+  return (
+    <div data-voice-server-url className="flex flex-col gap-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="url"
+          value={value}
+          onChange={(e) => { setError(null); setValue(e.target.value); }}
+          onKeyDown={(e) => e.key === "Enter" && dirty && submit(trimmed)}
+          disabled={saving}
+          placeholder="http://127.0.0.1:4123"
+          aria-label={t("voice.chatterboxAddress")}
+          autoComplete="off"
+          spellCheck={false}
+          className={cn(KEY_FIELD, "w-auto min-w-[min(100%,12rem)] flex-1")}
+        />
+        <button type="button" onClick={() => submit(trimmed)} disabled={saving || !dirty} className="ui-button shrink-0">
+          {saving ? <Loader2 size={13} className="animate-spin" aria-hidden="true" /> : t("common.save")}
+        </button>
+        {saved && (
+          <button type="button" onClick={() => submit("")} disabled={saving} className="ui-button shrink-0">
+            {t("keys.row.remove")}
+          </button>
+        )}
+      </div>
       {error && <div role="alert" className="text-[12px] leading-4 text-danger">{error}</div>}
     </div>
   );
