@@ -5,7 +5,7 @@ import { EFFECTS, glyphAmount } from "./CursorAvatar";
 import { FACE_BOX } from "./cursor-face-data";
 import { useBeatState } from "./mascot-beat";
 import { mascotClock, put, usePrefersReducedMotion, type MascotTicket } from "./mascot-clock";
-import { ACTIVE_STATES, COMPACT_MASCOT_PX, MOTION, VIEW_SPAN, bodyPose, frameFloorMs, loopSeed, nextFrameAt, type Pose } from "./mascot-motion";
+import { ACTIVE_STATES, COMPACT_MASCOT_PX, MOTION, PoseBlend, REST_POSE, VIEW_SPAN, bodyPose, frameFloorMs, loopSeed, nextFrameAt, type BodyMotion, type Pose } from "./mascot-motion";
 import { objectLook } from "./ObjectAvatar";
 
 /** The mascot body's pose as a CSS transform for a picture `size` pixels wide. */
@@ -41,9 +41,9 @@ export type BotPictureProps = {
 
 const CENTRE = FACE_BOX / 2;
 
-/** A bot's own picture. It moves as the mascot's body would in the same state, and gives way to the mascot's "!" or "?"
- * glyph on the same beat, under the mascot's rule: only while the state is an activity, unless the caller says otherwise,
- * and never with reduced motion. */
+/** A bot's own picture. It moves as the mascot's body would in the same state, blending each change in as the mascot's
+ * body does, and gives way to the mascot's "!" or "?" glyph on the same beat, under the mascot's rule: only while the
+ * state is an activity, unless the caller says otherwise, and never with reduced motion. */
 export function BotPicture({ src, alt, size, radius, zoom, origin, color, state: own = "idle", motion, motionKey, animated, onError }: BotPictureProps) {
   const frame = useRef<HTMLSpanElement>(null);
   const photo = useRef<HTMLImageElement>(null);
@@ -62,6 +62,9 @@ export function BotPicture({ src, alt, size, radius, zoom, origin, color, state:
     if (!element) return;
     let drawn: MausState | null = null;
     let since = 0;
+    const blend = new PoseBlend();
+    let shownPose: Pose = REST_POSE;
+    let poseKey = "";
     const showGlyph = (markup: string | null, amount: number) => {
       const layer = glyphLayer.current;
       if (layer) {
@@ -80,15 +83,18 @@ export function BotPicture({ src, alt, size, radius, zoom, origin, color, state:
         drawn = shown;
         since = now;
       }
-      if (!moving) {
-        element.style.transform = "";
-        showGlyph(null, 0);
-        return Infinity;
+      const motion: BodyMotion = MOTION[shown];
+      const target = moving ? bodyPose(motion, now - since, 1, { seed, compact: size <= COMPACT_MASCOT_PX }) : REST_POSE;
+      const key = `${shown}|${moving}`;
+      if (key !== poseKey) {
+        if (poseKey && !motion.enter) blend.retarget(now, shownPose, target);
+        poseKey = key;
       }
-      element.style.transform = pictureTransform(bodyPose(MOTION[shown], now - since, 1, { seed, compact: size <= COMPACT_MASCOT_PX }), size);
-      const glyph = EFFECTS[shown]?.glyph;
+      shownPose = blend.apply(now, target);
+      element.style.transform = pictureTransform(shownPose, size);
+      const glyph = moving ? EFFECTS[shown]?.glyph : undefined;
       showGlyph(glyph ? glyph.markup.replace(/\{\{GRADIENT\}\}/g, MAUS_COLORS[paint]) : null, glyph ? glyphAmount(glyph, now - since) : 0);
-      return nextFrameAt(now, frameFloorMs(size));
+      return moving || blend.blending ? nextFrameAt(now, frameFloorMs(size)) : Infinity;
     };
     const added = mascotClock().add(step, element);
     ticket.current = added;

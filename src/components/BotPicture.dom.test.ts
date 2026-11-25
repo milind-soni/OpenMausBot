@@ -80,14 +80,31 @@ describe("a bot's own picture follows its state", () => {
     expect([...seen].some((transform) => transform.includes("translate("))).toBe(true);
   });
 
-  it("holds still at rest, and stops once the work ends", () => {
+  it("holds still at rest, and settles back to rest once the work ends", () => {
     render("idle");
     expect(transformsOver(1000)).toEqual(new Set([""]));
     render("working");
     expect(transformsOver(600).size).toBeGreaterThan(1);
     render("idle");
     run(50);
-    expect(transformsOver(600)).toEqual(new Set([""]));
+    expect(picture().style.transform).not.toBe("");
+    run(1000);
+    expect(transformsOver(1000)).toEqual(new Set([""]));
+  });
+
+  it("blends a change in over about 300ms instead of jumping, as the mascot's body does", () => {
+    render("working");
+    transformsOver(700);
+    render("idle");
+    const offsets: number[] = [];
+    for (let elapsed = 0; elapsed < 600; elapsed += 50) {
+      run(50);
+      const y = /translate\([-\d.]+px, ([-\d.]+)px\)/.exec(picture().style.transform)?.[1];
+      offsets.push(Math.abs(Number(y ?? 0)));
+    }
+    expect(offsets[0]).toBeGreaterThan(0);
+    expect(offsets.at(-1)).toBe(0);
+    expect(offsets.findIndex((offset) => offset === 0) * 50).toBeLessThanOrEqual(600);
   });
 
   it("holds still where the caller asks it to, and with reduced motion", () => {
@@ -139,6 +156,7 @@ describe("a bot's own picture plays the mascot's beats", () => {
     expect(transformsOver(1000).size).toBeGreaterThan(3);
     run(600);
     expect(picture().dataset.pictureState).toBe("idle");
+    run(1000);
     expect(transformsOver(1000)).toEqual(new Set([""]));
   });
 
