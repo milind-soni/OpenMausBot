@@ -44,8 +44,11 @@ interface State extends Day {
   oldRelayUntil: number;
   /** The relay said no browser sandbox may start (the fleet's day spent, switched off): nothing is started before this. */
   unavailableUntil: number;
-  /** Per bot's profile key: when the home's saved sign-ins last carried in (or were last written back), by file time. */
+  /** Per sandbox and bot's profile key (`<box id>:<key>`): when the home's saved sign-ins last carried in, or were last
+   * written back, by the home file's time. A replaced sandbox has none, so the home's copy is carried into it. */
   carried: Record<string, number>;
+  /** Per bot's profile key: the home copy (by file time) Chrome would not take, not tried again until it changes. */
+  carryBad: Record<string, number>;
   /** Since when the operator lever has kept every browser in the home; 0 when it does not. */
   leverSince: number;
 }
@@ -75,7 +78,7 @@ export function createCloudBrowserRails(options: CloudBrowserRailsOptions) {
   const awakeCapMs = (options.awakeMinutes ?? CLOUD_BROWSER_DAILY_AWAKE_MINUTES) * 60_000;
   const file = join(options.dataDir, "cloud-browser", "rails.json");
   const fresh = (day: string): Day => ({ day, resumes: 0, awakeMs: 0, computer: 0, home: 0, fallbacks: {} });
-  let state: State = { ...fresh(utcDay(now())), failuresInRow: 0, backoffUntil: 0, accountUntil: 0, hoursUntil: 0, noRouteDay: null, awakeSince: 0, leverSince: 0, oldRelayUntil: 0, unavailableUntil: 0, carried: {} };
+  let state: State = { ...fresh(utcDay(now())), failuresInRow: 0, backoffUntil: 0, accountUntil: 0, hoursUntil: 0, noRouteDay: null, awakeSince: 0, leverSince: 0, oldRelayUntil: 0, unavailableUntil: 0, carried: {}, carryBad: {} };
   try {
     const saved = JSON.parse(readFileSync(file, "utf8")) as Partial<State>;
     const number = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0);
@@ -89,6 +92,8 @@ export function createCloudBrowserRails(options: CloudBrowserRailsOptions) {
       awakeSince: number(saved.awakeSince), leverSince: number(saved.leverSince),
       oldRelayUntil: number(saved.oldRelayUntil), unavailableUntil: number(saved.unavailableUntil),
       carried: Object.fromEntries(Object.entries(saved.carried && typeof saved.carried === "object" ? saved.carried : {})
+        .filter(([key, at]) => /^bx_[a-z0-9]{8}:[a-f0-9]{16}$/.test(key) && typeof at === "number" && Number.isFinite(at))),
+      carryBad: Object.fromEntries(Object.entries(saved.carryBad && typeof saved.carryBad === "object" ? saved.carryBad : {})
         .filter(([key, at]) => /^[a-f0-9]{16}$/.test(key) && typeof at === "number" && Number.isFinite(at))),
     };
   } catch {
@@ -200,6 +205,12 @@ export function createCloudBrowserRails(options: CloudBrowserRailsOptions) {
       save();
     },
     carried: (key: string): number => today().carried[key] ?? 0,
+    carryBad: (key: string): number | null => today().carryBad[key] ?? null,
+    setCarryBad(key: string, at: number | null): void {
+      const current = today();
+      if (at === null) delete current.carryBad[key]; else current.carryBad[key] = at;
+      save();
+    },
     setCarried(key: string, at: number): void {
       today().carried[key] = at;
       save();

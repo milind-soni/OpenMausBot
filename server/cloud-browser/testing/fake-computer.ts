@@ -39,6 +39,9 @@ export interface FakeComputer {
   cookies: Map<string, Array<Record<string, unknown>>>;
   /** Every DevTools command the sandbox's Chromes got, with its profile key. */
   commands: Array<{ key: string; method: string; params: Record<string, unknown> }>;
+  /** DevTools commands the sandbox's Chrome answers with an error, by method; `Storage.setCookies` also refuses a
+   * SameSite=None cookie without Secure, as Chrome does. */
+  failing: Set<string>;
   /** Sends a DevTools event to the connections of a profile that asked for download events. */
   emit(key: string, method: string, params: Record<string, unknown>): void;
   resumes(): number;
@@ -57,10 +60,11 @@ export async function startFakeComputer(): Promise<FakeComputer> {
   const secrets = new Map<string, string>();
   const wss = new WebSocketServer({ noServer: true });
   let made = 0;
+  let retired = true;
   const fake = {
     base: "", state: "ready", exists: true, startStatus: 200, startBody: { ok: true }, oldRelay: false, available: true, unavailableReason: "fleet_starts",
     unavailableUntil: null, hostRoute: true, unprotected: false, chromeStarts: true, requests: [], upgrades: [], frames: [], boxId: "bx_23456789",
-    files: new Map(), cookies: new Map(), commands: [],
+    files: new Map(), cookies: new Map(), commands: [], failing: new Set(),
   } as unknown as FakeComputer;
   const watchers = new Map<string, Set<import("ws").WebSocket>>();
   const HOME = "/home/user";
@@ -98,8 +102,8 @@ export async function startFakeComputer(): Promise<FakeComputer> {
       if (rest === "/sandboxes" && req.method === "GET") return send(200, { ok: true, sandboxes: fake.exists ? [row] : [], pageInfo: { nextCursor: null } });
       if (rest === "/sandboxes" && req.method === "POST") {
         if (fake.startStatus >= 300) return send(fake.startStatus, fake.startBody);
-        made += 1;
-        fake.boxId = made === 1 ? fake.boxId : `bx_2345678${"abcdefgh"[made % 8]}`;
+        // A sandbox made after one was deleted is a new one, with an id of its own.
+        if (retired) { made += 1; fake.boxId = `bx_2345678${"abcdefgh"[made % 8]}`; retired = false; }
         fake.exists = true;
         fake.state = "ready";
         return send(202, { ok: true, sandbox: { id: fake.boxId, state: "provisioning", ...(!fake.oldRelay && body.purpose ? { purpose: body.purpose } : {}) } });
@@ -108,6 +112,7 @@ export async function startFakeComputer(): Promise<FakeComputer> {
       if (rest === `/sandboxes/${boxId}` && req.method === "GET") return fake.exists ? send(200, { ok: true, sandbox: row }) : send(404, { ok: false });
       if (rest === `/sandboxes/${boxId}` && req.method === "DELETE") {
         fake.exists = false;
+        retired = true;
         fake.state = "ready";
         return send(200, { ok: true, operation: { id: `bdop_${"a".repeat(32)}`, status: "completed", kind: "sandbox", targetId: boxId } });
       }
@@ -157,6 +162,12 @@ export async function startFakeComputer(): Promise<FakeComputer> {
         const params = message.params ?? {};
         fake.commands.push({ key, method: message.method, params });
         let result: Record<string, unknown> = {};
+        const refusedCookie = message.method === "Storage.setCookies" && (params.cookies as Array<Record<string, unknown>>).some((cookie) => cookie.sameSite === "None" && cookie.secure !== true);
+        if (fake.failing.has(message.method) || refusedCookie) {
+          ws.send(JSON.stringify({ id: message.id, error: { code: -32000, message: "Sanitizing cookie failed" } }));
+          return;
+        }
+        if (message.method === "Storage.clearCookies") fake.cookies.set(key, []);
         if (message.method === "Storage.setCookies") fake.cookies.set(key, [...(fake.cookies.get(key) ?? []), ...(params.cookies as Array<Record<string, unknown>>)]);
         if (message.method === "Storage.getCookies") result = { cookies: (fake.cookies.get(key) ?? []).map((cookie) => ({ ...cookie, size: 1, session: cookie.expires === undefined, expires: cookie.expires ?? -1 })) };
         if (message.method === "Browser.setDownloadBehavior") { const set = watchers.get(key) ?? new Set(); set.add(ws); watchers.set(key, set); }

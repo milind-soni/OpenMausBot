@@ -8,7 +8,7 @@ import { randomBytes } from "node:crypto";
 import { cloudFailureOf } from "../boat-limit.ts";
 import { CloudBrowserDoors, dialable, probeDoor, type DoorTarget } from "./door.ts";
 import { connectCdp } from "../browser-sites.ts";
-import { SandboxCompanion, SignInsUnreadable, type CompanionDeps, type SignInStore } from "./companion.ts";
+import { CarryFailed, SandboxCompanion, SignInsUnreadable, type CompanionDeps, type SignInStore } from "./companion.ts";
 import { createCloudBrowserRails, type CloudBrowserRails, type HomeReason } from "./rails.ts";
 import { BROWSER_SANDBOX_CHROMES, BROWSER_SANDBOX_OWNER, COMPUTER_DOOR_PORT, OldRelay, profileKey, StaysHome, wakeSandbox, type ComputerOps } from "./remote.ts";
 
@@ -36,6 +36,8 @@ export interface CloudBrowserDeps {
   folder?(botId: string): string | null;
   /** Tests: the companion's own connection through the door. */
   connect?: CompanionDeps["connect"];
+  /** Tests: the Cloud disk's free and total bytes. */
+  disk?: CompanionDeps["disk"];
   env?: NodeJS.ProcessEnv;
   now?: () => number;
   log?: (line: string) => void;
@@ -78,6 +80,8 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
   const pendingSessions = new Map<string, Promise<Opened>>();
   const closing = new Set<string>();
   const companions = new Map<string, SandboxCompanion>();
+  /** What a closed session's companion still had to say (a last download retry), for that session's next call. */
+  const leftNotes = new Map<string, string[]>();
   /** One wake of the sandbox at a time, shared by every bot opening meanwhile. */
   let waking: Promise<{ id: string; started: boolean }> | null = null;
   let boxId: string | null = null;
@@ -168,7 +172,7 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
       const cdpUrl = await doors.open(request.session, target);
       const companion = new SandboxCompanion({
         session: request.session, botId: request.botId, key, boxId: box.id, home: answer.home, ops, rails, signIns: deps.signIns ?? null,
-        folder: (botId) => deps.folder?.(botId) ?? null, log,
+        folder: (botId) => deps.folder?.(botId) ?? null, log, now, ...(deps.disk ? { disk: deps.disk } : {}),
         connect: deps.connect ?? ((url, listeners) => connectCdp(url, 10_000, listeners)),
       });
       try {
@@ -178,9 +182,11 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
         doors.close(request.session);
         await quit();
         if (error instanceof SignInsUnreadable) return home(request, "sign-ins");
+        if (error instanceof CarryFailed) { rails.setCarryBad(key, error.modified); return home(request, "sign-ins"); }
         rails.failed();
         return home(request, "unreachable");
       }
+      rails.setCarryBad(key, null);
       companions.set(request.session, companion);
       sessions.set(request.session, request.botId);
       rails.opened();
@@ -233,6 +239,10 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
     // One Chrome per bot's profile: a second session of the same bot (another audience's) stays in the home.
     if (bots().has(request.botId)) return home(request, "busy");
     if (bots().size >= BROWSER_SANDBOX_CHROMES) return home(request, "sandbox-full");
+    // The home's copy Chrome refused before, unchanged since: not worth a wake.
+    const known = deps.signIns?.load(request.session);
+    const bad = rails.carryBad(profileKey(request.botId));
+    if (bad !== null && known && known !== "unreadable" && known.modified === bad) return home(request, "sign-ins");
     opening.add(request.botId);
     try {
       return await launch(request, ops);
@@ -248,7 +258,10 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
     if (!botId || closing.has(session)) return;
     closing.add(session);
     try {
-      await companions.get(session)?.stop().catch(() => undefined);
+      const companion = companions.get(session);
+      await companion?.stop().catch(() => undefined);
+      const notes = companion?.takeNotes() ?? [];
+      if (notes.length) leftNotes.set(session, notes);
       companions.delete(session);
       await deps.closeEngine(session).catch(() => undefined);
       doors.close(session);
@@ -264,6 +277,7 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
 
   async function closeIdle(): Promise<void> {
     const at = now();
+    await Promise.all([...companions.values()].map((companion) => companion.periodic()));
     await Promise.all(doors.sessions().map(async (session) => {
       const last = doors.lastActivity(session);
       if (last !== null && at - last >= CLOUD_BROWSER_IDLE_MS && !deps.held(session)) await close(session);
@@ -288,7 +302,11 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
     closeIdle,
     dialed: (session: string): number => doors.dialed(session),
     /** Lines for the session's next browser call (downloads that arrived, or could not). */
-    takeNotes: (session: string): string[] => companions.get(session)?.takeNotes() ?? [],
+    takeNotes: (session: string): string[] => {
+      const left = leftNotes.get(session) ?? [];
+      leftNotes.delete(session);
+      return [...left, ...(companions.get(session)?.takeNotes() ?? [])];
+    },
     /** A file of the Cloud given to the session's browser for a page's file input: its path in the sandbox, or the line to say. */
     upload: (session: string, file: string, name: string | null, size: number) =>
       companions.get(session)?.upload(file, name, size) ?? Promise.resolve({ error: "This browser closed; try the upload again." }),

@@ -9,7 +9,8 @@ import WebSocket from "ws";
 import type { AppConfig } from "../config.ts";
 import { ComputerIdleTimer } from "../computer-idle.ts";
 import { LOCAL_SCHEME_REFUSAL, localSchemeRefusal } from "./guards.ts";
-import { UPLOAD_MAX_BYTES, type SignInStore } from "./companion.ts";
+import { SESSION_DOWNLOAD_BYTES, SIGN_IN_SYNC_MS, UPLOAD_MAX_BYTES, type SignInStore } from "./companion.ts";
+import { cookieParam } from "./sign-ins.ts";
 import { CLOUD_BROWSER_IDLE_MS, createCloudBrowser, type CloudBrowserDeps } from "./index.ts";
 import { CLOUD_BROWSER_BACKOFF_MS, createCloudBrowserRails } from "./rails.ts";
 import { BROWSER_SANDBOX_CHROMES, BROWSER_SANDBOX_OWNER, browserSandboxCreateBody, profileKey, providerOps } from "./remote.ts";
@@ -57,6 +58,8 @@ function browser(overrides: Partial<CloudBrowserDeps> & { budget?: number; awake
     log: () => {},
     pollMs: 5,
     rails: createCloudBrowserRails({ dataDir: dir, now, ...(budget ? { budget } : {}), ...(awakeMinutes ? { awakeMinutes } : {}) }),
+    // A roomy disk, whatever this machine's own is.
+    disk: () => ({ free: 100 * 1024 ** 3, total: 200 * 1024 ** 3 }),
     ...rest,
   });
   browsers.push(created);
@@ -507,6 +510,110 @@ describe("a bot's sign-ins between the home and its sandbox profile", () => {
     expect(fake.cookies.get(profileKey("scout"))?.map((cookie) => cookie.name)).toContain("fallback");
   });
 
+  it("a sign-out in the home stays a sign-out: the home's newer copy replaces the sandbox's cookies, and nothing old is written back", async () => {
+    const home = memorySignIns({ cookies: [SIGNED_IN], origins: [] });
+    const cloud = browser({ signIns: home.store });
+    urlOf(await cloud.open(request()));
+    clock += CLOUD_BROWSER_IDLE_MS;
+    await cloud.closeIdle();
+    // The person uses "Sign out of all sites" in Settings: the home's copy is now empty, and newer.
+    home.change({ cookies: [], origins: [] });
+    urlOf(await cloud.open(request()));
+    expect(fake.cookies.get(profileKey("scout")), "the sandbox's old cookie is gone").toEqual([]);
+    const writes = home.writes.length;
+    clock += CLOUD_BROWSER_IDLE_MS;
+    await cloud.closeIdle();
+    expect(home.writes.length, "nothing changed in the session, so nothing is written back").toBe(writes);
+    expect(home.store.load("bot-scout")).toMatchObject({ state: { cookies: [] } });
+  });
+
+  it("a replaced sandbox gets the home's copy carried in, and a profile that lost its cookies never empties the home", async () => {
+    const home = memorySignIns({ cookies: [SIGNED_IN], origins: [] });
+    const cloud = browser({ signIns: home.store });
+    urlOf(await cloud.open(request()));
+    clock += CLOUD_BROWSER_IDLE_MS;
+    await cloud.closeIdle();
+    // The same sandbox, its profile emptied (Chrome lost its cookies): the home's copy is not newer, so nothing is carried,
+    // and the close writes back only what the session itself changed.
+    fake.cookies.set(profileKey("scout"), []);
+    urlOf(await cloud.open(request()));
+    clock += CLOUD_BROWSER_IDLE_MS;
+    await cloud.closeIdle();
+    expect(home.store.load("bot-scout")).toMatchObject({ state: { cookies: [expect.objectContaining({ name: "sid" })] } });
+    // A new sandbox (the provider broke the old one): its empty profile gets the home's copy.
+    fake.state = "error";
+    urlOf(await cloud.open(request()));
+    expect(fake.boxId).not.toBe("bx_23456789");
+    expect(fake.cookies.get(profileKey("scout"))).toEqual([expect.objectContaining({ name: "sid", value: "s1" })]);
+  });
+
+  it("writes back only the cookies the session changed: one the session never touched stays as the home has it", async () => {
+    const home = memorySignIns({ cookies: [SIGNED_IN, { ...SIGNED_IN, name: "keep", domain: "keep.example", value: "home" }], origins: [] });
+    const cloud = browser({ signIns: home.store });
+    urlOf(await cloud.open(request()));
+    const key = profileKey("scout");
+    // In the session: one cookie changed, one signed out of, one new.
+    fake.cookies.set(key, [{ name: "sid", value: "s2", domain: ".example.com", path: "/", secure: true, httpOnly: true, sameSite: "Lax" },
+      { name: "new", value: "n", domain: "new.example", path: "/" }]);
+    clock += CLOUD_BROWSER_IDLE_MS;
+    await cloud.closeIdle();
+    const saved = (home.store.load("bot-scout") as { state: { cookies: Array<{ name: string; value: string }> } }).state.cookies;
+    expect(saved.map((cookie) => [cookie.name, cookie.value]).sort()).toEqual([["new", "n"], ["sid", "s2"]]);
+  });
+
+  it("skips a cookie Chrome refuses instead of failing the carry, never counts it against the sandbox, and does not carry the same copy again", async () => {
+    const broken = { ...SIGNED_IN, name: "bad", domain: "bad.example", sameSite: "None", secure: false };
+    const lines: string[] = [];
+    const home = memorySignIns({ cookies: [SIGNED_IN, broken], origins: [] });
+    const cloud = browser({ signIns: home.store, log: (line) => lines.push(line) });
+    urlOf(await cloud.open(request()));
+    expect(fake.cookies.get(profileKey("scout"))?.map((cookie) => cookie.name)).toEqual(["sid"]);
+    expect(lines.join("\n")).toContain("1 refused by Chrome");
+    expect(cloud.report().held).toBeNull();
+    clock += CLOUD_BROWSER_IDLE_MS;
+    await cloud.closeIdle();
+    const sets = fake.commands.filter((one) => one.method === "Storage.setCookies").length;
+    urlOf(await cloud.open(request()));
+    expect(fake.commands.filter((one) => one.method === "Storage.setCookies").length).toBe(sets);
+  });
+
+  it("when Chrome takes nothing of the home's copy, opens in the home, never as a sandbox failure, and wakes the sandbox for it again only once the copy changes", async () => {
+    fake.failing.add("Storage.clearCookies");
+    const home = memorySignIns({ cookies: [SIGNED_IN], origins: [] });
+    const cloud = browser({ signIns: home.store });
+    expect(await cloud.open(request())).toEqual({ home: "sign-ins" });
+    expect(cloud.report().held, "no back-off for anyone").toBeNull();
+    fake.state = "archived";
+    const asked = fake.requests.length;
+    expect(await cloud.open(request())).toEqual({ home: "sign-ins" });
+    expect(fake.requests.length, "no wake for the same refused copy").toBe(asked);
+    fake.failing.clear();
+    home.change({ cookies: [SIGNED_IN], origins: [] });
+    urlOf(await cloud.open(request()));
+  });
+
+  it("writes a long session's changed sign-ins home every 10 minutes, so an unclean end loses minutes at most", async () => {
+    const home = memorySignIns(null);
+    const cloud = browser({ signIns: home.store });
+    const cdpUrl = urlOf(await cloud.open(request()));
+    clock += SIGN_IN_SYNC_MS;
+    await act(cdpUrl, 1);
+    await cloud.closeIdle();
+    expect(home.writes, "nothing changed yet").toEqual([]);
+    fake.cookies.set(profileKey("scout"), [{ name: "auth", value: "a", domain: "mail.example", path: "/" }]);
+    clock += SIGN_IN_SYNC_MS;
+    await act(cdpUrl, 1);
+    await cloud.closeIdle();
+    expect(home.writes).toEqual([[expect.objectContaining({ name: "auth" })]]);
+    expect(cloud.active("bot-scout"), "the session goes on").toBe(cdpUrl);
+  });
+
+  it("keeps a cookie's partition, saved as an object or as a site's text", () => {
+    expect(cookieParam({ ...SIGNED_IN, partitionKey: "https://top.example" })).toMatchObject({ partitionKey: "https://top.example" });
+    expect(cookieParam({ ...SIGNED_IN, partitionKey: { topLevelSite: "https://top.example", hasCrossSiteAncestor: false } }))
+      .toMatchObject({ partitionKey: { topLevelSite: "https://top.example", hasCrossSiteAncestor: false } });
+  });
+
   it("never puts a cookie value in the log", async () => {
     const lines: string[] = [];
     const cloud = browser({ signIns: memorySignIns({ cookies: [SIGNED_IN], origins: [] }).store, log: (line) => lines.push(line) });
@@ -566,6 +673,37 @@ describe("downloads and uploads of a browser in the sandbox", () => {
     await cloud.close("bot-scout");
     expect(readFileSync(join(folder, "downloads", "data.csv"), "utf8")).toBe("a,b\n1,2\n");
     expect(fake.files.has(downloadPath("retry-guid"))).toBe(false);
+  });
+
+  it("keeps a download in the sandbox when the Cloud's disk would be left with less than 1 GiB or 10% free", async () => {
+    const cloud = browser({ folder: () => folder, disk: () => ({ free: 1.5 * 1024 ** 3, total: 10 * 1024 ** 3 }) });
+    urlOf(await cloud.open(request()));
+    fake.files.set(downloadPath("full-guid"), Buffer.alloc(16));
+    fake.emit(profileKey("scout"), "Browser.downloadWillBegin", { guid: "full-guid", suggestedFilename: "movie.mp4" });
+    fake.emit(profileKey("scout"), "Browser.downloadProgress", { guid: "full-guid", totalBytes: 600 * 1024 ** 2, receivedBytes: 600 * 1024 ** 2, state: "completed" });
+    await vi.waitFor(() => expect(cloud.takeNotes("bot-scout").join("\n")).toContain("the Cloud's disk is too full for it"));
+    expect(fake.files.has(downloadPath("full-guid"))).toBe(true);
+  });
+
+  it("brings at most 2 GiB of downloads into the Cloud per session", async () => {
+    const cloud = browser({ folder: () => folder, disk: () => ({ free: 100 * 1024 ** 3, total: 200 * 1024 ** 3 }) });
+    urlOf(await cloud.open(request()));
+    fake.files.set(downloadPath("huge-guid"), Buffer.alloc(8));
+    fake.emit(profileKey("scout"), "Browser.downloadWillBegin", { guid: "huge-guid", suggestedFilename: "a.bin" });
+    fake.emit(profileKey("scout"), "Browser.downloadProgress", { guid: "huge-guid", totalBytes: SESSION_DOWNLOAD_BYTES + 1, receivedBytes: 10, state: "inProgress" });
+    await vi.waitFor(() => expect(fake.commands.some((one) => one.method === "Browser.cancelDownload")).toBe(true));
+  });
+
+  it("a last retry's line at close reaches the session's next call", async () => {
+    let available = false;
+    const cloud = browser({ folder: () => (available ? folder : null) });
+    urlOf(await cloud.open(request()));
+    await finish("late-guid", "late.txt", Buffer.from("x"));
+    await vi.waitFor(() => expect(cloud.takeNotes("bot-scout")).toHaveLength(1));
+    await cloud.close("bot-scout");
+    expect(cloud.takeNotes("bot-scout")).toEqual([expect.stringContaining(`"late.txt" was downloaded in the browser but could not be brought`)]);
+    expect(cloud.takeNotes("bot-scout")).toEqual([]);
+    available = true;
   });
 
   it("gives a page a file from the Cloud by copying it into the sandbox first, and refuses a large one in one line", async () => {

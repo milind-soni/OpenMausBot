@@ -87,6 +87,12 @@ export function providerOps(cfg: () => AppConfig): ComputerOps {
     const body = JSON.stringify(browserSandboxCreateBody());
     let request = beginBoatCreate(BROWSER_SANDBOX_OWNER, body).request;
     let answer = request.boxId ? await json(config, `/sandboxes/${request.boxId}`) : null;
+    // A remembered sandbox proven gone frees its key: never create again under it, which could return the gone one.
+    if (request.boxId && (answer?.status === 404 || answer?.status === 410)) {
+      discardBoatCreate(request);
+      request = beginBoatCreate(BROWSER_SANDBOX_OWNER, body).request;
+      answer = null;
+    }
     let posted = false;
     if (!answer?.ok) {
       posted = true;
