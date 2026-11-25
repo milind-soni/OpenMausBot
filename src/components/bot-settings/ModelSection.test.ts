@@ -121,6 +121,90 @@ describe("a bot's backup models", () => {
     const markup = renderToStaticMarkup(createElement(FallbackChain, { bot: bot([{ instanceId: "codex", model: "gpt-old" }]), onChange: vi.fn() }));
     expect(markup).toMatch(/aria-label="Model for Codex"[^>]*>.*<option value="gpt-old" selected="">gpt-old<\/option>/);
   });
+
+  it("sets, filters per model, and clears reasoning effort or model variant per backup row", () => {
+    const agy = {
+      instanceId: "agy", displayName: "Antigravity", driverKind: "antigravity", enabled: true,
+      snapshot: { state: "available", version: "1", authenticated: true },
+      capabilities: { modelVariants: true },
+      models: {
+        default: "gemini-4-neon",
+        options: [
+          { id: "gemini-4-neon", label: "Gemini 4 Neon", variants: [{ id: "low", label: "Low" }, { id: "medium", label: "Medium" }] },
+          { id: "gemini-4-lite", label: "Gemini 4 Lite" },
+        ],
+      },
+    } as unknown as InstanceInfo;
+    const codexLevels = {
+      ...engine("codex", "Codex", ["gpt-a", "gpt-b"]),
+      capabilities: { effortLevels: ["low", "medium", "high"] },
+      models: {
+        default: "gpt-a",
+        options: [
+          { id: "gpt-a", label: "GPT-A", effortLevels: ["low", "medium", "high"] },
+          { id: "gpt-b", label: "GPT-B", effortLevels: ["low", "high"] },
+        ],
+      },
+    } as unknown as InstanceInfo;
+    instances.splice(1, 1, codexLevels);
+    instances.push(agy);
+    try {
+      const noReasoningMarkup = renderToStaticMarkup(createElement(FallbackChain, {
+        bot: bot([{ instanceId: "agy", model: "gemini-4-lite" }]),
+        onChange: vi.fn(),
+      }));
+      expect(noReasoningMarkup).not.toContain("Reasoning for Antigravity");
+
+      const effortMarkup = renderToStaticMarkup(createElement(FallbackChain, {
+        bot: bot([{ instanceId: "codex", model: "gpt-b", effort: "low" }]),
+        onChange: vi.fn(),
+      }));
+      const effortSelect = effortMarkup.match(/<select[^>]*aria-label="Reasoning for Codex"[^>]*>(.*?)<\/select>/)?.[1];
+      expect(effortSelect).toContain('<option value="">Provider default</option>');
+      expect(effortSelect).toContain('<option value="low" selected="">Low</option>');
+      expect(effortSelect).not.toContain('value="medium"');
+
+      const selectControl = (node: ReactNode, label: string): { props: { onChange(event: { target: { value: string } }): void } } | undefined => {
+        if (Array.isArray(node)) return node.map((child) => selectControl(child, label)).find(Boolean);
+        if (!isValidElement(node)) return undefined;
+        const props = node.props as { "aria-label"?: string; children?: ReactNode };
+        if (props["aria-label"] === label) return node as never;
+        return typeof node.type === "function" && node.type.name === "BackupReasoningSelect"
+          ? selectControl((node.type as (p: unknown) => ReactNode)(props), label)
+          : selectControl(props.children, label);
+      };
+
+      const onVariantChange = vi.fn();
+      const variantTree = FallbackChain({
+        bot: bot([{ instanceId: "agy", model: "gemini-4-neon" }, { instanceId: "codex", model: "gpt-a", effort: "medium" }]),
+        onChange: onVariantChange,
+      });
+      selectControl(variantTree, "Reasoning for Antigravity")!.props.onChange({ target: { value: "medium" } });
+      expect(onVariantChange).toHaveBeenCalledWith([
+        { instanceId: "agy", model: "gemini-4-neon", variant: "medium" },
+        { instanceId: "codex", model: "gpt-a", effort: "medium" },
+      ]);
+
+      const onClearChange = vi.fn();
+      const clearTree = FallbackChain({
+        bot: bot([{ instanceId: "codex", model: "gpt-a", effort: "medium" }]),
+        onChange: onClearChange,
+      });
+      selectControl(clearTree, "Reasoning for Codex")!.props.onChange({ target: { value: "" } });
+      expect(onClearChange).toHaveBeenCalledWith([{ instanceId: "codex", model: "gpt-a" }]);
+
+      const onModelSwitch = vi.fn();
+      const switchTree = FallbackChain({
+        bot: bot([{ instanceId: "codex", model: "gpt-a", effort: "medium" }]),
+        onChange: onModelSwitch,
+      });
+      selectControl(switchTree, "Model for Codex")!.props.onChange({ target: { value: "gpt-b" } });
+      expect(onModelSwitch).toHaveBeenCalledWith([{ instanceId: "codex", model: "gpt-b" }]);
+    } finally {
+      instances.pop();
+      instances.splice(1, 1, engine("codex", "Codex", ["gpt-a", "gpt-b"]));
+    }
+  });
 });
 
 describe("the bot's model in Bot settings", () => {

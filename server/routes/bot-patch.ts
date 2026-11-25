@@ -8,7 +8,8 @@ import { normalizePhoneApps } from "../../shared/phone-apps.ts";
 import { parseToolScope, toolScopeWidens } from "../../shared/tool-scope.ts";
 import type { MemoryModelSelection } from "../../shared/memory-model.ts";
 import { parseToolsOff, TOOL_GROUPS } from "../../shared/tool-groups.ts";
-import { isMausColor, MAUS_COLOR_NAMES, type BotUpdateResponse, type WireBot, type WireGroup } from "../../shared/wire.ts";
+import { isEffortLevel, isMausColor, MAUS_COLOR_NAMES, offeredEffortLevels, type BotUpdateResponse, type WireBot, type WireGroup } from "../../shared/wire.ts";
+import { isModelVariant, type ModelSelection } from "../contracts.ts";
 import { dropRemovedGrants, MAX_ALWAYS_ALLOW } from "../always-allow.ts";
 import { checkBrowserProfileChange, settleBrowserChange } from "../bot-browser-profile.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
@@ -21,7 +22,6 @@ import type { CacheKeepWarm } from "../cache-keepwarm.ts";
 import { cloudBackendChangeError, vpsBotAliasChangeError, vpsLeftBehindNotice, VPS_BOT_ALIAS_CHANGE_ERROR, VPS_BOT_ALIAS_LIFECYCLE_ERROR, VPS_BOT_ALIAS_RESOURCES_ERROR } from "../cloud-backend.ts";
 import * as composio from "../composio.ts";
 import { isValidSshAlias, type AppConfig } from "../config.ts";
-import type { ModelSelection } from "../contracts.ts";
 import type { createApprovalModeSupport } from "../harness-capabilities.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
 import type { hostedModelPolicy } from "../hosted-models.ts";
@@ -255,16 +255,45 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (!Array.isArray(body.fallback) || body.fallback.length > 5) {
           return json(res, 400, { error: "fallback must be a list of up to five { instanceId, model } entries" });
         }
-        const chain: Array<{ instanceId: string; model: string }> = [];
+        const chain: ModelSelection[] = [];
         for (const entry of body.fallback as unknown[]) {
-          const row = entry && typeof entry === "object" ? (entry as { instanceId?: unknown; model?: unknown }) : null;
+          const row = entry && typeof entry === "object" ? (entry as { instanceId?: unknown; model?: unknown; effort?: unknown; variant?: unknown }) : null;
           if (!row || typeof row.instanceId !== "string" || !/^[\w.-]+$/.test(row.instanceId) || typeof row.model !== "string" || !row.model.trim() || row.model.length > 500) {
             return json(res, 400, { error: "fallback must be a list of up to five { instanceId, model } entries" });
           }
-          if (!registry.get(row.instanceId)) return json(res, 400, { error: `fallback engine "${row.instanceId}" is not available` });
+          const engine = registry.get(row.instanceId);
+          if (!engine) return json(res, 400, { error: `fallback engine "${row.instanceId}" is not available` });
           const model = row.model.trim();
+          let effort: ModelSelection["effort"];
+          if (row.effort !== undefined) {
+            if (!isEffortLevel(row.effort)) {
+              return json(res, 400, { error: `effort "${String(row.effort)}" is not recognized` });
+            }
+            if (!offeredEffortLevels(engine, model).includes(row.effort)) {
+              return json(res, 400, { error: `effort "${row.effort}" is not offered by fallback engine "${row.instanceId}"` });
+            }
+            effort = row.effort;
+          }
+          let variant: ModelSelection["variant"];
+          if (row.variant !== undefined) {
+            if (!isModelVariant(row.variant)) {
+              return json(res, 400, { error: "variant must be a non-empty model variant ID" });
+            }
+            if (effort !== undefined) {
+              return json(res, 400, { error: "choose either a model variant or an effort level" });
+            }
+            if (!engine.adapter.capabilities.modelVariants) {
+              return json(res, 400, { error: `model variants are not offered by fallback engine "${row.instanceId}"` });
+            }
+            variant = row.variant;
+          }
           if (chain.some((seen) => seen.instanceId === row.instanceId && seen.model === model)) continue;
-          chain.push({ instanceId: row.instanceId, model });
+          chain.push({
+            instanceId: row.instanceId,
+            model,
+            ...(effort !== undefined ? { effort } : {}),
+            ...(variant !== undefined ? { variant } : {}),
+          });
         }
         patch.fallback = chain;
       }

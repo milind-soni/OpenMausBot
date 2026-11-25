@@ -3537,6 +3537,8 @@
   "model.fallback.uses": "Used in order, with no other setting, when this bot's AI is at its usage limit or the provider proves a request never started. Work that may have run is not replayed. Only that thread switches; bot defaults and other threads stay unchanged. Backup provider charges may apply.",
   "model.fallback.remove": "Remove {name} from the fallback list",
   "model.fallback.model": "Model for {name}",
+  "model.fallback.reasoning": "Reasoning for {name}",
+  "model.fallback.reasoningDefault": "Provider default",
   "model.fallback.add": "Add a backup AI",
   "model.fallback.none": "No other AI is available",
   "model.fallback.addOption": "Add an AI…",

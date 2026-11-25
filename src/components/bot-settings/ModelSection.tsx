@@ -8,6 +8,7 @@ import { CheckWorkSetting } from "./CheckWorkSetting";
 import { ThreadModelsLine } from "../ThreadModelsLine";
 import { t } from "@/lib/i18n";
 import { Select } from "../Select";
+import { BackupReasoningSelect, withBackupModel } from "../BackupReasoningSelect";
 import { backupNote } from "@/lib/engine-rail";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
@@ -93,14 +94,14 @@ export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback
     .find((model) => model.trim() && !taken(instance.instanceId, model));
   const available = state.instances.filter((instance) =>
     instance.snapshot.state === "available" && Boolean(instance.models.default.trim()) && freeModel(instance) !== undefined);
-  const nameOf = (instanceId: string) => state.instances.find((instance) => instance.instanceId === instanceId)?.displayName ?? instanceId;
-  const main = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
+  const instanceOf = (instanceId: string) => state.instances.find((instance) => instance.instanceId === instanceId);
+  const main = instanceOf(bot.modelSelection.instanceId);
   const backupLabel = (instance: InstanceInfo) => {
     const note = backupNote(main, instance);
     return note ? `${instance.displayName} · ${note}` : instance.displayName;
   };
   const modelsOf = (entry: NonNullable<Bot["fallback"]>[number], index: number) => {
-    const offered = offeredBy(state.instances.find((candidate) => candidate.instanceId === entry.instanceId))
+    const offered = offeredBy(instanceOf(entry.instanceId))
       .filter((model) => !taken(entry.instanceId, model.id, index));
     return offered.some((model) => model.id === entry.model) ? offered : [{ id: entry.model, label: entry.model }, ...offered];
   };
@@ -120,25 +121,36 @@ export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback
       </div>
       {chain.length > 0 && (
         <ol className="mt-3 flex flex-col gap-1">
-          {chain.map((entry, index) => (
-            <li key={index} className="flex items-center gap-2 rounded-lg bg-inset px-3 py-1.5 text-[13px]">
-              <span className="w-4 shrink-0 tabular-nums text-ink-secondary">{index + 1}.</span>
-              <span className="min-w-0 flex-1 truncate text-ink">{nameOf(entry.instanceId)}</span>
-              <Select size="sm" className="max-w-[45%] shrink-0" value={entry.model}
-                aria-label={t("model.fallback.model", { name: nameOf(entry.instanceId) })}
-                onChange={(event) => onChange(chain.map((candidate, at) => at === index ? { ...candidate, model: event.target.value } : candidate))}>
-                {modelsOf(entry, index).map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
-              </Select>
-              <button
-                type="button"
-                onClick={() => onChange(chain.filter((_, at) => at !== index))}
-                aria-label={t("model.fallback.remove", { name: nameOf(entry.instanceId) })}
-                className="shrink-0 rounded p-0.5 text-ink-secondary hover:text-ink"
-              >
-                <X size={13} />
-              </button>
-            </li>
-          ))}
+          {chain.map((entry, index) => {
+            const instance = instanceOf(entry.instanceId);
+            const labelName = instance?.displayName ?? entry.instanceId;
+            return (
+              <li key={index} className="flex flex-wrap items-center gap-2 rounded-lg bg-inset px-3 py-1.5 text-[13px]">
+                <span className="w-4 shrink-0 tabular-nums text-ink-secondary">{index + 1}.</span>
+                <span className="min-w-0 flex-1 truncate text-ink">{labelName}</span>
+                <Select size="sm" className="max-w-[45%] shrink-0" value={entry.model}
+                  aria-label={t("model.fallback.model", { name: labelName })}
+                  onChange={(event) => onChange(chain.map((candidate, at) => (at === index ? withBackupModel(candidate, instance, event.target.value) : candidate)))}>
+                  {modelsOf(entry, index).map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+                </Select>
+                <BackupReasoningSelect
+                  entry={entry}
+                  instance={instance}
+                  labelName={labelName}
+                  className="shrink-0"
+                  onChange={(next) => onChange(chain.map((candidate, at) => (at === index ? next : candidate)))}
+                />
+                <button
+                  type="button"
+                  onClick={() => onChange(chain.filter((_, at) => at !== index))}
+                  aria-label={t("model.fallback.remove", { name: labelName })}
+                  className="shrink-0 rounded p-0.5 text-ink-secondary hover:text-ink"
+                >
+                  <X size={13} />
+                </button>
+              </li>
+            );
+          })}
         </ol>
       )}
       {chain.length < 5 && (

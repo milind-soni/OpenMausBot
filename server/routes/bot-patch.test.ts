@@ -584,3 +584,72 @@ describe("PATCH /api/bots/:id unread", () => {
     expect(store.bot(bot.id)?.unread).toBe(true);
   });
 });
+
+describe("PATCH /api/bots/:id fallback", () => {
+  it("validates and persists per-model effort and model variant on backup entries", async () => {
+    const engines = new Map<string, ProviderInstance>([
+      ["codex", {
+        instanceId: "codex",
+        driverKind: "codex",
+        enabled: true,
+        adapter: { capabilities: { effortLevels: ["low", "medium", "high"] } },
+        models: {
+          default: "gpt-6",
+          options: [
+            { id: "gpt-6", label: "GPT-6", effortLevels: ["low", "medium", "high"] },
+            { id: "gpt-6-mini", label: "GPT-6 Mini", effortLevels: ["low"] },
+          ],
+        },
+      } as unknown as ProviderInstance],
+      ["agy", {
+        instanceId: "agy",
+        driverKind: "antigravity",
+        enabled: true,
+        adapter: { capabilities: { modelVariants: true } },
+        models: {
+          default: "gemini-4-neon",
+          options: [{ id: "gemini-4-neon", label: "Gemini 4 Neon" }],
+        },
+      } as unknown as ProviderInstance],
+    ]);
+    const { store, bot, patch } = fixture({ registry: { get: (id) => engines.get(id) ?? null } });
+
+    const badUnknownEffort = await patch(bot.id, { fallback: [{ instanceId: "codex", model: "gpt-6", effort: "turbo" }] });
+    expect(badUnknownEffort.status).toBe(400);
+
+    const badPerModelEffort = await patch(bot.id, { fallback: [{ instanceId: "codex", model: "gpt-6-mini", effort: "medium" }] });
+    expect(badPerModelEffort.status).toBe(400);
+
+    const badVariantOnEffortEngine = await patch(bot.id, { fallback: [{ instanceId: "codex", model: "gpt-6", variant: "medium" }] });
+    expect(badVariantOnEffortEngine.status).toBe(400);
+
+    const badBoth = await patch(bot.id, { fallback: [{ instanceId: "agy", model: "gemini-4-neon", effort: "medium", variant: "medium" }] });
+    expect(badBoth.status).toBe(400);
+
+    const saved = await patch(bot.id, {
+      fallback: [
+        { instanceId: "codex", model: "gpt-6-mini", effort: "low" },
+        { instanceId: "agy", model: "gemini-4-neon", variant: "medium" },
+      ],
+    });
+    expect(saved.status).toBe(200);
+    expect(saved.body.bot.fallback).toEqual([
+      { instanceId: "codex", model: "gpt-6-mini", effort: "low" },
+      { instanceId: "agy", model: "gemini-4-neon", variant: "medium" },
+    ]);
+
+    // Changing only reasoning on an already-configured backup does not loosen trust while a bot is busy.
+    store.patchBot(bot.id, { busy: true });
+    const adjusted = await patch(bot.id, {
+      fallback: [
+        { instanceId: "codex", model: "gpt-6-mini" },
+        { instanceId: "agy", model: "gemini-4-neon", variant: "high" },
+      ],
+    });
+    expect(adjusted.status).toBe(200);
+    expect(adjusted.body.bot.fallback).toEqual([
+      { instanceId: "codex", model: "gpt-6-mini" },
+      { instanceId: "agy", model: "gemini-4-neon", variant: "high" },
+    ]);
+  });
+});

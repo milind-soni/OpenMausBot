@@ -202,7 +202,12 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
     const out: ModelSelection[] = [];
     const left: SkippedBackup[] = [];
     const add = (selection: ModelSelection) => {
-      const pick = { instanceId: selection.instanceId, model: selection.model };
+      const pick: ModelSelection = {
+        instanceId: selection.instanceId,
+        model: selection.model,
+        ...(selection.effort !== undefined ? { effort: selection.effort } : {}),
+        ...(selection.variant !== undefined ? { variant: selection.variant } : {}),
+      };
       if (pick.instanceId === from.instanceId && pick.model === from.model) return;
       if ([...out, ...left.map((one) => one.selection)].some((known) => known.instanceId === pick.instanceId && known.model === pick.model)) return;
       if (pick.instanceId === from.instanceId && (scope === "engine" || scope === "signed-out")) {

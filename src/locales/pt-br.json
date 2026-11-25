@@ -3323,6 +3323,8 @@
   "model.fallback.title": "Modelos de reserva deste bot",
   "model.fallback.remove": "Remover {name} da lista de reserva",
   "model.fallback.model": "Modelo de {name}",
+  "model.fallback.reasoning": "Raciocínio para {name}",
+  "model.fallback.reasoningDefault": "Padrão do provedor",
   "model.effort.label": "Esforço de raciocínio",
   "model.effort.default": "Padrão",
   "model.effort.none": "Nenhum",

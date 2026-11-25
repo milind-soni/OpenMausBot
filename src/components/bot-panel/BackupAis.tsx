@@ -16,6 +16,7 @@ import { modelMenuKey, modelMenuPointerMove } from "../model-menu-keys";
 import { SIMPLE_POPOVER_WIDTH } from "../ModelPicker";
 import { InstanceProviderMark } from "../ProviderIcons";
 import { SimpleModelMenu } from "../SimpleModelMenu";
+import { BackupReasoningSelect, withBackupModel } from "../BackupReasoningSelect";
 import { buttonCls, Card, ColRow, RowIcon, RowText, TrashButton } from "./rows";
 import { sameFields, useStoreActions, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
@@ -248,7 +249,9 @@ export function BackupAis({ bot, onChange }: { bot: Bot; onChange: (fallback: Ba
                     bot={bot}
                     current={entry}
                     exclude={others(index)}
-                    onPick={(picked) => onChange(chain.map((candidate, at) => (at === index ? picked : candidate)))}
+                    onPick={(picked) => onChange(chain.map((candidate, at) => (at === index
+                      ? (picked.instanceId === candidate.instanceId ? withBackupModel(candidate, instance, picked.model) : picked)
+                      : candidate)))}
                     label={t("botPanel.backups.row", { position: index + 1, model: name })}
                     title={instance ? `${instance.displayName} · ${name}` : name}
                     data-panel-action="backup-change"
@@ -261,6 +264,14 @@ export function BackupAis({ bot, onChange }: { bot: Bot; onChange: (fallback: Ba
                     {!instance && <span className="shrink-0 text-[12px] text-warning">{t("model.simple.unavailable")}</span>}
                     <ChevronDown size={12} strokeWidth={2} aria-hidden="true" className="shrink-0 text-ink-tertiary group-hover:text-ink-secondary" />
                   </BackupChooser>
+                  <BackupReasoningSelect
+                    entry={entry}
+                    instance={instance}
+                    labelName={name}
+                    variant="quiet"
+                    className="shrink-0"
+                    onChange={(next) => onChange(chain.map((candidate, at) => (at === index ? next : candidate)))}
+                  />
                   <TrashButton
                     data-panel-action="backup-remove"
                     label={t("botPanel.backups.remove", { model: name })}

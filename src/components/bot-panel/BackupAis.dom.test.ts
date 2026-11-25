@@ -164,6 +164,33 @@ describe("a bot's backup AIs in Simple", () => {
     expect(onChange).toHaveBeenCalledWith([{ instanceId: "codex", model: "gpt-5.5" }]);
   });
 
+  it("lets each backup row set and clear its own reasoning effort", () => {
+    fixture.instances[1] = {
+      ...codex,
+      capabilities: { effortLevels: ["low", "medium", "high"] },
+    } as InstanceInfo;
+    render([{ instanceId: "codex", model: "gpt-5.5" }]);
+    const select = host.querySelector<HTMLSelectElement>('select[aria-label="Reasoning for GPT-5.5"]');
+    expect(select).not.toBeNull();
+    expect([...select!.options].map((option) => option.textContent)).toEqual(["Provider default", "Low", "Medium", "High"]);
+    expect(select!.value).toBe("");
+    flushSync(() => {
+      select!.value = "medium";
+      select!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(onChange).toHaveBeenCalledWith([{ instanceId: "codex", model: "gpt-5.5", effort: "medium" }]);
+
+    onChange.mockReset();
+    render([{ instanceId: "codex", model: "gpt-5.5", effort: "medium" }]);
+    const configured = host.querySelector<HTMLSelectElement>('select[aria-label="Reasoning for GPT-5.5"]')!;
+    expect(configured.value).toBe("medium");
+    flushSync(() => {
+      configured.value = "";
+      configured.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(onChange).toHaveBeenCalledWith([{ instanceId: "codex", model: "gpt-5.5" }]);
+  });
+
   it("closes its menu on Escape without letting the key close the panel", async () => {
     render();
     click(host.querySelector("[data-panel-action=backup-add]"));

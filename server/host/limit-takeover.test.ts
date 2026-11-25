@@ -98,6 +98,23 @@ describe("which AI carries on while one is limited", () => {
     expect(instance.backups("kai", on("codex", "gpt-6"))).toEqual([on("opencode", "go-default"), on("claude", "claude-opus-5-5")]);
   });
 
+  it("preserves configured reasoning effort and model variant on chosen backups", () => {
+    const effortBackup: ModelSelection = { instanceId: "claude", model: "claude-opus-5-5", effort: "medium" };
+    const variantBackup: ModelSelection = { instanceId: "opencode", model: "go-default", variant: "high" };
+    const { instance } = takeover({ chosen: () => [effortBackup, variantBackup] });
+    expect(instance.weighBackups("kai", on("codex", "gpt-6")).backups).toEqual([effortBackup, variantBackup]);
+    expect(instance.backups("kai", on("codex", "gpt-6"))).toEqual([effortBackup, variantBackup]);
+
+    const clock = new LimitResetClock({ accounts: () => [{ id: "codex", name: "Codex", driver: "codex", environment: {} }], now: () => NOW });
+    clock.noteLimit("codex", NOW + HOUR);
+    const room = takeover({ blockedUntil: (id) => clock.blockedUntil(id), resetAt: (id) => clock.resetAt(id) }).instance;
+    expect(room.takeoverAtStart(KAI, on("codex", "gpt-6"), [effortBackup])).toEqual({
+      to: effortBackup,
+      scope: "engine",
+      resetsAt: NOW + HOUR,
+    });
+  });
+
   it("picks no other AI by itself: with no backup chosen the bot waits for the reset", () => {
     const { instance, told } = takeover({ blockedUntil: (id) => (id === "codex" ? NOW + HOUR : null) });
     expect(instance.backups("kai", on("codex", "gpt-6")), "Claude and OpenCode Go are set up, but not chosen").toEqual([]);

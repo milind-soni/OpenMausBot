@@ -1,9 +1,13 @@
 import { useEffect, useRef, type RefObject } from "react";
 import type { AppState, Bot, InstanceInfo, ModelSelection } from "@/state/store";
-import { offeredEffortLevels } from "../../shared/wire";
+import { offeredEffortLevels, type EffortLevel } from "../../shared/wire";
 import type { ModelVariantOption } from "../../shared/runtime-events";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
+
+export function effortLabel(level: EffortLevel): string {
+  return t(`model.effort.${level}` as Parameters<typeof t>[0]);
+}
 
 /** The chat engine's variants are thinking levels with these ids; other engines name their own. */
 const CHAT_ENGINE_VARIANTS: Readonly<Record<string, LocaleKey>> = {
