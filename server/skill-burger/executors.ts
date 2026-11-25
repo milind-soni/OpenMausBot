@@ -8,7 +8,7 @@ import { dirname, isAbsolute, relative, resolve as resolvePath } from "node:path
 
 import { appToolCall } from "../connector-app-tools.ts";
 import { toolData } from "../connected-reads.ts";
-import { spawnCli } from "../procs.ts";
+import { killCliTree, spawnCli } from "../procs.ts";
 import type { ExecResult, StepExecutors } from "./runner.ts";
 
 const MULTI_EXECUTE = "COMPOSIO_MULTI_EXECUTE_TOOL";
@@ -61,7 +61,7 @@ function runInBox(context: ExecutorContext, input: Parameters<StepExecutors["she
     let child: ReturnType<typeof spawnCli>;
     try {
       child = spawnCli(shell.command, shell.args(input.command), {
-        cwd: input.cwd && isAbsolute(input.cwd) ? input.cwd : context.cwd,
+        cwd: input.cwd ? resolvePath(context.cwd, input.cwd) : context.cwd,
         env: { PATH: commandPath(), HOME: process.env.HOME, LANG: process.env.LANG, ...input.env },
         stdio: ["pipe", "pipe", "pipe"],
         box: { botId: context.botId },
@@ -77,14 +77,14 @@ function runInBox(context: ExecutorContext, input: Parameters<StepExecutors["she
     const take = (into: Buffer[]) => (chunk: Buffer) => {
       size += chunk.length;
       if (size > input.maxBytes) {
-        if (!over) { over = true; child.kill("SIGKILL"); }
+        if (!over) { over = true; void killCliTree(child, 0); }
         return;
       }
       into.push(chunk);
     };
     child.stdout.on("data", take(out));
     child.stderr.on("data", take(err));
-    const stop = () => child.kill("SIGKILL");
+    const stop = () => { void killCliTree(child, 0); };
     input.signal.addEventListener("abort", stop, { once: true });
     child.on("error", (error) => done({ ok: false, error: error.message }));
     child.on("close", (code) => {
@@ -108,6 +108,7 @@ async function runOnVm(context: ExecutorContext, input: Parameters<StepExecutors
     if (Buffer.byteLength(stdout) > input.maxBytes) return tooLarge(input.maxBytes);
     return Number(vm.body.exitCode ?? 0) === 0 && !vm.body.timedOut ? { ok: true, output: stdout } : { ok: false, error: String(vm.body.stderr || vm.body.stdout || "the command failed").slice(-2_000) };
   }
+  if (vm.status !== 409 || vm.body.code !== "no_vm_for_turn") return { ok: false, error: String(vm.body.error ?? "the command failed") };
   const computer = await context.internal("computer", "/api/internal/computer/mcp", { jsonrpc: "2.0", id: rpcId(), method: "tools/call", params: { name: "exec", arguments: { command } } }, input.signal);
   if (!computer.ok) return { ok: false, error: String(vm.body.error ?? computer.body.error ?? "there is no cloud computer to run this on") };
   const result = callText(computer.body);
@@ -145,10 +146,10 @@ export function createExecutors(context: ExecutorContext): StepExecutors {
         botIds: input.botIds, message: input.message, ...(input.doneWhen ? { done_when: input.doneWhen } : {}), ...(input.rework ? { rework: true } : {}), ...(input.consult ? { consult: true } : {}),
       }, input.signal);
       const receipts = (Array.isArray(answer.body.receipts) ? answer.body.receipts : []).map(record).flatMap((receipt) => (
-        receipt && typeof receipt.botId === "string" && typeof receipt.requestId === "string" ? [{ botId: receipt.botId, name: String(receipt.botName ?? receipt.botId), requestId: receipt.requestId }] : []));
-      if (!answer.ok || !receipts.length) {
-        const refusedOne = (Array.isArray(answer.body.receipts) ? answer.body.receipts : []).map(record).find((receipt) => receipt?.detail);
-        return { ok: false, error: String(answer.body.error ?? refusedOne?.detail ?? "the hand-off was refused") };
+        receipt && receipt.outcome !== "failed" && typeof receipt.botId === "string" && typeof receipt.requestId === "string" ? [{ botId: receipt.botId, name: String(receipt.botName ?? receipt.botId), requestId: receipt.requestId }] : []));
+      if (!answer.ok || !receipts.length || input.botIds.some((botId) => !receipts.some((receipt) => receipt.botId === botId))) {
+        const refusedOne = (Array.isArray(answer.body.receipts) ? answer.body.receipts : []).map(record).find((receipt) => receipt?.detail && !receipts.some((one) => one.botId === receipt.botId));
+        return { ok: false, error: String(answer.body.error ?? refusedOne?.detail ?? "the hand-off was refused"), receipts };
       }
       return { ok: true, receipts };
     },
@@ -166,8 +167,15 @@ export function createExecutors(context: ExecutorContext): StepExecutors {
       try {
         return { ok: true, output: toolData(slug, answer.body) };
       } catch (error) {
-        const plain = callText(answer.body);
-        return plain.ok ? plain : { ok: false, error: error instanceof Error ? error.message : String(error) };
+        const content = record(answer.body.result)?.content;
+        const text = Array.isArray(content) ? content.map(record).find((part) => typeof part?.text === "string")?.text : undefined;
+        if (typeof text === "string") {
+          try { JSON.parse(text); } catch {
+            const plain = callText(answer.body);
+            if (plain.ok) return plain;
+          }
+        }
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
       }
     },
     async browser(input) {

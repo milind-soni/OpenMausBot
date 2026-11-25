@@ -15,6 +15,7 @@ export interface SavedWorkflowLayer {
 export interface SavedWorkflow {
   name: string;
   summary: string;
+  /** Revision of the instructions and executable workflow, used to reject stale edits. */
   sha256: string;
   savedAt: string;
   layers: SavedWorkflowLayer[];
