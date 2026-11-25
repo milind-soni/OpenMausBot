@@ -21,12 +21,17 @@ const OPENS_A_CONVERSATION: ReadonlySet<Action["type"]> = new Set(["select", "op
 const OPENS_A_ROOM_THREAD: ReadonlySet<Action["type"]> = new Set(["switchGroupTask", "newGroupTask", "sendGroup"]);
 /** Whether the page's first snapshot came in, or the person opened or wrote in a conversation here before it did. */
 let restoreSettled = false;
-/** The unread conversation this page put back on screen by itself when it loaded. Nobody chose to look at it, so it
- * stays unread until the person opens a conversation here. */
-let restoredUnread: string | undefined;
+/** The unread conversations this page put back on screen by itself when it loaded: the one it restored and, when launch
+ * moved on to the bot's main thread, that one too, so a failed move that shows the first again still holds it. Nobody
+ * chose to look at them, so they stay unread until the person opens a conversation here. */
+const restoredUnread = new Set<string>();
 
 /** Whether the page is opening, by itself, the conversation a bot opens to at launch. */
 let launching = false;
+
+/** A switch the page makes by itself at launch tells the server so: showing it is not the person opening it, so what
+ * waits there for them stays unseen. */
+export const launchTagged = (action: Action): Action => (launching && action.type === "switchTask" ? { ...action, auto: true } : action);
 
 /** Runs the page's own move at launch to the conversation a bot opens to: it is not the person opening one, so a
  * conversation restored unread stays held, now on the thread the page moved to. */
@@ -60,13 +65,13 @@ function openedBotThread(action: Action, state: AppState): string | undefined {
  * conversation they open or write in. */
 export function holdMarkedUnread(action: Action, state: AppState): void {
   if (launching) {
-    // The page moving to the bot's main thread by itself at launch: the hold follows it, since nobody chose to look.
-    if (action.type === "switchTask") restoredUnread = threadIsUnread(state, action.botId, action.threadId) ? action.threadId : undefined;
+    // The page moving to the bot's main thread by itself at launch: the hold covers it too, since nobody chose to look.
+    if (action.type === "switchTask" && threadIsUnread(state, action.botId, action.threadId)) restoredUnread.add(action.threadId);
     return;
   }
   if (OPENS_A_CONVERSATION.has(action.type) || OPENS_A_ROOM_THREAD.has(action.type)) {
     restoreSettled = true;
-    restoredUnread = undefined;
+    restoredUnread.clear();
   }
   const shown = shownBotThread(state), leaves = OPENS_A_CONVERSATION.has(action.type) || !shown;
   if (leaves || !markedUnread.has(shown)) markedUnread.clear();
@@ -89,7 +94,7 @@ export function holdRestoredUnread(state: AppState): void {
   if (restoreSettled) return;
   restoreSettled = true;
   const shown = shownThread(state);
-  restoredUnread = shown && shownChatIsUnread(state) ? shown : undefined;
+  if (shown && shownChatIsUnread(state)) restoredUnread.add(shown);
 }
 
 const serverHolds = (task: { threadId: string; heldUnread?: string } | undefined) =>
@@ -98,7 +103,7 @@ const serverHolds = (task: { threadId: string; heldUnread?: string } | undefined
 /** Whether the shown conversation is still held unread: put back on screen by a page load and not opened since, or marked
  * by the person and nothing newer has arrived in it. */
 export function shownChatHeldUnread(state: AppState): boolean {
-  if (restoredUnread !== undefined && shownThread(state) === restoredUnread) return true;
+  if (restoredUnread.size > 0 && restoredUnread.has(shownThread(state) ?? "")) return true;
   const shown = shownBotThread(state);
   if (!shown) return false;
   const task = state.bots.find((candidate) => candidate.id === state.selectedId)?.tasks?.find((candidate) => candidate.threadId === shown);
@@ -115,7 +120,7 @@ const chatShows = (state: AppState, id: string) => id === state.selectedId && st
 function visibleThreadIds(state: AppState, kind: "bot" | "group", ownerId: string, shown?: string): string[] {
   const panel = state.forkPanel;
   return [...new Set([shown, panel?.kind === kind && panel.ownerId === ownerId ? panel.threadId : undefined])]
-    .filter((threadId): threadId is string => Boolean(threadId) && threadId !== restoredUnread);
+    .filter((threadId): threadId is string => Boolean(threadId) && !restoredUnread.has(threadId!));
 }
 
 export function markVisibleBotThreadsRead(state: AppState, bot: BotAnnouncement, focused: boolean, post: SendRead = sendRead): void {
@@ -147,7 +152,7 @@ export function markVisibleBotThreadsRead(state: AppState, bot: BotAnnouncement,
   }
   // Without per-thread state the aggregate mark is the shown thread's, so a restored hold on it keeps the bot unread.
   if (bot.tasks) bot.unread = botShowsUnread(bot);
-  else if (!held && shown && shown !== restoredUnread) bot.unread = false;
+  else if (!held && shown && !restoredUnread.has(shown)) bot.unread = false;
 }
 
 export function markVisibleGroupThreadsRead(state: AppState, group: Partial<Group> & { id: string }, focused: boolean,
@@ -164,5 +169,5 @@ export function markVisibleGroupThreadsRead(state: AppState, group: Partial<Grou
     post(`/api/groups/${group.id}/read`, threadId, task?.updatedAt ?? 0, "seen");
   }
   if (group.tasks) group.unread = group.tasks.some((task) => task.unread);
-  else if (shown && shown !== restoredUnread) group.unread = false;
+  else if (shown && !restoredUnread.has(shown)) group.unread = false;
 }

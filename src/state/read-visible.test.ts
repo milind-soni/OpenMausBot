@@ -213,6 +213,26 @@ describe("a conversation a reloaded page put back on screen unread", () => {
     expect(page.shownChatHeldUnread(showing("main")), "the person opening it ends the hold").toBe(false);
   });
 
+  it("still holds the restored conversation when the launch move fails and the page shows it again", async () => {
+    const page = await reloaded();
+    page.holdRestoredUnread(showing("side"));
+    page.launchNavigation(() => page.holdMarkedUnread({ type: "switchTask", botId: "bot", threadId: "main" }, showing("side")));
+    expect(page.shownChatHeldUnread(showing("side"))).toBe(true);
+    const read: string[] = [];
+    page.markVisibleBotThreadsRead(showing("side"), { id: "bot", unread: true, tasks } as unknown as BotAnnouncement, true, (_path, threadId) => read.push(threadId));
+    expect(read).toEqual([]);
+  });
+
+  it("tags only the page's own launch switch, which the server then leaves unseen", async () => {
+    const page = await reloaded();
+    const move = { type: "switchTask", botId: "bot", threadId: "main" } as const;
+    let tagged: unknown;
+    page.launchNavigation(() => { tagged = page.launchTagged(move); });
+    expect(tagged).toEqual({ ...move, auto: true });
+    expect(page.launchTagged(move)).toBe(move);
+    expect(page.launchTagged({ type: "select", id: "bot" } as never)).toEqual({ type: "select", id: "bot" });
+  });
+
   it("keeps a bot announced without its conversations unread when a thread beside it is read", async () => {
     const page = await reloaded();
     const state = { selectedId: "bot", activeView: "chat", groups: [], forkPanel: { kind: "bot", ownerId: "bot", threadId: "fork" },
