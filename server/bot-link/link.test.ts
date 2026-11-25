@@ -27,7 +27,7 @@ import { EXCHANGE_BYTES, LINK_EXPIRES_MS, PAIR_PATH, STATE_PATH, SYNC_PATH, link
 const CLOUD = peerKey("cloud-environment"), COMPUTER = peerKey("computer-environment");
 const onCloud = (id: string) => linkedId(CLOUD, id), onComputer = (id: string) => linkedId(COMPUTER, id);
 
-type Bot = { id: string; name: string; hidden?: boolean; paused?: boolean; movedTo?: { team: { id: string; name: string }; state: "moving" | "moved" } };
+type Bot = { id: string; name: string; hidden?: boolean; paused?: boolean; farWorkRefused?: string; movedTo?: { team: { id: string; name: string }; state: "moving" | "moved" } };
 type Run = (node: HandoffView, resumed: boolean, signal: AbortSignal) => Promise<HostTurnResult>;
 
 const until = async (what: () => boolean, label: string, ms = 8_000) => {
@@ -104,7 +104,7 @@ function place(label: string, bots: Bot[], version?: number) {
       personName: () => "Sam", line: (_threadId, key, params) => `${key} ${params.bot ?? params.bots}${params.place ? ` [${params.place}]` : ""}`, follow: (_groupId, _threadId, speaker, text, hop) => { followed.push(`${speaker.name} at ${hop}: ${text}`); } });
     link = createBotLink({
       rooms, directoryChanged: () => { directoryChanges += 1; rooms.sync(); },
-      dataDir: dir, coordinator: () => coordinator, bots: () => bots, bot: (id) => bots.find((bot) => bot.id === id), level: () => "full", paused: (bot) => Boolean((bot as Bot).paused),
+      dataDir: dir, coordinator: () => coordinator, bots: () => bots, bot: (id) => bots.find((bot) => bot.id === id), level: () => "full", paused: (bot) => Boolean((bot as Bot).paused), acceptRefusal: (bot) => (bot as Bot).farWorkRefused ?? null,
       ...(options.tell ? { tellAfterMs: options.tell.afterMs, tellWithinMs: options.tell.withinMs } : {}),
       openThread: (bot, title, opener, brief) => { const id = `${bot.id}-work-${++openedCount}`; threads.add(id); opened.push({ threadId: id, title, from: opener.name, brief }); return id; },
       hasThread: (_botId, threadId) => threads.has(threadId), personName: () => "Sam",
@@ -436,6 +436,19 @@ describe("the link between a computer and its Cloud", () => {
     await until(() => computer.runs.some((run) => run.text === "FYI: the numbers changed"), "the notice arrives");
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(cloud.results).toHaveLength(1);
+  });
+
+  it("a bot that cannot take work from the other place now refuses it as it arrives, and the other place is not told it is paused", async () => {
+    const { computer, cloud } = await two();
+    computer.bots.find((bot) => bot.id === "local-writer")!.farWorkRefused = "This bot's AI can't work on this computer without running commands.";
+    computer.link.botsChanged();
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    expect(cloud.link.linked().find((one) => one.bot.id === "local-writer")?.bot.paused).toBeUndefined();
+    await cloud.handOff("cloud-analyst", call(["Writer"], "Draft the summary"));
+    await until(() => cloud.results.length === 1, "the Cloud hears the refusal");
+    expect(cloud.results[0]).toMatchObject({ name: "Writer (Sam's Mac)" });
+    expect(String(cloud.results[0]!.result)).toContain("without running commands");
+    expect(computer.runs).toHaveLength(0);
   });
 
   it("a hand-off that arrives twice runs once, and a result that arrives twice resumes once", async () => {
