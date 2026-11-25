@@ -55,6 +55,7 @@ export function useComposerThreadCommand({ text, botId, threadId, mainThreadId, 
   const confirmDelete = () => {
     if (!botId) return;
     setConfirming(false);
+    if (busy) { dispatch({ type: "error", message: t("composer.command.deleteBusy") }); return; }
     onCleared();
     nextThread();
     dispatch({ type: "deleteTask", botId, threadId });

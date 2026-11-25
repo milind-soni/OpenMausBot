@@ -203,6 +203,18 @@ describe("the / menu in the composer", () => {
     expect(document.body.querySelector('[role="alertdialog"]')).toBeNull();
   });
 
+  it("rechecks busy when the delete is confirmed", () => {
+    const input = fill("/delete");
+    press(input, "Enter");
+    flushSync(() => root.render(createElement(Composer, { bot: { ...bot, busy: true } })));
+    const dialog = document.body.querySelector('[role="alertdialog"]')!;
+    const confirm = [...dialog.querySelectorAll("button")].find((button) => button.textContent === "Delete thread")!;
+    flushSync(() => confirm.click());
+    expect(dispatch).toHaveBeenCalledWith({ type: "error", message: "Stop this conversation before deleting it." });
+    expect(dispatch.mock.calls.some(([action]) => action.type === "deleteTask")).toBe(false);
+    expect(container.querySelector("textarea")!.value).toBe("/delete");
+  });
+
   it("refuses /archive while a turn runs, and keeps the command in place", () => {
     flushSync(() => root.render(createElement(Composer, { bot: { ...bot, busy: true } })));
     const input = fill("/archive");
