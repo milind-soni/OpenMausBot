@@ -67,7 +67,8 @@ export function useComposerDictation({ draftId, text, onText }: {
       } else if (code === 1) {
         // A refused permission comes with a way to the pane that grants it.
         setSpeechError(message ?? (reason === "speech-not-authorized" ? withOpenSettings(t("composer.dictation.permission"), "speech")
-          : t(reason === "dictation-disabled" ? "composer.dictation.disabled" : "composer.dictation.failed")));
+          : t(reason === "dictation-disabled" ? "composer.dictation.disabled"
+            : reason === "speech-language-missing" ? "composer.dictation.languageMissing" : "composer.dictation.failed")));
       }
     });
     void bridge.speechStart().catch(() => {

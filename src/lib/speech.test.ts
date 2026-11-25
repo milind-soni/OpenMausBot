@@ -3,7 +3,8 @@ import { DEEPSEEK_RECORDING_MAX_MS } from "../../shared/deepseek-voice";
 import type { ConfigStatus } from "@/state/store";
 import { cacheDesktopCapabilities, initialDesktopCapabilities } from "./desktop";
 import { createEndpointer, fishSpeech } from "./fish-speech";
-import { CALL_ENDPOINT_MS, fishListeningReady, listensHere, missingListenKey, recordsClips, scribeChosen, speechBridge } from "./speech";
+import { t } from "./i18n";
+import { CALL_ENDPOINT_MS, callSpeechEndNote, fishListeningReady, listensHere, missingListenKey, recordsClips, scribeChosen, speechBridge } from "./speech";
 
 const withDictation = (dictation: DesktopCapabilities["dictation"]): DesktopCapabilities =>
   ({ ...initialDesktopCapabilities(), dictation });
@@ -171,5 +172,22 @@ describe("CALL_ENDPOINT_MS", () => {
   it("still ends the turn once the person has stopped speaking", () => {
     expect(CALL_ENDPOINT_MS).toBeLessThanOrEqual(2_500);
     expect(run(CALL_ENDPOINT_MS, CALL_ENDPOINT_MS + FRAME)).toBe("done");
+  });
+});
+
+describe("call speech-end note", () => {
+  it("tells a call without a recognizer for the language to add a listening key, not to use Windows voice typing", () => {
+    const note = t(callSpeechEndNote("speech-language-missing"));
+    expect(note).toContain("Fish Audio");
+    expect(note).not.toContain("Windows key + H");
+    expect(note).not.toBe(t("composer.dictation.failed"));
+  });
+
+  it("keeps the other helper reasons' notes", () => {
+    expect(callSpeechEndNote("helper-build-failed")).toBe("call.turns.helperBuildFailed");
+    expect(callSpeechEndNote("dictation-disabled")).toBe("composer.dictation.disabled");
+    expect(callSpeechEndNote("speech-not-authorized")).toBe("call.turns.speechNotAuthorized");
+    expect(callSpeechEndNote("helper-start-failed")).toBe("composer.dictation.failed");
+    expect(callSpeechEndNote(undefined)).toBe("composer.dictation.failed");
   });
 });
