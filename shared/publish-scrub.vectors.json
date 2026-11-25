@@ -216,18 +216,33 @@
     }
   },
   {
-    "name": "the person's own names, whole words only",
-    "input": "Written by Jane Doe (janedoe). Janedoes and jane stay.",
+    "name": "the person's own names: a full name anywhere, one word only as a handle or a folder",
+    "input": "Written by Jane Doe (@janedoe, /srv/janedoe/x, janedoe@host). janedoe wrote it; janedoes and jane-helper stay.",
     "names": [
       "janedoe",
       "Jane Doe"
     ],
-    "output": "Written by <name> (<name>). Janedoes and jane stay.",
+    "output": "Written by <name> (@<name>, /srv/<name>/x, <name>@host). janedoe wrote it; janedoes and jane-helper stay.",
     "counts": {
       "paths": 0,
       "emails": 0,
       "phones": 0,
       "names": 2,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "a one-word name that is an ordinary word stays in prose",
+    "input": "It will mark the rose. Ask @will or open ~will/notes.",
+    "names": [
+      "will"
+    ],
+    "output": "It will mark the rose. Ask @<name> or open ~<name>/notes.",
+    "counts": {
+      "paths": 0,
+      "emails": 0,
+      "phones": 0,
+      "names": 1,
       "secrets": 0
     }
   },

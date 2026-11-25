@@ -67,7 +67,7 @@ export interface ShareHostDeps {
   /** The person's own names here (this computer's user name, the profile's name): taken out of what a template carries
    * unless one is the name it is published under. */
   personNames?(): ReadonlyArray<string | undefined>;
-  /** What "Published by" starts with: the profile's name, where the profile is one person's. */
+  /** The name "Published by" most likely holds (the profile's), kept in the text a template is made with. */
   suggestedCredit?(): string | undefined;
   /** Re-draws a template card already in a conversation. */
   patch(threadId: string, messageId: string, text: string, card: TemplateCard): void;
@@ -309,7 +309,6 @@ export function createShareHost(deps: ShareHostDeps) {
   const cardOf = (record: TemplateRecord, document?: PackageDocument): TemplateCard => {
     const pkg = document?.package;
     const fallback = record.status === "draft" || record.status === "failed" ? deps.publisher.availability() : null;
-    const credit = record.author ?? deps.suggestedCredit?.();
     return {
       id: record.id,
       scope: record.scope,
@@ -325,7 +324,7 @@ export function createShareHost(deps: ShareHostDeps) {
       redacted: record.redacted,
       ...(anyScrubbed(record.scrubbed) ? { scrubbed: record.scrubbed } : {}),
       ...(record.secret ? { secret: true } : {}),
-      ...(credit !== undefined ? { author: credit } : {}),
+      ...(record.author !== undefined ? { author: record.author } : {}),
       ...(record.status === "published" && record.author ? { publishedBy: record.author } : {}),
       skipped: record.skipped,
       status: record.status,
@@ -499,6 +498,7 @@ export function createShareHost(deps: ShareHostDeps) {
       const record = records.get(id);
       if (!record || record.status === "gone") throw new ShareError("This template was deleted.", 404);
       if (record.status === "publishing") return lastCards.get(id) ?? cardOf(record);
+      if (deps.publisher.availability()) return update(record, { status: "draft", error: undefined });
       const credit = options.author ?? record.author ?? "";
       let document: PackageDocument, counts: ScrubCounts;
       try {
@@ -515,7 +515,7 @@ export function createShareHost(deps: ShareHostDeps) {
       const bytes = Object.values(files).reduce((sum, value) => sum + (typeof value === "string" ? Buffer.byteLength(value) : value.byteLength), 0);
       if (Object.keys(files).length > COMMUNITY_MAX_FILES) return update(record, { status: "failed", error: `A template can have at most ${COMMUNITY_MAX_FILES} files.` }, document);
       if (bytes > COMMUNITY_MAX_BYTES) return update(record, { status: "failed", error: "This template is bigger than 4 MB. Leave out large pictures or skills, then publish again." }, document);
-      update(record, { status: "publishing", error: undefined, author: credit, scrubbed }, document);
+      update(record, { status: "publishing", error: undefined, scrubbed, ...(options.author === undefined ? {} : { author: options.author }) }, document);
       const result = await deps.publisher.submit({
         slug: record.slug,
         files: Object.fromEntries(Object.entries(files).map(([path, value]) => [path, typeof value === "string" ? value : { base64: Buffer.from(value).toString("base64") }])),

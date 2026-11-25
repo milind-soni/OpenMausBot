@@ -9,12 +9,16 @@ import type { Message } from "@/state/store";
 
 const dispatch = vi.fn();
 const api = vi.fn(async (_path: string, _init?: RequestInit): Promise<unknown> => ({ ok: true }));
-const place: { state: { config?: { team?: { id: string; name: string } } }; admin: boolean | null } = { state: {}, admin: null };
+const place: { state: { config?: { team?: { id: string; name: string }; profile?: { name?: string } } }; admin: boolean | null; own: boolean } = { state: {}, admin: null, own: true };
 vi.mock("@/state/store", async () => {
   const { createContext } = await import("react");
   return { StoreContext: createContext(null), useStore: () => ({ state: place.state, dispatch }), api: (path: string, init?: RequestInit) => api(path, init) };
 });
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => place.admin }));
+vi.mock("@/lib/session", () => ({
+  readSessionState: async () => ({ kind: "loopback" }),
+  profileForSession: (profile: { name?: string } | undefined, session: unknown) => (session && place.own ? profile : undefined),
+}));
 const openExternalLink = vi.fn(async (_url: string) => {});
 vi.mock("@/lib/app-links", () => ({ openExternalLink: (url: string) => openExternalLink(url) }));
 const { TemplateChatCard, TemplateDetailsBody } = await import("./TemplateCard");
@@ -37,7 +41,7 @@ function render(card: TemplateCard) {
 }
 const button = (container: HTMLElement, label: string) => [...container.querySelectorAll("button")].find((each) => each.textContent?.trim() === label);
 
-afterEach(() => { vi.clearAllMocks(); delete (window as { ogb?: unknown }).ogb; place.state = {}; place.admin = null; document.body.innerHTML = ""; });
+afterEach(() => { vi.clearAllMocks(); delete (window as { ogb?: unknown }).ogb; place.state = {}; place.admin = null; place.own = true; document.body.innerHTML = ""; });
 
 describe("a template's chat card", () => {
   it("shows a draft with its counts, Publish and Details, and says nothing private travels", () => {
@@ -132,6 +136,26 @@ describe("a template's chat card", () => {
       await vi.waitFor(() => expect(container.querySelector("[data-template-published-by]")?.textContent).toBe("Published by Sam Rivera"));
       expect(container.querySelector("[data-template-author]")).toBeNull();
     } finally { unmount(); }
+  });
+
+  it("starts Published by with the person's own profile name, never someone else's, and a cleared one stays cleared", async () => {
+    place.state = { config: { profile: { name: "Sam Rivera" } } };
+    const own = render(draft);
+    try {
+      await vi.waitFor(() => expect(own.container.querySelector<HTMLInputElement>("[data-template-author]")!.value).toBe("Sam Rivera"));
+    } finally { own.unmount(); }
+    place.own = false;
+    const shared = render(draft);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(shared.container.querySelector<HTMLInputElement>("[data-template-author]")!.value).toBe("");
+    } finally { shared.unmount(); }
+    place.own = true;
+    const cleared = render({ ...draft, author: "" });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(cleared.container.querySelector<HTMLInputElement>("[data-template-author]")!.value).toBe("");
+    } finally { cleared.unmount(); }
   });
 
   it("names nobody on a published card credited to the community", () => {

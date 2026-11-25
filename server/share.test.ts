@@ -261,12 +261,12 @@ describe("publishing without the person's details", () => {
     let sent: unknown = null;
     const { share } = host({ bots: [clean()], suggestedCredit: "Jane Doe", submit: async (submission) => { sent = submission; return ok; } });
     const made = share.export({ scope: "bot", bot: clean() }, []);
-    expect(made.card.author).toBe("Jane Doe");
+    expect(made.card.author).toBeUndefined();
     expect(frontmatter(readFileSync(join(made.dir, "bot.md"), "utf8")).author).toEqual({ name: "Community" });
     const published = await share.publish(made.card.id, { author: "Jane D." });
     expect(frontmatter(botFile(sent)).author).toEqual({ name: "Jane D." });
     expect(published).toMatchObject({ status: "published", publishedBy: "Jane D.", author: "Jane D." });
-    await share.publish(made.card.id);
+    expect((await share.publish(made.card.id)).author).toBe("Jane D.");
     expect(frontmatter(botFile(sent)).author).toEqual({ name: "Jane D." });
     const cleared = await share.publish(made.card.id, { author: "" });
     expect(frontmatter(botFile(sent)).author).toEqual({ name: "Community" });
@@ -283,14 +283,14 @@ describe("publishing without the person's details", () => {
 
   it("takes out the person's user name, and their profile name unless they publish under it", async () => {
     let sent: unknown = null;
-    const helper = clean({ description: "Made by Jane Doe on janedoe's laptop for root." });
+    const helper = clean({ description: "Made by Jane Doe on ~janedoe/laptop for root, and janedoe will know." });
     const { share } = host({ bots: [helper], personNames: ["janedoe", "Jane Doe"], suggestedCredit: "Jane Doe", submit: async (submission) => { sent = submission; return ok; } });
     const made = share.export({ scope: "bot", bot: helper }, []);
     expect(made.card.scrubbed).toEqual({ paths: 0, emails: 0, phones: 0, names: 1 });
     await share.publish(made.card.id, { author: "Jane Doe" });
-    expect(frontmatter(botFile(sent)).agents[0].description).toBe("Made by Jane Doe on <name>'s laptop for root.");
+    expect(frontmatter(botFile(sent)).agents[0].description).toBe("Made by Jane Doe on ~<name>/laptop for root, and janedoe will know.");
     const card = await share.publish(made.card.id, { author: "JD" });
-    expect(frontmatter(botFile(sent)).agents[0].description).toBe("Made by <name> on <name>'s laptop for root.");
+    expect(frontmatter(botFile(sent)).agents[0].description).toBe("Made by <name> on ~<name>/laptop for root, and janedoe will know.");
     expect(card.scrubbed).toEqual({ paths: 0, emails: 0, phones: 0, names: 2 });
   });
 

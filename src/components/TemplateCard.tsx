@@ -12,6 +12,7 @@ import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { addToTeamTemplates, askBot, countsLine, creditShown, deleteTemplate, githubConnection, publishTemplate, publishToRepo, saveTemplateFolder, scrubbedLine, templateDetails } from "@/lib/template-share";
+import { profileForSession, readSessionState, type SessionState } from "@/lib/session";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useModalDialog } from "@/hooks/use-modal-dialog";
 import { useStore, type Message } from "@/state/store";
@@ -82,6 +83,18 @@ export function TemplateCardBody({ card }: { card: TemplateCard }) {
   );
 }
 
+/** The profile's name when the profile is this person's own (not a shared workspace's owner's). */
+function useOwnProfileName(): string {
+  const { state } = useStore();
+  const [session, setSession] = useState<SessionState | null>(null);
+  useEffect(() => {
+    let live = true;
+    void readSessionState().then((next) => { if (live) setSession(next); });
+    return () => { live = false; };
+  }, []);
+  return profileForSession(state.config?.profile, session)?.name?.trim() ?? "";
+}
+
 /** What the card's buttons do. The card shown is the latest the server answered, until the message brings a newer one. */
 export function useTemplateActions(initial: TemplateCard) {
   const [card, setCard] = useState(initial);
@@ -89,9 +102,10 @@ export function useTemplateActions(initial: TemplateCard) {
   const [error, setError] = useState("");
   const [saved, setSaved] = useState<string | null>(null);
   const [teamNote, setTeamNote] = useState<string | null>(null);
-  const [author, setAuthor] = useState(initial.author ?? "");
+  const profileName = useOwnProfileName();
+  const [typed, setAuthor] = useState<string | null>(null);
+  const author = typed ?? card.author ?? profileName;
   useEffect(() => setCard(initial), [initial]);
-  useEffect(() => setAuthor(initial.author ?? ""), [initial.id, initial.author]);
   const run = async (kind: NonNullable<typeof busy>, work: () => Promise<void>) => {
     if (busy) return;
     setBusy(kind);

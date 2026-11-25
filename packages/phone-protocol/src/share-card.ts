@@ -28,7 +28,7 @@ export interface TemplateCard {
   scrubbed?: { paths: number; emails: number; phones: number; names: number };
   /** It holds something key- or token-shaped: Publish is refused until the template is made again without it. */
   secret?: boolean;
-  /** What the "Published by" field starts with: the name it was last published under, else the profile's name. */
+  /** The name last typed into "Published by" ("" when it was cleared); left out until someone publishes it. */
   author?: string;
   /** The name it was published under; left out for none ("Community"). */
   publishedBy?: string;

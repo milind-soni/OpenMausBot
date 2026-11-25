@@ -159,13 +159,16 @@ export function personalNames(candidates: ReadonlyArray<string | null | undefine
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+/** A full name anywhere in the text. One word (a user name, a first name) may also be an ordinary word, so it goes only
+ * where it is a handle or a folder: after `@`, `~`, `/` or `\`, or before `/`, `\` or `@`. Never inside a longer word
+ * or an identifier: `jane-helper` keeps its name. */
 function scrubNames(text: string, names: readonly string[], found: Found): string {
   let out = text;
   for (const name of names) {
     const words = name.split(" ").map(escapeRegExp).join("\\s+");
-    // Not inside a longer word or an identifier: `jane-helper` keeps its name.
-    const pattern = new RegExp(`(?<![\\p{L}\\p{N}_-])${words}(?![\\p{L}\\p{N}_-])`, "giu");
-    out = out.replace(pattern, () => take(found, "names", name.toLowerCase(), SCRUB_MARKS.name));
+    const alone = `(?<![\\p{L}\\p{N}_-])${words}(?![\\p{L}\\p{N}_-])`;
+    const pattern = name.includes(" ") ? alone : `(?<=[@~/\\\\])${words}(?![\\p{L}\\p{N}_-])|${alone}(?=[/\\\\@])`;
+    out = out.replace(new RegExp(pattern, "giu"), () => take(found, "names", name.toLowerCase(), SCRUB_MARKS.name));
   }
   return out;
 }
