@@ -113,6 +113,7 @@ beforeAll(async () => {
     const path = String(input).replace(/\?.*$/, "");
     if (path === "/api/bots") return json({ bots: Array.from({ length: 12 }, (_, i) => ({ ...announced(i), messages: [] })), groups: [] });
     if (path in answers) return json(answers[path]);
+    if (/^\/api\/bots\/[^/]+\/memory\/file$/.test(path)) return json({ path: "MEMORY.md", text: "" });
     return /^\/api\/bots\/[^/]+\/overview$/.test(path) ? missing() : json({});
   });
   const container = document.createElement("div");

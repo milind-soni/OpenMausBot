@@ -3854,7 +3854,6 @@
   "botPanel.folder.ownHint": "이 컴퓨터의 다른 것은 건드리지 않아요",
   "botPanel.folder.pick": "직접 고른 폴더",
   "botPanel.folder.pickHint": "바탕화면, 프로젝트, 다운로드",
-  "botPanel.tryAsking": "이렇게 물어보세요",
   "computer.simple.dest.letItChoose": "알아서 고르게 하기",
   "botSettings.visibility.title": "볼 수 있는 사람",
   "botSettings.sections.overview": "개요",
