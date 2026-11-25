@@ -125,6 +125,9 @@ export interface BotLinkDeps {
   bot(id: string): LocalBot | null | undefined;
   /** Why this bot takes no work now (it moved away, it is paused), or null. */
   refusal?(bot: LocalBot): string | null;
+  /** Why this bot cannot take work from the other place now, though it takes other work (its engine cannot be held to
+   * what such work may do here): asked only as a hand-off arrives, never part of what the other places are told. */
+  acceptRefusal?(bot: LocalBot): string | null;
   model?(bot: LocalBot): string | undefined;
   level(bot: LocalBot): Level;
   /** Opens the thread another place's work runs in, and returns its id. */
@@ -506,7 +509,7 @@ export function createBotLink(deps: BotLinkDeps) {
     const refuse = (text: string) => { state!.work[frame.id] = work; recordResult(frame.id, { ok: false, text, outcome: "refused" }); };
     const bot = deps.bot(frame.to);
     if (!bot || bot.hidden) return refuse("That bot is no longer here.");
-    const refusal = deps.refusal?.(bot);
+    const refusal = deps.refusal?.(bot) ?? deps.acceptRefusal?.(bot);
     if (refusal) return refuse(refusal);
     const coordinator = deps.coordinator();
     try {
