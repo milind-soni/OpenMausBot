@@ -366,6 +366,24 @@
       }
     },
     {
+      "name": "set_main_thread",
+      "description": "Set your main thread (where your automations and briefs report) to one of your own open threads, or clear it back to the default. Only when the person or your instructions ask. Not a teammate's, room's, automation run's or archived thread.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread_id": {
+            "type": "string",
+            "description": "From list_threads or start_thread; default: this thread."
+          },
+          "clear": {
+            "type": "boolean",
+            "description": "true: clear the choice instead."
+          }
+        }
+      }
+    },
+    {
       "name": "run_workflow",
       "description": "Run a saved Skill Burger exactly, without redoing it by hand: when the person writes /<its-name> or asks for what one does. Fill args from their request. It hands back only steps that need your judgement; do them, then call again with resume and response.",
       "inputSchema": {

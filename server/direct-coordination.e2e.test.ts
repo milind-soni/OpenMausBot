@@ -550,6 +550,30 @@ it("lets a bot rename only the thread it is working in", () => fixture(async f =
   expect(renamed.title).not.toBe(before);
 }), 45_000);
 
+it("lets a bot make one of its own threads its main thread, never a teammate's", () => fixture(async f => {
+  const mainOf = async (botId: string) => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === botId).mainThreadId;
+  const leadMain = await mainOf(f.lead.id);
+  const daily = (await f.api(`/api/bots/${f.chief.id}/tasks`, { title: "Daily brief 25 Nov" })).task.threadId;
+  expect(await mainOf(f.chief.id)).not.toBe(daily);
+  f.plan[f.chief.id] = {
+    steps: [
+      { tool: "set_main_thread", arguments: { thread_id: f.lead.activeTaskId }, expectError: true },
+      { tool: "set_main_thread", arguments: { thread_id: daily } },
+    ],
+    reply: "Today's brief is the main thread",
+  };
+  f.save();
+  await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Make today's brief thread your main thread.");
+  expect((await f.wait()).status).toBe("settled");
+  const steps = f.evidence().at(-1).evidence.filter((entry: any) => entry.step?.tool === "set_main_thread");
+  expect(steps).toHaveLength(2);
+  expect(steps[0].response.result.isError).toBe(true);
+  expect(steps[1].response.result.isError).toBeFalsy();
+  expect(steps[1].response.result.content[0].text).toContain("#Daily brief 25 Nov is now your main thread");
+  expect(await mainOf(f.chief.id)).toBe(daily);
+  expect(await mainOf(f.lead.id)).toBe(leadMain);
+}), 45_000);
+
 it("does not treat self-opened work or an abandoned human branch as new human authority", () => fixture(async f => {
   await f.api("/api/config", { threads: { maxConcurrentPerBot: 1 } }, "PUT");
   const room = (await f.cli("new-channel", "--name", "Updates", "--members", f.chief.id, "--section", "Leadership")).channel;

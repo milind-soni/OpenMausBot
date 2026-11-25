@@ -28,7 +28,7 @@ export const OWN_SWITCH_TOOLS: Readonly<Record<"memory" | "research", ReadonlySe
 export const CORE_TOOLS: ReadonlySet<string> = new Set([
   "tool_result_read", "list_shared_computers", "shared_computer", "ask_for_computer", "list_room_targets", "coordinate_bots",
   "assignment_status", "list_bots", "usage_limits", "list_rooms", "select_computer", "reset_cloud_computer", "list_threads",
-  "close_thread", "rename_thread", "start_thread", "burst", "list_models", "vm_exec", "attach_file", "show_widget", "create_options_card",
+  "close_thread", "rename_thread", "set_main_thread", "start_thread", "burst", "list_models", "vm_exec", "attach_file", "show_widget", "create_options_card",
   "post_to_room", "post_to_thread", "create_bot", "list_team_setup", "list_team_library", "propose_team_setup",
   "propose_bot_deletion", "manage_room", "request_credential", "request_sign_in", "fill_login", "send_voice_note", "decide",
   "extract", "what_changed", "message_person", "report_bug", "retry_thread", "session_search", "trigger_info", "trigger", "delete_trigger",

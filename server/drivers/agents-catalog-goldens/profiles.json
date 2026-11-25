@@ -1,7 +1,7 @@
 {
   "default": {
-    "bytes": 61786,
-    "sha256": "8fef28ec7f165f998038c3a8527d918f90451428fddde67b0ae99e27b0e1da81",
+    "bytes": 62323,
+    "sha256": "87d6882fb150c5869f158f13202eb26e29dd95c1bfd85e8fea8b7a6b76dbf949",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -14,6 +14,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -61,8 +62,8 @@
     ]
   },
   "voice": {
-    "bytes": 62567,
-    "sha256": "1948ed35962d65c153fc7b70fc10edfecc1bbe9656cb4936290a24ff4d778e8e",
+    "bytes": 63104,
+    "sha256": "7a19846ea64f40fcf91cc78bb10efc4f1be2752a793e2c9ed524e8ec080d6d54",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -75,6 +76,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -123,8 +125,8 @@
     ]
   },
   "shared": {
-    "bytes": 64051,
-    "sha256": "5fee3bb2f5bd2d4bd3bab89f271d6ace0974e079123e4f170a33e14601996658",
+    "bytes": 64588,
+    "sha256": "5c43ffa10b648a994c182154bec1e12213c1a9733a4e6adf3c4cc1578f8bf28d",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -139,6 +141,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -186,8 +189,8 @@
     ]
   },
   "shared+voice": {
-    "bytes": 64832,
-    "sha256": "039c3f04aadb4effcfd6b64d78ecd9a36af2e225510946ba209d63cbdd59b78c",
+    "bytes": 65369,
+    "sha256": "fba0ae5823cc1d3402d7c6c2aab0b7e9cbbb08fab5eaeee00fc2c3ba14204d2a",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -202,6 +205,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -250,8 +254,8 @@
     ]
   },
   "skills": {
-    "bytes": 64107,
-    "sha256": "0ad12e265ac85405907bd6d6104c5c20f9092214825bcb2dde2c0422a669909c",
+    "bytes": 64644,
+    "sha256": "fd4b07f0e7e145dceac494517c1471f8d9a2f4e940406e693f8812090a0365ff",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -264,6 +268,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -313,8 +318,8 @@
     ]
   },
   "skills+voice": {
-    "bytes": 64888,
-    "sha256": "e84aeed89ce0cdd04ea43737a998c0b55d8db4e7d9733aa5e27bb32b47b057e0",
+    "bytes": 65425,
+    "sha256": "f91c67e51d44316235a684ec22aed02c3054136366358e9773d8ad93e1257f00",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -327,6 +332,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -377,8 +383,8 @@
     ]
   },
   "skills+shared": {
-    "bytes": 66372,
-    "sha256": "e25daba241a351ae01af6302b5145e040aa671826ea9ef385cf5009298599d0c",
+    "bytes": 66909,
+    "sha256": "c275753bb34e402d6330f1f24bc3a79fa5c56bbeadcf0b21235cb4f238377ca5",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -393,6 +399,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -442,8 +449,8 @@
     ]
   },
   "skills+shared+voice": {
-    "bytes": 67153,
-    "sha256": "caa48eaf2e1f91de824d9557dba3fe3f9cc25ccc59f4a8ae8c1228c7ff413299",
+    "bytes": 67690,
+    "sha256": "2b58e5ff03cdeb465a79955999a0cf12f38fb582702cff8a66f590fae7ff3057",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -458,6 +465,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -508,8 +516,8 @@
     ]
   },
   "non-chief": {
-    "bytes": 53238,
-    "sha256": "11dcbe1b650b5594fcb8dee761821311d641a4f764db68d2359a6a516b1d753b",
+    "bytes": 53775,
+    "sha256": "bba69b5afe74a6dcf8f8ee72627dde842dc07b9994ba2148b287691bd9962242",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -522,6 +530,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -562,8 +571,8 @@
     ]
   },
   "voice+non-chief": {
-    "bytes": 54019,
-    "sha256": "fd0da22b8fb6e5bbb75598c4f4a95c948ce62afd002141633d019cbc18d318ff",
+    "bytes": 54556,
+    "sha256": "a7d4165e510a4a043c2af337e7fea14f631db51d96750b38c88102febd960e03",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -576,6 +585,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -617,8 +627,8 @@
     ]
   },
   "shared+non-chief": {
-    "bytes": 55503,
-    "sha256": "00c4719ede4cffa7021c6c0b0c3b46bcc9608039273d09771ec889eb26e07509",
+    "bytes": 56040,
+    "sha256": "8a49c4eb65c26e38f10a4b24dd04bf96ee1900e2a8f13b00f68fdfa917d30f63",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -633,6 +643,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -673,8 +684,8 @@
     ]
   },
   "shared+voice+non-chief": {
-    "bytes": 56284,
-    "sha256": "7d92acda7ea804a5d65e19091a344fb4b344281e0effc820fbaf90e7362bc876",
+    "bytes": 56821,
+    "sha256": "cb486b2cd3818282f96b34ba9d649e5b2496e963033033b148352a65a3f395e0",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -689,6 +700,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -730,8 +742,8 @@
     ]
   },
   "skills+non-chief": {
-    "bytes": 55559,
-    "sha256": "9d0db5a1281674176c149076c3ad9588c9f92c16d090a0f6a7506a5fe2a79fd4",
+    "bytes": 56096,
+    "sha256": "f649b1c22e94b7711dea938524ad7f88c01af5f8ff39991a772ef7e192e8e9ad",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -744,6 +756,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -786,8 +799,8 @@
     ]
   },
   "skills+voice+non-chief": {
-    "bytes": 56340,
-    "sha256": "bd714c1109b6f44e247357e3b8ec3670d92e733284d4c0571f839d6f227a7cdc",
+    "bytes": 56877,
+    "sha256": "c60775e81e9ad088bbcb8a8bff4c13e5401bb2d4c4f3a1217b8a1659c0c6653c",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -800,6 +813,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -843,8 +857,8 @@
     ]
   },
   "skills+shared+non-chief": {
-    "bytes": 57824,
-    "sha256": "40fcc5d467598658d14d0bc02680aedcf87feccc5c6359dfcd3f129b7a204377",
+    "bytes": 58361,
+    "sha256": "e7bb6da96836f059992e5bd313ac32d909839c3fcada3515afc3abdddb49465e",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -859,6 +873,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -901,8 +916,8 @@
     ]
   },
   "skills+shared+voice+non-chief": {
-    "bytes": 58605,
-    "sha256": "9ff1c2fedb12487eafbf081e52952d011fa1242e3cb1f1767d40742d9db5a50c",
+    "bytes": 59142,
+    "sha256": "66e12c8aa2052703b94ccca1e6890ea04b46fd577da5a8c44ef91fc5a2ba8202",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -917,6 +932,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -960,8 +976,8 @@
     ]
   },
   "skills+shared+voice+cloud-home": {
-    "bytes": 66909,
-    "sha256": "aac499d8fa351c6c1b5fbd0cb7eef61f0266d61b7e733b20fb029da40276e4f0",
+    "bytes": 67446,
+    "sha256": "7529c8150e31a02bab3674cb72c5dd64924aa979904b0b4c47978b5d21212504",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -976,6 +992,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -1026,8 +1043,8 @@
     ]
   },
   "skills+shared+voice+non-chief+cloud-home": {
-    "bytes": 58361,
-    "sha256": "ad318559aa2da3aa0a99ea8cdc203cdbf7dabfe6959872d601d1ef972c6b29e8",
+    "bytes": 58898,
+    "sha256": "6c5e2b1fa5d09ccb6b5f9280ac4aa25d61097d6c7921fcaa3132570337e11848",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -1042,6 +1059,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -1085,8 +1103,8 @@
     ]
   },
   "skills+shared+voice+x": {
-    "bytes": 70992,
-    "sha256": "62150dcc25e64723a1134bd24c7369b500a2c15d9d3250fb61f3ba6a50c1d42f",
+    "bytes": 71529,
+    "sha256": "a677404e0d6aeda64dcf9c2dc6886dc4036da85dfdf11af4ff8bb164498fea5f",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -1101,6 +1119,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -1155,8 +1174,8 @@
     ]
   },
   "skills+shared+voice+x+team": {
-    "bytes": 70992,
-    "sha256": "62150dcc25e64723a1134bd24c7369b500a2c15d9d3250fb61f3ba6a50c1d42f",
+    "bytes": 71529,
+    "sha256": "a677404e0d6aeda64dcf9c2dc6886dc4036da85dfdf11af4ff8bb164498fea5f",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -1171,6 +1190,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -1225,8 +1245,8 @@
     ]
   },
   "skills+shared+voice+x+team+images": {
-    "bytes": 72939,
-    "sha256": "1be4ad6cd3468c16fec6620a13cb13e7f5f812714312eac507d574866f08fcbf",
+    "bytes": 73476,
+    "sha256": "a51d586d5859f1ad2f60400258e049fbc4ab4d5e3d699b950569d5c3a5e3c4d9",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -1241,6 +1261,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -1297,8 +1318,8 @@
     ]
   },
   "default+legacy-switches": {
-    "bytes": 61786,
-    "sha256": "8fef28ec7f165f998038c3a8527d918f90451428fddde67b0ae99e27b0e1da81",
+    "bytes": 62323,
+    "sha256": "87d6882fb150c5869f158f13202eb26e29dd95c1bfd85e8fea8b7a6b76dbf949",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -1311,6 +1332,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -1358,8 +1380,8 @@
     ]
   },
   "default+mausbot": {
-    "bytes": 62437,
-    "sha256": "e71818d3b029d88915f275d033efd65824bf856f10a42d416d70cb72deca109a",
+    "bytes": 62974,
+    "sha256": "a596e76529177e327b34025663edce9ef7d5f7cbc8d8b20e8de847bdd8ef7963",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -1372,6 +1394,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -1421,8 +1444,8 @@
     ]
   },
   "skills+shared+voice+mausbot": {
-    "bytes": 67804,
-    "sha256": "cbc3d1a39e3f96cf3bcadc25091882f1380143ba2e3489678f8eb9eeb53e1b73",
+    "bytes": 68341,
+    "sha256": "0a46c85bf09acb2e29fc0ef8fb83383b47ab32cddae0fb8714368d33691e1f06",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -1437,6 +1460,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -1489,8 +1513,8 @@
     ]
   },
   "default+no-computer-pick": {
-    "bytes": 60574,
-    "sha256": "caea065b9d1c1136843b9af9e3262b0d1cb2e7577a7a73ce1ab1868e8fdae7b9",
+    "bytes": 61111,
+    "sha256": "11bb12373f54b5abee175005349d898cfa90ee21f3e32acda48f275bce119734",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -1502,6 +1526,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -1650,8 +1675,8 @@
     ]
   },
   "default+images": {
-    "bytes": 63733,
-    "sha256": "55363deedcadebbfe935019cd4ffddb73fd9fa21bcc84eb4387e4fa106f8cbcd",
+    "bytes": 64270,
+    "sha256": "7378051b52449f37cbfadffc313983755b3b76cb89bf7426c7f5d25beae6a499",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -1664,6 +1689,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -1713,8 +1739,8 @@
     ]
   },
   "skills+shared+voice+x+team+images+hosting": {
-    "bytes": 74802,
-    "sha256": "9b730076edcabd4b5b2a1faaa4a17fb89e1e1b627bb519a7d27acf934abd20b4",
+    "bytes": 75339,
+    "sha256": "bb276af9d330efa87f164cd515f4d3a4c42f2d86f2fd34a38dd99ab65e86452a",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -1729,6 +1755,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -1787,8 +1814,8 @@
     ]
   },
   "default+hosting": {
-    "bytes": 63649,
-    "sha256": "08f24e6b0483ffbe58c4b106a223d42df13a00e2765457e988eb5a2ea8c64e13",
+    "bytes": 64186,
+    "sha256": "e55c38b43eea7ebaf7bf642588af0a5ec5a14f1a5772724e85fea2715f239083",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -1801,6 +1828,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
@@ -1850,8 +1878,8 @@
     ]
   },
   "default+tools-off": {
-    "bytes": 57469,
-    "sha256": "1ff600e1d65c11cae40425671f6e35324a78c7eb7b8f74663ed8633c1ef03f6e",
+    "bytes": 58006,
+    "sha256": "7d8d22dd97dcce536346a75bc641184ec314d2d30b138924f04caa0562d7eb09",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -1864,6 +1892,7 @@
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",

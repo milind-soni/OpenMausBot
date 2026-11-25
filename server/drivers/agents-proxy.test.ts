@@ -654,6 +654,7 @@ describe("agents-proxy MCP surface", () => {
       "list_threads",
       "close_thread",
       "rename_thread",
+      "set_main_thread",
       "run_workflow",
       "workflow_edit",
       "start_thread",
