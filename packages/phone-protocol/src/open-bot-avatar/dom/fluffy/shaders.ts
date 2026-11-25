@@ -66,15 +66,20 @@ vec3 bareSurface(vec3 n, vec3 light, float d) {
   // by the normal, not the mirrored view: a flat front face would otherwise swing from sky to
   // ground with every small turn.
   float up = -n.y;
+  // A light body (all three channels high) would mirror the white page: soften its horizon,
+  // narrow its range and darken its rim so it reads as silver, not as a hole in the page.
+  float pale = smoothstep(.62, .92, min(color.r, min(color.g, color.b)));
   float sky = mix(1., .58, smoothstep(.08, .95, up));
   float ground = mix(.46, .68, smoothstep(.12, .95, -up));
-  float surroundings = mix(ground, sky, smoothstep(-.24, .08, up));
+  float surroundings = mix(ground, sky, smoothstep(mix(-.24, -.75, pale), mix(.08, .50, pale), up));
+  surroundings = mix(surroundings, .70, .40 * pale);
   float fresnel = pow(1. - clamp(n.z, 0., 1.), 3.);
-  vec3 tint = mix(color, vec3(1.), .10 + .45 * fresnel);
+  vec3 tint = mix(color, vec3(1.), (.10 + .45 * fresnel) * (1. - .6 * pale));
   vec3 metal = tint * (.14 + .20 * clamp(lambert, 0., 1.) + .90 * surroundings);
   vec3 halfway = normalize(light + vec3(0., 0., 1.));
   float highlight = pow(clamp(dot(n, halfway), 0., 1.), 48.);
-  metal += mix(color, vec3(1.), .75) * (.85 * highlight + .22 * fresnel);
+  metal += mix(color, vec3(1.), .75) * (.85 * highlight + .22 * fresnel * (1. - .7 * pale));
+  metal *= 1. - .28 * pale * fresnel;
   return metal * (1. - .30 * socket);
 }`;
 
