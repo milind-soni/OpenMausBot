@@ -175,7 +175,7 @@ import {
   builtInBrowserEnabled,
   persistableInstanceConfigs,
   type AppConfig,
-  vpsResources, vpsSshAlias,
+  vpsIdleTimeoutMinutes, vpsResources, vpsSshAlias,
   DATA_DIR, EVENTS_DIR,
   onConfigSaved,
   CLAUDE_API_INSTANCE,
@@ -5602,6 +5602,7 @@ const orphanBoatLifecycleBusyIds = new Set<string>();
 const boatInventoryRequestsBusyIds = new Set<string>();
 type RemoteComputerProvider = "box" | "vps";
 const computerProviderConfigTransitions = new Set<RemoteComputerProvider>();
+const vpsIdleMs = () => vpsIdleTimeoutMinutes(cfg) * 60_000;
 const localVmIdleMs = () => localVmIdleTimeoutMinutes(cfg) * 60_000;
 const LOCAL_VM_DESKTOP_WAIT_MS = 90_000;
 const localVmIdles = new Map<string, ComputerIdleTimer>();
@@ -5619,7 +5620,7 @@ function touchVpsIdle(bot: BotRecord): void {
   const inUse = () => activeVpsThreads.has(id) || botHasActiveTurn(id) || Boolean(routines?.activeRunForBot(id))
     || sharedVm.snapshot(id).held || Boolean(vps.vpsDesktopConnection(id)) || computerPreviews.has(id)
     || computerProviderConfigTransitions.has("vps");
-  const timer: ComputerIdleTimer = new ComputerIdleTimer(localVmIdleMs(), () => inUse() || boatLifecycleBusyBots.has(id), async () => {
+  const timer: ComputerIdleTimer = new ComputerIdleTimer(vpsIdleMs(), () => inUse() || boatLifecycleBusyBots.has(id), async () => {
     if (!current()) return;
     const release = claimBotComputerLifecycle(id);
     try {
@@ -11622,6 +11623,7 @@ function configStatus() {
       configured: composio.configured(cfg), mode: composio.connectionMode(cfg),
     },
     box: { ...boat.describeBoatAccount(cfg), ...(boat.boatAccount(cfg)?.included ? {} : keyHint(cfg.box?.token)) },
+    vpsIdle: { timeoutMinutes: vpsIdleTimeoutMinutes(cfg) },
     vps: { configured: Boolean(vpsSshAlias(cfg)), sshAlias: vpsSshAlias(cfg) ?? "", servers: cfg.vpsServers ?? [], ...vpsResources(cfg) },
     opencodeGo: { ...keyStatus(cfg.opencodeGo?.apiKey), providerKeys: Object.keys(openCodeProviderKeys(cfg)) },
     tts: tts.describeVoice(cfg),
@@ -12247,7 +12249,7 @@ const postiz = createPostiz({ cfg: () => cfg, mcpOAuth, persistMcpServers: persi
   sharedComputers, sharedComputerControl, closeBrowser, browserEngineSwitched,
   hostedModels: Boolean(hostedModels),
   cloudHome: Boolean(CLOUD_HOME), cloudTeam: CLOUD_TEAM !== null, sharedMembership,
-  lendingEnabled: () => lendingEnabled() || ownerLends(), providerConfigs, localVmIdleMs, localVmIdles: { *values() { yield* localVmIdles.values(); yield* vpsIdles.values(); } }, localVmActiveThreads, localVmLifecycleBusy,
+  lendingEnabled: () => lendingEnabled() || ownerLends(), providerConfigs, localVmIdleMs, localVmIdles, vpsIdleMs, vpsIdles, localVmActiveThreads, localVmLifecycleBusy,
   localVmImageBusy: { get: () => localVmImageBusy },
   localVmModeChangeBusy: { set: (busy) => { localVmModeChangeBusy = busy; } },
   localVmModeChanging: sharedVm.modeChanging,
