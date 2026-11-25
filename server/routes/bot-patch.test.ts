@@ -301,6 +301,17 @@ describe("PATCH /api/bots/:id vpsAlias relocation guard", () => {
     expect((await patch(bot.id, { vpsAlias: null })).status).toBe(200);
     expect(switched).toEqual(["gamma-vps", undefined]);
   });
+  it("notifies vpsServerSwitched for a committed alias even when the profile save that follows throws", async () => {
+    const switched: Array<string | undefined> = [];
+    const { store, bot, patch } = fixture({
+      vpsServerSwitched: (updated) => { switched.push(updated.vpsAlias); },
+    });
+    vi.spyOn(store, "patchBotProfile").mockImplementation(() => { throw new Error("saveBots failed"); });
+
+    await expect(patch(bot.id, { vpsAlias: "gamma-vps", soul: "New instructions" })).rejects.toThrow("saveBots failed");
+    expect(store.bot(bot.id)?.vpsAlias).toBe("gamma-vps");
+    expect(switched).toEqual(["gamma-vps"]);
+  });
 });
 
 describe("PATCH /api/bots/:id defaultBot: null", () => {
