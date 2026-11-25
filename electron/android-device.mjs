@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { isPhoneTransport } from "./android-transport.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -135,7 +136,7 @@ export function createAndroidDeviceController(options = {}) {
     }
     try {
       const { stdout } = await invoke(binary, ["devices", "-l"]);
-      const devices = parseAdbDevices(stdout).filter((device) => device.connection === "usb");
+      const devices = parseAdbDevices(stdout).filter((device) => isPhoneTransport(device, (options.env ?? process.env).PH_ANDROID_SERIAL));
       const value = { available: true, adbPath: binary, devices };
       cachedStatus = { at: Date.now(), value };
       return value;
@@ -155,7 +156,7 @@ export function createAndroidDeviceController(options = {}) {
     if (typeof serial !== "string" || !serial) throw new Error("An Android device is required");
     const current = await status({ fresh: true });
     const device = current.devices.find((candidate) => candidate.serial === serial);
-    if (!device) throw new Error("That USB Android device is no longer connected");
+    if (!device) throw new Error("That Android device is no longer connected");
     if (device.state !== "device") {
       throw new Error(
         device.state === "unauthorized"

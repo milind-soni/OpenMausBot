@@ -211,6 +211,16 @@ const get = async (served: Fixture, path: string, headers: Record<string, string
 };
 
 describe("the USB phone routes", () => {
+  it("lists and streams the selected wireless phone using its adb serial", async () => {
+    const serial = "adb-EXAMPLE-random._adb-tls-connect._tcp";
+    vi.stubEnv("PH_ANDROID_SERIAL", serial);
+    const served = await serve({ devices: serial + " device model:Pixel" });
+    expect((await get(served, "/api/usb-phones")).body).toMatchObject({ devices: [{ serial, connection: "network" }] });
+    const watching = stream(served, { path: "/api/usb-phones/" + serial + "/stream" });
+    await watching.has(RECORDED.length);
+    expect(watching.messages).toEqual(RECORDED.map(tagged));
+  });
+
   it("are absent while the flag is off, with no adb call and no download, and answer once it is on", async () => {
     const served = await serve({ flag: false });
 

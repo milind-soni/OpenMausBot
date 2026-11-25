@@ -1,15 +1,15 @@
 ---
 name: phone-harness
-description: "Control, inspect, test, or automate a physical Android phone connected to OpenMausBot over authorized USB debugging. Use for explicit Android, USB phone, ADB, mobile-app, tapping, typing, swiping, scrolling, screenshot, or phone-screen requests."
+description: "Control, inspect, test, or automate a physical Android phone connected to OpenMausBot over USB or a configured paired wireless debugging connection. Use for explicit Android, USB phone, ADB, mobile-app, tapping, typing, swiping, scrolling, screenshot, or phone-screen requests."
 ---
 
 # Phone Harness
 
 Use the `phone` tools for every requested Android action. Never replace them
-with Bash, raw `adb`, `subprocess`, an emulator, network ADB, or Tailscale.
+with Bash, raw `adb`, `subprocess`, an emulator, manual network connections, or Tailscale.
 
 1. Call `status` before the first action. If the device is missing or
-   unauthorized, stop and relay the physical setup instruction. Press `wakeup`
+   unauthorized, stop and ask the person to reconnect the USB cable or their configured paired wireless phone. Press `wakeup`
    before the first action; it leaves a screen that is already on as it is. If
    the phone asks for a PIN, pattern, or password, stop and ask the user to
    unlock it.
@@ -24,6 +24,8 @@ with Bash, raw `adb`, `subprocess`, an emulator, network ADB, or Tailscale.
    next few steps, put them in one `batch`, and end the batch where the next
    screen is uncertain, such as after a step that may open a dialog. To wait
    for content to load, add a `wait` step to the batch, not Bash `sleep`.
+
+For an explicitly requested APK installation, use `install_apk` with the APK path relative to the conversation working folder. Verify the installed app with `open_app` or `list_apps`.
 
 The tools operate the user's real phone. Navigate and read only what the task
 needs. Stop before sending, posting, purchasing, booking, deleting, changing

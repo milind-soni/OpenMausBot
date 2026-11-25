@@ -1,3 +1,4 @@
+import { isPhoneTransport } from "../../electron/android-transport.mjs";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 
 import { STREAM_CLOSE } from "../browser/viewers/stream-v2.ts";
@@ -12,7 +13,7 @@ import { PASS, type RouteHandler } from "./table.ts";
 import type { Upgrades } from "./upgrades.ts";
 
 const LIST = "/api/usb-phones";
-const STREAM = /^\/api\/usb-phones\/([\w.-]{1,64})\/stream$/;
+const STREAM = /^\/api\/usb-phones\/([\w.-]{1,128})\/stream$/;
 const MAX_MESSAGE_BYTES = 4 * 1024;
 const MAX_TEXT_LENGTH = 300;
 // scrcpy's touch message carries the video's width and height as 16-bit numbers.
@@ -48,7 +49,7 @@ async function usbPhones(adbPath: string | null): Promise<UsbPhones> {
   if (!adbPath) return { available: false, reasonCode: "adb-unavailable", message: ADB_MISSING, devices: [] };
   try {
     const devices = parseDevices(await runAdb(adbPath, ["devices", "-l"]));
-    return { available: true, devices: devices.filter((device) => device.connection === "usb") };
+    return { available: true, devices: devices.filter((device) => isPhoneTransport(device, process.env.PH_ANDROID_SERIAL)) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { available: false, reasonCode: "adb-failed", message: message.replaceAll(adbPath, "adb"), devices: [] };
@@ -114,6 +115,7 @@ export function createPhoneScreenRoutes(deps: PhoneScreenRouteDeps): {
     }
     if (!deps.live(auth)) return json(res, 401, { error: "Viewer access expired" });
     const phone = phones.devices.find((device) => device.serial === serial);
+    if (!phones.available && serial.startsWith("adb-")) return json(res, 503, { error: phones.message });
     if (phones.available && !phone) return json(res, 404, { error: "That USB phone is not connected." });
     if (phone?.state === "unauthorized") return json(res, 409, { error: "Unlock the phone and accept Allow USB debugging" });
     if (phone && phone.state !== "device") return json(res, 409, { error: `The Android device is ${phone.state}` });

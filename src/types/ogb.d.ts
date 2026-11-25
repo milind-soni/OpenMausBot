@@ -621,7 +621,7 @@ export interface CompanionAccountState {
 export type AndroidUsbDevice = {
   serial: string;
   state: string;
-  connection: "usb";
+  connection: "usb" | "network";
   model: string;
   product?: string;
   transportId?: string;
