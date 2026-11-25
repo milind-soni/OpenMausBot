@@ -167,8 +167,10 @@ export function NotificationsPanel() {
   const clearAll = () => {
     const cleared = state.notifications;
     if (cleared.length === 0) return;
-    pendingClear.current = Date.now();
-    dispatch({ type: "notificationsCleared" });
+    commitClear();
+    const before = Math.max(...cleared.map((entry) => entry.at)) + 1;
+    pendingClear.current = before;
+    dispatch({ type: "notificationsCleared", before });
     setToast({
       text: t("notifications.cleared"),
       undo: () => {
