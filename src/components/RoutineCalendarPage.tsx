@@ -33,6 +33,7 @@ import { cronChoiceFor, cronDraftFor, cronEditorValue, isCronChoice, type CronCh
 import { partlyDone, routineRunLabel, routineRunsOn, routineRunText, routineRunTime, routineScheduleState } from "@/lib/routine-display";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useShowThreads } from "@/lib/thread-preferences";
+import { openRoomThreadThen } from "@/lib/room-feed";
 import { intlLocale, t } from "@/lib/i18n";
 import { intakeFilesWithNotice } from "@/lib/attach-notice";
 import { useModalDialog } from "@/hooks/use-modal-dialog";
@@ -1201,8 +1202,7 @@ export function EventDetails({
   const openRunTask = () => {
     if (!executionThreadId) return;
     if (isRoomGoal && goalGroupId) {
-      dispatch({ type: "switchGroupTask", groupId: goalGroupId, threadId: executionThreadId });
-      onOpenRoom(goalGroupId);
+      openRoomThreadThen(dispatch, state, goalGroupId, executionThreadId, onOpenRoom);
     } else if (primary) {
       openBotThread(dispatch, primary, executionThreadId, showThreads);
     }
