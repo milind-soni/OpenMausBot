@@ -456,13 +456,15 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         const queueIds = held.items.map((item) => item.messageId);
         settleHeldSteeredQueue(held);
         if (steered === "indeterminate") store.appendMessage(bot.threadId, { role: "bot", kind: "activity", tool: failedNoticeTool("chat.notice.steerUnconfirmed") });
-        // After it is recorded, each line loses its mark and waits once more, in order, at the head of the queue; one that
-        // could not be written says so in the thread, its row left to send again.
+        // After it is recorded, each line loses its mark and waits once more, in order, at the head of the queue. The batch
+        // is queued only once every mark is cleared, so no queued row still reads as steered; when any write fails, none is
+        // queued and the thread says to send them again.
         refusedLate = () => {
           refusedLate = () => {};
-          for (const message of messages) store.patchMessage(bot.threadId, message.id, { steered: undefined });
-          try { requeueSettledSteer(held, messages.map((message) => message.id)); }
-          catch (error) {
+          try {
+            for (const message of messages) store.patchMessage(bot.threadId, message.id, { steered: undefined });
+            requeueSettledSteer(held, messages.map((message) => message.id));
+          } catch (error) {
             console.warn("steer: could not queue a steer the agent turned down", error);
             store.appendMessage(bot.threadId, { role: "bot", kind: "activity", tool: failedNoticeTool("chat.notice.unreadMessage") });
           }

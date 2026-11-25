@@ -24,7 +24,7 @@ posixOnly("Antigravity CLI steer through the message route", () => {
   let child: ChildProcess;
   let home: string, tools: string;
   // One Antigravity instance per test, each with its own gates and log.
-  const NAMES = ["agy", "agyLate", "agyLateFull", "agyQueue", "agyQueueFull", "agyRoom", "agyLost", "agyLostQueue"];
+  const NAMES = ["agy", "agyLate", "agyLateFull", "agyLateMark", "agyQueue", "agyQueueFull", "agyQueueMark", "agyRoom", "agyLost", "agyLostQueue"];
   const cli = (name: string) => ({ finishGate: join(tools, `${name}.finish`), rejectGate: join(tools, `${name}.reject`), rpc: join(tools, `${name}.rpc.jsonl`) });
   let stderr = "";
 
@@ -245,6 +245,60 @@ posixOnly("Antigravity CLI steer through the message route", () => {
     expect(typed.some((m: any) => m.steered)).toBe(false);
     expect(bot.messages.filter((m: any) => m.tool?.nameCode === "chat.notice.unreadMessage")).toHaveLength(1);
     expect(calls("agyQueueFull", "session/prompt")).toBe(2);
+  }, 60_000);
+
+  it("a message the CLI rejects late whose steered mark cannot be cleared says so in the thread, with no retry", async () => {
+    const created = (await api("POST", "/api/bots")).body.bot;
+    expect((await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "agyLateMark", model: "gemini-3.8-flash" } })).status).toBe(200);
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "Build the report." })).status).toBe(202);
+    await waitFor(async () => (await getBot(created.id)).busy === true && calls("agyLateMark", "session/prompt") === 1, "the turn to start");
+    const sent = api("POST", `/api/bots/${created.id}/messages`, { text: "Use pytest." });
+    await waitFor(() => calls("agyLateMark", "session/prompt.held") === 1, "the CLI to hold the steer");
+    writeFileSync(cli("agyLateMark").finishGate, "finish");
+    expect((await sent).body).toMatchObject({ ok: true, steered: true });
+
+    const database = new DatabaseSync(join(home, ".openmausbot", "messages.db"));
+    database.exec("CREATE TRIGGER mark_direct BEFORE UPDATE ON messages WHEN NEW.text = 'Use pytest.' BEGIN SELECT RAISE(ABORT, 'disk full'); END");
+    try {
+      writeFileSync(cli("agyLateMark").rejectGate, "reject");
+      await waitFor(async () => {
+        const bot = await getBot(created.id);
+        return !bot.busy && bot.messages.some((m: any) => m.kind === "activity" && m.tool?.nameCode === "chat.notice.unreadMessage");
+      }, "the thread to say the turned-down message was not delivered");
+    } finally { database.exec("DROP TRIGGER mark_direct"); database.close(); }
+    const bot = await getBot(created.id);
+    const failed = bot.messages.filter((m: any) => m.kind === "activity" && m.tool?.ok === false);
+    expect(failed.map((m: any) => m.tool.nameCode)).toEqual(["chat.notice.unreadMessage"]);
+    expect(bot.messages.some((m: any) => m.kind === "error")).toBe(false);
+    expect(calls("agyLateMark", "session/prompt")).toBe(2);
+  }, 60_000);
+
+  it("the queue's Steer button: when one steered mark cannot be cleared, no message is queued again and the thread says so once", async () => {
+    const created = (await api("POST", "/api/bots")).body.bot;
+    expect((await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "agyQueueMark", model: "gemini-3.8-flash" } })).status).toBe(200);
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "Build the report." })).status).toBe(202);
+    await waitFor(async () => (await getBot(created.id)).busy === true && calls("agyQueueMark", "session/prompt") === 1, "the turn to start");
+    const first = await api("POST", `/api/bots/${created.id}/messages`, { text: "Use pytest.", followUp: "queue" });
+    await api("POST", `/api/bots/${created.id}/messages`, { text: "Add a README.", followUp: "queue" });
+    const pressed = api("POST", `/api/bots/${created.id}/queue/${first.body.queueId}/steer`, { threadId: created.threadId });
+    await waitFor(() => calls("agyQueueMark", "session/prompt.held") === 1, "the CLI to hold the steer");
+    writeFileSync(cli("agyQueueMark").finishGate, "finish");
+    expect((await pressed).body).toMatchObject({ ok: true, steered: true });
+
+    const database = new DatabaseSync(join(home, ".openmausbot", "messages.db"));
+    // The first row's mark clears; the second's write fails.
+    database.exec("CREATE TRIGGER mark_queue BEFORE UPDATE ON messages WHEN NEW.text = 'Add a README.' BEGIN SELECT RAISE(ABORT, 'disk full'); END");
+    try {
+      writeFileSync(cli("agyQueueMark").rejectGate, "reject");
+      await waitFor(async () => {
+        const bot = await getBot(created.id);
+        return !bot.busy && bot.messages.some((m: any) => m.kind === "activity" && m.tool?.nameCode === "chat.notice.unreadMessage");
+      }, "the thread to say the turned-down messages were not delivered");
+    } finally { database.exec("DROP TRIGGER mark_queue"); database.close(); }
+    const bot = await getBot(created.id);
+    expect(bot.messages.filter((m: any) => m.tool?.nameCode === "chat.notice.unreadMessage")).toHaveLength(1);
+    expect(bot.messages.some((m: any) => m.kind === "error")).toBe(false);
+    expect(calls("agyQueueMark", "session/prompt")).toBe(2);
   }, 60_000);
 
   it("a room's Steer keeps its message queued: the CLI never gets a steer it could turn down after the room counted it in", async () => {
