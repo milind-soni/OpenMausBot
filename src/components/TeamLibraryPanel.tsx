@@ -12,6 +12,7 @@ import { ArrowLeft, Check, ExternalLink, Github, Loader2, Plus, Search, Users, X
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { catalogCopy, catalogMatches, type TeamCatalog, type TeamCatalogEntry } from "@/lib/team-catalog";
+import { creditShown } from "@/lib/template-share";
 
 import { ReadyBotGallery } from "./ReadyBotGallery";
 import { OrgLibraryTab } from "./TeamLibraryPanelOrg";
@@ -350,12 +351,14 @@ export function TeamLibraryPanel({
                 <div className="grid grid-cols-1 gap-x-10 md:grid-cols-2">
                   {visibleTeams.map((entry) => {
                     const copy = catalogCopy(entry);
+                    const credit = creditShown(entry.author);
                     return (
                       <article key={entry.slug} className="flex min-h-[104px] items-center gap-3 border-b border-hairline/35 px-1 py-4">
                         <TeamGlyph />
                         <div className="min-w-0 flex-1">
                           <h3 className="truncate text-[13px] font-medium text-ink">{copy.name}</h3>
                           <p className="mt-0.5 truncate text-[13px] text-ink-secondary">{copy.outcome ?? copy.summary}</p>
+                          {credit && <p dir="auto" data-catalog-published-by className="mt-0.5 truncate text-[12px] text-ink-tertiary">{t("template.publishedBy", { name: credit })}</p>}
                           <p className="mt-1 truncate text-[12px] text-ink-tertiary">
                             {entry.members === 1 ? t("template.botsOne") : t("template.botsMany", { count: entry.members })}
                             {entry.skills.length > 0 && ` · ${entry.skills.length === 1 ? t("template.skillsOne") : t("template.skillsMany", { count: entry.skills.length })}`}

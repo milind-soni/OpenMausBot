@@ -95,11 +95,49 @@ describe("a template's chat card", () => {
     const { container, unmount } = render(draft);
     try {
       button(container, "Publish")!.click();
-      await vi.waitFor(() => expect(api).toHaveBeenCalledWith("/api/share/tpl1/publish", { method: "POST", body: "{}" }));
+      await vi.waitFor(() => expect(api).toHaveBeenCalledWith("/api/share/tpl1/publish", { method: "POST", body: JSON.stringify({ author: "" }) }));
       await vi.waitFor(() => expect(container.textContent).toContain("Copy link"));
       button(container, "View on GitHub")!.click();
       expect(openExternalLink).toHaveBeenCalledWith("https://github.com/x/y/tree/abc/teams/quill");
     } finally { unmount(); }
+  });
+
+  it("says what was taken out before publishing, in one line", () => {
+    expect(shown({ ...draft, scrubbed: { paths: 3, emails: 1, phones: 0, names: 0 } })).toContain("We removed 3 local paths and 1 email before publishing");
+    expect(shown({ ...draft, scrubbed: { paths: 1, emails: 0, phones: 2, names: 1 } })).toContain("We removed 1 local path, 2 phone numbers, and 1 mention of your name before publishing");
+    expect(shown(draft)).not.toContain("We removed");
+  });
+
+  it("refuses to publish a template with a key in it, in one line", () => {
+    const { container, unmount } = render({ ...draft, secret: true, status: "failed", error: "This template holds something that looks like a key or token." });
+    try {
+      expect(button(container, "Try again")!.disabled).toBe(true);
+      expect(container.querySelector("[data-template-secret]")!.textContent).toBe("It holds a key or token, so it can't be published. Remove it from the bot, then update the template.");
+      expect(container.textContent).not.toContain("This template holds something");
+    } finally { unmount(); }
+  });
+
+  it("publishes under the name in Published by, which starts as the suggested one and can be changed or cleared", async () => {
+    api.mockResolvedValue({ ...draft, status: "published", link: "https://github.com/x/y/tree/abc/teams/quill", publishedBy: "Sam Rivera" });
+    const { container, unmount } = render({ ...draft, author: "Sam" });
+    try {
+      const field = container.querySelector<HTMLInputElement>("[data-template-author]")!;
+      expect(field.value).toBe("Sam");
+      expect(container.querySelector(`label[for="${field.id}"]`)!.textContent).toBe("Published by");
+      expect(field.placeholder).toBe("Community");
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      flushSync(() => { setter.call(field, " Sam Rivera "); field.dispatchEvent(new Event("input", { bubbles: true })); });
+      button(container, "Publish")!.click();
+      await vi.waitFor(() => expect(api).toHaveBeenCalledWith("/api/share/tpl1/publish", { method: "POST", body: JSON.stringify({ author: "Sam Rivera" }) }));
+      await vi.waitFor(() => expect(container.querySelector("[data-template-published-by]")?.textContent).toBe("Published by Sam Rivera"));
+      expect(container.querySelector("[data-template-author]")).toBeNull();
+    } finally { unmount(); }
+  });
+
+  it("names nobody on a published card credited to the community", () => {
+    expect(shown({ ...draft, status: "published", link: "https://github.com/x/y/tree/a/teams/q", publishedBy: "Community" })).not.toContain("Published by");
+    expect(shown({ ...draft, status: "published", link: "https://github.com/x/y/tree/a/teams/q", publishedBy: "MausBot user" })).not.toContain("Published by");
+    expect(shown({ ...draft, publishedBy: "Sam" })).not.toContain("Published by Sam");
   });
 
   it("turns a refused publish into the failed state with the server's sentence", async () => {
