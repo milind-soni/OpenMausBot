@@ -106,11 +106,11 @@ export function threadTabsEnabled(config: FeatureFlagConfig | null | undefined):
   return config?.features?.threadTabs === true;
 }
 
-/** Whether this server has the room feed's routes: every server from 0.1.181 reports `features.roomFeed` (0.1.181 as
- * its old switch, later ones always true), and an older one, which has neither the thread summaries nor threads made
- * without moving the room's current one, reports nothing, so its rooms keep their single transcript. */
+/** Whether this home shows rooms as their feed: one from this version on reports `features.roomFeedSince` (and
+ * `roomFeed: true`); a 0.1.181 home only where its old switch was turned on. Any other home, including a 0.1.181 one
+ * that never opted in, keeps every room's single transcript until it updates. */
 export function roomFeedEnabled(config: FeatureFlagConfig | null | undefined): boolean {
-  return typeof config?.features?.roomFeed === "boolean";
+  return config?.features?.roomFeed === true || typeof config?.features?.roomFeedSince === "number";
 }
 
 export function teamBoardEnabled(config: FeatureFlagConfig | null | undefined): boolean {

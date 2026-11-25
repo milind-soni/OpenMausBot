@@ -4417,6 +4417,7 @@
   "room.feed.unreadBelow": "Ungelesener Thread weiter unten",
   "room.thread.panel": "Thread",
   "room.thread.close": "Thread schließen",
+  "room.thread.backToFeed": "Zurück zu {name}",
   "room.thread.resize": "Thread-Breite ändern",
   "settings.features.teamBoard": "Board",
   "settings.features.teamBoardLine": "Verfolge Arbeit in Gruppenchats als Einträge mit Status, Labels und dem, worauf jeder wartet",

@@ -135,6 +135,19 @@ describe("the sidebar's + menu with a room open", () => {
     expect(fixture.dispatch.mock.calls).toEqual([[{ type: "newGroupTask", groupId: "room" }]]);
   });
 
+  it("can't start one while the room is busy where it shows its single transcript, which a new thread would move", () => {
+    const busy = { ...room, busyBotId: "kiwi", working: true };
+    const item = (config: unknown) => openPlusMenu(true, false, { groups: [busy], selectedId: "room", activeView: "chat", config })
+      .find((node) => node.props["data-plus-room-thread"] === "room")!;
+    expect(item({ features: {} }).props.disabled).toBe(true);
+    vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
+    try {
+      expect(item({ features: { roomFeed: true, roomFeedSince: 1 } }).props.disabled).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("offers none for a bot-to-bot room", () => {
     expect(withRoom({ dm: true }).filter((node) => node.props.role === "menuitem").map((node) => words(node.props.children))).not.toContain("New thread in Launch room");
   });

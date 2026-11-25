@@ -12022,6 +12022,7 @@
   "room.feed.unreadBelow": "Conversa não lida abaixo",
   "room.thread.panel": "Conversa",
   "room.thread.close": "Fechar conversa",
+  "room.thread.backToFeed": "Voltar para {name}",
   "room.thread.resize": "Redimensionar conversa",
   "settings.features.teamBoard": "Quadro",
   "settings.features.teamBoardLine": "Acompanhe o trabalho nos chats em grupo como itens com status, rótulos e o que cada um espera",

@@ -2,12 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppState, Group } from "@/state/store";
 import { markVisibleGroupThreadsRead } from "@/state/read-visible";
 import { openThread, visibleNotificationThread } from "@/state/thread-navigation";
-import { feedPreview, feedThreadAction, openRoomThreadThen, openThreadBeside, firstFeedCatchUp, readStaleUnread, roomFeedShows, staleUnreadThreads, takeFeedComposerWanted } from "./room-feed";
+import { feedPreview, feedThreadAction, openRoomThreadThen, openThreadBeside, catchUpOldMarks, roomFeedShows, staleUnreadThreads, takeFeedComposerWanted } from "./room-feed";
 import { roomThreadAttention } from "./room-threads";
 
-const on = { features: { roomFeed: true } } as AppState["config"];
-/** A 0.1.181 home reports its old switch, off unless set; it has the feed's routes all the same. */
+const on = { features: { roomFeed: true, roomFeedSince: 1 } } as AppState["config"];
+/** A 0.1.181 home reports its old switch, off unless set, and no stamp. */
 const home181 = { features: { roomFeed: false } } as AppState["config"];
+const home181OptedIn = { features: { roomFeed: true } } as AppState["config"];
 /** A home older than 0.1.181 reports nothing about the feed and has none of its routes. */
 const off = { features: {} } as AppState["config"];
 const room = (extra: Partial<Group> = {}) => ({ id: "room", name: "Launch", threadId: "current", memberIds: ["kiwi"], messages: [{ id: "m" }],
@@ -22,7 +23,8 @@ afterEach(() => vi.unstubAllGlobals());
 describe("the room feed", () => {
   it("shows a room's feed wherever the server has it, never for a bot-to-bot room, and not on a phone", () => {
     expect(roomFeedShows(on, room())).toBe(true);
-    expect(roomFeedShows(home181, room())).toBe(true);
+    expect(roomFeedShows(home181, room())).toBe(false);
+    expect(roomFeedShows(home181OptedIn, room())).toBe(true);
     expect(roomFeedShows(off, room())).toBe(false);
     expect(roomFeedShows(undefined, room())).toBe(false);
     expect(roomFeedShows(on, room({ dm: true }))).toBe(false);
@@ -63,19 +65,21 @@ describe("the room feed", () => {
 });
 
 describe("an Inbox line where the server has the room feed", () => {
-  it("opens a room's thread or a bot's beside the chat", () => {
+  it("opens a room's thread with its feed, showing the room first when another chat is on screen", () => {
     const dispatch = vi.fn();
     expect(openThreadBeside(dispatch, "other", state(on, { selectedId: "kiwi" }))).toBe(true);
-    expect(dispatch).toHaveBeenLastCalledWith({ type: "openForkPanel", kind: "group", ownerId: "room", threadId: "other" });
-    expect(openThreadBeside(dispatch, "kiwi-side", state(on))).toBe(true);
-    expect(dispatch).toHaveBeenLastCalledWith({ type: "openForkPanel", kind: "bot", ownerId: "kiwi", threadId: "kiwi-side" });
+    expect(dispatch.mock.calls).toEqual([[{ type: "select", id: "room" }], [{ type: "openForkPanel", kind: "group", ownerId: "room", threadId: "other" }]]);
+    dispatch.mockClear();
+    expect(openThreadBeside(dispatch, "other", state(on))).toBe(true);
+    expect(dispatch.mock.calls).toEqual([[{ type: "openForkPanel", kind: "group", ownerId: "room", threadId: "other" }]]);
   });
 
-  it("goes the usual way on an older server, on a phone, for an unknown thread, or for the chat already on screen", () => {
+  it("leaves a bot's thread to the chat, as before, and goes the usual way on an older server, on a phone or for an unknown thread", () => {
     const dispatch = vi.fn();
+    expect(openThreadBeside(dispatch, "kiwi-side", state(on))).toBe(false);
+    expect(openThreadBeside(dispatch, "kiwi-main", state(on, { selectedId: "kiwi" }))).toBe(false);
     expect(openThreadBeside(dispatch, "other", state(off))).toBe(false);
     expect(openThreadBeside(dispatch, "gone", state(on))).toBe(false);
-    expect(openThreadBeside(dispatch, "kiwi-main", state(on, { selectedId: "kiwi" }))).toBe(false);
     narrow();
     expect(openThreadBeside(dispatch, "other", state(on))).toBe(false);
     expect(dispatch).not.toHaveBeenCalled();
@@ -157,21 +161,29 @@ describe("unread marks from before the feed", () => {
     expect(staleUnreadThreads({ tasks }, undefined)).toEqual([]);
   });
 
-  it("are read through the room's read route, one at a time", async () => {
-    const calls: unknown[] = [];
-    const patched: unknown[] = [];
-    const request = (async (path: string, init?: RequestInit) => { calls.push([path, init?.body]); return { group: { id: "room", unread: false } }; }) as never;
-    await readStaleUnread("room", ["a", "b"], (group) => patched.push(group), request);
-    expect(calls).toEqual([["/api/groups/room/read", JSON.stringify({ threadId: "a" })], ["/api/groups/room/read", JSON.stringify({ threadId: "b" })]]);
-    expect(patched).toHaveLength(2);
-  });
-
-  it("are read once per room on this device, so a thread marked unread again later keeps its mark", () => {
+  it("are read in one request per room, and the room counts as done only once that read succeeded", async () => {
     const saved = new Map<string, string>();
     const storage = { getItem: (key: string) => saved.get(key) ?? null, setItem: (key: string, value: string) => { saved.set(key, value); } };
-    expect(firstFeedCatchUp("room-a", storage)).toBe(true);
-    expect(firstFeedCatchUp("room-a", storage)).toBe(false);
-    expect(firstFeedCatchUp("room-b", storage)).toBe(true);
-    expect(JSON.parse(saved.get("omb-room-feed-old-marks-read")!)).toEqual(["room-a", "room-b"]);
+    const calls: unknown[] = [];
+    let fail = true;
+    const request = (async (path: string, init?: RequestInit) => {
+      calls.push([path, init?.body]);
+      if (fail) throw new Error("offline");
+      return { group: { id: "room", unread: false } };
+    }) as never;
+    const patched: unknown[] = [];
+    const room = { id: "room", tasks };
+    expect(await catchUpOldMarks(room, 100, (group) => patched.push(group), { request, storage })).toBe(false);
+    expect(saved.get("omb-room-feed-old-marks-read")).toBeUndefined();
+    fail = false;
+    expect(await catchUpOldMarks(room, 100, (group) => patched.push(group), { request, storage })).toBe(true);
+    expect(calls).toEqual([0, 1].map(() => ["/api/groups/room/read", JSON.stringify({ threadIds: ["old-unread", "no-stamp"] })]));
+    expect(patched).toEqual([{ id: "room", unread: false }]);
+    expect(JSON.parse(saved.get("omb-room-feed-old-marks-read")!)).toEqual(["room"]);
+    // Done: a thread marked unread on purpose later keeps its mark.
+    expect(await catchUpOldMarks(room, 100, () => {}, { request, storage })).toBe(false);
+    expect(calls).toHaveLength(2);
+    expect(await catchUpOldMarks({ id: "quiet", tasks: [] }, 100, () => {}, { request, storage })).toBe(true);
+    expect(calls).toHaveLength(2);
   });
 });

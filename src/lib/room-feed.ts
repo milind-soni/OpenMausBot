@@ -65,19 +65,15 @@ export function openRoomThreadThen(dispatch: (action: Action) => void, state: Pi
   dispatch(openFeedThread(groupId, threadId));
 }
 
-/** Where the server has the room feed, a thread opened from the Inbox opens beside whatever is on screen, and the Inbox stays.
- * False where today's way applies: a phone, a room's bot-to-bot chat, a thread no room or bot here holds, or the one
- * already shown in the chat. */
+/** A room thread opened from the Inbox opens with its room's feed, beside it (or in its place when the two don't fit),
+ * and the Inbox stays. False where the usual way applies: a bot's thread (it opens in the chat), a phone, a room that
+ * doesn't show as its feed, or a thread no room here holds. */
 export function openThreadBeside(dispatch: (action: Action) => void, threadId: string,
-  state: Pick<AppState, "config" | "activeView" | "selectedId"> & { bots: readonly ThreadOwner[]; groups: readonly (ThreadOwner & FeedRoom)[] }): boolean {
-  if (!roomFeedEnabled(state.config) || !wideWindow()) return false;
-  const owns = (owner: ThreadOwner) => (owner.tasks ?? []).some((task) => task.threadId === threadId);
-  const group = state.groups.find(owns), bot = group ? undefined : state.bots.find(owns);
-  const owner = group ?? bot;
-  if (!owner || group?.dm) return false;
-  const inChat = state.activeView === "chat" && state.selectedId === owner.id && owner.threadId === threadId;
-  if (inChat && !(group && roomFeedShows(state.config, group))) return false;
-  dispatch({ type: "openForkPanel", kind: group ? "group" : "bot", ownerId: owner.id, threadId });
+  state: Pick<AppState, "config" | "activeView" | "selectedId"> & { groups: readonly (ThreadOwner & FeedRoom)[] }): boolean {
+  const group = state.groups.find((owner) => (owner.tasks ?? []).some((task) => task.threadId === threadId));
+  if (!group || !roomFeedShows(state.config, group)) return false;
+  if (state.activeView !== "chat" || state.selectedId !== group.id) dispatch({ type: "select", id: group.id });
+  dispatch({ type: "openForkPanel", kind: "group", ownerId: group.id, threadId });
   return true;
 }
 
@@ -97,31 +93,42 @@ export function staleUnreadThreads(group: Pick<Group, "tasks">, since: number | 
 }
 
 const CAUGHT_UP_KEY = "omb-room-feed-old-marks-read";
-const caughtUpHere = new Set<string>();
-
-/** True the first time a room asks on this device (and, without storage, in this window): its old marks are read once,
- * so a thread the person marks unread again later keeps that mark. */
-export function firstFeedCatchUp(groupId: string, storage: Pick<Storage, "getItem" | "setItem"> | null = safeStorage()): boolean {
-  if (caughtUpHere.has(groupId)) return false;
-  caughtUpHere.add(groupId);
-  try {
-    const done = new Set<string>(JSON.parse(storage?.getItem(CAUGHT_UP_KEY) ?? "[]") as string[]);
-    if (done.has(groupId)) return false;
-    done.add(groupId);
-    storage?.setItem(CAUGHT_UP_KEY, JSON.stringify([...done]));
-  } catch { /* storage unavailable: once in this window */ }
-  return true;
-}
+/** As many threads as the room's read route takes in one request. */
+const READ_BATCH = 500;
+const reading = new Set<string>();
+type Store = Pick<Storage, "getItem" | "setItem">;
 
 function safeStorage(): Storage | null {
   try { return typeof localStorage === "undefined" ? null : localStorage; } catch { return null; }
 }
 
-/** Reads those old marks through the room's read route, one at a time, so a failure keeps every read before it. */
-export async function readStaleUnread(groupId: string, threadIds: readonly string[], onGroup: (group: Partial<Group> & { id: string }) => void,
-  request: typeof api = api): Promise<void> {
-  for (const threadId of threadIds) {
-    const result = await request<{ group?: Partial<Group> & { id: string } }>(`/api/groups/${groupId}/read`, { method: "POST", body: JSON.stringify({ threadId }) });
-    if (result?.group) onGroup(result.group);
+function caughtUp(storage: Store | null): Set<string> {
+  try { return new Set<string>(JSON.parse(storage?.getItem(CAUGHT_UP_KEY) ?? "[]") as string[]); } catch { return new Set(); }
+}
+
+/** Reads a room's old marks (staleUnreadThreads) the first time it shows as its feed on this device: all of them in one
+ * request to the room's read route, so one answer and one frame. The room counts as done only once that read
+ * succeeded; a failure leaves it to try again the next time the room shows. A thread marked unread on purpose later
+ * keeps its mark. Resolves to whether the room is done. */
+export async function catchUpOldMarks(group: Pick<Group, "id" | "tasks">, since: number | undefined,
+  onGroup: (group: Partial<Group> & { id: string }) => void,
+  { request = api, storage = safeStorage() }: { request?: typeof api; storage?: Store | null } = {}): Promise<boolean> {
+  if (typeof since !== "number" || reading.has(group.id) || caughtUp(storage).has(group.id)) return false;
+  reading.add(group.id);
+  try {
+    const stale = staleUnreadThreads(group, since);
+    for (let at = 0; at < stale.length; at += READ_BATCH) {
+      const result = await request<{ group?: Partial<Group> & { id: string } }>(`/api/groups/${group.id}/read`,
+        { method: "POST", body: JSON.stringify({ threadIds: stale.slice(at, at + READ_BATCH) }) });
+      if (result?.group) onGroup(result.group);
+    }
+    const done = caughtUp(storage);
+    done.add(group.id);
+    try { storage?.setItem(CAUGHT_UP_KEY, JSON.stringify([...done])); } catch { /* read again next time: harmless */ }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    reading.delete(group.id);
   }
 }

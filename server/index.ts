@@ -651,7 +651,7 @@ const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
 const WEBHOOK_PUBLIC_URL = process.env.OMB_WEBHOOK_PUBLIC_URL || undefined;
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
 
-dataFormatAtStart("check", DATA_DIR, serverVersion()); ensureDirs();
+dataFormatAtStart("check", DATA_DIR, serverVersion()); ensureDirs(); roomFeedSince(DATA_DIR); // when this place first had the room feed, stamped at start
 // Acquire before any durable identity, sessions, config or Store state is loaded.
 const dataDirLease = acquireDataDirLeaseForProcess(DATA_DIR); void startEngineRecords(DATA_DIR); const cacheSweeper = createCacheSweepHost(DATA_DIR); // stops what an earlier server left; the cache cap (cache-sweep/), off unless OMB_CACHE_SWEEP
 const releaseDataDirLeaseAtExit = releaseOnceAtExit(dataDirLease);

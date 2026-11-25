@@ -12022,6 +12022,7 @@
   "room.feed.unreadBelow": "Unread thread below",
   "room.thread.panel": "Thread",
   "room.thread.close": "Close thread",
+  "room.thread.backToFeed": "Back to {name}",
   "room.thread.resize": "Resize thread",
   "settings.features.teamBoard": "Board",
   "settings.features.teamBoardLine": "Track work in group chats as items with a state, labels and what each one waits for",

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { t } from "@/lib/i18n";
-import { firstFeedCatchUp, openFeedThread, readStaleUnread, staleUnreadThreads } from "@/lib/room-feed";
+import { catchUpOldMarks, openFeedThread } from "@/lib/room-feed";
 import { simpleRoomHeader } from "@/lib/room-panel";
 import { roomThreadAttention, roomThreadSpeakerId, roomThreadWorking } from "@/lib/room-threads";
 import { useComposerDockPad } from "@/lib/composer-dock";
@@ -88,9 +88,8 @@ export function RoomFeedView({ group }: { group: Group }) {
   // Unread marks older than the feed are read once, the first time the room shows as its feed on this device.
   const since = useStoreSelector((state) => state.config?.features?.roomFeedSince);
   useEffect(() => {
-    if (typeof since !== "number" || !firstFeedCatchUp(group.id)) return;
-    const stale = staleUnreadThreads(store.state().groups.find((candidate) => candidate.id === group.id) ?? group, since);
-    if (stale.length > 0) void readStaleUnread(group.id, stale, (patched) => dispatch({ type: "groupPatched", group: patched })).catch(() => {});
+    void catchUpOldMarks(store.state().groups.find((candidate) => candidate.id === group.id) ?? group, since,
+      (patched) => dispatch({ type: "groupPatched", group: patched }));
     // Once per room shown, not on every change of its threads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [group.id, since]);
@@ -129,7 +128,7 @@ export function RoomFeedView({ group }: { group: Group }) {
   }, [group.id]);
 
   return (
-    <main data-look="chat" data-room-feed={group.id} className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
+    <main data-look="chat" data-room-feed={group.id} data-feed-area="" className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
       <ChatBackdrop />
       {membersOpen && !remoteClient && <ManageMembersPanel group={group} onClose={closeMembers} triggerRef={membersTriggerRef} />}
       <GlassScrollFrame className="flex-1 [--glass-tint:var(--color-app)]">
