@@ -46,6 +46,8 @@ function place(label: string, bots: Bot[], version?: number) {
   const threads = new Set<string>();
   /** Each work thread this place opened for a far bot: the job it was opened with names it. */
   const opened: Array<{ threadId: string; title: string; from: string; brief: string }> = [];
+  /** Each hand-off from the far place this place's bot took, as its main chat is told of it. */
+  const handed: Array<{ botId: string; threadId: string; from: string; text: string }> = [];
   const runs: Array<{ botId: string; threadId: string; text: string; resumed: boolean; requester: string; origin: unknown }> = [];
   const sent: Array<{ recipient: string; threadId: string; roomId?: string }> = [];
   const results: Array<{ thread: string; name: string; status: string; result: string }> = [];
@@ -107,7 +109,7 @@ function place(label: string, bots: Bot[], version?: number) {
       dataDir: dir, coordinator: () => coordinator, bots: () => bots, bot: (id) => bots.find((bot) => bot.id === id), level: () => "full", paused: (bot) => Boolean((bot as Bot).paused), acceptRefusal: (bot) => (bot as Bot).farWorkRefused ?? null,
       ...(options.tell ? { tellAfterMs: options.tell.afterMs, tellWithinMs: options.tell.withinMs } : {}),
       openThread: (bot, title, opener, brief) => { const id = `${bot.id}-work-${++openedCount}`; threads.add(id); opened.push({ threadId: id, title, from: opener.name, brief }); return id; },
-      hasThread: (_botId, threadId) => threads.has(threadId), personName: () => "Sam",
+      hasThread: (_botId, threadId) => threads.has(threadId), personName: () => "Sam", handed: (input) => { handed.push(input); },
       sentRow: (input) => { sent.push({ recipient: input.recipient.name, threadId: input.threadId, ...(input.roomId ? { roomId: input.roomId } : {}) }); },
       resultRow: (parent, child, name) => { results.push({ thread: parent.threadId, name, status: child.status, result: child.result }); for (const listener of resultListeners) listener(); },
       kick: () => { queueMicrotask(() => { try { coordinator.tick(); } catch { /* closed */ } }); },
@@ -194,7 +196,7 @@ function place(label: string, bots: Bot[], version?: number) {
   }
 
   const api = {
-    dir, bots, runs, sent, results, requests, opened, boot, listen, unplug, shutdown, handOff, keep, ledger,
+    dir, bots, runs, sent, results, requests, opened, handed, boot, listen, unplug, shutdown, handOff, keep, ledger,
     nextResult(): Promise<void> {
       return new Promise((resolve) => {
         const listener = () => { resultListeners.delete(listener); resolve(); };
@@ -404,6 +406,12 @@ describe("the link between a computer and its Cloud", () => {
     await until(() => computer.results.length === 2, "the second result is back");
     expect(cloud.runs.filter((run) => run.botId === "cloud-analyst").map((run) => run.threadId)).toEqual(["cloud-analyst-work-1", "cloud-analyst-work-1"]);
     expect(cloud.opened).toEqual([{ threadId: "cloud-analyst-work-1", title: "@Writer · work", from: "Writer", brief: "Count the orders" }]);
+    // One line per hand-off in the Cloud bot's main chat, each pointing at the thread its work ran in.
+    expect(cloud.handed).toEqual([
+      { botId: "cloud-analyst", threadId: "cloud-analyst-work-1", from: "Writer", text: "Count the orders" },
+      { botId: "cloud-analyst", threadId: "cloud-analyst-work-1", from: "Writer", text: "Now the refunds" },
+    ]);
+    expect(computer.handed).toEqual([]);
   });
 
   it("a call that got one instruction-only local refusal and one real refusal from the other place fails, and says why", async () => {

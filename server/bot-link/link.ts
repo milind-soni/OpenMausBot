@@ -133,6 +133,8 @@ export interface BotLinkDeps {
   /** Opens the thread another place's work runs in, and returns its id. */
   openThread(bot: LocalBot, title: string, opener: { botId: string; name: string; threadId: string }, brief: string): string | undefined;
   hasThread(botId: string, threadId: string): boolean;
+  /** Work from the other place reached `botId`'s thread `threadId`: its main chat may say so (server/host/handed-line.ts). */
+  handed?(input: { botId: string; threadId: string; from: string; text: string }): void;
   personName(threadId: string): string | undefined;
   /** "Sent to …" in the requester's conversation. */
   sentRow(input: { sender: LocalBot; threadId: string; recipient: { id: string; name: string }; workThreadId: string; nodeId: string; reason?: string; doneWhen?: string;
@@ -535,6 +537,7 @@ export function createBotLink(deps: BotLinkDeps) {
       if (files.length) deps.files?.crossed(node.id, "sent", { botId: address.botId, name: frame.from.name }, files);
       work.child = node.id;
       state.work[frame.id] = work;
+      deps.handed?.({ botId: bot.id, threadId, from: frame.from.name, text: frame.text });
       save();
       coordinator.endTurn(root, { ok: true, text: "" });
       if (frame.mode === "notify") recordResult(frame.id, { ok: true, text: "" });
