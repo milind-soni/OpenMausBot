@@ -771,3 +771,29 @@ describe("Your own servers (SSH)", () => {
     expect(field("Server name").value).toBe("Lab");
   });
 });
+
+describe("the server desktop idle timer", () => {
+  const config = (vpsIdle?: { timeoutMinutes: number }) => ({
+    composio: { configured: false }, box: { configured: false }, vps: { configured: true, sshAlias: "my-vps" },
+    localVm: { mode: "shared", maxInstances: 1, idleTimeoutMinutes: 30 }, vpsIdle,
+  });
+  const field = () => host.querySelector<HTMLInputElement>("#vps-idle-timeout");
+
+  it("shows its own saved value and saves only the server setting", async () => {
+    const saved = config({ timeoutMinutes: 60 });
+    fx.api.mockImplementation(() => Promise.resolve(saved));
+    setConfig(config({ timeoutMinutes: 480 }));
+    page();
+    expect(field()!.value).toBe("480");
+    type(field()!, "60");
+    await answered(() => field()!.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
+    expect(fx.api).toHaveBeenCalledWith("/api/config", { method: "PATCH", body: JSON.stringify({ vpsIdle: { timeoutMinutes: 60 } }) });
+    expect(fx.dispatch).toHaveBeenCalledWith({ type: "configStatus", config: saved });
+  });
+
+  it("is left out for a server that does not report it", () => {
+    setConfig(config());
+    page();
+    expect(field()).toBeNull();
+  });
+});
