@@ -9,11 +9,20 @@ import { dirname, join } from "node:path";
 
 import { antigravityProfileDirectory } from "./drivers/antigravity-acp.ts";
 import { isAntigravityNativeAlias, resolveAntigravityRuntime } from "./drivers/antigravity-runtime.ts";
+import { unbridgeableFile, unbridgeableVersions } from "./drivers/antigravity-bridge-memory.ts";
+import { parseVersionTriple, versionAtLeast } from "./drivers/acp/version-probe.ts";
 
 
-/** Releases whose MCP permission requests were recorded as `mcp_agents_<tool>`, `Run mcp_agents_<tool>`, kind `other`,
- * with only allow_once and reject_once: 1.5.14 from real turns, 1.5.16 measured. A release joins once it is recorded. */
-export const BRIDGED_NATIVE_VERSIONS: ReadonlySet<string> = new Set(["1.5.14", "1.5.16"]);
+/** The releases bridged: from 1.5.14, whose MCP permission requests were recorded as `mcp_agents_<tool>`,
+ * `Run mcp_agents_<tool>`, kind `other`, with only allow_once and reject_once (1.5.14 from real turns, 1.5.16 measured),
+ * to before 1.6.0. A later 1.5 release that spells a bridged call otherwise has it refused, never approved as another
+ * tool, and is then recorded as unbridgeable (drivers/antigravity-bridge-memory.ts). */
+export const BRIDGED_NATIVE_RANGE = { from: [1, 5, 14], before: [1, 6, 0] } as const;
+
+function bridgedRelease(version: string): boolean {
+  const triple = parseVersionTriple(version);
+  return triple !== null && versionAtLeast(triple, [...BRIDGED_NATIVE_RANGE.from]) && !versionAtLeast(triple, [...BRIDGED_NATIVE_RANGE.before]);
+}
 
 export interface NativeCliRelease {
   executablePath: string;
@@ -54,6 +63,8 @@ export interface AntigravityBridgeHost {
   home: string;
   /** The account's profile, the CLI's --gemini-dir; defaults to the one the driver prepares. */
   antigravityProfile?: string;
+  /** The record of releases found unbridgeable; defaults to the one in the data folder. */
+  unbridgeableFile?: string;
 }
 
 const FILE_MAX_BYTES = 1024 * 1024;
@@ -145,7 +156,10 @@ function checkProfile(profile: string): void {
 export function antigravityRefusal(engine: AntigravityBridgeEngine, host: AntigravityBridgeHost): string | null {
   if (!isAntigravityNativeAlias(cliOf(engine.config))) return "the account does not name the native Antigravity CLI";
   if (!engine.nativeCli) return "the native Antigravity CLI is not installed";
-  if (!BRIDGED_NATIVE_VERSIONS.has(engine.nativeCli.version)) return `native Antigravity CLI ${engine.nativeCli.version} has not been checked with the bridge`;
+  if (!bridgedRelease(engine.nativeCli.version)) return `native Antigravity CLI ${engine.nativeCli.version} is outside the releases the bridge is used with`;
+  if (unbridgeableVersions(host.unbridgeableFile ?? unbridgeableFile()).includes(engine.nativeCli.version)) {
+    return `native Antigravity CLI ${engine.nativeCli.version} asked for a bridged tool in a form this version does not know`;
+  }
   if (engine.customMcpServers === undefined) return "the turn's MCP servers are not known";
   if (engine.customMcpServers.some((name) => /^agents(?:_|$)/iu.test(name))) return "another MCP server's name starts like the agents server's";
   const workspace = (engine.config as { workspace?: unknown } | undefined)?.workspace;

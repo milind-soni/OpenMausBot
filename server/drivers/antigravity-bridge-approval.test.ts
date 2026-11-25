@@ -10,6 +10,7 @@ import { removeTempDir } from "../testing/cleanup.ts";
 import { recordEvents } from "../testing/events.ts";
 import { BRIDGE_CLI_ENV, TOOL_BRIDGE_ENV } from "./agents-bridge.ts";
 import { AntigravityDriver } from "./antigravity.ts";
+import { unbridgeableVersions } from "./antigravity-bridge-memory.ts";
 
 const FAKE_ACP = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-acp-cli.ts");
 const WINDOWS = process.platform === "win32";
@@ -77,6 +78,7 @@ describe.skipIf(WINDOWS)("an Antigravity permission request on a turn whose agen
 
   it("judges use_tool as the tool it names: a command the never-list stops gets the card a direct call gets, even on full access", async () => {
     vi.stubEnv("OMB_SAFETY_FLOOR", "1");
+    expect(unbridgeableVersions()).toEqual([]);
     const direct = await asked("floor-direct", { approvalMode: "auto", toolCall: native("vm_exec", { command: "rm -rf ~" }) });
     const wrapped = await asked("floor-wrapped", { approvalMode: "auto", toolCall: native("use_tool", { name: "vm_exec", arguments: { command: "rm -rf ~" } }) });
     expect(direct).toMatchObject({ card: true, opened: { tool: "other", summary: "rm -rf ~", commandLine: "rm -rf ~" } });
@@ -133,6 +135,7 @@ describe.skipIf(WINDOWS)("an Antigravity permission request on a turn whose agen
     const result = await asked(`refuse-${label.replaceAll(/\W+/gu, "-")}`, { approvalMode: "auto", toolCall });
     expect(result).toMatchObject({ card: false, answer: "deny", completed: true });
     expect(result.errors.some((message) => message.includes("tool bridge"))).toBe(true);
+    expect(unbridgeableVersions()).toEqual(["1.5.16"]);
   }, 90_000);
 
   it("leaves a direct agents call whose input happens to have a catalog tool's name alone", async () => {

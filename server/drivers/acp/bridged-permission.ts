@@ -79,7 +79,7 @@ export function bridgedAlone(permission: BridgedPermission, optionFor: (want: "a
   return {
     optionId,
     ...(optionId ? {} : { missing: want }),
-    ...(permission.kind === "refuse" ? { note: `${agent} asked to run an agents tool through the tool bridge in a form this version does not know, so it was refused` } : {}),
+    ...(permission.kind === "refuse" ? { note: `${agent} asked to run an agents tool through the tool bridge in a form this version does not know, so it was refused. From the next message this version of ${agent} lists the agents tools directly; send the message again.` } : {}),
     end: permission.kind === "refuse" || !optionId,
   };
 }

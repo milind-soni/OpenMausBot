@@ -103,6 +103,8 @@ export interface EngineHost {
   managedPolicyFiles: readonly string[];
   /** A native Antigravity account's profile, in place of the one the driver prepares. */
   antigravityProfile?: string;
+  /** The record of native Antigravity releases found unbridgeable, in place of the data folder's. */
+  unbridgeableFile?: string;
 }
 
 const CHAT_RUNTIME_DRIVERS: ReadonlySet<string> = new Set(["cerebras", "greenference", "modelgo", "grok", "groq", "meta", "minimax", "mistral", "openai-compat"]);

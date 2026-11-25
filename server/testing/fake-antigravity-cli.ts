@@ -24,6 +24,7 @@
 //   FAKE_AGY_TOOL_BUDGET    bytes of tool definitions the model sees before the largest are dropped (default 60000)
 //   FAKE_AGY_OPTIONS        JSON array of permission options to offer instead of 1.5.x's allow / deny
 //   FAKE_AGY_EXIT_DELAY_MS  how long the process lingers after stdin closes or SIGTERM, as a slow exit
+//   FAKE_AGY_SPELLING       dotted: tools are named mcp.<server>.<tool>, as a later release might
 // MCP servers and tool calls follow fake-antigravity-mcp.ts. A prompt line `fake-agy: call <server>/<tool> <JSON args>`
 // stands for the model calling that tool: a tool the model cannot see is answered with `NOTOOL`, any other asks
 // permission as 1.5.14 does (tool_call, then session/request_permission with `allow` / `deny`), runs the tool once

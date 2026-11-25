@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { BRIDGED_NATIVE_VERSIONS } from "./agents-bridge-antigravity.ts";
+import { rememberUnbridgeable } from "./drivers/antigravity-bridge-memory.ts";
 import { agentsToolBridgeRefusal, bridgedAgents, engineBridgeRefusal, type BridgeEngine, type EngineHost } from "./agents-bridge-switch.ts";
 import { BRIDGE_CLI_ENV, TOOL_BRIDGE_ENV } from "./drivers/agents-bridge.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
@@ -37,7 +37,7 @@ function setup(overrides: Partial<BridgeEngine> = {}) {
     driverKind: "antigravityAgent", instanceId: "agy", config: { cli: "antigravity" }, cwd,
     nativeCli: { executablePath: CLI, version: "1.5.16" }, customMcpServers: [], ...overrides,
   };
-  const host: EngineHost = { home: join(root, "home"), managedPolicyFiles: [], antigravityProfile: profile };
+  const host: EngineHost = { home: join(root, "home"), managedPolicyFiles: [], antigravityProfile: profile, unbridgeableFile: join(root, "antigravity-bridge.json") };
   mkdirSync(host.home, { recursive: true });
   return { root, cwd, profile, engine, host };
 }
@@ -75,18 +75,31 @@ describe("bridging a native Antigravity account's turn", () => {
     expect(engineBridgeRefusal({}, engine, {}, host)).toBe("the account does not name the native Antigravity CLI");
   });
 
-  it("is on only for the releases whose permission requests were recorded", () => {
-    expect([...BRIDGED_NATIVE_VERSIONS]).toEqual(["1.5.14", "1.5.16"]);
-    for (const version of ["1.5.14", "1.5.16"]) {
+  it("is on from 1.5.14, whose permission requests were recorded, to before 1.6.0", () => {
+    for (const version of ["1.5.14", "1.5.15", "1.5.16", "1.5.17", "1.5.40"]) {
       const { engine, host } = setup({ nativeCli: { executablePath: CLI, version } });
       expect(decided(engine, host), version).toBeNull();
     }
-    for (const version of ["1.5.6", "1.5.15", "1.5.17", "1.6.0"]) {
+    for (const version of ["1.5.6", "1.5.13", "1.6.0", "2.0.0", "unknown"]) {
       const { engine, host } = setup({ nativeCli: { executablePath: CLI, version } });
-      expect(decided(engine, host), version).toMatch(/has not been checked with the bridge/u);
+      expect(decided(engine, host), version).toMatch(/outside the releases the bridge is used with/u);
     }
     const { engine, host } = setup({ nativeCli: undefined });
     expect(decided(engine, host)).toBe("the native Antigravity CLI is not installed");
+  });
+
+  it("is off for a release recorded as asking in a spelling this version does not know, and only for that release", () => {
+    const { engine, host } = setup({ nativeCli: { executablePath: CLI, version: "1.5.17" } });
+    rememberUnbridgeable("1.5.17", host.unbridgeableFile);
+    rememberUnbridgeable("1.5.17", host.unbridgeableFile);
+    expect(decided(engine, host)).toMatch(/asked for a bridged tool in a form this version does not know/u);
+    expect(decided({ ...engine, nativeCli: { executablePath: CLI, version: "1.5.16" } }, host)).toBeNull();
+  });
+
+  it("takes a damaged record for none", () => {
+    const { engine, host } = setup();
+    write(host.unbridgeableFile!, "{not json");
+    expect(decided(engine, host)).toBeNull();
   });
 
   it("is off when another of the turn's servers is named like the agents server, and on beside other names", () => {

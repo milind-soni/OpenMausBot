@@ -27,6 +27,11 @@ export interface AcpStdioServer {
 
 export const DEFAULT_TOOL_BUDGET = 60_000;
 
+/** A tool's name to the model and in permission requests: 1.5.x's own, or with FAKE_AGY_SPELLING=dotted
+ * `mcp.<server>.<tool>`, standing for a later release that spells it otherwise. */
+const nativeName = (server: string, tool: string) =>
+  process.env.FAKE_AGY_SPELLING === "dotted" ? `mcp.${server}.${tool}` : `mcp_${server}_${tool}`;
+
 /** A tool's size as the CLI measures it: its definition file. */
 export function toolBytes(tool: McpTool): number {
   return Buffer.byteLength(JSON.stringify({ name: tool.name, description: tool.description ?? "", parameters: tool.inputSchema ?? { type: "object" } }));
@@ -162,7 +167,7 @@ export class SessionTools {
   /** The names the model sees, as mcp_<server>_<tool>. */
   visible(): string[] {
     return this.connections.flatMap((connection) => connection.tools.filter((tool) => !this.dropped.has(`${connection.name}/${tool.name}`))
-      .map((tool) => `mcp_${connection.name}_${tool.name}`));
+      .map((tool) => nativeName(connection.name, tool.name)));
   }
 
   /** Bytes of every tool definition the servers listed, before the budget. */
@@ -171,7 +176,7 @@ export class SessionTools {
   }
 
   hidden(): string[] {
-    return [...this.dropped].map((key) => `mcp_${key.replace("/", "_")}`);
+    return [...this.dropped].map((key) => nativeName(key.split("/")[0]!, key.split("/").slice(1).join("/")));
   }
 
   /** A server's tool by the server's configured name, when the model can see it. */
@@ -179,7 +184,7 @@ export class SessionTools {
     const connection = this.connections.find((candidate) => candidate.server.name === serverName);
     const tool = connection?.tools.find((candidate) => candidate.name === toolName);
     if (!connection || !tool || this.dropped.has(`${connection.name}/${tool.name}`)) return undefined;
-    return { connection, tool, nativeName: `mcp_${connection.name}_${tool.name}` };
+    return { connection, tool, nativeName: nativeName(connection.name, tool.name) };
   }
 
   close(): void {

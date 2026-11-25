@@ -31,7 +31,11 @@ script exits non-zero on any failed check and writes `report.json`:
   answer it, an allow for the session on a direct call does not carry over,
   and `find_tool` runs with no card;
 - with the safety floor on, a never-list command through `use_tool` at Full is
-  denied and the agents server gets no call.
+  denied and the agents server gets no call;
+- a second fixture stands for a later release (1.5.17) that spells tools
+  `mcp.<server>.<tool>`: its first bridged call is refused and never reaches the
+  agents server, 1.5.17 is recorded as unbridgeable, and the next message lists
+  the agents tools directly and a direct call works.
 
 ## Limits
 

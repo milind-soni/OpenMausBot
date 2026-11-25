@@ -102,9 +102,9 @@ A native account is bridged unless `OMB_AGENTS_TOOL_BRIDGE=0` or
 `{"features": {"agentsToolBridge": false}}` turns it off, or any of these holds
 (`server/agents-bridge-antigravity.ts`):
 
-- the installed CLI is not a release whose permission requests were recorded
-  (1.5.14 and 1.5.16), or the turn would start a different file than the one
-  decided for;
+- the installed CLI is outside 1.5.14 (whose permission requests were first
+  recorded) to before 1.6.0, or is a release recorded as unbridgeable (below),
+  or the turn would start a different file than the one decided for;
 - another of the turn's MCP servers is named `agents` or starts with `agents_`;
 - the launch folder or any folder above it, read both as written and through
   its links, holds an `.agents` folder with anything but skills, a legacy
@@ -120,7 +120,10 @@ have no effect over ACP.
 
 On a bridged turn a permission request that may be an agents bridge call but is
 not in the recorded spelling (`mcp_agents_use_tool`, `Run mcp_agents_use_tool`,
-kind `other`) is refused and the turn ends. A new set of MCP servers, as when
+kind `other`) is refused and the turn ends. That release is then recorded in
+`antigravity-bridge.json` in the data folder, and its turns list the agents
+tools directly from the next message on, as before this bridge; deleting the
+file tries the bridge again. A new set of MCP servers, as when
 the switch changes, starts a new process that resumes the same session: the CLI
 renames a server it registers again in one process.
 

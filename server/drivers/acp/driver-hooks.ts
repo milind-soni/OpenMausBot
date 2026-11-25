@@ -11,6 +11,8 @@ export interface AcpDriverHooks {
    * agent that renames a server registered again in one process. Unlike restartOnMcpChange, a new system prompt alone
    * keeps the process. */
   restartsOnMcpServersChange?(instanceId: string): boolean;
+  /** Called when a bridged agents tool request in an unknown spelling was refused on this instance's turn. */
+  bridgeSpellingRefused?(instanceId: string): void;
   /** Why this turn must not start on the command resolveCommand chose, or undefined. */
   launchRefusal?(turn: SendTurnInput, launch: { command: string }): string | undefined;
   /** Local video, image, audio and PDF files named in the turn text go to the model as `resource_link` blocks
