@@ -212,7 +212,7 @@ function drawTrails(
   }
 }
 
-function glyphAmount(spec: GlyphSpec, elapsed: number): number {
+export function glyphAmount(spec: GlyphSpec, elapsed: number): number {
   const position = elapsed % spec.period
   const start = spec.period - spec.hold
   if (position < start) return 0

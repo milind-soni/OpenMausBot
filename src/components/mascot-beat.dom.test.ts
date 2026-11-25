@@ -3,7 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { MausMotion } from "@/lib/mascot";
-import { MOTION_BEAT_MS, useMotionBeat } from "./mascot-beat";
+import { MOTION_BEAT_MS, useBeatState, useMotionBeat } from "./mascot-beat";
 
 let container: HTMLDivElement, root: Root;
 const seen: boolean[] = [];
@@ -61,4 +61,20 @@ it("no motion is never a beat", async () => {
   expect(playing()).toBe(false);
   await show("none", 3);
   expect(playing()).toBe(false);
+});
+
+it("a beat with no face ends the face of the beat it cut short, so the bot does not keep it", async () => {
+  const faces: Array<string | null> = [];
+  function Face({ motion, motionKey }: { motion: MausMotion; motionKey: number }) {
+    faces.push(useBeatState(motion, motionKey, undefined));
+    return null;
+  }
+  const face = (motion: MausMotion, motionKey: number) => act(async () => root.render(createElement(Face, { motion, motionKey })));
+  await face("alert", 1);
+  expect(faces.at(-1)).toBe("alerting");
+  await wait(MOTION_BEAT_MS / 2);
+  await face("blink", 2);
+  expect(faces.at(-1)).toBeNull();
+  await wait(60_000);
+  expect(faces.at(-1)).toBeNull();
 });
