@@ -75,7 +75,7 @@ thread exactly as in any other.
 | --- | --- |
 | **Ask for approval** | Requests approval for commands and file changes, the way the provider's supervised mode does. |
 | **Auto-accept edits** | Approves file edits automatically; other actions can still require approval. Offered where the provider has such a mode (Claude, Grok, Antigravity). |
-| **Approve for me** | Uses the provider's automatic review on Codex, Claude, Cursor, and Grok to approve routine actions and ask about others. Providers without an equivalent fall back to asking. |
+| **Approve for me** | Uses the provider's automatic review on Codex, Claude, Cursor, and Grok to approve routine actions and ask about others. DeepSeek Harness keeps the sandbox and uses the session model to review requests to go outside it. Providers without an equivalent fall back to asking. |
 | **Full access** | Enables the provider's permissive mode for commands, edits, and selected-computer actions, including potentially destructive or sensitive work. Residual native permission prompts are answered for you. OMB profile changes, routine actions, team setup, bot deletion, and enabled skill authoring apply without a second approval. Peer-review prompts are skipped within the bot's authorized scope. Sends through connected apps (email, messages, posts, payments) follow the bot's Sending on your behalf setting: Ask every time requires consent, and Send without asking, or no setting at all, sends with no daily limit. Apps outside the bot's connected-app scope are still refused. Work handed on with `coordinate_bots` runs at the level of the receiving bot's thread: a new thread or work thread it opens takes the sending conversation's own level (above), and a Chief of Staff's level flows down (below). Actual questions and missing credentials still need your input. |
 | **Custom (`config.toml`)** | Codex only. OpenMausBot reads and reapplies the effective approval and sandbox settings from your Codex configuration. |
 
@@ -105,7 +105,7 @@ that reaches depends on who runs the tools:
   Groq, Greenference, ModelGo, Meta): OMB's tool gate reads the level before each tool call, so the
   change applies from the next call, up or down.
 - **Engines with their own modes** (Codex, Claude, Cursor, Antigravity, Grok
-  Build, Qwen Code, Gemini CLI, Droid, Pi's custom MCP tools): the engine got
+  Build, DeepSeek Harness, Qwen Code, Gemini CLI, Droid, Pi's custom MCP tools): the engine got
   its mode when the turn started and keeps it to the end of the turn. A
   permission request it still sends is answered at the new level, so raising
   to Full access applies to the next request. Lowering from Full access, and
@@ -397,6 +397,7 @@ multi-question card renders its structured form on current apps instead.
 | Antigravity (native CLI, 1.5.0 and later) | Native `default` | Native `default`; the app answers file edits inside the turn's folder itself | as Antigravity | Native `default`; the app answers every tool-permission request, never-list commands excepted; shown as Auto |
 | Grok Build | Native `default` | Native `acceptEdits` | Native `--permission-mode auto`; availability of Grok's reviewer depends on its feature rollout | Native `bypassPermissions` plus automatic approval of remaining tool-permission requests |
 | OpenCode | Ask | not offered | Ask | Approve individual ACP permission requests, never task questions |
+| DeepSeek Harness | Runs in the `workspace-write` sandbox and asks you about escalations | not offered | On dsh 0.2.2-rc.2 or later, OMB loads one plugin it writes locally, without loading or downloading any dsh plugins. The sandbox confines workspace writes to this conversation's task directory and this bot's memory directory. Each escalation costs one review request to the session model. Approval allows that call once. If review declines or fails, OMB asks you. Older or unrecognized versions keep dsh's usual sandbox and ask you about escalations. | Keeps the sandbox. OMB answers remaining permission requests. |
 | Qwen Code | Native `default` | Native `--approval-mode auto-edit` | Native `--approval-mode auto` (Qwen's LLM classifier approves safe actions, blocks risky ones) | `--yolo`, plus automatic approval of remaining ACP permission requests |
 | Gemini CLI | Native `default` | Native `--approval-mode auto_edit` | Ask (no reviewer) | `--yolo`, plus automatic approval of remaining ACP permission requests |
 | Cline | `--auto-approve false`, you review | not offered | Ask (no reviewer) | Approve individual ACP permission requests, never task questions |
