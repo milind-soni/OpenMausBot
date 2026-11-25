@@ -51,8 +51,8 @@ describe("readStdioLines", () => {
       lines.push(line);
       if (line === "bad") throw new Error("handler failed");
     });
-    expect(() => input.emit("data", Buffer.from("one\nbad\nthree"))).toThrow("handler failed");
+    expect(() => input.emit("data", Buffer.from("one\nbad\nthree\nfour"))).toThrow("handler failed");
     input.emit("data", Buffer.from("\n"));
-    expect(lines).toEqual(["one", "bad", "three"]);
+    expect(lines).toEqual(["one", "bad", "three", "four"]);
   });
 });
