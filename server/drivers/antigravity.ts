@@ -57,7 +57,7 @@ import {
 import { ANTIGRAVITY_NATIVE_CLI } from "./antigravity-cli-install.ts";
 import { acpFileEditWithin } from "./permission-command.ts";
 import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
-import { AntigravityProcesses } from "./antigravity-processes.ts";
+import { AntigravityProcesses, stopOrphanedAntigravityRuntimesOnce } from "./antigravity-processes.ts";
 import { VERIFICATION_TEMP_KEY, scheduleAntigravityTempSweep } from "./antigravity-temp.ts";
 import { augmentedPath } from "../env-path.ts";
 import { killCliTree } from "../procs.ts";
@@ -341,6 +341,12 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
     const base = await AcpAntigravityDriver.create(input);
     scheduleAntigravityTempSweep(input.instanceId);
     scheduleAntigravityTempSweep(VERIFICATION_TEMP_KEY);
+    // A stopped runtime's unpacked folder can be removed only once it has ended.
+    void stopOrphanedAntigravityRuntimesOnce().then((stopped) => {
+      if (!stopped) return;
+      scheduleAntigravityTempSweep(input.instanceId);
+      scheduleAntigravityTempSweep(VERIFICATION_TEMP_KEY);
+    });
     const auth = new AntigravityAuthController(() => {
       noteAntigravitySignedIn(antigravityTokenPath(input.instanceId));
       void base.refreshModels?.();
