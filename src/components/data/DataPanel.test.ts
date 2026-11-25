@@ -401,6 +401,31 @@ describe("DataPanel", () => {
     expect(fixture.embedLoaded).toBe(false);
   });
 
+  it("shows an unbound view's name and error beside numeric counts, including zero", async () => {
+    fixture.sheets = { pepper: sheet([card("orders", {})]) };
+    fixture.tables.pepper = [
+      { name: "sales", sqlName: "sales", rowCount: 12345, columns: [{ name: "id", type: "INTEGER" }] },
+      { name: "empty_data", sqlName: "empty_data", rowCount: 0, columns: [{ name: "id", type: "INTEGER" }] },
+      {
+        name: "sales_report",
+        sqlName: "sales_report",
+        rowCount: null,
+        columns: [{ name: "id", type: "INTEGER" }, { name: "amount", type: "INTEGER" }],
+        error: { code: "sql_error", message: 'Binder Error: Referenced column "amount" not found in FROM clause!' },
+      },
+    ];
+    render();
+    await settle();
+    const strip = host.querySelector('[data-testid="sources-strip"]')!;
+    expect(strip.textContent).toContain("sales");
+    expect(strip.textContent).toContain("12,345 rows");
+    expect(strip.textContent).toContain("empty_data");
+    expect(strip.textContent).toContain("0 rows");
+    expect(strip.textContent).toContain("sales_report");
+    expect(strip.textContent).toContain("Unknown rows");
+    expect(strip.textContent).toContain("amount");
+  });
+
   it("draws a chart card with vega-embed loaded on demand and the reduced rows bound as \"table\"", async () => {
     const spec = { mark: "bar", encoding: { x: { field: "n", type: "quantitative" } } };
     fixture.sheets = { pepper: sheet([card("c", { kind: "chart", vegaLite: spec, reduction: { method: "group", inputRows: 1000, outputRows: 3 } })]) };

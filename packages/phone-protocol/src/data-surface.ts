@@ -74,14 +74,19 @@ export interface DataColumn {
   sample?: string[];
 }
 
-/** One entry of the bot's table catalog, as GET /data reports it from DuckDB. */
-export interface DataTable {
+/** One entry of the bot's table catalog, as GET /data reports it from DuckDB.
+ * A numeric `rowCount` is a successful count, including zero. `rowCount: null`
+ * keeps the entry when its own count cannot bind; `error` is that failure and
+ * is present only then. */
+export type DataTable = {
   name: string;
   /** A quoted identifier ready to paste into SQL; `name` remains the identity. */
   sqlName?: string;
-  rowCount: number;
   columns: DataColumn[];
-}
+} & (
+  | { rowCount: number; error?: undefined }
+  | { rowCount: null; error: DataError }
+);
 
 /** A table the bot loaded, as the Sources strip and `data_load` report it. */
 export interface DataSource {
@@ -91,6 +96,10 @@ export interface DataSource {
   kind: "csv" | "parquet" | "json" | "xlsx" | "folder" | "url" | "postgres" | "mysql" | "sqlite" | "gsheet" | "connector" | "sql";
   /** The path, URL or connection the table came from, with credentials removed. */
   source: string;
+  /** SHA-256 hex of the exact source string. A later load reuses this table when this, the kind, the attached table and `requested` all match. Older records omit it and are not reused. */
+  identity?: string;
+  /** Name this load asked for. */
+  requested?: string;
   options?: Record<string, string | number | boolean>;
   rowCount: number;
   columns: DataColumn[];

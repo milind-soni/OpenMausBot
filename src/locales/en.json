@@ -7444,6 +7444,7 @@
   "data.loadFailed": "The data sheet could not be loaded: {reason}",
   "data.sources.label": "Tables",
   "data.sources.rows": "{count} rows",
+  "data.sources.unknownRows": "Unknown rows",
   "data.card.running": "Running…",
   "data.card.cancel": "Cancel",
   "data.card.failed": "This query failed",

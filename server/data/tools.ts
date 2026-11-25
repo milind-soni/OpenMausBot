@@ -1,6 +1,6 @@
 // Every SQL string built here quotes its literals and identifiers; every result is bounded by rows and bytes before it leaves.
 import { existsSync, mkdirSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import type { ValidateFunction } from "ajv";
@@ -19,6 +19,7 @@ import {
 } from "../../shared/data-surface.ts";
 import { compileToolSchema, schemaProblems } from "../mcp-schema-validator.ts";
 import { tableIdentifierParts } from "./identifiers.ts";
+import { commitReplacingCreate, withReplaceLock } from "./replace-lock.ts";
 import { queryRelation, singleStatement, type Token } from "./sql-statements.ts";
 import type { DataSheetStore } from "./sheet.ts";
 import { DataFailure, type BotDatabase, type ChartCompiler, type ChartRenderer, type DataConnection, type DataExtension, type RunOptions, type RunResult, type VegaLiteValidator } from "./types.ts";
@@ -385,6 +386,8 @@ export function stripCredentials(source: string): string {
   }
 }
 
+const sourceIdentity = (source: string) => createHash("sha256").update(source).digest("hex");
+
 export function tableNameFrom(stem: string): string {
   let name = stem.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 63);
   if (!name) name = "data";
@@ -457,6 +460,11 @@ export function planLoad(input: LoadInput): LoadPlan[] {
 }
 
 const DATABASE_TABLES_MAX = 25;
+const CATALOG_NAME_TAKEN = /^Catalog Error: (?:(?:Table|View) with name ".*" already exists!|Existing object .+ is of type \w+, trying to replace with type \w+)/;
+
+function catalogNameTaken(error: unknown): boolean {
+  return CATALOG_NAME_TAKEN.test(error instanceof Error ? error.message : String(error));
+}
 
 export interface LoadedTable { name: string; rowCount: number; columns: DataColumn[]; source: string }
 export interface LoadOutput { tables: LoadedTable[]; warnings: string[]; elapsedMs: number }
@@ -464,19 +472,43 @@ export interface LoadOutput { tables: LoadedTable[]; warnings: string[]; elapsed
 export async function loadData(ctx: DataContext, input: LoadInput): Promise<LoadOutput> {
   const started = Date.now();
   const plans = planLoad(input);
+  const identity = sourceIdentity(input.source);
   const replace = input.replace !== false;
-  const existing = new Set((await ctx.database.listTables()).map((table) => table.name.toLowerCase()));
+  const priorSources = ctx.sheet.sheet().sources.slice();
+  const catalog = await ctx.database.listTables();
+  const fold = (name: string) => name.toLowerCase();
+  const existing = new Set(catalog.map((table) => fold(table.name)));
+  const blocked = (name: string) => {
+    const exact = catalog.find((table) => table.name === name);
+    const match = exact ?? catalog.find((table) => fold(table.name) === fold(name));
+    return match?.rowCount === null;
+  };
   const tables: LoadedTable[] = [];
-  const unique = (base: string): string => {
+  const reserved = new Set<string>();
+  const suffixName = (stem: string, n: number) => `${stem.slice(0, 62 - String(n).length)}_${n}`;
+  const nameInEmptyCatalog = (base: string): string => {
     const stem = tableNameFrom(base);
     let name = stem;
-    for (let n = 2; tables.some((table) => table.name === name) || (!replace && existing.has(name)); n++) name = `${stem.slice(0, 62 - String(n).length)}_${n}`;
-    existing.add(name);
+    for (let n = 2; reserved.has(fold(name)); n++) name = suffixName(stem, n);
+    reserved.add(fold(name));
     return name;
   };
+  const assigned = (name: string) => tables.some((table) => fold(table.name) === fold(name));
+  const taken = (name: string) => assigned(name) || blocked(name) || existing.has(fold(name));
+  const attachedTable = (options?: Record<string, string | number | boolean>) => (typeof options?.table === "string" ? options.table : undefined);
+  const sameAllocation = (entry: DataSource, plan: LoadPlan, requested: string, sourceTable?: string) =>
+    entry.kind === plan.kind && entry.identity === identity && attachedTable(entry.options) === sourceTable && entry.requested === requested;
+  const suffixHeldByOther = (name: string) => priorSources.some((entry) => entry.requested === name && fold(entry.name) !== fold(name) && entry.identity !== undefined && entry.identity !== identity);
+  const priorAllocation = (plan: LoadPlan, requested: string, sourceTable?: string): string | undefined => {
+    let found: string | undefined;
+    for (const entry of priorSources) if (sameAllocation(entry, plan, requested, sourceTable)) found = entry.name;
+    return found;
+  };
+  const stillOwned = (name: string, plan: LoadPlan, requested: string, sourceTable?: string) =>
+    ctx.sheet.sheet().sources.some((entry) => entry.name === name && sameAllocation(entry, plan, requested, sourceTable));
   const warnings: string[] = [];
-  const create = async (name: string, relation: string, plan: LoadPlan, options: Record<string, string | number | boolean>) => {
-    const sql = (reader: string) => `CREATE ${replace ? "OR REPLACE " : ""}TABLE ${quoteIdent(name)} AS SELECT * FROM ${reader}`;
+  const create = async (name: string, relation: string, plan: LoadPlan, options: Record<string, string | number | boolean>, requested: string, orReplace: boolean) => {
+    const sql = (reader: string) => `CREATE ${orReplace ? "OR REPLACE " : ""}TABLE ${quoteIdent(name)} AS SELECT * FROM ${reader}`;
     const execute = (statement: string) => ctx.database.run(statement, runOptions(ctx, { extensions: plan.extensions }));
     try {
       await execute(sql(relation));
@@ -492,8 +524,41 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
     }
     const described = await ctx.database.describe(quoteIdent(name), runOptions(ctx));
     const columns = boundColumns(described.columns, DATA_LIMITS.describeBytesMax, 200).columns;
-    ctx.sheet.recordSource({ name, sqlName: quoteIdent(name), kind: plan.kind, source: plan.source, options, rowCount: described.rowCount, columns, loadedAt: new Date().toISOString() });
+    ctx.sheet.recordSource({ name, sqlName: quoteIdent(name), kind: plan.kind, source: plan.source, identity, options, requested, rowCount: described.rowCount, columns, loadedAt: new Date().toISOString() });
     tables.push({ name, rowCount: described.rowCount, columns, source: plan.source });
+  };
+  const place = async (base: string, relation: string, plan: LoadPlan, options: Record<string, string | number | boolean>, sourceTable?: string) => {
+    const stem = tableNameFrom(base);
+    const requested = nameInEmptyCatalog(base);
+    const prior = priorAllocation(plan, requested, sourceTable);
+    if (replace && prior && !assigned(prior) && !blocked(prior)) {
+      const reused = await withReplaceLock(ctx.database, async () => {
+        if (!stillOwned(prior, plan, requested, sourceTable)) return false;
+        existing.add(fold(prior));
+        await create(prior, relation, plan, options, requested, true);
+        return true;
+      });
+      if (reused) return;
+    } else if (requested === stem && !suffixHeldByOther(requested) && !assigned(requested) && !blocked(requested) && (replace || !existing.has(fold(requested)))) {
+      existing.add(fold(requested));
+      try {
+        await create(requested, relation, plan, options, requested, replace);
+        return;
+      } catch (error) {
+        if (replace || !catalogNameTaken(error)) throw error;
+      }
+    }
+    for (let n = 2; ; n++) {
+      const name = suffixName(stem, n);
+      if (taken(name)) continue;
+      existing.add(fold(name));
+      try {
+        await create(name, relation, plan, options, requested, false);
+        return;
+      } catch (error) {
+        if (!catalogNameTaken(error)) throw error;
+      }
+    }
   };
   const recordedOptions = (plan: LoadPlan): Record<string, string | number | boolean> => ({
     ...(input.sheet ? { sheet: input.sheet } : {}),
@@ -503,7 +568,7 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
   for (const plan of plans) {
     warnings.push(...plan.warnings);
     if (plan.reader) {
-      await create(unique(plan.stem), plan.reader, plan, recordedOptions(plan));
+      await place(plan.stem, plan.reader, plan, recordedOptions(plan));
       continue;
     }
     const attach = plan.attach!;
@@ -528,8 +593,8 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
       }
       for (const entry of chosen) {
         const relation = entry.schema ? `${quoteIdent(alias)}.${quoteIdent(entry.schema)}.${quoteIdent(entry.table)}` : `${quoteIdent(alias)}.${quoteIdent(entry.table)}`;
-        const name = unique(chosen.length > 1 ? entry.table : input.name ?? entry.table);
-        await create(name, relation, plan, { ...recordedOptions(plan), table: entry.schema ? `${entry.schema}.${entry.table}` : entry.table });
+        const sourceTable = entry.schema ? `${entry.schema}.${entry.table}` : entry.table;
+        await place(chosen.length > 1 ? entry.table : input.name ?? entry.table, relation, plan, { ...recordedOptions(plan), table: sourceTable }, sourceTable);
       }
     } finally {
       await ctx.database.run(`DETACH ${quoteIdent(alias)}`, { connection: ctx.connection }).catch(() => {});
@@ -566,7 +631,7 @@ async function describeSavedResult(ctx: DataContext, id?: string): Promise<Recor
   if (id && !selected) throw fail("card_not_found", `No card ${id} on the sheet.`);
   const summary = ({ id, title, kind, status, rowCount, updatedAt, by }: DataCard) => ({ id, title, kind, status, rowCount, updatedAt, by });
   const card: Record<string, unknown> | null = selected ? summary(selected) : null;
-  const result = { card, cards: [] as ReturnType<typeof summary>[], tables: [] as Array<{ name: string; sqlName?: string; rowCount: number }>, truncated: false, omitted: [] as string[] };
+  const result = { card, cards: [] as ReturnType<typeof summary>[], tables: [] as Array<{ name: string; sqlName?: string; rowCount: number | null; error?: DataError }>, truncated: false, omitted: [] as string[] };
   const fits = () => Buffer.byteLength(JSON.stringify(result)) <= DATA_LIMITS.describeBytesMax;
   if (selected && card) {
     // Never hand the model partial SQL/specs that it could accidentally save over the original.
@@ -580,8 +645,8 @@ async function describeSavedResult(ctx: DataContext, id?: string): Promise<Recor
     result.cards.push(summary(entry));
     if (!fits()) { result.cards.pop(); result.truncated = true; break; }
   }
-  for (const { name, sqlName, rowCount } of await ctx.database.listTables()) {
-    result.tables.push({ name, ...(sqlName ? { sqlName } : {}), rowCount });
+  for (const { name, sqlName, rowCount, error } of await ctx.database.listTables()) {
+    result.tables.push({ name, ...(sqlName ? { sqlName } : {}), rowCount, ...(error ? { error } : {}) });
     if (!fits()) { result.tables.pop(); result.truncated = true; break; }
   }
   return result;
@@ -602,7 +667,7 @@ export async function runSql(ctx: DataContext, input: SqlInput): Promise<SqlOutp
   const limit = Math.min(Math.max(1, Math.trunc(input.limit ?? DATA_LIMITS.sqlRowsDefault)), DATA_LIMITS.sqlRowsMax);
   const kind = gateSql(input.sql, { allowCreate: true });
   if (kind.kind === "create") {
-    await ctx.database.run(input.sql, runOptions(ctx));
+    await commitReplacingCreate(ctx, input.sql, kind.target, () => ctx.database.run(input.sql, runOptions(ctx)));
     const described = await ctx.database.describe(kind.target, runOptions(ctx));
     const bounded = boundColumns(described.columns, DATA_LIMITS.describeBytesMax);
     return { table: kind.target, columns: bounded.columns, rowCount: described.rowCount, rows: [], truncated: bounded.truncated, elapsedMs: Date.now() - started };

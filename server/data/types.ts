@@ -6,10 +6,11 @@ import type {
   DataPage,
   DataReduction,
   DataSource,
+  DataTable,
   OmbChartSpec,
 } from "../../shared/data-surface.ts";
 
-export type { DataColumn, DataColumnStats, DataError, DataHistogram, DataPage, DataReduction, DataSource, OmbChartSpec };
+export type { DataColumn, DataColumnStats, DataError, DataHistogram, DataPage, DataReduction, DataSource, DataTable, OmbChartSpec };
 
 export class DataFailure extends Error {
   readonly error: DataError;
@@ -63,7 +64,7 @@ export interface BotDatabase {
   describe(target: string, options: RunOptions): Promise<DescribeResult>;
   stats(table: string, options?: { signal?: AbortSignal }): Promise<DataColumnStats>;
   histogram(table: string, column: string, options?: { bins?: number; signal?: AbortSignal }): Promise<DataHistogram>;
-  listTables(): Promise<Array<{ name: string; sqlName?: string; rowCount: number; columns: DataColumn[] }>>;
+  listTables(): Promise<DataTable[]>;
   interrupt(connection: DataConnection): void;
   /** Resolves a bare or qualified identifier; `table_not_found` with candidates otherwise. */
   resolveTable(name: string): Promise<string>;

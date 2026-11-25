@@ -563,6 +563,82 @@ describe("a bot's database", () => {
     }
   });
 
+  it("keeps healthy counts when replacing a table leaves a view unbound", async () => {
+    const db = await e.forBot("invalid-view");
+    await db.run("CREATE TABLE sales AS SELECT 1 AS id, 10 AS amount", bot);
+    await db.run("CREATE VIEW sales_report AS SELECT id, amount FROM sales", bot);
+    await db.run("CREATE TABLE other_data AS SELECT 5 AS id", bot);
+    await db.run("CREATE TABLE empty_data AS SELECT 1 AS id WHERE false", bot);
+    await db.run("CREATE VIEW other_report AS SELECT id FROM other_data", bot);
+    await db.run("CREATE OR REPLACE TABLE sales AS SELECT 2 AS id, 20 AS total", bot);
+
+    const tables = await db.listTables();
+    const sales = tables.find((table) => table.name === "sales")!;
+    const other = tables.find((table) => table.name === "other_data")!;
+    const empty = tables.find((table) => table.name === "empty_data")!;
+    const report = tables.find((table) => table.name === "sales_report")!;
+    const valid = tables.find((table) => table.name === "other_report")!;
+    expect(sales.rowCount).toBe(1);
+    expect(sales.columns.map((column) => column.name)).toEqual(["id", "total"]);
+    expect(sales.error).toBeUndefined();
+    expect(other).toMatchObject({ rowCount: 1, columns: [{ name: "id" }] });
+    expect(other.error).toBeUndefined();
+    expect(empty.rowCount).toBe(0);
+    expect(empty.error).toBeUndefined();
+    expect(valid).toMatchObject({ rowCount: 1, sqlName: "other_report" });
+    expect(valid.error).toBeUndefined();
+    expect(report).toMatchObject({
+      name: "sales_report",
+      sqlName: "sales_report",
+      rowCount: null,
+      columns: [{ name: "id" }, { name: "amount" }],
+    });
+    expect(report.error).toMatchObject({ code: "sql_error" });
+    expect(report.error?.message).toContain("amount");
+    const rejected = await failure(db.run("SELECT * FROM sales_report", bot));
+    expect(rejected.error.code).toBe("sql_error");
+    expect(rejected.error.message).toContain("amount");
+
+    await db.run("CREATE OR REPLACE TABLE sales AS SELECT 2 AS id, 20 AS amount", bot);
+    const repaired = (await db.listTables()).find((table) => table.name === "sales_report")!;
+    expect(repaired.rowCount).toBe(1);
+    expect(repaired.error).toBeUndefined();
+  });
+
+  it("isolates every unbound view, including a quoted name in another schema", async () => {
+    const db = await e.forBot("invalid-views");
+    await db.run('CREATE SCHEMA "Odd Schema"', bot);
+    await db.run('CREATE TABLE "Odd Schema".src AS SELECT 1 AS id, 10 AS amount', bot);
+    await db.run('CREATE TABLE "Odd Schema".empty_src AS SELECT 1 AS id WHERE false', bot);
+    await db.run('CREATE VIEW "Odd Schema"."sales report" AS SELECT id, amount FROM "Odd Schema".src', bot);
+    await db.run('CREATE VIEW "Odd Schema".amounts AS SELECT amount FROM "Odd Schema".src', bot);
+    await db.run('CREATE VIEW "Odd Schema".ids AS SELECT id FROM "Odd Schema".src', bot);
+    await db.run('CREATE OR REPLACE TABLE "Odd Schema".src AS SELECT 2 AS id, 20 AS total', bot);
+
+    const tables = await db.listTables();
+    const catalog = await db.run(
+      "SELECT table_schema, table_name FROM information_schema.tables WHERE table_catalog = current_database() AND table_schema NOT IN ('information_schema', 'pg_catalog', 'omb_results') ORDER BY table_schema, table_name",
+      bot,
+    );
+    expect(tables.map((table) => table.name)).toEqual(catalog.rows.map(([schema, name]) => (schema === "main" ? String(name) : `${schema}.${name}`)));
+    const broken = tables.filter((table) => table.rowCount === null);
+    expect(broken.map((table) => table.name)).toEqual(["Odd Schema.amounts", "Odd Schema.sales report"]);
+    for (const table of broken) {
+      expect(table.error).toMatchObject({ code: "sql_error" });
+      expect(table.error?.message).toContain("amount");
+    }
+    expect(tables.find((table) => table.name === "Odd Schema.sales report")).toMatchObject({
+      sqlName: '"Odd Schema"."sales report"',
+      columns: [{ name: "id" }, { name: "amount" }],
+    });
+    expect(tables.find((table) => table.name === "Odd Schema.ids")).toMatchObject({ rowCount: 1 });
+    expect(tables.find((table) => table.name === "Odd Schema.empty_src")!.rowCount).toBe(0);
+    expect(tables.find((table) => table.name === "Odd Schema.src")).toMatchObject({
+      rowCount: 1,
+      columns: [{ name: "id" }, { name: "total" }],
+    });
+  });
+
   it("maps DuckDB errors to codes without rewording them", async () => {
     await ready;
     const parse = await failure(db.run("SELEC 1", bot));

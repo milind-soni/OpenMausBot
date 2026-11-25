@@ -8,9 +8,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { json, readBody } from "../harness/http.ts";
 import { dispatchRoutes } from "../routes/table.ts";
 import { FakeDataDatabase } from "../testing/fake-data-database.ts";
+import { chartRenderer, compileChart, validateVegaLite } from "./deps.ts";
 import { createDataRoutes, dataErrorStatus, type DataRouteDeps } from "./routes.ts";
 import { createDataEngine } from "./engine.ts";
 import { DataSheetRegistry } from "./sheet.ts";
+import { runDataTool, type DataContext } from "./tools.ts";
 import { DataFailure } from "./types.ts";
 
 const servers: Server[] = [];
@@ -146,6 +148,63 @@ describe("the Data routes", () => {
         expect((await call("POST", "/api/bots/bot-1/data/page", { ...query, filterColumn })).status).toBe(400);
       }
       expect((await call("POST", "/api/bots/bot-1/data/page", { ...query, filter: "", filterColumn: "label" })).body.rowCount).toBe(30);
+    } finally {
+      await engine.closeAll();
+    }
+  });
+
+  it("keeps the sheet and healthy tables when a replaced table leaves a view unbound", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-data-invalid-view-"));
+    dirs.push(dir);
+    const engine = createDataEngine({ dataDir: dir, botFolder: (id) => join(dir, id) });
+    try {
+      const { call, sheets } = await serve({ engine });
+      const ctx: DataContext = {
+        database: await engine.forBot("bot-1"),
+        sheet: sheets.for("bot-1"),
+        compileChart, validateVegaLite, renderer: chartRenderer,
+        exportRoots: () => [dir],
+        signal: new AbortController().signal,
+        connection: "bot",
+        by: "bot",
+      };
+      const sql = async (statement: string) => {
+        const result = await runDataTool(ctx, "data_sql", { sql: statement });
+        expect(result.isError, result.content[0]?.text).toBeUndefined();
+      };
+      await sql("CREATE TABLE sales AS SELECT 1 AS id, 10 AS amount");
+      await sql("CREATE VIEW sales_report AS SELECT id, amount FROM sales");
+      await sql("CREATE TABLE other_data AS SELECT 5 AS id");
+      const shown = await call("POST", "/api/bots/bot-1/data/run", { sql: "SELECT * FROM other_data" });
+      expect(shown.status).toBe(200);
+      const cardId = shown.body.card.id as string;
+      await sql("CREATE OR REPLACE TABLE sales AS SELECT 2 AS id, 20 AS total");
+
+      const catalog = await call("GET", "/api/bots/bot-1/data");
+      expect(catalog.status).toBe(200);
+      expect(catalog.body.sheet.cards.map((card: { id: string }) => card.id)).toContain(cardId);
+      const tables = catalog.body.tables as Array<{ name: string; rowCount: number | null; columns: Array<{ name: string }>; error?: { code: string; message: string } }>;
+      expect(tables.find((table) => table.name === "sales")).toMatchObject({ rowCount: 1, columns: [{ name: "id" }, { name: "total" }] });
+      expect(tables.find((table) => table.name === "other_data")).toMatchObject({ rowCount: 1 });
+      const view = tables.find((table) => table.name === "sales_report");
+      expect(view).toMatchObject({ rowCount: null, columns: [{ name: "id" }, { name: "amount" }] });
+      expect(view?.error).toMatchObject({ code: "sql_error" });
+      expect(view?.error?.message).toContain("amount");
+      expect(tables.some((table) => table.name.includes("omb_results") || table.name === "c_1")).toBe(false);
+
+      const byTable = await call("POST", "/api/bots/bot-1/data/page", { table: "other_data", offset: 0, limit: 10 });
+      expect(byTable).toMatchObject({ status: 200, body: { rows: [[5]], rowCount: 1 } });
+      const byCard = await call("POST", "/api/bots/bot-1/data/page", { cardId, offset: 0, limit: 10 });
+      expect(byCard).toMatchObject({ status: 200, body: { rows: [[5]], rowCount: 1 } });
+      const paged = await call("POST", "/api/bots/bot-1/data/page", { table: "sales_report", offset: 0, limit: 10 });
+      expect(paged.status).toBe(422);
+      expect(paged.body.error).toMatchObject({ code: "sql_error" });
+      expect(paged.body.error.message).toContain("amount");
+
+      const described = await runDataTool(ctx, "data_describe", { target: "sales_report" });
+      expect(described.isError).toBe(true);
+      expect(described.structuredContent).toMatchObject({ code: "sql_error" });
+      expect(String((described.structuredContent as { message?: string }).message)).toContain("amount");
     } finally {
       await engine.closeAll();
     }
