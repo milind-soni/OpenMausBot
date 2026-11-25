@@ -5,6 +5,7 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { chmodSync, chownSync, closeSync, existsSync, lstatSync, openSync, readFileSync, realpathSync, statSync, type Stats } from "node:fs";
 import { isIP } from "node:net";
+import { Readable } from "node:stream";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -14,6 +15,8 @@ import {
 import { procHidepid } from "./bot-box/hidepid.ts";
 import { boxMemory, heapSizeArgs } from "./box-memory.ts";
 import { BROWSER_CGROUP_ENV, prepareBrowserCgroup, spawnInCgroup } from "./browser/memory-cgroup.ts";
+import { CLOCK_FD_ENV } from "./cloud-clock.ts";
+import { startClockKeeper } from "./cloud-clock-keeper.ts";
 import { clearRecordsFromOtherMachines } from "./data-dir-lease.ts";
 import { OOM_SCORE, protectInit, protectSupervisor, spawnWithOomScore } from "./oom-score.ts";
 import { restartLine, restartPolicy } from "./restart.ts";
@@ -395,11 +398,16 @@ export function codeTrustProblem(files: readonly string[], home: string, stat: (
   return null;
 }
 
-/** Secrets go over an inherited pipe, never the environment; it is written and closed at once. */
+/** The server's "check the clock" pipe (server/cloud-clock.ts), when the supervisor keeps the clock. */
+const CLOCK_FD = 4;
+
+/** Secrets go over an inherited pipe, never the environment; it is written and closed at once. `clockPipe`: one more pipe,
+ * the child's descriptor 4, that the child writes "check" lines to (server/cloud-clock-keeper.ts reads them). */
 export function spawnWithSecrets(command: string, args: string[], env: NodeJS.ProcessEnv, secrets: Record<string, string>,
-  ids?: { uid: number; gid: number } | null, capture = false): ChildProcess {
-  const child = spawn(command, args, { env,
-    stdio: capture ? ["inherit", "pipe", "pipe", "pipe"] : ["inherit", "inherit", "inherit", "pipe"],
+  ids?: { uid: number; gid: number } | null, capture = false, clockPipe = false): ChildProcess {
+  const stdio: ("inherit" | "pipe")[] = capture ? ["inherit", "pipe", "pipe", "pipe"] : ["inherit", "inherit", "inherit", "pipe"];
+  if (clockPipe) stdio.push("pipe");
+  const child = spawn(command, args, { env: clockPipe ? { ...env, [CLOCK_FD_ENV]: String(CLOCK_FD) } : env, stdio,
     ...(ids ? { uid: ids.uid, gid: ids.gid } : {}) });
   const pipe = child.stdio[SECRETS_FD] as NodeJS.WritableStream | null;
   pipe?.on("error", () => {});
@@ -485,10 +493,17 @@ export function startCloudHome(processEnv: NodeJS.ProcessEnv = process.env) {
       if (!again?.(code, signal)) stop(true);
     });
   };
+  // The clock (server/cloud-clock-keeper.ts): root keeps it right after a resume the provider left it behind on. Root only.
+  const keeper = ids && process.platform === "linux" ? startClockKeeper(config.adminOrigin) : null;
   const policy = restartPolicy();
   const runServer = () => {
     if (stopping) return;
-    watch(inServerGroup(() => spawnWithOomScore(OOM_SCORE.server, () => spawnWithSecrets(process.execPath, [...heapSizeArgs(boxMemory().cgroupLimit, server.NODE_OPTIONS), join(here, "index.js")], server, secrets, ids))), (code, signal) => {
+    watch(inServerGroup(() => spawnWithOomScore(OOM_SCORE.server, () => {
+      const child = spawnWithSecrets(process.execPath, [...heapSizeArgs(boxMemory().cgroupLimit, server.NODE_OPTIONS), join(here, "index.js")], server, secrets, ids, false, Boolean(keeper));
+      const pipe = child.stdio[CLOCK_FD];
+      if (keeper && pipe instanceof Readable) keeper.listen(pipe);
+      return child;
+    })), (code, signal) => {
       if (!policy.again(code, stopping, signal)) return false;
       console.warn(`cloud home: ${restartLine(code, policy.delayMs())}`);
       if (policy.delayMs() > 0) restartTimer = setTimeout(runServer, policy.delayMs());
