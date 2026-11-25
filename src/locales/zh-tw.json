@@ -10447,8 +10447,6 @@
   "settings.features.skillBurgerLine": "把機器人的一次執行儲存為可再次執行的步驟",
   "settings.features.threadTabs": "對話分頁",
   "settings.features.threadTabsLine": "在聊天上方以分頁顯示機器人的對話",
-  "settings.features.roomFeed": "房間動態",
-  "settings.features.roomFeedLine": "將房間的對話列成一個動態，開啟的對話顯示在旁邊",
   "settings.features.error": "無法儲存。請檢查連線後再試一次。",
   "chat.botExchange.open": "開啟 {asker} 與 {helper} 的交流",
   "chat.botExchange.teammate": "一位隊友",

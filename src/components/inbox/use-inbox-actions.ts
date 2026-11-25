@@ -48,7 +48,7 @@ export function useInboxActions(view: InboxView | null) {
   return { run, answer, openInChat };
 }
 
-/** A conversation listed in the Inbox opens beside the chat with the room feed on, and in the chat otherwise. */
+/** A conversation listed in the Inbox opens beside the chat where the server has the room feed, and in the chat otherwise. */
 export function useInboxJump() {
   const store = useStoreRef(), dispatch = store.dispatch;
   const phone = useMediaQuery(PHONE_LAYOUT);

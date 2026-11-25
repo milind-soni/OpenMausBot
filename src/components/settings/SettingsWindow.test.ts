@@ -284,14 +284,15 @@ describe("the outer menu", () => {
 describe("Settings → Features", () => {
   const featureSwitches = () => Object.fromEntries(fixture.switches.map((props) => [(props as { "data-feature-switch"?: string })["data-feature-switch"], props.checked]).filter(([name]) => name));
 
-  it("is in Simple mode's list, with Skill Burger on and thread tabs and the room feed off by default", () => {
-    fixture.config = { features: { skillBurger: true, threadTabs: false, roomFeed: false } };
+  it("is in Simple mode's list, with Skill Burger on and thread tabs off by default, and no switch for the room feed", () => {
+    fixture.config = { features: { skillBurger: true, threadTabs: false, roomFeed: true } };
     const html = render("features");
     expect(navPages(html)).toContain("features");
     expect(html).toContain("Skill Burger");
     expect(html).toContain("Save a bot&#x27;s run as steps you can run again");
     expect(html).not.toContain("Saved in");
-    expect(featureSwitches()).toEqual({ skillBurger: true, threadTabs: false, roomFeed: false });
+    expect(featureSwitches()).toEqual({ skillBurger: true, threadTabs: false });
+    expect(html).not.toContain("Room feed");
   });
 
   it("saves Skill Burger off in the place's config.json", async () => {

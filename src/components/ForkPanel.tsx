@@ -1,24 +1,24 @@
 import { X } from "lucide-react";
 import { useLayoutEffect, useRef } from "react";
 import { cn } from "@/lib/cn";
-import { useFeature } from "@/lib/use-feature";
 import { useInboxPanel } from "@/state/inbox";
 import { currentTaskBot, useStore } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { ChatView } from "./ChatView";
 import { GroupView } from "./GroupView";
 import { ThreadPanelHeading } from "./room-feed/ThreadPanelHeading";
+import { useRoomFeedHere } from "./room-feed/use-room-feed";
 import { PANEL_MIN_WIDTH, useComputerPanelResize } from "./computer-panel-resize";
 
 const BESIDE_INBOX_MAX = 400;
 
-/** Any thread beside the chat: a fork, and with the room feed on, the thread a feed row or the Inbox opened. */
+/** Any thread beside the chat: a fork, and where the server has the room feed, the thread a feed row or the Inbox opened. */
 export function ForkPanel() {
   const { state, dispatch } = useStore();
   const panel = state.forkPanel;
   const asideRef = useRef<HTMLElement>(null);
   const focusedLoad = useRef<string | undefined>(undefined);
-  const beside = useFeature("roomFeed");
+  const beside = useRoomFeedHere();
   const resize = useComputerPanelResize({ key: "omb-thread-panel-width", defaultWidth: 440 });
   // Beside the Inbox the chat keeps the 440 it has beside any other side panel.
   const width = useInboxPanel().open ? Math.min(resize.panelWidth, BESIDE_INBOX_MAX) : resize.panelWidth;

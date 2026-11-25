@@ -10,9 +10,8 @@ const wideWindow = () => typeof window === "undefined" || typeof window.matchMed
 const remoteClient = () => typeof window !== "undefined" && window.ogb?.remoteClient?.active === true;
 export const settingUp = (group: FeedRoom) => !remoteClient() && Array.isArray(group.messages) && roomNeedsSetup(group as Group);
 
-/** A room shows its threads as one feed, with the open one beside it, while Settings → Features → Room feed is on and
- * the window is wide enough for the thread beside it. A bot-to-bot room keeps its one conversation, and a new room
- * its setup. */
+/** A room shows its threads as one feed, with the open one beside it, where its server has the feed and the window is
+ * wide enough for the thread beside it. A bot-to-bot room keeps its one conversation, and a new room its setup. */
 export function roomFeedShows(config: AppState["config"] | undefined, group: FeedRoom | undefined, wide = wideWindow()): boolean {
   return Boolean(group) && roomFeedEnabled(config) && !group!.dm && wide && !settingUp(group!);
 }
@@ -20,14 +19,37 @@ export function roomFeedShows(config: AppState["config"] | undefined, group: Fee
 export const openFeedThread = (groupId: string, threadId: string, focusComposer = false): Action =>
   ({ type: "openForkPanel", kind: "group", ownerId: groupId, threadId, ...(focusComposer ? { focusComposer } : {}) });
 
+/** The room whose feed composer a "+" asked for before the feed was on screen. */
+let composerWanted: string | null = null;
+
+/** Puts the cursor in the room's feed composer, if that feed is on screen. */
+export function focusFeedComposer(groupId: string): boolean {
+  if (typeof document === "undefined") return false;
+  const feed = [...document.querySelectorAll<HTMLElement>("[data-room-feed]")].find((element) => element.dataset.roomFeed === groupId);
+  const box = feed?.querySelector<HTMLTextAreaElement>("[data-room-feed-composer] textarea:not([disabled])");
+  if (!box) return false;
+  box.focus();
+  if (composerWanted === groupId) composerWanted = null;
+  return true;
+}
+
+/** Whether a "+" asked for this room's feed composer while the feed was not yet on screen; asking clears it. */
+export function takeFeedComposerWanted(groupId: string): boolean {
+  const wanted = composerWanted === groupId;
+  if (wanted) composerWanted = null;
+  return wanted;
+}
+
 /** A room's thread asked for from anywhere in the app opens beside its feed rather than becoming the room's current
- * thread, which is everyone's. A new thread there starts from the feed's composer. Null: nothing more to do. */
+ * thread, which is everyone's. A new thread (the room's "+") starts from the feed's composer: the room comes on screen
+ * first when it is not, with the cursor in that composer. Null: nothing more to do. */
 export function feedThreadAction(action: Action, state: Pick<AppState, "config" | "groups">): Action | null {
   if (action.type !== "switchGroupTask" && action.type !== "newGroupTask") return action;
   if (!roomFeedShows(state.config, state.groups.find((group) => group.id === action.groupId))) return action;
   if (action.type === "switchGroupTask") return openFeedThread(action.groupId, action.threadId);
-  document.querySelector<HTMLTextAreaElement>("[data-room-feed-composer] textarea:not([disabled])")?.focus();
-  return null;
+  if (focusFeedComposer(action.groupId)) return null;
+  composerWanted = action.groupId;
+  return { type: "select", id: action.groupId };
 }
 
 /** A room's thread opened from a page that then shows the room (`showRoom` selects it): with the feed, the room comes
@@ -43,7 +65,7 @@ export function openRoomThreadThen(dispatch: (action: Action) => void, state: Pi
   dispatch(openFeedThread(groupId, threadId));
 }
 
-/** With the room feed on, a thread opened from the Inbox opens beside whatever is on screen, and the Inbox stays.
+/** Where the server has the room feed, a thread opened from the Inbox opens beside whatever is on screen, and the Inbox stays.
  * False where today's way applies: a phone, a room's bot-to-bot chat, a thread no room or bot here holds, or the one
  * already shown in the chat. */
 export function openThreadBeside(dispatch: (action: Action) => void, threadId: string,

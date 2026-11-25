@@ -11626,7 +11626,7 @@ function configStatus() {
       autoRecall: autoRecallEnabled(cfg),
       roomMemoryCapture: roomMemoryCaptureEnabled(cfg),
       parallelRoomJobs: parallelRoomJobsEnabled(cfg),
-      savedSteps: savedStepsEnabled(cfg), savedStepsHere: savedSteps.here(), skillBurger: skillBurgerEnabled(cfg), threadTabs: cfg.features?.threadTabs === true, roomFeed: cfg.features?.roomFeed === true, teamBoard: CLOUD_TEAM ? cfg.features?.teamBoard === true : undefined,
+      savedSteps: savedStepsEnabled(cfg), savedStepsHere: savedSteps.here(), skillBurger: skillBurgerEnabled(cfg), threadTabs: cfg.features?.threadTabs === true, roomFeed: true, teamBoard: CLOUD_TEAM ? cfg.features?.teamBoard === true : undefined,
       usbPhoneTakeover: HAS_USB_PORT ? usbPhoneTakeoverEnabled(cfg) : undefined,
     },
     onboarding: {

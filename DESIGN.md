@@ -194,11 +194,13 @@ element's job and never a pixel value:
   36px avatar; every row hovers at `bg-ink/[0.06]`. The sidebar is 280px wide
   in both modes; pinned bots are 95 × 92px tiles with a 60px avatar. Pinned
   pages never join them: a bot's pages are in its bot panel's Library tab.
-- **With Room feed on, a room is a feed of its threads.** Each row is a
+- **A room is a feed of its threads** (no switch; a home older than 0.1.181,
+  which lacks the feed's routes, keeps the single transcript). Each row is a
   thread's first line, its reply count, who replied and when; a row, a room
   thread opened from anywhere, and an Inbox line open their thread in a panel
   beside the chat (`ForkPanel`), never by moving the room's current thread,
-  which is everyone's. The feed's composer starts a new thread. A row carries
+  which is everyone's. The feed's composer starts a new thread; the room's
+  "+" in the sidebar brings the room up with the cursor in that composer. A row carries
   the sidebar thread row's menu behind a quiet More (hover, focus and touch),
   a pin mark when pinned, and its unread or waiting dot; the thread beside the
   feed has the same menu in its header, with its export. Archived threads come

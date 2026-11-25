@@ -2,11 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppState, Group } from "@/state/store";
 import { markVisibleGroupThreadsRead } from "@/state/read-visible";
 import { openThread, visibleNotificationThread } from "@/state/thread-navigation";
-import { feedPreview, feedThreadAction, openRoomThreadThen, openThreadBeside, roomFeedShows } from "./room-feed";
+import { feedPreview, feedThreadAction, openRoomThreadThen, openThreadBeside, roomFeedShows, takeFeedComposerWanted } from "./room-feed";
 import { roomThreadAttention } from "./room-threads";
 
 const on = { features: { roomFeed: true } } as AppState["config"];
-const off = { features: { roomFeed: false } } as AppState["config"];
+/** A 0.1.181 home reports its old switch, off unless set; it has the feed's routes all the same. */
+const home181 = { features: { roomFeed: false } } as AppState["config"];
+/** A home older than 0.1.181 reports nothing about the feed and has none of its routes. */
+const off = { features: {} } as AppState["config"];
 const room = (extra: Partial<Group> = {}) => ({ id: "room", name: "Launch", threadId: "current", memberIds: ["kiwi"], messages: [{ id: "m" }],
   tasks: [{ threadId: "current", title: "", createdAt: 1, unread: true }, { threadId: "other", title: "", createdAt: 2, unread: true }], ...extra } as unknown as Group);
 const kiwi = { id: "kiwi", name: "Kiwi", threadId: "kiwi-main", tasks: [{ threadId: "kiwi-main" }, { threadId: "kiwi-side" }] };
@@ -16,22 +19,37 @@ const narrow = () => vi.stubGlobal("window", { matchMedia: () => ({ matches: fal
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("the room feed switch", () => {
-  it("shows a room's feed only with the switch on, never for a bot-to-bot room, and not on a phone", () => {
+describe("the room feed", () => {
+  it("shows a room's feed wherever the server has it, never for a bot-to-bot room, and not on a phone", () => {
     expect(roomFeedShows(on, room())).toBe(true);
+    expect(roomFeedShows(home181, room())).toBe(true);
     expect(roomFeedShows(off, room())).toBe(false);
     expect(roomFeedShows(undefined, room())).toBe(false);
     expect(roomFeedShows(on, room({ dm: true }))).toBe(false);
     expect(roomFeedShows(on, room(), false)).toBe(false);
   });
 
-  it("opens a room's thread beside the feed instead of moving the room's current thread, and leaves it alone with the switch off", () => {
+  it("opens a room's thread beside the feed instead of moving the room's current thread, and leaves it alone on an older server", () => {
     expect(feedThreadAction({ type: "switchGroupTask", groupId: "room", threadId: "other" }, state(on)))
       .toEqual({ type: "openForkPanel", kind: "group", ownerId: "room", threadId: "other" });
     const switching = { type: "switchGroupTask" as const, groupId: "room", threadId: "other" };
     expect(feedThreadAction(switching, state(off))).toBe(switching);
     const fresh = { type: "newGroupTask" as const, groupId: "room" };
     expect(feedThreadAction(fresh, state(off))).toBe(fresh);
+  });
+
+  it("a room's \"+\" puts the cursor in its feed composer, showing the room first when it is not on screen", () => {
+    const fresh = { type: "newGroupTask" as const, groupId: "room" };
+    expect(feedThreadAction(fresh, state(on))).toEqual({ type: "select", id: "room" });
+    expect(takeFeedComposerWanted("other-room")).toBe(false);
+    expect(takeFeedComposerWanted("room")).toBe(true);
+    expect(takeFeedComposerWanted("room")).toBe(false);
+    const box = { focus: vi.fn() };
+    const feed = { dataset: { roomFeed: "room" }, querySelector: (selector: string) => (selector.includes("data-room-feed-composer") ? box : null) };
+    vi.stubGlobal("document", { querySelectorAll: () => [{ dataset: { roomFeed: "elsewhere" }, querySelector: () => null }, feed] });
+    expect(feedThreadAction(fresh, state(on))).toBeNull();
+    expect(box.focus).toHaveBeenCalledTimes(1);
+    expect(takeFeedComposerWanted("room")).toBe(false);
   });
 
   it("opens a notification's room thread beside the feed, the room's current one too", () => {
@@ -44,7 +62,7 @@ describe("the room feed switch", () => {
   });
 });
 
-describe("an Inbox line with the room feed on", () => {
+describe("an Inbox line where the server has the room feed", () => {
   it("opens a room's thread or a bot's beside the chat", () => {
     const dispatch = vi.fn();
     expect(openThreadBeside(dispatch, "other", state(on, { selectedId: "kiwi" }))).toBe(true);
@@ -53,7 +71,7 @@ describe("an Inbox line with the room feed on", () => {
     expect(dispatch).toHaveBeenLastCalledWith({ type: "openForkPanel", kind: "bot", ownerId: "kiwi", threadId: "kiwi-side" });
   });
 
-  it("goes the usual way with the switch off, on a phone, for an unknown thread, or for the chat already on screen", () => {
+  it("goes the usual way on an older server, on a phone, for an unknown thread, or for the chat already on screen", () => {
     const dispatch = vi.fn();
     expect(openThreadBeside(dispatch, "other", state(off))).toBe(false);
     expect(openThreadBeside(dispatch, "gone", state(on))).toBe(false);
@@ -105,7 +123,7 @@ describe("a feed room's sidebar line", () => {
 });
 
 describe("a room's run opened from the calendar", () => {
-  it("shows the room first and keeps the thread open beside the feed, and keeps today's order with the switch off", () => {
+  it("shows the room first and keeps the thread open beside the feed, and keeps the old order on an older server", () => {
     const sent: unknown[] = [];
     const showRoom = (id: string) => sent.push({ type: "select", id });
     openRoomThreadThen((action) => sent.push(action), state(on), "room", "other", showRoom);

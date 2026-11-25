@@ -12004,8 +12004,6 @@
   "settings.features.skillBurgerLine": "Salva a execução de um bot como etapas que você pode executar de novo",
   "settings.features.threadTabs": "Abas de conversas",
   "settings.features.threadTabsLine": "Mostra as conversas de um bot como abas acima do chat",
-  "settings.features.roomFeed": "Feed do grupo",
-  "settings.features.roomFeedLine": "Mostra as conversas de um grupo em um só feed, com a conversa aberta ao lado",
   "composer.placeholder.newThread": "Comece uma conversa em {name}",
   "room.feed.aria": "Conversas em {name}",
   "room.feed.replyOne": "1 resposta",

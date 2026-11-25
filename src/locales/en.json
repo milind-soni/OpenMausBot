@@ -12004,8 +12004,6 @@
   "settings.features.skillBurgerLine": "Save a bot's run as steps you can run again",
   "settings.features.threadTabs": "Thread tabs",
   "settings.features.threadTabsLine": "Show a bot's threads as tabs above the chat",
-  "settings.features.roomFeed": "Room feed",
-  "settings.features.roomFeedLine": "Show a room's threads as one feed, with the open thread beside it",
   "composer.placeholder.newThread": "Start a thread in {name}",
   "room.feed.aria": "Threads in {name}",
   "room.feed.replyOne": "1 reply",
