@@ -7,6 +7,7 @@ export interface TwoPlacesPlace { key: string; name: string; kind: "cloud" | "se
 export declare const LOOK_EVERY_MS: number;
 export function usedBots(summary: unknown): string[];
 export function parseDismissed(value: unknown): Set<string>;
+export function parseLastRead(value: unknown): Record<string, Record<string, { name: string; kind: "cloud" | "server"; bots: string[]; at: number }>>;
 export function createTwoPlaces(deps: {
   /** This computer's move summary, null once its bots moved. */
   local(): Promise<unknown>;
@@ -18,6 +19,10 @@ export function createTwoPlaces(deps: {
   /** A move is under way: nothing is read or told until it is done. */
   quiet?(): boolean;
   dismissed: { read(): unknown; write(value: unknown): void };
+  /** Each own place's bots as last read, kept across restarts. */
+  lastRead?: { read(): unknown; write(value: unknown): void } | null;
+  /** Who is signed in; undefined while that is not known yet. */
+  account?(): { id: string | null; signedOut: boolean } | undefined;
   onChange?(): void;
   now?(): number;
   log?(line: string): void;

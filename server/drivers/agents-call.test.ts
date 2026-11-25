@@ -778,3 +778,15 @@ describe("reset_cloud_computer", () => {
     expect(Object.keys(tool({ OMB_MEETINGS: "1", OMB_CHIEF_OF_STAFF: "1" })?.inputSchema.properties ?? {})).toEqual(["why", "for_bot_id"]);
   });
 });
+
+describe("list_bots", () => {
+  const elsewhere = "The person's bots in their other places, which can't be reached from here: Ziggy (on My Cloud). If asked for one, say where it lives.";
+  const list = (answer: Record<string, unknown>) => callTool("list_bots", {}, context({ client: { api: async () => answer, apiResponse: async () => ({ ok: true, status: 200, body: answer }) } }));
+
+  it("names the bots of the person's other places after the ones here, so none of them is taken for no such bot", async () => {
+    const result = await list({ bots: [{ id: "bot-scout", name: "Scout", model: "m", status: "available" }], elsewhere });
+    expect(result.text).toMatch(/^Bots you can reach .*\n- Scout \[id: bot-scout, model: m\]\n\n.*resume you automatically\.\n\nThe person's bots in their other places/su);
+    expect((await list({ bots: [], elsewhere })).text).toBe(`No other bots you can reach yet.\n\n${elsewhere}`);
+    expect((await list({ bots: [] })).text).toBe("No other bots you can reach yet.");
+  });
+});

@@ -117,7 +117,7 @@ describe("Settings → AI → Providers: Google AI Studio (#6352)", () => {
   });
 });
 
-describe("Settings → AI → Providers: ModelGo sits in the main list, after Google's row", () => {
+describe("Settings → AI → Providers: ModelGo sits in the main list, among its first three rows", () => {
   const provider = (instanceId: string, driverKind: string, snapshot: InstanceInfo["snapshot"] = { state: "unavailable", reason: "No API key" }) => ({
     instanceId, driverKind, displayName: instanceId === "modelgo" ? "ModelGo" : instanceId, access: "api", snapshot, models: { default: "model", options: [] },
   } as unknown as InstanceInfo);
@@ -125,7 +125,7 @@ describe("Settings → AI → Providers: ModelGo sits in the main list, after Go
   const order = () => [...container.querySelectorAll("[data-simple-engine]")].map((row) => row.getAttribute("data-simple-engine"));
   const moreCount = () => [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("More providers"))?.textContent;
 
-  it("follows Google AI Studio, outside More providers, which no longer counts it", async () => {
+  it("follows Google AI Studio when nothing else leads, outside More providers, which no longer counts it", async () => {
     fixture.state = { ...fixture.state, instances: [provider("groq", "groq"), provider("modelgo", "modelgo"), provider("mistral", "mistral")] };
     await closed();
     expect(order()).toEqual(["google-ai-studio", "modelgo"]);
@@ -136,7 +136,7 @@ describe("Settings → AI → Providers: ModelGo sits in the main list, after Go
     expect(order().filter((id) => id === "modelgo"), "listed once, the fold open too").toHaveLength(1);
   });
 
-  it("follows the ready rows where Google's row is not offered, and stays among them, once, when it is ready itself", async () => {
+  it("follows the ready rows where Google's row is not offered, and keeps a higher place, once, when it is ready itself", async () => {
     const ready = { state: "available", authenticated: true } as const;
     fixture.state = { ...fixture.state, instances: [provider("modelgo", "modelgo"), provider("groq", "groq", ready), gemini(GEMINI_URL)] };
     await closed();
@@ -157,5 +157,77 @@ describe("Settings → AI → Providers: ModelGo sits in the main list, after Go
     await closed();
     expect(order()).toEqual(["google-ai-studio"]);
     expect(moreCount()).toContain("1");
+  });
+});
+
+describe("Settings → AI → Providers: ModelGo stands directly above Cursor, within the first three rows", () => {
+  // The rows a fresh install lists first, in the server's order: sign-in agents lead the Simple list, Droid has no sign-in.
+  const agent = (instanceId: string, driverKind: string, signIn = true) => ({
+    instanceId, driverKind, displayName: instanceId, access: "subscription", cliDefault: instanceId, snapshot: { state: "unavailable", reason: "Not installed" },
+    models: { default: "model", options: [] }, ...(signIn ? { authentication: { method: "browser" } } : {}),
+  } as unknown as InstanceInfo);
+  const key = (instanceId: string, driverKind: string, snapshot: InstanceInfo["snapshot"] = { state: "unavailable", reason: "No API key" }) => ({
+    instanceId, driverKind, displayName: instanceId === "modelgo" ? "ModelGo" : instanceId, access: "api", snapshot, models: { default: "model", options: [] },
+  } as unknown as InstanceInfo);
+  const [grok, kimi, droid, cursor, vibe] = [agent("grok", "grokAgent"), agent("kimi", "kimiAgent"), agent("droid", "droidAgent", false), agent("cursor", "cursorAgent"), agent("mistralVibe", "mistralVibeAgent")];
+  const fleet = [grok, kimi, droid, cursor, vibe, key("groq", "groq"), key("modelgo", "modelgo"), key("meta", "meta")];
+  const simple = async (open = false) => { await act(async () => { root.render(createElement(EnginesSettings, { simple: true, more: { id: "more", open, onToggle: () => {} } })); }); };
+  const advanced = async () => { await act(async () => { root.render(createElement(EnginesSettings)); }); };
+  const order = () => [...container.querySelectorAll("[data-simple-engine]")].map((row) => row.getAttribute("data-simple-engine"));
+  const cards = () => [...container.querySelectorAll("[data-engine-card]")].map((card) => card.getAttribute("data-engine-card"));
+  const raised = (ids: Array<string | null>) => { expect(ids.indexOf("modelgo")).toBeGreaterThanOrEqual(0); expect(ids.indexOf("modelgo")).toBeLessThan(3); };
+
+  it("takes Cursor's third place in the Simple list, the others keeping their order, and is listed once with the fold open", async () => {
+    fixture.state = { ...fixture.state, instances: fleet };
+    await simple();
+    expect(order().slice(0, 6)).toEqual(["grok", "kimi", "modelgo", "cursor", "mistralVibe", "google-ai-studio"]);
+    await simple(true);
+    expect(order().filter((id) => id === "modelgo")).toHaveLength(1);
+    expect(order().slice(0, 4)).toEqual(["grok", "kimi", "modelgo", "cursor"]);
+  });
+
+  it("goes directly above Cursor when Cursor leads, and third when Cursor is lower or gone", async () => {
+    fixture.state = { ...fixture.state, instances: [cursor, grok, kimi, key("modelgo", "modelgo")] };
+    await simple();
+    expect(order().slice(0, 3)).toEqual(["modelgo", "cursor", "grok"]);
+    fixture.state = { ...fixture.state, instances: [grok, kimi, vibe, cursor, key("modelgo", "modelgo")] };
+    await simple();
+    expect(order().slice(0, 5)).toEqual(["grok", "kimi", "modelgo", "mistralVibe", "cursor"]);
+    fixture.state = { ...fixture.state, instances: [grok, kimi, vibe, key("modelgo", "modelgo")] };
+    await simple();
+    expect(order().slice(0, 4)).toEqual(["grok", "kimi", "modelgo", "mistralVibe"]);
+  });
+
+  it("keeps that place, once, when ModelGo is set up", async () => {
+    fixture.state = { ...fixture.state, instances: [grok, kimi, droid, cursor, vibe, key("modelgo", "modelgo", { state: "available", authenticated: true })] };
+    await simple(true);
+    expect(order().slice(0, 4)).toEqual(["grok", "kimi", "modelgo", "cursor"]);
+    expect(order().filter((id) => id === "modelgo")).toHaveLength(1);
+  });
+
+  it("leaves the order alone where ModelGo may not be offered, and stays hidden once hidden", async () => {
+    fixture.state = { ...fixture.state, instances: fleet, config: { managedPolicy: { organizationName: "Acme", companyModelsOnly: false, allowedEngines: ["groq"] } } };
+    await simple();
+    expect(order().slice(0, 4)).toEqual(["grok", "kimi", "cursor", "mistralVibe"]);
+    expect(order()).not.toContain("modelgo");
+    fixture.state = { ...fixture.state, instances: fleet.filter((instance) => instance.instanceId !== "modelgo"), config: {} };
+    fixture.hidden = [{ instanceId: "modelgo", driverKind: "modelgo", displayName: "ModelGo" }];
+    await simple(true);
+    expect(order().slice(0, 4)).toEqual(["grok", "kimi", "cursor", "mistralVibe"]);
+    expect(order()).not.toContain("modelgo");
+  });
+
+  it("stands third, above Cursor, among the Advanced list's providers that need setting up", async () => {
+    fixture.state = { ...fixture.state, instances: fleet };
+    await advanced();
+    expect(cards().slice(0, 5)).toEqual(["grok", "kimi", "modelgo", "droid", "cursor"]);
+    raised(cards());
+    const ready = { state: "available", authenticated: true } as const;
+    fixture.state = { ...fixture.state, instances: [grok, cursor, key("groq", "groq", ready), key("mistral", "mistral", ready), key("meta", "meta", ready), key("modelgo", "modelgo", ready)] };
+    await advanced();
+    expect(cards(), "set up, it is third among the ready ones").toEqual(["groq", "mistral", "modelgo", "meta", "grok", "cursor"]);
+    fixture.state = { ...fixture.state, instances: fleet, config: { managedPolicy: { organizationName: "Acme", companyModelsOnly: false, allowedEngines: ["groq"] } } };
+    await advanced();
+    expect(cards().slice(0, 4)).toEqual(["grok", "kimi", "droid", "cursor"]);
   });
 });

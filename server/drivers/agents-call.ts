@@ -357,8 +357,9 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   }
   if (name === "list_bots") {
     const r = await api(`/api/internal/agents?self=${encodeURIComponent(BOT_ID)}`);
-    const bots = (r.bots as Array<Json>) ?? [];
-    if (!bots.length) return { text: "No other bots you can reach yet." };
+    // `elsewhere`: the person's bots in their other places, which can't be reached from here, so none is "no such bot".
+    const bots = (r.bots as Array<Json>) ?? [], elsewhere = typeof r.elsewhere === "string" && r.elsewhere ? `\n\n${r.elsewhere}` : "";
+    if (!bots.length) return { text: `No other bots you can reach yet.${elsewhere}` };
     const lines = bots.map((b) => {
       const role = b.title ? ` — ${b.title}` : "";
       const about = b.description ? ` (${String(b.description).slice(0, 120)})` : "";
@@ -369,7 +370,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       return `- ${b.name}${role}${about} [id: ${b.id}, model: ${b.model}${team}${state ? `, ${state}` : ""}]`;
     });
     return {
-      text: `Bots you can reach (every department; you can contact any of them):\n${lines.join("\n")}\n\nUse coordinate_bots for concrete work or, with consult: true, for advice, then end your turn. Busy teammates queue and results resume you automatically.`,
+      text: `Bots you can reach (every department; you can contact any of them):\n${lines.join("\n")}\n\nUse coordinate_bots for concrete work or, with consult: true, for advice, then end your turn. Busy teammates queue and results resume you automatically.${elsewhere}`,
     };
   }
   if (name === "list_rooms") {
