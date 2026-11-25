@@ -66,8 +66,9 @@ async function main(): Promise<void> {
       }
       const calls = messages.filter((message) => message.kind === "activity" && message.tool?.name).map((message) => String(message.tool.name));
       const after = await spent();
-      const row: Row = { id: item.id, score: scoreCase(item, calls), calls, done, costUsd: Number((after.cost - before.cost).toFixed(4)), inputTokens: after.input - before.input,
-        reply: String(messages.filter((message) => message.role === "bot" && message.kind === "text").at(-1)?.text ?? "").slice(0, 200) };
+      const reply = messages.filter((message) => message.role === "bot" && message.kind === "text").map((message) => String(message.text ?? "")).join("\n");
+      const row: Row = { id: item.id, score: scoreCase(item, calls, reply), calls, done, costUsd: Number((after.cost - before.cost).toFixed(4)), inputTokens: after.input - before.input,
+        reply: reply.slice(-200) };
       rows.push(row);
       console.log(`${row.score.pass ? "pass" : "MISS"} ${item.id}: ${row.score.chosen ?? "no tool"}${row.score.searched ? " (looked up)" : ""} $${row.costUsd} [${calls.join(", ")}]`);
     }
