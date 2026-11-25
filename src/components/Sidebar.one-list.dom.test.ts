@@ -246,7 +246,7 @@ describe("switch on: one list", () => {
     expect(cloudPage).not.toContain("data-other-place");
   });
 
-  it("rows of the other place never push rows under the pointer: they come in plain at the end, and take their place once the list is quiet", async () => {
+  it("rows of the other place never push rows under the pointer: they come in plain at the end, and show their marks once the list is quiet", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     try {
       window.ogb = { placesTogether: page } as never;
@@ -261,6 +261,7 @@ describe("switch on: one list", () => {
       expect(ids().slice(0, local.length)).toEqual(local);
       expect(ids('[data-sidebar-section-id="builtin:bots"]')).toEqual(["git", "ledger", "cloud:tech", "cloud:scout"]);
       expect(q('[data-sidebar-section-id="builtin:unread"]')).toBeNull();
+      expect(q('[data-sidebar-bot-row="cloud:scout"] [data-testid="working-dot"]')).toBeNull();
       await act(async () => { vi.advanceTimersByTime(10_000); });
       expect(q('[data-sidebar-section-id="builtin:unread"]')).toBeNull();
       // Gone from the list, then a click on it within the quiet time: still waiting.
@@ -269,8 +270,10 @@ describe("switch on: one list", () => {
       await act(async () => { vi.advanceTimersByTime(1_500); });
       expect(q('[data-sidebar-section-id="builtin:unread"]')).toBeNull();
       await act(async () => { vi.advanceTimersByTime(600); });
+      // Quiet: the rows stay where they are and now show what they say (Scout is working).
       expect(q('[data-sidebar-section-id="builtin:unread"]')).toBeNull();
-      expect(ids('[data-sidebar-section-id="builtin:bots"]')).toEqual(["cloud:scout", "git", "ledger", "cloud:tech"]);
+      expect(ids('[data-sidebar-section-id="builtin:bots"]')).toEqual(["git", "ledger", "cloud:tech", "cloud:scout"]);
+      expect(q('[data-sidebar-bot-row="cloud:scout"] [data-testid="working-dot"]')).not.toBeNull();
     } finally {
       vi.useRealTimers();
     }

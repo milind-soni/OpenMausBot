@@ -1096,10 +1096,9 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const viewerEmail = useViewerEmail(), placed = useOtherPlaceBots(q, sidebarRef), placeHere = useOneListHere();
   const parts = partitionSidebarBots(botDrag.preview(matchingBots), { universalPins, viewerEmail, welcoming: useWelcomingBot(), searching: Boolean(q) });
   const saved = withOtherPlace(simpleDesk ? withPrimaryTile(parts, myDefaultBot(state.bots, viewerEmail)?.id) : { ...parts, primary: null }, placed);
-  // Shown order only: a drag or Alt+Up/Down moves a bot among the rows as drawn and saves it into the saved order of the
-  // rows left in place. Unread never takes a row out of its list while the app is in use: the row keeps its place and
-  // shows the unread dot there.
-  const floats = (bot: Bot) => { const { waiting, working } = sidebarBotStatus(bot, state.pendingQueued); return waiting || working; };
+  // Rows keep their place while the app is in use: unread, work and a wait on the person show as marks on the row, never
+  // as a move to the top or into an Unread list. Only a pin, a drag, Alt+Up/Down or a move to a department moves a row.
+  const floats = () => false;
   const { primary, unsectionedChief } = saved;
   const { pinnedBots, filed, unreadBots, unreadCount, sectionChiefs, sectionedBots, unsectionedBots, inPlace } = sidebarBotRows(saved, floats, false);
   const { botChats, sectionedRooms, unsectionedRooms } = partitionSidebarGroups(visibleGroups);

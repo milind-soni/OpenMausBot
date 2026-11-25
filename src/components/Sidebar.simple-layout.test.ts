@@ -427,7 +427,7 @@ describe("unread bots keep their place", () => {
     expect(headers(tree).map((header) => header.props.name)).toEqual(["Group chats", "Work"]);
   });
 
-  it("moves no row when a bot is opened, gets a reply or is marked unread while the app is in use", () => {
+  it("moves no row when a bot is opened, gets a reply, is marked unread, works or waits on the person while the app is in use", () => {
     const shown = () => { const { tree } = render(); return { sections: sectionOrder(tree), bots: listedBots(tree) }; };
     const before = shown();
     fixture.state = reducer(fixture.state, { type: "select", id: "bea" });
@@ -435,6 +435,8 @@ describe("unread bots keep their place", () => {
     fixture.state = { ...fixture.state, bots: fixture.state.bots.map((candidate) => (candidate.id === "bea" ? { ...candidate, unread: true, tasks: [thread("bea", 90)] } : candidate)) };
     expect(shown()).toEqual(before);
     fixture.state = reducer(fixture.state, { type: "markUnread", botId: "dodo" });
+    expect(shown()).toEqual(before);
+    fixture.state = { ...fixture.state, bots: fixture.state.bots.map((candidate) => (candidate.id === "bea" ? { ...candidate, busy: true, activity: "working" as const } : candidate.id === "dodo" ? { ...candidate, activity: "waiting-on-you" as const } : candidate)) };
     expect(shown()).toEqual(before);
     fixture.state = reducer(fixture.state, { type: "select", id: "room" });
     expect(shown()).toEqual(before);
