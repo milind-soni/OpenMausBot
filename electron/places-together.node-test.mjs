@@ -57,6 +57,29 @@ test("the switch starts off, and off reads nothing, keeps nothing and starts no 
   assert.equal(f.together.on(), false);
 });
 
+test("turning the switch on from this computer's page lets My Cloud run commands here, once; already on, off, a never-linked install or My Cloud's page never do", () => {
+  let lent = 0;
+  const never = setup({ saved: null, deps: { turnedOn: () => { lent += 1; } } });
+  never.together.state("computer");
+  never.together.linkChanged();
+  assert.equal(lent, 0, "a never-linked install is left as it is");
+  never.together.set("computer", false);
+  assert.equal(lent, 0);
+  never.together.set("computer", true);
+  assert.equal(lent, 1, "the person's own turn on grants it");
+  never.together.set("computer", true);
+  assert.equal(lent, 1, "already on: nothing again");
+  const linked = setup({ deps: { turnedOn: () => { lent += 1; } } });
+  linked.together.state("computer");
+  linked.together.set("computer", true);
+  assert.equal(lent, 1, "a link already on from before is not changed without the person turning it on");
+  linked.together.set("cloud", false);
+  linked.together.set("cloud", true);
+  assert.equal(lent, 1, "My Cloud's page never grants it");
+  const failing = setup({ saved: null, deps: { turnedOn: () => { throw new Error("not signed in"); } } });
+  assert.equal(failing.together.set("computer", true).on, true, "the switch still turns on");
+});
+
 test("on: this computer's page lists My Cloud's bots, asked as background work with the person's own session", async () => {
   const f = setup();
   assert.equal(f.together.state("computer").other.state, "loading");

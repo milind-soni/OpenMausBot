@@ -11479,6 +11479,7 @@
   "together.state.offlineComputer": "This computer's bots can't be read right now.",
   "together.switch.title": "This computer and My Cloud together",
   "together.switch.line": "Off by default. The Cloud's bots and this computer's bots show in one list, and each opens where it lives.",
+  "together.switch.commands": "Turning it on also lets My Cloud's bots run commands on this computer; you can turn that off from the OpenMausBot icon.",
   "together.switch.failed": "That couldn't be saved. Try again.",
   "together.state.signin": "Open My Cloud once to sign in.",
   "sidebar.newBotOn.computer": "New bot on this computer",

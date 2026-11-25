@@ -10213,6 +10213,7 @@
   "together.state.offlineComputer": "现在无法读取这台电脑上的机器人。",
   "together.switch.title": "这台电脑和 My Cloud 合在一起",
   "together.switch.line": "默认关闭。Cloud 上的机器人和这台电脑上的机器人显示在同一个列表中，各自在所在的位置打开。",
+  "together.switch.commands": "开启后，My Cloud 上的机器人也能在这台电脑上运行命令；你可以从 OpenMausBot 图标关闭此权限。",
   "together.switch.failed": "未能保存。请重试。",
   "together.state.signin": "打开一次 My Cloud 以登录。",
   "sidebar.newBotOn.computer": "在这台电脑上新建机器人",

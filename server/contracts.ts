@@ -138,6 +138,10 @@ export interface SendTurnInput {
   toolScope?: ToolScope;
   /** A guest turn: no shell or command execution, no reads outside its folder. Sent only to drivers whose guestTurns is "confined". */
   guestConfined?: boolean;
+  /** Work from the person's other place while it may not run commands here (server/bot-link/far-side.ts): no shell,
+   * command execution or reads outside the working folders, at the level `approvalMode` says (writes in the working
+   * folder only). Sent only to drivers whose guestTurns is "confined". */
+  linkLimited?: true;
   /** Why this turn is confined, in the owner's words, for a refusal to end with. */
   confinedWhy?: string;
   /** Images for this user turn only; kept out of replay transcripts. */

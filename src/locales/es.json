@@ -6513,6 +6513,7 @@
   "remote.tailscale.needsApproval": "Este ordenador espera la aprobación en tu red de Tailscale. Apruébalo en la consola de administración de Tailscale y vuelve a intentarlo.",
   "together.switch.title": "Este equipo y My Cloud juntos",
   "together.switch.line": "Desactivado de forma predeterminada. Los bots del Cloud y los de este equipo aparecen en una sola lista, y cada uno se abre donde está.",
+  "together.switch.commands": "Al activarlo, los bots de My Cloud también pueden ejecutar comandos en este equipo; puedes desactivarlo desde el icono de OpenMausBot.",
   "together.switch.failed": "No se pudo guardar. Inténtalo de nuevo.",
   "imageGen.complexity.label": "Nivel de detalle",
   "imageGen.complexity.help": "Cuánto detalle tienen las imágenes de GPT-Image-2.6. Más bajo es más simple y rápido.",
