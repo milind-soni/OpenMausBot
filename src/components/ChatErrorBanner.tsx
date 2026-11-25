@@ -44,12 +44,15 @@ export function ChatErrorBanner({ message, onDismiss }: { message: string | null
   // Follows the window's word on an operation of ours (lib/cloud-work.ts), which lives outside React.
   useEffect(() => onCloudWork(setWork), []);
   const shape = chatErrorShape(message, work, calmFor);
-  // A send that didn't reach the Cloud: the page asks what has it down now. Said calmly once: kept so that it goes away, rather
-  // than turn red, when the Cloud is back.
+  // A send that didn't reach the Cloud: the page asks what has it down now (once per message, not on every render).
   useEffect(() => {
     if (message && NOT_ANSWERED.test(message)) noteCloudUnanswered();
+  }, [message]);
+  // Said calmly once: kept so that it goes away, rather than turn red, when the Cloud is back; forgotten once it has gone.
+  useEffect(() => {
     if (shape === "calm") setCalmFor(message);
-    if (shape === "gone") { setCalmFor(null); onDismiss(); }
+    else if (shape === "gone") onDismiss();
+    else if (shape === "none") setCalmFor(null);
   }, [shape, message, onDismiss]);
   if (!message || shape === "none" || shape === "gone") return null;
   if (shape === "calm" && work) {
