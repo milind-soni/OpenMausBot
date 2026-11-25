@@ -202,7 +202,7 @@ export function ThreadSwitcherPill({ bot, tabs, head, label, panelOpen, onToggle
       <div className="flex min-w-0 items-center gap-0.5">
         <button type="button" data-chathead-pill data-tour="bot-pill" onClick={onToggle} title={t("chat.openBotPanel")} aria-label={label}
           aria-expanded={panelOpen} aria-controls={panelOpen ? BOT_PANEL_ID : undefined}
-          className={cn(open ? PART : FACE, "min-w-0", open && "shrink-0")}>
+          className={cn(open ? PART : FACE, "min-w-0", open && "max-w-40")}>
           {head}
         </button>
         {open && (
