@@ -25,6 +25,7 @@ afterEach(async () => {
   roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true }));
 });
 
+// The replayed shell steps run as the bot, which the Skill Burger command executor does on POSIX only (executors.test.ts).
 async function replay(content: string, name = "write", path = "report.txt") {
   const home = mkdtempSync(join(tmpdir(), "burger-pi-write-"));
   roots.push(home);
@@ -90,7 +91,7 @@ async function replay(content: string, name = "write", path = "report.txt") {
   };
 }
 
-it("replays a native Pi write before the recorded shell command consumes its file", async () => {
+it.skipIf(process.platform === "win32")("replays a native Pi write before the recorded shell command consumes its file", async () => {
   const content = "north,south\n12,34\n";
   const h = await replay(content);
   expect(existsSync(join(h.root, "report.txt"))).toBe(false);
@@ -100,7 +101,7 @@ it("replays a native Pi write before the recorded shell command consumes its fil
   expect(h.workflow.steps[0]).toMatchObject({ kind: "file", path: "report.txt", content });
 });
 
-it("preserves an empty Pi write instead of copying stale contents", async () => {
+it.skipIf(process.platform === "win32")("preserves an empty Pi write instead of copying stale contents", async () => {
   const h = await replay("");
   writeFileSync(join(h.root, "report.txt"), "stale report");
   expect(await h.run()).toMatchObject({ ok: true, status: "ok" });
@@ -108,7 +109,7 @@ it("preserves an empty Pi write instead of copying stale contents", async () => 
   expect(readFileSync(join(h.root, "delivered.txt"), "utf8")).toBe("");
 });
 
-it("hands a shortened Pi write to AI before allowing its file consumer", async () => {
+it.skipIf(process.platform === "win32")("hands a shortened Pi write to AI before allowing its file consumer", async () => {
   const content = "report contents\n".repeat(600);
   const h = await replay(content);
   expect(h.messages[1]!.tool?.input).toContain("[… preview shortened]");
