@@ -99,6 +99,18 @@ describe("the brief's cards", () => {
     expect(english["brief.card.numberedEmailAction"]).toBe("{number}. {action}");
   });
 
+  it("leaves the buttons unnumbered when every email has its own sender", () => {
+    const emails = [
+      { messageId: "m1", threadId: "t1", from: "Ada <ada@x.test>", subject: "Q3 numbers", needsReply: true },
+      { messageId: "m2", threadId: "t2", from: "Grace <grace@x.test>", subject: "Friday agenda", needsReply: false },
+    ];
+    const parsed = parseWidgetInput(briefCard({ now: NOW, timeZone: "UTC", intro: false, meetings: null, emails, needs: [], routines: [] }).card);
+    expect(parsed.ok, parsed.ok ? "" : parsed.error).toBe(true);
+    if (!parsed.ok) return;
+    expect(widgetActions(parsed.value).filter((entry) => entry.action.type === DRAFT_ACTION || entry.action.type === DISMISS_ACTION).map((entry) => entry.label))
+      .toEqual(["Draft a reply to Ada", "Dismiss Ada's email", "Draft a reply to Grace", "Dismiss Grace's email"]);
+  });
+
   it("name a routine's Open page button", () => {
     const card = briefCard({ ...facts, routines: [{ text: "Digest", note: "Done", page: "https://pages.example.com/p/1" }] }).card;
     const json = JSON.stringify(card);

@@ -218,7 +218,9 @@ export function briefCard(facts: BriefFacts): BuiltCard {
   const w = briefWords(language);
   const replies = facts.emails.filter((email) => email.needsReply);
   const important = facts.emails.filter((email) => !email.needsReply);
-  const place = (index: number): number | undefined => (facts.emails.length > 1 ? index + 1 : undefined);
+  // Numbered only when two emails share a sender, whose buttons would otherwise read the same.
+  const senders = facts.emails.map((email) => sender(email, BRIEF_TEXT.label, w));
+  const place = (index: number): number | undefined => (new Set(senders).size < senders.length ? index + 1 : undefined);
   const needRows = [...replies.map((email, index) => emailRow(email, w, place(index))), ...facts.needs.map((row) => rowBeside(row.text, row.note, openButton(row.open, w), row.said))];
   const meetings = [...(facts.meetings ?? [])].sort((a, b) => a.start - b.start);
   const meetingRows = meetings.map((meeting) => rowBeside(`${clockTime(meeting.start, zone, language)} · ${meeting.title}`, "", joinButton(meeting, w.join),
