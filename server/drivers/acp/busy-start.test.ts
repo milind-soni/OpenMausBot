@@ -4,7 +4,8 @@ import { classifyError } from "../retry.ts";
 import { runtimeErrorText } from "../runtime-notice-error.ts";
 import { startupFailureRecoverable } from "./startup-recovery.ts";
 import { acpRpcError } from "./rpc-error.ts";
-import { BUSY_RETRY_PAUSE_MS, busyStartFailure, sessionNewRetried, SLOW_FIRST_ANSWER_MS, type BusyStartDeps } from "./busy-start.ts";
+import { BUSY_RETRY_PAUSE_MS, busyStartFailure, sessionNewRetried, SLOW_FIRST_ANSWER_MS, startFailureClass, type BusyStartDeps } from "./busy-start.ts";
+import { takeStartFailure } from "../../engine-start-failures.ts";
 import { acpRuntimeFailure } from "./failure-words.ts";
 import { classifyOpenCodeError } from "./opencode-go.ts";
 
@@ -95,5 +96,27 @@ describe("session/new on a busy Cloud", () => {
       await sessionNewRetried(send, () => alive, deps().deps).catch(() => {});
       expect(send).toHaveBeenCalledTimes(1);
     }
+  });
+});
+
+describe("why a start failed, for the health report", () => {
+  it("notes the thread's start failure as too busy or the engine's own refusal; a sign-in or a request problem is not noted", async () => {
+    const pressed = deps({ pressure: () => "cpu pressure 80%" });
+    await sessionNewRetried(() => Promise.reject(refusal()), () => true, pressed.deps, "busy-thread").catch(() => {});
+    expect(takeStartFailure("busy-thread", 0)).toBe("overloaded");
+    // Taken once: a later failed row on the thread is filed by its words.
+    expect(takeStartFailure("busy-thread", 0)).toBeNull();
+    await sessionNewRetried(() => Promise.reject(outage()), () => true, deps().deps, "outage-thread").catch(() => {});
+    expect(takeStartFailure("outage-thread", 0)).toBe("provider");
+    const signIn = Object.assign(new Error("Authentication required"), { acpSignInRequired: true });
+    expect(startFailureClass(signIn)).toBeNull();
+    expect(startFailureClass(new Error("400 invalid request"))).toBeNull();
+    // A later start on the thread refused for sign-in takes the earlier note back: its row keeps its auth code.
+    await sessionNewRetried(() => Promise.reject(outage()), () => true, deps().deps, "backup-thread").catch(() => {});
+    await sessionNewRetried(() => Promise.reject(signIn), () => true, deps().deps, "backup-thread").catch(() => {});
+    expect(takeStartFailure("backup-thread", 0)).toBeNull();
+    // Without a thread nothing is noted (and nothing else changes).
+    await sessionNewRetried(() => Promise.reject(outage()), () => true, deps().deps).catch(() => {});
+    expect(takeStartFailure("outage-thread", 0)).toBeNull();
   });
 });

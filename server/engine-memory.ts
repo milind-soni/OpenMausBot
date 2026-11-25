@@ -153,15 +153,21 @@ export const memoryStallText = (cause: string, count: number) => `${cause}. This
 /** The last day's memory pressure on a Cloud home: tasks that had to wait for memory and how long they waited in all (a wait
  * still going included), turns stopped for memory, processes the kernel stopped, and minutes the machine stalled on it. */
 export interface RoomReport { waits: number; waitMs: number; stopped: number; killed: number; stallMinutes: number }
+/** The same counts since this process started (no wait time): the Admin keeps each hour's increase (its Cloud history), which
+ * the rolling day can't give. A restart starts them again; the Admin tells by the report's `bootedAt`. */
+export type BootPressure = Omit<RoomReport, "waitMs">;
 type PressureKind = "waits" | "waitMs" | "stopped" | "killed" | "stalled";
 
-/** Counts by minute over the last day. */
+/** Counts by minute over the last day, and since start. */
 export class PressureLedger {
   private readonly minutes = new Map<number, Record<PressureKind, number>>();
+  private readonly sinceStart: BootPressure = { waits: 0, stopped: 0, killed: 0, stallMinutes: 0 };
 
   note(at: number, kind: PressureKind, amount = 1): void {
     const minute = Math.floor(at / MINUTE_MS);
     const slot = this.minutes.get(minute) ?? { waits: 0, waitMs: 0, stopped: 0, killed: 0, stalled: 0 };
+    if (kind === "stalled") { if (!slot.stalled) this.sinceStart.stallMinutes += 1; }
+    else if (kind !== "waitMs") this.sinceStart[kind] += amount;
     slot[kind] = kind === "stalled" ? 1 : slot[kind] + amount;
     this.minutes.set(minute, slot);
     for (const key of this.minutes.keys()) if (key <= minute - DAY_MINUTES) this.minutes.delete(key);
@@ -178,6 +184,9 @@ export class PressureLedger {
     for (const start of waiting) report.waitMs += Math.max(0, at - start);
     return report;
   }
+
+  /** Counts since start: never fall, so the Admin can take each read's increase. */
+  boot(): BootPressure { return { ...this.sinceStart }; }
 }
 
 /** The bots' browsers, which start during a turn rather than with its engine. */
@@ -602,6 +611,8 @@ export class EngineMemory {
 
   /** The last day's memory pressure, for the Admin's health check (cloud-health.ts): times only, never what ran. */
   dayPressure(): RoomReport { return this.ledger.read(this.now(), this.waitingSince.values()); }
+  /** The last day's pressure and the counts since start (`boot`), as the health report carries them. */
+  roomReport(): RoomReport & { boot: BootPressure } { return { ...this.dayPressure(), boot: this.ledger.boot() }; }
 
   /** Every couple of seconds while an engine or a bot's browser runs: notes short memory against the running turns, and
    * makes room before the machine runs out: an idle engine first (and, thrashing, the unused browsers with it), then the
