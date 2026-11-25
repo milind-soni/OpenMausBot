@@ -3636,6 +3636,8 @@
   "settings.appSounds.click": "क्लिक",
   "settings.appSounds.glass": "ग्लास",
   "settings.appSounds.retro": "रेट्रो",
+  "settings.appSounds.tap": "टैप",
+  "settings.appSounds.breeze": "हवा",
   "settings.appSounds.off": "बंद",
   "settings.notificationSounds.title": "सूचना ध्वनियाँ",
   "settings.openAtLogin.failed": "इसे बदला नहीं जा सका। फिर से कोशिश करें, या सिस्टम सेटिंग्स में लॉगिन आइटम देखें।",

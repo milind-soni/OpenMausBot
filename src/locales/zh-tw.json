@@ -1718,6 +1718,8 @@
   "settings.appSounds.click": "點擊",
   "settings.appSounds.glass": "玻璃",
   "settings.appSounds.retro": "復古",
+  "settings.appSounds.tap": "輕觸",
+  "settings.appSounds.breeze": "微風",
   "settings.appSounds.off": "關閉",
   "settings.deviceNotifications.title": "這台裝置上的通知",
   "settings.deviceNotifications.subtitle": "開啟這個應用程式時，機器人完成工作後在這裡顯示通知。核准、問題和警告一律會顯示。",

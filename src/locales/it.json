@@ -1997,6 +1997,8 @@
   "settings.appSounds.click": "Clic",
   "settings.appSounds.glass": "Vetro",
   "settings.appSounds.retro": "Retrò",
+  "settings.appSounds.tap": "Tocco",
+  "settings.appSounds.breeze": "Brezza",
   "settings.appSounds.off": "Disattivato",
   "settings.deviceNotifications.title": "Notifiche su questo dispositivo",
   "settings.deviceNotifications.subtitle": "Mostra qui una notifica quando un bot finisce, mentre questa app è aperta. Approvazioni, domande e avvisi si vedono sempre.",

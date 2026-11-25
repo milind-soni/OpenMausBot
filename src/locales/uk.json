@@ -4067,6 +4067,8 @@
   "settings.appSounds.click": "Клац",
   "settings.appSounds.glass": "Скло",
   "settings.appSounds.retro": "Ретро",
+  "settings.appSounds.tap": "Дотик",
+  "settings.appSounds.breeze": "Бриз",
   "settings.appSounds.off": "Вимк.",
   "settings.notificationSounds.title": "Звуки сповіщень",
   "settings.openAtLogin.failed": "Не вдалося змінити. Спробуйте ще раз або перевірте об’єкти входу в системних налаштуваннях.",

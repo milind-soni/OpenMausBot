@@ -1535,6 +1535,8 @@
   "settings.appSounds.click": "클릭",
   "settings.appSounds.glass": "글라스",
   "settings.appSounds.retro": "레트로",
+  "settings.appSounds.tap": "탭",
+  "settings.appSounds.breeze": "산들바람",
   "settings.appSounds.off": "끄기",
   "settings.deviceNotifications.title": "이 기기의 알림",
   "settings.deviceNotifications.subtitle": "이 앱이 열려 있는 동안 봇이 작업을 마치면 여기에 알림을 보여 줘요. 승인, 질문, 경고는 항상 표시돼요.",

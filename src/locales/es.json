@@ -1287,6 +1287,8 @@
   "settings.appSounds.click": "Clic",
   "settings.appSounds.glass": "Cristal",
   "settings.appSounds.retro": "Retro",
+  "settings.appSounds.tap": "Toque",
+  "settings.appSounds.breeze": "Brisa",
   "settings.appSounds.off": "Desactivado",
   "settings.deviceNotifications.title": "Notificaciones en este dispositivo",
   "settings.deviceNotifications.subtitle": "Muestra aquí una notificación cuando un bot termina, mientras esta app está abierta. Las aprobaciones, preguntas y advertencias siempre se muestran.",

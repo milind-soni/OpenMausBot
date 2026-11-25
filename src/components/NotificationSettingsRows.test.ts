@@ -14,7 +14,7 @@ vi.mock("@/lib/notification-preferences", () => ({
   useFinishedNotifications: () => fixture.optedIn,
   setFinishedNotifications: fixture.setFinishedNotifications,
 }));
-vi.mock("@/lib/app-sounds", () => ({ SOUND_STYLES: ["click", "glass", "retro"], previewAppSound: fixture.previewAppSound }));
+vi.mock("@/lib/app-sounds", () => ({ SOUND_STYLES: ["tap", "click", "glass", "retro", "breeze"], previewAppSound: fixture.previewAppSound }));
 
 let root: Root | undefined;
 let container: HTMLDivElement;
@@ -111,7 +111,7 @@ it("saves a sound style and plays a sample of it, but plays nothing when switche
   await act(async () => root!.render(createElement(NotificationSoundsRow)));
   const picker = container.querySelector("select")!;
   expect(picker.value).toBe("click");
-  expect([...picker.options].map((option) => option.textContent)).toEqual(["Click", "Glass", "Retro", "Off"]);
+  expect([...picker.options].map((option) => option.textContent)).toEqual(["Tap", "Click", "Glass", "Retro", "Breeze", "Off"]);
   const pick = async (value: string) => {
     picker.value = value;
     await act(async () => picker.dispatchEvent(new Event("change", { bubbles: true })));

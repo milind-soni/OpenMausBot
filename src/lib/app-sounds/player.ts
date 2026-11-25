@@ -1,4 +1,4 @@
-import { renderSound, type SoundChoice, type SoundEvent, type SoundStyle } from "./render";
+import { renderSound, type SoundChoice, type SoundCue, type SoundEvent, type SoundStyle } from "./render";
 
 /** What a hidden or unfocused window may still play: the person is not looking, so only what asks for them. */
 export const BACKGROUND_EVENTS: ReadonlySet<SoundEvent> = new Set(["attention", "mention", "done", "error"]);
@@ -48,7 +48,7 @@ export function createSoundPlayer(host: SoundHost) {
     return false;
   };
 
-  const sound = (event: SoundEvent, style: SoundStyle, rate: number) => {
+  const sound = (event: SoundCue, style: SoundStyle, rate: number) => {
     const key = `${event}:${style}:${rate}`;
     let samples = rendered.get(key);
     if (!samples) {
@@ -58,7 +58,7 @@ export function createSoundPlayer(host: SoundHost) {
     return samples;
   };
 
-  const emit = (out: SoundOutput, event: SoundEvent, style: SoundStyle) => {
+  const emit = (out: SoundOutput, event: SoundCue, style: SoundStyle) => {
     const samples = sound(event, style, out.sampleRate);
     const buffer = out.createBuffer(1, samples.length, out.sampleRate);
     buffer.copyToChannel(samples, 0);
@@ -70,7 +70,7 @@ export function createSoundPlayer(host: SoundHost) {
 
   /** A suspended context only counts once it woke within the deadline; until then anything may have asked for quiet,
    * and what asked for quiet keeps the system chime quiet too. */
-  const emitWhenRunning = (event: SoundEvent, style: SoundStyle, quiet: () => boolean): SoundDecision => {
+  const emitWhenRunning = (event: SoundCue, style: SoundStyle, quiet: () => boolean): SoundDecision => {
     const out = output;
     if (!out) return "unplayable";
     if (out.state === "running") {
@@ -124,7 +124,7 @@ export function createSoundPlayer(host: SoundHost) {
     preview(style: SoundStyle): SoundDecision {
       if (holds.size > 0) return "silenced";
       unlock();
-      return emitWhenRunning("done", style, () => holds.size > 0);
+      return emitWhenRunning("preview", style, () => holds.size > 0);
     },
   };
 }

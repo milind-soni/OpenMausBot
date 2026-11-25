@@ -2006,6 +2006,8 @@
   "settings.appSounds.click": "Click",
   "settings.appSounds.glass": "Glass",
   "settings.appSounds.retro": "Retro",
+  "settings.appSounds.tap": "Tap",
+  "settings.appSounds.breeze": "Breeze",
   "settings.appSounds.off": "Off",
   "settings.deviceNotifications.title": "Notifications on this device",
   "settings.deviceNotifications.subtitle": "Show a notification here when a bot finishes, while this app is open. Approvals, questions and warnings always show.",

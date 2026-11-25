@@ -1471,6 +1471,8 @@
   "settings.appSounds.click": "Щелчок",
   "settings.appSounds.glass": "Стекло",
   "settings.appSounds.retro": "Ретро",
+  "settings.appSounds.tap": "Касание",
+  "settings.appSounds.breeze": "Бриз",
   "settings.appSounds.off": "Выкл.",
   "settings.deviceNotifications.title": "Уведомления на этом устройстве",
   "settings.deviceNotifications.subtitle": "Показывать здесь уведомление, когда бот завершает работу, пока это приложение открыто. Подтверждения, вопросы и предупреждения показываются всегда.",

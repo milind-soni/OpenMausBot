@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSoundPlayer, REPEAT_WINDOW_MS, RESUME_DEADLINE_MS, type SoundOutput } from "./player";
-import type { SoundChoice, SoundEvent } from "./render";
+import { renderSound, type SoundChoice, type SoundEvent } from "./render";
 
 function fakeOutput(state = "running", resumes = true) {
   const started: Float32Array[] = [];
@@ -168,6 +168,12 @@ describe("app sound player", () => {
     expect(sounds.preview("retro")).toBe("played");
     expect(made).toBe(1);
     expect(speaker.started).toHaveLength(1);
+  });
+
+  it.each(["retro", "tap"] as const)("plays %s's own sample when it is picked", (style) => {
+    const sounds = player();
+    sounds.preview(style);
+    expect(speaker.started[0]).toEqual(renderSound("preview", style, 48_000));
   });
 
   it.each(["call", "recording"] as const)("plays no style sample during a %s", (reason) => {

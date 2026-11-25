@@ -1618,6 +1618,8 @@
   "settings.appSounds.click": "クリック",
   "settings.appSounds.glass": "グラス",
   "settings.appSounds.retro": "レトロ",
+  "settings.appSounds.tap": "タップ",
+  "settings.appSounds.breeze": "そよ風",
   "settings.appSounds.off": "オフ",
   "settings.deviceNotifications.title": "このデバイスの通知",
   "settings.deviceNotifications.subtitle": "アプリを開いている間、ボットの作業が終わったらここに通知します。承認、質問、警告は常に表示されます。",

@@ -999,6 +999,8 @@
   "settings.appSounds.click": "Tık",
   "settings.appSounds.glass": "Cam",
   "settings.appSounds.retro": "Retro",
+  "settings.appSounds.tap": "Dokunuş",
+  "settings.appSounds.breeze": "Esinti",
   "settings.appSounds.off": "Kapalı",
   "settings.deviceNotifications.title": "Bu cihazdaki bildirimler",
   "settings.deviceNotifications.subtitle": "Uygulama açıkken bir bot işini bitirdiğinde burada bildirim gösterin. Onaylar, sorular ve uyarılar her zaman gösterilir.",
