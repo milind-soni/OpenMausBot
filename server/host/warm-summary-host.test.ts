@@ -120,7 +120,7 @@ function setup(overrides: Partial<WarmSummaryHostDeps> = {}, options: { tokens?:
     for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
   };
   const finishTurn = () => host.turnCompleted({ threadId: "t1", botId: "b1", instanceId: "claude" }, { ok: true, contextTokens: options.tokens ?? 150_000 });
-  return { host, task, messages, appended, compactCalls, holds, book, bookEngineCompact, adapter, fold, advance, finishTurn,
+  return { host, task, store, messages, appended, compactCalls, holds, book, bookEngineCompact, adapter, fold, advance, finishTurn,
     setCompactResult: (result: IdleCompactResult) => { compactResult = result; }, now: () => now };
 }
 
@@ -414,6 +414,40 @@ describe("Compact now", () => {
     expect(f.bookEngineCompact).not.toHaveBeenCalled();
     expect(f.task.lastContextModel).toBe("claude:m");
     expect(f.task.usage.context).toEqual({ tokens: 270_000, window: 272_000 });
+  });
+
+  it("keeps the point the session had received with the task in the same write that drops the old reading", async () => {
+    const f = setup({}, { inPlace: async () => ok({ input: 90, output: 10, cachedInput: 0 }) });
+    const writes: Array<Record<string, unknown>> = [];
+    const write = f.store.patchTask;
+    f.store.patchTask = (botId, threadId, patch) => { writes.push(patch); return write(botId, threadId, patch); };
+    const boundary = { instanceId: "claude", session: "live-session", throughId: "m4" };
+    await expect(f.host.compactNow(target, new AbortController().signal, check({ boundary: () => boundary }))).resolves.toBe("done");
+    expect(writes).toEqual([expect.objectContaining({ lastContextModel: undefined, engineCompacted: boundary })]);
+  });
+
+  it("writes no compaction line when the write that keeps its point fails", async () => {
+    const f = setup({}, { inPlace: async () => ok() });
+    f.store.patchTask = () => { throw new Error("disk full"); };
+    await expect(f.host.compactNow(target, new AbortController().signal, check({ boundary: () => ({ instanceId: "claude", session: "live-session", throughId: "m4" }) }))).rejects.toThrow("disk full");
+    expect(f.appended).toEqual([]);
+  });
+
+  it("books what an engine reported for a compaction it did not do, once, and leaves the conversation to the fold", async () => {
+    const f = setup({}, { inPlace: async () => ({ ok: false, reason: "answered as a message", usage: { input: 9_100, output: 147, cachedInput: 0 }, model: null }) });
+    await expect(f.host.compactNow(target, new AbortController().signal, check())).resolves.toBe("skipped");
+    expect(f.bookEngineCompact).toHaveBeenCalledTimes(1);
+    expect(f.bookEngineCompact).toHaveBeenCalledWith(target, { ok: true, usage: { input: 9_100, output: 147, cachedInput: 0 }, model: "m" });
+    expect(f.appended).toEqual([]);
+  });
+
+  it("lets no turn carry on a session that took the request as a message", async () => {
+    const f = setup({}, { inPlace: async () => ({ ok: false, reason: "answered as a message", sessionChanged: true }) });
+    await expect(f.host.compactNow(target, new AbortController().signal, check())).resolves.toBe("skipped");
+    expect(f.task.resumeCursors.claude).toBeUndefined();
+    const kept = setup({}, { inPlace: async () => ({ ok: false, reason: "no kept process" }) });
+    await kept.host.compactNow(target, new AbortController().signal, check());
+    expect(kept.task.resumeCursors.claude).toBe("live-session");
   });
 
   it("never asks the engine when the next turn would not carry on this session", async () => {

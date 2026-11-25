@@ -20,7 +20,7 @@ export function startFresh(store: FreshStartStore, botId: string, threadId: stri
   const task = store.taskByThread(botId, threadId);
   if (!task) return null;
   store.patchTask(botId, threadId, {
-    rewound: true, resumeCursors: {}, appliedCompactionId: undefined, contextFloor: undefined, lastContextModel: undefined,
+    rewound: true, resumeCursors: {}, appliedCompactionId: undefined, contextFloor: undefined, engineCompacted: undefined, lastContextModel: undefined,
     ...(task.usage ? { usage: { ...task.usage, context: undefined } } : {}),
   });
   const path = store.activePath(threadId);

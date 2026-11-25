@@ -356,7 +356,8 @@ describe("Store", () => {
     const record = store.appendMessage(bot.threadId, { role: "bot", kind: "compaction", compaction: {
       summary: `Historical data -5 != 5; ${key}`, firstKeptId: "", foldedThroughId: user.id, tokensBefore: 100, by: "person",
     } });
-    const patch = { appliedCompactionId: record.id, contextFloor: 500, lastContextModel: "claude:fixture" };
+    const patch = { appliedCompactionId: record.id, contextFloor: 500, lastContextModel: "claude:fixture",
+      engineCompacted: { instanceId: "antigravity", session: "native-session-1", throughId: user.id } };
     store.patchTask(bot.id, bot.threadId, patch);
     const reloaded = new Store(selection);
     expect(reloaded.taskByThread(bot.id, bot.threadId)).toMatchObject(patch);

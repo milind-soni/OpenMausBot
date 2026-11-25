@@ -518,3 +518,145 @@ it("leaves the first turn of another engine after a Codex compaction to replay t
   expect(prompt).not.toContain("Earlier conversation summary");
   expect(await f.folds()).toHaveLength(0);
 }), 90_000);
+
+async function antigravityFixture(test: (f: Awaited<ReturnType<typeof antigravitySetup>>) => Promise<void>, fakeEnv: NodeJS.ProcessEnv = {}) {
+  const f = await antigravitySetup(fakeEnv);
+  try { await test(f); } finally { await f.close(); }
+}
+
+async function antigravitySetup(fakeEnv: NodeJS.ProcessEnv) {
+  const env = { ...process.env, FAKE_AGY_USAGE: "1", FAKE_CLAUDE_VERSION: "2.1.270", ...fakeEnv };
+  const session = await launchVerificationServer(env, undefined, undefined, undefined, undefined, undefined, ["antigravity"]);
+  let ready = false;
+  try {
+    const evidence: unknown[] = [];
+    const api = async (path: string, body?: unknown, method = "POST") => {
+      const result = await request(path, body === undefined ? {} : { method, body: JSON.stringify(body) }, session.info.url) as any;
+      evidence.push({ path, method: body === undefined ? "GET" : method, body, result });
+      return result;
+    };
+    const cli = async (...args: string[]) => {
+      const result = await runControlOmb(args, { env: { OPENMAUSBOT_URL: session.info.url } }) as any;
+      evidence.push({ command: args, result });
+      return result;
+    };
+    const bot = (await cli("new-bot", "--name", "Antigravity context probe")).bot;
+    const thread: string = bot.activeTaskId;
+    await expect.poll(async () => (await cli("models")).instances.find((item: any) => item.instanceId === "antigravity")?.models?.options?.length ?? 0, { timeout: 30_000 }).toBeGreaterThan(0);
+    const model = (await cli("models")).instances.find((item: any) => item.instanceId === "antigravity").models.options[0].id as string;
+    await api(`/api/bots/${bot.id}/tasks/${thread}`, { modelSelection: { instanceId: "antigravity", model }, requireAvailableModel: true }, "PATCH");
+    const messages = async () => (await api(`/api/threads/${thread}/messages`)).messages as any[];
+    const task = () => readRegistry(session.info.dataDir).bots.find((b: any) => b.id === bot.id).tasks.find((t: any) => t.threadId === thread);
+    const idle = () => expect.poll(async () => (await api("/api/bots?messages=0")).bots
+      .find((b: any) => b.id === bot.id).tasks.find((t: any) => t.threadId === thread).busy, { timeout: 15_000 }).toBe(false);
+    const send = async (text: string) => {
+      await cli("send", "--bot", bot.id, "--task", thread, "--text", text);
+      expect((await cli("wait", "--bot", bot.id, "--task", thread, "--timeout", "30")).status).toBe("settled");
+    };
+    const log = join(session.info.dataDir, "fake-antigravity.log");
+    const entries = (): Array<Record<string, any>> => existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line)) : [];
+    const prompts = () => entries().filter(entry => entry.method === "session/prompt");
+    const turnPids = () => new Set(prompts().map(entry => entry.pid));
+    const sessionSetups = () => entries().filter(entry => turnPids().has(entry.pid) && (entry.method === "session/new" || entry.method === "session/resume")).map(entry => entry.method);
+    const folds = async () => (await messages()).filter(m => m.kind === "compaction" && m.compaction);
+    const engineRows = async () => (await messages()).filter(m => m.kind === "compaction" && m.engineCompaction);
+    const cursor = () => task().resumeCursors.antigravity as string;
+    const conversation = async (texts = ["FIRST historical request", "SECOND keep recent", "THIRD correction"]) => {
+      for (const text of texts) await send(text);
+      await expect.poll(() => cursor()).toMatch(/^fixture-session-/);
+      expect(await folds()).toHaveLength(0);
+    };
+    const compact = async () => { await api(`/api/bots/${bot.id}/compact`, { threadId: thread }); await idle(); };
+    const usageRows = () => readUsage(session.info.dataDir, { from: new Date(Date.now() - 3_600_000), to: new Date(Date.now() + 3_600_000) })
+      .filter(row => row.threadId === thread && row.botId === bot.id).sort((a, b) => a.at.localeCompare(b.at));
+    ready = true;
+    return { session, api, cli, bot, thread, messages, task, idle, send, prompts, sessionSetups, folds, engineRows, cursor, conversation, compact, usageRows,
+      close: async () => {
+        try {
+          evidence.push({ commit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+            final: { messages: await messages().catch(() => null), task: task(), usage: usageRows(), fakeAntigravity: entries() } });
+          writeFileSync(`${session.info.logPath}.context.json`, JSON.stringify(evidence, null, 2), { mode: 0o600 });
+          console.info(`Antigravity compaction evidence: ${session.info.logPath}.context.json`);
+        } finally { await session.close(); }
+      } };
+  } finally { if (!ready) await session.close(); }
+}
+
+it.skipIf(process.platform === "win32")("Compact now compacts a native Antigravity CLI conversation in place: /compact goes to the live session and the next message goes on in it", () => antigravityFixture(async f => {
+  await f.conversation();
+  const session = f.cursor();
+  const pid = f.prompts().at(-1)!.pid;
+  const rowsBefore = f.usageRows().length;
+  await f.compact();
+  expect(f.prompts().filter(entry => entry.prompt === "/compact")).toEqual([expect.objectContaining({ pid })]);
+  expect(await f.folds()).toHaveLength(0);
+  expect(await f.engineRows()).toEqual([expect.objectContaining({ kind: "compaction", engineCompaction: true })]);
+  await expect.poll(() => f.task().usage?.context).toBeUndefined();
+  expect(f.cursor()).toBe(session);
+  await expect.poll(() => f.usageRows().length).toBe(rowsBefore + 1);
+  expect(f.usageRows().at(-1)).toMatchObject({ instanceId: "antigravity", output: 500 });
+  await f.send("FOURTH after compaction");
+  expect(f.prompts().at(-1)).toMatchObject({ pid, prompt: expect.stringContaining("FOURTH after compaction") });
+  expect(f.sessionSetups()).toEqual(["session/new"]);
+  expect(await f.folds()).toHaveLength(0);
+  expect(f.cursor()).toBe(session);
+  await expect.poll(() => f.usageRows().length).toBe(rowsBefore + 2);
+}), 120_000);
+
+const antigravityFoldedToNewSession = async (f: Awaited<ReturnType<typeof antigravitySetup>>, oldSession: string, requests = 0) => {
+  expect(f.prompts().filter(entry => entry.prompt === "/compact")).toHaveLength(requests);
+  expect((await f.folds()).at(-1).compaction.by).toBe("person");
+  await f.send("FOURTH after the fold");
+  await expect.poll(() => f.cursor()).not.toBe(oldSession);
+  expect(f.prompts().at(-1)!.prompt).toContain("Earlier conversation summary");
+};
+
+it.skipIf(process.platform === "win32")("folds a native Antigravity conversation when the process the last turn left is gone", () => antigravityFixture(async f => {
+  await f.conversation();
+  const session = f.cursor();
+  const pid = f.prompts().at(-1)!.pid;
+  process.kill(pid, "SIGKILL");
+  await expect.poll(() => { try { process.kill(pid, 0); return true; } catch { return false; } }).toBe(false);
+  await f.compact();
+  await antigravityFoldedToNewSession(f, session);
+}), 120_000);
+
+it.skipIf(process.platform === "win32")("folds a native Antigravity conversation when the person set where to fold", () => antigravityFixture(async f => {
+  await f.api("/api/config", { context: { compactAt: 0.5 } }, "PATCH");
+  await f.conversation();
+  const session = f.cursor();
+  await f.compact();
+  await antigravityFoldedToNewSession(f, session);
+}), 120_000);
+
+it.skipIf(process.platform === "win32")("folds when the native CLI answers /compact as a message, and books what it reported", () => antigravityFixture(async f => {
+  await f.conversation();
+  const session = f.cursor();
+  const rowsBefore = f.usageRows().length;
+  await f.compact();
+  await expect.poll(() => f.usageRows().filter(row => row.output === 777)).toEqual([expect.objectContaining({ instanceId: "antigravity", driverKind: "antigravityAgent", input: expect.any(Number) })]);
+  expect(f.usageRows().length).toBeGreaterThan(rowsBefore);
+  expect(await f.engineRows()).toHaveLength(0);
+  await antigravityFoldedToNewSession(f, session, 1);
+}, { FAKE_AGY_COMPACT: "reply" }), 120_000);
+
+it.skipIf(process.platform === "win32")("keeps the compacted session when the last reply had taken the history past the fold point", () => antigravityFixture(async f => {
+  const long = (label: string) => `${label} ${"x".repeat(90_000)}`;
+  await f.conversation(["FIRST", "SECOND", "THIRD", "FOURTH", "FIFTH"].map(long));
+  const session = f.cursor();
+  await f.compact();
+  expect(await f.engineRows()).toHaveLength(1);
+  await f.send("SIXTH after compaction");
+  expect(await f.folds()).toHaveLength(0);
+  expect(f.cursor()).toBe(session);
+  expect(f.sessionSetups()).toEqual(["session/new"]);
+}), 120_000);
+
+it.skipIf(process.platform === "win32")("folds that long a conversation on its next message when nothing compacted it", () => antigravityFixture(async f => {
+  const long = (label: string) => `${label} ${"x".repeat(90_000)}`;
+  await f.conversation(["FIRST", "SECOND", "THIRD", "FOURTH", "FIFTH"].map(long));
+  const session = f.cursor();
+  await f.send("SIXTH with no compaction");
+  expect((await f.folds()).at(-1)?.compaction.by).toBe("harness");
+  expect(f.cursor()).not.toBe(session);
+}), 120_000);

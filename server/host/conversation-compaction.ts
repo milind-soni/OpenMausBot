@@ -3,7 +3,7 @@ import { compactBudget, compactionReading, contextWindowFor, shouldCompact } fro
 import { MAX_SUMMARY_BYTES, selectReplay } from "../context-rebuild.ts";
 import type { ModelCatalog } from "../contracts.ts";
 import type { EngineCompactCheck, EngineCompactOutcome } from "./warm-summary-host.ts";
-import type { ContextMessage } from "../delta-context.ts";
+import { handedStateUsable, type ContextMessage } from "../delta-context.ts";
 import { sinceFreshStart } from "../fresh-start.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
 
@@ -40,12 +40,14 @@ interface CompactionInstance {
   instanceId: string;
   driverKind: string;
   models?: ModelCatalog;
-  adapter: { capabilities: { contextReading?: "meter"; nativeCompaction?: boolean } };
+  adapter: { capabilities: { contextReading?: "meter"; nativeCompaction?: boolean }; compactSession?: unknown };
 }
 
 export interface CompactConversationInput {
   bot: BotRecord; threadId: string; generation: string; instance: CompactionInstance; model: string;
   excludedIds: ReadonlySet<string>; manual: boolean; idle?: AbortSignal;
+  /** The turn this runs before resumes a coordination, which decides on its own whether it carries on the session. */
+  coordinationResumed?: boolean;
 }
 
 export interface ConversationCompactionDeps {
@@ -74,6 +76,21 @@ export interface ConversationCompactionDeps {
 
 export function createConversationCompaction(deps: ConversationCompactionDeps) {
   const { store } = deps;
+
+  const engineCompactedThrough = (input: CompactConversationInput, task: { resumeCursors: Record<string, unknown>; engineCompacted?: { instanceId: string; session: string; throughId: string } }, history: ContextMessage[]): number => {
+    const marked = task.engineCompacted;
+    if (!marked || input.coordinationResumed || marked.instanceId !== input.instance.instanceId || task.resumeCursors[marked.instanceId] !== marked.session) return -1;
+    return deps.resumesSession(input, marked.session) ? history.findIndex((entry) => entry.id === marked.throughId) : -1;
+  };
+
+  const receivedThrough = (botId: string, threadId: string, instanceId: string, context: ContextMessage[]) => {
+    const task = store.taskByThread(botId, threadId);
+    const session = task?.resumeCursors[instanceId];
+    const handed = task?.handedMessages?.[instanceId];
+    if (typeof session !== "string" || !handed?.through || !handedStateUsable(handed, session, context.map((entry) => entry.id))) return undefined;
+    return { instanceId, session, throughId: handed.through };
+  };
+
   return async function compactConversation(input: CompactConversationInput): Promise<void> {
     const { bot, threadId, generation, instance, model, excludedIds, manual, idle } = input;
     const task = store.taskByThread(bot.id, threadId);
@@ -102,7 +119,9 @@ export function createConversationCompaction(deps: ConversationCompactionDeps) {
       if (!manual) store.patchTask(bot.id, threadId, { contextFloor: floor });
     }
     const engineCompacts = instance.adapter.capabilities.nativeCompaction === true && deps.engineCompactionOn(instance);
-    if (!manual && !foldDue({ engineCompacts, configuredCompactAt: settings?.compactAt, contextTokens: measurement?.tokens, estimatedBytes: bytes,
+    const compactedAt = !engineCompacts && !manual ? engineCompactedThrough(input, task, history) : -1;
+    const timedBytes = compactedAt < 0 ? bytes : history.slice(compactedAt + 1).reduce((n, entry) => n + Buffer.byteLength(entry.text), 0);
+    if (!manual && !foldDue({ engineCompacts, configuredCompactAt: settings?.compactAt, contextTokens: measurement?.tokens, estimatedBytes: timedBytes,
       window, nativeCompactAt: deps.nativeCompactTokens(instance, model), floor, idleFraction: idle ? deps.idleFraction : 1 })) return;
     const fold = manual ? { folded: history, firstKeptId: "" } : foldPoint(history);
     if (!fold) return;
@@ -118,9 +137,11 @@ export function createConversationCompaction(deps: ConversationCompactionDeps) {
     // Someone waits on this summary (not an idle one): the status line says so until every way out below, in the finally.
     let shown = false;
     try {
-      const engine = manual && engineCompacts ? await deps.engineCompact({ botId: bot.id, threadId, instanceId: instance.instanceId }, controller.signal, {
+      const asksEngine = manual && deps.engineCompactionOn(instance) && (engineCompacts || instance.adapter.compactSession !== undefined);
+      const engine = asksEngine ? await deps.engineCompact({ botId: bot.id, threadId, instanceId: instance.instanceId }, controller.signal, {
         model, compactAtSet: positive(settings?.compactAt), resumes: (session) => deps.resumesSession(input, session), selectionNow: () => deps.currentSelection(bot.id, threadId),
         current: () => deps.claimIsCurrent(bot.id, generation, threadId),
+        ...(engineCompacts ? {} : { boundary: () => receivedThrough(bot.id, threadId, instance.instanceId, context) }),
       }) : "skipped";
       controller.signal.throwIfAborted();
       if (engine !== "skipped") return;

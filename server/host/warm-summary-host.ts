@@ -52,6 +52,9 @@ export interface EngineCompactCheck {
   selectionNow(): { instanceId: string; model: string | null } | undefined;
   /** The turn that holds the conversation for this compaction still does. */
   current(): boolean;
+  /** For an engine that does not compact by itself: the point the compacted session had received, kept with the task so
+   * the fold measures only what came after it. */
+  boundary?(): { instanceId: string; session: string; throughId: string } | undefined;
 }
 
 /** `skipped`: the engine did nothing or failed, and the caller folds. `done`: the session is compacted. `stale`: the engine
@@ -151,6 +154,12 @@ export function createWarmSummaryHost(deps: WarmSummaryHostDeps) {
     const { threadId, botId, instanceId } = target;
     const result = await deps.instance(instanceId)!.adapter.compactSession!(threadId, { botId, session, model: check.model, selectionNow: check.selectionNow, signal });
     if (!result.ok) {
+      if (result.usage) deps.bookEngineCompact(target, { ok: true, usage: result.usage, model: result.model ?? check.model });
+      const task = store.taskByThread(botId, threadId);
+      if (result.sessionChanged && task?.resumeCursors[instanceId] === session) {
+        const { [instanceId]: _dropped, ...resumeCursors } = task.resumeCursors;
+        store.patchTask(botId, threadId, { resumeCursors });
+      }
       deps.log?.(`compact now ${threadId}: not by the engine (${result.reason})`);
       return "skipped";
     }
@@ -161,7 +170,8 @@ export function createWarmSummaryHost(deps: WarmSummaryHostDeps) {
       return "stale";
     }
     const task = store.taskByThread(botId, threadId);
-    store.patchTask(botId, threadId, { lastContextModel: undefined, ...(task?.usage ? { usage: { ...task.usage, context: undefined } } : {}) });
+    const boundary = check.boundary?.();
+    store.patchTask(botId, threadId, { lastContextModel: undefined, ...(task?.usage ? { usage: { ...task.usage, context: undefined } } : {}), ...(boundary ? { engineCompacted: boundary } : {}) });
     store.appendMessage(threadId, { role: "bot", kind: "compaction", engineCompaction: true });
     deps.log?.(`compact now ${threadId}: compacted in place by the engine`);
     return "done";

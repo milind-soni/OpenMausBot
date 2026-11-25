@@ -78,8 +78,12 @@ export interface AcpSession {
   settledAt?: number;
   /** The slash commands the agent last advertised for this session. */
   commands?: ReadonlySet<string>;
+  commandsSession?: string;
   fallbackNotice?: string;
   launchModel?: string;
+  /** The slash command that compacts this session in place, from the launch that started its process. */
+  compactCommand?: string;
+  lastModel?: string;
   /** The effort the session runs: its process's launch argv's, or the last one configureSession applied. */
   effort?: SendTurnInput["effort"];
 }

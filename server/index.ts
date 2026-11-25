@@ -7677,7 +7677,7 @@ async function beginTurn(
       await warmSummaries.beforeTurn(threadId, () => directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)); setup.lap("summaries");
       if (usesNativeImageInput && !opts?.compactOnly) turnImages.push(...await videoFramesWithin(turnImages.length, resolvedImages.videos, turnVideos, turnImages)); setup.lap("videoFrames");
       await compactConversation({ bot, threadId, generation: dispatchClaimId, instance, model,
-        excludedIds: new Set([userMessage.id, ...(opts?.excludeMessageIds ?? [])]), manual: opts?.compactOnly === true }); setup.lap("compact");
+        excludedIds: new Set([userMessage.id, ...(opts?.excludeMessageIds ?? [])]), manual: opts?.compactOnly === true, coordinationResumed: opts?.coordination?.resumed === true }); setup.lap("compact");
       if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) throw new DirectTurnSetupCancelled("turn stopped during context setup");
       if (opts?.compactOnly) {
         clearDirectTurnDispatch(threadId, dispatchClaimId);

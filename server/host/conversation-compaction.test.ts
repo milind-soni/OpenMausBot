@@ -228,3 +228,81 @@ describe("compactConversation", () => {
     expect(done.summarizing).toEqual([]);
   });
 });
+
+describe("compactConversation on an engine that compacts in place only when asked", () => {
+  const bot = { id: "bot" } as BotRecord;
+  const thread = "thread";
+  /** Eight messages of `size` bytes each (the last pair `tail` bytes), on a meter-reading engine with no compaction of its own. */
+  function setup(options: { size?: number; tail?: number; engineCompacted?: { instanceId: string; session: string; throughId: string }; cursor?: string;
+    resumes?: boolean; coordinationResumed?: boolean; handed?: { session: string; through: string } }) {
+    const size = options.size ?? 60_000, tail = options.tail ?? size;
+    const messages: Message[] = [0, 1, 2, 3].flatMap((index) => [
+      { id: `u${index}`, role: "user", kind: "text", text: "u".repeat(index === 3 ? tail : size), at: index * 2 } as Message,
+      { id: `b${index}`, role: "bot", kind: "text", text: "b".repeat(index === 3 ? tail : size), at: index * 2 + 1 } as Message,
+    ]);
+    const boundaries: unknown[] = [];
+    const task = { resumeCursors: { engine: options.cursor ?? "s1" }, engineCompacted: options.engineCompacted,
+      handedMessages: options.handed ? { engine: { session: options.handed.session, through: options.handed.through, ids: [] } } : undefined };
+    const deps: ConversationCompactionDeps = {
+      store: {
+        taskByThread: () => task as never,
+        activePath: () => messages,
+        patchTask: () => undefined as never,
+        appendMessage: (_threadId: string, message: Partial<Message>) => { const made = { id: `m${messages.length}`, ...message } as Message; messages.push(made); return made; },
+      } as never,
+      context: () => undefined,
+      directContext: (_bot, _thread, all) => all.filter((m) => m.kind === "text").map((m) => ({ id: m.id, role: m.role === "user" ? "user" as const : "assistant" as const, text: m.text ?? "" })),
+      latestCompaction: () => undefined,
+      nativeCompactTokens: () => undefined,
+      engineCompactionOn: () => true,
+      engineCompact: async (_target, _signal, check) => { boundaries.push(check.boundary?.()); return "done"; },
+      resumesSession: () => options.resumes ?? true,
+      currentSelection: () => ({ instanceId: "engine", model: "model" }),
+      generateText: () => undefined,
+      claimIsCurrent: () => true,
+      controllers: new Map(),
+      cancelled: (reason) => new Error(reason),
+      idleFraction: 0.85,
+    };
+    const instance = { instanceId: "engine", driverKind: "antigravityAgent", adapter: { capabilities: { contextReading: "meter" as const }, compactSession: () => undefined } };
+    const run = (manual: boolean) => createConversationCompaction(deps)({ bot, threadId: thread, generation: "g", instance, model: "model", excludedIds: new Set(), manual,
+      ...(options.coordinationResumed ? { coordinationResumed: true } : {}) });
+    const folds = () => messages.filter((m) => m.kind === "compaction");
+    return { run, folds, boundaries };
+  }
+  const compacted = { instanceId: "engine", session: "s1", throughId: "b2" };
+
+  it("Compact now asks it, handing over the last message its session received in order, and nothing when no record says", async () => {
+    const asked = setup({ handed: { session: "s1", through: "b3" } });
+    await asked.run(true);
+    expect(asked.boundaries).toEqual([{ instanceId: "engine", session: "s1", throughId: "b3" }]);
+    expect(asked.folds()).toHaveLength(0);
+    const unknown = setup({ handed: { session: "s0", through: "b3" } });
+    await unknown.run(true);
+    expect(unknown.boundaries).toEqual([undefined]);
+  });
+
+  it("times the fold by the history after the point its session was compacted, while the next turn carries on that session", async () => {
+    const over = setup({});
+    await over.run(false);
+    expect(over.folds()).toHaveLength(1);
+    const kept = setup({ engineCompacted: compacted });
+    await kept.run(false);
+    expect(kept.folds()).toHaveLength(0);
+  });
+
+  it("folds the whole history once what came after the compaction outgrows the budget", async () => {
+    const grown = setup({ size: 10_000, tail: 230_000, engineCompacted: compacted });
+    await grown.run(false);
+    expect(grown.folds()).toHaveLength(1);
+    expect(grown.folds()[0]!.compaction).toMatchObject({ tokensBefore: Math.ceil((6 * 10_000 + 2 * 230_000) / 4) });
+  });
+
+  it("times the fold by the whole history when the next turn would not carry on the compacted session", async () => {
+    for (const away of [{ cursor: "s2" }, { resumes: false }, { coordinationResumed: true }, { engineCompacted: { ...compacted, instanceId: "other" } }]) {
+      const moved = setup({ engineCompacted: compacted, ...away });
+      await moved.run(false);
+      expect(moved.folds()).toHaveLength(1);
+    }
+  });
+});
