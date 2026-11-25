@@ -2241,7 +2241,7 @@
   "chat.unpin": "ピン留めを外す",
   "chat.pinnedJump": "ピン留めしたメッセージへ移動",
   "chat.you": "あなた",
-  "chat.peer.asked": "ask_bot で質問しました",
+  "chat.peer.asked": "質問しました",
   "chat.peer.handedTask": "タスクを任せました",
   "chat.peer.openedThread": "このスレッドを開きました",
   "chat.peer.requested": "リクエストを送りました",
