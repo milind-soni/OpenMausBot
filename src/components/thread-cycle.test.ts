@@ -34,6 +34,13 @@ describe("Ctrl+Tab through a bot's threads", () => {
     expect(threadCycleOrder(bot)).toEqual(["pin", "new", "helper", "mid", "main"]);
   });
 
+  it("in Simple mode goes in the thread pill's order instead, main thread first", () => {
+    const bot = { id: "b", threadId: "mid", mainThreadId: "main", tasks: [thread("main", 1), thread("new", 9), thread("pin", 2, { pinned: true }), thread("mid", 5)] };
+    expect(threadCycleOrder(bot)).toEqual(["pin", "new", "mid", "main"]);
+    expect(threadCycleOrder(bot, true)).toEqual(["main", "pin", "new", "mid"]);
+    expect(nextCycleThread(threadCycleOrder(bot, true), "main", 1)).toBe("pin");
+  });
+
   it("leaves out the blank New thread chat's tab", () => {
     const bot = { id: "b", threadId: newChatThreadId("b"), tasks: [thread("a", 2), thread("p", 1, { pinned: true })] };
     expect(threadTabs(bot).some((tab) => tab.draft)).toBe(true);
