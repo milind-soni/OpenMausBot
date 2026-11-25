@@ -10331,7 +10331,18 @@
   "remote.tailscale.needsApproval": "這台電腦正在等待你的 Tailscale 網路核准。請在 Tailscale 管理主控台中核准它，然後再試一次。",
   "together.switch.title": "這台電腦和 My Cloud 合在一起",
   "together.switch.line": "預設為關閉。Cloud 上的機器人和這台電腦上的機器人顯示在同一個清單中，各自在所在的位置開啟。",
+  "together.switch.commands": "開啟後，My Cloud 上的機器人也能在這台電腦上執行指令；你可以從 OpenMausBot 圖示關閉這項權限。",
   "together.switch.failed": "無法儲存。請再試一次。",
+  "together.mark.workingCloud": "正在 My Cloud 上工作",
+  "together.mark.workingComputer": "正在這台電腦上工作",
+  "together.mark.asleep": "My Cloud 正在休眠。開啟 {name} 會喚醒它。",
+  "together.mark.offlineCloud": "目前無法連線到 My Cloud。它恢復後 {name} 會繼續。",
+  "together.line.asleep": "My Cloud 正在休眠。開啟它即可查看其中的機器人。",
+  "together.mark.livesCloud": "位於 My Cloud",
+  "together.mark.livesComputer": "位於這台電腦",
+  "together.mark.livesOn": "位於 {place}",
+  "together.mark.workingOn": "正在 {place} 上工作",
+  "together.mark.offline": "目前無法連線到 {place}。它恢復後 {name} 會繼續。",
   "imageGen.complexity.label": "細節等級",
   "imageGen.complexity.help": "GPT-Image-2.6 圖片的細節程度。越低越簡單、越快。",
   "imageGen.complexity.low": "低",
@@ -10464,5 +10475,7 @@
   "phone.reach.offAdding": "已關閉 · 新增手機會開啟這些",
   "settings.nav.devicesNeedYou": "有裝置或私人網路需要你處理",
   "settings.nav.phoneConnectedAllClear": "有一部手機已連線，沒有需要你處理的事",
-  "keys.vps.ownServer": "你自己的伺服器 (SSH)"
+  "keys.vps.ownServer": "你自己的伺服器 (SSH)",
+  "chat.notice.cloudBusyStart": "這個 Cloud 現在太忙，無法啟動 AI，所以這項任務沒有執行。請等一分鐘後再傳送，停止一項正在執行的繁重任務，或改用更大的方案以取得更多空間。",
+  "chat.notice.cloudOutOfCpu": "你的 Cloud 沒有足夠的 CPU 來處理這項任務，所以 AI 無法啟動，什麼也沒有執行。請等一分鐘後再傳送，停止一項正在執行的繁重任務，或改用更大的方案以取得更多 CPU。"
 }

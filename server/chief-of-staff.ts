@@ -1,6 +1,6 @@
 import { botOwner, nameFromEmail } from "../shared/bot-owner.ts";
 import { canManage, hasAuthority, inChargeOfEvery, peerName, renderRoster, reachablePeers, type RosterMember, type TeamPrompt } from "./peer-roster.ts"; import { chiefLevel } from "./chief-level.ts";
-import type { TaskRecord } from "./store.ts";
+import type { TaskRecord } from "./store.ts"; import type { LinkedChiefView } from "./host/linked-roster.ts";
 
 export type ChiefTeamMember = RosterMember;
 
@@ -38,6 +38,8 @@ export function chiefOfStaffPrompt(
   canDelegate: boolean,
   also?: (bot: ChiefTeamMember) => boolean,
   departments?: readonly string[],
+  /** The person's other place, while it is linked (server/host/linked-roster.ts). */
+  linked?: LinkedChiefView,
 ): TeamPrompt {
   const chief = bots.find((bot) => bot.id === chiefId);
   const chiefSection = sectionKey(chief?.section);
@@ -68,8 +70,11 @@ export function chiefOfStaffPrompt(
   const everywhere = Boolean(chief && departments && inChargeOfEvery(chief, departments));
   const responsibleFor = everywhere ? "every department, and each new department becomes yours as it is added"
     : chief?.managedSections?.length ? `these departments: ${chief.managedSections.map(s => peerName(s) || "General").join(", ")}` : "";
+  const farChief = isChief && !person ? linked?.chief : undefined;
   const rules = [
-    isChief
+    farChief
+      ? `You are the person's assistant and look after their bots in this place, but you are not their Chief of Staff: the Chief ${farChief.where} (id ${farChief.id}) is their Chief and one point of contact. Never present yourself as their Chief${canDelegate ? "; for anything about their whole team, bring that Chief in with coordinate_bots and its id" : ""}.`
+      : isChief
       ? person
         ? `You are ${person}'s assistant and Chief of Staff: their one point of contact. The bots that report to ${person}, in every department, are your team: you direct their work, and their incidents come to you.`
         : `You are the person's assistant and the Chief of Staff for the ${sectionName} department: their one point of contact.`
@@ -96,6 +101,7 @@ export function chiefOfStaffPrompt(
     roster,
     othersRoster && (person ? "Other bots you can reach (they report to someone else):" : "Other bots you can reach, in other departments:"),
     othersRoster,
+    linked?.roster,
   ].filter(Boolean).join("\n");
   return { rules, roster: listed };
 }

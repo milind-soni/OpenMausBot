@@ -929,6 +929,40 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(recorder.events.find((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
   });
 
+  it("runs work from the person's other place with no command-running tool, at Auto-accept edits, never at Full", async () => {
+    await create(undefined, { FAKE_CLAUDE_VERSION: "2.1.284" });
+    const folder = mkdtempSync(join(scratch, "link-folder-"));
+    writeFileSync(join(folder, ".mcp.json"), JSON.stringify({ mcpServers: { planted: { command: "sh", args: ["-c", "id"] } } }));
+    const dump = join(scratch, "dump-link.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-link", text: "hello", approvalMode: "edits", linkLimited: true, cwd: folder, userSkillsDir: join(scratch, "user-skills"),
+      integrations: { agents: { command: process.execPath, args: ["fixture-agents"], env: {} }, composio: { command: process.execPath, args: ["fixture-apps"], env: {} },
+        email: { command: process.execPath, args: ["fixture-email"], env: {} } } });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8")) as { argv: string[]; settings: any; mcpConfig: any };
+    const after = (flag: string) => seen.argv[seen.argv.indexOf(flag) + 1];
+    expect(seen.argv).toContain("--restricted");
+    expect(after("--tools")).toBe("Read,Grep,Glob,Edit,Write,WebSearch");
+    expect(after("--permission-mode")).toBe("acceptEdits");
+    expect(seen.settings.permissions).toMatchObject({ blockReadsOutsideWorkingDirectories: true });
+    expect(seen.settings.permissions.deny).toEqual(expect.arrayContaining(["Bash", "PowerShell", "WebFetch"]));
+    expect(Object.keys(seen.mcpConfig.mcpServers)).not.toContain("planted");
+    // Only the harness's own tools run unasked: a connected app's or Email's tool asks, and the harness answers it.
+    expect(after("--allowedTools").split(",").filter((name) => !name.startsWith("mcp__ogb")).sort()).toEqual(["mcp__agents"]);
+    expect(seen.argv, "the person's skills folder is not a working folder").not.toContain("--add-dir");
+    expect(recorder.events.find((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
+    await expect(instance.adapter.sendTurn({ threadId: "t-link-full", text: "hello", approvalMode: "full", linkLimited: true }))
+      .rejects.toThrow("runs here only in Ask or Auto-accept edits");
+  });
+
+  it("stops work from the person's other place when the CLI kept a shell", async () => {
+    await create(undefined, { FAKE_CLAUDE_VERSION: "2.1.284", FAKE_CLAUDE_KEEP_BASH: "1" });
+    await instance.adapter.sendTurn({ threadId: "t-link-kept", text: "hello", approvalMode: "edits", linkLimited: true, confinedWhy: "Commands are off." });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(JSON.stringify(recorder.events)).toContain("kept its shell, so it can't run this turn. Update Claude Code. Commands are off.");
+    expect(recorder.events.find((e) => e.type === "turn.completed")).toMatchObject({ ok: false });
+  });
+
   it("stops a guest's turn when the CLI kept a shell, and refuses one too old to confine it", async () => {
     await create(undefined, { FAKE_CLAUDE_VERSION: "2.1.284", FAKE_CLAUDE_KEEP_BASH: "1" });
     await instance.adapter.sendTurn({ threadId: "t-kept", text: "hello", approvalMode: "ask", guestConfined: true, confinedWhy: "This routine was made before this update." });

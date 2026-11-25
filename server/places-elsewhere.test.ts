@@ -67,6 +67,9 @@ describe("where the person's other bots live", () => {
     expect(resolveTeammate(bots, from, "Reviewer 2", here.explain)).toEqual({ error: expect.stringMatching(/^Reviewer 2 lives on Work laptop, the person's computer, not here\./u) });
     expect(resolveTeammate(bots, from, "Scout", here.explain), "a bot here of that name, archived: no such reachable bot, never elsewhere").toEqual({ error: expect.stringMatching(/^No bot with id or name "Scout"/u) });
     expect(resolveTeammate(bots, from, "Nobody", here.explain)).toEqual({ error: expect.not.stringContaining("Bots work together") });
+    // The stub a bot left when it moved to the laptop is not an archived bot here: where it lives is said.
+    const moved = [...bots, { id: "rev-2", name: "Reviewer 2", hidden: true, movedTo: { team: { id: "laptop", name: "Work laptop" }, state: "moved" } }];
+    expect(resolveTeammate(moved, from, "Reviewer 2", here.explain)).toEqual({ error: expect.stringMatching(/^Reviewer 2 lives on Work laptop/u) });
   });
 });
 

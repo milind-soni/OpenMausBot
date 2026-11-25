@@ -20,13 +20,13 @@ import { DeviceAuthController, deviceAuthInstanceSurface, type DeviceSignIn } fr
 import { AcpBrowserAuth, acpBrowserAuthInstanceSurface, type AcpBrowserSignInSpec } from "./browser-auth.ts";
 import { commitPromptSplitReceipt, deletePromptSplitReceipt, type PendingPromptSplitReceipt } from "../prompt-split.ts";
 import { liveSessionKey, sessionSystem, turnPrompt } from "./session-system.ts";
-import { boxAudienceKey, describeSpawnFailure, execCli, killCliTree, sharedBoxScope, spawnCli } from "../../procs.ts"; import { stopEngineTree, stopEngineTrees } from "../../engine-stop.ts";
+import { boxAudienceKey, describeSpawnFailure, killCliTree, sharedBoxScope, spawnCli } from "../../procs.ts"; import { execCliProbe } from "../../cli-probe-cache.ts"; import { stopEngineTree, stopEngineTrees } from "../../engine-stop.ts";
 import { applyOneShotEnv, oneShotTurnModel, runAcpOneShot } from "./background-text.ts"; import type { AcpBackgroundWork } from "./background-work.ts";
 import { acpCapabilities } from "./capabilities.ts"; import { readAcpMediaLinks } from "./media-links.ts";
 import { acpNativeLogMessage } from "./tool-log.ts";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
 import { formatQuietLimit, lastSeenPhrase, LIMIT_WORDS, promptIdleTimeoutMs, type LogSignal } from "./quiet-status.ts"; import { startAcpQuietWatch } from "./quiet-watch.ts"; import { AppliedConfig } from "./applied-config.ts"; import { modelRefused, roomForReadBeside, startupRefresh } from "./startup-refresh.ts"; import { stderrFailureOf, watchStderrFailure, type StderrFailure } from "./harness-failure.ts"; import { timed, turnStartClock, type TurnStartClock } from "../../perf/turn-starts.ts";
-import { acpMissingSession, retryTransient } from "./rpc-error.ts";
+import { acpMissingSession, retryTransient } from "./rpc-error.ts"; import { busyOf, inconclusiveMark } from "../../harness/probe-hold.ts"; import { sessionNewRetried } from "./busy-start.ts";
 import { readSessionReport } from "./session-reports.ts";
 import { promptTokenUsage } from "./prompt-usage.ts";
 import { advertisedCommands, turnAnswers, turnSteering, type AcpSteerSupport } from "./steer.ts";
@@ -1179,11 +1179,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 promptTurn = { ...turn, text: recovery.text };
                 rebuiltFromReplay = recovery.replayed;
               }
-              await request("session/new", { cwd, mcpServers: support.mcpServersFromLaunch ? [] : acpSessionMcpServers(mcpServers, ownMcp, init), ...selectionParams, ...support.sessionSetupParams?.(init, heldSystem()) }, support.sessionSetupTimeoutMs ?? NEW_SESSION_TIMEOUT, (result) => {
+              await sessionNewRetried(() => request("session/new", { cwd, mcpServers: support.mcpServersFromLaunch ? [] : acpSessionMcpServers(mcpServers, ownMcp, init), ...selectionParams, ...support.sessionSetupParams?.(init, heldSystem()) }, support.sessionSetupTimeoutMs ?? NEW_SESSION_TIMEOUT, (result) => {
                 session.sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
                 session.sessionKey = liveSessionKey(sessionKey, heldSystem());
                 receiveModelVariants(result, true);
-              });
+              }), () => session.child.exitCode === null && !session.closing && !session.dead); // a busy machine: once more, then plain words
               break;
             }
             const sessionId = session.sessionId;
@@ -1409,7 +1409,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const env = childEnv();
         if (support.snapshot) return support.snapshot(env, config, instanceId);
         const probe = await new Promise<{ version?: string; reason?: string; other?: true }>((resolve) => {
-          execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout, stderr) => {
+          execCliProbe(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout, stderr) => {
             if (err) {
               const failure = err as NodeJS.ErrnoException & { killed?: boolean };
               const reason = failure.code === "ENOENT"
@@ -1420,14 +1420,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                     ? `\`${config.cli}\` version check timed out after 8 seconds. Check it in a terminal on the server, then try again.`
                     : `\`${config.cli}\` version check failed. Run it with --version on the server to diagnose the installation, then check again.`;
               // Do not echo arbitrary CLI output or its environment into Settings.
-              resolve({ reason });
+              resolve({ reason, ...inconclusiveMark(err) }); // `busy`: the check could not finish, which says nothing about the install
               return;
             }
             const version = versionFromProbe(stdout, stderr);
             resolve(!version ? { reason: `\`${config.cli}\` returned no version. Check the configured executable with --version, then try again.` } : support.cliVersion && !support.cliVersion.test(version) ? { reason: notThisCli(config.cli, support.displayName), other: true } : { version });
           });
         });
-        if (!probe.version) return { state: "unavailable", reason: probe.reason, ...(probe.other ? { notEngineCli: true } : {}) };
+        if (!probe.version) return { state: "unavailable", reason: probe.reason, ...(probe.other ? { notEngineCli: true } : {}), ...busyOf(probe) };
         const authenticated = await support.isAuthenticated(env, config, instanceId, instanceEnvNames(input.environment, env)); return { state: "available", version: probe.version, authenticated, ...apiKeyAccount(env, support.credentialEnv, authenticated) };
       };
 

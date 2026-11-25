@@ -3773,7 +3773,18 @@
   "remote.tailscale.needsApproval": "यह कंप्यूटर आपके Tailscale नेटवर्क पर मंज़ूरी का इंतज़ार कर रहा है। Tailscale एडमिन कंसोल में इसे मंज़ूर करें, फिर दोबारा कोशिश करें।",
   "together.switch.title": "यही कंप्यूटर और मेरा क्लाउड एक साथ",
   "together.switch.line": "डिफ़ॉल्ट रूप से बंद। क्लाउड के बॉट और इस कंप्यूटर के बॉट एक ही सूची में दिखते हैं, और हर बॉट वहीं खुलता है जहाँ वह है।",
+  "together.switch.commands": "इसे चालू करने पर मेरा क्लाउड के बॉट इस कंप्यूटर पर कमांड भी चला सकते हैं; इसे आप OpenMausBot आइकन से बंद कर सकते हैं।",
   "together.switch.failed": "इसे सहेजा नहीं जा सका। फिर से कोशिश करें।",
+  "together.mark.workingCloud": "अभी मेरे क्लाउड पर काम कर रहा है",
+  "together.mark.workingComputer": "अभी इस कंप्यूटर पर काम कर रहा है",
+  "together.mark.asleep": "मेरा क्लाउड सो रहा है। {name} खोलने पर यह जाग जाएगा।",
+  "together.mark.offlineCloud": "मेरे क्लाउड तक अभी पहुँचा नहीं जा सकता। इसके वापस आने पर {name} काम जारी रखेगा।",
+  "together.line.asleep": "मेरा क्लाउड सो रहा है। इसके बॉट देखने के लिए इसे खोलें।",
+  "together.mark.livesCloud": "मेरे क्लाउड पर रहता है",
+  "together.mark.livesComputer": "इस कंप्यूटर पर रहता है",
+  "together.mark.livesOn": "{place} पर रहता है",
+  "together.mark.workingOn": "अभी {place} पर काम कर रहा है",
+  "together.mark.offline": "{place} तक अभी पहुँचा नहीं जा सकता। इसके वापस आने पर {name} काम जारी रखेगा।",
   "imageGen.complexity.label": "विवरण स्तर",
   "imageGen.complexity.help": "GPT-Image-2.6 की छवियाँ कितनी विस्तृत हों। कम का मतलब सरल और तेज़।",
   "imageGen.complexity.low": "कम",
@@ -3909,5 +3920,7 @@
   "phone.reach.offAdding": "बंद · फ़ोन जोड़ने पर ये चालू हो जाते हैं",
   "settings.nav.devicesNeedYou": "किसी डिवाइस या निजी नेटवर्क को आपकी ज़रूरत है",
   "settings.nav.phoneConnectedAllClear": "एक फ़ोन जुड़ा है, और किसी चीज़ को आपकी ज़रूरत नहीं है",
-  "keys.vps.ownServer": "आपका अपना सर्वर (SSH)"
+  "keys.vps.ownServer": "आपका अपना सर्वर (SSH)",
+  "chat.notice.cloudBusyStart": "यह Cloud अभी AI शुरू करने के लिए बहुत व्यस्त है, इसलिए यह काम नहीं चला। एक मिनट रुककर इसे फिर से भेजें, चल रहा कोई भारी काम रोकें, या ज़्यादा जगह के लिए बड़े प्लान पर जाएँ।",
+  "chat.notice.cloudOutOfCpu": "इस काम के लिए आपके Cloud का CPU ख़त्म हो गया, इसलिए AI शुरू नहीं हो सका और कुछ नहीं चला। एक मिनट रुककर इसे फिर से भेजें, चल रहा कोई भारी काम रोकें, या ज़्यादा CPU के लिए बड़े प्लान पर जाएँ।"
 }
