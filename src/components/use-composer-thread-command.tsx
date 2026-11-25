@@ -42,9 +42,9 @@ export function useComposerThreadCommand({ text, botId, threadId, mainThreadId, 
     }
     if (command === "delete") { setConfirming(true); return; }
     const archivedThreadId = threadId;
-    dispatch({ type: "updateTask", botId, threadId, patch: { archivedAt: Date.now() } });
     onCleared();
     nextThread();
+    dispatch({ type: "updateTask", botId, threadId, patch: { archivedAt: Date.now() } });
     // The sidebar's notice outlives this composer, which the conversation switch remounts.
     announceArchiveNotice({
       error: false,
@@ -55,9 +55,9 @@ export function useComposerThreadCommand({ text, botId, threadId, mainThreadId, 
   const confirmDelete = () => {
     if (!botId) return;
     setConfirming(false);
-    dispatch({ type: "deleteTask", botId, threadId });
     onCleared();
     nextThread();
+    dispatch({ type: "deleteTask", botId, threadId });
   };
 
   const dialog = (

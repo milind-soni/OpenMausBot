@@ -304,13 +304,11 @@ export function Composer({
   };
   const typedGoalText = !group?.dm ? goalTextFromComposer(text) : null;
   const effectiveText = typedGoalText ?? text;
-  // /archive and /delete act on this conversation; a room's threads are managed from the room, and a blank New thread
-  // has no conversation to act on yet, so neither offers the commands.
+  // A room's threads are managed from the room, and a blank New thread has no conversation to act on yet.
   const threadCommandAvailable = !group && Boolean(composerTask);
   const { command: threadCommand, run: runThreadCommand, dialog: threadCommandDialog } = useComposerThreadCommand({
     text: threadCommandAvailable ? text : "", botId: threadCommandAvailable ? bot?.id : undefined, threadId, mainThreadId: profile?.mainThreadId, threads: profile?.tasks,
-    title: composerTask?.title, busy, dispatch, returnFocusRef: inputRef,
-    onCleared: () => { editText(""); setAttachments([]); picks.clear(); setCaret(0); setDismissedSlashAt(null); onConsumeReply?.(); setChannelMode("chat"); },
+    title: composerTask?.title, busy, dispatch, returnFocusRef: inputRef, onCleared: () => { editText(""); setAttachments([]); picks.clear(); setCaret(0); setDismissedSlashAt(null); onConsumeReply?.(); setChannelMode("chat"); },
   });
   const effectiveChannelMode = typedGoalText !== null ? "goal" : channelMode;
   const engineSupportsImages = imageTargetsSupport(effectiveText, effectiveChannelMode);
@@ -345,10 +343,8 @@ export function Composer({
       description: t("composer.command.setupDesc"),
     }, { kind: "command", id: "burst", label: "/burst", description: t("composer.command.burstDesc") });
     if (builtIns && forkOwnerId) available.push({ kind: "command", id: "fork", label: "/fork", description: t("composer.command.forkDesc") });
-    if (builtIns && !group && bot && composerTask) available.push(
-      { kind: "command", id: "archive", label: "/archive", description: t("composer.command.archiveDesc") },
-      { kind: "command", id: "delete", label: "/delete", description: t("composer.command.deleteDesc") },
-    );
+    if (builtIns && !group && bot && composerTask) available.push({ kind: "command", id: "archive", label: "/archive", description: t("composer.command.archiveDesc") },
+      { kind: "command", id: "delete", label: "/delete", description: t("composer.command.deleteDesc") });
     available.push(...skillSlashCommands(slashSkills).filter((command) => !(builtIns && forkOwnerId && command.id === "fork")));
     return available.filter((command) => slashCommandMatches(command, slash.query));
   }, [slash, dismissedSlashAt, group, bot, composerTask, canLearn, state.instances, locale, slashSkills, forkOwnerId]);
