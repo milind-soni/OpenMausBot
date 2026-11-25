@@ -163,16 +163,17 @@ export function sectionsInUse(names: readonly string[], filed: ReadonlyArray<{ s
 type UnreadListBot = {
   id: string;
   unread?: boolean;
-  tasks?: ReadonlyArray<{ unread?: boolean; routineRunId?: string; archivedAt?: number; updatedAt?: number; createdAt?: number }> | null;
+  tasks?: ReadonlyArray<{ unread?: boolean; activity?: string; routineRunId?: string; archivedAt?: number; updatedAt?: number; createdAt?: number }> | null;
   messages?: ReadonlyArray<{ at: number }>;
 };
 
 /** The bot kept in Unread after it was opened from there, with the time it was listed by and the conversation open then. */
 export type UnreadHold = { id: string; since: number; chat?: string };
 
-function unreadSince(bot: UnreadListBot): number {
-  const threads = (bot.tasks ?? []).filter((task) => task.unread && !task.routineRunId && task.archivedAt === undefined);
-  if (threads.length === 0) return bot.messages?.at(-1)?.at ?? 0;
+function unreadSince(bot: UnreadListBot, asks = false): number {
+  const listed = (task: NonNullable<UnreadListBot["tasks"]>[number]) => asks ? task.activity === "waiting-on-you" : task.unread;
+  const threads = (bot.tasks ?? []).filter((task) => listed(task) && !task.routineRunId && task.archivedAt === undefined);
+  if (threads.length === 0) return asks ? unreadSince(bot) : bot.messages?.at(-1)?.at ?? 0;
   return Math.max(...threads.map((task) => task.updatedAt ?? task.createdAt ?? 0));
 }
 
@@ -200,7 +201,7 @@ export function unreadBotsApart<T extends UnreadListBot>(parts: { sectionChiefs:
   const listed = (bot: T) => botShowsUnread(bot) || waiting(bot) || bot.id === held?.id;
   const inPlace = (bots: T[]) => bots.filter((bot) => !listed(bot));
   const unreadBots = [...parts.unsectionedBots, ...parts.sectionChiefs, ...parts.sectionedBots].filter(listed)
-    .map((bot) => ({ bot, asks: waiting(bot), since: held && bot.id === held.id && !botShowsUnread(bot) ? held.since : unreadSince(bot) }))
+    .map((bot) => { const asks = waiting(bot); return { bot, asks, since: held && bot.id === held.id && !botShowsUnread(bot) ? held.since : unreadSince(bot, asks) }; })
     .sort((a, b) => Number(b.asks) - Number(a.asks) || b.since - a.since).map(({ bot }) => bot);
   return { unreadBots, sectionChiefs: inPlace(parts.sectionChiefs), sectionedBots: inPlace(parts.sectionedBots), unsectionedBots: inPlace(parts.unsectionedBots) };
 }
