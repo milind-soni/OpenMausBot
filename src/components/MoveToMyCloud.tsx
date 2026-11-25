@@ -7,6 +7,7 @@ import { ArrowRightLeft, Check, Cloud, Loader2, X } from "lucide-react";
 import type { BotMoveState, BotMoveView } from "../../electron/cloud-send.mjs";
 import { botMoveLine, filterBots, ipcErrorText, CHOOSER_PAGE, MY_CLOUD_TEAM } from "@/lib/cloud-send";
 import { t } from "@/lib/i18n";
+import { useListedOnMyCloud } from "@/lib/place-rows";
 import type { Bot } from "@/state/store";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useMoveChanges } from "./MoveChanges";
@@ -147,7 +148,9 @@ export function useMoveToMyCloud() {
 
 /** The one row the bots that moved to My Cloud leave in the sidebar: however many there are, it opens My Cloud. */
 export function MovedToMyCloudRow({ bots }: { bots: readonly Bot[] }) {
-  const moved = bots.filter((bot) => bot.movedTo?.state === "moved" && bot.movedTo.team.id === MY_CLOUD_TEAM);
+  // With the one list on, a bot that moved and that My Cloud's rows already list (it keeps its id there) is not said twice.
+  const listed = useListedOnMyCloud();
+  const moved = bots.filter((bot) => bot.movedTo?.state === "moved" && bot.movedTo.team.id === MY_CLOUD_TEAM && !listed.has(bot.id));
   if (!moved.length) return null;
   const page = bridge();
   return <div className="flex flex-col px-2 pb-1">

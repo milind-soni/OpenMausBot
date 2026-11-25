@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import type { PlaceBotRow, PlacesTogetherState } from "@/lib/places-together";
 import { resetPlacesTogetherForTest } from "@/lib/places-together";
-import { OtherPlaceBots, OwnBotHomeMark } from "./OtherPlaceBots";
+import { OtherPlaceLine } from "./OtherPlaceBots";
 import { PlacesTogetherSwitch } from "./PlacesTogetherSwitch";
 import { SettingsLook } from "./SettingsPrimitives";
 
@@ -20,7 +20,6 @@ const page = {
   onChanged: vi.fn((cb: () => void) => { changed = cb; return () => {}; }),
 };
 const q = (selector: string) => document.body.querySelector<HTMLElement>(selector);
-const all = (selector: string) => [...document.body.querySelectorAll<HTMLElement>(selector)];
 const render = async (...parts: Array<ReturnType<typeof createElement>>) => { await act(async () => root.render(createElement("div", null, ...parts))); await act(async () => {}); };
 
 beforeEach(() => {
@@ -32,75 +31,85 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); resetPlacesTogetherForTest(); vi.unstubAllGlobals(); delete (window as { ogb?: unknown }).ogb; });
 
-it("draws nothing with the switch off, and nothing in a browser", async () => {
+it("draws nothing with the switch off, nothing in a browser, and nothing while the other place has rows: they are in the list", async () => {
   said = state({ on: false, other: null });
-  await render(createElement(OtherPlaceBots, { key: "list" }), createElement(OwnBotHomeMark, { key: "mark" }));
+  await render(createElement(OtherPlaceLine, { key: "line" }));
   expect(q("[data-other-place]")).toBeNull();
-  expect(q("[data-bot-home]")).toBeNull();
+  said = state();
+  await act(async () => changed());
+  expect(q("[data-other-place]")).toBeNull();
   await act(async () => root.unmount());
   resetPlacesTogetherForTest();
   delete (window as { ogb?: unknown }).ogb;
   root = createRoot(container);
-  await render(createElement(OtherPlaceBots, { key: "list" }));
+  await render(createElement(OtherPlaceLine, { key: "line" }));
   expect(q("[data-other-place]")).toBeNull();
-  expect(page.state).toHaveBeenCalledTimes(1);
+  expect(page.state).toHaveBeenCalledTimes(2);
 });
 
-it("lists My Cloud's bots under their own heading, each with the cloud mark, and a click opens that bot on My Cloud", async () => {
-  await render(createElement(OtherPlaceBots, { key: "list" }));
-  expect(q("[data-other-place]")!.getAttribute("data-other-place")).toBe("cloud");
-  expect(q("[data-section]")!.getAttribute("data-section")).toBe("On My Cloud");
-  expect(all("[data-placed-bot]").map((item) => item.getAttribute("data-placed-bot"))).toEqual(["cloud:scout", "cloud:nova"]);
-  expect(all("[data-placed-bot] svg[data-bot-home='cloud']").length).toBe(2);
-  expect(q('[data-placed-bot="cloud:nova"] [data-testid="unread-dot"]')).toBeTruthy();
-  expect(q('[data-placed-bot="cloud:scout"] [data-testid="unread-dot"]')).toBeNull();
-  expect(q("[data-other-place-line]")).toBeNull();
-  await act(async () => q('[data-placed-bot="cloud:nova"]')!.click());
-  expect(page.open.mock.calls).toEqual([["nova"]]);
+it("nothing while the first read is under way: no spinner, the rows come when they come", async () => {
+  said = state({ other: { home: "cloud", state: "loading", bots: [] } });
+  await render(createElement(OtherPlaceLine, { key: "line" }));
+  expect(q("[data-other-place]")).toBeNull();
 });
 
-it("on My Cloud's page: this computer's bots carry no cloud, and the page's own rows do", async () => {
-  said = state({ here: "cloud", other: { home: "computer", state: "ready", bots: [row("computer", "scout", "Scout")] } });
-  await render(createElement(OtherPlaceBots, { key: "list" }), createElement("span", { key: "own", "data-own": "" }, createElement(OwnBotHomeMark)));
-  expect(q("[data-section]")!.getAttribute("data-section")).toBe("On this computer");
-  expect(q('[data-placed-bot="computer:scout"] [data-bot-home="cloud"]')).toBeNull();
-  expect(q("[data-own] [data-bot-home='cloud']")).toBeTruthy();
-});
-
-it("a sleeping, waking or unreachable Cloud keeps its bots, dimmed, under one short line, and they still open", async () => {
-  for (const [power, line] of [["asleep", "My Cloud is asleep. Open a bot to wake it."], ["waking", "My Cloud is waking up…"], ["offline", "My Cloud can't be reached right now."]] as const) {
-    said = state({ other: { home: "cloud", state: power, bots: [row("cloud", "scout", "Scout")] } });
-    await render(createElement(OtherPlaceBots, { key: "list" }));
-    await act(async () => changed());
-    expect(q("[data-other-place-line]")!.textContent).toBe(line);
-    expect(q("[data-other-place-line]")!.getAttribute("role")).toBe("status");
-    expect(q('[data-placed-bot="cloud:scout"]')!.className).toContain("opacity-60");
-    expect((q('[data-placed-bot="cloud:scout"]') as HTMLButtonElement).disabled).toBe(false);
-  }
+it("a Cloud this window is not signed in to says so in one quiet line that opens it, never a card or a dialog", async () => {
+  const openMyCloud = vi.fn(async () => {});
+  window.ogb = { placesTogether: page, cloudSendPage: { openMyCloud } } as never;
+  said = state({ other: { home: "cloud", state: "signin", bots: [] } });
+  await render(createElement(OtherPlaceLine, { key: "line" }));
+  expect(q("[data-other-place-line]")!.textContent).toBe("Open My Cloud once to sign in.");
+  expect(q("[data-other-place]")!.getAttribute("data-other-place-state")).toBe("signin");
+  await act(async () => q("button[data-other-place-line]")!.click());
+  expect(openMyCloud).toHaveBeenCalledTimes(1);
   expect(document.body.querySelector("[role=alert], [role=dialog]")).toBeNull();
 });
 
-it("a bot with the same id as one of this page's own is its own row: it carries the other home, and its click names that home's bot", async () => {
-  said = state({ other: { home: "cloud", state: "ready", bots: [row("cloud", "scout", "Scout there", { unread: true })] } });
-  await render(createElement("div", { key: "own", "data-own-bot": "scout" }, "Scout here"), createElement(OtherPlaceBots, { key: "list" }));
-  expect(q('[data-placed-bot="cloud:scout"]')!.getAttribute("data-bot-home")).toBe("cloud");
-  expect(q('[data-placed-bot="cloud:scout"]')!.textContent).toContain("Scout there");
-  expect(q("[data-own-bot] [data-testid='unread-dot']")).toBeNull();
-  await act(async () => q('[data-placed-bot="cloud:scout"]')!.click());
-  expect(page.open.mock.calls).toEqual([["scout"]]);
+it("a sleeping or unreachable Cloud with nothing kept says so as normal, and the line opens it; while it wakes the line only says so", async () => {
+  const openMyCloud = vi.fn(async () => {});
+  window.ogb = { placesTogether: page, cloudSendPage: { openMyCloud } } as never;
+  said = state({ other: { home: "cloud", state: "asleep", bots: [] } });
+  await render(createElement(OtherPlaceLine, { key: "line" }));
+  expect(q("[data-other-place-line]")!.textContent).toBe("My Cloud is asleep. Open it to see its bots.");
+  expect(q("[data-other-place-line]")!.className).not.toContain("danger");
+  await act(async () => q("button[data-other-place-line]")!.click());
+  expect(openMyCloud).toHaveBeenCalledTimes(1);
+  said = state({ other: { home: "cloud", state: "offline", bots: [] } });
+  await act(async () => changed());
+  expect(q("[data-other-place-line]")!.textContent).toBe("My Cloud can't be reached right now.");
+  await act(async () => q("button[data-other-place-line]")!.click());
+  expect(openMyCloud).toHaveBeenCalledTimes(2);
+  said = state({ other: { home: "cloud", state: "waking", bots: [] } });
+  await act(async () => changed());
+  expect(q("[data-other-place-line]")!.tagName).toBe("P");
+  expect(q("[data-other-place-line]")!.getAttribute("role")).toBe("status");
 });
 
-it("a Cloud this window is not signed in to says so in one line, with no rows", async () => {
+it("My Cloud's page lists its own bots only: no line about this computer there, whatever main says", async () => {
+  for (const power of ["offline", "ready", "loading"] as const) {
+    said = state({ here: "cloud", other: { home: "computer", state: power, bots: [] } });
+    await render(createElement(OtherPlaceLine, { key: "line" }));
+    await act(async () => changed());
+    expect(q("[data-other-place]")).toBeNull();
+  }
+});
+
+it("in the avatars-only sidebar the line is its icon alone, its words its tooltip and label, and it still opens My Cloud", async () => {
+  const openMyCloud = vi.fn(async () => {});
+  window.ogb = { placesTogether: page, cloudSendPage: { openMyCloud } } as never;
+  said = state({ other: { home: "cloud", state: "asleep", bots: [] } });
+  await render(createElement(OtherPlaceLine, { key: "line", icons: true }));
+  const line = q("button[data-other-place-line]")!;
+  expect(line.textContent).toBe("");
+  expect(line.getAttribute("aria-label")).toBe("My Cloud is asleep. Open it to see its bots.");
+  expect(line.getAttribute("title")).toBe("My Cloud is asleep. Open it to see its bots.");
+  await act(async () => line.click());
+  expect(openMyCloud).toHaveBeenCalledTimes(1);
+});
+
+it("a line is no search result: hidden while the sidebar is searched", async () => {
   said = state({ other: { home: "cloud", state: "signin", bots: [] } });
-  await render(createElement(OtherPlaceBots, { key: "list" }));
-  expect(q("[data-other-place-line]")!.textContent).toBe("Open My Cloud once to sign in.");
-  expect(all("[data-placed-bot]")).toEqual([]);
-});
-
-it("follows the sidebar's search, and hides the heading when nothing there matches", async () => {
-  await render(createElement(OtherPlaceBots, { key: "list", query: "research" }));
-  expect(all("[data-placed-bot]").map((item) => item.getAttribute("data-placed-bot"))).toEqual(["cloud:nova"]);
-  await render(createElement(OtherPlaceBots, { key: "list", query: "zzz" }));
+  await render(createElement(OtherPlaceLine, { key: "line", query: "scout" }));
   expect(q("[data-other-place]")).toBeNull();
 });
 

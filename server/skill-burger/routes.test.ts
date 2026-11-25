@@ -10,6 +10,8 @@ import { json, readBody } from "../harness/http.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { dispatchRoutes } from "../routes/table.ts";
 import { createSkillBurgerRoutes, type SkillBurgerRouteDeps } from "./routes.ts";
+import { createExecutors } from "./executors.ts";
+import { startRun } from "./runner.ts";
 
 const servers: Server[] = [];
 afterEach(async () => {
@@ -48,7 +50,7 @@ async function serve(extra: Partial<SkillBurgerRouteDeps> = {}, scopes: readonly
     const res = await fetch(`${base}${path}`, init);
     return { status: res.status, body: await res.json() as Record<string, any> };
   };
-  return { api, bot };
+  return { api, bot, root };
 }
 
 const send = (method: string, body: unknown): RequestInit => ({ method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -92,6 +94,50 @@ it("names a finished run with the bot's small text model, and says nothing when 
   expect(prompts[0]).toContain("Request: Send the invoice to priya@example.com");
   const plain = await serve();
   expect((await plain.api("/api/skill-burger-summary", send("POST", { botId: plain.bot, threadId: "t1" }))).body).toEqual({ summary: null });
+});
+
+it.each(["unavailable", "not requested"])("does not apply an earlier run's decisions when the next summary is %s", async (summary) => {
+  let messages: RunMessage[] = [...thread, { id: "reply-1", role: "bot", kind: "text", text: "I sent the email only because invoices were found." }];
+  let answering = true;
+  const { api, bot, root } = await serve({
+    messages: () => messages,
+    summarize: async (_botId, prompt) => !answering ? null : prompt.startsWith("A run was saved")
+      ? '{"conditions":[{"step":"s2","when":{"$step":"s1","path":"messages.0","op":"exists"}}]}'
+      : "Send the invoice",
+  });
+  const request = { botId: bot, threadId: "t1" };
+  await api("/api/skill-burger-summary", send("POST", request));
+  const prior = await api("/api/skill-burgers", send("POST", { ...request, name: "conditional-invoice", summary: "A custom title" }));
+  expect(prior.status).toBe(201);
+  const previous = (await api("/api/skill-burgers/conditional-invoice")).body.workflow;
+  expect(previous.steps[1].when).toEqual({ $step: "s1", path: "messages.0", op: "exists" });
+
+  messages = [...messages, ...thread.map((message) => ({ ...message, id: `${message.id}-next` })),
+    { id: "reply-2", role: "bot", kind: "text", text: "I sent the status email whether or not there were invoices." }];
+  answering = false;
+  if (summary === "unavailable") expect((await api("/api/skill-burger-summary", send("POST", request))).body).toEqual({ summary: null });
+  const saved = await api("/api/skill-burgers", send("POST", { ...request, name: "unconditional-invoice" }));
+  expect(saved.status).toBe(201);
+  const workflow = (await api("/api/skill-burgers/unconditional-invoice")).body.workflow;
+  const sent: Array<{ tool_slug: string; arguments: Record<string, unknown> }> = [];
+  const exec = createExecutors({
+    botId: bot, cwd: root,
+    async internal(kind, path, body) {
+      expect(kind).toBe("connectors");
+      expect(path).toBe("/api/internal/connectors/mcp");
+      const tool = (body as { params: { arguments: { tools: typeof sent } } }).params.arguments.tools[0]!;
+      sent.push(tool);
+      const data = tool.tool_slug === "GMAIL_FETCH_EMAILS" ? { messages: [] } : { messageId: "fixture-email" };
+      return { ok: true, body: { result: { content: [{ type: "text", text: JSON.stringify({ data: { results: [{ tool_slug: tool.tool_slug, response: { successful: true, data } }] } }) }] } } };
+    },
+  });
+  const ran = await startRun({ name: saved.body.skill.name, botId: bot, threadId: "fresh", sha256: saved.body.skill.sha256, workflow }, {
+    exec, events: { started() {}, ended() {} }, save() { throw new Error("this workflow should finish without a pause"); },
+  });
+  expect(ran).toMatchObject({ ok: true, status: "ok" });
+  expect(sent.map((tool) => tool.tool_slug)).toEqual(["GMAIL_FETCH_EMAILS", "GMAIL_SEND_EMAIL"]);
+  expect(sent[1]!.arguments).toMatchObject({ recipient_email: "priya@example.com" });
+  expect(workflow.steps[1]).not.toHaveProperty("when");
 });
 
 

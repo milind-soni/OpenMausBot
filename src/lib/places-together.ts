@@ -27,8 +27,8 @@ function subscribe(listener: () => void): () => void {
   return () => { listeners.delete(listener); };
 }
 
-/** What main says about the two places: null in a browser, on another place's page, and until main first answers. */
-export function usePlacesTogether(): PlacesTogetherState | null {
+/** Main is asked while any component that draws its answer is on screen, and told again on focus. */
+function useWatchTogether(): void {
   useEffect(() => {
     const page = bridge();
     if (!page) return;
@@ -44,7 +44,20 @@ export function usePlacesTogether(): PlacesTogetherState | null {
       window.removeEventListener("focus", read);
     };
   }, []);
+}
+
+/** What main says about the two places: null in a browser, on another place's page, and until main first answers. */
+export function usePlacesTogether(): PlacesTogetherState | null {
+  useWatchTogether();
   return useSyncExternalStore(subscribe, () => known, () => null);
+}
+
+/** One part of what main says, for a component that draws only that part: it draws again only when that part changes,
+ * not on every answer main gives (one each time the window is focused). `select` returns the same value for the same
+ * answer: a string or number, or a value it keeps. */
+export function usePlacesTogetherPart<T>(select: (state: PlacesTogetherState | null) => T): T {
+  useWatchTogether();
+  return useSyncExternalStore(subscribe, () => select(known), () => select(null));
 }
 
 /** Turns the switch, and says what main kept. */

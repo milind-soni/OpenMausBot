@@ -9,6 +9,8 @@ export interface SendItem {
   id?: string;
   bot?: string;
   parts: Record<string, string>;
+  /** Of a bot coming back to the side that lists it: the other side's is newer, and goes. */
+  returning?: true;
 }
 /** `chats`: the server takes chats by row (server/cloud-send-chats.ts). `vault`: it takes saved Vault secrets by id. */
 export interface SendSummary { v: 1; appVersion: string | null; items: SendItem[]; chats?: true; vault?: true }

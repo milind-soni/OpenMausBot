@@ -109,6 +109,8 @@ export function createPlacesElsewhere({ dataDir, now = Date.now }: { dataDir: st
       const found = where(bot);
       return found ? { where: livesElsewhere(found.bot, found.place, known.self) } : null;
     },
+    /** What kind of place of the person's other places has `bot`, or null. */
+    kindOf: (bot: string): Place["kind"] | null => where(bot)?.place.kind ?? null,
     /** The bots of the person's other places that `text` @mentions (none named like a bot `here`), each with where it
      * lives, told to the bot answering it. */
     mentioned(text: string, here: ReadonlyArray<{ name: string }>): string {

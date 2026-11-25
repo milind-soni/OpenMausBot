@@ -5,7 +5,7 @@ import test from "node:test";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-import { botRow, botRows, CLOUD_EVERY_MS, createPlacesTogether, FRESH_MS, installPlacesTogether, LOOK_EVERY_MS, OPEN_WAIT_MS, makesNewBots, NEW_BOT_ACK_MS, NEW_BOT_WAIT_MS, otherHome, parseTogether, readyAis } from "./places-together.mjs";
+import { botRow, botRows, PREVIEW_MAX, previewOf, CLOUD_EVERY_MS, createPlacesTogether, FRESH_MS, installPlacesTogether, LOOK_EVERY_MS, OPEN_WAIT_MS, makesNewBots, NEW_BOT_ACK_MS, NEW_BOT_WAIT_MS, otherHome, parseTogether, readyAis } from "./places-together.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLOUD = "https://mine.cloud.test";
@@ -57,6 +57,29 @@ test("the switch starts off, and off reads nothing, keeps nothing and starts no 
   assert.equal(f.together.on(), false);
 });
 
+test("turning the switch on from this computer's page lets My Cloud run commands here, once; already on, off, a never-linked install or My Cloud's page never do", () => {
+  let lent = 0;
+  const never = setup({ saved: null, deps: { turnedOn: () => { lent += 1; } } });
+  never.together.state("computer");
+  never.together.linkChanged();
+  assert.equal(lent, 0, "a never-linked install is left as it is");
+  never.together.set("computer", false);
+  assert.equal(lent, 0);
+  never.together.set("computer", true);
+  assert.equal(lent, 1, "the person's own turn on grants it");
+  never.together.set("computer", true);
+  assert.equal(lent, 1, "already on: nothing again");
+  const linked = setup({ deps: { turnedOn: () => { lent += 1; } } });
+  linked.together.state("computer");
+  linked.together.set("computer", true);
+  assert.equal(lent, 1, "a link already on from before is not changed without the person turning it on");
+  linked.together.set("cloud", false);
+  linked.together.set("cloud", true);
+  assert.equal(lent, 1, "My Cloud's page never grants it");
+  const failing = setup({ saved: null, deps: { turnedOn: () => { throw new Error("not signed in"); } } });
+  assert.equal(failing.together.set("computer", true).on, true, "the switch still turns on");
+});
+
 test("on: this computer's page lists My Cloud's bots, asked as background work with the person's own session", async () => {
   const f = setup();
   assert.equal(f.together.state("computer").other.state, "loading");
@@ -68,7 +91,7 @@ test("on: this computer's page lists My Cloud's bots, asked as background work w
   ], newBot: true });
   assert.deepEqual(f.asked.map(([side]) => side), ["admin", "cloud"], "the Admin is asked whether it sleeps first, then My Cloud, once");
   const [, url, init] = f.asked[1];
-  assert.deepEqual([url, init.headers["x-omb-background"], init.credentials, init.redirect], [`${CLOUD}/api/bots?messages=0`, "1", "include", "error"]);
+  assert.deepEqual([url, init.headers["x-omb-background"], init.credentials, init.redirect], [`${CLOUD}/api/bots?messages=3`, "1", "include", "error"]);
   assert.equal(f.changes, 1);
 });
 
@@ -100,7 +123,7 @@ test("My Cloud's page lists this computer's bots the same way", async () => {
   f.together.state("cloud");
   await f.together.refresh("computer");
   assert.deepEqual(f.together.state("cloud").other.bots.map((row) => [row.home, row.id]), [["computer", "scout"]]);
-  assert.deepEqual(f.asked.map(([side, route]) => [side, route]), [["computer", "/api/bots?messages=0"]]);
+  assert.deepEqual(f.asked.map(([side, route]) => [side, route]), [["computer", "/api/bots?messages=3"]]);
   assert.equal(otherHome("cloud"), "computer");
   assert.equal(otherHome("local"), "cloud");
 });
@@ -397,7 +420,7 @@ test("without a My Cloud, or once this computer's bots moved away, there is noth
   assert.equal(f.asked.length, 0);
 });
 
-test("a row is a name, a look and a state: no messages, and no row for an archived bot or a move's pointer", () => {
+test("a row is a name, a look and a state: no whole message, and no row for an archived bot or a move's pointer", () => {
   const full = bot("scout", " Scout ", { title: "Research", messages: [{ text: "secret" }], soul: "secret", modelSelection: { instanceId: "x" }, chiefOfStaff: true,
     tasks: [{ threadId: "t1", unread: true }, { threadId: "t2", activity: "waiting-on-you" }, { threadId: "t3", busy: true, routineRunId: "r" }] });
   assert.deepEqual(botRow(full, "cloud"), { home: "cloud", id: "scout", threadId: "t-scout", name: "Scout", title: "Research", color: "blue", mascotBody: "classic", chief: true, waiting: true, unread: true });
@@ -409,6 +432,42 @@ test("a row is a name, a look and a state: no messages, and no row for an archiv
   assert.equal(botRow(bot("x", "X", { color: "url(javascript:1)<" }), "cloud").color, undefined);
   assert.deepEqual(botRows({ bots: "no" }, "cloud"), []);
   assert.deepEqual(botRows(null, "cloud"), []);
+});
+
+test("a row carries the start of its bot's newest line while that is words said, and nothing of a step, card, file or another bot's note", () => {
+  const said = (message) => botRow(bot("scout", "Scout", { messages: [{ id: "m1", role: "bot", kind: "text", text: "old" }, { id: "m2", ...message }] }), "cloud").preview;
+  assert.equal(said({ role: "bot", kind: "text", text: "  Filed the **March** invoices.\n" }), "Filed the **March** invoices.");
+  assert.equal(said({ role: "user", kind: "text", text: "Can you file them?" }), "Can you file them?");
+  assert.equal(said({ role: "bot", kind: "text", text: "x".repeat(PREVIEW_MAX + 50) }).length, PREVIEW_MAX);
+  const afterWork = botRow(bot("w", "Worker", { messages: [{ role: "user", kind: "text", text: "Run it" }, { role: "bot", kind: "text", text: "Done: all green." },
+    { role: "bot", kind: "activity", tool: { name: "bash", output: "secret" } }, { role: "bot", kind: "digest", text: "[digest] · tools: Bash" }] }), "cloud");
+  assert.equal(afterWork.preview, "Done: all green.", "a turn's steps and summary are looked past, as the sidebar's own preview does");
+  for (const message of [
+    { role: "bot", kind: "options", text: "Pick one", card: { title: "Pick" } },
+    { role: "bot", kind: "screen", text: "screenshot" },
+    { role: "user", kind: "text", text: "a photo", attachments: [{ kind: "image", path: "/api/attachments/x", mime: "image/png" }] },
+    { role: "user", kind: "text", text: "[From @Scout (bot) · message · a1] please check" },
+    { role: "user", kind: "text", text: "asked", peerAsk: { name: "Scout" } },
+    { role: "bot", kind: "text", text: "Set up a key", setupSuggestion: { kind: "helperKey" } },
+    { role: "bot", kind: "text", text: "   " },
+    { role: "system", kind: "text", text: "internal" },
+  ]) assert.equal(said(message), undefined, JSON.stringify(message));
+  assert.equal(previewOf(bot("none", "None")), null);
+  assert.equal("preview" in botRow(bot("none", "None", { messages: [] }), "cloud"), false);
+});
+
+test("a row carries the title of the conversation its bot has open there, and only that one", () => {
+  const row = botRow(bot("scout", "Scout", { title: "Research", tasks: [{ threadId: "t-other", title: "Not this one" }, { threadId: "t-scout", title: " Leeds trip " }] }), "cloud");
+  assert.equal(row.chat, "Leeds trip");
+  assert.equal("chat" in botRow(bot("none", "None", { tasks: [{ threadId: "t-other", title: "Elsewhere" }] }), "cloud"), false);
+});
+
+test("a row carries when its conversations last moved there: their own times, never a word of them and never a routine run's", () => {
+  const row = botRow(bot("scout", "Scout", { tasks: [{ threadId: "t1", updatedAt: 3_000 }, { threadId: "t2", updatedAt: 9_000 }, { threadId: "t3", updatedAt: 99_000, routineRunId: "r" },
+    { threadId: "t4", updatedAt: 50_000, archivedAt: 1 }, { threadId: "t5", updatedAt: "soon" }] }), "cloud");
+  assert.equal(row.lastAt, 9_000);
+  assert.equal("lastAt" in botRow(bot("new", "New", { tasks: [] }), "cloud"), false);
+  assert.equal("lastAt" in botRow(bot("odd", "Odd", { tasks: [{ threadId: "t1", updatedAt: -5 }] }), "cloud"), false);
 });
 
 test("only this computer's page and My Cloud's own page are answered", async () => {

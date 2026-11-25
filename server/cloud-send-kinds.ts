@@ -292,6 +292,15 @@ function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown, source: A
   }
   if (Object.hasOwn(fields, "chiefOfStaff") && fields.chiefOfStaff !== true) patch.chiefOfStaff = fields.chiefOfStaff ?? undefined;
   if (fields.chiefOfStaff === true) delete patch.hidden;
+  // A bot coming back here (bot-moves.ts) stays hidden until it arrived: its archived switch waits on its hold till then.
+  // It never takes this place's Chief's crown or MausBot mark: those stay where they are (a Chief does not move back).
+  const coming = (bot.movedTo as { back?: true } | undefined)?.back === true;
+  if (coming) {
+    if (Object.hasOwn(patch, "hidden")) (patch as Record<string, unknown>).movedTo = { ...bot.movedTo, archived: patch.hidden === true };
+    for (const key of ["hidden", "chiefOfStaff", "managedSections"] as const) delete patch[key];
+    deps.store.patchBot(id, patch);
+    return;
+  }
   deps.store.patchBot(id, patch);
   // A MausBot arriving where the person's own MausBot stays (takeArrivingDefaultBot) doesn't take the crown from this
   // place's Chief, whichever bot that is, also when a later pass sends its Chief fields without its MausBot mark.
@@ -327,7 +336,7 @@ function adoptRoutine(deps: MoveKindsDeps, raw: unknown, runs: unknown, from: st
     held.runs.push(...arriving.filter((run) => !have.has(run.id)));
     return [adopted];
   });
-  if (adopted) deps.ownRoutine?.(adopted, owner.person);
+  if (adopted && !owner.here) deps.ownRoutine?.(adopted, owner.person);
   deps.arrived?.();
 }
 

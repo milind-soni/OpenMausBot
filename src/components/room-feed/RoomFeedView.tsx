@@ -3,10 +3,11 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { t } from "@/lib/i18n";
 import { openFeedThread } from "@/lib/room-feed";
 import { simpleRoomHeader } from "@/lib/room-panel";
-import { roomThreadSpeakerId, roomThreadWorking } from "@/lib/room-threads";
+import { roomThreadAttention, roomThreadSpeakerId, roomThreadWorking } from "@/lib/room-threads";
 import { useComposerDockPad } from "@/lib/composer-dock";
 import { sameDrawnBots } from "@/lib/drawn-bots";
 import type { Bot, Group } from "@/state/store";
+import { useStoreRef } from "@/state/store-ref";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { ChatErrorBanner, ChatNotice } from "../ChatErrorBanner";
 import { ChatBackdrop, GlassBar, GlassScrollFrame } from "../GlassScrollFrame";
@@ -16,9 +17,10 @@ import { RoomChiefAbsent } from "../RoomChiefAbsent";
 import { RoomHeader } from "../RoomHeader";
 import { RoomHoldsBanner } from "../RoomHoldsBanner";
 import { RoomWorkingFolder } from "../RoomWorkingFolder";
-import { useRelativeNow } from "../SidebarThreadRow";
+import { roomThreadRowActions } from "../SidebarGroupThreadList";
+import { isArchived, useRelativeNow } from "../SidebarThreadRow";
 import { FeedComposer } from "./FeedComposer";
-import { RoomFeedRow, type FeedRowData } from "./RoomFeedRow";
+import { RoomFeedRow, type FeedRowActions, type FeedRowData } from "./RoomFeedRow";
 import { useRoomThreads, type FeedThread } from "./use-room-threads";
 
 /** How near the foot the feed counts as being read there, so a new thread keeps it at the foot. */
@@ -26,24 +28,31 @@ const FOOT_PX = 48;
 /** Only the person scrolling takes the feed off its foot; a row opening beside it or a window resize never does. */
 const INTENT_MS = 1_000;
 
-const toRow = (group: Group, { task, summary }: FeedThread): FeedRowData => ({
-  threadId: task.threadId,
-  speaker: summary.first.speaker,
-  text: summary.first.text,
-  clipped: summary.first.clipped,
-  at: summary.first.at,
-  replies: summary.replies,
-  lastReplyAt: summary.lastReplyAt,
-  repliers: summary.repliers,
-  mark: task.activity === "waiting-on-you" ? "waiting" : task.unread ? "unread" : null,
-  working: roomThreadWorking(group, task.threadId),
-  workingBotId: roomThreadSpeakerId(group, task.threadId),
-});
+function toRow(group: Group, { task, summary }: FeedThread, bots: readonly Bot[]): FeedRowData {
+  const { waiting, unread } = roomThreadAttention(group, task, bots);
+  return {
+    threadId: task.threadId,
+    speaker: summary.first.speaker,
+    text: summary.first.text,
+    clipped: summary.first.clipped,
+    at: summary.first.at,
+    replies: summary.replies,
+    lastReplyAt: summary.lastReplyAt,
+    repliers: summary.repliers,
+    mark: waiting ? "waiting" : unread ? "unread" : null,
+    working: roomThreadWorking(group, task.threadId),
+    workingBotId: roomThreadSpeakerId(group, task.threadId),
+    title: task.title,
+    pinned: task.pinned === true,
+    archived: isArchived(task),
+  };
+}
 
 /** A room as one feed of its threads, oldest at the top and the newest just above the composer, where a line starts a
  * new thread. A row opens its thread beside the feed; the room's current thread, which is everyone's, never moves. */
 export function RoomFeedView({ group }: { group: Group }) {
   const dispatch = useStoreDispatch();
+  const store = useStoreRef();
   const bots = useStoreSelector((state) => state.bots, sameDrawnBots);
   const you = useStoreSelector((state) => state.config?.profile?.name?.trim()) || t("room.feed.you");
   const error = useStoreSelector((state) => state.error);
@@ -60,16 +69,29 @@ export function RoomFeedView({ group }: { group: Group }) {
   const composerDockRef = useRef<HTMLDivElement>(null);
   const composerDock = useComposerDockPad(composerDockRef);
   const now = useRelativeNow();
-  const { threads, failed, retry } = useRoomThreads(group);
+  const hasArchived = (group.tasks ?? []).some(isArchived);
+  const deletable = (group.tasks?.length ?? 1) > 1;
+  const [showArchived, setShowArchived] = useState(false);
+  const { threads, failed, retry } = useRoomThreads(group, showArchived && hasArchived);
+  const actions = useMemo<FeedRowActions>(() => {
+    const room = roomThreadRowActions(group.id, dispatch);
+    const leave = (threadId: string) => { if (store.state().forkPanel?.threadId === threadId) dispatch({ type: "closeForkPanel" }); };
+    return {
+      ...room,
+      onDelete: (task) => { leave(task.threadId); room.onDelete(task); },
+      onArchive: (task, archivedAt) => { if (archivedAt !== null) leave(task.threadId); room.onArchive(task, archivedAt); },
+      deletable,
+    };
+  }, [group.id, dispatch, store, deletable]);
   const [pending, setPending] = useState<{ text: string; at: number; threadId: string | null } | null>(null);
 
   const rows = useMemo(() => {
     if (!threads) return null;
-    const listed = threads.map((thread) => toRow(group, thread));
+    const listed = threads.map((thread) => toRow(group, thread, bots));
     if (!pending || (pending.threadId && listed.some((row) => row.threadId === pending.threadId))) return listed;
     return [...listed, { threadId: pending.threadId ?? "", speaker: { person: {} }, text: pending.text, at: pending.at, replies: 0, lastReplyAt: null,
       repliers: [], mark: null, working: false, workingBotId: null } satisfies FeedRowData];
-  }, [threads, pending, group]);
+  }, [threads, pending, group, bots]);
 
   const waiting = useCallback((text: string | null) => {
     setPending(text === null ? null : { text, at: Date.now(), threadId: null });
@@ -110,13 +132,17 @@ export function RoomFeedView({ group }: { group: Group }) {
           {!simpleHeader && <RoomBulletin group={group} remoteClient={remoteClient} />}
           {folderOpen && <div className="w-full px-5"><div className="mb-1"><RoomWorkingFolder group={group} /></div></div>}
         </GlassBar>
-        <div ref={scrollRef} className="glass-scroller h-full overflow-x-hidden overflow-y-auto px-4 [overflow-anchor:none]"
+        <div ref={scrollRef} data-feed-fade="" className="glass-scroller h-full overflow-x-hidden overflow-y-auto px-4 [overflow-anchor:none]"
           onWheel={moved} onTouchMove={moved} onKeyDown={moved} onPointerDown={moved}
           onScroll={(event) => {
             const el = event.currentTarget, foot = el.scrollHeight - el.scrollTop - el.clientHeight < FOOT_PX;
             if (foot || Date.now() - scrolledAt.current < INTENT_MS) atFoot.current = foot;
           }}>
           <div ref={contentRef} className="glass-scroller-content chat-column flex min-h-full w-full flex-col justify-end" style={{ paddingBottom: composerDock.pad }}>
+            {hasArchived && rows !== null && <button type="button" data-feed-archived-toggle="" aria-pressed={showArchived} onClick={() => setShowArchived((shown) => !shown)}
+              className="mt-2 inline-flex h-7 items-center self-center rounded-md px-2 text-[13px] font-medium leading-4 text-ink-secondary hover:text-ink">
+              {showArchived ? t("room.feed.hideArchived") : t("room.feed.showArchived")}
+            </button>}
             {rows === null ? (
               failed && (
                 <p role="alert" className="flex items-center justify-center gap-2 py-6 text-[13px] text-ink-secondary">
@@ -129,7 +155,8 @@ export function RoomFeedView({ group }: { group: Group }) {
             ) : (
               <ol aria-label={t("room.feed.aria", { name: group.name })} className="flex flex-col gap-0.5 py-2">
                 {rows.map((row) => (
-                  <RoomFeedRow key={row.threadId || "pending"} row={row} bots={bots} you={you} now={now} open={row.threadId !== "" && row.threadId === openThread} onOpen={open} />
+                  <RoomFeedRow key={row.threadId || "pending"} row={row} groupId={group.id} bots={bots} you={you} now={now} open={row.threadId !== "" && row.threadId === openThread}
+                    onOpen={open} actions={actions} />
                 ))}
               </ol>
             )}

@@ -244,6 +244,9 @@ export interface CloudSendChatsDeps {
   ownerKey?: string;
 }
 
+/** Whose rows arriving lines become: none on the person's own computer, where their lines name nobody. */
+const stamping = (owner: CloudOwner | null): CloudOwner | null => (owner?.here ? null : owner);
+
 const ownerOf = (store: Pick<ChatStore, "bots" | "groups">, threadId: string) => {
   const bot = store.bots.find((candidate) => candidate.threadId === threadId || (candidate.tasks ?? []).some((task) => task.threadId === threadId));
   return { bot, room: bot ? undefined : store.groups.find((candidate) => roomThreads(candidate).includes(threadId)) };
@@ -392,6 +395,8 @@ export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, 
     if (!owner) { json(res, 403, { error: "Only My Cloud's owner can say which of its lines are theirs." }); return true; }
     const parsed = idsSchema.safeParse(await readBody(req, 2 * 1024 * 1024));
     if (!parsed.success) { json(res, 400, { error: `send { v: 1, conversations: [{ threadId, ids }] }, at most ${VERIFY_IDS} ids of each` }); return true; }
+    // On the person's own computer their lines name nobody: nothing is stamped.
+    if (owner.here) { json(res, 200, { v: 1, stamped: 0 }); return true; }
     const { stamped, threads } = stampHeld(store, parsed.data.conversations, owner);
     for (const threadId of threads) deps.stamped?.(threadId);
     json(res, 200, { v: 1, stamped });
@@ -454,7 +459,7 @@ export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, 
     }
     for (const room of store.groups) if (room.busyBotId) for (const threadId of [room.threadId, ...(room.tasks ?? []).map((task) => task.threadId)]) busy.add(threadId);
     const result = addSentChats(store, deps.dataDir, parsed.data.dataDir, parsed.data.conversations as unknown as SentConversation[],
-      { busy: (threadId) => busy.has(threadId), owner: deps.owner?.(auth) ?? null });
+      { busy: (threadId) => busy.has(threadId), owner: stamping(deps.owner?.(auth) ?? null) });
     json(res, 200, result);
     return true;
   }

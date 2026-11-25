@@ -34,6 +34,8 @@ vi.mock("@/lib/connected-apps", () => ({
 vi.mock("@/lib/connected-apps-cache", () => ({ readCachedInventory: () => null, writeCachedInventory: () => {} }));
 vi.mock("@/lib/product-events", () => ({ connectorConnect: vi.fn() }));
 vi.mock("./McpServersPanel", () => ({ McpServersPanel: () => null }));
+vi.mock("./github/GithubAppCard", () => ({ GITHUB_CARD_SEARCH: "github git", GITHUB_CARD_CATEGORIES: ["Developer tools"], GithubAppCard: () => null }));
+vi.mock("@/lib/github-sign-in", () => ({ useGithubConnected: () => null, useGithubShown: () => true }));
 vi.mock("./XCard", async () => {
   const { createElement: element } = await import("react");
   return { X_CARD_SEARCH: "x", XCard: () => fixture.xTile ? element("div", { "data-app-tile": "x" }, "X") : null };

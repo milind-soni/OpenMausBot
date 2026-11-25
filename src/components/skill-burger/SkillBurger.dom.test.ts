@@ -178,20 +178,25 @@ it("explains a finished delegation run and saves only what the person kept, unde
   expect(body).toMatchObject({ botId: "scout", threadId: "t1", skip: ["s2"], inputs: { site: { name: "website" } } });
 });
 
-it("leaving a step out leaves out the steps that use its output", async () => {
+it.each([1, 2, 10])("groups %i composed fields with their app step and leaves out dependent steps", async (fields) => {
+  const writers = Array.from({ length: fields }, (_, index) => ({
+    id: `s2_write${index ? `_${index + 1}` : ""}`, kind: "ai", label: "Write summary", exact: false, needs: ["s1"],
+  }));
   const draft = {
-    goal: "Fetch and write", inputs: [],
+    goal: "Fetch and send", inputs: [],
     steps: [
       { id: "s1", kind: "shell", label: "Fetch example.com", exact: true, needs: [] },
-      { id: "s2_write", kind: "ai", label: "Write top.md", exact: false, needs: ["s1"] },
-      { id: "s2", kind: "file", label: "Write top.md", exact: true, needs: ["s2_write"] },
+      ...writers,
+      { id: "s2", kind: "app", label: "Send summary", exact: true, needs: writers.map((step) => step.id) },
     ],
   };
   fixture.api.mockImplementation(async (path: string) => (path === "/api/skill-burger-draft" ? { draft } : {}));
   // Another run than the one saved above: a saved run's card comes back saved.
   await render([ask, app("m31", "GOOGLESHEETS_BATCH_GET"), app("m32", "GMAIL_SEND_EMAIL")]);
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-  expect([...host.querySelectorAll("[data-burger-layer]")].map((row) => row.textContent)).toEqual([expect.stringContaining("Fetch example.com"), expect.stringContaining("Write top.md")]);
+  expect([...host.querySelectorAll("[data-burger-layer]")].map((row) => row.textContent)).toEqual([expect.stringContaining("Fetch example.com"), expect.stringContaining("Send summary")]);
+  expect(host.querySelector("[data-burger-pill]")?.textContent).toContain("2 steps");
+  expect(host.querySelector(".burger-bun-top")?.textContent).toContain("1 exact, 1 by judgement");
   await act(async () => host.querySelector<HTMLInputElement>('input[aria-label="Keep “Fetch example.com”"]')!.click());
   expect([...host.querySelectorAll("[data-burger-layer]")].map((row) => row.getAttribute("data-kept"))).toEqual(["false", "false"]);
 });
