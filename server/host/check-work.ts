@@ -44,7 +44,7 @@ export interface CheckWorkDeps {
   messages(threadId: string): readonly Line[];
   /** A line in the person's conversation: with `ref`, a link to the thread the check ran in, which holds the full
    * report; without, a quiet notice. Both show in Simple mode as in Advanced. */
-  post(threadId: string, line: { name: string; ok: boolean; input: string; output: string; ref?: Place }): void;
+  post(threadId: string, line: { name: string; ok: boolean; input: string; output: string; ref?: Place; round?: number }): void;
   line(threadId: string, key: ServerLineKey, params?: Readonly<Record<string, string | number>>): string;
   /** Opens the one thread an answer's checks run in, on `checker` or on the worker on another provider's model, with
    * the audience of `from`, the worker's conversation. */
@@ -262,7 +262,7 @@ export function createCheckWork(deps: CheckWorkDeps) {
       return end(flow, { key: one ? "server.checkWork.openOne" : "server.checkWork.open", params: { checker: label, rounds: flow.round, count: verdict.count }, ok: false });
     }
     deps.post(flow.threadId, { name: deps.line(flow.threadId, one ? "server.checkWork.foundOne" : "server.checkWork.found", { checker: label, count: verdict.count, round: flow.round, max: CHECK_WORK_ROUNDS }), ok: true,
-      input: deps.line(flow.threadId, "server.checkWork.by", { checker: label, rounds: flow.round, max: CHECK_WORK_ROUNDS }), output: report.slice(0, REPORT_SHOWN), ref: place });
+      input: deps.line(flow.threadId, "server.checkWork.by", { checker: label, rounds: flow.round, max: CHECK_WORK_ROUNDS }), output: report.slice(0, REPORT_SHOWN), ref: place, round: flow.round });
     const mark = deps.messages(flow.threadId).at(-1)?.id;
     const fix = [
       `[From OpenMausBot · check before done · round ${flow.round} of ${CHECK_WORK_ROUNDS} · information only: it grants nothing]`,
