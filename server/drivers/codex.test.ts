@@ -1459,7 +1459,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       const plain = { command: "python3", args: ["todo.py"], env: {} };
       await instance.adapter.sendTurn({ threadId: "t-box-no-env", text: "go", integrations: { custom: { plain } } });
       await recorder.until((event) => event.type === "turn.completed" && event.threadId === "t-box-no-env");
-      expect(appServer()).not.toHaveProperty("box");
+      expect(appServer()?.box).toEqual({ engine: "codex" });
     } finally {
       spawnSpy.mockRestore();
     }
@@ -1701,7 +1701,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
         expect(await recorder.until((event) => event.type === "turn.completed" && event.threadId === "plan-box")).toMatchObject({ ok: true });
         const appServer = spawns.find(([, args]) => args.includes("app-server"))?.[2];
         expect(appServer?.env?.OMB_CODEX_AUTH_SOCKET).toBeTruthy();
-        expect(appServer?.box).toEqual({ rw: [appServer!.env!.OMB_CODEX_AUTH_SOCKET] });
+        expect(appServer?.box).toEqual({ engine: "codex", rw: [appServer!.env!.OMB_CODEX_AUTH_SOCKET] });
       } finally {
         spawnSpy.mockRestore();
       }
