@@ -546,7 +546,7 @@ export async function describeTarget(ctx: DataContext, target: string): Promise<
   let name: string | undefined;
   let sql: string | undefined;
   if (tableIdentifierParts(target)) {
-    name = await ctx.database.resolveTable(target.trim());
+    name = await ctx.database.resolveTable(target.trim(), ctx.connection);
     relation = name;
   } else {
     const kind = gateSql(target);
@@ -699,7 +699,7 @@ export async function showCard(context: DataContext, input: ShowInput, onCardRea
       if (kind.kind !== "read" || !kind.materialisable) throw fail("invalid_input", "A card shows a SELECT's result.", { sql: input.sql });
       from = queryRelation(input.sql);
     } else {
-      from = await ctx.database.resolveTable(input.table!);
+      from = await ctx.database.resolveTable(input.table!, ctx.connection);
       cardSql = `SELECT * FROM ${from}`;
     }
     ctx.signal.throwIfAborted();
@@ -865,7 +865,7 @@ export async function exportData(ctx: DataContext, input: ExportInput): Promise<
     else throw fail("invalid_input", `${card.id} has no data to export.`);
     stem = card.title;
   } else if (input.table) {
-    relation = await ctx.database.resolveTable(input.table);
+    relation = await ctx.database.resolveTable(input.table, ctx.connection);
     stem = input.table;
   } else {
     const kind = gateSql(input.sql!);

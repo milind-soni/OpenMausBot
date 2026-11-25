@@ -66,7 +66,7 @@ export interface BotDatabase {
   listTables(): Promise<Array<{ name: string; sqlName?: string; rowCount: number; columns: DataColumn[] }>>;
   interrupt(connection: DataConnection): void;
   /** Resolves a bare or qualified identifier; `table_not_found` with candidates otherwise. */
-  resolveTable(name: string): Promise<string>;
+  resolveTable(name: string, connection?: DataConnection): Promise<string>;
   close(): Promise<void>;
 }
 
