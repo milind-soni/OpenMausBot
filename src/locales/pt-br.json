@@ -8931,6 +8931,7 @@
   "call.turns.needsDictation": "As chamadas precisam do Ditado do macOS, que ainda não está disponível aqui.",
   "call.turns.helperBuildFailed": "Não foi possível montar o auxiliar de ditado. Instale as Command Line Tools da Apple e tente novamente.",
   "call.turns.speechNotAuthorized": "Permita o Reconhecimento de Fala em Ajustes do Sistema → Privacidade e Segurança e tente novamente.",
+  "call.turns.languageMissing": "O Windows não tem um reconhecedor de fala para o seu idioma que as chamadas possam usar. Para falar nas chamadas, adicione uma chave do Fish Audio ou do ElevenLabs em Configurações → IA → Outros serviços.",
   "call.turns.pushToTalk": "Aperte para falar",
   "call.turns.listening": "Ouvindo",
   "call.turns.oneMoment": "Um momento",

@@ -8999,6 +8999,7 @@
   "call.turns.needsDictation": "Calls need macOS dictation, which isn't available here yet.",
   "call.turns.helperBuildFailed": "The dictation helper couldn't be built. Install Apple's Command Line Tools and try again.",
   "call.turns.speechNotAuthorized": "Allow Speech Recognition in System Settings → Privacy & Security, then try again.",
+  "call.turns.languageMissing": "Windows has no speech recognizer for your language that calls can use. To talk in calls, add a Fish Audio or ElevenLabs key in Settings → AI → Other services.",
   "call.turns.pushToTalk": "Push to talk",
   "call.turns.listening": "Listening",
   "call.turns.oneMoment": "One moment",
