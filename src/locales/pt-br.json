@@ -4720,6 +4720,7 @@
   "phone.code.trouble": "Com dificuldade?",
   "phone.code.address": "Endereço de pareamento",
   "phone.code.publicNetwork": "A rede {network} deste computador está definida como pública no Windows, então o firewall pode bloquear seu celular. Se o celular não conseguir se conectar, abra Configurações do Windows → Rede e Internet → {network} e selecione Rede privada em Tipo de perfil de rede.",
+  "phone.code.hostFirewall": "O firewall deste computador (ufw) pode bloquear seu celular no Wi-Fi. Se o celular não conseguir se conectar, ative \"De qualquer lugar, pelo {app}\" ou libere o celular executando isto em um terminal:",
   "phone.error.directUnavailable": "O pareamento direto por Wi-Fi não está disponível neste computador agora. Conecte-o a uma rede Wi-Fi e tente novamente.",
   "phone.error.protectedUnavailable": "A rota de pareamento HTTPS ficou indisponível. Verifique o acesso seguro e crie um código novo.",
   "phone.error.remoteUpdate": "Não foi possível atualizar o acesso remoto. Abra “Avançado e solução de problemas” e tente novamente.",

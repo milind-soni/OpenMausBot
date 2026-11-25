@@ -12,6 +12,7 @@ import { companionEndpointCandidates, hostedCompanionUrl } from "./endpoints.ts"
 import { directRoutes, routedAddresses } from "./direct-routes.ts";
 import { lanInterfaces, tailnetName, tailscaleAddress } from "./listener.ts";
 import { defaultHostName } from "./mdns.ts";
+import { hostFirewall, type HostFirewall } from "./host-firewall.ts";
 import { publicNetworks } from "./windows-network.ts";
 
 export const CONTROL_TOKEN_HEADER = "x-openmausbot-control-token";
@@ -37,6 +38,8 @@ export interface ControlOptions {
   /** `PUT /routes` from the desktop app: which direct ways in are on, and the tailnet name it learned. */
   setDirectRoutes?: (body: unknown) => boolean;
   publicNetworks?: () => ReadonlySet<string>;
+  /** Linux: a host firewall that likely drops a phone on the device port. */
+  hostFirewall?: (port: number) => HostFirewall | null;
   /** End-to-end status; absent or `enabled: false` while it is off. */
   e2e?: () => E2EStatus;
   /** The best live encrypted route of each connected device. */
@@ -202,6 +205,8 @@ export function companionState(options: Omit<ControlOptions, "controlToken">) {
   const publicNetwork = pairing && lead && (options.publicNetworks ?? publicNetworks)().has(lead.name)
     ? lead.name
     : null;
+  // Read from /etc only while pairing is open, and only when a Wi-Fi address is offered.
+  const firewall = pairing && lead ? (options.hostFirewall ?? hostFirewall)(options.companionPort) : null;
   const secretPublicKey = options.secretPublicKey?.() ?? null;
   const routes = directRoutes();
   return {
@@ -215,6 +220,8 @@ export function companionState(options: Omit<ControlOptions, "controlToken">) {
     lan: lead?.address ?? null,
     // Windows has this network as Public, so its firewall likely drops a phone.
     ...(publicNetwork ? { publicNetwork } : {}),
+    // ufw is on and nothing we can read lets the device port in.
+    ...(firewall ? { hostFirewall: firewall } : {}),
     hosts: hostCandidates(addresses, name),
     endpoints: companionEndpointCandidates(
       options.companionPort,

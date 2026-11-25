@@ -5,6 +5,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { t } from "@/lib/i18n";
 import { copyText } from "@/lib/copy-text";
 import { productName } from "@/lib/brand";
+import { HostFirewallNote } from "./HostFirewallNote";
 import type { PhoneSetupController } from "./PhoneSetupFlow";
 
 /** A fresh code while this screen is open; the previous one stays valid to its two-minute end, so a phone mid-scan
@@ -64,6 +65,8 @@ export function PhonePairingQr({ c, signedIn }: { c: PhoneSetupController; signe
           {t("phone.code.publicNetwork", { network: state.publicNetwork })}
         </p>
       )}
+      {/* With the relay in the QR the phone pairs through it whatever the firewall says. */}
+      {!relay && <HostFirewallNote state={state} />}
       <p className="mt-4 flex items-start gap-1.5 px-2 text-left text-[12px] text-ink-tertiary">
         <Lock size={12} className="mt-0.5 shrink-0" />
         {t("phone.code.e2e.encrypted")}

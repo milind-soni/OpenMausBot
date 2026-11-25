@@ -407,3 +407,18 @@ If it prints `No suitable fusermount binary found on the $PATH` or `Cannot mount
 setup`, install the distribution's FUSE 3 package (`fuse3` on Ubuntu, Debian and Arch). If it then names a missing
 `lib*.so` file, install the desktop libraries listed under
 [Arch Linux and EndeavourOS](#arch-linux-and-endeavouros-appimage), or your distribution's packages for them.
+
+### A phone on the same Wi-Fi cannot pair
+
+On Same Wi-Fi the phone connects to this computer on TCP port 8810. A host firewall that drops incoming connections
+stops it, and the phone can only say it couldn't reach the computer. Omarchy turns on ufw with "deny incoming" by
+default; stock Ubuntu ships ufw turned off. While a pairing code is open, the pairing panel says when ufw is on and
+no rule it can read allows the port. Either turn on **Anywhere, through MausBot** (it needs no open port), or allow
+the port:
+
+```sh
+sudo ufw allow 8810/tcp
+```
+
+The app never changes the firewall itself. If pairing still fails, check that the phone is not on a guest network
+or one with client isolation, which stops devices on the same Wi-Fi from reaching each other.

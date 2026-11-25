@@ -3446,6 +3446,7 @@
   "phone.code.trouble": "¿Problemas?",
   "phone.code.address": "Dirección de emparejamiento",
   "phone.code.publicNetwork": "Windows tiene la red {network} de este equipo configurada como Pública, así que su firewall puede bloquear tu teléfono. Si tu teléfono no puede conectarse, abre Configuración de Windows → Red e Internet → {network} y cambia el tipo de perfil de red a Privada.",
+  "phone.code.hostFirewall": "El firewall de este equipo (ufw) puede bloquear tu teléfono en la red Wi-Fi. Si tu teléfono no puede conectarse, activa «En cualquier lugar, a través de {app}» o deja entrar a tu teléfono ejecutando esto en una terminal:",
   "phone.error.directUnavailable": "El emparejamiento directo por Wi-Fi no está disponible ahora en este equipo. Conéctalo a una Wi-Fi e inténtalo de nuevo.",
   "phone.error.protectedUnavailable": "La ruta de emparejamiento HTTPS dejó de estar disponible. Revisa el acceso seguro y crea un código nuevo.",
   "phone.error.remoteUpdate": "No se pudo actualizar el acceso remoto. Abre Avanzado y solución de problemas e inténtalo otra vez.",
