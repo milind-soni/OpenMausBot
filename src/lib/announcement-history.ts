@@ -5,8 +5,8 @@ import { useSyncExternalStore } from "react";
 import { BOAT_OFFER, boatClaimMailto } from "@/lib/boat-offer";
 import type { CloudSource } from "@/lib/cloud-plan";
 import type { OnboardingStatus } from "@/lib/onboarding";
-import { BOAT_OFFER_NOTICE, CLOUD_INTRO, dismissNotice, GROK_MOVE_NOTICE, MODELGO_OFFER_NOTICE, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL,
-  TEAMS_NOTICE, WHATS_NEW_NOTICE } from "@/lib/notices";
+import { BOAT_OFFER_NOTICE, CLOUD_INTRO, dismissNotices, EARLIER_WHATS_NEW_NOTICE, GROK_MOVE_NOTICE, MODELGO_OFFER_NOTICE, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL,
+  PRODUCT_HUNT_URL, TEAMS_NOTICE } from "@/lib/notices";
 import type { LocaleKey } from "@/locales";
 import type { ConfigStatus } from "@/state/config-status";
 import { api } from "@/state/store";
@@ -66,7 +66,7 @@ export const BUILT_IN_ANNOUNCEMENTS: readonly BuiltInAnnouncement[] = [
     open: { buttons: [{ label: "modelgoOffer.getKey", action: { open_url: MODELGO_URL } }] } },
   { id: GROK_MOVE_NOTICE, date: "2026-11-04", title: "settings.import.grokTitle", body: "grokMove.popup.body", mark: "grok",
     for: facts => everywhere(facts) && !facts.remote && facts.canSave && !facts.team, open: { modal: "grok-move" } },
-  { id: WHATS_NEW_NOTICE, date: "2026-10-31", title: "whatsNew.cloud.title", body: "whatsNew.cloud.body", mark: "cloud",
+  { id: EARLIER_WHATS_NEW_NOTICE, date: "2026-10-31", title: "whatsNew.cloud.title", body: "whatsNew.cloud.body", mark: "cloud",
     for: facts => everywhere(facts) && facts.cloudSale, open: { modal: "whats-new" } },
   { id: BOAT_OFFER_NOTICE, date: "2026-10-31", title: "boatOffer.title", body: "boatOffer.body", mark: "boat", for: facts => facts.sponsors && !facts.branded,
     open: { buttons: [{ label: "boatOffer.get", action: { open_url: BOAT_OFFER.url } }, { label: "boatOffer.claim", action: { email: boatClaimMailto() } }] }, until: BOAT_OFFER.until },
@@ -181,10 +181,10 @@ export interface RecordWriter {
   saved: (config: ConfigStatus) => void;
 }
 
-function savePersonal(hint: string, hintsSeen: string[] | null, writer: RecordWriter): void {
-  void writer.desktop?.seen(hint).catch(() => {});
+function savePersonal(hints: readonly string[], hintsSeen: string[] | null, writer: RecordWriter): void {
+  for (const hint of hints) void writer.desktop?.seen(hint).catch(() => {});
   const saving = writer.team
-    ? api("/api/me/welcome", { method: "PUT", body: JSON.stringify({ hints: [hint] }) }).then(() => api<ConfigStatus>("/api/config"))
+    ? api("/api/me/welcome", { method: "PUT", body: JSON.stringify({ hints }) }).then(() => api<ConfigStatus>("/api/config"))
     : hintsSeen ? api<ConfigStatus>("/api/config", { method: "PUT", body: JSON.stringify({ onboarding: { hintsSeen } }) }) : null;
   void saving?.then(writer.saved).catch(() => {});
 }
@@ -194,14 +194,15 @@ export function markAnnouncementsRead(now: number, record: OnboardingStatus | un
   const mark = readMark(now), hints = record?.hintsSeen ?? [];
   store(READ_KEY, String(Math.floor(now)));
   const next = [...hints.filter(hint => !ANNOUNCEMENTS_READ_HINT.test(hint)), mark];
-  savePersonal(mark, next.length > 100 ? null : next, writer);
+  savePersonal([mark], next.length > 100 ? null : next, writer);
   changed();
 }
 
-/** The person closed (or used) a built-in popup that is theirs alone, as the Teams one is on a Team Cloud. */
-export function rememberNoticeSeen(id: string, record: OnboardingStatus | undefined, writer: RecordWriter): void {
-  const patch = dismissNotice(record, id);
-  savePersonal(id, writer.team ? [] : patch?.onboarding.hintsSeen ?? null, writer);
+/** The person closed (or used) a built-in popup that is theirs alone, as the Teams one is on a Team Cloud; `also`, the
+ * notices it stands for. */
+export function rememberNoticeSeen(id: string, record: OnboardingStatus | undefined, writer: RecordWriter, also: readonly string[] = []): void {
+  const ids = [id, ...also], patch = dismissNotices(record, ids);
+  savePersonal(ids, writer.team ? [] : patch?.onboarding.hintsSeen ?? null, writer);
   changed();
 }
 
