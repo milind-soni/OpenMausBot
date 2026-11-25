@@ -1520,6 +1520,8 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
           }}>
           <TeamMenuItems
             department={teamMotion.value!.name} onRead={closeTeamMenu} onAddBots={() => { closeTeamMenu(); setMoveToTeam(teamMotion.value!.name); }}
+            onMoveUp={sections.interactive ? () => { layout.header(userSectionId(teamMotion.value!.name)).onMove(-1); } : undefined}
+            onMoveDown={sections.interactive ? () => { layout.header(userSectionId(teamMotion.value!.name)).onMove(1); } : undefined}
             onRename={() => { closeTeamMenu(); (advanced ? setRenameTeam : botDrag.startRename)(teamMotion.value!.name); }}
             onShare={() => { closeTeamMenu(); setShareTeam(teamMotion.value!.name); }}
             onDelete={() => { closeTeamMenu(); setDeletingTeam(teamMotion.value!.name); }}

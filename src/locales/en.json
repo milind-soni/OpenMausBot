@@ -2182,6 +2182,8 @@
   "team.moveMany": "Move {count} bots",
   "team.moveSelected": "Move selected bots",
   "team.addBots": "Add bots",
+  "team.moveUp": "Move up",
+  "team.moveDown": "Move down",
   "team.markAllRead": "Mark all as read",
   "team.markingAllRead": "Marking as read…",
   "team.manageBots": "Add or remove bots",
