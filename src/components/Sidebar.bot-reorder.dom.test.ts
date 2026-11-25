@@ -132,18 +132,18 @@ for (const advanced of [false, true]) {
       expect(saved()).toEqual([{ type: "botsOrdered", botIds: ["delta", "alpha", "bravo", "charlie"] }]);
     });
 
-    it("plans among the rows left in place while Unread lists another bot of the same list", () => {
-      // Saved alpha, bravo, charlie, delta, echo; delta is working, echo is unread and listed in Unread above.
+    it("plans with an unread bot in its own place, like any other row", () => {
+      // Saved alpha, bravo, charlie, delta, echo; delta is working, echo is unread and stays where it is.
       const unread = bot("echo", { tasks: [{ threadId: "echo-t", title: "Chat", createdAt: 1, unread: true }] });
       render([bot("alpha"), bot("bravo"), bot("charlie"), bot("delta", { busy: true }), unread]);
-      expect(order()).toEqual(["echo", "delta", "alpha", "bravo", "charlie"]);
+      expect(order()).toEqual(["delta", "alpha", "bravo", "charlie", "echo"]);
       dragOnto("charlie", "delta", "top");
-      expect(saved()).toEqual([{ type: "botsOrdered", botIds: ["charlie", "alpha", "bravo", "delta"] }]);
+      expect(saved()).toEqual([{ type: "botsOrdered", botIds: ["charlie", "alpha", "bravo", "delta", "echo"] }]);
       dispatch.mockReset();
       flushSync(() => document.querySelector('[data-sidebar-bot-row="alpha"]')!
         .dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", altKey: true, bubbles: true, cancelable: true })));
-      expect(saved()).toEqual([{ type: "botsOrdered", botIds: ["bravo", "alpha", "charlie", "delta"] }]);
-      expect(document.body.textContent).toContain("Alpha moved to position 3 of 4");
+      expect(saved()).toEqual([{ type: "botsOrdered", botIds: ["bravo", "alpha", "charlie", "delta", "echo"] }]);
+      expect(document.body.textContent).toContain("Alpha moved to position 3 of 5");
     });
   });
 }

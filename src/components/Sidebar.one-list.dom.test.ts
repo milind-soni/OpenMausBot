@@ -114,20 +114,21 @@ describe("switch on: one list", () => {
   it("lists My Cloud's bots in the same list as this computer's, with no group or heading of their own", async () => {
     window.ogb = { placesTogether: page } as never;
     await render();
-    expect(ids('[data-sidebar-section-id="builtin:bots"]')).toEqual(["git", "ledger", "cloud:scout"]);
-    expect(ids('[data-sidebar-section-id="builtin:unread"]')).toEqual(["cloud:tech"]);
+    expect(ids('[data-sidebar-section-id="builtin:bots"]')).toEqual(["git", "ledger", "cloud:scout", "cloud:tech"]);
+    expect(q('[data-sidebar-section-id="builtin:unread"]')).toBeNull();
     expect([...host.querySelectorAll("[data-section]")].map((header) => header.getAttribute("data-section"))).not.toContain("On My Cloud");
     expect(q("[data-other-place]")).toBeNull();
     expect(q('[data-sidebar-bot-row="cloud:scout"]')!.textContent).toContain("Open issues");
     expect(q('[data-sidebar-bot-row="cloud:tech"]')!.textContent).toContain("Deploy passed on staging.");
   });
 
-  it("unread rows of both places share the one Unread group, newest first", async () => {
+  it("unread rows of both places keep their places in the one list", async () => {
     window.ogb = { placesTogether: page } as never;
     const nova = bot("nova", { unread: true, tasks: [{ threadId: "nova-t", title: "Chat", createdAt: 1, updatedAt: 5_000, unread: true }] });
     answer = async () => said({ other: { home: "cloud", state: "ready", bots: [row("old", { unread: true, lastAt: 1_000 }), row("tech", { unread: true, lastAt: 9_000 })] } });
     await render([...OWN, nova]);
-    expect(ids('[data-sidebar-section-id="builtin:unread"]')).toEqual(["cloud:tech", "nova", "cloud:old"]);
+    expect(ids('[data-sidebar-section-id="builtin:bots"]')).toEqual(["git", "ledger", "nova", "cloud:old", "cloud:tech"]);
+    expect(q('[data-sidebar-section-id="builtin:unread"]')).toBeNull();
   });
 
   it("a bot with the same id in both places is two rows, each its own", async () => {
@@ -228,7 +229,7 @@ describe("switch on: one list", () => {
   it("the rail's two circles: this computer's page has the one list; My Cloud's page lists My Cloud's bots only, as with the switch off", async () => {
     window.ogb = { placesTogether: page } as never;
     await render();
-    expect(ids('[data-sidebar-section-id="builtin:bots"]')).toEqual(["git", "ledger", "cloud:scout"]);
+    expect(ids('[data-sidebar-section-id="builtin:bots"]')).toEqual(["git", "ledger", "cloud:scout", "cloud:tech"]);
     await act(async () => root.unmount());
     resetPlacesTogetherForTest(); resetPlaceRowsForTest();
     root = createRoot(host);
@@ -268,8 +269,8 @@ describe("switch on: one list", () => {
       await act(async () => { vi.advanceTimersByTime(1_500); });
       expect(q('[data-sidebar-section-id="builtin:unread"]')).toBeNull();
       await act(async () => { vi.advanceTimersByTime(600); });
-      expect(ids('[data-sidebar-section-id="builtin:unread"]')).toEqual(["cloud:tech"]);
-      expect(ids('[data-sidebar-section-id="builtin:bots"]')).toEqual(["cloud:scout", "git", "ledger"]);
+      expect(q('[data-sidebar-section-id="builtin:unread"]')).toBeNull();
+      expect(ids('[data-sidebar-section-id="builtin:bots"]')).toEqual(["cloud:scout", "git", "ledger", "cloud:tech"]);
     } finally {
       vi.useRealTimers();
     }
@@ -329,6 +330,6 @@ describe("switch on: one list", () => {
     expect(ids()).toEqual(["mausbot", "git", "ledger"].filter((id) => q(`[data-sidebar-bot-row="${id}"]`)));
     expect(ids('[data-sidebar-section-id="builtin:bots"]')).toEqual(["git", "ledger"]);
     await act(async () => release(said()));
-    expect(ids('[data-sidebar-section-id="builtin:bots"]')).toEqual(["git", "ledger", "cloud:scout"]);
+    expect(ids('[data-sidebar-section-id="builtin:bots"]')).toEqual(["git", "ledger", "cloud:scout", "cloud:tech"]);
   });
 });
