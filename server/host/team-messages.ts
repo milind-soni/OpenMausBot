@@ -26,6 +26,7 @@ import type { BotRecord, GroupRecord, Message, Store, StoreChange } from "../sto
 import type { TeamPeople } from "../team-people.ts";
 import { currentTimeZone } from "../time-zone.ts";
 import { loadMemory } from "../workspace.ts";
+import { messagePersonTarget, type MessagePersonBotsDeps } from "./message-person-bots.ts";
 import { OUTSIDE_REFUSAL } from "./outside-fence.ts";
 import type { PlaceInbox } from "./place-inbox.ts";
 import { createPersonInbox, type Delivery, type Item, type Passed, type PersonInbox, type PersonInboxDeps } from "./person-inbox.ts";
@@ -66,6 +67,8 @@ export interface TeamMessagesDeps {
   notify(notification: Notification): void;
   /** The inbox of a place that is no team's. */
   place?: PlaceInbox | null;
+  /** Off a team: who `to` may name besides the bots here (message-person-bots.ts). */
+  named?: Omit<MessagePersonBotsDeps, "bots">;
   /** What the inbox needs from the server: whose asks are whose, hand-offs, a bot carrying on, the assistant's reads. */
   inbox: Pick<PersonInboxDeps, "askedPerson" | "handedFrom" | "continueTurn"> & Partial<Pick<PersonInboxDeps, "notes" | "ensureOwnBot" | "changed" | "delivered">> & {
     representative?: Omit<RepresentativeDeps, "timeZone"> & Partial<Pick<RepresentativeDeps, "timeZone">>;
@@ -333,8 +336,14 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       if (!team && deps.place) {
         const body = placeBodySchema.safeParse(await ctx.readBody());
         if (!body.success) return ctx.json(ctx.res, 400, { error: `message_person needs message (up to ${MESSAGE_PERSON_MAX} characters).` });
+        const to = body.data.to ?? "";
+        const target = to ? messagePersonTarget({ bots: () => store.bots, personNames: deps.named?.personNames ?? (() => []), ...(deps.named?.elsewhere ? { elsewhere: deps.named.elsewhere } : {}) }, ctx.botId, ctx.threadId, to) : "person";
+        if (target !== "person" && target) return ctx.json(ctx.res, 409, { error: target.refusal });
         const sent = deps.place.message(ctx.botId, ctx.threadId, body.data.message);
-        return ctx.json(ctx.res, sent.status, sent.status === 200 ? { text: sent.text } : { error: sent.text });
+        // There is one person here: a name that is no bot's still reaches them, and the bot is told so, never left waiting on "Bob".
+        const shown = JSON.stringify(oneLine(to, 80));
+        const text = target === null && sent.status === 200 ? `No bot here is called ${shown}, and only the person you work for can be messaged from here, so this went to their own Inbox. ${sent.text}` : sent.text;
+        return ctx.json(ctx.res, sent.status, sent.status === 200 ? { text } : { error: sent.text });
       }
       if (!team || !deps.people) return ctx.json(ctx.res, 404, { error: "Passing a message to a person works only on a team's Cloud." });
       if (deps.confined?.(ctx.threadId)) return ctx.json(ctx.res, 403, { error: OUTSIDE_REFUSAL });
