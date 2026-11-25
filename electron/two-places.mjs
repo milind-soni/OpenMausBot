@@ -22,6 +22,14 @@ const KEEP_MS = 7 * 24 * 60 * 60_000;
 const RETELL_MS = 60 * 60_000;
 const KINDS = new Set(["cloud", "server"]);
 
+/** What a place on an older version is told instead: without when, places not read yet or no longer listed; then without
+ * teams too. */
+const OLDER = [
+  (places) => places,
+  (places) => places.filter((place) => place.bots.length && !place.away).map(({ name, kind, bots }) => ({ name, kind, bots })),
+  (places) => OLDER[1](places).filter((place) => place.kind !== "team"),
+];
+
 /** A place's move summary, which is how bots are counted; anything else is no answer. */
 const isSummary = (value) => record(value) && Array.isArray(value.items);
 
@@ -31,11 +39,19 @@ export function usedBots(summary) {
   return [...new Set(items.filter((item) => record(item) && item.kind === "bot" && typeof item.label === "string" && item.label.trim()).map((item) => item.label.trim()))];
 }
 
-/** Each own place's bots as last read, read back: `{ [key]: { name, kind, bots, at } }`. A team keeps its own (team-places.mjs). */
+const ACCOUNT = /^[^\s]{0,200}$/u;
+/** Each account's own places' bots as last read, read back: `{ [account]: { [key]: { name, kind, bots, at } } }`, "" for
+ * the places of nobody signed in. A team keeps its own (team-places.mjs). */
 export function parseLastRead(value) {
   const out = {};
-  if (!record(value) || value.v !== 1 || !record(value.places)) return out;
-  for (const [key, place] of Object.entries(value.places).slice(0, MAX_PLACES)) {
+  if (!record(value) || value.v !== 2 || !record(value.accounts)) return out;
+  for (const [account, places] of Object.entries(value.accounts).slice(0, 20)) if (ACCOUNT.test(account)) out[account] = placesOf(places);
+  return out;
+}
+function placesOf(value) {
+  const out = {};
+  if (!record(value)) return out;
+  for (const [key, place] of Object.entries(value).slice(0, MAX_PLACES)) {
     if (!KEY.test(key) || !record(place) || typeof place.name !== "string" || !place.name.trim() || !KINDS.has(place.kind) || !Array.isArray(place.bots)
       || !Number.isSafeInteger(place.at) || place.at < 0) continue;
     out[key] = { name: place.name, kind: place.kind, bots: place.bots.filter((bot) => typeof bot === "string" && bot.trim()).slice(0, 500), at: place.at };
@@ -57,6 +73,7 @@ export function parseDismissed(value) {
  *   quiet?(): boolean,
  *   dismissed: { read(): unknown, write(value: unknown): void },
  *   lastRead?: { read(): unknown, write(value: unknown): void },
+ *   account?(): { id: string | null, signedOut: boolean } | undefined,
  *   onChange?(): void,
  *   now?(): number,
  *   log?(line: string): void,
@@ -67,23 +84,46 @@ export function parseDismissed(value) {
  * one-time move there; a team has neither, it is only read. `settled()`: no move is under way or done, so this computer's bots are its own. `quiet()`: a move is
  * under way, so nothing is read or told until it is done. `lastRead`: each own place's bots as last read, kept
  * across restarts, so a place that can't be read now is still told as it was, with when, never as having no bots.
+ * `account()`: who is signed in (undefined while that is not known yet, when nothing is read or told): what is kept is
+ * that account's alone, never told while another is signed in, and all of it is forgotten once nobody is.
  */
-export function createTwoPlaces({ local, here: computer = null, places, settled, quiet = () => false, dismissed, lastRead = null, onChange = () => {}, now = Date.now, log = () => {}, t = nativeText.englishText.t }) {
+export function createTwoPlaces({ local, here: computer = null, places, settled, quiet = () => false, dismissed, lastRead = null, account = () => ({ id: null, signedOut: false }), onChange = () => {}, now = Date.now, log = () => {}, t = nativeText.englishText.t }) {
   /** What each place had when read in this run: its bots by name, and when. Only this drives the suggestion. */
   const known = new Map();
   /** What each place was last told, so it is told again only once that changes. */
   const told = new Map();
   /** This computer's bots: undefined until it first answers, null once they moved. */
-  let here, hereAt = 0, lookedAt = -Infinity, looking = null, said = "";
-  const remembered = () => { try { return parseLastRead(lastRead?.read()); } catch { return {}; } };
-  /** A good read of an own place is kept, one with no bots too: only a good read may say a place has none. */
+  let here, hereAt = 0, lookedAt = -Infinity, looking = null, said = "", whose = null;
+  /** Each place last told in a shape an older version refuses less of (1: without when or places not read, 2: nor teams). */
+  const older = new Map();
+  const everything = () => { try { return parseLastRead(lastRead?.read()); } catch { return {}; } };
+  const save = (before, all) => {
+    if (JSON.stringify(all) === JSON.stringify(before)) return;
+    try { lastRead.write({ v: 2, accounts: all }); } catch {}
+  };
+  const remembered = () => everything()[whose ?? ""] ?? {};
+  /** A good read of an own place is kept, one with no bots too: only a good read may say a place has none. Written only
+   * when that changed, or about once an hour for when. */
   const keep = (place, bots) => {
     if (!lastRead || !KINDS.has(place.kind)) return;
-    const all = remembered();
+    const all = everything(), before = structuredClone(all), mine = all[whose ?? ""] ??= {};
     // The person has one Cloud of their own: one at a new address replaces the one before.
-    for (const key of Object.keys(all)) if (key !== place.key && place.kind === "cloud" && all[key].kind === "cloud") delete all[key];
-    all[place.key] = { name: place.name, kind: place.kind, bots, at: now() };
-    try { lastRead.write({ v: 1, places: Object.fromEntries(Object.entries(all).slice(-MAX_PLACES)) }); } catch {}
+    for (const key of Object.keys(mine)) if (key !== place.key && place.kind === "cloud" && mine[key].kind === "cloud") delete mine[key];
+    const last = mine[place.key];
+    if (!last || last.name !== place.name || JSON.stringify(last.bots) !== JSON.stringify(bots) || now() - last.at >= RETELL_MS) mine[place.key] = { name: place.name, kind: place.kind, bots, at: now() };
+    all[whose ?? ""] = Object.fromEntries(Object.entries(mine).slice(-MAX_PLACES));
+    save(before, all);
+  };
+  /** Who is signed in now: another account starts afresh, and once nobody is, what every account had is forgotten. */
+  const signedIn = (who) => {
+    const next = who.id ?? null;
+    if (next !== whose) known.clear();
+    whose = next;
+    if (who.signedOut && lastRead) {
+      const all = everything(), before = structuredClone(all);
+      for (const key of Object.keys(all)) if (key !== "") delete all[key];
+      save(before, all);
+    }
   };
   const hidden = () => { try { return parseDismissed(dismissed.read()); } catch { return new Set(); } };
 
@@ -118,23 +158,25 @@ export function createTwoPlaces({ local, here: computer = null, places, settled,
       return last.bots.length ? [{ key: place.key, name: place.name, kind: place.kind, bots: last.bots, seen: last.at }] : [];
     });
     const same = (last) => listed.some((place) => place.kind === last.kind && (last.kind === "cloud" || place.name === last.name));
+    // No longer listed (signed out of it, cancelled, its owner unconfirmed): named for a while, but nothing is offered there.
     const gone = Object.entries(kept).filter(([key, last]) => !listedKeys.has(key) && !same(last) && last.bots.length && now() - last.at < KEEP_MS)
-      .map(([key, last]) => ({ key, name: last.name, kind: last.kind, bots: last.bots, seen: last.at }));
+      .map(([key, last]) => ({ key, name: last.name, kind: last.kind, bots: last.bots, seen: last.at, away: true }));
     const everyone = [...(name ? [{ key: "here", name, kind: "computer", bots: here, seen: hereAt }] : []), ...others, ...gone];
     const receivers = [...(computer && here !== null ? [{ key: "here", name: t("computer.badge.local"), kind: "computer", tell: computer.tell }] : []), ...(unnamed ? [] : listed.filter((place) => place.tell))];
     for (const receiver of receivers) {
       const payload = { v: 1, self: { name: receiver.name, kind: receiver.kind },
-        places: everyone.filter((place) => place.key !== receiver.key).slice(0, MAX_PLACES).map(({ name: placeName, kind, bots, seen }) => ({ name: placeName, kind, bots: bots.slice(0, 500), ...(seen === undefined ? {} : { seen }) })) };
+        places: everyone.filter((place) => place.key !== receiver.key).slice(0, MAX_PLACES).map(({ name: placeName, kind, bots, seen, away }) => ({ name: placeName, kind, bots: bots.slice(0, 500), ...(seen === undefined ? {} : { seen }), ...(away ? { away } : {}) })) };
       const signature = JSON.stringify({ ...payload, places: payload.places.map((place) => ({ ...place, seen: place.seen === undefined ? null : Math.floor(place.seen / RETELL_MS) })) });
       if (told.get(receiver.key) === signature) continue;
       try {
-        // A place on an older version refuses a kind or a field it does not know; it still hears about the person's own
-        // places' bots, as before.
-        await receiver.tell(payload).catch((error) => {
-          const own = payload.places.filter((place) => place.kind !== "team" && place.bots.length).map(({ name: placeName, kind, bots }) => ({ name: placeName, kind, bots }));
-          if (error?.status !== 400 || JSON.stringify(own) === JSON.stringify(payload.places)) throw error;
-          return receiver.tell({ ...payload, places: own });
-        });
+        // A place on an older version refuses a field it does not know (when, away), and an older one still a team: it
+        // hears what it understands, in the shape it took before, so telling it again costs one request.
+        for (let level = older.get(receiver.key) ?? 0, sent = null, refused = null; ; level++) {
+          const places = OLDER[level](payload.places), shape = JSON.stringify(places), last = level === OLDER.length - 1;
+          if (shape === sent) { if (last) throw refused; continue; }
+          try { await receiver.tell({ ...payload, places }); older.set(receiver.key, level); break; }
+          catch (error) { if (error?.status !== 400 || last) throw error; sent = shape; refused = error; }
+        }
         told.set(receiver.key, signature);
       } catch (error) { log(`two places: ${receiver.name} was not told where the other bots live (${error?.message ?? error})`); }
     }
@@ -144,7 +186,11 @@ export function createTwoPlaces({ local, here: computer = null, places, settled,
    * lately (`force`: something about them changed). */
   function refresh({ force = false } = {}) {
     if (looking || (!force && now() - lookedAt < LOOK_EVERY_MS) || quiet()) return looking ?? Promise.resolve();
+    let who;
+    try { who = account(); } catch { who = undefined; }
+    if (!who) return Promise.resolve();
     lookedAt = now();
+    signedIn(who);
     looking = (async () => {
       const summary = await local().catch((error) => { log(`two places: this computer did not say which bots it has (${error?.message ?? error})`); return undefined; });
       // No answer here keeps what it had: never taken as no bots, nor as moved.

@@ -127,7 +127,7 @@ import { createSideJobs, helperSelection } from "./side-jobs.ts";
 import type { CaptureTurn, RoomLine } from "./memory-capture.ts";
 import { createAboutMe } from "./about-me.ts"; import { createPersonPreference } from "./host/person-preference.ts";
 import { botMemoryUpdate, ownersOwnAsk } from "./memory-forget.ts";
-import { canManage, canReach, departmentRefusal, hasTeamAuthority, inChargeOfEvery, livePeerRoster, livePeerRosterBlock, peerName, peerRosterPrompt, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts"; import { createLinkedRoster } from "./host/linked-roster.ts"; import { roomPostRefusal, sharedNamesNote, unreachedMentionLines } from "./same-name-mentions.ts";
+import { canManage, canReach, departmentRefusal, hasTeamAuthority, inChargeOfEvery, livePeerRoster, livePeerRosterBlock, peerName, peerRosterPrompt, peerRosterSystemPrompt, withElsewhere, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts"; import { createLinkedRoster } from "./host/linked-roster.ts"; import { roomPostRefusal, sharedNamesNote, unreachedMentionLines } from "./same-name-mentions.ts";
 import {
   containerComputerAction,
   containerComputerFrame,
@@ -850,7 +850,7 @@ function personNameIn(threadId: string): string | undefined {
 
 function sharedMembership(): boolean {
   return CLOUD_TEAM !== null || hostedWorkspaceConfiguration()?.portalMembership === true || signInAllowList().members.length > 0;
-} const ownHome = createOwnHome({ dataDir: DATA_DIR, facts: () => ({ managed: CLOUD_HOME !== null || HOSTED_WORKSPACE, shared: sharedMembership(), admins: signInAllowList().admins }) }); const placesElsewhere = createPlacesElsewhere({ dataDir: DATA_DIR });
+} const ownHome = createOwnHome({ dataDir: DATA_DIR, facts: () => ({ managed: CLOUD_HOME !== null || HOSTED_WORKSPACE, shared: sharedMembership(), admins: signInAllowList().admins }) }); const placesElsewhere = createPlacesElsewhere({ dataDir: DATA_DIR, here: CLOUD_HOME ? "cloud" : HOSTED_WORKSPACE ? null : DESKTOP_MANAGED ? "computer" : "server" });
 
 /** Everyone is "user" where one person uses the workspace; where several do, each reacts as their own key. */
 function reactorFor(auth: RequestAuth): Reactor {
@@ -8146,11 +8146,11 @@ async function beginTurn(
         ? mentionedBots(withoutPersonTags(providerText, [...personTagNames(cfg.profile?.name), ...teamMessages.people().flatMap((one) => one.tags)],
           store.bots.filter((one) => !one.hidden).map((one) => one.name)), sectionPeers, opts?.mentions)
         : [];
-      const teamPrompt = chiefLevel(bot)
+      const teamPrompt = withElsewhere(chiefLevel(bot)
         ? chiefOfStaffPrompt(bot.id, store.bots, Boolean(integrations.agents), (peer) => personalReach.listed(bot, peer, threadId), store.sections, linkedRoster.forChief(bot, Boolean(integrations.agents)))
         : integrations.agents && sectionPeers.length > 0
-          ? peerRosterPrompt(sectionPeers, bot, placesElsewhere.roster("roster", (kind) => botLink.link.on() && kind !== "team"))
-          : { rules: "", roster: "" }; const coordinationPrompt = teamPrompt.rules + (integrations.agents ? personalReach.prompt(bot, threadId, sectionPeers) : "");
+          ? peerRosterPrompt(sectionPeers, bot)
+          : { rules: "", roster: "" }, integrations.agents ? placesElsewhere.roster("roster", (kind) => botLink.link.on() && kind !== "team") : ""); const coordinationPrompt = teamPrompt.rules + (integrations.agents ? personalReach.prompt(bot, threadId, sectionPeers) : "");
       const credentialPrompt = integrations.agents ? CREDENTIAL_PROMPT + botLogins.secretsPrompt(bot.id, vaultReaders.turn(threadId)) + THREADS_PROMPT + WIDGET_PROMPT : "";
       const routinePrompt = integrations.agents ? TRIGGER_PROMPT : "";
       const profilePrompt = integrations.agents ? PROFILE_PROMPT : "";

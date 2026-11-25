@@ -240,10 +240,10 @@ test("a place is told again about once an hour though nothing changed, so what i
   assert.equal(w.told.here.at(-1).places[0].seen, w.clock.at);
 });
 
-test("a place on an older version, which refuses when or a place not read yet, still hears about the bots of the person's own places", async () => {
-  const told = [];
+test("a place on an older version that takes a team but not when keeps hearing the team's bots, and telling it again costs one request", async () => {
+  const told = [], clock = { at: 5 };
   const two = createTwoPlaces({
-    local: async () => summary("Scout"), settled: () => true, dismissed: memory(), now: () => 5,
+    local: async () => summary("Scout"), settled: () => true, dismissed: memory(), now: () => clock.at,
     here: { name: async () => "Work laptop", tell: async () => {} },
     places: () => [
       { key: "cloud:https://omb-u-1.fly.dev", name: "My Cloud", kind: "cloud", read: async () => summary("Ziggy"), tell: async (payload) => {
@@ -251,13 +251,18 @@ test("a place on an older version, which refuses when or a place not read yet, s
         if (payload.places.some((place) => "seen" in place || !place.bots.length)) throw Object.assign(new Error("refused"), { status: 400 });
       } },
       { key: "server:https://garage.example.test", name: "Garage server", kind: "server", read: async () => null },
+      { key: "team:acme", name: "Acme", kind: "team", read: async () => summary("Sales") },
     ],
   });
   await two.refresh();
   assert.deepEqual(told.map((payload) => payload.places), [
-    [{ name: "Work laptop", kind: "computer", bots: ["Scout"], seen: 5 }, { name: "Garage server", kind: "server", bots: [] }],
-    [{ name: "Work laptop", kind: "computer", bots: ["Scout"] }],
+    [{ name: "Work laptop", kind: "computer", bots: ["Scout"], seen: 5 }, { name: "Garage server", kind: "server", bots: [] }, { name: "Acme", kind: "team", bots: ["Sales"], seen: 5 }],
+    [{ name: "Work laptop", kind: "computer", bots: ["Scout"] }, { name: "Acme", kind: "team", bots: ["Sales"] }],
   ]);
+  clock.at += 2 * 60 * 60_000;
+  await two.refresh();
+  assert.equal(told.length, 3, "the hourly telling again: one request, in the shape it took");
+  assert.deepEqual(told.at(-1).places, told[1].places);
 });
 
 test("main: a sleeping Cloud is never asked or told anything, and this computer still hears the bots it had", async () => {
@@ -310,7 +315,7 @@ test("a place no longer listed (signed out, its owner check lapsed) is told as l
   };
   const soon = unlisted(6 * DAY);
   await soon.two.refresh();
-  assert.deepEqual(soon.told.at(-1).places, [{ name: "My Cloud", kind: "cloud", bots: ["Ziggy"], seen: 1_000 }]);
+  assert.deepEqual(soon.told.at(-1).places, [{ name: "My Cloud", kind: "cloud", bots: ["Ziggy"], seen: 1_000, away: true }], "named, and nothing is offered there");
   const late = unlisted(8 * DAY);
   await late.two.refresh();
   assert.deepEqual(late.told.at(-1).places, [], "a week on, it is no longer named");
@@ -319,9 +324,9 @@ test("a place no longer listed (signed out, its owner check lapsed) is told as l
     here: { name: async () => "Work laptop", tell: async () => {} },
     places: () => [{ key: "cloud:https://new.example.test", name: "My Cloud", kind: "cloud", read: async () => summary("Ziggy", "Quill") }] });
   await moved.refresh();
-  assert.deepEqual(Object.keys(parseLastRead(lastRead.read())), ["cloud:https://new.example.test"], "one Cloud of their own");
+  assert.deepEqual(Object.keys(parseLastRead(lastRead.read())[""]), ["cloud:https://new.example.test"], "one Cloud of their own");
   const told = [];
-  const elsewhere = createTwoPlaces({ local: async () => summary("Scout"), lastRead: memory({ v: 1, places: { "cloud:https://old.example.test": { name: "My Cloud", kind: "cloud", bots: ["Ziggy"], at: 1 } } }),
+  const elsewhere = createTwoPlaces({ local: async () => summary("Scout"), lastRead: memory({ v: 2, accounts: { "": { "cloud:https://old.example.test": { name: "My Cloud", kind: "cloud", bots: ["Ziggy"], at: 1 } } } }),
     now: () => 2_000, settled: () => true, dismissed: memory(), here: { name: async () => "Work laptop", tell: async (payload) => { told.push(payload); } },
     places: () => [{ key: "cloud:https://new.example.test", name: "My Cloud", kind: "cloud", read: async () => null }] });
   await elsewhere.refresh();
@@ -329,12 +334,79 @@ test("a place no longer listed (signed out, its owner check lapsed) is told as l
 });
 
 test("what was last read is read back strictly", () => {
-  assert.deepEqual(parseLastRead({ v: 1, places: {
+  assert.deepEqual(parseLastRead({ v: 2, accounts: { "acct-a": {
     "cloud:https://omb-u-1.fly.dev": { name: "My Cloud", kind: "cloud", bots: ["Ziggy", 3, ""], at: 5 },
     "team:acme": { name: "Acme", kind: "team", bots: ["Sales"], at: 5 },
     "server:https://garage.example.test": { name: "Garage", kind: "server", bots: ["Ledger"], at: -1 },
     "nonsense": { name: "x", kind: "cloud", bots: [], at: 1 },
     "server:https://family.example.test": { name: "", kind: "server", bots: [], at: 1 },
-  } }), { "cloud:https://omb-u-1.fly.dev": { name: "My Cloud", kind: "cloud", bots: ["Ziggy"], at: 5 } });
-  for (const junk of [null, "x", { v: 2, places: {} }, { v: 1, places: [] }]) assert.deepEqual(parseLastRead(junk), {});
+  }, "bad id": {} } }), { "acct-a": { "cloud:https://omb-u-1.fly.dev": { name: "My Cloud", kind: "cloud", bots: ["Ziggy"], at: 5 } } });
+  for (const junk of [null, "x", { v: 1, places: {} }, { v: 2, accounts: [] }]) assert.deepEqual(parseLastRead(junk), {});
+});
+
+test("what one account's places had is never told while another account is signed in, and is forgotten once nobody is", async () => {
+  const lastRead = memory();
+  let who = { id: "acct-a", signedOut: false }, cloud = "cloud:https://a.example.test", asleep = false;
+  const told = { here: [], cloud: [] };
+  const two = createTwoPlaces({ local: async () => summary("Scout"), lastRead, account: () => who, now: () => 1_000, settled: () => true, dismissed: memory(),
+    here: { name: async () => "Work laptop", tell: async (payload) => { told.here.push(payload); } },
+    places: () => (cloud ? [{ key: cloud, name: "My Cloud", kind: "cloud", read: async () => (asleep ? null : cloud.includes("a.example") ? summary("Ziggy") : summary()),
+      tell: async (payload) => { told.cloud.push(payload); } }] : []) });
+  await two.refresh();
+  assert.deepEqual(told.here.at(-1).places.map((place) => place.bots), [["Ziggy"]]);
+  // B signs in, with no Cloud; then with one that is asleep.
+  who = { id: "acct-b", signedOut: false }; cloud = null;
+  await two.refresh({ force: true });
+  assert.deepEqual(told.here.at(-1).places, []);
+  cloud = "cloud:https://b.example.test"; asleep = true;
+  await two.refresh({ force: true });
+  assert.deepEqual(told.here.at(-1).places, [{ name: "My Cloud", kind: "cloud", bots: [] }], "B's Cloud, not known yet: never A's bots");
+  assert.ok(!JSON.stringify([...told.here.slice(1), ...told.cloud.slice(1)]).includes("Ziggy"), "nothing of A's told anywhere");
+  // Back to A: A's are A's again. Then nobody is signed in: all of it is forgotten.
+  who = { id: "acct-a", signedOut: false }; cloud = "cloud:https://a.example.test";
+  await two.refresh({ force: true });
+  assert.deepEqual(told.here.at(-1).places.map((place) => place.bots), [["Ziggy"]], "A's last read, A's Cloud asleep");
+  who = { id: null, signedOut: true }; cloud = null;
+  await two.refresh({ force: true });
+  assert.deepEqual(parseLastRead(lastRead.read()), {});
+  assert.deepEqual(told.here.at(-1).places, []);
+  // While who is signed in is not known yet, nothing is read or told.
+  const before = told.here.length;
+  who = undefined;
+  await two.refresh({ force: true });
+  assert.equal(told.here.length, before);
+});
+
+test("what was last read is written only when it changed, or about once an hour for when", async () => {
+  let writes = 0, bots = ["Ziggy"];
+  const store = memory(), lastRead = { read: store.read, write: (value) => { writes++; store.write(value); } };
+  const w = laptop({ lastRead, cloud: async () => summary(...bots) });
+  await w.two.refresh();
+  assert.equal(writes, 1);
+  w.clock.at += LOOK_EVERY_MS;
+  await w.two.refresh();
+  assert.equal(writes, 1, "the same bots ten minutes on: not written");
+  bots = ["Ziggy", "Quill"];
+  w.clock.at += LOOK_EVERY_MS;
+  await w.two.refresh();
+  assert.equal(writes, 2);
+  w.clock.at += 60 * 60_000;
+  await w.two.refresh();
+  assert.equal(writes, 3);
+});
+
+test("main: a Cloud that fell asleep after it was listed is not told", async () => {
+  const asked = [];
+  let asleep = false;
+  const main = installTwoPlacesMain({
+    ipcMain: { handle: () => {} }, guard: (_channel, handler) => handler,
+    localRequest: async (route, init) => (init?.method === "PUT" ? Response.json({ ok: true }) : route.startsWith("/.well-known") ? Response.json({ label: "Work laptop" }) : Response.json(summary("Scout"))),
+    fetch: async (url, init) => { asked.push(`${init?.method ?? "GET"} ${new URL(url).pathname}`); asleep = true; return Response.json(summary("Ziggy")); },
+    environments: () => [], cloud: () => ({ origin: "https://omb-u-1.fly.dev", asleep }),
+    oneHome: { journal: () => null, keep: { state: () => ({ shown: true, on: false, moved: false }), set: async () => {} } },
+    ownHome: { owns: () => false, offers: () => false, start: async () => {}, active: () => false, away: () => false, refresh: () => {} },
+    dismissed: memory(), tell: () => {},
+  });
+  try { await main.refresh({ force: true }); } finally { main.close(); }
+  assert.deepEqual(asked, ["GET /api/cloud-send"], "read while awake; asleep by the time it would be told");
 });

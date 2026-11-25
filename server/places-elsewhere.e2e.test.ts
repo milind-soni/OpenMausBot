@@ -2,13 +2,13 @@
 // the app telling each of the person's own places which bots their other places have (electron/two-places-main.mjs), and a
 // bot on each side asking for a teammate that lives on the other one. Disposable homes; no network.
 import { randomBytes } from "node:crypto";
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { installTwoPlacesMain } from "../electron/two-places-main.mjs";
 import { launchOwnHomeFixture, type OwnHomeFixture, type OwnServer } from "../scripts/testing/own-home-fixture.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
-import { ONE_PLACE } from "./places-elsewhere.ts";
+import { onePlace } from "./places-elsewhere.ts";
 
 const KEY = randomBytes(16).toString("hex");
 let fx: OwnHomeFixture;
@@ -52,7 +52,7 @@ it("a bot asking for a teammate on the person's other place hears where it lives
   const before = await coordinate(garage.base, ledger, "Scout");
   expect(before.status).toBe(403);
   expect(before.error).toMatch(/^No bot with id or name "Scout" — call list_bots/u);
-  expect(before.error).toContain(ONE_PLACE);
+  expect(before.error).toContain(onePlace("server"));
 
   fx.main.refresh();
   await expect.poll(() => fx.main.owns(garage.place), { timeout: 10_000, interval: 100 }).toBe(true);
@@ -82,7 +82,7 @@ it("a bot asking for a teammate on the person's other place hears where it lives
 
   const onGarage = await coordinate(garage.base, ledger, "scout");
   expect(onGarage).toEqual({ status: 403, error: "Scout lives on Work laptop, the person's computer, not here. Bots work together only within one place, so it can't be reached from here. "
-    + "Tell the person plainly. Offer to bring their bots together on Garage server: in the app, right-click Garage server's icon on the left of the app and choose \"Make Garage server my home\"." });
+    + "Tell the person plainly. Offer to bring their bots together on Garage server: in the desktop app, right-click Garage server's icon on the left of the app and choose \"Make Garage server my home\"." });
   const onComputer = await coordinate(fx.desktopBase, scout, "Ledger");
   expect(onComputer.status).toBe(403);
   expect(onComputer.error).toMatch(/^Ledger lives on Garage server, not here\. .* choose "Make Garage server my home"\.$/u);
@@ -129,6 +129,16 @@ it("a bot asking for a teammate on the person's other place hears where it lives
   const said = async () => ((await garage.as("GET", `/api/threads/${room.threadId}/messages?limit=200`)).body?.messages ?? [])
     .filter((row: { kind?: string; tool?: { name?: string } }) => row.kind === "activity" && row.tool?.name?.startsWith("Scout lives on"));
   await expect.poll(async () => (await said()).map((row: { tool: { name: string } }) => row.tool.name), { timeout: 30_000, interval: 200 }).toEqual([
-    "Scout lives on Work laptop, so that mention didn't reach it: bots work together only within one place. To bring your bots together on Garage server, in the app, right-click Garage server's icon on the left of the app and choose \"Make Garage server my home\".",
+    "Scout lives on Work laptop, so that mention didn't reach it: bots work together only within one place. To bring your bots together on Garage server, in the desktop app, right-click Garage server's icon on the left of the app and choose \"Make Garage server my home\".",
   ]);
+
+  // The person's own MausBot, a chief, sees the same line in its roster.
+  await expect.poll(idle, { timeout: 60_000, interval: 200 }).toBe(true);
+  const bots = (await garage.as("GET", "/api/bots")).body.bots as Array<{ id: string; threadId: string; name: string; defaultBot?: boolean; chiefOfStaff?: boolean }>;
+  const chief = bots.find((bot) => bot.defaultBot || bot.chiefOfStaff);
+  expect(chief, JSON.stringify(bots.map(({ name, defaultBot, chiefOfStaff }) => ({ name, defaultBot, chiefOfStaff })))).toBeTruthy();
+  rmSync(join(fx.root, "garage-turn.json"), { force: true });
+  expect((await garage.as("POST", `/api/bots/${chief!.id}/messages`, { text: "Ask Scout to check the numbers.", threadId: chief!.threadId })).status).toBe(202);
+  await expect.poll(() => { try { return JSON.parse(readFileSync(join(fx.root, "garage-turn.json"), "utf8")).systemPrompt ?? ""; } catch { return ""; } }, { timeout: 60_000, interval: 200 })
+    .toMatch(/\[TEAM ROSTER\]\n- In the person's other places, not reachable from here \(if asked for one, say where it lives\): Scout \(on Work laptop\)\n\[\/TEAM ROSTER\]/u);
 }, hostTimeout(180_000));

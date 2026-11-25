@@ -56,7 +56,11 @@ export function installTwoPlacesMain({ ipcMain, guard, localRequest, fetch: fetc
         headers: { accept: "application/json", origin: mine.origin, ...BACKGROUND_HEADERS, ...init.headers } });
       out.push({ key: `cloud:${mine.origin}`, name: t("cloudSetup.myCloud"), kind: "cloud",
         read: async () => (cloud().asleep ? null : json(await request("/api/cloud-send?move=1"))),
-        ...(mine.asleep ? {} : { tell: async (payload) => sent(await request(ROUTE, { ...put(payload), headers: { "content-type": "application/json" } }), t("cloudSetup.myCloud")) }),
+        // Asleep since it was listed: still not told, as it is not read.
+        ...(mine.asleep ? {} : { tell: async (payload) => {
+          if (cloud().asleep) throw new Error(`${t("cloudSetup.myCloud")} is asleep`);
+          return sent(await request(ROUTE, { ...put(payload), headers: { "content-type": "application/json" } }), t("cloudSetup.myCloud"));
+        } }),
         ...(keep.on && !keep.moved && !mine.asleep ? { bring: () => oneHome.keep.set(false) } : {}) });
     }
     for (const place of environments().filter((entry) => handSaved(entry) && ownHome.owns(entry))) {
@@ -67,6 +71,17 @@ export function installTwoPlacesMain({ ipcMain, guard, localRequest, fetch: fetc
         ...(ownHome.offers(place) ? { bring: () => ownHome.start(place.id) } : {}) });
     }
     return [...out, ...teams()];
+  };
+  /** Who is signed in to the account the Cloud and teams come from; undefined while it is still being restored. */
+  const signedIn = () => {
+    const client = account?.();
+    if (!client) return { id: null, signedOut: false };
+    const state = client.state?.();
+    if (!state || typeof state !== "object") return undefined;
+    if (state.status === "signed-out") return state.message ? undefined : { id: null, signedOut: true };
+    const id = state.account?.id;
+    if (typeof id === "string" && id) return { id, signedOut: false };
+    return state.status === "connecting" ? undefined : { id: null, signedOut: false };
   };
   const journal = () => parseJournal(oneHome.journal());
   /** This computer's bots moved: to My Cloud, or to a server of the person's own. */
@@ -85,7 +100,7 @@ export function installTwoPlacesMain({ ipcMain, guard, localRequest, fetch: fetc
       name: async () => (label ??= (await json(await localRequest("/.well-known/openmausbot/environment", { signal: AbortSignal.timeout(10_000) })))?.label ?? null),
       tell: async (payload) => sent(await localRequest(ROUTE, { ...put(payload), headers: { "content-type": "application/json" } }), t("rail.thisComputer")),
     },
-    t, places, settled, quiet: () => !settled() && !moved(), dismissed, lastRead, onChange: tell, log });
+    t, places, settled, quiet: () => !settled() && !moved(), dismissed, lastRead, account: signedIn, onChange: tell, log });
   installTwoPlaces({ ipcMain, guard, twoPlaces });
   let watched = "";
   const watch = setInterval(() => {

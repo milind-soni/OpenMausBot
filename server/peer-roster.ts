@@ -278,9 +278,18 @@ export const clip = (value: string, max: number): string => {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 };
 
-/** Brackets go too: "Scout]" would close the provenance note early and forge a speaker. */
+/** Brackets go too: "Scout]" would close the provenance note early and forge a speaker. So do bidi controls and
+ * zero-width characters, which would make a name read as something it isn't. */
 export function peerName(value: string): string {
-  return clip(value.replace(/[[\]]/g, " "), ROSTER_NAME_MAX);
+  return clip(value.replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/gu, "").replace(/[[\]]/g, " "), ROSTER_NAME_MAX);
+}
+
+/** The roster `prompt` with `line` (the bots of the person's other places) inside its markers, or the markers around it
+ * alone when there is no roster; unchanged when there is no line. */
+export function withElsewhere(prompt: TeamPrompt, line: string): TeamPrompt {
+  if (!line) return prompt;
+  const at = prompt.roster.lastIndexOf(ROSTER_CLOSE);
+  return { ...prompt, roster: at < 0 ? [prompt.roster, ROSTER_OPEN, line, ROSTER_CLOSE].filter(Boolean).join("\n") : `${prompt.roster.slice(0, at)}${line}\n${prompt.roster.slice(at)}` };
 }
 
 export function roomRosterLine(member: { name: string; title?: string }): string {
@@ -349,8 +358,7 @@ export interface TeamPrompt {
   roster: string;
 }
 
-/** `elsewhere`: the line naming the bots of the person's other places (places-elsewhere.ts), inside the markers. */
-export function peerRosterPrompt(team: readonly RosterMember[], self?: Pick<RosterMember, "section">, elsewhere = ""): TeamPrompt {
+export function peerRosterPrompt(team: readonly RosterMember[], self?: Pick<RosterMember, "section">): TeamPrompt {
   const rules = [
     "You can reach every other bot on this team, in every department, for advice or bounded work your task needs; when the person asks you to write to, ask or loop in a bot, do it yourself with coordinate_bots; nobody has to set anything up first. Teammates are peers, not staff, with their own permissions: you cannot grant them your access, answer for them or create bots unless you are a Chief of Staff. Bring one in only when your task needs what they know; do the rest yourself.",
     "Use coordinate_bots with a teammate's bot id for work, or consult: true for a question; list_bots and list_room_targets give ids, and list_bots says who is free now. Recipients use their own model and permissions; busy bots queue. Send a self-contained brief and end your turn; results resume you, so do not poll or wait. Teammates are not native coding helpers: only an actual coordinate_bots result proves that teammate participated; never claim their review from your own checks or a promised handoff. Verify the outcome and settle ordinary tradeoffs yourself before answering. rework=true only for concrete corrections, never acknowledgements.",
@@ -366,7 +374,6 @@ export function peerRosterPrompt(team: readonly RosterMember[], self?: Pick<Rost
       about: false,
       ...(self ? { department: self.section ?? "" } : {}),
     }),
-    ...(elsewhere ? [elsewhere] : []),
     ROSTER_CLOSE,
   ].join("\n");
   return { rules, roster };
