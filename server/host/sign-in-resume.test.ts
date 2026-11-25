@@ -457,6 +457,18 @@ describe("createSignInResume", () => {
     expect(w.sent.map(({ message }) => message.text)).toEqual(["Draft the plan"]);
   });
 
+  it("takes a sign-in made in the app after a status read already told one for a new sign-in", async () => {
+    const { w, host, listeners } = hostWorld();
+    w.tick(10);
+    listeners.forEach((listener) => listener("claude"));
+    w.tick(10);
+    const kai = w.stuck("t-kai");
+    host.noticed(kai.noticed);
+    w.tick(10);
+    host.appSignedIn("claude");
+    await vi.waitFor(() => expect(w.noticeTool("t-kai", kai.notice.id)?.nameCode).toBe("chat.notice.signedInAgain"));
+  });
+
   it("after a restart, asks the AI once and sends what was left waiting", async () => {
     const directory = mkdtempSync(join(tmpdir(), "omb-sign-in-resume-"));
     scratch.push(directory);
