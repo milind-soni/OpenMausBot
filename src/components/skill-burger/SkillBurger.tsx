@@ -57,11 +57,13 @@ const FIELD = "w-full min-w-0 rounded-md border border-hairline/60 bg-card px-1.
 
 type Saving = { state: "idle" } | { state: "saving" } | { state: "saved"; skill: SavedWorkflow } | { state: "undone" } | { state: "error"; message: string };
 
-export function SkillBurger({ run, layers, draft, summary: initialSummary, canSave, busy = false, botId, threadId, onDismiss }: {
+export function SkillBurger({ run, layers, draft, summary: initialSummary, canSave, busy = false, quiet = false, botId, threadId, onDismiss }: {
   /** The run this card is for, so a save is remembered when the card comes back. */
   run: string;
   /** The bot is still working: the pill cooks. */
   busy?: boolean;
+  /** Simple mode: the pill shows the run's marks and Add, not how many steps it took. */
+  quiet?: boolean;
   layers: BurgerLayer[];
   /** The finished run as it would be saved: shown in place of the live layers once it arrives. */
   draft?: DraftView | null;
@@ -141,7 +143,7 @@ export function SkillBurger({ run, layers, draft, summary: initialSummary, canSa
   const count = [stepCount === 1 ? t("skillBurger.layersOne") : t("skillBurger.layersMany", { count: stepCount }), draft && !saved ? replayLine(draft.steps, skipped) : ""].filter(Boolean).join(" · ");
   const cooking = busy || live;
   const failed = !cooking && layers.some((layer) => layer.status === "failed");
-  const pillLabel = cooking
+  const pillLabel = quiet && !cooking ? null : cooking
     ? <Sheen text={t("skillBurger.pill.cooking", { count: stepCount })}><WithCount template={t("skillBurger.pill.cooking")} count={stepCount} /></Sheen>
     : stepCount === 1 ? t("skillBurger.layersOne") : <WithCount template={t("skillBurger.layersMany")} count={stepCount} />;
   return (
@@ -256,7 +258,7 @@ export function SkillBurger({ run, layers, draft, summary: initialSummary, canSa
       )}
       <BurgerPill
         marks={pillMarks(layers)}
-        label={<span role="status" aria-live="polite" aria-atomic="true">{pillLabel}</span>}
+        label={pillLabel === null ? null : <span role="status" aria-live="polite" aria-atomic="true">{pillLabel}</span>}
         tone={failed ? "danger" : "normal"}
         open={!folded}
         controls={panelId}

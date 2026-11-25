@@ -5,8 +5,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import type { RunMessage } from "../../../shared/skill-burger/layers";
 
-const fixture = vi.hoisted(() => ({ api: vi.fn() }));
+const fixture = vi.hoisted(() => ({ api: vi.fn(), advanced: true }));
 vi.mock("@/state/api", () => ({ api: (...args: unknown[]) => fixture.api(...args) }));
+vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced }));
 
 const { SkillBurgerSlot } = await import("./SkillBurgerSlot");
 
@@ -31,6 +32,7 @@ const button = (text: string) => [...host.querySelectorAll("button")].find((node
 
 beforeEach(() => {
   fixture.api.mockReset();
+  fixture.advanced = true;
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -199,4 +201,23 @@ it.each([1, 2, 10])("groups %i composed fields with their app step and leaves ou
   expect(host.querySelector(".burger-bun-top")?.textContent).toContain("1 exact, 1 by judgement");
   await act(async () => host.querySelector<HTMLInputElement>('input[aria-label="Keep “Fetch example.com”"]')!.click());
   expect([...host.querySelectorAll("[data-burger-layer]")].map((row) => row.getAttribute("data-kept"))).toEqual(["false", "false"]);
+});
+
+it("keeps Simple mode's run out of sight while the bot works, then offers Add without counting the steps", async () => {
+  fixture.advanced = false;
+  const pill = () => host.querySelector<HTMLElement>("[data-burger-pill]");
+  const run = [ask, app("q1", "GOOGLESHEETS_BATCH_GET"), app("q2", "GMAIL_SEND_EMAIL")];
+  await render(run.slice(0, 2), [], true);
+  expect(burger()).toBeNull();
+  await render(run, ["q2"], true);
+  expect(burger()).toBeNull();
+  await render(run);
+  expect(burger()?.dataset.skillBurger).toBe("done");
+  expect(pill()?.textContent).toBe("Add");
+  expect(pill()?.querySelectorAll(".rounded-full.bg-card").length).toBe(2);
+  expect(host.querySelector('[data-burger-pill] [role="status"]')).toBeNull();
+  // The steps are still a tap away, and Add still saves.
+  await act(async () => host.querySelector<HTMLButtonElement>("[data-burger-pill] button[aria-controls]")!.click());
+  expect([...host.querySelectorAll("[data-burger-layer]")].map((layer) => layer.textContent?.trim())).toEqual(["Read from Google Sheets", "Send email"]);
+  expect(button("Add Skill Burger")?.disabled).toBe(false);
 });

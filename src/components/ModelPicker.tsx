@@ -36,7 +36,7 @@ import { COMPACT_SQUARE } from "@/lib/compact-chip";
 import { useAiSwitch } from "@/lib/ai-switch";
 import { usePickerPane } from "@/lib/model-picker-pane";
 import { threadsOnOwnModel } from "../../shared/thread-model";
-import { ThreadModelsLine } from "./ThreadModelsLine"; import { SimpleModelTrigger } from "./ModelPickerTrigger";
+import { ThreadModelsLine } from "./ThreadModelsLine"; import { SimpleModelTrigger } from "./ModelPickerTrigger"; import { modelAttention } from "./model-attention";
 import { USAGE_WARN_WIDENS, UsageBars, UsageMenuRows } from "./EngineUsage";
 import { Select } from "./Select";
 
@@ -565,11 +565,7 @@ export function ModelPicker({
     else close(true);
   };
 
-  const currentOption = active?.models.options.find((option) => option.id === selection.model);
-  const attention = !active ? undefined
-    : active.policy ? t("policy.managedBy", { organization: active.policy.organizationName })
-      : needsCli(active) ? t("model.setupRequired")
-        : needsSignIn(active) && !isCustomOnly(active) && !currentOption?.custom ? t("model.signInRequired") : currentOption?.orgBlocked ? t("model.orgBlocked") : currentOption?.needsCliUpdate ? t("engines.updateClaude") : undefined;
+  const attention = modelAttention(active, selection);
   const summary = active
     ? `${engineDisplayName(active)} · ${modelLabel(active, selection.model)}${
         modelProvider(active, selection.model) ? ` · ${modelProvider(active, selection.model)}` : ""

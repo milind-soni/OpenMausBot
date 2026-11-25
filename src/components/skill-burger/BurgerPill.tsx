@@ -101,7 +101,7 @@ export function BurgerPill({ marks, label, tone = "normal", open, controls, togg
               </span>
             ))}
           </span>
-          <span className={cn("min-w-0 whitespace-pre", tone === "danger" ? "text-danger" : "text-ink")}>{label}</span>
+          {label != null && <span className={cn("min-w-0 whitespace-pre", tone === "danger" ? "text-danger" : "text-ink")}>{label}</span>}
         </button>
         {action}
       </div>

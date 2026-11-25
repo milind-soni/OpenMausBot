@@ -251,3 +251,22 @@ describe("the model menu's usage rings", () => {
     expect(shownRows(menu)).toEqual(["weekly"]);
   });
 });
+
+describe("Simple mode's header model", () => {
+  const head = async () => {
+    const { SimpleHeadModel } = await import("./SimpleHeadModel");
+    flushSync(() => root.render(createElement(SimpleHeadModel, { bot: scout, folded: false })));
+    await settle();
+    return host.querySelector('[data-tour="model"]');
+  };
+
+  it("stays out of sight while usage is fine, and comes back near or at the limit with its bars", async () => {
+    expect(await head()).toBeNull();
+    remember([usage(91)]);
+    expect((await head())?.querySelector("[data-usage-bars]")?.getAttribute("data-usage-bars")).toBe("near");
+    remember([usage(100, true)]);
+    expect((await head())?.querySelector("[data-usage-bars]")?.getAttribute("data-usage-bars")).toBe("out");
+    remember([usage(38)]);
+    expect(await head()).toBeNull();
+  });
+});

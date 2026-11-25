@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { askOf, burgerLayers, burgerWorthy, type RunMessage } from "../../../shared/skill-burger/layers";
 import { latestRun, runView } from "../../../shared/skill-burger/run-view";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import { fetchBurgerDraft, fetchBurgerSummary, useRunnable, type DraftView } from "@/lib/skill-burger";
 import { RunBurger } from "./RunBurger";
 import { layerLine, SkillBurger } from "./SkillBurger";
@@ -21,7 +22,9 @@ export function editIn(messages: readonly RunMessage[]): { id: string; name: str
 }
 
 /** The chat dock's burger. While a saved Skill Burger runs (or right after the turn changed one), its steps as the run
- * goes; else the run since the person's last ask, once it has two real steps, ready to save. Either stays until closed. */
+ * goes; else the run since the person's last ask, once it has two real steps, ready to save. Either stays until closed.
+ * Simple mode keeps the work out of sight: no pill while the bot works, and a finished run's pill offers Add without
+ * counting its steps (a tap still shows them). */
 export function SkillBurgerSlot({ botId, threadId, busy, canWrite, messages, liveTools, transcriptKey }: {
   botId: string;
   threadId: string;
@@ -31,6 +34,7 @@ export function SkillBurgerSlot({ botId, threadId, busy, canWrite, messages, liv
   liveTools: ReadonlySet<string>;
   transcriptKey: string;
 }) {
+  const simple = !useAdvancedMode();
   const seen = useMemo(() => latestRun(messages, liveTools), [messages, liveTools]);
   const edit = useMemo(() => (seen ? null : editIn(messages)), [seen, messages]);
   const runnable = useRunnable(seen?.name ?? edit?.name ?? null, botId);
@@ -73,8 +77,9 @@ export function SkillBurgerSlot({ botId, threadId, busy, canWrite, messages, liv
       </div>
     );
   }
-  // The pill shows from the first step while the bot works; a run that ends with too little to keep goes.
-  if (!run || !(burgerWorthy(layers) || (busy && layers.length > 0)) || closed.get(transcriptKey) === run) return null;
+  // The pill shows from the first step while the bot works (in Simple, once it has finished); a run that ends with too
+  // little to keep goes.
+  if (!run || !(simple ? finished : burgerWorthy(layers) || (busy && layers.length > 0)) || closed.get(transcriptKey) === run) return null;
   const summary = named.get(runKey) ?? askOf(messages) ?? layers.map(layerLine).join(", ");
   return (
     <div className="flex justify-end px-4 pb-2">
@@ -89,6 +94,7 @@ export function SkillBurgerSlot({ botId, threadId, busy, canWrite, messages, liv
         botId={botId}
         threadId={threadId}
         onDismiss={close(run)}
+        quiet={simple}
       />
     </div>
   );

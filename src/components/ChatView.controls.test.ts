@@ -11,7 +11,7 @@ import { en } from "@/locales";
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
-  return { showThreads: true, advanced: true, menus: [] as { ariaLabel: string; items: MenuRow[] }[], dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
+  return { instances: [{ instanceId: "test", driverKind: "codex", displayName: "Test" }] as unknown[], showThreads: true, advanced: true, menus: [] as { ariaLabel: string; items: MenuRow[] }[], dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
   };
 });
 type MenuRow = { key: string; disabled?: boolean; heading?: string; active?: boolean; note?: string; submenu?: MenuRow[]; onSelect?: () => void };
@@ -19,7 +19,7 @@ vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({
     state: { ...original.initialState, config: fixture.showToolCalls ? { features: { showToolCalls: true } } : null,
-      instances: [{ instanceId: "test", driverKind: "codex", displayName: "Test" } as InstanceInfo] },
+      instances: fixture.instances as InstanceInfo[] },
     dispatch: fixture.dispatch,
   }) };
 });
@@ -74,18 +74,36 @@ describe("the header's right side", () => {
     return { markup, controls: markup.slice(markup.indexOf("data-chathead-controls"), markup.indexOf("role=\"log\"")) };
   };
 
-  it("keeps the model picker and the bot's computer in view in Simple mode, with ⋯ left to the bot panel", () => {
+  it("keeps the bot's computer in view in Simple mode, with the model and ⋯ left to the bot panel while the AI is fine", () => {
     fixture.advanced = false;
     try {
       const { markup, controls } = header();
-      expect(controls).toContain("data-test-model-control");
-      expect(fixture.model).toMatchObject({ threadId: "selected" });
+      expect(controls).not.toContain("data-test-model-control");
+      expect(fixture.model).toBeNull();
       const computer = controls.match(/<button[^>]*data-tour="computer"[^>]*>/)?.[0] ?? "";
       expect(computer.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "size-9", "shadow-(--shadow-float)"]));
       expect(markup).not.toContain('data-testid="chat-more"');
       expect(fixture.menus.find((menu) => menu.ariaLabel === "More")).toBeUndefined();
       expect(markup).toContain("data-chathead-pill");
     } finally {
+      fixture.advanced = true;
+    }
+  });
+
+  it("brings the model back to the Simple header while its AI needs the person, and only then", () => {
+    fixture.advanced = false;
+    const ready = { instanceId: "test", driverKind: "codex", displayName: "Test", snapshot: { state: "available", authenticated: true }, models: { options: [{ id: "thread-model", label: "Thread model" }] } };
+    try {
+      fixture.instances = [ready];
+      expect(header().controls).not.toContain("data-test-model-control");
+      for (const trouble of [{ ...ready, snapshot: { state: "available", authenticated: false } }, { ...ready, snapshot: { state: "missing" } },
+        { ...ready, models: { options: ["thread-model", "profile-default"].map((id) => ({ id, label: id, orgBlocked: true })) } }]) {
+        fixture.instances = [trouble];
+        expect(header().controls).toContain("data-test-model-control");
+        expect(fixture.model).toMatchObject({ bot: { id: "bot" }, threadId: "selected" });
+      }
+    } finally {
+      fixture.instances = [{ instanceId: "test", driverKind: "codex", displayName: "Test" }];
       fixture.advanced = true;
     }
   });
@@ -668,14 +686,19 @@ describe("thread control placement", () => {
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "updateTask", botId: "bot", threadId: "selected", patch: { approvalMode: "auto" } });
   });
 
-  it("keeps the model in Simple mode's header", () => {
+  it("keeps the model off Simple mode's chat while its AI is fine, in the header only when it needs the person", () => {
     fixture.advanced = false;
     try {
+      Object.assign(fixture, { model: null });
+      expect(renderToStaticMarkup(createElement(ChatView, { bot }))).not.toContain("data-test-model-control");
+      expect(fixture.model).toBeNull();
+      fixture.instances = [{ instanceId: "test", driverKind: "codex", displayName: "Test", snapshot: { state: "available", authenticated: false }, models: { options: [] } }];
       const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
       expect(markup.match(/data-test-model-control/g)).toHaveLength(1);
       expect(markup.indexOf("data-test-model-control")).toBeLessThan(markup.indexOf('role="log"'));
       expect(fixture.model?.quiet).toBeUndefined();
     } finally {
+      fixture.instances = [{ instanceId: "test", driverKind: "codex", displayName: "Test" }];
       fixture.advanced = true;
     }
   });
