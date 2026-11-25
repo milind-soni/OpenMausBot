@@ -1,7 +1,7 @@
 // The bots' browser as the server hosts it: the engine's runtime and live view, which session a bot's browser is, and
 // the integration a turn mounts. browserEngine.engine picks agent-browser (the default) or the new Chrome engine; a
 // person's own Chrome (My Chrome) stays on agent-browser either way.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -61,7 +61,9 @@ import { createBrowserReclaim, reclaimable } from "./browser-reclaim.ts";
 import { createCloudBrowser, type HomeReason } from "../cloud-browser/index.ts";
 import { providerOps } from "../cloud-browser/remote.ts";
 import { boatAccount, boatConfigured } from "../boat.ts";
-import { downloadNote, localSchemeRefusal } from "../cloud-browser/guards.ts";
+import { localSchemeRefusal } from "../cloud-browser/guards.ts";
+import { readSignIns, writeSignIns } from "../browser-sites.ts";
+import { browserSessionsDirectory } from "../browser-engine.ts";
 import { BrowserUploadRefusal } from "../browser-upload.ts";
 import { BROWSER_TASKS, processBudget } from "../process-room.ts";
 import { idleAfter } from "../drivers/session-idle.ts";
@@ -108,7 +110,7 @@ export interface BrowserHostDeps {
   browsersAtOnce?(): number;
   /** A personal Cloud only: a bot's browser opens in the Cloud's browser sandbox (server/cloud-browser), the home's
    * otherwise. `used`: the cloud computers' idle path, which times the sandbox too. */
-  cloudBrowser?: { used(owner: string, windowMs: number): void };
+  cloudBrowser?: { used(owner: string, windowMs: number): void; folder?(botId: string): string | null };
 }
 
 /** The lent computer's connection for a browser's pages, under the rule for everything it lends: only while the last
@@ -126,7 +128,6 @@ type Spec = { command: string; args?: readonly string[]; env: Record<string, str
 type LendRefusal = CloudLendingRefusal | "memory-changed" | "memory-changed-here";
 const BOT_SESSION = /^bot-[A-Za-z0-9_.-]+$/;
 /** What the upload tool answers while the bot's browser runs on its cloud computer. */
-export const CLOUD_BROWSER_NO_UPLOAD = "File uploads don't work in this browser yet: it runs in this Cloud's browser sandbox, which can't take files from the Cloud yet. Tell the person in one sentence and ask them to upload the file themselves.";
 /** However short of room the server is, a bot's browser stays this long after its last use: a turn's next browser call is
  * seldom further apart. */
 const BROWSER_IDLE_FLOOR_MS = 60_000;
@@ -255,7 +256,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     annotate: (spec, result) => passkeyAnnotation(chromeEngine.onPane(spec) ? "pane" : CLOUD_HOME ? "cloud" : DESKTOP_MANAGED ? "desktop" : "server")(spec, result),
     // agent-browser's own error names only the CDP connection; the door knows what went wrong on the way.
     afterCall: (session, spec, answer) => {
-      const result = cloudBrowser?.attached(session) ? downloadNote(withCeilingNote(session, answer)) : withCeilingNote(session, answer);
+      const result = withSandboxNotes(session, withCeilingNote(session, answer));
       const failed = result as { isError?: unknown; content?: unknown };
       const found = failed?.isError === true && viaDoor(session, spec) ? doors?.problem(session) : null;
       // A door refused under an earlier holder says nothing about a caller that may use it.
@@ -285,7 +286,16 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     used: (owner, windowMs) => deps.cloudBrowser?.used(owner, windowMs),
     closeEngine: (session) => { const spec = usedBrowserSessions.get(session); return spec ? closeBrowser(session, spec) : Promise.resolve(true); },
     held: (session) => !turnResources.free(`browser:${session}`),
+    folder: (botId) => deps.cloudBrowser?.folder?.(botId) ?? null,
+    // The home's saved sign-ins: agent-browser's encrypted restore file, under this server's key only.
+    signIns: {
+      load: (session) => readSignIns(sessionsDirectory(session), session, browserEngineEncryptionKey()),
+      save: (session, cookies) => writeSignIns(sessionsDirectory(session), session, browserEngineEncryptionKey(), cookies),
+    },
   }) : null;
+  function sessionsDirectory(session: string): string {
+    return browserSessionsDirectory(browserRuntimeEnv({ ...usedBrowserSessions.get(session)?.env, AGENT_BROWSER_SESSION: session }));
+  }
   /** Where a session's browser opens, decided once when it opens: in the Cloud's browser sandbox (its address returned),
    * or in the home (undefined). A browser already running stays where it runs. */
   async function cloudBrowserUrl(botId: string, profile: string | undefined, session: string, audience: Audience, opening: string | null | undefined): Promise<string | undefined> {
@@ -404,6 +414,13 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   function inRunningSession(session: string, args: string[]): Promise<Record<string, unknown> | null> {
     const spec = usedBrowserSessions.get(session);
     return spec ? inRunningBrowser(spec.command, browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session }), args).catch(() => null) : Promise.resolve(null);
+  }
+  /** What the browser sandbox has to say since the last call (downloads that arrived, or could not), added to this one. */
+  function withSandboxNotes(session: string, result: unknown): unknown {
+    const notes = cloudBrowser?.takeNotes(session) ?? [];
+    const content = (result as { content?: unknown } | null)?.content;
+    if (!notes.length || !Array.isArray(content)) return result;
+    return { ...(result as object), content: [...content, ...notes.map((text) => ({ type: "text", text }))] };
   }
   /** The ceiling's word on what it closed, added to the bot's next call in that browser. */
   function withCeilingNote(session: string, result: unknown): unknown {
@@ -762,8 +779,18 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     return (await Promise.all(requests.map((request) => eraseOneBrowser(request)))).every(Boolean);
   }
   /** Chrome receives private copies; a boxed agent-browser reads them from its own profile's folder. */
+  /** In the Cloud's browser sandbox, each file goes there first and the page gets its path there. */
+  async function sandboxUploadPaths(files: ReadonlyArray<{ file: string; name: string | null }>, session: string): Promise<string[]> {
+    const paths: string[] = [];
+    for (const { file, name } of files) {
+      const given = await cloudBrowser!.upload(session, file, name, statSync(file).size);
+      if ("error" in given) throw new BrowserUploadRefusal(given.error);
+      paths.push(given.path);
+    }
+    return paths;
+  }
   function uploadPaths(files: ReadonlyArray<{ file: string; name: string | null }>, session: string, spec: Spec): Promise<string[]> {
-    if (cloudBrowser?.attached(session)) return Promise.reject(new BrowserUploadRefusal(CLOUD_BROWSER_NO_UPLOAD));
+    if (cloudBrowser?.attached(session)) return sandboxUploadPaths(files, session);
     const chrome = chromeTarget(session, spec);
     const folder = boxed && !chrome ? join(browserProfileDirectory(session), "omb-uploads") : join(DATA_DIR, "browser-uploads");
     return namedUploadPaths(files, folder, Date.now(), { everyFile: boxed || Boolean(chrome) });

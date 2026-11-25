@@ -7,6 +7,8 @@ import { randomBytes } from "node:crypto";
 
 import { cloudFailureOf } from "../boat-limit.ts";
 import { CloudBrowserDoors, dialable, probeDoor, type DoorTarget } from "./door.ts";
+import { connectCdp } from "../browser-sites.ts";
+import { SandboxCompanion, SignInsUnreadable, type CompanionDeps, type SignInStore } from "./companion.ts";
 import { createCloudBrowserRails, type CloudBrowserRails, type HomeReason } from "./rails.ts";
 import { BROWSER_SANDBOX_CHROMES, BROWSER_SANDBOX_OWNER, COMPUTER_DOOR_PORT, OldRelay, profileKey, StaysHome, wakeSandbox, type ComputerOps } from "./remote.ts";
 
@@ -28,6 +30,12 @@ export interface CloudBrowserDeps {
   closeEngine(session: string): Promise<unknown>;
   /** A turn holds this session's browser now: it is not closed for being idle. */
   held(session: string): boolean;
+  /** The home's saved sign-ins (agent-browser's restore file), carried in and back; null keeps them apart. */
+  signIns?: SignInStore | null;
+  /** The bot's working folder, where its downloads land. */
+  folder?(botId: string): string | null;
+  /** Tests: the companion's own connection through the door. */
+  connect?: CompanionDeps["connect"];
   env?: NodeJS.ProcessEnv;
   now?: () => number;
   log?: (line: string) => void;
@@ -69,6 +77,7 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
   /** A session's open under way: a second call for the same session waits on it, so one session never splits in two. */
   const pendingSessions = new Map<string, Promise<Opened>>();
   const closing = new Set<string>();
+  const companions = new Map<string, SandboxCompanion>();
   /** One wake of the sandbox at a time, shared by every bot opening meanwhile. */
   let waking: Promise<{ id: string; started: boolean }> | null = null;
   let boxId: string | null = null;
@@ -138,7 +147,7 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
       box = await wake(ops);
       const secret = randomBytes(24).toString("hex");
       const answer = await ops.launch(box.id, key, secret);
-      if (!answer.chrome) {
+      if (!answer.chrome || !answer.home) {
         rails.failed();
         await quit();
         return home(request, "start-failed");
@@ -157,6 +166,22 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
         return home(request, "unreachable");
       }
       const cdpUrl = await doors.open(request.session, target);
+      const companion = new SandboxCompanion({
+        session: request.session, botId: request.botId, key, boxId: box.id, home: answer.home, ops, rails, signIns: deps.signIns ?? null,
+        folder: (botId) => deps.folder?.(botId) ?? null, log,
+        connect: deps.connect ?? ((url, listeners) => connectCdp(url, 10_000, listeners)),
+      });
+      try {
+        await companion.start(cdpUrl);
+      } catch (error) {
+        companion.close();
+        doors.close(request.session);
+        await quit();
+        if (error instanceof SignInsUnreadable) return home(request, "sign-ins");
+        rails.failed();
+        return home(request, "unreachable");
+      }
+      companions.set(request.session, companion);
       sessions.set(request.session, request.botId);
       rails.opened();
       startSweep();
@@ -223,6 +248,8 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
     if (!botId || closing.has(session)) return;
     closing.add(session);
     try {
+      await companions.get(session)?.stop().catch(() => undefined);
+      companions.delete(session);
       await deps.closeEngine(session).catch(() => undefined);
       doors.close(session);
       sessions.delete(session);
@@ -260,6 +287,11 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
     close,
     closeIdle,
     dialed: (session: string): number => doors.dialed(session),
+    /** Lines for the session's next browser call (downloads that arrived, or could not). */
+    takeNotes: (session: string): string[] => companions.get(session)?.takeNotes() ?? [],
+    /** A file of the Cloud given to the session's browser for a page's file input: its path in the sandbox, or the line to say. */
+    upload: (session: string, file: string, name: string | null, size: number) =>
+      companions.get(session)?.upload(file, name, size) ?? Promise.resolve({ error: "This browser closed; try the upload again." }),
     /** Today's counts for the health report. Read on the Admin's poll, never at start: a sandbox an earlier run of this
      * server left awake gets its idle window here, and the lever's day-old cleanup runs here. */
     report: () => {
@@ -274,6 +306,8 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
     closeAll(): void {
       if (sweep) clearInterval(sweep);
       sweep = null;
+      for (const companion of companions.values()) companion.close();
+      companions.clear();
       doors.closeAll();
       sessions.clear();
     },

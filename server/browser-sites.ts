@@ -2,7 +2,7 @@
 // it autosaves (`<restore key>-<session>.json.enc`, cli/src/native/state.rs: AES-256-GCM under SHA-256 of the key text,
 // 12-byte nonce first, 16-byte tag last); signing out clears all three. The key stays in this server process; no bot or page ever sees it.
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -189,6 +189,31 @@ function rewriteSavedState(directory: string, session: string, key: string, site
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     }
   }
+}
+
+/** A session's saved sign-ins (its newest restore file) and when they last changed, for the Cloud's browser sandbox to carry
+ * over (server/cloud-browser/sign-ins.ts): null when it has none, "unreadable" when the file is there but cannot be read
+ * (a save under way, or another key), so the sandbox never opens signed out by mistake. */
+export function readSignIns(directory: string, session: string, key: string): { state: SavedState; modified: number } | null | "unreadable" {
+  for (const base of stateBases(session)) {
+    const path = [".json.enc", ".json"].map((suffix) => join(directory, base + suffix)).filter(existsSync)
+      .sort((a, b) => modified(b) - modified(a))[0];
+    if (!path) continue;
+    try { return { state: readState(path, key), modified: modified(path) }; }
+    catch { return "unreadable"; }
+  }
+  return null;
+}
+
+/** The sandbox's cookies written back as the session's saved cookies (its storage kept), so a browser that opens in the
+ * home sees the sign-ins made in the sandbox. Returns when the file changed. */
+export function writeSignIns(directory: string, session: string, key: string, cookies: unknown[]): number {
+  const current = readSignIns(directory, session, key);
+  const origins = current && current !== "unreadable" ? current.state.origins : [];
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const path = join(directory, `${stateBases(session)[0]}.json.enc`);
+  writeState(path, { cookies: cookies.filter(isCookie), origins }, key);
+  return modified(path);
 }
 
 export function connectCdp(url: string, timeoutMs = 10_000, listeners: CdpListeners = {}): Promise<Cdp> {

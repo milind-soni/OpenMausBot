@@ -1,18 +1,18 @@
 // The bots' browser host on a personal Cloud, where a bot's browser opens in the Cloud's browser sandbox, against a fake
 // provider (cloud-browser/testing/fake-computer.ts): the switch's lever, a desktop install, and the rules kept for it.
-import { rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { browserEngineStatus } from "../browser-engine.ts";
 import { BrowserRuntime } from "../browser-runtime.ts";
-import { BrowserUploadRefusal } from "../browser-upload.ts";
 import { REDDIT_REFUSAL } from "../browser/egress/reddit.ts";
 import { DATA_DIR, type AppConfig } from "../config.ts";
 import type { Store } from "../store.ts";
 import { RELAY_KEY, startFakeComputer, type FakeComputer } from "../cloud-browser/testing/fake-computer.ts";
 import { LOCAL_SCHEME_REFUSAL } from "../cloud-browser/guards.ts";
-import { CLOUD_BROWSER_NO_UPLOAD, createBrowserHost, type BrowserHostDeps } from "./browser.ts";
+import { createBrowserHost, type BrowserHostDeps } from "./browser.ts";
 
 vi.mock("../browser-engine.ts", async (original) => {
   const actual = await original<typeof import("../browser-engine.ts")>();
@@ -101,8 +101,16 @@ describe("a personal Cloud's bot browser opens in the Cloud's browser sandbox", 
     // Reddit stays refused in the sandbox, as in the home.
     expect(await host.browserRuntime.agentRpc(browser.session, browser.spec, "tools/call", { name: OPEN, arguments: { url: "https://www.reddit.com/" } }))
       .toEqual({ isError: true, content: [{ type: "text", text: REDDIT_REFUSAL }] });
-    // An upload from the Cloud's disk says so in one line instead of failing on a missing file.
-    await expect(host.uploadPaths([{ file: "/tmp/a.txt", name: "a.txt" }], browser.session, browser.spec)).rejects.toThrow(new BrowserUploadRefusal(CLOUD_BROWSER_NO_UPLOAD));
+    // An upload from the Cloud's disk goes to the sandbox first, and the page gets its path there.
+    const scratch = mkdtempSync(join(tmpdir(), "upload-"));
+    try {
+      writeFileSync(join(scratch, "a.txt"), "hello");
+      const paths = await host.uploadPaths([{ file: join(scratch, "a.txt"), name: "notes.txt" }], browser.session, browser.spec);
+      expect(paths).toEqual([expect.stringMatching(/^\/home\/user\/\.omb-browser\/\.uploads\/[a-f0-9]{16}\/notes\.txt$/)]);
+      expect(fake.files.get(paths[0]!)?.toString()).toBe("hello");
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
     expect(host.cloudBrowserBusy("browser")).toBe(true);
     expect(host.cloudBrowserBusy(botId)).toBe(false);
     expect(host.cloudBrowserReport()).toMatchObject({ sessions: { sandbox: 1, home: 0 } });

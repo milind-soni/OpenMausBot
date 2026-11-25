@@ -16,7 +16,7 @@ export const CLOUD_BROWSER_BACKOFF_MS = 15 * 60_000;
 
 /** Why a browser session opened in the home instead: names only, for the log and the health report. */
 export type HomeReason =
-  | "lever" | "team" | "not-eligible" | "own-key" | "not-set-up" | "busy" | "lent-connection"
+  | "lever" | "team" | "not-eligible" | "own-key" | "sign-ins" | "not-set-up" | "busy" | "lent-connection"
   | "old-relay" | "unavailable" | "budget" | "minutes-used" | "sandbox-full" | "backoff" | "account-limit" | "hours-used" | "at-once" | "no-route" | "start-failed" | "unreachable";
 
 interface Day {
@@ -44,6 +44,8 @@ interface State extends Day {
   oldRelayUntil: number;
   /** The relay said no browser sandbox may start (the fleet's day spent, switched off): nothing is started before this. */
   unavailableUntil: number;
+  /** Per bot's profile key: when the home's saved sign-ins last carried in (or were last written back), by file time. */
+  carried: Record<string, number>;
   /** Since when the operator lever has kept every browser in the home; 0 when it does not. */
   leverSince: number;
 }
@@ -73,7 +75,7 @@ export function createCloudBrowserRails(options: CloudBrowserRailsOptions) {
   const awakeCapMs = (options.awakeMinutes ?? CLOUD_BROWSER_DAILY_AWAKE_MINUTES) * 60_000;
   const file = join(options.dataDir, "cloud-browser", "rails.json");
   const fresh = (day: string): Day => ({ day, resumes: 0, awakeMs: 0, computer: 0, home: 0, fallbacks: {} });
-  let state: State = { ...fresh(utcDay(now())), failuresInRow: 0, backoffUntil: 0, accountUntil: 0, hoursUntil: 0, noRouteDay: null, awakeSince: 0, leverSince: 0, oldRelayUntil: 0, unavailableUntil: 0 };
+  let state: State = { ...fresh(utcDay(now())), failuresInRow: 0, backoffUntil: 0, accountUntil: 0, hoursUntil: 0, noRouteDay: null, awakeSince: 0, leverSince: 0, oldRelayUntil: 0, unavailableUntil: 0, carried: {} };
   try {
     const saved = JSON.parse(readFileSync(file, "utf8")) as Partial<State>;
     const number = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0);
@@ -86,6 +88,8 @@ export function createCloudBrowserRails(options: CloudBrowserRailsOptions) {
       noRouteDay: typeof saved.noRouteDay === "string" ? saved.noRouteDay : null,
       awakeSince: number(saved.awakeSince), leverSince: number(saved.leverSince),
       oldRelayUntil: number(saved.oldRelayUntil), unavailableUntil: number(saved.unavailableUntil),
+      carried: Object.fromEntries(Object.entries(saved.carried && typeof saved.carried === "object" ? saved.carried : {})
+        .filter(([key, at]) => /^[a-f0-9]{16}$/.test(key) && typeof at === "number" && Number.isFinite(at))),
     };
   } catch {
     // None yet, or unreadable: a fresh day. The holds it may have had end by the next day anyway.
@@ -193,6 +197,11 @@ export function createCloudBrowserRails(options: CloudBrowserRailsOptions) {
     holdOff(): void {
       const current = today();
       current.backoffUntil = Math.max(current.backoffUntil, now() + CLOUD_BROWSER_BACKOFF_MS);
+      save();
+    },
+    carried: (key: string): number => today().carried[key] ?? 0,
+    setCarried(key: string, at: number): void {
+      today().carried[key] = at;
       save();
     },
     /** An Admin from before the browser sandbox: asked again in a week. */

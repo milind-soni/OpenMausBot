@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { boatAccount, boatFetch, boatNameFor, boatRefusal, deadBoatOf, findBoat, requestRecordedBoatDeletion, SLEEPING_BOAT_STATES } from "../boat.ts";
 import { beginBoatCreate, discardBoatCreate, rememberCreatedBoat, resolveBoatCreate } from "../boat-create-idempotency.ts";
 import { relayBody } from "../boat-relay.ts";
+import { copyFromComputer, copyToComputer, type CopyOutcome } from "../cloud-computer-files.ts";
 import type { AppConfig } from "../config.ts";
 
 const READY = new Set(["idle", "ready", "running"]);
@@ -44,8 +45,14 @@ export interface ComputerOps {
   /** One resume. Throws the relay's refusal (with its limit) on anything but a 2xx or a 409. */
   resume(boxId: string): Promise<void>;
   state(boxId: string): Promise<string | null>;
-  /** One bot's Chrome started on its profile, with this open's door secret. */
-  launch(boxId: string, key: string, secret: string): Promise<{ chrome: boolean }>;
+  /** One bot's Chrome started on its profile, with this open's door secret; `home` is the sandbox's home folder. */
+  launch(boxId: string, key: string, secret: string): Promise<{ chrome: boolean; home: string | null }>;
+  /** A finished download (a sandbox path) brought into `folder` as `to`, with the cloud computers' copy checks and limits. */
+  fetchFile(boxId: string, path: string, folder: string, to: string): Promise<CopyOutcome>;
+  /** A file of the Cloud (`from`, inside `folder`) copied to a sandbox path for an upload. */
+  sendFile(boxId: string, folder: string, from: string, path: string): Promise<CopyOutcome>;
+  /** A download the sandbox no longer needs to keep. */
+  removeDownload(boxId: string, key: string, name: string): Promise<void>;
   /** One bot's Chrome asked to quit (it writes its cookies); `key` null: every Chrome and the door. */
   quit(boxId: string, key: string | null): Promise<void>;
   /** The door's port on a protected relay URL (one that needs its token); null where it is refused or unprotected. */
@@ -139,7 +146,15 @@ export function providerOps(cfg: () => AppConfig): ComputerOps {
     },
     async launch(boxId, key, secret) {
       if (!HEX16.test(key) || !HEX48.test(secret)) throw new Error("bad browser profile key or door secret");
-      return { chrome: (await action(boxId, { action: "launch", key, secret }))?.chrome === true };
+      const answer = await action(boxId, { action: "launch", key, secret });
+      const home = typeof answer?.home === "string" && /^\/[^\0\n]*$/.test(answer.home) && !answer.home.split("/").includes("..") ? answer.home.replace(/\/+$/, "") : null;
+      return { chrome: answer?.chrome === true, home };
+    },
+    fetchFile: (boxId, path, folder, to) => copyFromComputer(cfg(), boxId, folder, { path, to }, AbortSignal.timeout(10 * 60_000)),
+    sendFile: (boxId, folder, from, path) => copyToComputer(cfg(), boxId, folder, { from, path }, AbortSignal.timeout(10 * 60_000)),
+    async removeDownload(boxId, key, name) {
+      if (!HEX16.test(key)) throw new Error("bad browser profile key");
+      await action(boxId, { action: "remove-download", key, name });
     },
     async quit(boxId, key) {
       if (key !== null && !HEX16.test(key)) throw new Error("bad browser profile key");

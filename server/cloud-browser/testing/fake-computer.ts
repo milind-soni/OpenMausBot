@@ -33,6 +33,14 @@ export interface FakeComputer {
   upgrades: Array<{ path: string; host: string | undefined; origin: string | undefined }>;
   frames: string[];
   boxId: string;
+  /** Files on the sandbox's disk by path (downloads the page made, uploads the home sent). */
+  files: Map<string, Buffer>;
+  /** Each bot's cookies in its sandbox Chrome, by profile key, as `Storage.setCookies` left them. */
+  cookies: Map<string, Array<Record<string, unknown>>>;
+  /** Every DevTools command the sandbox's Chromes got, with its profile key. */
+  commands: Array<{ key: string; method: string; params: Record<string, unknown> }>;
+  /** Sends a DevTools event to the connections of a profile that asked for download events. */
+  emit(key: string, method: string, params: Record<string, unknown>): void;
   resumes(): number;
   creates(): number;
   launches(): number;
@@ -52,13 +60,30 @@ export async function startFakeComputer(): Promise<FakeComputer> {
   const fake = {
     base: "", state: "ready", exists: true, startStatus: 200, startBody: { ok: true }, oldRelay: false, available: true, unavailableReason: "fleet_starts",
     unavailableUntil: null, hostRoute: true, unprotected: false, chromeStarts: true, requests: [], upgrades: [], frames: [], boxId: "bx_23456789",
+    files: new Map(), cookies: new Map(), commands: [],
   } as unknown as FakeComputer;
+  const watchers = new Map<string, Set<import("ws").WebSocket>>();
+  const HOME = "/home/user";
   const server: Server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://fake");
-    let raw = "";
-    req.on("data", (chunk) => { raw += chunk; });
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk: Buffer) => { chunks.push(chunk); });
     req.on("end", () => {
-      const body = raw ? JSON.parse(raw) as Record<string, unknown> : {};
+      // The transfer links: no bearer, as the provider's signed links need none.
+      if (url.pathname === "/file" && req.method === "GET") {
+        const file = fake.files.get(url.searchParams.get("p") ?? "");
+        res.writeHead(file ? 200 : 404, { "content-length": String(file?.length ?? 0), connection: "close" });
+        res.end(file ?? "");
+        return;
+      }
+      if (url.pathname === "/put" && req.method === "PUT") {
+        fake.files.set(url.searchParams.get("p") ?? "", Buffer.concat(chunks));
+        res.writeHead(200, { connection: "close" });
+        res.end();
+        return;
+      }
+      const raw = Buffer.concat(chunks).toString("utf8");
+      const body = raw && !url.pathname.startsWith("/put") ? JSON.parse(raw) as Record<string, unknown> : {};
       fake.requests.push({ method: req.method ?? "GET", path: url.pathname, body });
       const send = (status: number, payload: unknown) => { res.writeHead(status, { "content-type": "application/json", connection: "close" }); res.end(JSON.stringify(payload)); };
       if (req.headers.authorization !== `Bearer ${RELAY_KEY}`) return send(401, { ok: false });
@@ -98,11 +123,18 @@ export async function startFakeComputer(): Promise<FakeComputer> {
       if (rest === `/sandboxes/${boxId}/browser`) {
         if (body.action === "launch" && typeof body.key === "string" && typeof body.secret === "string") {
           secrets.set(body.key, body.secret);
-          return send(200, { ok: true, chrome: fake.chromeStarts, policy: true });
+          return send(200, { ok: true, chrome: fake.chromeStarts, policy: true, home: HOME });
         }
+        if (body.action === "remove-download") fake.files.delete(`${HOME}/.omb-browser/.downloads/${String(body.key)}/${String(body.name)}`);
         return send(200, { ok: true });
       }
       if (rest === `/sandboxes/${boxId}/commands`) return send(404, { ok: false, code: "not_found" });
+      if (rest === `/sandboxes/${boxId}/files/download-url` || rest === `/sandboxes/${boxId}/files/upload-url`) {
+        const path = String(body.path ?? "");
+        const download = rest.endsWith("download-url");
+        if (!new RegExp(`^${HOME}/\\.omb-browser/\\.${download ? "downloads" : "uploads"}/[a-f0-9]{16}/[^/.][^/]*$`).test(path)) return send(404, { ok: false, code: "not_found" });
+        return send(200, { ok: true, url: `${fake.base}/${download ? "file" : "put"}?p=${encodeURIComponent(path)}`, method: download ? "GET" : "PUT", path });
+      }
       if (rest === `/sandboxes/${boxId}/stop`) { fake.state = "archived"; return send(200, { ok: true }); }
       send(404, { ok: false, code: "not_found" });
     });
@@ -116,7 +148,23 @@ export async function startFakeComputer(): Promise<FakeComputer> {
       return;
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
-      ws.on("message", (data) => { const text = String(data); fake.frames.push(text); ws.send(`echo:${key}:${text}`); });
+      ws.on("message", (data) => {
+        const text = String(data);
+        fake.frames.push(text);
+        const message = JSON.parse(text) as { id?: number; method?: string; params?: Record<string, unknown>; sessionId?: string };
+        // A DevTools command gets Chrome's answer; anything else (the engine's frames in these tests) comes back echoed.
+        if (typeof message.method !== "string") { ws.send(`echo:${key}:${text}`); return; }
+        const params = message.params ?? {};
+        fake.commands.push({ key, method: message.method, params });
+        let result: Record<string, unknown> = {};
+        if (message.method === "Storage.setCookies") fake.cookies.set(key, [...(fake.cookies.get(key) ?? []), ...(params.cookies as Array<Record<string, unknown>>)]);
+        if (message.method === "Storage.getCookies") result = { cookies: (fake.cookies.get(key) ?? []).map((cookie) => ({ ...cookie, size: 1, session: cookie.expires === undefined, expires: cookie.expires ?? -1 })) };
+        if (message.method === "Browser.setDownloadBehavior") { const set = watchers.get(key) ?? new Set(); set.add(ws); watchers.set(key, set); }
+        if (message.method === "Target.createTarget") result = { targetId: "page-1" };
+        if (message.method === "Target.attachToTarget") result = { sessionId: "session-1" };
+        ws.send(JSON.stringify({ id: message.id, result, ...(message.sessionId ? { sessionId: message.sessionId } : {}) }));
+      });
+      ws.on("close", () => watchers.get(key)?.delete(ws));
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -128,6 +176,7 @@ export async function startFakeComputer(): Promise<FakeComputer> {
   fake.quits = () => fake.requests.flatMap((request) => !request.path.endsWith("/browser") ? []
     : request.body?.action === "quit" ? [`quit:${String(request.body.key)}`] : request.body?.action === "quit-all" ? ["quit-all"] : []);
   fake.profiles = () => actions("launch").map((request) => String(request.body?.key));
+  fake.emit = (key, method, params) => { for (const ws of watchers.get(key) ?? []) ws.send(JSON.stringify({ method, params })); };
   fake.close = async () => {
     for (const client of wss.clients) client.terminate();
     wss.close();
