@@ -349,7 +349,8 @@ export interface TeamPrompt {
   roster: string;
 }
 
-export function peerRosterPrompt(team: readonly RosterMember[], self?: Pick<RosterMember, "section">): TeamPrompt {
+/** `elsewhere`: the line naming the bots of the person's other places (places-elsewhere.ts), inside the markers. */
+export function peerRosterPrompt(team: readonly RosterMember[], self?: Pick<RosterMember, "section">, elsewhere = ""): TeamPrompt {
   const rules = [
     "You can reach every other bot on this team, in every department, for advice or bounded work your task needs; when the person asks you to write to, ask or loop in a bot, do it yourself with coordinate_bots; nobody has to set anything up first. Teammates are peers, not staff, with their own permissions: you cannot grant them your access, answer for them or create bots unless you are a Chief of Staff. Bring one in only when your task needs what they know; do the rest yourself.",
     "Use coordinate_bots with a teammate's bot id for work, or consult: true for a question; list_bots and list_room_targets give ids, and list_bots says who is free now. Recipients use their own model and permissions; busy bots queue. Send a self-contained brief and end your turn; results resume you, so do not poll or wait. Teammates are not native coding helpers: only an actual coordinate_bots result proves that teammate participated; never claim their review from your own checks or a promised handoff. Verify the outcome and settle ordinary tradeoffs yourself before answering. rework=true only for concrete corrections, never acknowledgements.",
@@ -365,6 +366,7 @@ export function peerRosterPrompt(team: readonly RosterMember[], self?: Pick<Rost
       about: false,
       ...(self ? { department: self.section ?? "" } : {}),
     }),
+    ...(elsewhere ? [elsewhere] : []),
     ROSTER_CLOSE,
   ].join("\n");
   return { rules, roster };

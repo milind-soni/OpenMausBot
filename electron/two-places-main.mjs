@@ -90,7 +90,8 @@ export function installTwoPlacesMain({ ipcMain, guard, localRequest, fetch: fetc
   let watched = "";
   const watch = setInterval(() => {
     ownHome.refresh();
-    const now = JSON.stringify([settled(), moved(), places().map((place) => [place.key, Boolean(place.bring)])]);
+    // A Cloud waking up can be told again: read at once, as when it used to appear only then.
+    const now = JSON.stringify([settled(), moved(), places().map((place) => [place.key, Boolean(place.bring), Boolean(place.tell)])]);
     if (now !== watched) { watched = now; void twoPlaces.refresh({ force: true }); } else void twoPlaces.refresh();
   }, WATCH_MS);
   watch.unref?.();

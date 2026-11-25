@@ -11,6 +11,7 @@ import { z } from "zod";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { foldName } from "./peer-delivery.ts";
+import { peerName } from "./peer-roster.ts";
 import { mentionedBots } from "./store.ts";
 
 const FILE = "places-elsewhere.json";
@@ -134,15 +135,18 @@ export function createPlacesElsewhere({ dataDir, now = Date.now }: { dataDir: st
       const known = read(), found = where(bot);
       return known && found ? `This went to ${bot} on ${known.self.name}; another bot named ${found.bot} is ${inOn(found.place)} ${found.place.name}.` : "";
     },
-    /** One line for list_bots: the bots of the person's other places, which can't be reached from here (`skip`: kinds of
-     * place that can, through the link). */
-    roster(skip: (kind: Place["kind"]) => boolean = () => false): string {
+    /** One line naming the bots of the person's other places, which can't be reached from here, so none is taken for "no
+     * such bot": for list_bots (`tool`), or for the team roster in the system prompt (`roster`, between its markers).
+     * `skip`: kinds of place that can be reached, through the link. "" when there are none. */
+    roster(form: "tool" | "roster", skip: (kind: Place["kind"]) => boolean = () => false): string {
       const known = read();
       const listed = (known?.places ?? []).filter((place) => place.bots.length && !skip(place.kind)).map((place) => {
         const age = ago(place, known!.at, now()), more = place.bots.length - ROSTER_MAX;
-        return `${place.bots.slice(0, ROSTER_MAX).join(", ")}${more > 0 ? ` and ${more} more` : ""} (${inOn(place)} ${place.name}${age ? `, last seen ${age} ago` : ""})`;
-      });
-      return listed.length ? `The person's bots in their other places, which can't be reached from here: ${listed.join("; ")}. If asked for one, say where it lives.` : "";
+        return `${place.bots.slice(0, ROSTER_MAX).map(peerName).join(", ")}${more > 0 ? ` and ${more} more` : ""} (${inOn(place)} ${peerName(place.name)}${age ? `, last seen ${age} ago` : ""})`;
+      }).join("; ");
+      if (!listed) return "";
+      return form === "tool" ? `The person's bots in their other places, which can't be reached from here: ${listed}. If asked for one, say where it lives.`
+        : `- In the person's other places, not reachable from here (if asked for one, say where it lives): ${listed}`;
     },
     /** What kind of place of the person's other places has `bot`, or null. */
     kindOf: (bot: string): Place["kind"] | null => where(bot)?.place.kind ?? null,

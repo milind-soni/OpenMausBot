@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createTwoPlaces, LOOK_EVERY_MS, parseDismissed, usedBots } from "./two-places.mjs";
+import { createTwoPlaces, LOOK_EVERY_MS, parseDismissed, parseLastRead, usedBots } from "./two-places.mjs";
 import { installTwoPlacesMain } from "./two-places-main.mjs";
 
 const summary = (...names) => ({ v: 1, items: [...names.map((name, at) => ({ key: `bot:b${at}`, kind: "bot", label: name, parts: {} })), { key: "setting:language", kind: "setting", label: "Language", parts: {} }] });
@@ -295,4 +295,46 @@ test("main: a sleeping Cloud is never asked or told anything, and this computer 
   });
   try { await notAnswering.refresh({ force: true }); } finally { notAnswering.close(); }
   assert.ok(!asked.includes("PUT /api/places/elsewhere"), "this computer not answering is not 'its bots moved': My Cloud is not told it has none");
+});
+
+test("a place no longer listed (signed out, its owner check lapsed) is told as last read for a week, then dropped; a Cloud at a new address replaces the old one", async () => {
+  const DAY = 24 * 60 * 60_000;
+  const lastRead = memory();
+  const first = laptop({ lastRead, cloud: async () => summary("Ziggy") });
+  await first.two.refresh();
+  const unlisted = (at) => {
+    const told = [];
+    const two = createTwoPlaces({ local: async () => summary("Scout"), lastRead, now: () => at, settled: () => true, dismissed: memory(),
+      here: { name: async () => "Work laptop", tell: async (payload) => { told.push(payload); } }, places: () => [] });
+    return { two, told };
+  };
+  const soon = unlisted(6 * DAY);
+  await soon.two.refresh();
+  assert.deepEqual(soon.told.at(-1).places, [{ name: "My Cloud", kind: "cloud", bots: ["Ziggy"], seen: 1_000 }]);
+  const late = unlisted(8 * DAY);
+  await late.two.refresh();
+  assert.deepEqual(late.told.at(-1).places, [], "a week on, it is no longer named");
+
+  const moved = createTwoPlaces({ local: async () => summary("Scout"), lastRead, now: () => 2_000, settled: () => true, dismissed: memory(),
+    here: { name: async () => "Work laptop", tell: async () => {} },
+    places: () => [{ key: "cloud:https://new.example.test", name: "My Cloud", kind: "cloud", read: async () => summary("Ziggy", "Quill") }] });
+  await moved.refresh();
+  assert.deepEqual(Object.keys(parseLastRead(lastRead.read())), ["cloud:https://new.example.test"], "one Cloud of their own");
+  const told = [];
+  const elsewhere = createTwoPlaces({ local: async () => summary("Scout"), lastRead: memory({ v: 1, places: { "cloud:https://old.example.test": { name: "My Cloud", kind: "cloud", bots: ["Ziggy"], at: 1 } } }),
+    now: () => 2_000, settled: () => true, dismissed: memory(), here: { name: async () => "Work laptop", tell: async (payload) => { told.push(payload); } },
+    places: () => [{ key: "cloud:https://new.example.test", name: "My Cloud", kind: "cloud", read: async () => null }] });
+  await elsewhere.refresh();
+  assert.deepEqual(told.at(-1).places, [{ name: "My Cloud", kind: "cloud", bots: [] }], "never two of My Cloud");
+});
+
+test("what was last read is read back strictly", () => {
+  assert.deepEqual(parseLastRead({ v: 1, places: {
+    "cloud:https://omb-u-1.fly.dev": { name: "My Cloud", kind: "cloud", bots: ["Ziggy", 3, ""], at: 5 },
+    "team:acme": { name: "Acme", kind: "team", bots: ["Sales"], at: 5 },
+    "server:https://garage.example.test": { name: "Garage", kind: "server", bots: ["Ledger"], at: -1 },
+    "nonsense": { name: "x", kind: "cloud", bots: [], at: 1 },
+    "server:https://family.example.test": { name: "", kind: "server", bots: [], at: 1 },
+  } }), { "cloud:https://omb-u-1.fly.dev": { name: "My Cloud", kind: "cloud", bots: ["Ziggy"], at: 5 } });
+  for (const junk of [null, "x", { v: 2, places: {} }, { v: 1, places: [] }]) assert.deepEqual(parseLastRead(junk), {});
 });
