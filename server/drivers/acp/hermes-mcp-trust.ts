@@ -1,3 +1,5 @@
+import { providerMcpTool } from "../../provider-tool-allow.ts";
+
 // hermes-agent asks before a write-capable tool runs on an MCP server its own config.yaml marks `trust: untrusted`
 // (tools/mcp_tool_handlers.py `_ask_for_call`). The ask reaches ACP as a shell call (acp_adapter/permissions.py): kind
 // `execute`, title "<description>: <message>", rawInput {command: message, description}. As a shell call, "Always allow"
@@ -14,6 +16,9 @@ export function hermesPermissionRequest(params: Record<string, any>): Record<str
   const options: Array<{ kind?: unknown }> = Array.isArray(params.options) ? params.options : [];
   const description = toolCall.rawInput?.description;
   const asked = toolCall.kind === "execute" && typeof description === "string" ? REMEMBERABLE_TRUST_ASK.exec(description) : null;
-  if (!asked || asked[1].includes("__") || !options.some((option) => option.kind === "allow_always")) return params;
-  return { ...params, toolCall: { ...toolCall, kind: "other", title: `mcp__${asked[1]}__${asked[2]}` } };
+  if (!asked || !options.some((option) => option.kind === "allow_always")) return params;
+  const title = `mcp__${asked[1]}__${asked[2]}`;
+  const readBack = providerMcpTool(title);
+  if (readBack?.server !== asked[1] || readBack.tool !== asked[2]) return params;
+  return { ...params, toolCall: { ...toolCall, kind: "other", title } };
 }

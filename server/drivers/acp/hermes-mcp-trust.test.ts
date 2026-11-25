@@ -42,6 +42,7 @@ describe("Hermes MCP trust asks", () => {
       { toolCall: { ...trustAsk(), kind: "edit" }, options: OPTIONS },
       { toolCall: { kind: "execute", title: "rm -rf build", rawInput: { command: "rm -rf build", description: "recursive delete" } }, options: OPTIONS },
       { toolCall: trustAsk("my__server"), options: OPTIONS },
+      { toolCall: trustAsk("linear_"), options: OPTIONS }, // mcp__linear___create_issue reads back as linear / _create_issue
       { toolCall: trustAsk("linear", "create issue"), options: OPTIONS },
       { toolCall: trustAsk("linear'"), options: OPTIONS },
     ];
