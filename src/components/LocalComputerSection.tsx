@@ -666,15 +666,11 @@ export function parseLocalVmIdleTimeoutMinutes(value: string): number | null {
 export function LocalVmIdleTimeoutSetting({
   minutes,
   disabled,
-  onSave,
-  id = "local-vm-idle-timeout",
-  detail = t("vm.idle.detail"),
+  onSave, id = "local-vm-idle-timeout", detail = t("vm.idle.detail"),
 }: {
   minutes: number;
   disabled: boolean;
-  onSave: (minutes: number) => Promise<void>;
-  id?: string;
-  detail?: string;
+  onSave: (minutes: number) => Promise<void>; id?: string; detail?: string;
 }) {
   const [value, setValue] = useState(String(minutes));
   const [dirty, setDirty] = useState(false);

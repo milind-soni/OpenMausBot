@@ -1,7 +1,7 @@
 // BYO Linux VPS: Docker's SSH transport reaches the user's daemon; one Cua MCP container per bot.
 import { createHash, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
-import { createConnection, createServer, type AddressInfo } from "node:net";
+import { loopbackAnswers, unusedLoopbackPort } from "./vps-loopback.ts";
 import { OWN_GROUP, stopGroup } from "./group-exec.ts";
 import {
   BASE_IMAGE,
@@ -188,38 +188,6 @@ export function vpsSshTunnelArgs(alias: string, localPort: number, privateIp: st
     `127.0.0.1:${localPort}:${privateIp}:${INTERNAL_VIEWER_PORT}`,
     alias,
   ];
-}
-
-function unusedLoopbackPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = createServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      // SAFETY: bound to an IPv4 TCP address above, so Node returns AddressInfo, not a socket path.
-      const port = (probe.address() as AddressInfo).port;
-      probe.close((error) => {
-        if (error) reject(error);
-        else if (port >= 1024) resolve(port);
-        else reject(new Error("could not reserve a VPS viewer port"));
-      });
-    });
-  });
-}
-
-function loopbackAnswers(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = createConnection({ host: "127.0.0.1", port });
-    let settled = false;
-    const finish = (answer: boolean) => {
-      if (settled) return;
-      settled = true;
-      socket.destroy();
-      resolve(answer);
-    };
-    socket.once("connect", () => finish(true));
-    socket.once("error", () => finish(false));
-    socket.setTimeout(250, () => finish(false));
-  });
 }
 
 function stopDesktopTunnel(botId: string, expected?: DesktopTunnel): boolean {
@@ -552,31 +520,16 @@ async function computeVpsComputerStatus(
   return status;
 }
 
-export async function vpsComputerRunning(
-  cfg: AppConfig,
-  botId: string,
-  runner: VpsCommandRunner = defaultRunner,
-): Promise<boolean> {
+export async function vpsComputerRunning(cfg: AppConfig, botId: string, runner: VpsCommandRunner = defaultRunner): Promise<boolean> {
   const alias = vpsSshAlias(snapshotVpsConfig(cfg));
   if (!alias) return false;
   const name = vpsContainerName(botId);
   try {
-    const inspected = JSON.parse((await runner(vpsDockerArgs(alias, ["inspect", name]), { timeoutMs: 10_000 })).stdout) as Array<{
-      Config?: { Labels?: Record<string, string> };
-      State?: { Running?: boolean };
-    }>;
-    const detail = inspected[0];
+    const detail = (JSON.parse((await runner(vpsDockerArgs(alias, ["inspect", name]), { timeoutMs: 10_000 })).stdout) as Array<{ Config?: { Labels?: Record<string, string> }; State?: { Running?: boolean } }>)[0];
     const labels = detail?.Config?.Labels;
     const environmentLabel = labels?.[VPS_ENVIRONMENT_LABEL];
-    return Boolean(
-      detail?.State?.Running &&
-      labels?.[VPS_MANAGED_LABEL] === "1" &&
-      labels?.[VPS_CONTAINER_LABEL] === name &&
-      (environmentLabel === undefined || environmentLabel === vpsEnvironmentId()),
-    );
-  } catch {
-    return false;
-  }
+    return Boolean(detail?.State?.Running && labels?.[VPS_MANAGED_LABEL] === "1" && labels?.[VPS_CONTAINER_LABEL] === name && (environmentLabel === undefined || environmentLabel === vpsEnvironmentId()));
+  } catch { return false; }
 }
 
 export async function vpsComputerStatus(
