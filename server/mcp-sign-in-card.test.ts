@@ -20,6 +20,8 @@ import type { RequestAuth } from "./request-auth.ts";
 import { createInternalMcpRoutes, type InternalMcpDeps } from "./routes/internal-mcp.ts";
 import type { RouteContext } from "./routes/table.ts";
 import type { Scope, SessionRecord } from "./sessions.ts";
+import { startFakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
+import { startFakeOAuth } from "./testing/fake-oauth-server.ts";
 import { startFakePostiz, type FakePostiz } from "./testing/fake-postiz.ts";
 
 const SIGN_IN_PAGE = "https://postiz.example";
@@ -380,6 +382,21 @@ describe("the Sign in card", () => {
     expect(await f.authorize(card)).toEqual({ status: 409, body: { error: "linear no longer exists." } });
     expect(f.answers).toHaveLength(1);
     expect(f.provider.counts.register).toBe(0);
+  });
+
+  it("a server that registers no apps fails the card with the reason, and the bot hears it once", async () => {
+    const f = await setup();
+    const oauth = await startFakeOAuth({ noRegistration: true });
+    const mcp = await startFakeHttpMcp({ acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge });
+    fixtures.push(oauth, mcp);
+    f.cfg.mcpServers!.linear = { type: "http", url: mcp.url, headers: {}, enabled: true } as never;
+    const { card } = await f.signIn();
+    const refused = await f.authorize(card);
+    expect(refused).toMatchObject({ status: 400, body: { code: "no-registration", error: expect.stringContaining("only signs in apps registered with it in advance") } });
+    expect(f.current(card).connector).toMatchObject({ status: "failed", error: refused.body.error, resumed: true });
+    expect(f.answers).toEqual([{ messageId: card.id, text: `OpenMausBot MCP sign-in for linear: ${refused.body.error as string} Nothing was signed in.` }]);
+    await f.authorize(card);
+    expect(f.answers).toHaveLength(1);
   });
 
   it("dismiss cancels the flow and resumes with the not-signed-in text", async () => {

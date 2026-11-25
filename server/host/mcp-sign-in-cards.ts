@@ -168,7 +168,12 @@ export function createMcpSignInCards(deps: McpSignInCardDeps) {
       started = await manager.start(name, server.url, undefined, owner, browser);
     } catch (error) {
       if (error instanceof McpSignInError) return { status: error.status, body: { error: error.message } };
-      if (error instanceof McpOAuthError) return { status: 400, body: { error: error.message, code: error.code } };
+      if (error instanceof McpOAuthError) {
+        // A busy port frees up; the other failures last until the server is set up differently.
+        const now = find(threadId, card.id);
+        if (error.code === "port-busy" || !now || now.connector.dismissed) return { status: 400, body: { error: error.message, code: error.code } };
+        return unreachable(threadId, now, { status: 400, reason: () => error.message }, { code: error.code });
+      }
       return { status: 502, body: { error: error instanceof Error ? error.message : "Sign-in could not start." } };
     }
     // The provider refused to register this home's https address.
@@ -181,14 +186,14 @@ export function createMcpSignInCards(deps: McpSignInCardDeps) {
     return { status: 200, body: { url: started.authorizationUrl } };
   }
 
-  /** A card whose server went away (removed, or no longer one a sign-in reaches) can never finish: it says why, and the
-   * bot hears it once. */
-  function unreachable(threadId: string, card: McpCard, server: Unreachable): Reply {
+  /** A card whose server went away (removed, or no longer one a sign-in reaches) or can't sign in as it is set up can
+   * never finish: it says why, and the bot hears it once. */
+  function unreachable(threadId: string, card: McpCard, server: Unreachable, extra: Record<string, unknown> = {}): Reply {
     const error = server.reason(deps.language(threadId));
     patch(threadId, card.id, { status: "failed", error });
     const said = `OpenMausBot MCP sign-in for ${card.connector.slug}: ${server.reason(undefined)} Nothing was signed in.`;
     if (!find(threadId, card.id)!.connector.resumed && deps.answer(threadId, card.id, said)) patch(threadId, card.id, { resumed: true });
-    return { status: server.status, body: { error } };
+    return { status: server.status, body: { error, ...extra } };
   }
 
   /** Idempotent: a card already resumed, or one no turn waits on yet, is left as it is. False: nothing to resume. */
