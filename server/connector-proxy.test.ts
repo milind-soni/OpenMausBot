@@ -325,6 +325,24 @@ describe("connector MCP bridge", () => {
     expect(reply.result).not.toHaveProperty("content");
   });
 
+  it("answers a server/discover probe itself, without waiting on an upstream that never answers", async () => {
+    const asked: string[] = [];
+    const upstream = await listen((request) => {
+      let body = "";
+      request.on("data", (chunk) => { body += chunk; });
+      request.on("end", () => { asked.push(String(JSON.parse(body).method)); });
+    });
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream });
+    // The probe the Antigravity CLI 1.5.16 sends first, verbatim.
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "server/discover", params: { _meta: {
+      "io.modelcontextprotocol/clientCapabilities": { elicitation: { form: {}, url: {} }, roots: { listChanged: true } },
+      "io.modelcontextprotocol/clientInfo": { name: "antigravity-client", version: "v1.0.0" },
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+    } } })}\n`);
+    expect(await nextJson(lines)).toEqual({ jsonrpc: "2.0", id: 1, error: { code: -32601, message: "Method not found: server/discover" } });
+    expect(asked).toEqual([]);
+  });
+
   it("answers initialize after a bounded wait when the upstream stalls", async () => {
     let sawInitialize!: () => void;
     const received = new Promise<void>((resolve) => { sawInitialize = resolve; });

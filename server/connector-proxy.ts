@@ -322,6 +322,13 @@ async function handle(received: Json): Promise<void> {
     }
     return;
   }
+  // Clients that probe with MCP 2026-07-28's server/discover before initialize (Antigravity CLI 1.5.16, Claude Code 2.1.292)
+  // fall back to initialize on Method not found; this proxy answers initialize itself, so it answers the probe too, with
+  // no relay of its own: the Antigravity CLI drops a server that has not listed its tools about 5 s after it started it.
+  if (method === "server/discover") {
+    if (id !== undefined) send({ jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found: server/discover" } });
+    return;
+  }
   let changed: string[] = [];
   if (method === "tools/call") {
     const given = (message.params ?? {}) as Json;
