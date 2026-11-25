@@ -36,19 +36,50 @@ function phrases(phase: string, keys: LocaleKey[]): LiveActivityPhrases {
   return { phase: `friendly:${phase}`, phrases: keys.map((key) => t(key)) };
 }
 
+/** A written file's kind, as what it makes for the person: a page or a write-up; code and anything else are neither. */
+const MADE: Array<[RegExp, LocaleKey]> = [[/\.html?$/i, "chat.friendly.page"], [/\.(?:md|markdown|txt|rtf|docx?|odt|pdf)$/i, "chat.friendly.writeup"]];
+
+/** What the running write or edit is making, from the engine's report or the call still running in the chat. */
+export function madeKey(status: LiveStatus | null, message?: Message): LocaleKey | null {
+  const step = message?.kind === "activity" && message.tool?.ok === undefined ? message.tool?.step : undefined;
+  // The engine's report wins over the chat's call, as it does for the rest of the line.
+  const file = status ? (status.activity === "write" || status.activity === "edit" ? status.file ?? status.target : undefined)
+    : step?.activity === "write" || step?.activity === "edit" ? step.target : undefined;
+  return (file && MADE.find(([kind]) => kind.test(file))?.[1]) || null;
+}
+
+/** Words that name only the tool: the conversation's subject says more. */
+const TOOL_TALK: ReadonlySet<LocaleKey> = new Set(["chat.friendly.code", "chat.friendly.commands"]);
+
+const UNTITLED = new Set(["New task", "New thread"]);
+
+/** The conversation's title as the name of the work, once it is more than a placeholder or the opening of one of the
+ * person's own messages (the stand-in title a thread gets until its generated one arrives, pasted text included). */
+export function taskSubject(title: string | undefined, userTexts: readonly string[]): string | undefined {
+  const name = title?.trim();
+  if (!name || UNTITLED.has(name)) return undefined;
+  const opening = name.replace(/…$/, "");
+  return userTexts.some((text) => text.includes(opening)) ? undefined : name;
+}
+
 /** Simple mode's one rotating line for what the bot is doing now: plain words in place of file names, sizes and
  * timers, chosen by the kind of step (a tool's spoken narration is read by its name, as every other step is); a
- * command, search or page the server could name is said by name. */
-export function friendlyNowPhrases(status: LiveStatus | null, message?: Message): LiveActivityPhrases {
+ * command, search or page the server could name is said by name. A page or write-up says what it makes, and the
+ * conversation's `subject`, when known, stands in for words that would only name the tool (thinking, code, commands). */
+export function friendlyNowPhrases(status: LiveStatus | null, message?: Message, subject?: string): LiveActivityPhrases {
   const plain = message?.kind === "activity" && message.tool?.spoken ? { ...message, tool: { ...message.tool, spoken: undefined } } : message;
   const now = turnNowPhrases(status, plain);
   if (now?.phase.startsWith("step:") || now?.phase.startsWith("notice:")) return now;
   const tool = (status && "tool" in status ? status.tool : undefined) ?? (message?.kind === "activity" && message.tool?.ok === undefined ? message.tool?.name : undefined);
   const service = toolService(tool);
   if (service) return { phase: `friendly:service:${service}`, phrases: [t("chat.friendly.service", { service })] };
-  if (!now) return phrases("generic", GENERIC);
+  const made = madeKey(status, message);
+  if (made) return phrases(made, [made]);
+  const task = (phase: string, keys: LocaleKey[]) => subject ? { phase: `friendly:task:${subject}`, phrases: [t("chat.friendly.task", { task: subject })] } : phrases(phase, keys);
+  if (!now) return task("generic", GENERIC);
   if (now.phase.startsWith("live:read:")) return phrases("digging", ["chat.friendly.digging"]);
-  if (now.phase.startsWith("live:")) return phrases("code", ["chat.friendly.code"]);
+  if (now.phase.startsWith("live:")) return task("code", ["chat.friendly.code"]);
   const match = BY_PHASE.find(([phases]) => phases.includes(now.phase));
-  return match ? phrases(match[1][0]!, match[1]) : phrases("generic", GENERIC);
+  if (!match) return task("generic", GENERIC);
+  return TOOL_TALK.has(match[1][0]!) ? task(match[1][0]!, match[1]) : phrases(match[1][0]!, match[1]);
 }

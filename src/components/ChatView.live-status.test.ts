@@ -94,7 +94,7 @@ describe("Simple mode's working line", () => {
     engine({ type: "turn.started" });
     render(busyBot([ask]));
     expect(mascot()).not.toBeNull();
-    expect(statusLine()).toBe("Thinking it through");
+    expect(statusLine(), "the conversation's title names the work").toBe("Working on Dashboard");
     expect(mascot()!.innerHTML).toContain('width="28px"');
     const row = mascot()!.firstElementChild as HTMLElement;
     expect([...row.classList]).toEqual(expect.arrayContaining(["h-9", "ps-2", "gap-2"]));
@@ -108,6 +108,18 @@ describe("Simple mode's working line", () => {
     // The reply that just arrived pops in first; the line comes back once it has.
     act(() => void vi.advanceTimersByTime(600));
     engine({ type: "turn.progress", activity: "write", itemId: "toolu_write", file: "index.html", bytes: 14 * 1024 + 300 } as Partial<RuntimeEvent>);
+    expect(statusLine()).toBe("Putting the page together");
+    engine({ type: "turn.progress", activity: "write", itemId: "toolu_script", file: "build.py", bytes: 300 } as Partial<RuntimeEvent>);
+    expect(statusLine(), "code says the work, not the tool").toBe("Working on Dashboard");
+  });
+
+  it("keeps today's words while the title is still the opening of the ask", () => {
+    mode.advanced = false;
+    engine({ type: "turn.started" });
+    const shown = busyBot([ask]);
+    render({ ...shown, tasks: shown.tasks!.map((task) => ({ ...task, title: "Build me a sales dashboard" })) });
+    expect(statusLine()).toBe("Thinking it through");
+    engine({ type: "turn.progress", activity: "write", itemId: "toolu_script", file: "build.py", bytes: 300 } as Partial<RuntimeEvent>);
     expect(statusLine()).toBe("Writing some code");
   });
 

@@ -29,6 +29,26 @@ describe("sidebar working line", () => {
     act(() => root.render(createElement(SidebarWorkingStep, { bot })));
     expect(phrase()).toBe("Running a command");
   });
+
+  it("says what a page or write-up makes, still without its name", () => {
+    const write = (target: string): Message => ({ id: "w", at: 1, role: "bot", kind: "activity", tool: { name: "Write", step: { activity: "write", target } } });
+    act(() => root.render(createElement(SidebarWorkingStep, { bot, last: write("lisbon.html") })));
+    expect(phrase()).toBe("Putting the page together");
+  });
+
+  it("reads the file's kind from the engine's live status too", () => {
+    noteTurnEvent({ eventId: "e2", provider: "claudeAgent", threadId: "t-side", createdAt: "2026-11-07T00:00:00.000Z", turnId: "turn-2",
+      type: "turn.progress", activity: "write", itemId: "w2", file: "lisbon-trip.md" } as RuntimeEvent);
+    act(() => root.render(createElement(SidebarWorkingStep, { bot: { ...bot, threadId: "t-other" } })));
+    expect(phrase()).toBe("Writing it up");
+  });
+
+  it("keeps the kind of step for code", () => {
+    noteTurnEvent({ eventId: "e3", provider: "claudeAgent", threadId: "t-side", createdAt: "2026-11-07T00:00:00.000Z", turnId: "turn-3",
+      type: "turn.progress", activity: "write", itemId: "w3", file: "build.py" } as RuntimeEvent);
+    act(() => root.render(createElement(SidebarWorkingStep, { bot })));
+    expect(phrase()).toBe("Writing a file");
+  });
 });
 
 describe("useHeldText", () => {
