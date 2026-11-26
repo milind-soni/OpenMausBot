@@ -137,6 +137,9 @@ const BLOCKED: Case[] = [
   ["bash -oc pipefail 'rm -rf /'", "delete-root"],
   ["bash -eoOc pipefail extglob 'rm -rf ~'", "delete-home"],
   ["sh -oc errexit 'mkfs.ext4 /dev/sda1'", "format-disk"],
+  ["zsh -oerrexit -c 'rm -rf /'", "delete-root"],
+  ["zsh -eoerrexit -c 'rm -rf ~'", "delete-home"],
+  ["zsh -o errexit -c 'rm -rf /'", "delete-root"],
   ["sudo sh -c \"bash -c 'rm -rf /'\"", "delete-root"],
   ["eval 'rm -rf /'", "delete-root"],
   // chains
