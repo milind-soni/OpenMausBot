@@ -20,6 +20,11 @@ export function useAllAutomationActions() {
     catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
     finally { setBusy(null); }
   };
+  /** Runs a schedule's or another app's own action: an earlier "Pause all" refusal is no longer the latest word. */
+  const handOn = <T>(action: () => T): T => {
+    if (!base.busy) setError("");
+    return action();
+  };
   return {
     ...base,
     busy: busy ?? base.busy,
@@ -36,12 +41,16 @@ export function useAllAutomationActions() {
     }),
     toggle: (automation: Automation) => automation.kind === "app"
       ? void attempt(`toggle:${automation.id}`, () => appTriggerApi.update(automation.id, { enabled: !automation.enabled }))
-      : busy ? undefined : base.toggle(automation),
+      : busy ? undefined : handOn(() => base.toggle(automation)),
     runNow: (automation: Automation) => automation.kind === "app"
       ? attempt(`run:${automation.id}`, () => appTriggerApi.test(automation.id))
-      : base.runNow(automation),
+      : handOn(() => base.runNow(automation)),
     remove: async (automation: Automation, question: string): Promise<boolean> => {
-      if (automation.kind !== "app") return base.remove(automation, question);
+      if (automation.kind !== "app") {
+        const removed = await base.remove(automation, question);
+        if (removed) setError("");
+        return removed;
+      }
       if (!window.confirm(question)) return false;
       await attempt(`delete:${automation.id}`, () => appTriggerApi.remove(automation.id));
       return true;

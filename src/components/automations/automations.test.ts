@@ -347,6 +347,27 @@ describe("the Automations list switch", () => {
       expect(row("routine-1").querySelector("[role=alert]")).toBeNull();
     });
 
+    it("lets a later switch replace its refusal, beside the switch only when that switch is refused too", async () => {
+      fixture.state.routines = [routine, { ...routine, id: "routine-2", name: "Evening digest" }];
+      mountPage();
+      fixture.api.mockImplementation(async (_path: unknown, init: unknown) => {
+        if ((init as { body?: string } | undefined)?.body) throw new Error("The server is restarting");
+        return {};
+      });
+      stubConfirm(true);
+      flushSync(() => setAll()!.click());
+      await vi.waitFor(() => expect(container.querySelector("[role=alert]")?.textContent).toBe("The server is restarting"));
+      await vi.waitFor(() => expect(setAll()!.disabled).toBe(false));
+      answerWrites();
+      flushSync(() => toggle("Morning summary").click());
+      await vi.waitFor(() => expect(row("routine-1").dataset.automationStatus).toBe("paused"));
+      expect(container.querySelector("[role=alert]")).toBeNull();
+      fixture.api.mockRejectedValueOnce(new Error("The assigned bot no longer exists"));
+      flushSync(() => toggle("Morning summary").click());
+      await vi.waitFor(() => expect(container.querySelectorAll("[role=alert]")).toHaveLength(1));
+      expect(row("routine-1").querySelector("[role=alert]")?.textContent).toBe("The assigned bot no longer exists");
+    });
+
     it("keeps every switch waiting while it writes, so a click cannot be undone by it", async () => {
       fixture.state.routines = [routine, { ...routine, id: "routine-2", name: "Evening digest" }];
       mountPage();
