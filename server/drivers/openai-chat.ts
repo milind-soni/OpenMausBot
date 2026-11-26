@@ -465,15 +465,15 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     onUsage?: TextGenerationOptions["onUsage"], variant?: string, threadId?: string,
   ): Promise<Completion> => {
     for (;;) {
-      let replied = false;
+      const attemptedRoute = routes.routeFor(model, tools.length > 0); let replied = false;
       try {
-        return await completeOn(routes.routeFor(model, tools.length > 0), messages, model, stream, signal, onDelta && ((text, kind) => {
+        return await completeOn(attemptedRoute, messages, model, stream, signal, onDelta && ((text, kind) => {
           replied = true;
           onDelta(text, kind);
         }), tools, onUsage, variant, threadId);
       } catch (error) {
         if (!(error instanceof ModelRouteRefused) || replied || signal?.aborted) throw error;
-        if (!routes.advance(model, error.refusal)) throw new ChatProtocolError(noRouteLeft(error.message));
+        if (routes.routeFor(model, tools.length > 0) === attemptedRoute && !routes.advance(model, error.refusal)) throw new ChatProtocolError(noRouteLeft(error.message));
         console.warn(`${options.driverKind}: ${model} answered ${error.refusal}; now on ${routes.routeFor(model, true)}`);
       }
     }
