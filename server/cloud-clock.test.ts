@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { agree, CLOCK_FD_ENV, CLOCK_STEP_MS, clockKicker, clockSources, createCloudClock, readClock, type ClockClocks } from "./cloud-clock.ts";
+import { agree, CLOCK_FD_ENV, CLOCK_MAX_STEP_MS, CLOCK_STEP_MS, clockKicker, clockSources, createCloudClock, readClock, type ClockClocks } from "./cloud-clock.ts";
 import { clockFacts, createClockKeeper, hasEffectiveCapability } from "./cloud-clock-keeper.ts";
 import { CLOUD_PAIRING_SKEW_S, cloudRequestSignature, createCloudRequestVerifier } from "./cloud-home.ts";
 import { createCloudPower } from "./cloud-power.ts";
@@ -66,12 +66,17 @@ describe("reading a clock from the outside", () => {
     expect(await readClock(ADMIN, (async () => { throw new Error("down"); }) as typeof fetch, w.clocks)).toBeNull();
   });
 
-  it("agrees only on two or more answers within a few seconds of each other", () => {
+  it("agrees on the largest group of two or more answers within a few seconds of each other, which must hold the Admin's", () => {
     const at = (origin: string, offsetMs: number) => ({ origin, offsetMs, tripMs: 50 });
     expect(agree([at(ADMIN, SIX_HOURS)]).state).toBe("too-few");
     expect(agree([at(ADMIN, SIX_HOURS), at(ACCOUNTS, 0)]).state).toBe("disagree");
     expect(agree([at(ADMIN, SIX_HOURS), at(ACCOUNTS, SIX_HOURS + 2_000)])).toMatchObject({ state: "agreed", offsetMs: SIX_HOURS + 1_000 });
-    expect(agree([at(ADMIN, SIX_HOURS), at(ACCOUNTS, SIX_HOURS), at(RELAY, 0)]).state).toBe("disagree");
+    // One host with a wrong clock is outvoted, not a veto.
+    expect(agree([at(ADMIN, SIX_HOURS), at(ACCOUNTS, SIX_HOURS), at(RELAY, 0)], ADMIN)).toMatchObject({ state: "agreed", offsetMs: SIX_HOURS, readings: [at(ADMIN, SIX_HOURS), at(ACCOUNTS, SIX_HOURS)] });
+    // Two hosts that are not the Admin never move the clock away from the Admin's time.
+    expect(agree([at(ADMIN, 0), at(ACCOUNTS, SIX_HOURS), at(RELAY, SIX_HOURS)], ADMIN).state).toBe("disagree");
+    // Two groups as large, each with the Admin's answer, saying different times: nothing.
+    expect(agree([at(ACCOUNTS, -2_500), at(ADMIN, 0), at(RELAY, 2_500)], ADMIN).state).toBe("disagree");
   });
 });
 
@@ -178,6 +183,15 @@ describe("what can't move the clock", () => {
     expect(set).toEqual([]);
   });
 
+  it("the two other hosts agreeing without the Admin: nothing is set", async () => {
+    const w = world(), set: number[] = [], lines: string[] = [];
+    w.state.skew[ACCOUNTS] = SIX_HOURS;
+    w.state.skew[RELAY] = SIX_HOURS;
+    await createClockKeeper({ origins: [ADMIN, ACCOUNTS, RELAY], canSet: true, fetch: w.fetcher, clocks: w.clocks, log: (line) => lines.push(line), set: (ms) => { set.push(ms); return { ok: true }; } }).check();
+    expect(set).toEqual([]);
+    expect(lines).toEqual(["cloud home: clock not checked (the hosts disagree); left as it is"]);
+  });
+
   it("one host alone, or cached answers: too few to agree", async () => {
     const w = world(), set: number[] = [];
     w.suspend(SIX_HOURS);
@@ -203,6 +217,35 @@ describe("what can't move the clock", () => {
     await createClockKeeper({ origins: [ADMIN, ACCOUNTS, RELAY], canSet: true, fetch: w.fetcher, clocks: w.clocks, log: (line) => lines.push(line), set: (ms) => { set.push(ms); return { ok: true }; } }).check();
     expect(set).toEqual([]);
     expect(lines).toEqual(["cloud home: the clock is 360 min ahead; only a clock behind is set, so it is left as it is"]);
+  });
+
+  it("one host with a wrong clock: the Admin and the other host agree, and the clock is set", async () => {
+    const w = world(), set: number[] = [], lines: string[] = [];
+    w.suspend(SIX_HOURS);
+    w.state.skew[RELAY] = -SIX_HOURS;
+    await createClockKeeper({ origins: [ADMIN, ACCOUNTS, RELAY], canSet: true, fetch: w.fetcher, clocks: w.clocks, log: (line) => lines.push(line), set: (ms) => { set.push(ms); return { ok: true }; } }).check();
+    expect(set).toHaveLength(1);
+    expect(Math.abs(set[0]! - w.state.truth)).toBeLessThanOrEqual(1_000);
+    expect(lines.at(-1)).toMatch(/360 min behind \(2 hosts agree\); set forward/);
+  });
+
+  it("an error larger than any suspend (two weeks) is not believed: nothing set, nothing let through on it", async () => {
+    const w = world(), home = homeClock(w), set: number[] = [], lines: string[] = [];
+    w.suspend(CLOCK_MAX_STEP_MS + 86_400_000);
+    home.health.verify(w.sign());
+    await home.clock.check();
+    expect(home.kicks).toEqual([]);
+    expect(home.clock.report().errorMs).toBeNull();
+    expect(home.health.verify(w.sign())).toMatchObject({ ok: false, error: "stale_request" });
+    expect(home.lines.at(-1)).toMatch(/more than any suspend; not believed/);
+    await createClockKeeper({ origins: [ADMIN, ACCOUNTS, RELAY], canSet: true, fetch: w.fetcher, clocks: w.clocks, log: (line) => lines.push(line), set: (ms) => { set.push(ms); return { ok: true }; } }).check();
+    expect(set).toEqual([]);
+    expect(lines.at(-1)).toMatch(/more than any suspend; not believed/);
+    // Just under it: set.
+    const near = world(), nearSet: number[] = [];
+    near.suspend(CLOCK_MAX_STEP_MS - 3_600_000);
+    await createClockKeeper({ origins: [ADMIN, ACCOUNTS, RELAY], canSet: true, fetch: near.fetcher, clocks: near.clocks, log: () => {}, set: (ms) => { nearSet.push(ms); return { ok: true }; } }).check();
+    expect(nearSet).toHaveLength(1);
   });
 
   it("a machine that may not set its clock: told once, the measurement still reported", async () => {

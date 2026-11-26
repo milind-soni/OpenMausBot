@@ -124,7 +124,8 @@ export function createCloudPower(options: {
   let sleptUntil: number | null = options.bootedFromSleep ? bootedAt : null;
   /** A wake: the Admin hears (`onWoke`), and the home's clock is measured again (server/cloud-clock.ts): a resume may have left it
    * behind, and a clock the supervisor just set forward is a jump like a resume's. */
-  const woke = () => { options.onWoke?.(); cloudClockWoke(); };
+  // The clock first: its measurement is what the wake notice waits for before it is signed (cloud-woke.ts).
+  const woke = () => { cloudClockWoke(); options.onWoke?.(); };
   if (options.bootedFromSleep) woke();
   /** The first request since `wokeAt` (`arrived`), and whether one came. */
   let wokeBy: CloudPowerReport["wokeBy"] = null, wokeSeen = false, bootWake = Boolean(options.bootedFromSleep);

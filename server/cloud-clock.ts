@@ -28,6 +28,10 @@ export const CLOCK_MAX_TRIP_MS = 4_000;
 const CLOCK_TIMEOUT_MS = 5_000;
 /** Measurements at most this often (each is one HEAD request per host). */
 export const CLOCK_CHECK_GAP_MS = 60_000;
+/** The most a measurement may move the clock: about the longest suspend a home could have had. A larger error is not believed
+ * (a host's clock wrong, or something not a suspend), and the clock is left to a restart. A guest clock 20 to 34 days behind
+ * can't measure at all anyway: the hosts' certificates are not valid yet for it (measured live Nov 26 2026). */
+export const CLOCK_MAX_STEP_MS = 14 * 86_400_000;
 /** A measurement is trusted this long on the monotonic clock, and never across a wake (the monotonic clock stops too). */
 export const CLOCK_TRUST_MS = 10 * 60_000;
 /** The supervisor's inherited pipe for "check" lines; only a Cloud home's supervisor sets it. */
@@ -70,18 +74,34 @@ export async function readClock(origin: string, fetcher: typeof fetch, clocks: C
   return { origin, offsetMs: Math.round(date + 500 - (sent + tripMs / 2)), tripMs };
 }
 
-/** Pure: two or more answers, all within CLOCK_AGREE_MS of each other, give the offset (their middle); anything else nothing. */
-export function agree(readings: readonly ClockReading[]): ClockVerdict {
+/**
+ * Pure: the largest group of two or more answers all within CLOCK_AGREE_MS of each other gives the offset (its middle), so one
+ * host with a wrong clock (or a slow answer) is outvoted rather than spoiling the rest. `required` (the home's Admin): the group
+ * must hold its answer, so hosts that are not the Admin can never move the clock away from the Admin's time by themselves.
+ * Two groups as large, or none: nothing. `readings` in the verdict: the group that agreed, else all of them.
+ */
+export function agree(readings: readonly ClockReading[], required?: string): ClockVerdict {
   const list = [...readings];
   if (list.length < 2) return { state: "too-few", readings: list };
-  const offsets = list.map((reading) => reading.offsetMs).sort((a, b) => a - b);
-  if (offsets[offsets.length - 1]! - offsets[0]! > CLOCK_AGREE_MS) return { state: "disagree", readings: list };
-  return { state: "agreed", offsetMs: Math.round((offsets[0]! + offsets[offsets.length - 1]!) / 2), readings: list };
+  const sorted = [...list].sort((a, b) => a.offsetMs - b.offsetMs);
+  let best: ClockReading[] = [], tie = false;
+  for (let from = 0; from < sorted.length; from++) {
+    let to = from;
+    while (to + 1 < sorted.length && sorted[to + 1]!.offsetMs - sorted[from]!.offsetMs <= CLOCK_AGREE_MS) to++;
+    const group = sorted.slice(from, to + 1);
+    if (group.length < 2 || (required !== undefined && !group.some((reading) => reading.origin === required))) continue;
+    if (group.length > best.length) { best = group; tie = false; }
+    // Another group as large that is not just the same answers seen from a later start: they say different times.
+    else if (group.length === best.length && !group.every((reading) => best.includes(reading))) tie = true;
+  }
+  if (best.length < 2 || tie) return { state: "disagree", readings: list };
+  return { state: "agreed", offsetMs: Math.round((best[0]!.offsetMs + best[best.length - 1]!.offsetMs) / 2), readings: best };
 }
 
+/** `origins[0]` is the home's Admin (`clockSources`), whose answer any agreement must include. */
 export async function measureClock(origins: readonly string[], fetcher: typeof fetch = fetch, clocks: ClockClocks = systemClocks): Promise<ClockVerdict> {
   const readings = await Promise.all(origins.map((origin) => readClock(origin, fetcher, clocks)));
-  return agree(readings.filter((reading): reading is ClockReading => reading !== null));
+  return agree(readings.filter((reading): reading is ClockReading => reading !== null), origins[0]);
 }
 
 /** What the health answer says about this clock (`clock`): its error when last measured and still trusted (positive: behind),
@@ -137,8 +157,13 @@ export function createCloudClock(options: { origins: readonly string[]; fetch?: 
       note(`cloud clock: not measured (${verdict.state === "disagree" ? "the hosts disagree" : "too few hosts answered"}); left as it is`);
       return;
     }
-    trusted = { offsetMs: verdict.offsetMs, wall: clocks.wall(), mono: clocks.mono() };
     const minutes = Math.round(Math.abs(verdict.offsetMs) / 60_000);
+    if (Math.abs(verdict.offsetMs) > CLOCK_MAX_STEP_MS) {
+      trusted = null;
+      note(`cloud clock: ${minutes} min off, more than any suspend; not believed, left as it is (a restart sets it)`);
+      return;
+    }
+    trusted = { offsetMs: verdict.offsetMs, wall: clocks.wall(), mono: clocks.mono() };
     if (verdict.offsetMs >= CLOCK_STEP_MS) {
       note(`cloud clock: ${minutes} min behind (${verdict.readings.length} hosts agree); asking the supervisor to set it`);
       options.kick?.();
@@ -157,6 +182,8 @@ export function createCloudClock(options: { origins: readonly string[]; fetch?: 
     /** It woke (a resume, a boot from sleep, or the clock stepped): the monotonic clock stopped meanwhile, so the last
      * measurement no longer holds; measure again now. */
     woke() { trusted = null; void check(true); },
+    /** The measurement in progress, if any. */
+    settled(): Promise<void> { return checking ?? Promise.resolve(); },
     noteSigned(timestampS: number) {
       if (Math.abs(timestampS * 1000 - clocks.wall()) >= CLOCK_STEP_MS) void check();
     },
@@ -173,7 +200,23 @@ export function createCloudClock(options: { origins: readonly string[]; fetch?: 
 }
 export type CloudClock = ReturnType<typeof createCloudClock>;
 
-/** The running home's clock watch, for cloud-power.ts's wake path; null on any server that is not a Cloud home. */
-let registered: Pick<CloudClock, "woke"> | null = null;
-export function registerCloudClock(clock: Pick<CloudClock, "woke"> | null) { registered = clock; }
+/** The running home's clock watch, for cloud-power.ts's wake path and the home's own signed calls; null on any server that is
+ * not a Cloud home. */
+let registered: Pick<CloudClock, "woke" | "report" | "settled"> | null = null;
+export function registerCloudClock(clock: Pick<CloudClock, "woke" | "report" | "settled"> | null) { registered = clock; }
 export function cloudClockWoke() { registered?.woke(); }
+/** Resolves once a measurement in progress is done (at once when none is), so a call signed right after a wake can use it. */
+export function cloudClockSettled(): Promise<void> { return registered?.settled() ?? Promise.resolve(); }
+
+/**
+ * The time a home signs its own calls to the Admin with (phone notifications, the wake notice, Pages, Slack, team rules and the
+ * roster): this clock, or the true time when a fresh measurement says this clock is CLOCK_STEP_MS or more off (the supervisor
+ * has not set it yet, or can't). The Admin judges those timestamps by its own clock, so a home left behind would otherwise lose
+ * them all, silently, until the clock is right.
+ */
+export function cloudSigningTime(at: number = Date.now()): number {
+  const error = registered?.report().errorMs ?? null;
+  return error !== null && Math.abs(error) >= CLOCK_STEP_MS ? at + error : at;
+}
+/** `cloudSigningTime` as the whole seconds a signed request's timestamp carries. */
+export function cloudSignedTimestamp(at: number = Date.now()): string { return String(Math.floor(cloudSigningTime(at) / 1000)); }

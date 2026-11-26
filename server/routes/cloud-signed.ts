@@ -63,7 +63,8 @@ export function createCloudSignedRoutes(deps: {
 }) {
   const clock = deps.clock ?? null;
   const pairing = createCloudPairing({ secret: deps.secret, sessions: deps.sessions, team: deps.team ?? null, ...(deps.invited ? { invited: deps.invited } : {}), ...(deps.memberBrowserOff ? { memberBrowserOff: deps.memberBrowserOff } : {}), clock, now: deps.now });
-  // Only the two read-only reads the Admin manages a home by are tolerant of a clock measured behind (cloud-home.ts).
+  // Only the read-only reads the Admin manages a home by (health, power, and the diagnose read it sends when one looks wrong)
+  // are tolerant of a clock measured behind (cloud-home.ts).
   const healthRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now, clock, tolerant: true });
   const powerReads = createCloudRequestVerifier({ secret: deps.secret, now: deps.now, clock, tolerant: true });
   const sleepRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now, clock });
@@ -72,7 +73,7 @@ export function createCloudSignedRoutes(deps: {
   const memberLeftRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now, clock });
   const planRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now, clock });
   const policyNudges = createCloudRequestVerifier({ secret: deps.secret, now: deps.now, clock });
-  const diagnoseReads = createCloudRequestVerifier({ secret: deps.secret, now: deps.now, clock });
+  const diagnoseReads = createCloudRequestVerifier({ secret: deps.secret, now: deps.now, clock, tolerant: true });
   /** A refusal's body; a stale one also says this clock's measured error, when known, so the Admin can tell a clock from an attack. */
   const refusal = (error: string) => {
     const measured = error === "stale_request" ? clock?.report().errorMs ?? null : null;
@@ -161,7 +162,7 @@ export function createCloudSignedRoutes(deps: {
     if (diagnose) {
       if (method !== "GET") { json(res, 405, { error: "method_not_allowed" }); return true; }
       const verdict = diagnoseReads.verify({ ...signed, method, target: `${path}${url.search}`, body: "" });
-      if (!verdict.ok) { console.warn(`cloud diagnose read refused from ${source}: ${verdict.error}`); json(res, verdict.status, { error: verdict.error }); return true; }
+      if (!verdict.ok) { console.warn(`cloud diagnose read refused from ${source}: ${verdict.error}`); json(res, verdict.status, refusal(verdict.error)); return true; }
       json(res, 200, await diagnose.read());
       return true;
     }

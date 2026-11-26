@@ -5,13 +5,14 @@
 // a home whose server is down still comes right. A line is only a reason to look: anything `maus` writes there can make it
 // measure at most once a minute, never choose a time.
 //
-// Setting it: `date -u -s @<seconds>` (clock_settime), which needs CAP_SYS_TIME. A Fly machine is its own VM and the
-// supervisor is its root, so it has it; a Docker container (Hetzner, a team's own server) has not, and those never suspend:
-// there it logs once and only measures. No time daemon ships in the image and none is needed for this.
+// Setting it: `date -u -s @<seconds>` (clock_settime), which needs CAP_SYS_TIME. A home that runs as its own VM has its
+// supervisor as root, so it has it (measured live Nov 26 2026 on the provider's smallest machine, where the provider's init
+// also keeps the clock from the host's PTP clock while that works); a Docker container (a rented or a team's own server) has
+// not, and those never suspend: there it logs once and only measures. No time daemon ships in the image.
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import type { Readable } from "node:stream";
-import { CLOCK_CHECK_GAP_MS, CLOCK_STEP_MS, clockSources, measureClock, readClock, systemClocks, type ClockClocks } from "./cloud-clock.ts";
+import { CLOCK_CHECK_GAP_MS, CLOCK_MAX_STEP_MS, CLOCK_STEP_MS, clockSources, measureClock, readClock, systemClocks, type ClockClocks } from "./cloud-clock.ts";
 
 /** The supervisor's own look, one host at a time. */
 export const CLOCK_LOOK_MS = 10 * 60_000;
@@ -64,6 +65,10 @@ export function createClockKeeper(options: {
     const minutes = Math.round(Math.abs(verdict.offsetMs) / 60_000);
     if (verdict.offsetMs < CLOCK_STEP_MS) {
       log(verdict.offsetMs <= -CLOCK_STEP_MS ? `cloud home: the clock is ${minutes} min ahead; only a clock behind is set, so it is left as it is` : "cloud home: the clock is right");
+      return;
+    }
+    if (verdict.offsetMs > CLOCK_MAX_STEP_MS) {
+      log(`cloud home: the clock measured ${minutes} min behind, more than any suspend; not believed, left as it is (a restart sets it)`);
       return;
     }
     if (!canSet) {
