@@ -7,7 +7,7 @@ import { expect, it } from "vitest";
 import { launchVerificationServer } from "../scripts/control-omb.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
-it("answers a bot's yes-or-no question with a 👍, and the bot goes on by itself", async () => {
+it("answers a bot's yes-or-no question with a 👍, and the bot goes on by itself; a 👎 reaches its next turn quietly, once", async () => {
   const scratch = mkdtempSync(join(tmpdir(), "omb-reactions-"));
   const promptLog = join(scratch, "prompts.jsonl");
   const fixture = await launchVerificationServer({
@@ -61,7 +61,7 @@ it("answers a bot's yes-or-no question with a 👍, and the bot goes on by itsel
     ]);
     expect(prompts()).toHaveLength(2);
     expect(JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).systemPrompt).toContain(
-      "A plain yes or no needs no widget: ask in one short sentence; a word or 👍/👎 on your message comes back as their reply.");
+      "A plain yes or no needs no widget: ask in one short sentence; a word or 👍 on your message comes back as their reply, and a 👎 reaches you as a note with their next message.");
     const reactionPrompt = prompts()[1]!;
     evidence.push({ reactionPrompt });
     expect(reactionPrompt).toContain("The current message is the person's reaction: they reacted 👍 to your earlier message instead of typing a reply.");
@@ -86,15 +86,22 @@ it("answers a bot's yes-or-no question with a 👍, and the bot goes on by itsel
     expect(thanks).toMatch(/\(\S+ reacted ❤️ to your message “Sent it to Sam\.”\.\)\n\nThanks!/);
     expect(thanks).not.toContain("reacted 👍");
 
-    expect(await react(asked.id, "👎", true)).toMatchObject({ delivery: "started", message: { reactions: [{ emoji: "👎", by: "user" }] } });
+    const lines = (await transcript()).length;
+    expect(await react(asked.id, "👎", true)).toMatchObject({ delivery: "noted", message: { reactions: [{ emoji: "👎", by: "user" }] } });
+    expect((await api("GET", "/api/bots?messages=0")).bots.find((candidate: any) => candidate.id === bot.id).busy).toBeFalsy();
+    expect(await transcript()).toHaveLength(lines);
+    expect(prompts()).toHaveLength(3);
+    await api("POST", `/api/bots/${bot.id}/messages`, { threadId: bot.threadId, text: "Actually, wait." }, 202);
     await settled("Understood: I'll recall it.");
-    expect(prompts()[3]).toContain("they reacted 👎 to your earlier message instead of typing a reply.\n👎 means no, not that.");
-    expect(await react(asked.id, "👍", true)).toMatchObject({ delivery: "started" });
+    const quiet = prompts()[3]!;
+    evidence.push({ quiet });
+    expect(quiet.match(/\(\S+ reacted 👎 to your message “I drafted the email to Sam\. Shall I send it\?”\.\)/g)).toHaveLength(1);
+    expect(quiet).toMatch(/reacted 👎 to your message “I drafted the email to Sam\. Shall I send it\?”\.\)\n\nActually, wait\./);
+    await api("POST", `/api/bots/${bot.id}/messages`, { threadId: bot.threadId, text: "Fine." }, 202);
     await settled("Then it stays sent.");
-    expect(prompts()[4]).toContain("they reacted 👍 to your earlier message instead of typing a reply.\n👍 answers that message. If it asked them something or offered to do something, 👍 means yes, go ahead");
+    expect(prompts()[4]).not.toContain("reacted 👎");
     const answers = (await transcript()).filter((message) => message.reaction);
-    expect(answers.map((message) => [message.reaction, message.sendId.slice(-1)])).toEqual([["👍", "y"], ["👎", "n"], ["👍", "y"]]);
-    expect(new Set(answers.map((message) => message.sendId)).size).toBe(3);
+    expect(answers.map((message) => [message.reaction, message.sendId.slice(-1)])).toEqual([["👍", "y"]]);
 
     const session = await api("GET", "/api/auth/session");
     expect(session).not.toHaveProperty("reactor");
@@ -193,11 +200,11 @@ it("allows an open approval with a 👍 on its card and denies one with a 👎",
   }
 }, 90_000);
 
-it("in a room, gives the 👍 to the member that asked, by name", async () => {
+it("in a room, gives the 👍 to the member that asked, by name, and a 👎 to its next turn anywhere in the room, quietly", async () => {
   const scratch = mkdtempSync(join(tmpdir(), "omb-reaction-room-"));
   const promptLog = join(scratch, "prompts.jsonl");
   const fixture = await launchVerificationServer({
-    FAKE_CLAUDE_REPLIES: JSON.stringify(["Shall I post the launch note?", "Posted it.", "Noted."]),
+    FAKE_CLAUDE_REPLIES: JSON.stringify(["Shall I post the launch note?", "Posted it.", "Noted.", "On the pricing now."]),
     FAKE_CLAUDE_REPLY_STATE: join(scratch, "reply-state"),
     FAKE_CLAUDE_TOOL_CALLS: "[]",
     FAKE_CLAUDE_PROMPTS: promptLog,
@@ -237,7 +244,7 @@ it("in a room, gives the 👍 to the member that asked, by name", async () => {
     expect(answered).toContain(": [reacted 👍 to Otter: “Shall I post the launch note?”]");
     expect(answered).not.toContain("@Otter: 👍");
     expect(JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).systemPrompt)
-      .toContain("A \"[reacted 👍 to …]\" line is that person's whole reply to the message it names: 👍 means yes, go ahead when that message asked them something or offered to do something, and only got it (start no new work) when it just told them something; 👎 means no.");
+      .toContain("A \"[reacted 👍 to …]\" line is that person's whole reply to the message it names: 👍 means yes, go ahead when that message asked them something or offered to do something, and only got it (start no new work) when it just told them something. A \"(… reacted 👎 …)\" note, like any reaction in parentheses, is quiet feedback on the message it names or follows (👎: not that): weigh it, and start no new work for it alone.");
 
     const posted = after.find((message) => message.text === "Posted it.");
     expect(await api("POST", `/api/threads/${room.threadId}/messages/${posted.id}/reactions`, { emoji: "🎉", on: true }))
@@ -246,7 +253,21 @@ it("in a room, gives the 👍 to the member that asked, by name", async () => {
     await settled("Noted.");
     const thanked = prompts()[2]!;
     evidence.push({ thanked });
-    expect(thanked).toMatch(/Otter: Posted it\.\n\(\S+ reacted 🎉\)/);
+    expect(thanked.match(/\(\S+ reacted 🎉 to your message “Posted it\.”\.\)/g)).toHaveLength(1);
+    expect(thanked).not.toMatch(/Otter: Posted it\.\n\(/);
+
+    const roomLines = (await transcript()).length;
+    expect(await api("POST", `/api/threads/${room.threadId}/messages/${posted.id}/reactions`, { emoji: "👎", on: true }))
+      .toMatchObject({ delivery: "noted" });
+    expect(await transcript()).toHaveLength(roomLines);
+    expect(prompts()).toHaveLength(3);
+    const pricing = (await api("POST", `/api/groups/${room.id}/tasks`, { title: "Pricing" }, 201)).task;
+    await api("POST", `/api/groups/${room.id}/messages`, { threadId: pricing.threadId, text: "@Otter start on pricing." }, 202);
+    await expect.poll(async () => (await api("GET", `/api/threads/${pricing.threadId}/messages`)).messages
+      .some((message: any) => message.text === "On the pricing now."), { timeout: 20_000 }).toBe(true);
+    const elsewhere = prompts()[3]!;
+    evidence.push({ elsewhere });
+    expect(elsewhere.match(/reacted 👎 to your message “Posted it\.”/g)).toHaveLength(1);
   } finally {
     writeFileSync(`${fixture.info.logPath}.reaction-room.json`, JSON.stringify(evidence, null, 2));
     await fixture.close();

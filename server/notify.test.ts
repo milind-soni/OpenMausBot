@@ -84,6 +84,12 @@ describe("buildNotification", () => {
 
     expect(buildNotification("done", bot, "thread-1", "pushed")?.avatarUrl).toBeUndefined();
   });
+  it("marks a scheduled routine's finish as a report, and nothing else", () => {
+    expect(buildNotification("done", bot, "thread-1", "Daily digest ready", { routine: true })?.routine).toBe(true);
+    expect(buildNotification("done", bot, "thread-1", "Daily digest ready")).not.toHaveProperty("routine");
+    expect(buildNotification("done", bot, "thread-1", "Daily digest ready", { routine: false })).not.toHaveProperty("routine");
+    expect(buildNotification("routine-failed", bot, "thread-1", "boom", { routine: true })).not.toHaveProperty("routine");
+  });
   it("titles a finished wait and keeps its line as the body", () => {
     expect(buildNotification("wait", { id: "b", name: "Pepper" }, "t", "the build: done. ci passed.")).toEqual({
       kind: "wait", botId: "b", botName: "Pepper", threadId: "t", title: "Pepper's wait is over", body: "the build: done. ci passed.",

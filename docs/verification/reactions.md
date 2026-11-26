@@ -1,10 +1,13 @@
 # Reactions
 
-A person reacts to a message from the chat's action row. A 👍 or 👎 on a bot's
-message is their reply to it and reaches that bot at once; ❤️ 😂 🎉 👀 never
-start a turn and reach the bot with the person's next message. The rule lives
-in `server/reactions.ts`, the route in `server/routes/reactions.ts`, and the
-reply itself goes the way a late answer to a question card goes
+A person reacts to a message from the chat's action row. A 👍 on a bot's
+message is their reply to it ("yes, go ahead") and reaches that bot at once. A
+👎, like ❤️ 😂 🎉 👀, posts nothing and starts no turn: the bot reads it once, in
+its next turn: in a 1:1 conversation ahead of the person's next message, in a
+room in its next turn in any of the room's conversations. A 👎 still answers an
+open card (deny, or no) and a line in a person's inbox. The rule lives in
+`server/reactions.ts`, the route in `server/routes/reactions.ts`, and a 👍
+reply goes the way a late answer to a question card goes
 (`server/person-replies.ts`).
 
 ## Server
@@ -26,9 +29,12 @@ data. A second 👍 with `on: true`, or taking the 👍 back and
 setting it again, delivers nothing: the bot already has that answer. A ❤️ on
 the reply answers `delivery: "noted"`, starts no turn, and opens the next typed
 turn's prompt with `(User reacted ❤️ to your message “Sent it to Sam.”.)`.
-Changing the question's 👍 to 👎 and back to 👍 starts a turn for each change,
-whose prompts read the 👎 as no and the 👍 as yes. The system prompt tells the
-bot to ask a plain yes or no in one sentence instead of a widget.
+Changing the question's 👍 to 👎 answers `delivery: "noted"`, adds no line and
+starts no turn; the person's next typed message opens with `(User reacted 👎 to
+your message “I drafted the email to Sam. Shall I send it?”.)` exactly once,
+and the turn after that does not repeat it. The system prompt tells the bot to
+ask a plain yes or no in one sentence instead of a widget, that a 👍 comes back
+as the reply and a 👎 as a note with the next message.
 
 Another test reacts 👍 to a new bot's greeting: the bot answers, and the
 conversation keeps its untitled name instead of being named "👍".
@@ -40,8 +46,13 @@ engine receives `allow` and `deny`, and each card records
 
 The room test runs a room: a 👍 on Otter's question adds the room line
 `@Otter: 👍` and Otter answers; the room's conversation window shows the line
-as `User: [reacted 👍 to Otter: “Shall I post the launch note?”]` and, after a
-🎉, Otter's line with `(User reacted 🎉)` under it.
+as `User: [reacted 👍 to Otter: “Shall I post the launch note?”]`. After a 🎉 on
+Otter's reply, Otter's next turn opens with `(User reacted 🎉 to your message
+“Posted it.”.)` once, and Otter's own lines carry no reaction marks in the
+transcript it reads (other members still see `(User reacted 🎉)` under them).
+A 👎 on that line adds no line and starts no turn, and reaches Otter's next turn
+in another of the room's threads, once. These room notes are kept in memory: a
+restart drops the ones not yet told.
 
 Evidence is written beside the fixture's server log as
 `<server-log>.reactions.json`, `<server-log>.reaction-cards.json` and
@@ -54,8 +65,10 @@ pnpm exec vitest run server/bot-visibility.e2e.test.ts -t "reaction their own"
 ```
 
 Ada's and Bob's 👍 sit side by side with their names, Ada's 👎 replaces only
-her own, `GET /api/auth/session` returns each session's `reactor` key, and the
-three replies reach the bot attributed to the person who reacted.
+her own, `GET /api/auth/session` returns each session's `reactor` key, the two
+👍 replies reach the bot attributed to the person who reacted, and Ada's 👎 adds
+no line. The change streams to Bob, who sees the conversation; a reaction in a
+conversation Bob cannot see streams to Ada and never to him.
 
 ## Renderer
 
@@ -93,7 +106,7 @@ pnpm control:omb ui console --ui $H
 ```
 
 Expected: the open row is a toolbar named `Reactions` with six toggle buttons,
-`Thumbs up: yes, go ahead` first and focused. After the click the question has
+`Thumbs up: yes, go ahead` first and focused, then `Thumbs down`. After the click the question has
 a group `Reactions` holding `Thumbs up: yes, go ahead: You`, no `👍` bubble is
 drawn, and the bot's next message `Sent it to Sam.` follows by itself. From the
 keyboard, Enter on a focused **Add reaction** opens the row, Arrow keys move,

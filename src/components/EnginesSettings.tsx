@@ -12,7 +12,8 @@ import { ApiKeyEngineManage, EngineSetup, EngineUpdateNotice, EngineWarningNotic
 import { AntigravitySwitchCli } from "./AntigravitySwitchCli";
 import { AppCopyNotice } from "./EngineAppCopy";
 import { forgetAppCopySwitches } from "@/state/engine-install";
-import { AccountsCard, AddAccount, accountGroupOf, accountsReady, type AccountGroup } from "./EngineAccounts";
+import { AccountsCard, AddAccount, accountGroupOf, accountGroupTitle, accountsReady, type AccountGroup } from "./EngineAccounts";
+import { engineDisplayName } from "@/lib/engine-name";
 import { ClaudeEndpoints, CodexEndpoints } from "./ClaudeEndpoints";
 import { ClaudeBedrockEndpoints } from "./ClaudeBedrock";
 import { DEVICE_SIGN_IN_COPY, deviceSignInProvider } from "./DeviceSignIn";
@@ -197,7 +198,7 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
 }
 
 /** The executable behind an engine: its path, Claude's self-update, and a reset to the default. */
-function EngineAdvanced({ instance }: { instance: InstanceInfo }) {
+function EngineAdvanced({ instance, accountName }: { instance: InstanceInfo; accountName?: string }) {
   const { refreshInstances } = useStoreActions();
   const showInstances = useShowInstances();
   const [open, setOpen] = useState(false);
@@ -258,7 +259,7 @@ function EngineAdvanced({ instance }: { instance: InstanceInfo }) {
 
   return (
       <details className="mt-4 border-t border-hairline/40 pt-3">
-        <summary className="cursor-pointer rounded-md py-1 text-[12px] font-medium text-ink-secondary outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">{t("engines.library.advanced")}</summary>
+        <summary className="cursor-pointer rounded-md py-1 text-[12px] font-medium text-ink-secondary outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">{accountName ? `${t("engines.library.advanced")} · ${accountName}` : t("engines.library.advanced")}</summary>
         <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("engines.footer")}</p>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-[13px]">
           {instance.cli ? (
@@ -461,7 +462,7 @@ function ProviderRow({ instance, ready, open, onToggle, compact, children }: {
     <div data-simple-engine={instance.instanceId} className={cn("flex items-center gap-3 px-4", compact && !ready && !status.tone ? "min-h-11 py-1.5" : "min-h-16 py-3")}>
       <SettingsMark><InstanceProviderMark instance={instance} size={18} subtle /></SettingsMark>
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate text-[14px] leading-5 text-ink">{instance.displayName}</span>
+        <span className="truncate text-[14px] leading-5 text-ink">{accountGroupOf(instance) === "antigravity" ? accountGroupTitle("antigravity") : instance.displayName}</span>
         {!(compact && !ready && !status.tone) && <span className="truncate text-[13px] leading-[18px] text-ink-secondary"><StatusDot tone={status.tone} />{status.text}</span>}
       </span>
       <button type="button" aria-expanded={open} className="ui-button ml-3 shrink-0" onClick={onToggle}>
@@ -536,6 +537,13 @@ function SimpleEngines({ rows, isReady, renderEngine, more, accountsOnly = false
   );
 }
 
+function accountsAdvanced(group: AccountGroup, accounts: InstanceInfo[]): ReactNode {
+  if (group === "antigravity") return accounts.map((account) => (
+    <EngineAdvanced key={account.instanceId} instance={account} accountName={accounts.length > 1 ? engineDisplayName(account) : undefined} />
+  ));
+  return <>{group === "claude" ? <><ClaudeEndpoints /><ClaudeBedrockEndpoints /></> : <CodexEndpoints />}<EngineAdvanced instance={accounts[0]!} /></>;
+}
+
 /** A provider's accounts share one card, which takes the place of its first account. */
 function groupedAccounts(listed: InstanceInfo[]) {
   const groups = new Map<AccountGroup, InstanceInfo[]>();
@@ -558,7 +566,9 @@ export function AiSignInSettings() {
   const isReady = (instance: InstanceInfo) => { const group = groupOf(instance); return group ? accountsReady(groups.get(group)!) : engineReady(instance); };
   const renderEngine = (instance: InstanceInfo, bare = false) => {
     const group = groupOf(instance);
-    return group ? <AccountsCard group={group} accounts={groups.get(group)!} bare={bare} /> : <EngineRow instance={instance} bare={bare} />;
+    return group
+      ? <AccountsCard group={group} accounts={groups.get(group)!} bare={bare} advanced={group === "antigravity" ? accountsAdvanced(group, groups.get(group)!) : undefined} />
+      : <EngineRow instance={instance} bare={bare} />;
   };
   return <AdminOnly><div data-ai-sign-in="">
     <SimpleEngines rows={rows} isReady={isReady} renderEngine={renderEngine} accountsOnly more={{ id: "ai-sign-in-more", open: false, onToggle: () => {} }} />
@@ -581,7 +591,7 @@ export function EnginesSettings({ simple = false, more }: { simple?: boolean; mo
     const group = groupOf(instance);
     return group
       ? <AccountsCard group={group} accounts={groups.get(group)!} bare={bare}
-        advanced={<>{group === "claude" ? <><ClaudeEndpoints /><ClaudeBedrockEndpoints /></> : <CodexEndpoints />}<EngineAdvanced instance={instance} /></>} />
+        advanced={accountsAdvanced(group, groups.get(group)!)} />
       : <EngineRow instance={instance} bare={bare} />;
   };
 
