@@ -1892,6 +1892,7 @@ its thread (and a routine's run row) gets one line saying which:
 | `loopGuard.unattendedStopAt`, or `OMB_LOOP_GUARD_UNATTENDED_STOP_AT` | `20` | The times in a row one shell command may fail the same way. For such a turn the loop guard (see "A bot stuck on a failing command") is on whatever `loopGuard.enabled` says, with its note at `loopGuard.steerAt` and its stop here, or at `loopGuard.stopAt` if that is lower. `2`-`1000`. |
 | `OMB_HANDOFF_MAX_FAILURES` | `5` | For work nobody is waiting on: work one request handed to other bots that may fail in a row, with none completing between. At that many the request is stopped with a line naming the last failure. |
 | `OMB_HANDOFF_MAX_TURNS` | `300` | For work nobody is waiting on: the turns one request may hand out in all, across every bot it hands work to. Nothing renews it. Past it no more work is handed out, and the bot that asked still gets one turn to wrap up what came back. |
+| `OMB_QUEUE_TIMEOUT_MINUTES` | `30` | How long work handed to a teammate may wait in the queue before it is given up. Until then it holds its slot, and for room work its room. The window starts when the work is queued and starts again when the server restarts, so a restart never expires a queue entry on its own. `OMB_QUEUE_TIMEOUT_MS` sets the same window in milliseconds; `OMB_QUEUE_TIMEOUT_MINUTES` wins when both are set. |
 
 The three `OMB_UNATTENDED_TURN_*` settings and
 `OMB_LOOP_GUARD_UNATTENDED_STOP_AT` also take `off`; `loopGuard.unattended:
