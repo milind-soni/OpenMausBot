@@ -30,7 +30,6 @@ import { BotEditorStore, initialState, StoreProvider } from "@/state/store";
 import { setLocale } from "@/lib/i18n";
 import { ThreadRefsContext } from "./ThreadRefs";
 import * as AttachmentPreview from "./AttachmentPreview";
-import * as OutsideWorkspaceProbe from "./outside-workspace-probe";
 import { messageReferencesFile } from "../../server/message-file";
 
 // Most of this file pins Advanced mode's chrome; the Simple code block has its own tests below.
@@ -295,6 +294,107 @@ describe("math rendering", () => {
   it("does not pair dollars across paragraphs", () => {
     const html = renderToStaticMarkup(createElement(ChatMarkdown, { text: "Costs $5.\n\nThen pay later$" }));
     expect(html).not.toContain('class="katex"');
+  });
+
+  it("does not swallow headings or bold text when display math $$ is unclosed", () => {
+    const text = [
+      "$$",
+      "#### 核心系统状态概览",
+      "**加粗指标**: 正常运行",
+    ].join("\n");
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text }));
+    expect(html).toContain("核心系统状态概览");
+    expect(html).toContain("<strong>加粗指标</strong>");
+    expect(html).not.toContain("katex-error");
+    expect(html).not.toContain("katex-display");
+  });
+
+  it("does not corrupt tables or lists when $$ is unclosed before a table", () => {
+    const text = [
+      "$$",
+      "| 服务名称 | 节点状态 | 延迟 (ms) |",
+      "| :--- | :--- | :--- |",
+      "| auth-cluster | ACTIVE | 12 |",
+      "| gateway-v2 | ACTIVE | 8 |",
+      "",
+      "- 列表说明项 A",
+    ].join("\n");
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text }));
+    expect(html).toContain("<table");
+    expect(html).toContain("服务名称");
+    expect(html).toContain("auth-cluster");
+    expect(html).toContain("gateway-v2");
+    expect(html).toContain("列表说明项 A");
+    expect(html).not.toContain("katex-error");
+    expect(html).not.toContain("katex-display");
+  });
+
+  it("safely isolates unclosed $$ before heading and still renders subsequent valid math", () => {
+    const text = [
+      "$$",
+      "#### 核心系统状态概览",
+      "**加粗指标**: 正常运行",
+      "",
+      "$$",
+      "E = mc^2",
+      "$$",
+    ].join("\n");
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text }));
+    expect(html).toContain("核心系统状态概览");
+    expect(html).toContain("<strong>加粗指标</strong>");
+    expect(html).toContain('class="katex"');
+    expect(html).not.toContain("katex-error");
+  });
+
+  it("does not match single $ greedily across multiple lines", () => {
+    const text = [
+      "这是一个普通的段落，包含一个符号 $ 没有闭合。",
+      "这里是下一行文本，包含另外一个 $ 符号。",
+    ].join("\n");
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text }));
+    expect(html).not.toContain('class="katex"');
+    expect(html).not.toContain("katex-error");
+    expect(html).toContain("包含一个符号 $ 没有闭合。");
+    expect(html).toContain("这里是下一行文本，包含另外一个 $ 符号。");
+  });
+
+  it("does not break list indentation or leak red errors when $$ is used inside a list item", async () => {
+    await ensureChatKatex();
+    const text = [
+      "- **加权净收益方程**：",
+      "  $$\\text{NetQuotaROI} = W_p \\cdot \\Big[\\Delta C_{\\text{dirty}}\\Big]$$",
+      "  - **同级模型临界点**（Flash 派发 Flash，缓存系数 $\\alpha = 0.10$）：剩余 5 轮时临界点为 **$13,500\\text{ tokens}$**",
+      "",
+      "#### 硬性三分流仲裁标准：",
+      "1. **强制内联直办 (`INLINE_EXECUTION`)**：",
+      "   - 命中条件：脏数据 $\\le 1,500\\text{ t}$（单条 CLI 或 $\\le 120$ 行切片即可闭环）。",
+      "   - **裁决**：**严禁拉起子代理**，立省 6,000 Tokens 固定税。",
+    ].join("\n");
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text }));
+    expect(html).not.toContain("katex-error");
+    expect(html).toContain("<strong>加权净收益方程</strong>");
+    expect(html).toContain("<strong>同级模型临界点</strong>");
+    expect(html).toContain("强制内联直办");
+    expect(html).toContain("<strong>严禁拉起子代理</strong>");
+  });
+
+  it("renders valid complex LaTeX formulas with absolute values and matrices", () => {
+    const text = [
+      "$$",
+      "|a| + |b| = c",
+      "$$",
+      "",
+      "$$",
+      "\\begin{aligned}",
+      "f(x) &= (x + a)(x + b) \\\\",
+      "     &= x^2 + (a + b)x + ab",
+      "\\end{aligned}",
+      "$$",
+    ].join("\n");
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text }));
+    expect(html.match(/class="katex"/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(html).toContain("katex-display");
+    expect(html).not.toContain("katex-error");
   });
 
   it.each([
@@ -929,16 +1029,10 @@ describe("ChatMarkdown attachments", () => {
 
   describe("a file link outside the conversation's workspace", () => {
     const filePath = "C:\\Users\\Maus\\_draft\\ollama-gen.js";
-    const render = (
-      outsideWorkspace: boolean,
-      href = filePath,
-      probedOutside: boolean | null = outsideWorkspace ? true : false,
-      saveFailed = outsideWorkspace,
-    ) => {
-      const probe = vi.spyOn(OutsideWorkspaceProbe, "useMessageFileOutsideWorkspace").mockReturnValue(probedOutside);
+    const render = (outsideWorkspace: boolean, href = filePath) => {
       const save = vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
-        state: saveFailed ? "failed" : "idle",
-        reason: outsideWorkspace ? "the linked file is outside this conversation's workspace" : "",
+        state: "failed",
+        reason: "the linked file is outside this conversation's workspace",
         savedTo: "",
         outsideWorkspace,
         retryable: !outsideWorkspace,
@@ -951,19 +1045,17 @@ describe("ChatMarkdown attachments", () => {
         }));
       } finally {
         save.mockRestore();
-        probe.mockRestore();
       }
     };
     const revealInFolder = vi.fn(async () => "shown" as const);
 
-    it("reveals the host path on the first click in the local desktop app when the probe already refused it", () => {
+    it("offers Show in folder in the local desktop app, without printing the path", () => {
       vi.stubGlobal("window", { ogb: { revealInFolder, remoteClient: { active: false } } });
       try {
-        const html = render(false, filePath, true);
-        expect(html).not.toContain("This file is outside this chat&#x27;s working folder, so it can&#x27;t be saved from here");
+        const html = render(true);
+        expect(html).toContain("This file is outside this chat&#x27;s working folder, so it can&#x27;t be saved from here");
         expect(html).not.toContain("the linked file is outside");
-        expect(html).toContain('title="Show in folder"');
-        expect(html).toContain("lucide-folder-open");
+        expect(html).toContain("Show in folder");
         expect(html).not.toContain("<code");
       } finally {
         vi.unstubAllGlobals();
@@ -973,8 +1065,8 @@ describe("ChatMarkdown attachments", () => {
     it("shows the full path as selectable text to a remote client instead", () => {
       vi.stubGlobal("window", { ogb: { revealInFolder, remoteClient: { active: true } } });
       try {
-        const html = render(true, filePath, null);
-        expect(html).not.toContain('title="Show in folder"');
+        const html = render(true);
+        expect(html).not.toContain("Show in folder");
         expect(html).toMatch(/<code[^>]*select-all[^>]*>C:\\Users\\Maus\\_draft\\ollama-gen\.js<\/code>/);
       } finally {
         vi.unstubAllGlobals();
@@ -982,36 +1074,22 @@ describe("ChatMarkdown attachments", () => {
     });
 
     it("does not offer a retry for a refusal that happens on every try", () => {
-      vi.stubGlobal("window", { ogb: { revealInFolder, remoteClient: { active: false } } });
-      try {
-        expect(render(false, filePath, true)).not.toContain("lucide-rotate-ccw");
-        expect(render(false, "file:///Users/maus/Desktop/designs/Posts/2026-10-08_News", true)).not.toContain("lucide-rotate-ccw");
-        expect(render(false, filePath, false, true)).toContain("lucide-rotate-ccw");
-      } finally {
-        vi.unstubAllGlobals();
-      }
+      expect(render(true)).not.toContain("lucide-rotate-ccw");
+      expect(render(true, "file:///Users/maus/Desktop/designs/Posts/2026-10-08_News")).not.toContain("lucide-rotate-ccw");
+      expect(render(false)).toContain("lucide-rotate-ccw");
     });
 
     it("shows the path in a browser, which has no desktop bridge", () => {
-      expect(render(true, filePath, null)).toContain(`>${filePath}</code>`);
-    });
-
-    it("keeps the link usable in a browser, where nothing probes it", () => {
-      const html = render(false, filePath, null);
-      expect(html).not.toContain("animate-spin");
-      expect(html).not.toContain('disabled=""');
+      expect(render(true)).toContain(`>${filePath}</code>`);
     });
 
     describe("a backticked folder path with a space", () => {
       const folder = "D:\\Claude Works\\v3\\";
       const text = `The videos are in \`${folder}\``;
-      const outsideSave = () => {
-        vi.spyOn(OutsideWorkspaceProbe, "useMessageFileOutsideWorkspace").mockReturnValue(null);
-        return vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
-          state: "failed", reason: "", savedTo: "", outsideWorkspace: true, retryable: false, folder: null,
-          save: vi.fn(async () => undefined),
-        });
-      };
+      const outsideSave = () => vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
+        state: "failed", reason: "", savedTo: "", outsideWorkspace: true, retryable: false, folder: null,
+        save: vi.fn(async () => undefined),
+      });
 
       it("shows the real path in a browser, not the link's %20 spelling", () => {
         const save = outsideSave();
@@ -1036,20 +1114,15 @@ describe("ChatMarkdown attachments", () => {
 
       it("asks the desktop app to show the real folder", async () => {
         const save = outsideSave();
-        const probe = vi.spyOn(OutsideWorkspaceProbe, "useMessageFileOutsideWorkspace").mockReturnValue(true);
         const ogb = (window as { ogb?: unknown }).ogb;
         const reveal = vi.fn(async () => "shown" as const);
         (window as { ogb?: unknown }).ogb = { revealInFolder: reveal, remoteClient: { active: false } };
-        vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
-          state: "idle", reason: "", savedTo: "", outsideWorkspace: false, retryable: false, folder: null,
-          save: vi.fn(async () => undefined),
-        });
         const host = document.createElement("div");
         document.body.append(host);
         const root = createRoot(host);
         try {
           await act(async () => root.render(createElement(ChatMarkdown, { text, message: { threadId: "thread-1", messageId: "message-1" } })));
-          const show = host.querySelector('button[title="Show in folder"]') as HTMLButtonElement;
+          const show = [...host.querySelectorAll("button")].find((button) => button.textContent === "Show in folder")!;
           await act(async () => show.click());
           expect(reveal).toHaveBeenCalledWith(folder);
         } finally {
@@ -1057,34 +1130,19 @@ describe("ChatMarkdown attachments", () => {
           host.remove();
           (window as { ogb?: unknown }).ogb = ogb;
           save.mockRestore();
-          probe.mockRestore();
         }
       });
     });
 
     it("leaves other failures alone", () => {
       vi.stubGlobal("window", { ogb: { revealInFolder, remoteClient: { active: false } } });
-      const probe = vi.spyOn(OutsideWorkspaceProbe, "useMessageFileOutsideWorkspace").mockReturnValue(false);
-      const save = vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
-        state: "failed",
-        reason: "the linked file is outside this conversation's workspace",
-        savedTo: "",
-        outsideWorkspace: false,
-        retryable: true,
-        folder: null,
-        save: vi.fn(async () => undefined),
-      });
       try {
-        const html = renderToStaticMarkup(createElement(ChatMarkdown, {
-          text: `[ollama-gen.js](${filePath})`, message: { threadId: "thread-1", messageId: "message-1" },
-        }));
+        const html = render(false);
         expect(html).toContain("the linked file is outside this conversation&#x27;s workspace");
-        expect(html).not.toContain('title="Show in folder"');
+        expect(html).not.toContain("Show in folder");
         expect(html).not.toContain(filePath);
       } finally {
         vi.unstubAllGlobals();
-        save.mockRestore();
-        probe.mockRestore();
       }
     });
   });
