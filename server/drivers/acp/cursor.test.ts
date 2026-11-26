@@ -437,12 +437,13 @@ describe("CursorAgentDriver", () => {
     }
   });
 
-  it("sends cursor_login only when no Cursor key is in the agent's env", async () => {
+  it("sends cursor_login once when the CLI reports no login and no Cursor key is in the agent's env", async () => {
     ensureDirs();
     chmodSync(FAKE_CLI, 0o755);
     const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-auth-"));
     scratchDirs.push(scratch);
     process.env.FAKE_ACP_AUTH_METHOD = "cursor_login";
+    process.env.FAKE_ACP_AUTH = "0";
     const authenticateCalls = async (environment: Record<string, string>) => {
       const rpcFile = join(scratch, `rpc-${Object.keys(environment).join("-") || "none"}.jsonl`);
       process.env.FAKE_ACP_RPC_APPEND_FILE = rpcFile;
@@ -469,6 +470,36 @@ describe("CursorAgentDriver", () => {
     expect(await authenticateCalls({})).toBe(1);
     expect(await authenticateCalls({ CURSOR_API_KEY: "key-from-env" })).toBe(0);
     expect(await authenticateCalls({ CURSOR_AUTH_TOKEN: "token-from-env" })).toBe(0);
+    delete process.env.FAKE_ACP_AUTH;
+  });
+
+  it("skips cursor_login when the CLI already holds a login", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-auth-signed-in-"));
+    scratchDirs.push(scratch);
+    process.env.FAKE_ACP_AUTH_METHOD = "cursor_login";
+    process.env.FAKE_ACP_AUTH = "1";
+    const rpcFile = join(scratch, "rpc.jsonl");
+    process.env.FAKE_ACP_RPC_APPEND_FILE = rpcFile;
+    const instance = await CursorAgentDriver.create({
+      instanceId: "cursor-auth-signed-in",
+      displayName: "Cursor",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-cursor-auth-signed-in", text: "hi" });
+      expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
+      const methods = readFileSync(rpcFile, "utf8").trim().split("\n").map((line) => JSON.parse(line).method);
+      expect(methods).not.toContain("authenticate");
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      delete process.env.FAKE_ACP_AUTH;
+    }
   });
 
   it("omits --force when fullAuto is off, still approves MCP, and completes a turn", async () => {

@@ -235,6 +235,7 @@ export interface AcpSupport extends AcpDriverHooks {
     config: AcpConfig,
     instanceId: string, allowEnv?: readonly string[],
   ): boolean | Promise<boolean>;
+  skipAuthenticateWhenAuthenticated?: boolean;
   /** Refuse a first-party cloud turn before spawning when snapshot auth is
    * false. Local injected models deliberately bypass this subscription gate. */
   requireAuthenticationBeforeSpawn?: boolean;
@@ -1090,11 +1091,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 ));
               }
               if (!skipSubscriptionAuthForLocalInject(turn.model) && !session.authenticated && !support.skipsAuthenticate?.(instanceId)) {
-                const methods: Array<{ id?: string }> = Array.isArray(session.initResult?.authMethods)
-                  ? session.initResult.authMethods
-                  : [];
-                const methodId = support.pickAuthMethod(methods, spawnEnv);
-                if (methodId) {
+                const methods = Array.isArray(session.initResult?.authMethods) ? session.initResult.authMethods : [];
+                const methodId = support.pickAuthMethod(methods, spawnEnv), skip = methodId && support.skipAuthenticateWhenAuthenticated === true && await support.isAuthenticated(spawnEnv, turnConfig, instanceId, instanceEnvNames(input.environment, spawnEnv));
+                if (skip) session.authenticated = true;
+                else if (methodId) {
                   try {
                     await session.host.once("authenticate", () => retryTransient(request, "authenticate", { methodId }, INIT_TIMEOUT));
                     session.authenticated = true;
