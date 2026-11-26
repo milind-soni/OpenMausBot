@@ -7,6 +7,7 @@ import { textOnlyErrorResultLine } from "./mcp-error-result.ts";
 import { createToolListNormalizer } from "./mcp-tool-schema.ts";
 import { createJournalTap, postJournal } from "./saved-steps/journal-tap.ts";
 import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
+import { toolsForSessionShare } from "./tool-list-share.ts";
 
 export const BRIDGE_INACTIVITY_MS = 45_000;
 const PROBE_TIMEOUT_MS = 10_000;
@@ -358,7 +359,8 @@ export function runMcpBridge(options: BridgeOptions): void {
     : null;
   const reply = createReplyQueue(tap, (written) => process.stdout.write(written + "\n"));
   const answer = (line: string) => reply(line, line);
-  const toolLists = createToolListNormalizer(toolSchemaProfileFromEnv(), (line) => process.stderr.write(`${options.label}: ${line}\n`), options.ownTools);
+  const logList = (line: string) => process.stderr.write(`${options.label}: ${line}\n`);
+  const toolLists = createToolListNormalizer(toolSchemaProfileFromEnv(), logList, options.ownTools, (tools) => toolsForSessionShare(tools, process.env, logList));
   // Injected responses must never land inside one of the child's half-written frames.
   const rewrite = options.rewriteResponse ?? ((line: string) => line);
   const respond = (line: string) => reply(line, textOnlyErrorResultLine(rewrite(toolLists.rewriteResponse(line))));
