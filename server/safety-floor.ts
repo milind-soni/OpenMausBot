@@ -449,7 +449,8 @@ function commandIndex(words: string[], unread: () => void): number {
 }
 
 /** The command line a shell is handed with `-c`, or null. */
-function inlineScript(args: string[], zsh: boolean): string | null {
+function inlineScript(args: string[], shell: string): string | null {
+  const attached = shell === "zsh" || shell === "fish";
   let inline = false;
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -457,11 +458,11 @@ function inlineScript(args: string[], zsh: boolean): string | null {
     if (/^--[a-z-]+$/.test(arg)) {
       if (arg === "--rcfile" || arg === "--init-file") index++;
     } else if (/^[-+][A-Za-z]+$/.test(arg)) {
-      // zsh reads the rest of the word after -o as the option name (`zsh -oerrexit`); bash and sh give each -o or -O
-      // in a cluster the next word (`bash -oc pipefail CMD` runs CMD)
-      const letters = zsh ? arg.slice(1).replace(/o.+/, "o") : arg.slice(1);
+      // zsh and fish read the rest of the word after -o as its value (`zsh -oerrexit`, `fish -odebug`); bash and sh
+      // give each -o or -O in a cluster the next word (`bash -oc pipefail CMD` runs CMD)
+      const letters = attached ? arg.slice(1).replace(/o.+/, "o") : arg.slice(1);
       if (arg[0] === "-" && letters.includes("c")) inline = true;
-      index += zsh ? Number(letters === arg.slice(1) && letters.endsWith("o")) : letters.replace(/[^oO]/g, "").length;
+      index += attached ? Number(letters === arg.slice(1) && letters.endsWith("o")) : letters.replace(/[^oO]/g, "").length;
     } else return inline ? arg : null;
   }
   return null;
@@ -591,7 +592,7 @@ function judge(command: Command, source: string, pass: Pass, mode: Mode, depth: 
     return scan(line, pass, as, depth + 1);
   };
 
-  if (SHELLS.has(program)) return run(inlineScript(args, program === "zsh"), "posix");
+  if (SHELLS.has(program)) return run(inlineScript(args, program), "posix");
   // PowerShell 7 off Windows: `rm` is the real rm and Remove-Item takes POSIX paths, so its script is read both ways.
   // The outer shell already removed the quotes, so the words after the flag are the script.
   if (!host.windows && mode === "posix" && (program === "pwsh" || program === "powershell")) {

@@ -140,6 +140,8 @@ const BLOCKED: Case[] = [
   ["zsh -oerrexit -c 'rm -rf /'", "delete-root"],
   ["zsh -eoerrexit -c 'rm -rf ~'", "delete-home"],
   ["zsh -o errexit -c 'rm -rf /'", "delete-root"],
+  ["fish -odebug -c 'rm -rf ~'", "delete-home"],
+  ["fish -o /tmp/fish.log -c 'rm -rf /'", "delete-root"],
   ["sudo sh -c \"bash -c 'rm -rf /'\"", "delete-root"],
   ["eval 'rm -rf /'", "delete-root"],
   // chains
