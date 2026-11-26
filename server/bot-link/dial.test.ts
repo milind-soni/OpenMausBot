@@ -118,7 +118,7 @@ describe("bot-link exchange lifetime", () => {
     cleanups.push(() => dialer.close());
     dialer.start();
     await requested.promise;
-    await dialer[action]();
+    await (action === "sleep" ? dialer.sleep(Date.now()) : dialer[action]());
     expect(transport.signals[0]!.aborted).toBe(true);
     expect(observed.receive).not.toHaveBeenCalled();
     expect(observed.setOnline).not.toHaveBeenCalledWith("cloud-peer", true);
@@ -137,7 +137,7 @@ describe("bot-link exchange lifetime", () => {
     cleanups.push(() => dialer.close());
     dialer.start();
     await transport.reading;
-    await dialer[action]();
+    await (action === "sleep" ? dialer.sleep(Date.now()) : dialer[action]());
     expect(transport.signals[0]!.aborted).toBe(true);
     expect(observed.receive).not.toHaveBeenCalled();
     expect(observed.setOnline).not.toHaveBeenCalledWith("cloud-peer", true);
@@ -230,7 +230,7 @@ async function sleepyCloud(answer: (request: { background: boolean; wait: number
 }
 
 /** A computer's link whose Cloud sleeps: work can be wanted, and what the dialer says of waking is kept. */
-function sleepyLink(origin: string) {
+function sleepyLink(origin: string, { sleeps = true }: { sleeps?: boolean } = {}) {
   let wanted: (person: boolean) => void = () => {};
   const waking: boolean[] = [];
   const link = {
@@ -243,7 +243,7 @@ function sleepyLink(origin: string) {
     setOnline: vi.fn(),
     setLevel: vi.fn(),
     setSleeps: vi.fn(),
-    sleeps: () => true,
+    sleeps: () => sleeps,
     setWaking: (_peer: string, on: boolean) => { waking.push(on); },
     setTransfer: vi.fn(),
     onOutgoing: () => () => {},
@@ -268,6 +268,37 @@ describe("a Cloud that sleeps", () => {
     expect(sleepy.seen).toEqual([]);
   });
 
+  it("this server starting asks nothing of the Cloud, even one the link never saw asleep, until the app says it is awake", async () => {
+    const sleepy = await sleepyCloud();
+    const { link } = sleepyLink(sleepy.origin, { sleeps: false });
+    const dialer = createDialer({ link, holdMs: 200, firstRetryMs: 1 });
+    cleanups.push(() => dialer.close());
+    dialer.start({ gentle: true });
+    await settle();
+    expect(dialer.state()).toMatchObject({ running: true, asleep: true });
+    expect(sleepy.seen, "a stopped Cloud is not started by this server starting").toEqual([]);
+  });
+
+  it("an awake the app heard before the link parked starts nothing; one heard after it asks the Cloud once", async () => {
+    let clock = 50_000;
+    const sleepy = await sleepyCloud();
+    const { link } = sleepyLink(sleepy.origin);
+    const dialer = createDialer({ link, holdMs: 5_000, firstRetryMs: 1, now: () => clock });
+    cleanups.push(() => dialer.close());
+    dialer.start({ gentle: true });
+    expect(dialer.state()).toMatchObject({ asleep: true, parkedAt: 50_000 });
+    clock = 60_000;
+    dialer.start({ heardAt: 20_000 });
+    dialer.start({ heardAt: 50_000 });
+    await settle();
+    expect(sleepy.seen, "the Admin's awake from before the Cloud went to sleep is stale").toEqual([]);
+    expect(dialer.state()).toMatchObject({ asleep: true });
+    dialer.start({ heardAt: 60_000 });
+    await sleepy.requests(1);
+    expect(sleepy.seen[0], "the first ask since the park, as background work; the held poll that follows is the link's own").toEqual({ background: true, wait: 0 });
+    expect(dialer.state()).toMatchObject({ asleep: false });
+  });
+
   it("work a person waits on wakes it with an exchange that is not background; the idle polls after it are background again", async () => {
     const sleepy = await sleepyCloud();
     const { link, observed, want, waking } = sleepyLink(sleepy.origin);
@@ -279,6 +310,21 @@ describe("a Cloud that sleeps", () => {
     await sleepy.requests(2);
     expect(sleepy.seen).toEqual([{ background: false, wait: 0 }, { background: true, wait: 5_000 }]);
     expect(observed.setOnline).toHaveBeenCalledWith("cloud-peer", true);
+  });
+
+  it("the Cloud's own asleep answer is kept for the app to hold, apart from a park the app asked for", async () => {
+    let clock = 70_000;
+    const sleepy = await sleepyCloud(() => "asleep");
+    const { link } = sleepyLink(sleepy.origin);
+    const dialer = createDialer({ link, firstRetryMs: 1, now: () => clock });
+    cleanups.push(() => dialer.close());
+    dialer.start({ gentle: true });
+    expect(dialer.state()).not.toHaveProperty("cloudAsleepAt");
+    clock = 80_000;
+    dialer.start({ heardAt: 80_000 });
+    await sleepy.requests(1);
+    await settle();
+    expect(dialer.state()).toMatchObject({ asleep: true, cloudAsleepAt: 80_000 });
   });
 
   it("a Cloud that answers even that exchange with asleep parks the link once, with no second ask", async () => {
@@ -398,10 +444,10 @@ describe("a wake for work is bounded", () => {
       }
       await settle();
       expect(cloudSide.calls).toHaveLength(WAKES_PER_HOUR * WAKE_TRIES);
-      // A fourth in the same hour is no wake: it asks in the background as before, and the app's asleep parks it.
+      // A fourth in the same hour is no wake: the link stays parked and asks nothing.
       want();
-      await vi.waitFor(() => expect(cloudSide.calls.length).toBeGreaterThan(WAKES_PER_HOUR * WAKE_TRIES));
-      dialer.sleep(clock.at);
+      await settle();
+      expect(cloudSide.calls).toHaveLength(WAKES_PER_HOUR * WAKE_TRIES);
       expect(dialer.state()).toMatchObject({ asleep: true });
       expect(foreground()).toBe(WAKES_PER_HOUR * WAKE_TRIES);
       // An hour on, work may wake it again.
@@ -410,6 +456,31 @@ describe("a wake for work is bounded", () => {
       await vi.waitFor(() => expect(foreground()).toBe((WAKES_PER_HOUR + 1) * WAKE_TRIES), { timeout: 5_000 });
     });
   }
+
+  it("a person's work past the wakes an hour allows waits, says when it goes, and wakes the Cloud by itself once the hour has passed", async () => {
+    const clock = { at: 1_000_000 };
+    const cloudSide = unanswering("network", clock, 0);
+    const { link, observed, want } = sleepyLink("https://cloud.invalid");
+    const later = vi.fn();
+    Object.assign(observed, { wakeLater: later, personWaiting: () => true });
+    const dialer = createDialer({ link, fetch: cloudSide.fetch, firstRetryMs: 1, now: () => clock.at });
+    cleanups.push(() => dialer.close());
+    dialer.start({ gentle: true });
+    const foreground = () => cloudSide.calls.filter((call) => call.foreground).length;
+    for (let wake = 1; wake <= WAKES_PER_HOUR; wake += 1) {
+      want();
+      await vi.waitFor(() => expect(foreground()).toBe(wake * WAKE_TRIES), { timeout: 5_000 });
+      await vi.waitFor(() => expect(dialer.state().asleep).toBe(true), { timeout: 5_000 });
+    }
+    clock.at += 60 * 60_000 - 200;
+    want();
+    await settle();
+    expect(foreground(), "past the limit: nothing now").toBe(WAKES_PER_HOUR * WAKE_TRIES);
+    expect(later).toHaveBeenLastCalledWith("cloud-peer", 1_200);
+    clock.at += 1_000;
+    await vi.waitFor(() => expect(foreground()).toBe((WAKES_PER_HOUR + 1) * WAKE_TRIES), { timeout: 5_000 });
+    expect(later).toHaveBeenLastCalledWith("cloud-peer", 0);
+  });
 
   it("a wake that runs out of time parks, and the app's asleep is no longer put off", async () => {
     const clock = { at: 1_000_000 };
@@ -428,18 +499,22 @@ describe("a wake for work is bounded", () => {
     expect(cloudSide.calls).toHaveLength(1);
   });
 
-  it("work no person waits on (a routine's) unparks with background asks, as before, and the app's asleep parks it", async () => {
+  it("work no person waits on (a routine's) never wakes a parked link: nothing is asked until the app says the Cloud is awake", async () => {
+    let clock = 5_000;
     const sleepy = await sleepyCloud(() => "asleep");
     const { link, want, waking } = sleepyLink(sleepy.origin);
-    const dialer = createDialer({ link });
+    const dialer = createDialer({ link, now: () => clock });
     cleanups.push(() => dialer.close());
     dialer.start({ gentle: true });
     want(false);
-    await sleepy.requests(1);
     await settle();
-    expect(sleepy.seen).toEqual([{ background: true, wait: 0 }]);
+    expect(sleepy.seen).toEqual([]);
     expect(waking).toEqual([]);
     expect(dialer.state()).toMatchObject({ asleep: true });
+    clock = 6_000;
+    dialer.start({ heardAt: 6_000 });
+    await sleepy.requests(1);
+    expect(sleepy.seen[0]).toEqual({ background: true, wait: 0 });
   });
 
   it("asked to sign in again while waking: the wake ends, and after pairing again the first ask is background", async () => {

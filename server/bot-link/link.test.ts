@@ -15,7 +15,7 @@ import type { SessionRecord } from "../sessions.ts";
 import type { PassedFile } from "../host/handoff-files.ts";
 import { readBody } from "../harness/http.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
-import { createDialer } from "./dial.ts";
+import { createDialer, WAKES_PER_HOUR } from "./dial.ts";
 import { createBotLink, SPOOL_KEEP_MS, type BotLink } from "./link.ts";
 import { createBotLinkRoutes as routesOf, linkSessionRefusal } from "../routes/bot-link.ts";
 import { createLinkedRooms, type LinkedRooms } from "../host/bot-link-rooms.ts";
@@ -101,7 +101,7 @@ function place(label: string, bots: Bot[], version?: number) {
   const syncs: Array<{ background: boolean }> = [];
   const sockets = new Set<import("node:net").Socket>();
 
-  function boot(options: { limits?: { queueMs?: number; stallMs?: number }; tell?: { afterMs: number; withinMs: number } } = {}) {
+  function boot(options: { limits?: { queueMs?: number; stallMs?: number }; tell?: { afterMs: number; withinMs: number }; backgroundWaitMs?: number } = {}) {
     rooms = createLinkedRooms({ dataDir: dir, store: roomStore as never, coordinator: () => coordinator, on: () => link.on(), linked: (peer) => link.has(peer), online: (peer) => link.online(peer), linkedBots: () => link.linked(), selfName: () => link.selfName(), wanted: (person) => link.wanted(person),
       window: (threadId, reader) => createRoomTranscript({ store: roomStore as never, teammateReportContext: () => "" }).window(threadId, "Sam", undefined, reader),
       opener: (botId, threadId) => (routineThreads.has(threadId) ? { requester: { kind: "routine_run", runId: "run-1", botId, threadId }, origin: { kind: "routine", source: "routine", ref: "routine-1" } } : undefined),
@@ -109,7 +109,7 @@ function place(label: string, bots: Bot[], version?: number) {
     link = createBotLink({
       rooms, directoryChanged: () => { directoryChanges += 1; rooms.sync(); },
       dataDir: dir, coordinator: () => coordinator, bots: () => bots, bot: (id) => bots.find((bot) => bot.id === id), level: () => "full", paused: (bot) => Boolean((bot as Bot).paused), acceptRefusal: (bot) => (bot as Bot).farWorkRefused ?? null,
-      ...(options.tell ? { tellAfterMs: options.tell.afterMs, tellWithinMs: options.tell.withinMs } : {}),
+      ...(options.tell ? { tellAfterMs: options.tell.afterMs, tellWithinMs: options.tell.withinMs } : {}), ...(options.backgroundWaitMs ? { backgroundWaitMs: options.backgroundWaitMs } : {}),
       openThread: (bot, title, opener, brief) => { const id = `${bot.id}-work-${++openedCount}`; threads.add(id); opened.push({ threadId: id, title, from: opener.name, brief }); return id; },
       hasThread: (_botId, threadId) => threads.has(threadId), personName: () => "Sam", handed: (input) => { if (handedFails.on) throw new Error("the line could not be written"); handed.push(input); },
       sentRow: (input) => { sent.push({ recipient: input.recipient.name, threadId: input.threadId, ...(input.roomId ? { roomId: input.roomId } : {}) }); },
@@ -133,7 +133,7 @@ function place(label: string, bots: Bot[], version?: number) {
       },
     };
     coordinator = createCoordinator({ dataDir: dir, host: link.host(inner), log: () => {}, ...(options.limits ? { runtimeLimits: options.limits } : {}) });
-    dialer = createDialer({ link, holdMs: 400, firstRetryMs: 20, ...(version ? { level: version } : {}) });
+    dialer = createDialer({ link, holdMs: 400, firstRetryMs: 20, now: () => Date.now() + skew, recheckMs: 50, ...(version ? { level: version } : {}) });
     ticker = setInterval(() => coordinator.tick(), 15);
     return api;
   }
@@ -248,7 +248,7 @@ afterEach(async () => {
 });
 
 /** A computer and a Cloud. The same id, `shared`, is a different bot in each. */
-async function two(options: { paired?: boolean; limits?: { queueMs?: number; stallMs?: number }; tell?: { afterMs: number; withinMs: number } } = {}) {
+async function two(options: { paired?: boolean; limits?: { queueMs?: number; stallMs?: number }; tell?: { afterMs: number; withinMs: number }; backgroundWaitMs?: number } = {}) {
   const computer = place("computer", [{ id: "shared", name: "Scout" }, { id: "local-writer", name: "Writer" }]).boot(options);
   const cloud = place("cloud", [{ id: "shared", name: "Atlas" }, { id: "cloud-analyst", name: "Analyst" }]).boot(options);
   places.push(computer, cloud);
@@ -596,6 +596,21 @@ describe("the link between a computer and its Cloud", () => {
     expect(cloudOrigin).toContain("127.0.0.1");
   });
 
+  it("turned off mid-hand-off: the Cloud's work is stopped, and the asker is told so truthfully, with the bot's own name", async () => {
+    const { computer, cloud } = await two();
+    let stopped = false;
+    cloud.engine((_node, _resumed, signal) => new Promise((resolve) => { signal.addEventListener("abort", () => { stopped = true; resolve({ ok: false, text: "stopped" }); }); }));
+    await computer.handOff("local-writer", call(["Analyst"], "Count the orders"));
+    await until(() => cloud.runs.length === 1, "the work starts on the Cloud");
+    await computer.fetch("PUT", STATE_PATH, { on: false });
+    await until(() => stopped, "the Cloud's turn is stopped, not left running with nowhere to send its result");
+    await until(() => computer.results.length === 1, "the asker hears");
+    const [row] = computer.results;
+    expect(row!.name).toBe("Analyst (My Cloud)");
+    expect(row!.result).not.toMatch(/not (delivered|sent)/);
+    expect(row!.result).toContain("turned off");
+  });
+
   it("two computers on one Cloud: each has its own link, and work, results and stops go only to the computer they belong to", async () => {
     const { computer, cloud, cloudOrigin } = await two();
     const laptop = place("laptop", [{ id: "shared", name: "Scout" }, { id: "laptop-coder", name: "Coder" }]).boot();
@@ -689,20 +704,31 @@ describe("the link between a computer and its Cloud", () => {
     expect(JSON.parse(readFileSync(join(computer.dir, "bot-link-ended.json"), "utf8"))).toHaveLength(1);
     await cloud.listen(at);
     expect(cloud.link.on()).toBe(true);
-    await computer.fetch("PUT", STATE_PATH, { cloud: "awake", origin: "https://another.example" });
+    await computer.fetch("PUT", STATE_PATH, { cloud: "awake", origin: "https://another.example", heardAt: Date.now() });
     expect(cloud.link.on()).toBe(true);
-    await computer.fetch("PUT", STATE_PATH, { cloud: "awake", origin: cloudOrigin });
+    await computer.fetch("PUT", STATE_PATH, { cloud: "awake", origin: cloudOrigin, heardAt: Date.now() });
     expect(cloud.link.on()).toBe(false);
     expect(cloud.sessions()).toEqual([]);
     expect(existsSync(join(computer.dir, "bot-link-ended.json"))).toBe(false);
   });
 
+  it("an asleep or awake that does not say when the app heard it changes nothing: it neither parks the link nor asks the Cloud", async () => {
+    const { computer, cloud, cloudOrigin } = await two();
+    expect((await computer.fetch("PUT", STATE_PATH, { cloud: "asleep", origin: cloudOrigin })).body).toMatchObject({ asleep: false, online: true });
+    expect((await computer.fetch("PUT", STATE_PATH, { cloud: "asleep", origin: cloudOrigin, heardAt: Date.now() })).body).toMatchObject({ asleep: true });
+    const before = cloud.requests.length;
+    await computer.fetch("PUT", STATE_PATH, { cloud: "awake", origin: cloudOrigin });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(cloud.requests.length, "no request to a Cloud on an undated awake").toBe(before);
+    expect((await computer.fetch("GET", STATE_PATH)).body).toMatchObject({ asleep: true });
+  });
+
   it("the app's word about one Cloud is not fed to a link to another", async () => {
     const { computer, cloudOrigin } = await two();
-    expect((await computer.fetch("PUT", STATE_PATH, { cloud: "asleep", origin: "https://another.example" })).body).toMatchObject({ asleep: false, online: true });
-    expect((await computer.fetch("PUT", STATE_PATH, { cloud: "asleep", origin: cloudOrigin })).body).toMatchObject({ asleep: true, online: false });
+    expect((await computer.fetch("PUT", STATE_PATH, { cloud: "asleep", origin: "https://another.example", heardAt: Date.now() })).body).toMatchObject({ asleep: false, online: true });
+    expect((await computer.fetch("PUT", STATE_PATH, { cloud: "asleep", origin: cloudOrigin, heardAt: Date.now() })).body).toMatchObject({ asleep: true, online: false });
     expect((await computer.fetch("GET", STATE_PATH)).body).toMatchObject({ origin: cloudOrigin, account: "account-1" });
-    await computer.fetch("PUT", STATE_PATH, { cloud: "awake", origin: cloudOrigin });
+    await computer.fetch("PUT", STATE_PATH, { cloud: "awake", origin: cloudOrigin, heardAt: Date.now() });
     await until(() => computer.link.online(), "the link is back");
   });
 
@@ -1347,6 +1373,30 @@ describe("the link between a computer and its Cloud", () => {
     await until(() => cloud.runs.some((run) => run.botId === "moved-bot-1"), "the moved bot works on the Cloud");
   });
 
+  it("a name a bot here and a bot of the other place both have is not settled on the one here: the bot is asked which, with both ids and places", async () => {
+    const { computer, cloud } = await two();
+    cloud.bots.push({ id: "cloud-writer", name: "writer" });
+    cloud.link.botsChanged();
+    await until(() => computer.link.linked().length === 3, "the computer hears of the Cloud's Writer");
+    let asked = false;
+    const { answer } = await computer.handOff("shared", call(["Writer"], "Name my cactus"), async () => { asked = true; return { status: 200, body: {} }; });
+    expect(asked).toBe(false);
+    expect(answer.status).toBe(403);
+    expect(answer.body.error).toContain("Writer here (id local-writer)");
+    expect(answer.body.error).toContain(`writer on My Cloud (id ${onCloud("cloud-writer")})`);
+    expect(answer.body.error).toContain("the place they named, or the one here if they named none");
+    // Either id goes through as it always did.
+    const { answer: byId } = await computer.handOff("shared", call(["local-writer"], "Name my cactus"), async () => { asked = true; return { status: 200, body: { receipts: [] } }; });
+    expect([asked, byId.status]).toEqual([true, 200]);
+    // A far bot of that name its place paused is no choice to offer.
+    cloud.bots.find((bot) => bot.id === "cloud-writer")!.paused = true;
+    cloud.link.botsChanged();
+    await until(() => computer.link.linked().some((one) => one.bot.paused), "the computer hears of the pause");
+    asked = false;
+    await computer.handOff("shared", call(["Writer"], "Name my cactus"), async () => { asked = true; return { status: 200, body: { receipts: [] } }; });
+    expect(asked).toBe(true);
+  });
+
   it("with the link on, two bots of the other place with one name are not guessed between: the bot is asked which, by id", async () => {
     const { computer, cloud } = await two();
     cloud.bots.push({ id: "cloud-analyst-2", name: "Analyst" });
@@ -1393,7 +1443,7 @@ describe("the link between a computer and its Cloud", () => {
     await cloud.listen(at);
     expect(cloud.link.linked().length).toBeGreaterThan(0);
     // The app says that Cloud is awake: it is told, and the computer's bots go there at once.
-    await computer.fetch("PUT", STATE_PATH, { cloud: "awake", origin: cloudOrigin });
+    await computer.fetch("PUT", STATE_PATH, { cloud: "awake", origin: cloudOrigin, heardAt: Date.now() });
     expect(cloud.link.linked()).toEqual([]);
     expect(cloud.link.on()).toBe(false);
     expect(existsSync(join(computer.dir, "bot-link-ended.json"))).toBe(false);
@@ -1401,7 +1451,7 @@ describe("the link between a computer and its Cloud", () => {
 
   it("turned off while the Cloud sleeps: the sleeping Cloud is not asked, and turning the link on again there ends the earlier one", async () => {
     const { computer, cloud, cloudOrigin } = await two();
-    await computer.fetch("PUT", STATE_PATH, { cloud: "asleep", origin: cloudOrigin });
+    await computer.fetch("PUT", STATE_PATH, { cloud: "asleep", origin: cloudOrigin, heardAt: Date.now() });
     const before = cloud.requests.length;
     expect((await computer.fetch("PUT", STATE_PATH, { on: false })).body).toEqual({ on: false, ended: [cloudOrigin] });
     expect(cloud.requests.length).toBe(before);
@@ -1499,13 +1549,83 @@ describe("a Cloud that sleeps", () => {
     const before = cloud.syncs.length;
     home.jump(12_000);
     const { receipts } = await computer.handOff("local-writer", call(["Analyst"], "Count the orders"), undefined, undefined, true);
-    expect(receipts[0]!.detail).toContain("My Cloud is offline now");
+    expect(receipts[0]!.detail, "never promised as delivered when it is back: it may be given up").toContain("My Cloud can't be reached now (asleep, off or not connected), and work no person waits on does not wake it, so this waits until it can be reached for another reason, at most 6 hours, and is not sent if it can't be by then");
     expect(receipts[0]!.detail).not.toContain("waking");
-    // As before this change: one background exchange, which a Cloud that sleeps answers with asleep, and the link parks again.
-    await until(() => cloud.syncs.length > before && computer.dialer.state().asleep, "the link asks once and parks again");
-    expect(cloud.syncs.slice(before).every((one) => one.background)).toBe(true);
+    // Work no person waits on never wakes it: not one exchange while it sleeps.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(cloud.syncs.length).toBe(before);
+    expect(computer.dialer.state().asleep).toBe(true);
     expect(home.power.sleeping()).toBe(true);
     expect(computer.results).toEqual([]);
+  });
+
+  it("a person's hand-off while the Cloud was already woken as often as an hour allows is told when it goes by itself", async () => {
+    const { computer, cloud } = await two();
+    await computer.dialer.stop();
+    computer.link.setOnline(CLOUD, false);
+    computer.link.wakeLater(CLOUD, 10 * 60_000);
+    const { receipts } = await computer.handOff("local-writer", call(["Analyst"], "Count the orders"));
+    expect(receipts[0]!.detail).toContain("My Cloud was woken for work several times in the last hour already, so this waits and is sent by itself when it may be woken again, in about 10 minutes");
+    computer.link.wakeLater(CLOUD, 0);
+    expect(cloud.runs).toEqual([]);
+  });
+
+  it("a person's hand-off past the hour's wakes is told the wait, wakes nothing now, and goes by itself once the oldest wake is an hour old, using one wake", async () => {
+    const { computer, cloud, cloudOrigin } = await two();
+    /** The app's word that the Cloud sleeps, heard after its last answer: the computer's end parks. */
+    const park = async () => {
+      // Said again until it holds: a word heard before the Cloud's last answer to a person's work parks nothing.
+      await until(() => computer.dialer.state().asleep || (void computer.fetch("PUT", STATE_PATH, { cloud: "asleep", origin: cloudOrigin, heardAt: Date.now() + 60 * 60_000 * (parkedLater ? 1 : 0) }), false), "the computer's end parks");
+    };
+    let parkedLater = false;
+    for (let wake = 1; wake <= WAKES_PER_HOUR; wake += 1) {
+      await park();
+      const { receipts } = await computer.handOff("local-writer", call(["Analyst"], `Job ${wake}`));
+      expect(receipts[0]!.detail, `wake ${wake}`).toContain("waking up for this now");
+      await until(() => computer.results.length === wake, `the result of job ${wake}`);
+    }
+    await park();
+    const before = cloud.syncs.length;
+    const { receipts } = await computer.handOff("local-writer", call(["Analyst"], "Job 4"));
+    expect(receipts[0]!.detail).toContain("was woken for work several times in the last hour already, so this waits and is sent by itself");
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(cloud.syncs.length, "nothing wakes it now").toBe(before);
+    computer.later(60 * 60_000);
+    parkedLater = true;
+    await until(() => computer.results.length === WAKES_PER_HOUR + 1, "it goes by itself once the oldest wake is an hour old");
+    expect(cloud.syncs.slice(before).some((one) => !one.background), "as a wake, a person's").toBe(true);
+    await park();
+    const settled = cloud.syncs.length;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(cloud.syncs.length, "nothing waits, so nothing more is sent: no loop").toBe(settled);
+  });
+
+  it("the only computer linked to the Cloud expires after thirty days: as before, no work there is cancelled with words of a turn-off", async () => {
+    const { computer, cloud } = await two();
+    cloud.engine(() => new Promise(() => {}));
+    await computer.handOff("local-writer", call(["Analyst"], "Count the orders"));
+    await until(() => cloud.runs.length === 1, "the Cloud runs it");
+    const reasons: string[] = [];
+    const original = cloud.coordinator.cancelDirect.bind(cloud.coordinator);
+    cloud.coordinator.cancelDirect = ((root: string, why?: string) => { reasons.push(why ?? ""); return original(root, why); }) as typeof cloud.coordinator.cancelDirect;
+    await computer.dialer.stop();
+    await until(() => !cloud.link.online(), "the computer goes quiet");
+    cloud.later(LINK_EXPIRES_MS + 60_000);
+    cloud.link.tidy();
+    expect(cloud.link.on()).toBe(false);
+    expect(reasons).toEqual([]);
+  });
+
+  it("a routine's hand-off to a sleeping Cloud waits for it to be awake for another reason, and is given up with a plain line after the bound, never sent", async () => {
+    const { computer, cloud, cloudOrigin } = await two({ backgroundWaitMs: 600 });
+    const home = sleepyHome(cloud);
+    await asleep(computer, cloudOrigin, home);
+    const before = cloud.syncs.length;
+    await computer.handOff("local-writer", call(["Analyst"], "Count the orders"), undefined, undefined, true);
+    await until(() => computer.results.length === 1, "given up after the bound");
+    expect(computer.results[0]!.result).toContain("could not be reached for");
+    expect(cloud.syncs.length, "nothing was ever sent to the sleeping Cloud").toBe(before);
+    expect(cloud.runs).toEqual([]);
   });
 
   it("background link traffic never wakes a sleeping Cloud or keeps one awake", async () => {

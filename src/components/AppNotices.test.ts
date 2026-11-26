@@ -47,6 +47,8 @@ import { ADVANCED_BACK_KEY } from "@/lib/new-look";
 import { api } from "@/state/store";
 import { forgetAnnouncementCards, seenKey } from "@/lib/announcements";
 import { CLOUD_WELCOME_DONE } from "../../shared/cloud-hints";
+import { createPlacesTogether, installPlacesTogether } from "../../electron/places-together.mjs";
+import { resetPlacesTogetherForTest } from "@/lib/places-together";
 
 const DAY = 86_400_000, NOW = new Date(2026, 9, 9, 12).getTime();
 const plans = [
@@ -1894,5 +1896,80 @@ describe("the Teams What's new", () => {
     expect(await launch(), "the launch the welcome finished in").not.toContain(TITLE);
     expect(steps()).toEqual([]);
     expect(await relaunch(), "the next launch").toContain(TITLE);
+  });
+});
+
+describe("bots together by default", () => {
+  let saved: unknown, reads: string[], lent: boolean, lends: boolean[];
+  const install = () => {
+    const together = createPlacesTogether({
+      pref: { read: () => { if (saved === undefined) throw Object.assign(new Error("none"), { code: "ENOENT" }); return saved; }, write: (value: unknown) => { saved = JSON.parse(JSON.stringify(value)); } },
+      cloud: () => ({ origin: MY_CLOUD, account: "a", asleep: false }), computer: () => "computer:/data",
+      powerChecked: async () => { reads.push("admin"); return true; },
+      local: async (route: string) => { reads.push(`computer ${route}`); return new Response(JSON.stringify({ bots: [] })); },
+      cloudFetch: async (url: string) => { reads.push(`cloud ${url}`); return new Response(JSON.stringify({ bots: [] })); },
+      shown: () => "computer", focused: () => true, openPlace: () => undefined, send: () => {}, changed: () => {}, now: () => now,
+      commands: { on: () => lent, set: (on: boolean) => { lends.push(on); lent = on; } }, turnedOn: () => { lends.push(true); lent = true; },
+      setTimer: () => ({}) as never, clearTimer: () => {},
+    });
+    installPlacesTogether({ ipcMain: { handle: (channel: string, handler: Handler) => void desk.handlers.set(channel, handler) } as never,
+      asking: (event: unknown) => { const page = (event as { page: Page }).page; return page === "server" ? null : page; }, together });
+    return together;
+  };
+  beforeEach(() => { saved = undefined; reads = []; lent = false; lends = []; resetPlacesTogetherForTest(); });
+  afterEach(() => resetPlacesTogetherForTest());
+
+  it("once, on this computer's page, for a person who never chose: drawing it turns the list on, lends nothing and reads nothing of My Cloud yet", async () => {
+    returning(); storage.set(CLOUD_INTRO, "1");
+    const together = install();
+    expect(together.on()).toBe(false);
+    const html = await launch();
+    expect(html).toContain('data-notice="together-default"');
+    expect(html).toContain("Your bots are in one list now");
+    expect(html).toContain("Let your Clouds&#x27; bots run commands on this computer");
+    expect(html).not.toContain(STAR);
+    expect(together.on()).toBe(true);
+    expect(lends, "the default never lends commands").toEqual([]);
+    expect(reads.filter(read => !read.startsWith("computer")), "no read of My Cloud at the start").toEqual([]);
+    press("Got it");
+    expect(await settle()).not.toContain('data-notice="together-default"');
+    resetPlacesTogetherForTest();
+    expect(await launch(), "closed: never again").not.toContain('data-notice="together-default"');
+    expect(together.on(), "and it stays on").toBe(true);
+  });
+
+  it("never in the launch What's new or the Cloud card takes: it waits for a later launch", async () => {
+    returning();
+    install();
+    const html = await launch();
+    expect(html).not.toContain('data-notice="together-default"');
+  });
+
+  it("no suggestion to move bots to My Cloud goes ahead of it: not while it is due, nor while main has not said whether it is", async () => {
+    returning(); storage.set(CLOUD_INTRO, "1"); storage.set(PRODUCT_HUNT_NOTICE, "1");
+    desk.handlers.set("two-places:state", async () => ({ suggest: { key: "cloud:mine", name: "My Cloud", kind: "cloud" } }));
+    desk.handlers.set("places-together:state", () => new Promise(() => {}));
+    expect(await launch(), "main has not said yet").not.toContain('data-notice="two-places"');
+    resetPlacesTogetherForTest();
+    install();
+    const due = await launch();
+    expect(due).not.toContain('data-notice="two-places"');
+    expect(due).toContain('data-notice="together-default"');
+  });
+
+  it("never for a person who chose either way, nor on My Cloud's page", async () => {
+    returning();
+    saved = { v: 1, on: false };
+    install();
+    expect(await launch()).not.toContain('data-notice="together-default"');
+    saved = { v: 1, on: true };
+    resetPlacesTogetherForTest();
+    install();
+    expect(await launch()).not.toContain('data-notice="together-default"');
+    saved = undefined;
+    resetPlacesTogetherForTest();
+    install();
+    showWindow(MY_CLOUD);
+    expect(await launch()).not.toContain('data-notice="together-default"');
   });
 });
