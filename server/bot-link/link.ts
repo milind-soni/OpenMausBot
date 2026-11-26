@@ -30,6 +30,7 @@ import type { PassedFile } from "../host/handoff-files.ts";
 import { foldName, withTargetsHere, type CoordinateResult, type PeerDeliveryReceipt } from "../peer-delivery.ts";
 import { isIdStart } from "../peer-roster.ts";
 import type { Level } from "../runtime/types.ts";
+import { bothPlaces } from "./both-places.ts";
 import { armBackground, BACKGROUND_WAIT_MS, backgroundWaitNote, cloudUnreachableTooLong, neverSent } from "./away.ts";
 import { endedSchema, stateSchema, type EndedLink, type LinkState, type Work } from "./link-state.ts";
 import { BRIEF_MAX, EXCHANGE_BYTES, FILES_MAX, LINK_EXPIRES_MS, PEERS_MAX, frameSchema, handoffOfRoot, isLinkedId, linkRoot, linkedId, parseLinked, peerKey,
@@ -360,21 +361,6 @@ export function createBotLink(deps: BotLinkDeps) {
     if (matches.length < 2) return null;
     const listed = matches.slice(0, 12).map((remote) => `${remote.bot.name} on ${placeName(remote.peer)} (id ${linkedId(remote.peer, remote.bot.id)})`).join("; ");
     return `${matches.length} bots of the person's other places are named "${raw.trim().slice(0, 120)}", so nothing was sent: ${listed}${matches.length > 12 ? `; and ${matches.length - 12} more` : ""}. Send it again with the id of the one you mean.`;
-  }
-
-  /** A name a bot here and a bot of another place both have: which one is meant, by its address. Nothing can tell
-   * whether the person named a place ("the Ziggy on my MacBook"), so neither is picked for them. */
-  function bothPlaces(raw: string): string | null {
-    if (!state) return null;
-    const wanted = raw.trim(), lower = wanted.toLowerCase(), named = foldName(wanted);
-    if (!named || isLinkedId(wanted)) return null;
-    const local = deps.bots().filter((bot) => !movedAway(bot) && !bot.hidden);
-    if (local.some((bot) => bot.id.toLowerCase() === lower || (isIdStart(wanted) && bot.id.toLowerCase().startsWith(lower)))) return null;
-    const here = local.filter((bot) => foldName(bot.name) === named);
-    const far = Object.entries(state.peers).flatMap(([peer, known]) => known.bots.filter((bot) => !bot.paused && foldName(bot.name) === named).map((bot) => ({ peer, bot })));
-    if (!here.length || !far.length) return null;
-    const listed = [...here.slice(0, 6).map((bot) => `${bot.name} here (id ${bot.id})`), ...far.slice(0, 6).map((remote) => `${remote.bot.name} on ${placeName(remote.peer)} (id ${linkedId(remote.peer, remote.bot.id)})`)].join("; ");
-    return `A bot here and a bot of the person's other place are both named "${raw.trim().slice(0, 120)}", so nothing was sent: ${listed}. Send it again with the id of the one the person meant: the place they named, or the one here if they named none.`;
   }
 
   /** `person`: work a person waits on (it may wake a sleeping Cloud); other work never wakes it, and may be given up. */
@@ -710,7 +696,8 @@ export function createBotLink(deps: BotLinkDeps) {
   /** coordinate_bots for targets that live in another place; the rest go on as they always did (`local`). */
   async function coordinate(call: CoordinateBotsCall, context: CoordinateContext, local: (call: CoordinateBotsCall) => Promise<CoordinateResult>): Promise<CoordinateResult> {
     if (!state || context.external) return local(call);
-    for (const raw of call.botIds) { const shared = bothPlaces(raw) ?? sharedName(raw); if (shared) return { status: 403, body: { error: shared } }; }
+    const byName = deps.bots().filter((bot) => !movedAway(bot) && !bot.hidden);
+    for (const raw of call.botIds) { const shared = bothPlaces({ raw, here: byName, peers: state.peers, placeName }) ?? sharedName(raw); if (shared) return { status: 403, body: { error: shared } }; }
     const away = new Map<string, Remote>();
     for (const raw of call.botIds) { const remote = resolve(raw); if (remote) away.set(raw, remote); }
     if (away.size === 0) return local(call);
