@@ -30,6 +30,8 @@ services:
       # "1": phones pair by QR through MausBot Relay (docs/phone-relay-server.md). Sign the
       # container in once first: docker compose exec omb openmausbot login --relay
       OMB_PHONE_RELAY: ${OMB_PHONE_RELAY:-}
+      # Attachment store ceiling in bytes; empty keeps the server default (512 MB).
+      OMB_ATTACHMENTS_MAX_BYTES: ${OMB_ATTACHMENTS_MAX_BYTES:-}
     healthcheck:
       test:
         - CMD
