@@ -178,6 +178,12 @@ export interface CoordinatorHost {
    * requester's turn is what the answer may save, and the teammate's engine is busy with the teammate's work. Absent,
    * undefined or a throw: the requester wakes. */
   statusReply?(requesterBotId: string, prompt: string, signal: AbortSignal): Promise<string | undefined>;
+  /** The running turn of handed-off `node` waits on a person or a computer, or the host does not watch it: its silence is
+   * not counted against it (runtime Limits.handoffQuietMaxMs). Absent: never. */
+  waiting?(node: HandoffView): boolean;
+  /** Handed-off `node` has shown nothing for `quietMs` and is stopped in `closesInMs`: its requester is told, once per
+   * quiet stretch. */
+  quiet?(node: HandoffView, parent: HandoffView | undefined, quietMs: number, closesInMs: number): void;
 }
 
 export interface Coordinator {
@@ -232,8 +238,9 @@ export interface Coordinator {
   /** The conversation stopped: its work and everything that work handed out end, and nothing resumes it. */
   stopAwaitingDirect(threadId: string, reason?: string): void;
   /** The person stopped one hand-off, not the conversation that made it: that work and everything it handed on end as the
-   * person's stop, and its requester hears it was stopped and goes on. Undefined for no such hand-off. */
-  stopHandoff(id: string): "stopped" | "ended" | undefined;
+   * person's stop, and its requester hears it was stopped and goes on. With `by`, the bot that handed it on stopped it: the
+   * same, in its words, and not remembered as the person's stop. Undefined for no such hand-off. */
+  stopHandoff(id: string, by?: { requester: string; why?: string }): "stopped" | "ended" | undefined;
   /** The next start goes on with this thread's turn, so a shutdown's "cut" line would be false. */
   continuesAfterRestart(threadId: string): boolean;
   note(id: string): string | undefined;

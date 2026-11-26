@@ -333,6 +333,51 @@ describe("Runtime: one tree, one lane", () => {
     }
   });
 
+  it("tells the requester once per quiet stretch about handed-off work that shows nothing, and stops it at the limit mid-command", async () => {
+    const w = world(() => "hold", { handoffQuietNoticeMs: 1_000, handoffQuietMaxMs: 3_000 });
+    const told: Array<{ id: string; parent?: string; quietMs: number; closesInMs: number }> = [];
+    w.runner.quiet = (a, parent, quietMs, closesInMs) => { told.push({ id: a.id, ...(parent ? { parent: parent.id } : {}), quietMs, closesInMs }); };
+    const root = w.runtime.begin(beginReq());
+    const a = ok(w.runtime.enqueue(toBot("a", root.id)));
+    w.runtime.tick();
+    const signal = w.runner.runs.find(r => r.a.id === a.id)!.signal;
+    w.clock.advance(1_001);
+    w.runtime.tick();
+    w.runtime.tick();
+    expect(told).toEqual([{ id: a.id, parent: root.id, quietMs: 1_001, closesInMs: 1_999 }]);
+    w.runtime.progress(a.id);
+    w.clock.advance(1_500);
+    w.runtime.tick();
+    expect(told.map(t => t.quietMs)).toEqual([1_001, 1_500]);
+    w.clock.advance(1_501);
+    w.runtime.tick();
+    expect(w.store.get(a.id)).toMatchObject({ status: "failed", outcome: "stalled" });
+    expect(w.store.get(a.id)?.result).toContain("no activity for 3s on this handed-off work");
+    expect(signal.aborted).toBe(true);
+    expect(w.runner.reports.map(r => r.a.id)).toEqual([a.id]);
+    expect(w.store.get(root.id)?.status).not.toBe("failed");
+    invariants(w);
+  });
+
+  it("does not count the silence of handed-off work waiting on a person or a computer, nor of a root", () => {
+    const w = world(() => "hold", { handoffQuietNoticeMs: 1_000, handoffQuietMaxMs: 3_000 });
+    let waiting = true;
+    const told: string[] = [];
+    w.runner.waiting = () => waiting;
+    w.runner.quiet = a => { told.push(a.id); };
+    const root = w.runtime.begin(beginReq());
+    const a = ok(w.runtime.enqueue(toBot("a", root.id)));
+    w.runtime.tick();
+    w.clock.advance(10_000);
+    w.runtime.tick();
+    expect(w.store.get(a.id)?.status).toBe("running");
+    expect(told).toEqual([]);
+    waiting = false;
+    w.runtime.tick();
+    expect(w.store.get(a.id)).toMatchObject({ status: "failed", outcome: "stalled" });
+    expect(w.store.get(root.id)?.status).not.toBe("failed");
+  });
+
   it("stalls a turn with no activity on the monotonic clock, and a tree with no progress, but never a parked tree", async () => {
     const w = world(() => "hold", { turnStallMs: 1_000, stallMs: 10_000 });
     const root = w.runtime.begin(beginReq());

@@ -552,6 +552,28 @@ describe("a shell command that keeps working", () => {
   });
 });
 
+describe("what the hand-off limits read from a watched turn", () => {
+  it("waits while a turn waits on a person or a computer, or is not watched, and names its running command", () => {
+    const { dog, tick } = rig();
+    expect(dog.waits("t1")).toBe(true);
+    expect(dog.command("t1")).toBeNull();
+    dog.watch("t1", "bot1");
+    expect(dog.waits("t1")).toBe(false);
+    dog.setWaitingOnHuman("t1", true);
+    expect(dog.waits("t1")).toBe(true);
+    dog.setWaitingOnHuman("t1", false);
+    dog.setWaitingOnComputer("t1", true);
+    expect(dog.waits("t1")).toBe(true);
+    dog.setWaitingOnComputer("t1", false);
+    expect(dog.command("t1")).toBeNull();
+    dog.observe(shellStarted("tests", "pnpm test"));
+    tick(45 * 60_000);
+    expect(dog.command("t1")).toEqual({ command: "pnpm test", minutes: 45 });
+    dog.settle("t1");
+    expect(dog.waits("t1")).toBe(true);
+  });
+});
+
 describe("stuckCommand", () => {
   it("names the longest-running shell command still running when the turn is stopped", () => {
     const { dog, stalls, tick } = rig();

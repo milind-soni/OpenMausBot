@@ -76,6 +76,9 @@
           "answers": {
             "type": "string"
           },
+          "stop": {
+            "type": "string"
+          },
           "files": {
             "type": "array",
             "items": {

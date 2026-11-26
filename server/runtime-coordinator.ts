@@ -471,17 +471,19 @@ export class RuntimeCoordinator implements Coordinator {
     for (const { root, work } of trees) if (root) this.rememberStop(root, work);
   }
 
-  stopHandoff(id: string): "stopped" | "ended" | undefined {
+  stopHandoff(id: string, by?: { requester: string; why?: string }): "stopped" | "ended" | undefined {
     this.ready();
     const n = this.store.get(id);
     if (!n?.parentId) return undefined;
     if (isTerminal(n)) return "ended";
     const root = this.store.get(n.rootId);
     const work = this.subtree(n).filter(a => !isTerminal(a));
+    const cause = by ? `Stopped by @${by.requester}, who handed this work on${by.why ? `: ${by.why}` : ""}` : STOPPED_BY_USER;
     const outer = this.stoppingHandoff;
     this.stoppingHandoff = true;
-    try { this.stopFor(STOPPED_BY_USER, () => this.runtime.cancel(id, STOPPED_BY_USER, "stopped")); } finally { this.stoppingHandoff = outer; }
-    if (root) this.rememberStop(root, work, true);
+    try { this.stopFor(cause, () => this.runtime.cancel(id, cause, "stopped")); } finally { this.stoppingHandoff = outer; }
+    // A requester's stop is not the person's: it may hand the same work on again.
+    if (root && !by) this.rememberStop(root, work, true);
     return "stopped";
   }
 
@@ -651,6 +653,8 @@ export class RuntimeCoordinator implements Coordinator {
       names: (a, parent) => host.names(view(a, parent), parent && this.project(parent)),
       outward: a => host.outward ? host.outward(this.project(a)) : [],
       away: a => host.away ? host.away(this.project(a)) : false,
+      waiting: a => host.waiting?.(this.project(a)) ?? false,
+      quiet: (a, parent, quietMs, closesInMs) => host.quiet?.(view(a, parent), parent && this.project(parent), quietMs, closesInMs),
     };
   }
 

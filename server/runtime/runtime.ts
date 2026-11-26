@@ -62,7 +62,7 @@ const defaultClock: Clock = { now: () => Date.now(), monotonic: () => performanc
 
 /** `interruption`: a resume for a teammate's question while other work is still out; the node's restart note waits for its real resume.
  * `carried`: the settled children whose results the turn's input carried; one that settles later owes the node another resume. */
-interface LiveTurn { controller: AbortController; rootId: string; activeAt: number; interruption: boolean; carried: ReadonlySet<string> }
+interface LiveTurn { controller: AbortController; rootId: string; activeAt: number; interruption: boolean; carried: ReadonlySet<string>; quietTold?: boolean }
 
 type TerminalStatus = "completed" | "failed" | "cancelled";
 
@@ -331,7 +331,7 @@ export class Runtime {
         if (turn && this.away(n)) turn.activeAt = mono;
         else if (turn && mono - turn.activeAt > this.limits.turnStallMs) {
           this.cancelTree(n, `no activity for ${duration(this.limits.turnStallMs)}`, "failed", "stalled");
-        }
+        } else if (turn && n.parentId !== undefined) this.quietHandoff(n, turn, mono - turn.activeAt);
       }
     }
     // Access is rechecked every tick, not only at dispatch, so no result crosses a boundary that closed under it.
@@ -618,6 +618,7 @@ export class Runtime {
     const turn = this.turns.get(id);
     if (turn) {
       turn.activeAt = this.clock.monotonic();
+      turn.quietTold = false;
       this.rootActivity.set(turn.rootId, now);
     }
     try {
@@ -904,6 +905,21 @@ export class Runtime {
   private names(n: Assignment, parent: Assignment | undefined): EnvelopeNames {
     const names = this.safe("names", () => this.runner.names(n, parent));
     return names ?? { requester: n.requester.botId ?? n.requester.kind, assignee: n.assignee.botId };
+  }
+
+  /** Handed-off work quiet for `quiet`: its requester hears it once per quiet stretch, and at handoffQuietMaxMs it fails as
+   * stalled, which aborts its turn even with a command still running. A turn waiting on a person or a computer is not quiet. */
+  private quietHandoff(n: Assignment, turn: LiveTurn, quiet: number): void {
+    const { handoffQuietNoticeMs: notice, handoffQuietMaxMs: max } = this.limits;
+    if (quiet <= Math.min(notice, max) || this.safe("waiting", () => this.runner.waiting?.(n) ?? false) !== false) return;
+    if (quiet > max) {
+      this.cancelTree(n, `no activity for ${duration(max)} on this handed-off work, so it was stopped, along with any command it was running`, "failed", "stalled");
+      return;
+    }
+    if (turn.quietTold) return;
+    turn.quietTold = true;
+    const parent = n.parentId ? this.store.get(n.parentId) : undefined;
+    this.safe("quiet", () => this.runner.quiet?.(n, parent, quiet, max - quiet));
   }
 
   private safe<T>(what: string, fn: () => T): T | undefined {

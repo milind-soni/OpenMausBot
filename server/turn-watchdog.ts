@@ -189,6 +189,18 @@ export class TurnWatchdog {
     this.turns.delete(threadId);
   }
 
+  /** The thread's turn waits on a person or a computer, or no turn of it is watched here: its silence proves nothing. */
+  waits(threadId: string): boolean {
+    const turn = this.turns.get(threadId);
+    return !turn || parked(turn);
+  }
+
+  /** The thread's longest-running shell command, scrubbed, with the minutes it has run by `at`; null when none runs. */
+  command(threadId: string, at = this.now()): { command: string; minutes: number } | null {
+    const turn = this.turns.get(threadId);
+    return turn ? stuckCommand(turn, at) : null;
+  }
+
   /** A Stop that discards the turn's later events leaves no way for a tool or a wait to report its end: watch the teardown as a fresh silent turn. */
   eventsDiscarded(threadId: string): void {
     const turn = this.turns.get(threadId);
