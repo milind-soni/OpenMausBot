@@ -10,7 +10,7 @@ const LONG = "I drafted the email to the team and saved it in your drafts folder
 describe("lastExchange", () => {
   it("is the person's last message and the bot's finished reply, ignoring older turns and the work in between", () => {
     const rows = [ask("u0", "older question"), reply("b0", "an older answer that is long enough"), ask("u1", "Draft the email"), step("s1"), reply("b1", LONG), step("s2")];
-    expect(lastExchange(rows)).toEqual({ ask: "Draft the email", reply: LONG, replyId: "b1" });
+    expect(lastExchange(rows)).toEqual({ ask: "Draft the email", askId: "u1", reply: LONG, replyId: "b1" });
   });
 
   it("has nothing while the bot has not answered the newest message", () => {

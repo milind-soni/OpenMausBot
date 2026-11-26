@@ -1,13 +1,13 @@
 import { t } from "@/lib/i18n";
-import { useMediaQuery } from "@/lib/use-media-query";
+import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 
 export const SUGGESTION_HINT_ID = "composer-suggested-reply-hint";
-const TOUCH = "(hover: none) and (pointer: coarse)";
+const TAPPED = `(hover: none) and (pointer: coarse), ${PHONE_LAYOUT}`;
 
 /** The faded suggestion drawn where the empty field's placeholder sits: a Tab keycap after it, or on a touch screen a
- * small button that fills the field. */
+ * small button that fills the field, also in the phone layout. */
 export function SuggestedReplyGhost({ text, onUse }: { text: string; onUse(): void }) {
-  const touch = useMediaQuery(TOUCH);
+  const touch = useMediaQuery(TAPPED);
   return (
     <div data-suggested-reply className="flex min-w-0 items-center gap-2 text-ink-tertiary">
       <span aria-hidden="true" className="min-w-0 truncate">{text}</span>

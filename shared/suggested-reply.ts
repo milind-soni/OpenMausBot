@@ -13,6 +13,7 @@ export interface SuggestionRow {
 export interface LastExchange {
   /** The person's last message. */
   ask: string;
+  askId: string;
   reply: string;
   /** The reply's row: a suggestion is for this reply only. */
   replyId: string;
@@ -54,7 +55,7 @@ export function lastExchange(rows: readonly SuggestionRow[]): LastExchange | nul
   const reply = after.findLast((row) => row.kind === "text");
   const text = reply?.text?.trim();
   if (!reply || !text || text.length < TRIVIAL_CHARS || words(text) < TRIVIAL_WORDS) return null;
-  return { ask: ask.text.trim().slice(0, ASK_MAX), reply: text.length > REPLY_MAX ? `…${text.slice(-REPLY_MAX)}` : text, replyId: reply.id };
+  return { ask: ask.text.trim().slice(0, ASK_MAX), askId: ask.id, reply: text.length > REPLY_MAX ? `…${text.slice(-REPLY_MAX)}` : text, replyId: reply.id };
 }
 
 /** The model's answer as one short line, or null when it gave none that fits. */

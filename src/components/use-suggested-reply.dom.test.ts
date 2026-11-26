@@ -95,8 +95,18 @@ describe("useSuggestedReply", () => {
     expect(fixture.calls).toHaveLength(1);
   });
 
+  it("asks after a quick reply to a message sent here, even if the bot was never seen working", async () => {
+    render({ messages: TURN });
+    render({ messages: [...TURN, ask("u2", "Make it friendlier"), reply("b2")] });
+    await settle();
+    expect(fixture.calls.map((call) => call.body.after)).toEqual(["b2"]);
+  });
+
   it("asks nothing for a conversation that was already finished when it opened", async () => {
     render({ messages: TURN });
+    await settle();
+    render({ threadId: "t2", messages: [] });
+    render({ threadId: "t2", messages: [ask("x1"), reply("y1")] });
     await settle();
     expect(fixture.calls).toHaveLength(0);
   });

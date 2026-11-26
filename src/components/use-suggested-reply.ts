@@ -35,7 +35,8 @@ export interface SuggestedReply {
   onKeyDown(event: Pick<KeyboardEvent, "key" | "shiftKey" | "ctrlKey" | "altKey" | "metaKey" | "preventDefault">): boolean;
 }
 
-/** One faded next line after a reply that finished while this composer was open. Asked for once per reply, after a short
+/** One faded next line after a reply that finished while this composer was open: the bot was seen working, or the person
+ * sent a message here (a quick reply can start and end between two renders). Asked for once per reply, after a short
  * pause, and cancelled the moment anything else happens in the thread or the field. */
 export function useSuggestedReply(input: SuggestedReplyInput): SuggestedReply {
   const on = useFeature("suggestedReplies");
@@ -44,9 +45,12 @@ export function useSuggestedReply(input: SuggestedReplyInput): SuggestedReply {
   const exchange = useMemo(() => lastExchange(input.messages), [input.messages]);
   const replyId = exchange?.replyId ?? null;
   const [, redraw] = useState(0);
-  const [watched, setWatched] = useState({ threadId, worked: working });
-  if (watched.threadId !== threadId) setWatched({ threadId, worked: working });
-  else if (working && !watched.worked) setWatched({ threadId, worked: true });
+  const askId = input.messages.length ? input.messages.findLast((row) => row.role === "user")?.id ?? null : undefined;
+  const [watched, setWatched] = useState({ threadId, worked: working, askAtOpen: askId });
+  if (watched.threadId !== threadId) setWatched({ threadId, worked: working, askAtOpen: askId });
+  else if (working && !watched.worked) setWatched({ ...watched, worked: true });
+  else if (watched.askAtOpen === undefined && askId !== undefined) setWatched({ ...watched, askAtOpen: askId });
+  const sent = watched.threadId === threadId && watched.askAtOpen !== undefined && exchange !== null && exchange.askId !== watched.askAtOpen;
   const lastThread = useRef(threadId);
 
   useEffect(() => {
@@ -55,7 +59,7 @@ export function useSuggestedReply(input: SuggestedReplyInput): SuggestedReply {
     if (sameThread && draft && replyId && (offered.get(threadId)?.after === replyId || asked.get(threadId) === replyId)) declined.set(threadId, replyId);
   }, [threadId, draft, replyId]);
 
-  const live = on && Boolean(botId) && watched.threadId === threadId && watched.worked && !held && !draft && !attached;
+  const live = on && Boolean(botId) && ((watched.threadId === threadId && watched.worked) || sent) && !held && !draft && !attached;
   useEffect(() => {
     if (!live || !replyId || asked.get(threadId) === replyId) return;
     const stop = new AbortController();
