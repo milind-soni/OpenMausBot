@@ -129,6 +129,7 @@ function boot(engaged = true, options: {
       send(text: string): Promise<void>; open(url: string): Promise<void>; setContext(text: string): Promise<void>; theme: string; room: boolean;
       data: { query(sql: string, params?: unknown): Promise<unknown> };
       state: { get(key: string): Promise<unknown>; set(key: string, value?: unknown): Promise<void>; keys(): Promise<string[]> };
+      connectors: { call(name: string, tool: string, args?: unknown): Promise<unknown>; list(): Promise<unknown[]> };
     },
   };
 }
@@ -191,6 +192,26 @@ describe("the bot-page helper", () => {
     expect(await page.mausbot().state.get("filter")).toBeUndefined();
     expect(asked[0]).toEqual(["mausbot/data/query", { sql: "SELECT ? AS n", params: [1] }]);
     expect(asked[4]).toEqual(["mausbot/state/set", { key: "filter" }]);
+  });
+
+  it("calls declared connector tools and lists them through the bridge, answering with the tool's result alone", async () => {
+    const asked: Array<[string, Record<string, unknown>]> = [];
+    const page = boot(false, {
+      can: { connectors: [{ connector: "gmail", tools: ["GMAIL_FETCH_EMAILS"] }] },
+      rpc: async (method, params) => {
+        asked.push([method, params]);
+        return method === "mausbot/connectors/list"
+          ? { connectors: [{ connector: "gmail", label: "Gmail", connected: true, tools: ["GMAIL_FETCH_EMAILS"] }] }
+          : { result: { messages: [{ id: "1" }] }, truncated: true };
+      },
+    });
+    expect(await page.mausbot().connectors.call("gmail", "GMAIL_FETCH_EMAILS", { max_results: 3 })).toEqual({ messages: [{ id: "1" }] });
+    expect(await page.mausbot().connectors.list()).toEqual([{ connector: "gmail", label: "Gmail", connected: true, tools: ["GMAIL_FETCH_EMAILS"] }]);
+    expect(asked).toEqual([
+      ["mausbot/connectors/call", { connector: "gmail", tool: "GMAIL_FETCH_EMAILS", arguments: { max_results: 3 }, engaged: false }],
+      ["mausbot/connectors/list", {}],
+    ]);
+    await expect(page.mausbot().connectors.call("gmail", "GMAIL_SEND_EMAIL")).rejects.toThrow("This page did not declare GMAIL_SEND_EMAIL");
   });
 
   it("rejects data and state with the reason when the page did not declare them", async () => {

@@ -1,10 +1,9 @@
-// One session's MCP tool budget shared out among OpenMausBot's own servers in it: the least cut that
-// brings all of them under the budget together is found here, when the session's servers are sent, and each server gets
-// what its list comes to at that cut plus its part of what is left, as its OMB_TOOL_SCHEMA_PROFILE. Each server then fits
-// the list it really serves into that share: a browser engine listing more than the estimate here only cuts its own.
-// The agents list is sized exactly; the others by the catalogs their endpoints serve (email and phone show fewer when
-// the bot may use fewer, and agent-browser's own list replaces the browser catalog). The person's servers and the
-// connected-apps server are not ours to trim and are not sized: their lists are only known once they answer.
+// OpenMausBot's own servers in one session's MCP tool budget: the least cut that brings every sized list under the
+// budget together is found when the session's servers are sent, and each own server gets what its list comes to at that
+// cut plus its part of what is left, as its OMB_TOOL_SCHEMA_PROFILE. Each server then fits the list it really serves into
+// that share: a browser engine listing more than the estimate here only cuts its own. The agents list is sized exactly;
+// the others by the catalogs their endpoints serve (email and phone show fewer when the bot may use fewer, and
+// agent-browser's own list replaces the browser catalog).
 import { TOOL_LIST as BROWSER_TOOLS } from "../browser/tools.ts";
 import { CLOUD_COMPUTER_TOOLS } from "../cloud-computer-tools.ts";
 import { DATA_TOOLS } from "../data/tools.ts";
@@ -33,12 +32,14 @@ export interface SessionShares {
   fits: boolean;
 }
 
-/** Shares of `budget` for `lists`: each list's bytes at the least cut that fits them all, plus its part of the rest. With
- * no cut that fits, each gets its part of the budget by its size at its shortest, and fits what it can. */
-export function sessionToolShares(lists: ReadonlyArray<readonly ListedTool[]>, budget: number): SessionShares {
-  const compacted = lists.map((tools) => withCompactSchemas(tools));
-  const { level, fits } = descriptionLevelFor(compacted.flat(), budget);
-  const sizes = compacted.map((tools) => definitionListBytes(withDescriptionLevel(tools, level)));
+/** Shares of `budget` for `lists`: each list's bytes at the least cut that fits them all, plus its part of the rest. A
+ * number stands for a list known only by the bytes set aside for it, which no cut changes. With no cut that fits, each
+ * gets its part of the budget by its size at its shortest, and fits what it can. */
+export function sessionToolShares(lists: ReadonlyArray<readonly ListedTool[] | number>, budget: number): SessionShares {
+  const reserved = lists.reduce<number>((sum, list) => sum + (typeof list === "number" ? list : 0), 0);
+  const compacted = lists.map((tools) => (typeof tools === "number" ? [] : withCompactSchemas(tools)));
+  const { level, fits } = descriptionLevelFor(compacted.flat(), budget - reserved);
+  const sizes = lists.map((list, index) => (typeof list === "number" ? list : definitionListBytes(withDescriptionLevel(compacted[index]!, level))));
   const bytes = sizes.reduce((sum, size) => sum + size, 0);
   if (bytes === 0) return { shares: sizes, bytes, fits };
   const room = fits ? budget - bytes : budget;
@@ -56,21 +57,32 @@ function ownKind(server: AcpMcpServer): { kind: OwnKind; env: Record<string, str
   return kind === "agents" || (kind !== undefined && kind in CATALOGS) ? { kind: kind as OwnKind, env } : null;
 }
 
+/** The tools one of OpenMausBot's own servers lists before any share; null for any other server. */
+export function ownServerToolList(server: AcpMcpServer): readonly ListedTool[] | null {
+  const own = ownKind(server);
+  if (!own) return null;
+  return own.kind === "agents" ? agentsToolList({ ...own.env, [TOOL_SCHEMA_PROFILE_ENV]: undefined }).listed as ListedTool[] : CATALOGS[own.kind];
+}
+
+/** One of OpenMausBot's own stdio servers with `share` as its OMB_TOOL_SCHEMA_PROFILE, any earlier profile replaced. */
+export function withOwnShare(server: AcpMcpServer, share: number): AcpMcpServer {
+  if (!("command" in server)) return server;
+  const env = server.env.filter(({ name }) => name !== TOOL_SCHEMA_PROFILE_ENV);
+  return { ...server, env: [...env, { name: TOOL_SCHEMA_PROFILE_ENV, value: toolListShareProfile(share) }] };
+}
+
 /** `servers` with each of OpenMausBot's own servers given its share of `budget`; every other server as it was. */
 export function withSessionToolShares(servers: AcpMcpServer[], budget: number, log: (line: string) => void = (line) => console.warn(line)): AcpMcpServer[] {
-  const own = servers.map((server) => ({ server, own: ownKind(server) })).filter((entry) => entry.own !== null);
+  const own = servers.map((server) => ({ server, tools: ownServerToolList(server) })).filter((entry) => entry.tools !== null);
   if (!own.length) return servers;
-  const lists = own.map(({ own: found }) => (found!.kind === "agents" ? agentsToolList({ ...found!.env, [TOOL_SCHEMA_PROFILE_ENV]: undefined }).listed as ListedTool[] : CATALOGS[found!.kind as HarnessMcpKind]));
-  const { shares, bytes, fits } = sessionToolShares(lists, budget);
+  const { shares, bytes, fits } = sessionToolShares(own.map(({ tools }) => tools!), budget);
   if (!fits) {
     const others = servers.filter((server) => !own.some((entry) => entry.server === server)).map((server) => server.name);
-    log(`[mcp] this session's own MCP tools (${own.map(({ own: found }) => found!.kind).join(", ")}) come to ${bytes} bytes at their shortest, ${bytes - budget} over the ${budget}-byte tool budget; the engine leaves out its largest tools first${others.length ? ` (${others.join(", ")} not counted)` : ""}`);
+    log(`[mcp] this session's own MCP tools (${own.map(({ server }) => server.name).join(", ")}) come to ${bytes} bytes at their shortest, ${bytes - budget} over the ${budget}-byte tool budget; the engine leaves out its largest tools first${others.length ? ` (${others.join(", ")} not counted)` : ""}`);
   }
   const shareOf = new Map(own.map(({ server }, index) => [server, shares[index]!]));
   return servers.map((server) => {
     const share = shareOf.get(server);
-    if (share === undefined || !("command" in server)) return server;
-    const env = server.env.filter(({ name }) => name !== TOOL_SCHEMA_PROFILE_ENV);
-    return { ...server, env: [...env, { name: TOOL_SCHEMA_PROFILE_ENV, value: toolListShareProfile(share) }] };
+    return share === undefined ? server : withOwnShare(server, share);
   });
 }

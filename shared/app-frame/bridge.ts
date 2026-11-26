@@ -1,15 +1,17 @@
 // The host side of the MCP Apps bridge (io.modelcontextprotocol/ui, stable 2026-01-26) for one app frame. It
 // runs in the desktop renderer and, bundled, in the phones' web views, so it never touches a window: a platform
 // hands it each `message` event and an adapter for the rest.
-import { APP_LIMITS, APP_PROTOCOL_VERSION, ROOM_VIEW_ONLY, utf8Bytes, type AppDocument } from "../app.ts";
+import { APP_LIMITS, APP_PROTOCOL_VERSION, ROOM_VIEW_ONLY, utf8Bytes, type AppConnectorUse, type AppDocument } from "../app.ts";
 import {
   APP_RPC_METHODS,
   PAGE_RPC_METHODS,
+  pageMethodUse,
   RPC_HOST_REFUSED,
   RPC_INVALID_PARAMS,
   RPC_METHOD_NOT_FOUND,
   type AppRpcMethod,
   type PageRpcMethod,
+  type PageUse,
   type JsonRpcError,
   type JsonRpcId,
   type JsonRpcMessage,
@@ -180,9 +182,38 @@ export function openableLink(value: unknown): string | null {
 }
 
 /** Why a bot's page may not make a call it did not declare, or makes in a room. */
-export function pageUseRefusal(use: "data" | "state", room: boolean): string {
+export function pageUseRefusal(use: PageUse, room: boolean): string {
+  if (use === "connectors") {
+    return room ? "In a room, a page cannot call connected apps." : 'This page declared no connector tools: show it with uses naming each tool, e.g. ["gmail:GMAIL_FETCH_EMAILS"].';
+  }
   if (room) return "In a room, a page cannot read its bot's data or keep state.";
   return `This page did not declare "${use}": show it with uses: ["${use}"] to ${use === "data" ? "read its bot's data" : "keep state"}.`;
+}
+
+/** The target of a connector call as the page named it: a connected app's toolkit or an MCP server, and the tool. */
+export type PageConnectorTarget = { connector: string; tool: string } | { server: string; tool: string };
+
+/** `name` is a connected app's toolkit or, failing that, an MCP server the page declared; "mcp:<server>" always a server. */
+export function pageConnectorTarget(params: Record<string, unknown>, declared: readonly AppConnectorUse[]): PageConnectorTarget | null {
+  const tool = params.tool, given = params.name ?? params.connector ?? params.server;
+  if (typeof tool !== "string" || !tool || tool.length > 128 || typeof given !== "string" || !given || given.length > 68) return null;
+  const name = given.trim().toLowerCase();
+  if (typeof params.server === "string" || name.startsWith("mcp:")) return { server: name.replace(/^mcp:/, ""), tool };
+  if (typeof params.connector === "string") return { connector: name, tool };
+  const app = declared.some((group) => "connector" in group && group.connector === name);
+  return !app && declared.some((group) => "server" in group && group.server === name) ? { server: name, tool } : { connector: name, tool };
+}
+
+/** The declared group a target belongs to, when the page declared that exact tool. */
+export function declaredConnectorTool(declared: readonly AppConnectorUse[], target: PageConnectorTarget): AppConnectorUse | null {
+  return declared.find((group) => ("server" in target
+    ? "server" in group && group.server === target.server
+    : "connector" in group && group.connector === target.connector) && group.tools.includes(target.tool)) ?? null;
+}
+
+export function pageConnectorUndeclared(target: PageConnectorTarget): string {
+  const named = "server" in target ? `mcp:${target.server}:${target.tool}` : `${target.connector}:${target.tool}`;
+  return `This page did not declare ${target.tool}: list "${named}" in show_html uses to call it.`;
 }
 
 /** The params a page's own call needs, or what is wrong with them. */
@@ -198,8 +229,22 @@ function pageParamsProblem(method: PageRpcMethod, params: Record<string, unknown
     case "mausbot/state/set":
       return key(params.key) ? null : `A state key is text of 1 to ${APP_LIMITS.pageStateKeyChars} characters.`;
     case "mausbot/state/keys":
+    case "mausbot/connectors/list":
       return null;
+    case "mausbot/connectors/call": {
+      if (!pageConnectorTarget(params, [])) return "mausbot.connectors.call needs (connector or server, tool name, arguments object).";
+      if (params.arguments !== undefined && !isRecord(params.arguments)) return "mausbot.connectors.call arguments: one object.";
+      const bytes = jsonBytes(params.arguments ?? {});
+      return bytes === null || bytes > APP_LIMITS.pageConnectorArgsBytes ? `mausbot.connectors.call arguments: at most ${APP_LIMITS.pageConnectorArgsBytes} bytes of JSON.` : null;
+    }
   }
+}
+
+/** Only what the host should send on: a connector call's own fields, with the host's word on engagement. */
+function pageParamsSent(method: PageRpcMethod, params: Record<string, unknown>, target: PageConnectorTarget | null, engaged: () => boolean): Record<string, unknown> {
+  if (method === "mausbot/connectors/list") return {};
+  if (!target) return params;
+  return { ...target, arguments: isRecord(params.arguments) ? params.arguments : {}, engaged: engaged() };
 }
 
 function messageText(params: Record<string, unknown> | undefined): string | null {
@@ -312,15 +357,20 @@ export function createAppBridge(options: AppBridgeOptions): AppBridge {
   };
 
   // A page's reads and saves need no click: a dashboard loads its data, and remembers its filters, on its own.
+  // A connector call to a tool that changes something needs a click as well, which only the host can vouch for: the server
+  // knows which tools change something and refuses such a call made without one.
   const onPageRpc = async (id: JsonRpcId, method: PageRpcMethod, params: Record<string, unknown>) => {
     if (mcp) return fail(id, RPC_METHOD_NOT_FOUND, "Method not found");
-    const use = method === "mausbot/data/query" ? "data" : "state";
-    if (!doc.can[use]) return fail(id, RPC_HOST_REFUSED, pageUseRefusal(use, Boolean(doc.room)));
+    const use = pageMethodUse(method);
+    const declared = use === "connectors" ? doc.can.connectors ?? [] : [];
+    if (use === "connectors" ? !declared.length : !doc.can[use]) return fail(id, RPC_HOST_REFUSED, pageUseRefusal(use, Boolean(doc.room)));
     const problem = pageParamsProblem(method, params);
     if (problem) return fail(id, RPC_INVALID_PARAMS, problem);
+    const target = method === "mausbot/connectors/call" ? pageConnectorTarget(params, declared)! : null;
+    if (target && !declaredConnectorTool(declared, target)) return fail(id, RPC_HOST_REFUSED, pageConnectorUndeclared(target));
     if (!rates.rpc.take()) return fail(id, RPC_HOST_REFUSED, "Too many calls from this page. Wait a moment.");
     try {
-      respond(id, (await adapter.callRpc(method, params)) ?? {});
+      respond(id, (await adapter.callRpc(method, pageParamsSent(method, params, target, () => adapter.engaged()))) ?? {});
     } catch (error) {
       const failure = rpcErrorFrom(error);
       fail(id, failure.code, failure.message);

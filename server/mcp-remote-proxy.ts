@@ -29,6 +29,7 @@ import { APP_ONLY_REFUSAL, AppObserver, REMOTE_MCP_APPS_ENV, UI_EXTENSION, model
 import { lenientToolValidator, schemaProblems } from "./mcp-schema-validator.ts";
 import { fitToolListResult } from "./mcp-tool-schema.ts";
 import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
+import { toolsListResultForSessionShare } from "./tool-list-share.ts";
 import { capToolListResult, toolLimitFromEnv } from "./tool-count-limit.ts";
 import { readStdioLines } from "./stdio-lines.ts";
 import { APP_EXTENSION_KEY } from "../shared/app.ts";
@@ -341,7 +342,7 @@ async function handle(message: Json): Promise<void> {
   try {
     const result = directory ? await directed(message, signal) : await upstream(message.method, message.params, signal);
     if (message.method === "initialize") initialized = true;
-    send({ jsonrpc: "2.0", id: message.id, result: message.method === "tools/list" ? capToolListResult(fitToolListResult(result, SCHEMA_PROFILE, logFit), TOOL_LIMIT, logFit) : result });
+    send({ jsonrpc: "2.0", id: message.id, result: message.method === "tools/list" ? toolsListResultForSessionShare(capToolListResult(fitToolListResult(result, SCHEMA_PROFILE, logFit), TOOL_LIMIT, logFit), process.env, logFit) : result });
   } catch (failure) {
     // Transport failures may carry URLs or header values: never relayed.
     let code = -32603;

@@ -17,7 +17,7 @@ export const JSX_PAGE_LIBRARIES = {
 const NPM = "https://cdn.jsdelivr.net/npm";
 const REACT = `${NPM}/react@${JSX_PAGE_LIBRARIES.react}/+esm`;
 
-/** What a page's file may import. `mausbot` is the shell's own: Chart, useTheme, send, open, setContext, data and state. */
+/** What a page's file may import. `mausbot` is the shell's own: Chart, useTheme, send, open, setContext, data, state and connectors. */
 export const JSX_PAGE_IMPORTS: Readonly<Record<string, string>> = {
   react: REACT,
   "react/jsx-runtime": `${NPM}/react@${JSX_PAGE_LIBRARIES.react}/jsx-runtime/+esm`,
@@ -169,6 +169,10 @@ export const JSX_RUNTIME_SOURCE = `(function (env) {
         get: function (key) { return bridge() ? bridge().state.get(key) : unpublished(); },
         set: function (key, value) { return bridge() ? bridge().state.set(key, value) : unpublished(); },
         keys: function () { return bridge() ? bridge().state.keys() : unpublished(); }
+      },
+      connectors: {
+        call: function (name, tool, args) { return bridge() ? bridge().connectors.call(name, tool, args) : unpublished(); },
+        list: function () { return bridge() ? bridge().connectors.list() : unpublished(); }
       }
     };
   };

@@ -15,7 +15,7 @@ export const APP_TOOL_DEFINITIONS = [
         fallback_text: { type: "string", description: "Optional plain text for clients without pages." },
         frameless: { type: "boolean", description: "true drops the card frame; a replacement keeps its frame unless given." },
         live: { type: "boolean", description: "With path: true reloads it when its folder changes." },
-        uses: { type: "array", items: { type: "string", enum: ["data", "state"] } },
+        uses: { type: "array", items: { type: "string" } },
         app_id: { type: "string", description: "Only to replace a page you showed." },
       },
     },

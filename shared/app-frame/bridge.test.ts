@@ -514,3 +514,67 @@ describe("a bot page's data and state", () => {
     expect((await h.request("mausbot/data/query", { sql: "SELECT 1" }))?.error).toBeUndefined();
   });
 });
+
+describe("a bot page's connector tools", () => {
+  const gmail = { connector: "gmail", tools: ["GMAIL_FETCH_EMAILS", "GMAIL_SEND_EMAIL"] };
+  const notes = { server: "notes", tools: ["search"] };
+  const declared = (over: Partial<AppDocument> = {}): AppDocument => ({ ...botDoc(), can: { ...botDoc().can, connectors: [gmail, notes] }, ...over });
+
+  it("refuses a page that declared no connector tools, and a tool it did not declare, before the host is asked", async () => {
+    const none = harness(botDoc());
+    await none.connect();
+    expect((await none.request("mausbot/connectors/call", { name: "gmail", tool: "GMAIL_FETCH_EMAILS" }))?.error).toEqual({
+      code: RPC_HOST_REFUSED, message: 'This page declared no connector tools: show it with uses naming each tool, e.g. ["gmail:GMAIL_FETCH_EMAILS"].',
+    });
+    expect((await none.request("mausbot/connectors/list"))?.error?.code).toBe(RPC_HOST_REFUSED);
+    const h = harness(declared());
+    await h.connect();
+    expect((await h.request("mausbot/connectors/call", { name: "gmail", tool: "GMAIL_DELETE_MESSAGE" }))?.error).toEqual({
+      code: RPC_HOST_REFUSED, message: 'This page did not declare GMAIL_DELETE_MESSAGE: list "gmail:GMAIL_DELETE_MESSAGE" in show_html uses to call it.',
+    });
+    expect((await h.request("mausbot/connectors/call", { name: "outlook", tool: "OUTLOOK_LIST_MESSAGES" }))?.error?.code).toBe(RPC_HOST_REFUSED);
+    expect((await h.request("mausbot/connectors/call", { name: "notes", tool: "write" }))?.error?.message).toContain('"mcp:notes:write"');
+    expect(none.calls.rpc).toEqual([]);
+    expect(h.calls.rpc).toEqual([]);
+  });
+
+  it("forwards a declared call with exactly its own fields and the host's word on a click, which the page cannot set", async () => {
+    const h = harness(declared());
+    h.answerRpc(async () => ({ result: { messages: [] } }));
+    await h.connect();
+    h.setEngaged(false);
+    expect((await h.request("mausbot/connectors/call", { name: "gmail", tool: "GMAIL_FETCH_EMAILS", arguments: { max_results: 5 }, engaged: true, account: "acct_1" }))?.result)
+      .toEqual({ result: { messages: [] } });
+    h.setEngaged(true);
+    await h.request("mausbot/connectors/call", { name: "gmail", tool: "GMAIL_SEND_EMAIL", arguments: { to: "a@example.com" } });
+    await h.request("mausbot/connectors/call", { name: "notes", tool: "search" });
+    expect(h.calls.rpc).toEqual([
+      { method: "mausbot/connectors/call", params: { connector: "gmail", tool: "GMAIL_FETCH_EMAILS", arguments: { max_results: 5 }, engaged: false } },
+      { method: "mausbot/connectors/call", params: { connector: "gmail", tool: "GMAIL_SEND_EMAIL", arguments: { to: "a@example.com" }, engaged: true } },
+      { method: "mausbot/connectors/call", params: { server: "notes", tool: "search", arguments: {}, engaged: true } },
+    ]);
+  });
+
+  it("asks the host for the list with no params, and checks a call's params first", async () => {
+    const h = harness(declared());
+    h.answerRpc(async () => ({ connectors: [] }));
+    await h.connect();
+    expect((await h.request("mausbot/connectors/list", { anything: 1 }))?.result).toEqual({ connectors: [] });
+    expect((await h.request("mausbot/connectors/call", { name: "gmail" }))?.error?.code).toBe(RPC_INVALID_PARAMS);
+    expect((await h.request("mausbot/connectors/call", { name: "gmail", tool: "GMAIL_FETCH_EMAILS", arguments: [1] }))?.error?.code).toBe(RPC_INVALID_PARAMS);
+    expect((await h.request("mausbot/connectors/call", { name: "gmail", tool: "GMAIL_FETCH_EMAILS", arguments: { q: "x".repeat(70_000) } }))?.error?.code).toBe(RPC_INVALID_PARAMS);
+    expect(h.calls.rpc).toEqual([{ method: "mausbot/connectors/list", params: {} }]);
+  });
+
+  it("gives a room's page and an MCP app none of it", async () => {
+    const room = harness({ ...botDoc(), room: true });
+    await room.connect();
+    expect((await room.request("mausbot/connectors/call", { name: "gmail", tool: "GMAIL_FETCH_EMAILS" }))?.error?.message).toBe("In a room, a page cannot call connected apps.");
+    const mcp = harness(mcpDoc({ can: { ...mcpDoc().can, connectors: [gmail] } }));
+    await mcp.connect();
+    expect((await mcp.request("mausbot/connectors/list"))?.error?.code).toBe(RPC_METHOD_NOT_FOUND);
+    expect(room.calls.rpc).toEqual([]);
+    expect(mcp.calls.rpc).toEqual([]);
+  });
+});
+

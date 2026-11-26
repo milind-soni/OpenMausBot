@@ -1,7 +1,7 @@
 // No byte of app content precedes the CSP meta. A leading BOM, whitespace, comments, bogus comments
 // (`<?xml …?>`, `<![CDATA[…]>`) and the app's own doctype are stripped first; the rest follows the meta,
 // which already sits in the head the parser opened for it.
-import type { AppCan, AppDocument, AppToolDefinition, AppToolResult, AppUse } from "../app.ts";
+import type { AppCan, AppConnectorUse, AppDocument, AppToolDefinition, AppToolResult, AppUse } from "../app.ts";
 import { BOT_HTML_CSP, BOT_HTML_NETWORK, folderPageCsp, folderPageNetwork, mcpAppCsp } from "./csp.ts";
 import { APP_HELPER_SOURCE, APP_ROOM_HELPER_SOURCE, APP_THEME_STYLE, PUBLISHED_PAGE_NO_BOT } from "./helper.ts";
 import { jsxPageHtml } from "./jsx-page.ts";
@@ -45,7 +45,7 @@ const PUBLISHED_MAUSBOT = "(function(){var no=function(){return Promise.reject(n
   "window.mausbot={theme:matchMedia(\"(prefers-color-scheme: dark)\").matches?\"dark\":\"light\"," +
   "send:function(){return Promise.resolve()},setContext:function(){return Promise.resolve()}," +
   "open:function(u){window.open(String(u),\"_blank\",\"noopener\");return Promise.resolve()}," +
-  "data:{query:no},state:{get:no,set:no,keys:no}};})();";
+  "data:{query:no},state:{get:no,set:no,keys:no},connectors:{call:no,list:no}};})();";
 
 /** A bot's HTML page as a published page serves it: the theme colours the chat would give it, and a quiet mausbot. */
 export function publishedBotHtml(html: string): string {
@@ -61,6 +61,7 @@ export const ROOM_CAN: AppCan = { serverTools: false, serverResources: false, me
  * page gets none of it. */
 export function botHtmlDocument(input: {
   messageId: string; rev: number; html: string; format?: "jsx"; title?: string; files?: string; room?: boolean; uses?: readonly AppUse[];
+  connectors?: readonly AppConnectorUse[];
 }): AppDocument {
   const html = input.format === "jsx" ? jsxPageHtml({ title: input.title ?? "Page", source: input.html }) : input.html;
   const csp = input.files ? folderPageCsp(input.files) : BOT_HTML_CSP;
@@ -72,13 +73,16 @@ export function botHtmlDocument(input: {
     srcdoc: buildSrcdoc({ html, csp, botHelper: true, room: input.room === true, ...(input.files ? { base: input.files } : {}) }),
     csp,
     network: { connect: [...network.connect], resources: [...network.resources] },
-    can: input.room ? { ...ROOM_CAN } : declaredCan(input.uses ?? []),
+    can: input.room ? { ...ROOM_CAN } : declaredCan(input.uses ?? [], input.connectors ?? []),
     ...(input.room ? { room: true as const } : {}),
   };
 }
 
-function declaredCan(uses: readonly AppUse[]): AppCan {
-  return { ...BOT_HTML_CAN, ...(uses.includes("data") ? { data: true } : {}), ...(uses.includes("state") ? { state: true } : {}) };
+function declaredCan(uses: readonly AppUse[], connectors: readonly AppConnectorUse[]): AppCan {
+  return {
+    ...BOT_HTML_CAN, ...(uses.includes("data") ? { data: true } : {}), ...(uses.includes("state") ? { state: true } : {}),
+    ...(connectors.length ? { connectors: connectors.map((group) => ({ ...group, tools: [...group.tools] })) } : {}),
+  };
 }
 
 export function mcpAppDocument(input: {
