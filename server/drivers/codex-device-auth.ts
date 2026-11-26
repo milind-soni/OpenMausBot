@@ -1,5 +1,6 @@
 // Codex's device-code sign-in: `codex login --device-auth`, `codex login status` to keep and confirm a login, `codex logout`.
 import { stripVTControlCharacters } from "node:util";
+import type { SignInOutcome } from "../../shared/sign-in-outcome.ts";
 import { deviceSignInPrompt } from "../../shared/device-sign-in.ts";
 import { DeviceAuthController, type DeviceAuthOptions, type DeviceSignIn } from "./device-auth.ts";
 import { codexReportsLogin } from "./codex-login.ts";
@@ -22,6 +23,13 @@ function loginFailure(output: string): string {
   return "ChatGPT sign-in did not finish. Check the server's connection and that device-code login is enabled in ChatGPT, then try again.";
 }
 
+/** `loginFailure` as a fixed code: an expired code, device sign-in refused by the account's settings, else the command ended. */
+function loginFailureReason(output: string): SignInOutcome {
+  if (/device.{0,40}(disabled|not enabled|not allowed)|enable.{0,40}device/i.test(output)) return "refused";
+  if (/expired|expiration|timed out/i.test(output)) return "expired";
+  return "exited";
+}
+
 export const CODEX_DEVICE_SIGN_IN: DeviceSignIn = {
   provider: "codex",
   product: "Codex",
@@ -31,6 +39,7 @@ export const CODEX_DEVICE_SIGN_IN: DeviceSignIn = {
   loginArgs: ["login", "--device-auth"],
   install: "Run npm install -g @openai/codex@latest on the server, then try again.",
   failure: loginFailure,
+  failureReason: loginFailureReason,
   status: {
     args: ["login", "status"],
     read: (code, output) =>

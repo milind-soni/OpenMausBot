@@ -1799,9 +1799,34 @@ wait for the next read, `truncated: true`):
     "boot": { "waits": 5, "stopped": 1, "killed": 1, "stallMinutes": 4 } },
   "speed": { "windowS": 300, "steal": 1.2, "psi": { "cpu": 3.4, "memory": 0, "io": 0.8 }, "bootMs": 5400, "wakeMs": null,
     "turnStarts": [12, 3, 1, 0, 0, 0], "loop": { "n": 2, "worstMs": 1800 } },
-  "clock": { "v": 1, "errorMs": 21660000, "measuredAt": 1790021660000 }
+  "clock": { "v": 1, "errorMs": 21660000, "measuredAt": 1790021660000 },
+  "signIns": { "attempts": 3, "open": 0,
+    "engines": [{ "kind": "claudeAgent", "attempts": 3, "completed": 0, "last": { "outcome": "interrupted", "at": 1790000780000 } }],
+    "recent": [{ "kind": "claudeAgent", "method": "paste-code", "outcome": "wrong_code", "at": 1790000420000 },
+               { "kind": "claudeAgent", "method": "paste-code", "outcome": "interrupted", "at": 1790000780000 }] }
 }
 ```
+
+**`signIns`** is the home's engine sign-ins (`server/sign-in-trace.ts`, kept
+in `sign-in-trace.json` so a stop can't wipe it): `attempts` since the first
+one (each press of an engine's sign-in), how many are `open` now, per engine
+kind its attempts, completed ones and the last event, and the last 10 events
+(`started`, or an outcome). An outcome is a fixed code
+(`shared/sign-in-outcome.ts`): `completed`, `wrong_code` (a pasted code that
+is not a code; the sign-in stays open), `refused` (the provider refused it),
+`expired`, `cancelled`, `exited` (the engine's login command ended),
+`interrupted` (the server stopped or restarted under it, which the next boot
+records, or the engine's settings changed), `not_installed`, `timed_out` or
+`failed`. `method` is the provider card's (`paste-code`, `device-code`,
+`browser-pkce`, `browser`, `callback-url`). Never a code, link, account,
+session or flow. Each event is also one log line, such as `sign-in:
+claudeAgent paste-code wrong_code after 1m 12s`. Left out when it can't be
+read; older homes don't send it, and an Admin that doesn't know it drops it.
+The sign-in status the screen polls (`GET /api/instances/<id>/auth/status`)
+carries the same code as `reason` on a finished sign-in, and an error from
+`auth/start`, `auth/complete` or `auth/cancel` carries it as `reason` where
+known: a flow the server's stop cut short reads `{"phase":"failed",
+"reason":"interrupted"}`.
 
 **`clock`** is the home's clock as it last measured it ("The home's clock"
 below): `errorMs` how far it is behind the true time (negative: ahead), and
@@ -2083,7 +2108,9 @@ judge a pending timer by a wall-clock time stored when it was set.
   send; one parked on a person's answer doesn't count), no Live call, no cloud
   computer on or starting (its idle timer
   lives in this process), no maintenance (backup or restore, Move to Cloud, an
-  engine or browser install, a provider sign-in) and no request in progress;
+  engine or browser install, a provider sign-in until it finishes, fails, is
+  cancelled or reaches its own expiry, at most 15 minutes for every engine) and no
+  request in progress;
 - nobody used the home for 10 minutes (the Admin may ask for another window).
   A use is an authenticated request, except the event stream, `/api/health`,
   `/api/sync/…`, `/api/shared-computers/…` and requests the page marks
