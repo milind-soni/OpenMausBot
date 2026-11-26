@@ -1,13 +1,13 @@
 // A hostile or prompt-injected server against the real connector and executor.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { lstat, mkdtemp, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { link, lstat, mkdtemp, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { createComputerSharing, validSharedOperation } from "./computer-sharing.mjs";
-import { executeSharedOperation, LENT_SCREEN_TOOLS } from "./shared-computer-access.mjs";
+import { executeSharedOperation, homeSettingsTarget, LENT_SCREEN_TOOLS } from "./shared-computer-access.mjs";
 import { LENT_SCREEN_ARGUMENTS, lentScreenArguments } from "./lent-screen-tools.mjs";
 import { createLendingActivity } from "./lending-activity.mjs";
 import { helperMissing, SCREEN_LOCKED } from "./lent-screen-failures.mjs";
@@ -468,4 +468,15 @@ test("direct executor: through the whole system drive, the home folder's hidden 
   }
   await run({ action: "write_file", path: inHome("Documents/plan.txt"), content: "fine" });
   assert.equal(await readFile(path.join(home, "Documents", "plan.txt"), "utf8"), "fine");
+});
+
+test("another name for a hidden home entry (an 8.3 alias such as APPDAT~1, here a hard link) counts as that entry", async t => {
+  const home = await realpath(await mkdtemp(path.join(tmpdir(), "omb-alias-home-")));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  await writeFile(path.join(home, ".vimrc"), "set number\n");
+  await link(path.join(home, ".vimrc"), path.join(home, "VIMRC~1"));
+  await mkdir(path.join(home, "Documents"));
+  await writeFile(path.join(home, "notes.txt"), "plain\n");
+  for (const relative of ["VIMRC~1", "./VIMRC~1", ".bashrc", "AppData/Roaming/x.json"]) assert.equal(await homeSettingsTarget(home, relative), true, relative);
+  for (const relative of ["notes.txt", "Documents/plan.txt", "NEW~1/x.txt", ""]) assert.equal(await homeSettingsTarget(home, relative), false, relative);
 });

@@ -75,6 +75,22 @@ async function insideHomePath(target, home = os.homedir()) {
   return null;
 }
 
+/** Whether `relative` (inside `home`) is one of home's hidden entries, Library or AppData. By name and by {dev, ino}, so
+ * another name for the same entry (a Windows 8.3 alias such as APPDAT~1 or VIMRC~1) is refused as the entry is. */
+export async function homeSettingsTarget(home, relative) {
+  if (insideHomeSettings(relative)) return true;
+  const first = relative.split("/").find(part => part && part !== ".");
+  if (!first) return false;
+  const sameEntry = async name => { const info = await fs.lstat(path.join(home, name), { bigint: true }); return `${info.dev}:${info.ino}`; };
+  let identity;
+  try { identity = await sameEntry(first); } catch (error) { if (absent(error)) return false; throw error; }
+  for (const name of await fs.readdir(home)) {
+    if (!insideHomeSettings(name)) continue;
+    try { if ((await sameEntry(name)) === identity) return true; } catch (error) { if (!absent(error)) throw error; }
+  }
+  return false;
+}
+
 /** {dev, ino}, never path text; a root a fresh install has not created yet is skipped. */
 export async function protectedIdentities(roots) {
   const identities = new Set();
@@ -327,11 +343,11 @@ export async function executeSharedOperation(grant, operation, signal, cua, lent
   const remove = operation.action === "delete_file", changes = write || edit || append || remove;
   if (changes && folder.write !== true) throw new Error("This folder is read-only");
   if (changes && insideGitInternals(folder.path, operation.path ?? "")) throw new Error(GIT_INTERNALS);
-  if (changes && folder.home === true && insideHomeSettings(operation.path ?? "")) throw new Error(HOME_SETTINGS);
+  if (changes && folder.home === true && await homeSettingsTarget(folder.path, operation.path ?? "")) throw new Error(HOME_SETTINGS);
   // The whole system drive holds the home folder too: the same files stay out of reach through it.
   if (changes && folder.system === true) {
     const inHome = await insideHomePath(target);
-    if (inHome !== null && insideHomeSettings(inHome)) throw new Error(HOME_SETTINGS);
+    if (inHome !== null && await homeSettingsTarget(await fs.realpath(os.homedir()), inHome)) throw new Error(HOME_SETTINGS);
   }
   let data;
   if (write) {
