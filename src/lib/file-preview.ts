@@ -28,11 +28,16 @@ function set(next: FilePreview | null): void {
   for (const listener of listeners) listener();
 }
 
-export const openFilePreview = (preview: FilePreview): void => set({ ...preview });
-export const closeFilePreview = (): void => set(null);
-
 /** The file each conversation the chat left had open beside it, shown again when the person comes back to it. */
 const leftOpen = new Map<string, FilePreview>();
+
+/** A file opened in a conversation replaces the one it had kept from before, so closing it leaves that conversation
+ * with none. */
+export function openFilePreview(preview: FilePreview): void {
+  leftOpen.delete(preview.message.threadId);
+  set({ ...preview });
+}
+export const closeFilePreview = (): void => set(null);
 
 /** The chat moved from one conversation to another: keeps the open file for the one it left, and shows the one the
  * other had open when the person left it, if any and if `show`; otherwise that one stays kept for a later return. */

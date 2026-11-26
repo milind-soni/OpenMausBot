@@ -135,6 +135,22 @@ describe("a file opened from the chat on a wide window", () => {
     expect(pane()?.getAttribute("data-file-preview")).toBe(PLAN.path);
   });
 
+  it("stays closed on a return after the person opened and closed another file there while the first waited", async () => {
+    await render();
+    await openFile();
+    await render({ threadId: "t2" });
+    fixture.state = { ...fixture.state, computerOpen: true };
+    await render({ threadId: "t2" });
+    await render({ threadId: "t1" });
+    fixture.state = { ...fixture.state, computerOpen: false };
+    await render({ threadId: "t1" });
+    await openFile();
+    await act(async () => pane()!.querySelector<HTMLButtonElement>("button[aria-label='Close preview']")!.click());
+    await render({ threadId: "t2" });
+    await render({ threadId: "t1" });
+    expect(pane()).toBeNull();
+  });
+
   it("stays closed in a conversation where it was never open", async () => {
     await render();
     await openFile();
