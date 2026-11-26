@@ -735,6 +735,32 @@ describe("createOpenAIChatRuntime stream termination", () => {
     expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true, usage: { input: 5, output: 9 } });
   });
 
+  it("continues a reply cut at the output limit instead of failing the turn", async () => {
+    let requests = 0;
+    const events = await runTurn(() => {
+      requests += 1;
+      return requests === 1
+        ? sse('data: {"choices":[{"index":0,"delta":{"content":"Part one"}}]}\n\n' +
+            'data: {"choices":[{"index":0,"delta":{},"finish_reason":"length"}]}\n\ndata: [DONE]\n\n')
+        : sse('data: {"choices":[{"index":0,"delta":{"content":" plus part two"}}]}\n\n' +
+            'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":9}}\n\ndata: [DONE]\n\n');
+    });
+    expect(requests).toBe(2);
+    const texts = events.filter((event) => event.type === "item.completed").map((event) => (event as { text: string }).text);
+    expect(texts).toEqual(["Part one", " plus part two"]);
+    expect(events.find((event) => event.type === "runtime.error")).toBeUndefined();
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true, usage: { input: 5, output: 9 } });
+  });
+
+  it("gives up on a reply that only ever hits the output limit", async () => {
+    const events = await runTurn(
+      'data: {"choices":[{"index":0,"delta":{"content":"still cut"}}]}\n\n' +
+        'data: {"choices":[{"index":0,"delta":{},"finish_reason":"length"}]}\n\ndata: [DONE]\n\n',
+    );
+    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expect.stringContaining("provider did not finish the response (length)") });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+  });
+
   it("splits a final unterminated frame across two stream chunks", async () => {
     let controller: ReadableStreamDefaultController<Uint8Array>;
     const stream = new ReadableStream<Uint8Array>({
