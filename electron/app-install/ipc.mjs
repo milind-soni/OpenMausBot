@@ -15,13 +15,15 @@ export function installAppInstall({ ipcMain, guard, installer }) {
     return installer.installApp({ id, name, iconPng, desktopShortcut: input?.desktopShortcut === true });
   }));
   ipcMain.handle("app-install:uninstall", guard("app-install:uninstall", (_event, id) => installer.uninstallApp(typeof id === "string" ? id : "")));
+  ipcMain.handle("app-install:add-to-desktop", guard("app-install:add-to-desktop", (_event, id) => installer.addToDesktop(typeof id === "string" ? id : "")));
+  ipcMain.handle("app-install:remove-from-desktop", guard("app-install:remove-from-desktop", (_event, id) => installer.removeFromDesktop(typeof id === "string" ? id : "")));
   ipcMain.handle("app-install:list", guard("app-install:list", async () => ({ available: installer.available(), apps: await installer.installedApps() })));
   // `ids`: every saved app's id, from the page that just read the whole list; anything else removes nothing.
   ipcMain.handle("app-install:cleanup", guard("app-install:cleanup", (_event, ids) =>
     (Array.isArray(ids) && ids.length <= 10_000 && ids.every((id) => typeof id === "string") ? installer.cleanup(ids) : [])));
 }
 
-/** Main's wiring: the real folders, Electron's shell and image tools, and `execFile` for sips and iconutil. */
+/** Main's wiring: the real folders, Electron's shell and image tools, and `execFile` for sips, iconutil and xdg-user-dir. */
 export function createDesktopAppInstaller({ app, shell, nativeImage, env, platform, log }) {
   const userData = app.getPath("userData");
   const executable = platform === "linux" ? env.APPIMAGE || process.execPath : process.execPath;
@@ -31,7 +33,7 @@ export function createDesktopAppInstaller({ app, shell, nativeImage, env, platfo
     home: app.getPath("home"),
     userData,
     appData: platform === "win32" ? app.getPath("appData") : null,
-    desktop: platform === "win32" ? app.getPath("desktop") : null,
+    desktop: platform === "linux" ? null : desktopFolder(app),
     dataHome: env.XDG_DATA_HOME && path.isAbsolute(env.XDG_DATA_HOME) ? env.XDG_DATA_HOME : null,
     executable,
     hostBundleId: hostBundleId(platform),
@@ -39,7 +41,7 @@ export function createDesktopAppInstaller({ app, shell, nativeImage, env, platfo
     fs: fs.promises,
     shell,
     run: (file, args) => new Promise((resolve) => {
-      execFile(file, args, { timeout: 20_000 }, (error) => resolve({ code: error ? (typeof error.code === "number" ? error.code : 1) : 0 }));
+      execFile(file, args, { timeout: 20_000 }, (error, stdout) => resolve({ code: error ? (typeof error.code === "number" ? error.code : 1) : 0, stdout: String(stdout ?? "") }));
     }),
     resizePng: (png, side) => {
       const image = nativeImage.createFromBuffer(Buffer.from(png));
@@ -49,6 +51,10 @@ export function createDesktopAppInstaller({ app, shell, nativeImage, env, platfo
   });
   if (installer.available()) void installer.refreshTargets().catch(() => {});
   return installer;
+}
+
+function desktopFolder(app) {
+  try { return app.getPath("desktop"); } catch { return null; }
 }
 
 function hostBundleId(platform) {

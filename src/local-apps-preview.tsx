@@ -138,12 +138,15 @@ const store = { state, dispatch: () => {}, flushBotPatches: async () => null, re
 if (view === "app") openLocalApp(LOCAL[0]!.id);
 if (params.get("desktop") === "1" || view === "window") {
   let installed = [LOCAL[0]!.id];
+  let onDesktop: string[] = [];
   (window as { ogb?: unknown }).ogb = {
     localApps: { openWindow: async () => true, openChat: async () => true },
     appInstall: {
-      list: async () => ({ available: true, apps: installed.map((id) => ({ id, name: "", path: null })) }),
+      list: async () => ({ available: true, apps: installed.map((id) => ({ id, name: "", path: null, desktop: onDesktop.includes(id) })) }),
       install: async ({ id, name }: { id: string; name: string }) => { installed = [...installed, id]; return { ok: true, app: { id, name, path: null } }; },
-      uninstall: async (id: string) => { installed = installed.filter((one) => one !== id); return { ok: true, removed: true }; },
+      uninstall: async (id: string) => { installed = installed.filter((one) => one !== id); onDesktop = onDesktop.filter((one) => one !== id); return { ok: true, removed: true }; },
+      addToDesktop: async (id: string) => { onDesktop = [...onDesktop, id]; return { ok: true, app: { id, name: "", path: null, desktop: true } }; },
+      removeFromDesktop: async (id: string) => { onDesktop = onDesktop.filter((one) => one !== id); return { ok: true, removed: true }; },
       cleanup: async () => [],
     },
   };

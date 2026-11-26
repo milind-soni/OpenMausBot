@@ -3,98 +3,10 @@ import path from "node:path";
 import test from "node:test";
 import { createAppInstaller } from "./app-install/installer.mjs";
 import { icoFromPng, letterTilePng, pngSize, tileLetter } from "./app-install/icons.mjs";
+import { L, PNG, linux, mac, windows } from "./app-install-test-fixture.mjs";
 import { installAppInstall } from "./app-install/ipc.mjs";
 import { desktopEntry, macInfoPlist, macLauncherScript, macPlistAppId, windowsShortcut, windowsWindowDetails } from "./app-install/launchers.mjs";
 import { launcherBundleId, launcherLink, launcherName, validAppId, windowsAppUserModelId } from "./app-install/names.mjs";
-
-/** A saved app's id from a short name: `la_` and 16 characters, as the store makes them. */
-const L = (short) => `la_${short.padEnd(16, "0")}`;
-
-function memoryFs(flavour) {
-  const entries = new Map();
-  const missing = (p) => Object.assign(new Error(`ENOENT: ${p}`), { code: "ENOENT" });
-  const children = (p) => [...entries.keys()].filter((k) => k.startsWith(p.endsWith(flavour.sep) ? p : p + flavour.sep));
-  const stat = (e) => ({ isDirectory: () => e.type === "dir", isFile: () => e.type === "file", isSymbolicLink: () => e.type === "link", mode: e.mode });
-  const parentReady = (p) => { if (entries.get(flavour.dirname(p))?.type !== "dir") throw missing(flavour.dirname(p)); };
-  const fs = {
-    entries,
-    async mkdir(p, { recursive } = {}) {
-      const chain = [];
-      for (let at = p; !entries.has(at); at = flavour.dirname(at)) { chain.unshift(at); if (flavour.dirname(at) === at) break; }
-      if (!recursive && chain.length > 1) throw missing(p);
-      for (const dir of chain) entries.set(dir, { type: "dir" });
-    },
-    async writeFile(p, data, opts) {
-      parentReady(p);
-      if (entries.get(p)?.type === "dir") throw new Error(`EISDIR: ${p}`);
-      entries.set(p, { type: "file", data: Buffer.from(data), mode: opts?.mode ?? 0o644 });
-    },
-    async readFile(p, encoding) {
-      const e = entries.get(p);
-      if (e?.type !== "file") throw missing(p);
-      return encoding ? e.data.toString(encoding) : e.data;
-    },
-    async rm(p, { recursive, force } = {}) {
-      if (!entries.has(p)) { if (force) return; throw missing(p); }
-      if (entries.get(p).type === "dir" && children(p).length && !recursive) throw new Error(`ENOTEMPTY: ${p}`);
-      for (const k of children(p)) entries.delete(k);
-      entries.delete(p);
-    },
-    async rename(a, b) {
-      if (!entries.has(a)) throw missing(a);
-      parentReady(b);
-      const moved = [[a, entries.get(a)], ...children(a).map((k) => [k, entries.get(k)])];
-      for (const [k] of moved) entries.delete(k);
-      for (const [k, v] of moved) entries.set(b + k.slice(a.length), v);
-    },
-    async lstat(p) { const e = entries.get(p); if (!e) throw missing(p); return stat(e); },
-    async readdir(p) { return children(p).filter((k) => flavour.dirname(k) === p).map((k) => flavour.basename(k)); },
-    async chmod(p, mode) { const e = entries.get(p); if (!e) throw missing(p); e.mode = mode; },
-    text: (p) => entries.get(p)?.data?.toString("utf8"),
-    files: () => [...entries].filter(([, e]) => e.type !== "dir").map(([k]) => k),
-  };
-  return fs;
-}
-
-const PNG = letterTilePng({ id: L("seed"), name: "Seed", size: 64 });
-
-function mac({ runOk = true, trash = true, enabled = true } = {}) {
-  const fs = memoryFs(path.posix);
-  const calls = [];
-  const trashed = [];
-  const run = async (file, args) => {
-    calls.push([file, ...args]);
-    if (!runOk) return { code: 1 };
-    const out = file.endsWith("sips") ? args[args.indexOf("--out") + 1] : args[args.indexOf("-o") + 1];
-    await fs.writeFile(out, file.endsWith("sips") ? PNG : Buffer.from("icns"));
-    return { code: 0 };
-  };
-  const shell = trash ? { trashItem: async (p) => { trashed.push(p); await fs.rm(p, { recursive: true }); } } : {};
-  const installer = createAppInstaller({ platform: "darwin", path: path.posix, home: "/Users/u", userData: "/Users/u/Library/Application Support/OpenMausBot", fs, run, shell, hostBundleId: "com.openmausbot.app", enabled });
-  return { fs, calls, trashed, installer, dir: "/Users/u/Applications/MausBot Apps" };
-}
-
-function windows({ executable = "C:\\Users\\u\\AppData\\Local\\Programs\\OpenMausBot\\OpenMausBot.exe" } = {}) {
-  const fs = memoryFs(path.win32);
-  const shortcuts = [];
-  const shell = {
-    writeShortcutLink(file, operation, options) {
-      if (fs.entries.get(path.win32.dirname(file))?.type !== "dir") return false;
-      shortcuts.push([file, operation, options]);
-      fs.entries.set(file, { type: "file", data: Buffer.from(JSON.stringify(options)) });
-      return true;
-    },
-    readShortcutLink(file) { return JSON.parse(fs.text(file)); },
-  };
-  const options = { platform: "win32", path: path.win32, home: "C:\\Users\\u", userData: "C:\\Users\\u\\AppData\\Roaming\\OpenMausBot", appData: "C:\\Users\\u\\AppData\\Roaming", desktop: "C:\\Users\\u\\Desktop", fs, shell, executable, resizePng: async (png) => png };
-  return { fs, shortcuts, options, installer: createAppInstaller(options), dir: "C:\\Users\\u\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\MausBot Apps" };
-}
-
-function linux({ executable = "/home/u/Apps/OpenMausBot.AppImage" } = {}) {
-  const fs = memoryFs(path.posix);
-  const options = { platform: "linux", path: path.posix, home: "/home/u", userData: "/home/u/.config/OpenMausBot", fs, executable };
-  return { fs, options, installer: createAppInstaller(options), dir: "/home/u/.local/share/applications" };
-}
 
 test("launcher names are safe file names on macOS, Windows and Linux", () => {
   const table = [
@@ -188,7 +100,7 @@ test("icons: PNG checks, a one-image .ico, and a letter tile", () => {
 test("macOS: a bundle in ~/Applications/MausBot Apps with its plist, script and icon", async () => {
   const { fs, calls, installer, dir } = mac();
   const result = await installer.installApp({ id: L("notes"), name: "Notes", iconPng: PNG });
-  assert.deepEqual(result, { ok: true, app: { id: L("notes"), name: "Notes", path: `${dir}/Notes.app` } });
+  assert.deepEqual(result, { ok: true, app: { id: L("notes"), name: "Notes", path: `${dir}/Notes.app`, desktop: false } });
   const bundle = `${dir}/Notes.app/Contents`;
   assert.equal(macPlistAppId(fs.text(`${bundle}/Info.plist`)), L("notes"));
   assert.match(fs.text(`${bundle}/Info.plist`), /CFBundleIconFile/);
@@ -199,7 +111,7 @@ test("macOS: a bundle in ~/Applications/MausBot Apps with its plist, script and 
   assert.equal(calls.filter(([f]) => f === "/usr/bin/sips").length, 10);
   assert.deepEqual(calls.at(-1).slice(0, 4), ["/usr/bin/iconutil", "-c", "icns", "-o"]);
   assert.ok(calls.at(-1)[4].endsWith("AppIcon.icns") && calls.at(-1)[5].endsWith("icon.iconset"));
-  assert.deepEqual(await installer.installedApps(), [{ id: L("notes"), name: "Notes", path: `${dir}/Notes.app` }]);
+  assert.deepEqual(await installer.installedApps(), [{ id: L("notes"), name: "Notes", path: `${dir}/Notes.app`, desktop: false }]);
   assert.equal(await installer.isInstalled(L("notes")), true);
   assert.equal(await installer.isInstalled(L("other")), false);
   assert.equal(fs.files().some((f) => f.includes("/work/") || f.includes(".staging")), false);
@@ -295,7 +207,7 @@ test("refusals: unavailable when off, a bad id, and an unreadable list starts ag
 });
 
 test("Windows: a Start menu shortcut to MausBot's executable with the link, its own taskbar id and icon", async () => {
-  const { fs, shortcuts, installer, dir, options } = windows();
+  const { fs, shortcuts, installer, dir, options } = windows({ makeDesktop: true });
   const result = await installer.installApp({ id: L("notes"), name: "Notes", iconPng: PNG });
   assert.equal(result.app.path, `${dir}\\Notes.lnk`);
   const [file, operation, link] = shortcuts[0];
@@ -307,7 +219,7 @@ test("Windows: a Start menu shortcut to MausBot's executable with the link, its 
   assert.match(link.icon, /^C:\\Users\\u\\AppData\\Roaming\\OpenMausBot\\app-install\\icons\\[0-9a-f]{16}\.ico$/);
   assert.deepEqual([...fs.entries.get(link.icon).data.subarray(0, 4)], [0, 0, 1, 0]);
   assert.equal(shortcuts.length, 1);
-  assert.equal(fs.entries.has("C:\\Users\\u\\Desktop"), false);
+  assert.equal(fs.files().some((f) => f.startsWith("C:\\Users\\u\\Desktop\\")), false);
 
   await installer.installApp({ id: L("notes"), name: "Notes", desktopShortcut: true });
   assert.deepEqual(shortcuts.slice(1).map(([f, op]) => [f, op]), [[`${dir}\\Notes.lnk`, "replace"], ["C:\\Users\\u\\Desktop\\Notes.lnk", "create"]]);
@@ -379,7 +291,7 @@ test("calls run one at a time, so two installs of one name never pick the same f
   assert.deepEqual([a.app.name, b.app.name], ["Same", "Same 2"]);
 });
 
-test("IPC: four guarded channels that pass on only what the installer takes", async () => {
+test("IPC: six guarded channels that pass on only what the installer takes", async () => {
   const handlers = new Map();
   const guarded = [];
   const seen = [];
@@ -389,9 +301,13 @@ test("IPC: four guarded channels that pass on only what the installer takes", as
     uninstallApp: async (id) => { seen.push(id); return { ok: true }; },
     installedApps: async () => [{ id: L("a"), name: "A", path: "/p" }],
     cleanup: async (ids) => { seen.push(["cleanup", ids]); return []; },
+    addToDesktop: async (id) => { seen.push(["add", id]); return { ok: true }; },
+    removeFromDesktop: async (id) => { seen.push(["remove", id]); return { ok: true }; },
   };
   installAppInstall({ ipcMain: { handle: (channel, fn) => handlers.set(channel, fn) }, guard: (channel, fn) => { guarded.push(channel); return fn; }, installer });
-  assert.deepEqual([...handlers.keys()], ["app-install:install", "app-install:uninstall", "app-install:list", "app-install:cleanup"]);
+  assert.deepEqual([...handlers.keys()], [
+    "app-install:install", "app-install:uninstall", "app-install:add-to-desktop", "app-install:remove-from-desktop", "app-install:list", "app-install:cleanup",
+  ]);
   assert.deepEqual(guarded, [...handlers.keys()]);
   await handlers.get("app-install:install")({}, { id: L("a"), name: "x".repeat(600), iconPng: "x", desktopShortcut: 1, extra: true });
   await handlers.get("app-install:uninstall")({}, { id: L("a") });
@@ -401,6 +317,12 @@ test("IPC: four guarded channels that pass on only what the installer takes", as
   await handlers.get("app-install:cleanup")({}, [L("a")]);
   for (const bad of [undefined, null, "x", [1], { length: 1 }]) assert.deepEqual(await handlers.get("app-install:cleanup")({}, bad), []);
   assert.deepEqual(seen, [["cleanup", [L("a")]]]);
+  seen.length = 0;
+  await handlers.get("app-install:add-to-desktop")({}, L("a"));
+  await handlers.get("app-install:add-to-desktop")({}, { id: L("a") });
+  await handlers.get("app-install:remove-from-desktop")({}, L("a"));
+  await handlers.get("app-install:remove-from-desktop")({}, 7);
+  assert.deepEqual(seen, [["add", L("a")], ["add", ""], ["remove", L("a")], ["remove", ""]]);
 });
 
 test("Windows: an installed app's own window takes its launcher's taskbar details; nothing elsewhere or uninstalled", async () => {

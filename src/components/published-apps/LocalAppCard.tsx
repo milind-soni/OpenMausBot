@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AppWindowMac, MessageSquare, MonitorDown, MonitorUp, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { AppWindowMac, MessageSquare, MonitorDown, MonitorUp, MoreHorizontal, Pencil, SquareMinus, SquarePlus, Trash2 } from "lucide-react";
 
 import type { LocalApp } from "../../../shared/local-apps";
 import { t } from "@/lib/i18n";
@@ -34,12 +34,28 @@ export function InlineName({ name, onDone }: { name: string; onDone: (next: stri
   );
 }
 
-/** Install on this computer or Uninstall, for a menu: nothing where the desktop app can't install launchers. */
-export function installItems(install: { installed: boolean; run(): void } | undefined): SidebarMenuItem[] {
+/** What a saved app's menu offers on this computer. `desktop`: absent where this desktop build can't add a Desktop icon. */
+export type InstallActions = { installed: boolean; run(): void; desktop?: { on: boolean; run(): void } };
+
+/** Install on this computer or Uninstall, then Add to Desktop or Remove from Desktop, for a menu: nothing where the
+ * desktop app can't install launchers. */
+export function installItems(install: InstallActions | undefined): SidebarMenuItem[] {
   if (!install) return [];
-  return [install.installed
-    ? { key: "uninstall", label: t("localApps.install.uninstall"), icon: <MonitorUp size={16} />, onSelect: install.run }
-    : { key: "install", label: t("localApps.install.install"), icon: <MonitorDown size={16} />, onSelect: install.run }];
+  const { desktop } = install;
+  return [
+    install.installed
+      ? { key: "uninstall", label: t("localApps.install.uninstall"), icon: <MonitorUp size={16} />, onSelect: install.run }
+      : { key: "install", label: t("localApps.install.install"), icon: <MonitorDown size={16} />, onSelect: install.run },
+    ...(!desktop ? [] : desktop.on
+      ? [{ key: "desktop-remove", label: t("localApps.install.removeFromDesktop"), icon: <SquareMinus size={16} />, onSelect: desktop.run }]
+      : [{ key: "desktop-add", label: t("localApps.install.addToDesktop"), icon: <SquarePlus size={16} />, onSelect: desktop.run }]),
+  ];
+}
+
+/** The one line a failed Desktop change shows: installing first failed, or the Desktop item itself. */
+export function desktopFailedText(error: unknown, removing: boolean, name: string): string {
+  if (removing) return t("localApps.install.desktopRemoveFailed", { name });
+  return t(error instanceof Error && error.message === "install" ? "localApps.install.failed" : "localApps.install.desktopFailed", { name });
 }
 
 export function InstalledMark() {
@@ -57,7 +73,7 @@ export function LocalAppCard({ app, bot, onOpen, onOpenWindow, onRename, onGoToC
   onGoToChat?: () => void;
   onRemove: () => void;
   /** Present only where this computer can install launchers. */
-  install?: { installed: boolean; run(): void };
+  install?: InstallActions;
 }) {
   const [renaming, setRenaming] = useState(false);
   const maker = bot?.name ?? app.bot?.name;
@@ -69,10 +85,10 @@ export function LocalAppCard({ app, bot, onOpen, onOpenWindow, onRename, onGoToC
     { key: "remove", label: t("localApps.card.remove"), icon: <Trash2 size={16} />, separatorBefore: true, onSelect: onRemove },
   ];
   return (
-    <li data-local-app={app.id} className="group relative flex min-w-0 flex-col overflow-hidden rounded-2xl border border-hairline/40 bg-card transition-colors duration-[120ms] hover:border-hairline motion-reduce:transition-none">
+    <li data-local-app={app.id} className="group relative flex min-w-0 flex-col rounded-2xl border border-hairline/40 bg-card transition-colors duration-[120ms] hover:border-hairline motion-reduce:transition-none">
       <button type="button" onClick={onOpen} aria-label={t("localApps.card.openOf", { name: app.name })} title={app.name}
         className="absolute inset-0 z-[1] rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus" />
-      <div className="border-b border-hairline/30">
+      <div className="overflow-hidden rounded-t-2xl border-b border-hairline/30">
         <LocalAppThumb app={app} bot={bot} />
       </div>
       <div className="min-w-0 pb-3 pe-2 ps-3.5 pt-2">
