@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   GROUP_GOAL_CONTROL_CLOSE,
   GROUP_GOAL_CONTROL_OPEN,
   GROUP_GOAL_MAX_TURNS,
+  goalControlMissLimit,
   groupGoalAssignmentKey,
   groupGoalCompletionTurnId,
   groupGoalCoordinatorInstructions,
@@ -13,6 +14,9 @@ import {
   type GoalRunEnd,
   type GoalStepResult,
 } from "./group-goal-run.ts";
+
+beforeEach(() => { delete process.env.OMB_GOAL_CONTROL_MISSES; });
+afterEach(() => vi.unstubAllEnvs());
 
 const members = [
   { id: "scout-id", name: "Scout" },
@@ -91,6 +95,15 @@ describe("group goal runs", () => {
 
   it("reserves the final bounded turn for coordinator evaluation", () => {
     expect(GROUP_GOAL_MAX_TURNS % 2).toBe(1);
+  });
+
+  it("bounds how many malformed control envelopes are re-asked", () => {
+    expect(goalControlMissLimit(undefined)).toBe(3);
+    expect(goalControlMissLimit("")).toBe(3);
+    expect(goalControlMissLimit("0")).toBe(3);
+    expect(goalControlMissLimit("not-a-number")).toBe(3);
+    expect(goalControlMissLimit("2")).toBe(2);
+    expect(goalControlMissLimit("9")).toBe(5);
   });
 });
 
@@ -206,8 +219,53 @@ describe("one goal-run loop for a room and a one-on-one chat", () => {
   it("never takes a reply without a valid marker as done", async () => {
     const goal = goalRun({ solo: true, steps: [settled("All done, trust me.")] });
     await goal.done;
-    expect(goal.calls).toHaveLength(1);
-    expect(goal.finished).toEqual([{ status: "blocked", detail: "Solo did not provide a valid next-step decision." }]);
+    expect(goal.calls).toHaveLength(3);
+    expect(goal.finished).toEqual([{ status: "blocked", detail: "Solo did not provide a valid next-step decision after 3 replies." }]);
+  });
+
+  it("asks the coordinator again after a malformed envelope and carries on", async () => {
+    const goal = goalRun({
+      solo: true,
+      steps: [
+        settled("All done, trust me."),
+        settled(envelope({ status: "continue", next: "solo-id", instruction: "Fix the parser test", detail: "Working" })),
+        settled(envelope({ status: "completed", detail: "Every test passes." })),
+      ],
+    });
+    await goal.done;
+    expect(goal.calls).toHaveLength(3);
+    expect(goal.calls[1]!.instructions).toContain("Harness note: Your last reply did not end with exactly one valid control envelope");
+    expect(goal.progress).toContain("Solo's reply did not end with a valid control envelope. Asking again (1/3).");
+    expect(goal.finished).toEqual([{ status: "completed", detail: "Every test passes." }]);
+  });
+
+  it("counts control-envelope misses in a row, not across the run", async () => {
+    const goal = goalRun({
+      solo: true,
+      steps: [
+        settled("All done, trust me."),
+        settled("Still no envelope."),
+        settled(envelope({ status: "continue", next: "solo-id", instruction: "First step", detail: "Working" })),
+        settled("Still no envelope."),
+        settled(envelope({ status: "completed", detail: "Done." })),
+      ],
+    });
+    await goal.done;
+    expect(goal.calls).toHaveLength(5);
+    expect(goal.progress.filter((line) => line.includes("Asking again"))).toEqual([
+      "Solo's reply did not end with a valid control envelope. Asking again (1/3).",
+      "Solo's reply did not end with a valid control envelope. Asking again (2/3).",
+      "Solo's reply did not end with a valid control envelope. Asking again (1/3).",
+    ]);
+    expect(goal.finished).toEqual([{ status: "completed", detail: "Done." }]);
+  });
+
+  it("blocks at a configured miss limit", async () => {
+    vi.stubEnv("OMB_GOAL_CONTROL_MISSES", "2");
+    const goal = goalRun({ solo: true, steps: [settled("All done, trust me.")] });
+    await goal.done;
+    expect(goal.calls).toHaveLength(2);
+    expect(goal.finished).toEqual([{ status: "blocked", detail: "Solo did not provide a valid next-step decision after 2 replies." }]);
   });
 
   it("blocks a room of one that repeats the same next step", async () => {
