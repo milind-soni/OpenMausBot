@@ -468,7 +468,7 @@ import { createAgentCard } from "./chat-widgets.ts";
 import { createChatAppRoutes, createChatApps, createChatAppsMcp } from "./routes/chat-apps.ts";
 import { buildBotOverview, type BotOverview, connectedAppsFacts } from "./bot-overview.ts";
 import { ProfileRequestService } from "./profile-requests.ts"; import { browserProfileLabel } from "./bot-browser-profile.ts";
-import { ModelRequestService } from "./model-requests.ts";
+import { ModelRequestService } from "./model-requests.ts"; import { createLocalAppsRoutes } from "./routes/local-apps.ts"; import { createLocalApps } from "./local-apps/service.ts"; import { withLocalAppDocs } from "./local-apps/store.ts";
 import { TeamSetupError, TeamSetupRequestService } from "./team-setup-requests.ts";
 import { startsWithoutCloudComputer, teamSetupDecisionText as decisionText, type TeamSetupRequest } from "../shared/team-setup.ts";
 import { profileRevision, profileSnapshot } from "./profile-revision.ts";
@@ -11936,8 +11936,8 @@ ROUTES.push(createBotMessageRoutes({
   relayedReaction: (threadId, messageId, person, emoji) => void store.setReaction(threadId, messageId, relayedPersonKey(person),
     { emoji, name: person.name ?? person.email, at: Date.now() }),
 }));
-const liveRoots = (threadId: string, botId: string | undefined) => { const bot = botId ? store.bot(botId) : store.botByThread(threadId); return bot ? messageFileRootsForThread(bot.id, threadId).filter((root) => root !== ATTACHMENTS_DIR) : null; }; const chatApps = createChatApps({ store, dataDir: DATA_DIR, liveRows: liveAppRows, liveRoots, paused: () => workspaceMaintenance.active || moveFreeze.frozen() });
-const chatAppsMcp = createChatAppsMcp({ store, apps: chatApps, dataDir: DATA_DIR, keys: mcpKeys, storedServers: () => cfg.mcpServers ?? {}, mountedServers: (bot) => teamConnections.engineMcp(bot), personMcp: teamConnections.personMcp, probeAs: (server) => mcpServersHost.probeAs(server), oauth: mcpOAuth });
+const liveRoots = (threadId: string, botId: string | undefined) => { const bot = botId ? store.bot(botId) : store.botByThread(threadId); return bot ? messageFileRootsForThread(bot.id, threadId).filter((root) => root !== ATTACHMENTS_DIR) : null; }; const chatApps = createChatApps({ store, dataDir: DATA_DIR, references: withLocalAppDocs(DATA_DIR), liveRows: liveAppRows, liveRoots, paused: () => workspaceMaintenance.active || moveFreeze.frozen() });
+const chatAppsMcp = createChatAppsMcp({ store, apps: chatApps, dataDir: DATA_DIR, keys: mcpKeys, storedServers: () => cfg.mcpServers ?? {}, mountedServers: (bot) => teamConnections.engineMcp(bot), personMcp: teamConnections.personMcp, probeAs: (server) => mcpServersHost.probeAs(server), oauth: mcpOAuth }); const localApps = createLocalApps({ chat: store, docs: chatApps.docs, dataDir: DATA_DIR, sweep: () => void chatApps.sweep() }); ROUTES.push(createLocalAppsRoutes({ apps: localApps, store, visibleFor: (auth) => visibleTo(viewerFor(auth)), threadRefusal: cloudThreadRefusal }));
 ROUTES.push(createChatAppRoutes({ store, apps: chatApps, threadRefusal: cloudThreadRefusal, mcpRpc: chatAppsMcp.rpc, threadVisible: (auth, threadId) => (auth.kind !== "session" || sessions.isLive(auth.session.id)) && visibleTo(viewerFor(auth)).thread(threadId) }));
 const roomReactionNotes = createRoomReactionNotes({ store }), { react } = createReactions({
   store, noted: roomReactionNotes.noted, inboxAnswer: (input) => teamMessages.reactedIn(input.auth, input.threadId, input.target.id, input.answer, { sendId: input.sendId, sender: messageSender(input.auth) }), reply: (input) => personReplies.deliver({ ...input, about: "message" }),
@@ -12434,7 +12434,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     if (await emailSignInRoute({ cloudHome: Boolean(CLOUD_HOME), emailSignIn, sessions, cookieName: SESSION_COOKIE, target: (r) => signInMailTarget(publicUrl(), requestOrigin(r)),
       environment: () => environmentDescriptor({ environmentId: ENVIRONMENT_ID, ...TEAM_LABEL, desktopManaged: DESKTOP_MANAGED, emailSignIn: true, sharedComputers: lendingEnabled() }) }, req, res, path, method)) return;
-    if ((cloudSigned && await cloudSigned({ req, res, url, path, method })) || chatApps.serveFile(req, res, path, method) || await cliLogin.open(req, res, path, method)) return;
+    if ((cloudSigned && await cloudSigned({ req, res, url, path, method })) || chatApps.serveFile(req, res, path, method) || localApps.serveFile(req, res, path, method) || await cliLogin.open(req, res, path, method)) return;
     if (method === "POST" && path === "/api/auth/pair") {
       // JSON only: a cross-site HTML form cannot send this content type without a preflight, so no unused code is planted as a session.
       if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) {

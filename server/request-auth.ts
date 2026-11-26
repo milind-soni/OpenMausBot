@@ -505,6 +505,10 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   // what the viewer's own bots put online, from conversations they can read; the handler deletes only what is theirs
   { methods: ["GET"], path: /^\/api\/published-apps(?:\/framing)?$/ },
   { methods: ["POST"], path: /^\/api\/published-apps\/delete$/ },
+  // the apps a person saved from bots' pages: the handler shows and changes only their own, from conversations they read
+  { methods: ["GET", "POST"], path: /^\/api\/local-apps$/ },
+  { methods: ["GET", "PATCH", "DELETE"], path: /^\/api\/local-apps\/la_[A-Za-z0-9_-]{16}$/ },
+  { methods: ["GET"], path: /^\/api\/local-apps\/la_[A-Za-z0-9_-]{16}\/app$/ },
   // a Team Cloud's shared folder: every member reads and adds; the handler lets a member delete or rename only what they
   // uploaded (routes/team-files.ts); off a Team Cloud they answer 404
   { methods: ["GET"], path: /^\/api\/team-files(?:\/file)?$/ },
