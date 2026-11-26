@@ -8,6 +8,7 @@ import { parseTotpKey, totpCode, type TotpKey } from "./totp.ts";
 // Obvious fakes only.
 const PASSWORD = "fake-S3cret!pass";
 const KEY = parseTotpKey("JBSWY3DPEHPK3PXP")!;
+const SECOND_KEY = parseTotpKey("GEZDGNBVGY3TQOJQ")!;
 const NOW = 1_700_000_010_000; // 10 s into a 30 s step
 const DASHBOARD = { url: "https://example.com/dashboard?session=abc", html: "<title>Dashboard</title><h1>Welcome back</h1>" };
 
@@ -321,6 +322,39 @@ describe("one-time codes and fields", () => {
     const { page, fill } = setup("https://example.com/2fa", `<form><div class="code">${boxes}</div></form>`, [{ host: "example.com", username: "alice", totp: KEY }], { submit: false });
     expect(await fill()).toMatchObject({ ok: true, filled: ["code"] });
     expect(Array.from({ length: 6 }, (_, index) => page.field(`input[name=d${index}]`).value).join("")).toBe(totpCode(KEY, NOW));
+  });
+
+  it.each([
+    ["Verify Security Code", "alice@example.com", KEY],
+    ["Verify Security Code", "bob@example.com", SECOND_KEY],
+    ["Enter ZIP code", "alice@example.com", KEY],
+  ])("uses the selected account's code on the verification screen (%s, %s)", async (prompt, username, key) => {
+    const boxes = Array.from({ length: 6 }, (_, index) =>
+      `<div><input name="d${index}" type="number" maxlength="1"></div>`
+    ).join("");
+    const shouldFill = prompt === "Verify Security Code";
+    const { page, fill } = setup(
+      "https://example.com/login",
+      LOGIN_FORM,
+      [
+        { host: "example.com", username: "alice@example.com", totp: KEY },
+        { host: "example.com", username: "bob@example.com", totp: SECOND_KEY },
+      ],
+    );
+    page.answer = () => page.sent.length === 1
+      ? { navigate: {
+        url: "https://example.com/verify",
+        html: `<h2>${prompt}</h2><form><div>${boxes}</div><button type="submit">Verify</button></form>`,
+      } }
+      : { navigate: DASHBOARD };
+
+    const outcome = await fill(username);
+    const code = totpCode(key, NOW);
+    expect(outcome.filled).toEqual(shouldFill ? ["username", "password", "code"] : ["username", "password"]);
+    expect(page.typed.slice(2).join("")).toBe(shouldFill ? code : "");
+    expect(page.sent.slice(1)).toEqual(shouldFill
+      ? [Object.fromEntries([...code].map((digit, index) => [`d${index}`, digit]))] : []);
+    expectNoSecret(outcome, page, [code, PASSWORD, key.secret]);
   });
 
   it("points at the person's inbox, then the person, when a code is asked for and no 2FA key is saved", async () => {
