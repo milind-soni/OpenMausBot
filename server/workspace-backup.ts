@@ -15,7 +15,7 @@ import { userErrorFields, userErrorThrown } from "./user-errors.ts";
 import { WORKSPACE_BACKUP_CLIENT_KEYS } from "../shared/workspace-backup-client.ts";
 import { INSTRUCTION_FILE, restorePaths, validRelative } from "./workspace-backup-paths.ts";
 import { cjkSearchText } from "./cjk-search.ts";
-import { dataEngineSpillPath, ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, managedTaskSkillLink, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
+import { bytecodeCache, dataEngineSpillPath, ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, installedDependencyFolder, managedTaskSkillLink, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
 import { omittedAsTeamPrivate, routinesWithoutTeamPrivate, stripTeamPrivate, TEAM_PRIVATE_NOTE, teamPrivateAttachments, teamPrivateThreads, withoutTeamPrivate } from "./workspace-backup-team-private.ts";
 import { flushLaterSaves } from "./save-batch.ts";
 import { DATA_TABLES, foldLegacySidecars, LEGACY_SIDECARS, LIVE_DATABASE_SIDECARS, SNAPSHOT_DATABASES, snapshotDatabases, tooLargeError } from "./workspace-backup-databases.ts";
@@ -68,7 +68,7 @@ const EXCLUSION_NOTES = [
   "Device pairing, server identity, live leases and runtime files (existing destination identities are preserved).",
   "Saved credentials, provider and MCP connections, managed provider login homes and browser login profiles are not transferred. Destination connections are preserved; reconnect on a new device.",
   "Downloaded tools and caches (they can be installed again), and recorded browser step screenshots (export them from a conversation to keep them).",
-  "Installed dependency folders (node_modules) and symbolic links inside conversation work folders; reinstall or recreate them in the project.",
+  "Installed dependency folders (node_modules, Python virtual environments), Python bytecode caches and symbolic links inside conversation work folders; reinstall or recreate them in the project.",
   "External project folders, CLI login homes, browser session homes, OS keychains, companion devices and other servers.",
   "VM/container disk layers and remote cloud data; durable files inside this workspace are included.",
   "Waits bots set up: they end within a week, so ask the bot again after restoring.",
@@ -351,10 +351,11 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
         if (!validRelative(path)) throw new Error(`Cannot back up a name that cannot be restored on every supported platform, such as one with ":" or "\\", a trailing dot or space, or a Windows device name like CON or AUX; rename it first: ${path}`);
         let source = join(directory, name);
         let stat = lstatSync(source);
-        if (name === "node_modules" && (stat.isDirectory() || stat.isSymbolicLink())) {
+        if (installedDependencyFolder(source, name, stat)) {
           skippedDependencies++;
           continue;
         }
+        if (bytecodeCache(name, stat)) continue;
         // A link a bot made in a conversation's folder, or in Team files (which a bot may be let to write), is never
         // followed or carried, and never stops the backup.
         if (stat.isSymbolicLink() && path.startsWith("team-files/")) {
@@ -425,7 +426,7 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
     };
     walk(root);
     if (skippedLinks) warnings.push(`${skippedLinks} managed skill discovery link(s) were omitted and are recreated by the app.`);
-    if (skippedDependencies) warnings.push(`${skippedDependencies} installed dependency folder(s) (node_modules) were omitted; reinstall them in the project after restoring.`);
+    if (skippedDependencies) warnings.push(`${skippedDependencies} installed dependency folder(s) (node_modules or Python virtual environments) were omitted; reinstall them in the project after restoring.`);
     if (copiedLinks) warnings.push(`${copiedLinks} symbolic link(s) inside a workspace were saved as copies of what they point to; restoring creates regular files and folders there.`);
     if (skippedWorkLinks) warnings.push(`${skippedWorkLinks} symbolic link(s) in conversation work folders were omitted; what they point to is outside this backup.`);
     const summary: WorkspaceBackupSummary = {

@@ -713,7 +713,7 @@ describe("encrypted full workspace backups", () => {
     mkdirSync(installed, { recursive: true });
     writeFileSync(join(installed, "index.js"), "module.exports = 1");
     const exported = await createWorkspaceBackup(root, { password: PASSWORD });
-    expect(exported.summary.warnings.some((warning) => warning.startsWith("2 installed dependency folder(s) (node_modules)"))).toBe(true);
+    expect(exported.summary.warnings.some((warning) => warning.startsWith("2 installed dependency folder(s) (node_modules or Python virtual environments)"))).toBe(true);
     expect(exported.summary.warnings.some((warning) => warning.startsWith("1 symbolic link(s) in conversation work folders"))).toBe(true);
     const target = directory();
     const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
@@ -724,6 +724,47 @@ describe("encrypted full workspace backups", () => {
     expect(existsSync(join(data, "workspaces", "bot", "project", "node_modules"))).toBe(false);
     symlinkSync(join(outside, "secret"), join(root, "workspaces", "bot", "external"));
     await expect(createWorkspaceBackup(root, { password: PASSWORD })).rejects.toThrow(/outside the workspace/);
+  });
+
+  it("leaves out Python virtual environments, whose python links outside, and bytecode caches; other outside links still stop it", async () => {
+    const root = directory();
+    const outside = directory();
+    writeFileSync(join(outside, "python3"), "#!/bin/sh");
+    const bot = join(root, "workspaces", "bot");
+    const venv = join(bot, ".venv");
+    mkdirSync(join(venv, "bin"), { recursive: true });
+    mkdirSync(join(venv, "lib", "site-packages", "requests"), { recursive: true });
+    writeFileSync(join(venv, "pyvenv.cfg"), `home = ${outside}\n`);
+    writeFileSync(join(venv, "lib", "site-packages", "requests", "__init__.py"), "");
+    symlinkSync(join(outside, "python3"), join(venv, "bin", "python"));
+    // Any name: a venv is known by its pyvenv.cfg, here one a conversation made, reached through a link.
+    const made = join(outside, "made-env");
+    mkdirSync(join(made, "bin"), { recursive: true });
+    writeFileSync(join(made, "pyvenv.cfg"), "home = /usr/bin\n");
+    symlinkSync(join(outside, "python3"), join(made, "bin", "python"));
+    const work = join(root, "task-workspaces", "bot", "thread");
+    mkdirSync(work, { recursive: true });
+    symlinkSync(made, join(work, "env"), process.platform === "win32" ? "junction" : "dir");
+    mkdirSync(join(bot, "app", "__pycache__"), { recursive: true });
+    writeFileSync(join(bot, "app", "main.py"), "print(1)");
+    writeFileSync(join(bot, "app", "__pycache__", "main.cpython-312.pyc"), "bytes");
+    // A folder named like a venv but with no pyvenv.cfg is the person's own: it goes.
+    mkdirSync(join(bot, "venv"), { recursive: true });
+    writeFileSync(join(bot, "venv", "notes.txt"), "mine");
+
+    const exported = await createWorkspaceBackup(root, { password: PASSWORD });
+    expect(exported.summary.warnings.some((warning) => warning.startsWith("2 installed dependency folder(s) (node_modules or Python virtual environments)"))).toBe(true);
+    const target = directory();
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    const data = join(target, ".backups", staged.id, "staged", "data");
+    expect(readFileSync(join(data, "workspaces", "bot", "app", "main.py"), "utf8")).toBe("print(1)");
+    expect(readFileSync(join(data, "workspaces", "bot", "venv", "notes.txt"), "utf8")).toBe("mine");
+    expect(existsSync(join(data, "workspaces", "bot", ".venv"))).toBe(false);
+    expect(existsSync(join(data, "task-workspaces", "bot", "thread", "env"))).toBe(false);
+    expect(existsSync(join(data, "workspaces", "bot", "app", "__pycache__"))).toBe(false);
+
+    symlinkSync(join(outside, "python3"), join(bot, "venv", "python"));
+    await expect(createWorkspaceBackup(root, { password: PASSWORD })).rejects.toThrow("Cannot back up symbolic link outside the workspace: workspaces/bot/venv/python");
   });
 
   it("counts the app's skill links in work folders as managed, not as outside data", async () => {
