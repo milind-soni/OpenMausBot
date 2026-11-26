@@ -399,6 +399,19 @@ describe("the Sign in card", () => {
     expect(f.answers).toHaveLength(1);
   });
 
+  it("a server that signs in apps only by a client ID metadata document says OpenMausBot can't do that yet", async () => {
+    const f = await setup();
+    const oauth = await startFakeOAuth({ noRegistration: true, clientIdMetadataDocument: true });
+    const mcp = await startFakeHttpMcp({ acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge });
+    fixtures.push(oauth, mcp);
+    f.cfg.mcpServers!.linear = { type: "http", url: mcp.url, headers: {}, enabled: true } as never;
+    const { card } = await f.signIn();
+    const refused = await f.authorize(card);
+    expect(refused).toMatchObject({ status: 400, body: { code: "no-registration", error: "This server signs in apps by a published app ID (a client ID metadata document), which OpenMausBot doesn't support yet." } });
+    expect(f.current(card).connector).toMatchObject({ status: "failed", error: refused.body.error, resumed: true });
+    expect(f.answers).toEqual([{ messageId: card.id, text: `OpenMausBot MCP sign-in for linear: ${refused.body.error as string} Nothing was signed in.` }]);
+  });
+
   it("a server that registers no apps, refused before the turn parks, still reaches the bot once it parks", async () => {
     const f = await setup();
     const oauth = await startFakeOAuth({ noRegistration: true });
