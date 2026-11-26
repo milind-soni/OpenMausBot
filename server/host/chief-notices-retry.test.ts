@@ -357,7 +357,7 @@ describe("a run the server had no room to start", () => {
 
 describe("a Chief's retry of a thread that failed the Chief's own request", () => {
   const sent = { status: 200, body: { receipts: [{ botId: "ada", botName: "Ada", outcome: "queued", threadId: "ada-job" }] } };
-  const node = (over: Record<string, unknown>) => ({ id: "child", parentId: "chief-turn", threadId: "ada-job", botId: "ada", status: "failed", reply: "resume", ...over });
+  const node = (over: Record<string, unknown>) => ({ id: "child", parentId: "chief-turn", threadId: "ada-job", botId: "ada", status: "failed", reply: "resume", mode: "work", ...over });
   const coordinator = (last: Record<string, unknown> | undefined) => ({
     inThread: () => (last ? [node({ id: "older", status: "completed" }), last] : []) as never,
     node: (id: string) => (id === "chief-turn" ? { id, botId: "chief", threadId: "chief-main" } : undefined) as never,
@@ -365,7 +365,8 @@ describe("a Chief's retry of a thread that failed the Chief's own request", () =
   const requester = (last: Record<string, unknown> | undefined) => failedRequester(coordinator(last), "ada-job");
 
   it("knows which bot asked, with reply resume, for the failed work, and nobody for anything else", () => {
-    expect(requester(node({}))).toBe("chief");
+    expect(requester(node({}))).toEqual({ botId: "chief", consult: false });
+    expect(requester(node({ mode: "consult" }))).toEqual({ botId: "chief", consult: true });
     expect(requester(node({ status: "completed" }))).toBeUndefined();
     expect(requester(node({ reply: "none" }))).toBeUndefined();
     expect(requester(node({ parentId: undefined }))).toBeUndefined();
@@ -374,7 +375,7 @@ describe("a Chief's retry of a thread that failed the Chief's own request", () =
 
   it("asks again from the Chief's own turn, so the result wakes the Chief, and says so", async () => {
     const coordinateBots = vi.fn(async () => sent);
-    const f = fixture({ failedRequester: () => "chief" });
+    const f = fixture({ failedRequester: () => ({ botId: "chief", consult: false }) });
     const how = await f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: true, note: "The service was down.", coordinateBots });
     expect(f.startTurn).not.toHaveBeenCalled();
     expect(coordinateBots).toHaveBeenCalledWith(expect.objectContaining({ botIds: ["ada"], thread: "ada-job", reply: "resume", consult: false }));
@@ -382,9 +383,16 @@ describe("a Chief's retry of a thread that failed the Chief's own request", () =
     expect(retriedMessage("Ada", "Invoices", "request")).toContain("resumes you");
   });
 
+  it("asks a failed question again as a question, so the teammate still acts on nothing", async () => {
+    const coordinateBots = vi.fn(async () => sent);
+    const f = fixture({ failedRequester: () => ({ botId: "chief", consult: true }) });
+    expect(await f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: false, coordinateBots })).toBe("request");
+    expect(coordinateBots).toHaveBeenCalledWith(expect.objectContaining({ reply: "resume", consult: true }));
+  });
+
   it("tells the Chief why when that request could not be sent", async () => {
     const coordinateBots = vi.fn(async () => ({ status: 403, body: { error: "not reachable" } }));
-    const f = fixture({ failedRequester: () => "chief" });
+    const f = fixture({ failedRequester: () => ({ botId: "chief", consult: false }) });
     await expect(f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: true, coordinateBots })).rejects.toThrow("not reachable");
     expect(f.startTurn).not.toHaveBeenCalled();
   });
@@ -392,7 +400,7 @@ describe("a Chief's retry of a thread that failed the Chief's own request", () =
   it("retries every other thread as before: another bot's request, the person's own work, or OpenMausBot's automatic retry", async () => {
     for (const [requested, automatic] of [["someone-else", false], [undefined, false], ["chief", true]] as const) {
       const coordinateBots = vi.fn(async () => sent);
-      const f = fixture({ failedRequester: () => requested });
+      const f = fixture({ failedRequester: () => (requested ? { botId: requested, consult: false } : undefined) });
       const how = await f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: true, coordinateBots, ...(automatic ? { automatic: true as const } : {}) });
       expect(coordinateBots).not.toHaveBeenCalled();
       expect(f.turnsOf("ada")).toHaveLength(1);

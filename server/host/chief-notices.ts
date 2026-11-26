@@ -22,8 +22,8 @@ type PeerAsk = NonNullable<Message["peerAsk"]>;
 export interface ChiefNoticeDeps {
   store: Pick<Store, "bots" | "bot" | "tasks" | "taskByThread" | "groupByThread" | "createTask" | "appendMessage" | "messagesFor" | "activePath"> & Partial<Pick<Store, "patchMessage">>;
   assignerOf(threadId: string): unknown;
-  /** The bot whose reply-resume request this thread's newest assignment was, when that assignment failed (`failedRequester`). */
-  failedRequester?(threadId: string): string | undefined;
+  /** Who asked, with reply resume, for this thread's newest assignment, and whether it was a question, when it failed (`failedRequester`). */
+  failedRequester?(threadId: string): FailedRequest | undefined;
   notify(notification: Notification | null): void;
   threadBusy(botId: string, threadId: string): boolean;
   botAtThreadCapacity(botId: string): boolean;
@@ -79,10 +79,14 @@ export const SERVER_MEMORY_RETRY_TEXT = "[OpenMausBot started this again by itse
 export const ROOM_RETRY_TEXT = "[OpenMausBot started this again by itself, once: the last run could not start because this server had no room for another program. "
   + "Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]";
 
-/** The bot that asked, with reply resume, for the work this thread's newest assignment was, when that assignment failed. */
-export function failedRequester(coordinator: Pick<Coordinator, "inThread" | "node">, threadId: string): string | undefined {
+/** The bot that asked, with reply resume, for this thread's newest assignment, and whether it asked a question (consult). */
+export interface FailedRequest { botId: string; consult: boolean }
+
+/** Who asked for the work this thread's newest assignment was, when that assignment failed. */
+export function failedRequester(coordinator: Pick<Coordinator, "inThread" | "node">, threadId: string): FailedRequest | undefined {
   const last = coordinator.inThread(threadId).at(-1);
-  return last?.status === "failed" && last.reply === "resume" && last.parentId ? coordinator.node(last.parentId)?.botId : undefined;
+  const botId = last?.status === "failed" && last.reply === "resume" && last.parentId ? coordinator.node(last.parentId)?.botId : undefined;
+  return last && botId ? { botId, consult: last.mode === "consult" } : undefined;
 }
 
 /** What retry_thread tells the Chief: a retry of its own failed request comes back to it; any other result stays there. */
@@ -139,14 +143,16 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
   /** The one way a teammate's stopped thread runs again: a Chief's retry_thread and OpenMausBot's automatic retry both
    * start it here, after the same refusal checks. Throws the refusal, or why the start failed. */
   async function retryThread(input: { chief: BotRecord; bot: BotRecord; threadId: string; unattended: boolean; note?: string; automatic?: true;
-    /** The retrying Chief's own coordinate_bots, from its current turn. */
+    /** The retrying Chief's own coordinate_bots, from its current turn; left out from a room, where it would address the room, not this thread. */
     coordinateBots?: (call: CoordinateBotsCall) => Promise<{ status: number; body: Record<string, unknown> }> }): Promise<"request" | "turn"> {
     const refused = retryRefusal(input.bot.id, input.threadId);
     if (refused) throw new Error(refused);
     // The Chief's own request failed here: it asks again from its current turn, so the result wakes it as the first would have.
-    if (!input.automatic && input.coordinateBots && deps.failedRequester?.(input.threadId) === input.chief.id) {
+    const failed = input.automatic || !input.coordinateBots ? undefined : deps.failedRequester?.(input.threadId);
+    if (input.coordinateBots && failed?.botId === input.chief.id) {
       const note = input.note ? ` Note: ${quoteInNote(input.note, 300)}` : "";
-      const sent = await input.coordinateBots({ botIds: [input.bot.id], thread: input.threadId, reply: "resume", consult: false, rework: false,
+      // A question stays a question: asked again, the teammate still acts on nothing.
+      const sent = await input.coordinateBots({ botIds: [input.bot.id], thread: input.threadId, reply: "resume", consult: failed.consult, rework: false,
         message: `Your last run in this thread stopped before it finished my request, so I am asking again.${note} Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.` });
       const receipt = (sent.body.receipts as PeerDeliveryReceipt[] | undefined)?.[0];
       if (sent.status !== 200 || !receipt || receipt.outcome === "failed") throw new Error(String(receipt?.detail ?? sent.body.error ?? "Not delivered."));
