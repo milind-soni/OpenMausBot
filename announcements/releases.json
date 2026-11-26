@@ -1,8 +1,36 @@
 {
   "$schema": "./releases.schema.json",
   "version": 1,
-  "updatedAt": "2026-11-26T14:54:16Z",
+  "updatedAt": "2026-11-26T23:22:24Z",
   "releases": [
+    {
+      "version": "0.1.184",
+      "date": "2026-11-26T23:22:08Z",
+      "sections": [
+        {
+          "title": "Bots and pages",
+          "items": [
+            "**Local apps.** Save a page a bot made as an app and open it in its own window without the chat. To install one on your computer, open the app, then choose Install on this computer from its menu.",
+            "**Pages a bot shows can use the connected apps they ask for,** through your own connection."
+          ]
+        },
+        {
+          "title": "Models and providers",
+          "items": [
+            "**Antigravity CLI: connected apps no longer lose tools.** The CLI allows a bot only so much tool text in total, and with many connected apps (Drive, Docs, Photos…) it quietly left out the biggest ones. Every tool's description is now shortened as needed so they all fit."
+          ]
+        },
+        {
+          "title": "Fixes",
+          "items": [
+            "**A Cloud no longer freezes after you delete conversations with many attachments.** Cleaning up their files now runs one pass at a time, off the main work, and is safe if the Cloud restarts part-way.",
+            "**One saved key with a stray character can no longer take a Cloud down.** Keys are trimmed when saved and when read, and a request that still can't be sent fails on its own instead of stopping the server.",
+            "**Export full backup no longer stops on files it can't carry.** Python environments, a bot's browser profile, and links in a bot's folder that point outside it or to nothing are left out, and the backup says how many it left out.",
+            "**Bots give the right directions for moving to the Cloud.** The move to My Cloud is for a Cloud of your own. A Team plan's Cloud belongs to the team: there's no one-step move into it, your computer's bots keep working where they are, and bots from another app can be brought into the team from the team Cloud's Settings → Import & export."
+          ]
+        }
+      ]
+    },
     {
       "version": "0.1.182",
       "date": "2026-11-26T14:45:02Z",
@@ -1241,98 +1269,6 @@
             "**Data:** decimals sort correctly, export file names don't collide, and compressed files load with a folder.",
             "**Notion integration tokens are masked** in chats and logs.",
             "**Emailed sign-in codes stop being read** when the turn ends."
-          ]
-        }
-      ]
-    },
-    {
-      "version": "0.1.153",
-      "date": "2026-11-11T13:24:23Z",
-      "sections": [
-        {
-          "title": "Burst mode",
-          "items": [
-            "**Give a bot a big job and let it split the work.** Type `/burst`, or let the bot offer it: it previews the parts, runs them side by side and gives you one result. Every plan has it, with more parts at once on bigger plans."
-          ]
-        },
-        {
-          "title": "Models and engines",
-          "items": [
-            "**Ollama, found for you.** MausBot finds Ollama running on your computer and adds it in one click, shows the models you've pulled, and lets you turn a model's thinking off or pick its level.",
-            "**Reasoning levels for OpenAI and OpenRouter API models.**",
-            "**Star a model** to keep it at the top of its provider.",
-            "**Amazon Bedrock** as a way to run Claude.",
-            "**New models without an update.** The model list now refreshes by itself."
-          ]
-        },
-        {
-          "title": "My Cloud",
-          "items": [
-            "**Choose which bots move to My Cloud.** With two or more bots you pick, or move everything.",
-            "**Big workspaces finish moving,** including on slow connections.",
-            "**Open one of your computers from another over Tailscale,** and see why when it can't connect.",
-            "**Bots know which of your computers they can use,** and say so when one is away."
-          ]
-        },
-        {
-          "title": "Phones",
-          "items": [
-            "**A clear notice when an older phone app stops connecting away from Wi-Fi.** Update the app on your phone, then open it once on the same Wi-Fi as your computer. Phone & devices has a **Pair again** button if you need it, and your bots now give the same answer.",
-            "**Self-hosted servers can pair a phone through MausBot's relay,** with no domain or open port. Start the server with `--relay`. It is new: tell us how it goes."
-          ]
-        },
-        {
-          "title": "Hand-offs and Inbox",
-          "items": [
-            "**Finished hand-offs get a line in your Inbox.**",
-            "**Work waiting on you gets one reminder after a day and closes after three,** instead of waiting forever.",
-            "**An approval nobody answered stays in your Inbox** until you decide."
-          ]
-        },
-        {
-          "title": "Apps and secrets",
-          "items": [
-            "**Suggested apps** to connect, and bots can search the app catalog.",
-            "**MCP server secrets are kept in the Vault,** and your saved secrets travel with you when you send a workspace to My Cloud.",
-            "**Emailed one-time codes fill in by themselves** when a bot is allowed to read that mailbox."
-          ]
-        },
-        {
-          "title": "Chats and rooms",
-          "items": [
-            "**Start fresh.** Reset a chat's context from its actions menu.",
-            "**Pin a bot's page to the sidebar.**",
-            "**Rooms follow their Chief of Staff,** and tell you when the Chief isn't in the room.",
-            "**The rail takes a click at once.**",
-            "**Attach.xmind mind maps.**"
-          ]
-        },
-        {
-          "title": "Self-hosting",
-          "items": [
-            "**One command installs a server** on a fresh Ubuntu machine, with HTTPS on your domain.",
-            "**A stable channel, and an update that backs up first and goes back by itself** if the new version doesn't work.",
-            "**HTTPS survives a server restart.** If you run the Docker setup, run `docker compose up -d` after pulling, not only a restart.",
-            "**Sign-in lists:** people you added in Settings while an empty environment setting was overriding it now take effect at the next start. Check the list before you update."
-          ]
-        },
-        {
-          "title": "Other",
-          "items": [
-            "**The ModelGo card** now shows on your first launch of this version if you haven't seen it.",
-            "**MausBot can tell you about news with a card,** without an app update. Set `OMB_DISABLE_ANNOUNCEMENTS=1` to turn it off.",
-            "**Traditional Chinese** is fully translated."
-          ]
-        },
-        {
-          "title": "Fixes",
-          "items": [
-            "**Starter:** the list of paused bots no longer disappears when it changes.",
-            "**A turn that needs a Local VM's tools stops** when the VM offers none, as before.",
-            "**A turn carries on when one optional MCP server dies.**",
-            "**The bot sandbox keeps more server settings away from bots.**",
-            "**Length refusals tell a bot how to shorten and try again.**",
-            "**An expired Claude sign-in is recognised,** with one notice a day naming the bots that can't run."
           ]
         }
       ]
