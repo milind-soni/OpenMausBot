@@ -204,7 +204,7 @@ describe("Devin ACP driver", () => {
   it("fails discovery without calling authenticate when the CLI requires a key and none is available", async () => {
     const dump = join(scratch, "discovery-no-key.json");
     await expect(resolveDevinModels({
-      ...process.env, FAKE_ACP_MODELS: MODELS, FAKE_ACP_MODE: "auth-required-api-key", FAKE_ACP_AUTH_METHOD: "devin-browser",
+      ...process.env, WINDSURF_API_KEY: "", FAKE_ACP_MODELS: MODELS, FAKE_ACP_MODE: "auth-required-api-key", FAKE_ACP_AUTH_METHOD: "devin-browser",
       FAKE_ACP_EXPECTED_API_KEY: "engine-fixture-key", FAKE_ACP_DUMP: dump,
     }, { cli: FAKE_CLI })).rejects.toThrow(/ACP model discovery/);
     expect(existsSync(`${dump}.authenticate.json`)).toBe(false);
