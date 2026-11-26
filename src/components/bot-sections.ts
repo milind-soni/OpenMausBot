@@ -1,5 +1,6 @@
 import type { Dispatch } from "react";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
+import { reorderNamesIfMoved } from "../../shared/bot-order";
 import { api, type Action, type AppState, type Bot } from "@/state/store";
 
 const failure = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
@@ -41,6 +42,45 @@ export function saveBotOrder(dispatch: Dispatch<Action>, bots: readonly Pick<Bot
     dispatch({ type: "botsOrdered", botIds: before });
     dispatch({ type: "error", message: failure(cause) });
   });
+}
+
+/** The workspace's department order and its save, for a person who may move bots; null keeps the order this device's own. */
+export function useDepartmentOrder(sections: readonly string[] | undefined, dispatch: Dispatch<Action>): DepartmentOrder | null {
+  // Only once the answer is known: a member must not offer or move the workspace's order while it is being looked up.
+  if (useOwnerOrAdmin() !== true) return null;
+  const order = sections ?? [];
+  return { order, save: (names: string[]) => saveDepartmentOrder(dispatch, order, names), offer: offerDepartmentOrder };
+}
+
+export interface DepartmentOrder {
+  order: readonly string[];
+  save(names: string[]): Promise<boolean>;
+  /** This device's own order, taken only by a workspace whose order nobody has set. */
+  offer(names: string[]): void;
+}
+
+function offerDepartmentOrder(names: string[]): void {
+  // Quiet: an older server without the shared order leaves this device's order as it was.
+  api("/api/sidebar-sections/order", { method: "PUT", body: JSON.stringify({ sections: names, first: true }) }).catch(() => undefined);
+}
+
+let departmentOrderRequest = 0;
+
+/** Shows the departments `names` in this order at once and saves it for every device; every other department keeps
+ * its place. True once the workspace has it. A refused save is undone only while no newer move has been made. */
+export async function saveDepartmentOrder(dispatch: Dispatch<Action>, sections: readonly string[], names: string[]): Promise<boolean> {
+  if (!reorderNamesIfMoved(sections, names)) return true;
+  const before = sections.filter((name) => names.includes(name));
+  const request = ++departmentOrderRequest;
+  dispatch({ type: "sectionsOrdered", sections: names });
+  try {
+    await api("/api/sidebar-sections/order", { method: "PUT", body: JSON.stringify({ sections: names }) });
+    return true;
+  } catch (cause) {
+    if (request === departmentOrderRequest) dispatch({ type: "sectionsOrdered", sections: before });
+    dispatch({ type: "error", message: failure(cause) });
+    return false;
+  }
 }
 
 export async function renameDepartment(dispatch: Dispatch<Action>, from: string, to: string): Promise<void> {

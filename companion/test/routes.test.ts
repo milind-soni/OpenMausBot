@@ -50,6 +50,7 @@ describe("what the app may do", () => {
     ["DELETE", "/api/bots/bot_123"],
     ["PUT", "/api/bots/order"],
     ["POST", "/api/sidebar-sections"],
+    ["PUT", "/api/sidebar-sections/order"],
     ["POST", "/api/bots/bot_123/messages"],
     ["PATCH", "/api/bots/bot_123/cards/msg_2"],
     ["POST", "/api/bots/bot_123/respond"],
