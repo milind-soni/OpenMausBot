@@ -3112,6 +3112,8 @@
   "attach.folderFilesAria": "Arquivos em {name}",
   "attach.folderTruncated": "Só os primeiros arquivos estão listados",
   "attach.outsideWorkspace": "Este arquivo está fora da pasta de trabalho desta conversa, então não pode ser salvo daqui",
+  "attach.openOutsideFile": "Abrir este arquivo",
+  "attach.saveOutsideFile": "Salvar este arquivo",
   "attach.outsideWorkspacePath": "Encontre este arquivo neste caminho no computador onde o app {app} roda",
   "attach.revealMissing": "Esse arquivo não está mais lá",
   "attach.revealFailed": "Não foi possível mostrar esse arquivo na pasta. Ele pode ter sido movido ou excluído.",

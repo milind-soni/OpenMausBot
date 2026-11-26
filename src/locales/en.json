@@ -3331,6 +3331,8 @@
   "attach.folderFilesAria": "Files in {name}",
   "attach.folderTruncated": "Only the first files are listed",
   "attach.outsideWorkspace": "This file is outside this chat's working folder, so it can't be saved from here",
+  "attach.openOutsideFile": "Open this file",
+  "attach.saveOutsideFile": "Save this file",
   "attach.outsideWorkspacePath": "Find this file at this path on the computer running {app}",
   "attach.revealMissing": "That file is no longer there",
   "attach.revealFailed": "Couldn't show that file in its folder. It may have been moved or deleted.",

@@ -907,6 +907,7 @@ describe("ChatMarkdown attachments", () => {
       reason: "",
       savedTo: "",
       outsideWorkspace: false,
+      canOpenOutside: false,
       retryable: false,
       folder: {
         name: "04_post",
@@ -941,6 +942,7 @@ describe("ChatMarkdown attachments", () => {
         reason: outsideWorkspace ? "the linked file is outside this conversation's workspace" : "",
         savedTo: "",
         outsideWorkspace,
+        canOpenOutside: false,
         retryable: !outsideWorkspace,
         folder: null,
         save: vi.fn(async () => undefined),
@@ -1008,7 +1010,7 @@ describe("ChatMarkdown attachments", () => {
       const outsideSave = () => {
         vi.spyOn(OutsideWorkspaceProbe, "useMessageFileOutsideWorkspace").mockReturnValue(null);
         return vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
-          state: "failed", reason: "", savedTo: "", outsideWorkspace: true, retryable: false, folder: null,
+          state: "failed", reason: "", savedTo: "", outsideWorkspace: true, canOpenOutside: false, retryable: false, folder: null,
           save: vi.fn(async () => undefined),
         });
       };
@@ -1041,7 +1043,7 @@ describe("ChatMarkdown attachments", () => {
         const reveal = vi.fn(async () => "shown" as const);
         (window as { ogb?: unknown }).ogb = { revealInFolder: reveal, remoteClient: { active: false } };
         vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
-          state: "idle", reason: "", savedTo: "", outsideWorkspace: false, retryable: false, folder: null,
+          state: "idle", reason: "", savedTo: "", outsideWorkspace: false, canOpenOutside: false, retryable: false, folder: null,
           save: vi.fn(async () => undefined),
         });
         const host = document.createElement("div");
@@ -1070,6 +1072,7 @@ describe("ChatMarkdown attachments", () => {
         reason: "the linked file is outside this conversation's workspace",
         savedTo: "",
         outsideWorkspace: false,
+        canOpenOutside: false,
         retryable: true,
         folder: null,
         save: vi.fn(async () => undefined),
