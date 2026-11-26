@@ -14,7 +14,8 @@ describe("places", () => {
   it("name a place by its path, with when only Advanced mode or one kind of place shows it", () => {
     expect(placePath("keys")).toBe("Settings → AI → Other services");
     expect(placePath("language")).toBe("Settings → General → Language (in Simple mode it is at Settings → This app → Language)");
-    expect(placePath("send-key")).toBe("Settings → General → Send messages with (shown in Advanced mode only; app_settings set appearance.advanced true turns it on)");
+    expect(placePath("send-key")).toBe("Settings → General → Send messages with (shown in Advanced mode; the switch is at the bottom of Settings)");
+    expect(placesList()).not.toContain("appearance.advanced");
     expect(placePath("wifi")).toMatch(/\(only in the desktop app, on this computer's own page\)$/);
   });
 
