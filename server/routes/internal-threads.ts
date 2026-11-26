@@ -4,6 +4,7 @@ import { mainThreadChoicePatch } from "../main-thread.ts";
 import { reachablePeers } from "../peer-roster.ts";
 import { threadTitleFrom, type BotRecord, type Store, type TaskRecord } from "../store.ts";
 import { PASS, type RouteHandler } from "./table.ts";
+import { closeRoomThreadAtTurnEnd } from "../room-thread-close.ts";
 import { conversationLanguage, serverLine } from "../server-lines.ts";
 
 const THREADS_PAGE = 100;
@@ -23,7 +24,7 @@ interface ThreadRow {
 
 /** Only dispatch inside the internal capability gate: `from` and `fromThreadId` come from the caller's capability. */
 export function createInternalThreadRoutes(deps: {
-  store: Pick<Store, "bot" | "bots" | "tasks" | "taskByThread" | "appendMessage" | "patchTask" | "setTaskClosedBy" | "renameTask" | "patchBot">;
+  store: Pick<Store, "bot" | "bots" | "tasks" | "taskByThread" | "appendMessage" | "patchTask" | "setTaskClosedBy" | "renameTask" | "patchBot" | "groupByThread" | "groupTaskByThread">;
   coordinator: Pick<Coordinator, "awaitingAnswer" | "parkedDirect" | "activeDirect" | "active">;
   from: BotRecord;
   fromThreadId: string;
@@ -142,6 +143,13 @@ export function createInternalThreadRoutes(deps: {
       return json(res, 403, { error: "source conversation does not belong to sender" });
     }
     const threadId = closeMatch[1]!;
+    const room = threadId === fromThreadId ? store.groupByThread(threadId) : undefined;
+    if (room && !room.dm) {
+      const task = store.groupTaskByThread(room.id, threadId);
+      if (!task || !room.memberIds.includes(from.id)) return json(res, 404, { error: "this room thread is gone, or you are no longer in its room" });
+      if (task.closedAt === undefined) closeRoomThreadAtTurnEnd(threadId, from);
+      return json(res, 200, { closed: true, room: true, threadId, title: task.title, ...(task.closedAt !== undefined ? { alreadyClosed: true } : {}) });
+    }
     const owner = [from, ...reachablePeers(store.bots, from)].find((bot) => store.taskByThread(bot.id, threadId));
     const task = owner ? store.taskByThread(owner.id, threadId) : undefined;
     if (!owner || !task || !deps.shown(threadId)) return json(res, 404, { error: "no such thread — call list_threads for the ones you can see" });

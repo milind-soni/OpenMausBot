@@ -1742,7 +1742,7 @@ not open the browser.
 | Status | Body | Meaning |
 | --- | --- | --- |
 | `401` | `{"error":"invalid_signature"}` | Wrong key, tampered request, or malformed headers. Counts toward the per-source pairing lockout. |
-| `401` | `{"error":"stale_request"}` | Timestamp more than 300 s from the machine's clock. |
+| `401` | `{"error":"stale_request"}` | Timestamp more than 300 s from the machine's clock (or, while the home has measured its clock off, from the measured true time: "The home's clock" below). A health, power or diagnose read's refusal adds `clockErrorMs` when the home has measured its clock. |
 | `401` | `{"error":"replayed_request"}` | Nonce already used in the last 10 minutes. |
 | `429` | `{"error":"rate_limited","retryAfterSeconds":n}` | Too many bad signatures from this source. |
 | `400` | `invalid_body`, `invalid_label`, `invalid_ttl`, `invalid_purpose`, `invalid_owner` | Not a JSON object; label not plain text of 80 characters or fewer; TTL not a positive integer; `purpose` present and not `"browser"`; `owner` missing on a browser sign-in, or not one email address of 254 characters or fewer in printable ASCII with exactly one `@` and no `<` or `>`. |
@@ -1798,9 +1798,15 @@ wait for the next read, `truncated: true`):
   "room": { "waits": 3, "waitMs": 360000, "stopped": 1, "killed": 1, "stallMinutes": 2,
     "boot": { "waits": 5, "stopped": 1, "killed": 1, "stallMinutes": 4 } },
   "speed": { "windowS": 300, "steal": 1.2, "psi": { "cpu": 3.4, "memory": 0, "io": 0.8 }, "bootMs": 5400, "wakeMs": null,
-    "turnStarts": [12, 3, 1, 0, 0, 0], "loop": { "n": 2, "worstMs": 1800 } }
+    "turnStarts": [12, 3, 1, 0, 0, 0], "loop": { "n": 2, "worstMs": 1800 } },
+  "clock": { "v": 1, "errorMs": 21660000, "measuredAt": 1790021660000 }
 }
 ```
+
+**`clock`** is the home's clock as it last measured it ("The home's clock"
+below): `errorMs` how far it is behind the true time (negative: ahead), and
+`measuredAt` when, in true time; both `null` when nothing measured it in the
+last 10 minutes. Older homes don't send it.
 
 **`speed`** says how fast the machine is for this home (`server/cloud-speed.ts`),
 read from `/proc` when the report is built, with no timer or sampler of its
@@ -1994,6 +2000,66 @@ updates; a cloud computer that fails a turn arrives as its place's code
 
 A home from before this answers `404`; the Admin then reads `/api/health`
 and shows its health as Unknown.
+
+## The home's clock
+
+A home its provider suspended and resumed is meant to get its clock set on
+resume; once in a while it isn't, and both its wall clock and its monotonic
+clock stopped while it was suspended, so the home can't tell by itself (Nov
+2026: one home ran 6 h behind for 8+ hours, another 40 minutes behind for
+10.5 hours; the Admin's signed reads were all `stale_request`, and routines
+ran late). Measured on the provider's smallest machine (Nov 26 2026): its own
+init holds the host's PTP clock and puts the guest's clock right within about
+2.5 s of any change, and resumes after 5, 20 and 60 minutes came back right; a
+home that stays behind is one whose init stopped keeping its clock, and a
+restart fixes it. The Admin also sets such a clock from outside. `server/cloud-clock.ts`:
+
+- **What starts a look.** A signed request from the Admin with a valid
+  signature whose timestamp is 30 s or more from the home's clock, any wake
+  (`server/cloud-power.ts`: a resume it noticed, a boot from sleep, the clock
+  set forward), and the supervisor's own look every 10 minutes at one host. A
+  request's timestamp is never taken as the time.
+- **What it trusts.** The `Date` header of a fresh `HEAD /` to the home's
+  Admin, the account service and a phone relay. An answer slower than 4 s or
+  with an `Age` header is dropped. The largest group of two or more answers
+  within 3 s of each other gives the time, and it must hold the Admin's own
+  answer (one host with a wrong clock is outvoted; two hosts that aren't the
+  Admin never move the clock); two such groups, or none, and nothing is
+  measured. An error over 14 days (longer than any suspend) is not believed:
+  nothing is set or let through on it. At most one look a minute. A clock
+  20 to 34 days behind can't measure at all: the hosts' certificates aren't
+  valid yet for it.
+- **Who sets it.** Only the root supervisor (`server/cloud-clock-keeper.ts`),
+  which measures again by itself and then runs `date -u -s`, forward only, for
+  an error of 30 s or more. The true time is anchored on the monotonic clock as
+  its measurement starts, and it steps only if the wall clock is still 30 s or
+  more behind at that moment (the platform may set it right meanwhile). The server writes a payload-free `check` line to
+  it on an inherited pipe (`OMB_CLOUD_CLOCK_FD`); whatever is written there
+  can make it look at most once a minute, never pick a time. It needs
+  CAP_SYS_TIME: a home that runs as its own VM has it; a Docker container
+  doesn't (those never suspend), so there it only logs and measures. It logs
+  the clock source, a PTP clock and CAP_SYS_TIME at start.
+- **The Admin's reads meanwhile.** While a measurement in the last 10 minutes
+  says the clock is 30 s or more off, every signed request must fit the
+  measured true time (a request signed hours ago that only fits the wrong
+  clock is refused), and the health, power and diagnose reads (`GET` only)
+  pass on that alone. Pairing, the sleep request and every other signed request still need
+  the home's own clock. Nonces expire on the monotonic clock, so a step never
+  forgets one early.
+- **The home's own calls to the Admin.** Phone notifications, the wake
+  notice, Pages, Slack, the team's rules and roster, and bug report status are
+  signed with the measured true time while a measurement says the clock is
+  30 s or more off (`cloudSignedTimestamp`), so they still pass the Admin's
+  check before the clock is set. The wake notice waits for the measurement
+  the wake starts.
+- **What a step forward does.** Node's timers run on the monotonic clock and
+  carry on. The power loop sees a jump and runs its wake handling (the Admin
+  hears the home woke). Due routines run within a minute (`server/due-timer.ts`),
+  each once: its newest occurrence, the ones before closed on one counted row
+  (`server/routine-catch-up.ts`). A running turn's watchdog takes a jump for a
+  suspend, and the unattended-turn limit counts on the monotonic clock, so no
+  turn is stopped for the hours skipped. What was written while the clock was
+  behind keeps its times.
 
 ## Sleeping homes: the power read and the sleep handshake
 

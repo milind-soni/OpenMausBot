@@ -88,7 +88,8 @@ function over(turn: Counted, limits: UnattendedLimits): Stop | undefined {
 }
 
 export function createUnattendedTurns(deps: UnattendedTurnDeps): UnattendedTurns {
-  const now = deps.now ?? Date.now;
+  // Monotonic: a clock set forward (server/cloud-clock-keeper.ts) or a computer asleep is not time a turn worked.
+  const now = deps.now ?? (() => performance.now());
   const limits = deps.limits ?? (() => unattendedLimits());
   const loops = createLoopGuard({ ...deps, settings: (threadId) => deps.settings(deps.unattended(threadId)) });
   const turns = new Map<string, Counted>();
