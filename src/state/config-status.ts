@@ -55,8 +55,6 @@ export interface ConfigStatus {
   box: SavedKey & { included?: boolean };
   /** `servers`: named servers for the per-bot picker; empty for client sessions, missing from an older server. */
   vps: { configured: boolean; sshAlias: string; servers?: { name: string; sshAlias: string; memoryGb?: number; cpus?: number }[]; memoryGb?: number; cpus?: number };
-  /** The idle window for SSH server desktops. Absent from older servers. */
-  vpsIdle?: { timeoutMinutes: number };
   rooms: { turnTimeoutMinutes: number };
   /** Per-call ceiling (minutes) for a bot's MCP tools. Absent from servers
    * older than the setting; read it with mcpCallTimeoutMinutes(). */

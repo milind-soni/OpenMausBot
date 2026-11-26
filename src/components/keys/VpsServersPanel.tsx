@@ -1,12 +1,10 @@
 import { useContext, useId, useState } from "react";
 import { ChevronRight, Loader2 } from "lucide-react";
-import { api, type ConfigStatus } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { productName } from "@/lib/brand";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { sshServerAnchor } from "../devices/device-words";
-import { LocalVmIdleTimeoutSetting } from "../LocalComputerSection";
 import { SettingsShellContext } from "../settings/settings-shell";
 import { KEY_FIELD } from "./KeyRow";
 import { CPUS, Field, LimitField, limitValue, MEMORY_GB, useVpsSave, useVpsSaving, VpsServerEditor, type VpsNamedServer } from "./VpsServerEditor";
@@ -33,24 +31,6 @@ export function VpsConnection() {
       {notice && <div role="status" className="text-[12px] leading-4 text-ink-secondary">{notice}</div>}
       <VpsServers />
       <p className="text-[12px] leading-4 text-ink-secondary">{t("keys.vps.limitsHint")}</p>
-      <VpsIdleTimeout />
-    </div>
-  );
-}
-
-/** One idle window for every SSH server desktop, saved apart from the private desktop's. */
-function VpsIdleTimeout() {
-  const minutes = useStoreSelector((s) => s.config?.vpsIdle?.timeoutMinutes);
-  const dispatch = useStoreDispatch();
-  const configured = useStoreSelector((s) => Boolean(s.config?.vps?.sshAlias || s.config?.vps?.servers?.length));
-  if (minutes === undefined || !configured) return null;
-  const save = async (timeoutMinutes: number) => {
-    const config: ConfigStatus = await api("/api/config", { method: "PATCH", body: JSON.stringify({ vpsIdle: { timeoutMinutes } }) });
-    dispatch({ type: "configStatus", config });
-  };
-  return (
-    <div data-vps-idle="">
-      <LocalVmIdleTimeoutSetting id="vps-idle-timeout" detail={t("keys.vps.idle.detail")} minutes={minutes} disabled={false} onSave={save} />
     </div>
   );
 }

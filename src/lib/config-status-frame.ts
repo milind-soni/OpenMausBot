@@ -3,7 +3,7 @@ import type { ConfigStatus } from "@/state/config-status";
 // A setting left out here is wiped from state.config whenever a config frame lands.
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "awakeLimit" | "pausedBots" | "pausedByPerson" | "heldBots" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta" | "deepseek" | "xResearch" | "treg" | "postiz" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "vpsIdle" | "rooms" | "mcp" | "threads" | "automaticRecovery" | "cacheKeepWarm" | "localVm" | "opencodeGo" | "tts" | "decider" | "helpers" | "imageGen" | "live" | "savedKeys" | "profile" | "everyBotRules" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy" | "cloudHome" | "team" | "workspaceBanner" | "toolGroups"
+  "awakeLimit" | "pausedBots" | "pausedByPerson" | "heldBots" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta" | "deepseek" | "xResearch" | "treg" | "postiz" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "mcp" | "threads" | "automaticRecovery" | "cacheKeepWarm" | "localVm" | "opencodeGo" | "tts" | "decider" | "helpers" | "imageGen" | "live" | "savedKeys" | "profile" | "everyBotRules" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy" | "cloudHome" | "team" | "workspaceBanner" | "toolGroups"
 >;
 
 /** What the server says about the place itself. Its frames carry them as GET /api/config does, one left out meaning
@@ -33,7 +33,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame, held?: ConfigSta
     fleet: frame.fleet, toolGroups: frame.toolGroups,
     composio: frame.composio,
     box: frame.box,
-    vps: frame.vps, vpsIdle: frame.vpsIdle,
+    vps: frame.vps,
     rooms: frame.rooms,
     mcp: frame.mcp,
     threads: frame.threads,

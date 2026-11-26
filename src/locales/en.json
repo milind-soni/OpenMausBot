@@ -4415,7 +4415,6 @@
   "keys.vps.servers.namePlaceholder": "Home lab",
   "keys.vps.servers.add": "Add",
   "keys.vps.servers.removeAria": "Remove {name}",
-  "keys.vps.idle.detail": "Applies to server desktops only, not the private desktop. A desktop with a running turn is never stopped.",
   "keys.vps.limitsHint": "Memory and cores are the most each bot's desktop on a server may use. Left empty, a named server uses the default server's, and the default uses 4 GB and 2 cores. A running desktop takes a change the next time it starts. Saving checks that the machine has them.",
   "usage.title": "Usage",
   "planUsage.title": "Plan usage",
