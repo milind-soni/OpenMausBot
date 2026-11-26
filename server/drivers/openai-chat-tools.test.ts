@@ -1537,38 +1537,34 @@ describe("a turn with the person's Windows computer, the built-in browser and th
     return { ...others, agents: catalog(syntheticToolNames("agent", agents), { after: names.map((name) => join(gates, name)) }) };
   };
 
-  it("sends the first request without waiting for a slow server, and lists its tools from the next round", async () => {
-    // The slow server cannot start until the first request has arrived: a turn that waited for it would give up on it
-    // first, so its tools could never be listed in the next round, however slow the runner.
-    const gate = mkdtempSync(join(tmpdir(), "omb-chat-tools-slow-"));
-    cleanups.push(() => removeTempDir(gate));
-    const go = join(gate, "go");
+  it("sends the first request past the startup budget with a notice, and lists the late server's tools from the next round", async () => {
+    // A URL server's own start budget is longer than the turn's, so the turn goes on without it past the budget, saying
+    // so, and has its tools in hand before the next round.
     let settledBeforeFirst: boolean | null = null;
-    const notes = catalog(["note"], { after: [go] });
+    const notes = await startFakeHttpMcp({ tools: [{ name: "note", description: "Note", inputSchema: { type: "object" } }], toolsDelayMs: 9_500 });
     const f = await fixture(async (_body, response, round) => {
       if (round > 1) return answer(response);
       settledBeforeFirst = mountSettled.servers.has("notes");
-      writeFileSync(go, "");
       // The turn has the slow server's tools in hand before the next round.
       await settledServer("notes");
       sse(response, [chunk({ tool_calls: [toolCall("agents_agent_1", "{}")] }, "tool_calls")]);
     });
-    await f.start({ integrations: { agents: catalog(syntheticToolNames("agent", 1)), custom: { notes } } });
-    expect(await f.completed()).toMatchObject({ ok: true });
-    expect(settledBeforeFirst).toBe(false);
-    expect(f.requests.map((request) => request.tools!.map((tool) => tool.function.name))).toEqual([["agents_agent_1", "ask_user"], ["agents_agent_1", "notes_note", "ask_user"]]);
-    expect(f.recorder.events.filter((event) => event.type === "runtime.notice" || event.type === "runtime.error")).toEqual([]);
-  });
+    try {
+      await f.start({ integrations: { agents: catalog(syntheticToolNames("agent", 1)), custom: { notes: { type: "http", url: notes.url, headers: {} } } } });
+      expect(await f.recorder.until((event) => event.type === "turn.completed", 40_000)).toMatchObject({ ok: true });
+      expect(settledBeforeFirst).toBe(false);
+      expect(f.requests.map((request) => request.tools!.map((tool) => tool.function.name))).toEqual([["agents_agent_1", "ask_user"], ["agents_agent_1", "notes_note", "ask_user"]]);
+      expect(f.recorder.events.filter((event) => event.type === "runtime.notice" || event.type === "runtime.error")).toEqual([
+        expect.objectContaining({ type: "runtime.notice", message: 'MCP server "notes" was skipped for this turn: still starting; its tools may be missing from this turn\'s first reply.' }),
+      ]);
+    } finally { await notes.close(); }
+  }, 30_000);
 
   it("lists fewer tools when servers that joined after a tool call go past the provider's limit", async () => {
-    const gate = mkdtempSync(join(tmpdir(), "omb-chat-tools-gate-"));
-    cleanups.push(() => removeTempDir(gate));
-    const go = join(gate, "go");
-    const notes = catalog(syntheticToolNames("note", 5), { after: [go] });
+    const notes = await startFakeHttpMcp({ tools: syntheticToolNames("note", 5).map((name) => ({ name, description: "Note", inputSchema: { type: "object" } })), toolsDelayMs: 9_500 });
     const f = await fixture(async (body, response) => {
       if (!body.messages.some((message) => message.role === "tool")) {
         // The slow server starts, and the turn has its tools in hand, before the next round.
-        writeFileSync(go, "");
         await settledServer("notes");
         return sse(response, [chunk({ tool_calls: [toolCall("agents_agent_1", "{}")] }, "tool_calls")]);
       }
@@ -1579,16 +1575,16 @@ describe("a turn with the person's Windows computer, the built-in browser and th
     const warn = console.warn;
     console.warn = () => {};
     try {
-      await f.start({ integrations: { agents: catalog(syntheticToolNames("agent", 1)), custom: { notes } } });
-      expect(await f.completed()).toMatchObject({ ok: true });
-    } finally { console.warn = warn; }
+      await f.start({ integrations: { agents: catalog(syntheticToolNames("agent", 1)), custom: { notes: { type: "http", url: notes.url, headers: {} } } } });
+      expect(await f.recorder.until((event) => event.type === "turn.completed", 40_000)).toMatchObject({ ok: true });
+    } finally { await notes.close(); console.warn = warn; }
     expect(f.requests.map((request) => request.tools!.map((tool) => tool.function.name))).toEqual([
       ["agents_agent_1", "ask_user"],
       ["agents_agent_1", ...syntheticToolNames("notes_note", 5), "ask_user"],
       ["agents_agent_1", "mcp_search_tools", "mcp_describe_tool", "mcp_call_tool", "ask_user"],
     ]);
     expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
-  });
+  }, 30_000);
 
   it("sends at most 128 tools, ask_user and every agents tool among them", async () => {
     const f = await fixture((_body, response) => answer(response));

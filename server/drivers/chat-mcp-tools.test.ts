@@ -1543,8 +1543,8 @@ describe("Chat MCP tool limit, fairly shared", () => {
 describe("Chat MCP servers starting in the background", () => {
   const slowStart = (ms: number) => `if (message.method === "initialize") { setTimeout(() => reply(message, {protocolVersion:"2024-11-05",capabilities:{tools:{}}}), ${ms}); continue; }`;
   const ask: ChatToolDefinition = { type: "function", function: { name: "ask_user", description: "Ask", parameters: { type: "object" } } };
-  const background = async (integrations: SendTurnInput["integrations"], signal: AbortSignal, toolLimit?: number, onSettled?: (server: string) => void) => {
-    const session = await mountChatTools(integrations, signal, false, undefined, undefined, undefined, undefined, undefined, toolLimit, { background: true, ...(onSettled ? { onSettled } : {}) });
+  const background = async (integrations: SendTurnInput["integrations"], signal: AbortSignal, toolLimit?: number, onSettled?: (server: string) => void, options: { startupMs?: number } = {}) => {
+    const session = await mountChatTools(integrations, signal, false, undefined, undefined, undefined, undefined, undefined, toolLimit, { background: true, ...(onSettled ? { onSettled } : {}), ...options });
     sessions.push(session);
     return session;
   };
@@ -1577,29 +1577,41 @@ describe("Chat MCP servers starting in the background", () => {
     return lines;
   };
 
-  it("starts the turn once the agents server is up, and lists a slow server's tools when it joins", async () => {
+  it("waits for a configured server that starts within the budget, and lists its tools from the first request", async () => {
     const agents = fixture();
     const slow = fixture(slowStart(1_500));
-    const startedAt = Date.now();
     const session = await background({ agents: agents.server, custom: { slow: slow.server } }, agents.controller.signal);
-    expect(Date.now() - startedAt).toBeLessThan(1_500);
     session.definitions.push(ask);
-    expect(names(session)).toEqual(["agents_write", "ask_user"]);
-    expect(await joined(session)).toEqual([]);
     expect(names(session)).toEqual(["agents_write", "slow_write", "ask_user"]);
     await expect(session.execute("slow_write", { value: "late" }, agents.controller.signal)).resolves.toMatchObject({ ok: true, text: "recorded:late" });
     expect(await session.join()).toBeUndefined();
   });
 
-  it("says when a server that was still starting is skipped", async () => {
+  it("skips a configured server that fails within the wait, saying so before the model runs", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const agents = fixture();
     const late = fixture(`if (message.method === "tools/list") { setTimeout(() => reply(message, {tools:"invalid"}), 800); continue; }`);
     const session = await background({ agents: agents.server, custom: { late: late.server } }, agents.controller.signal);
-    expect(session.skipped).toEqual([]);
-    expect(await joined(session)).toEqual([expect.stringMatching(/^MCP server "late" was skipped for this turn: .*invalid result/)]);
+    expect(chatToolNotices(session)).toEqual([expect.stringMatching(/^MCP server "late" was skipped for this turn: .*invalid result/)]);
     expect(names(session)).toEqual(["agents_write"]);
+    expect(await session.join()).toBeUndefined();
     warn.mockRestore();
+  });
+
+  it("says when a configured server is still starting past the budget, and lists its tools when it joins", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const agents = fixture();
+    // A URL server's own start budget is longer than a turn's, so it is still starting when the bound passes.
+    const late = await startFakeHttpMcp({ tools: whopLikeCatalog(2), toolsDelayMs: 1_200 });
+    try {
+      const session = await mountChatTools({ agents: agents.server, custom: { late: { type: "http", url: late.url, headers: {} } } },
+        agents.controller.signal, false, undefined, undefined, undefined, undefined, undefined, undefined, { background: true, startupMs: 800 });
+      sessions.push(session);
+      expect(chatToolNotices(session)).toEqual(['MCP server "late" was skipped for this turn: still starting; its tools may be missing from this turn\'s first reply.']);
+      expect(names(session)).toEqual(["agents_write"]);
+      await joined(session);
+      expect(names(session).some((name) => name.startsWith("late_"))).toBe(true);
+    } finally { await late.close(); warn.mockRestore(); }
   });
 
   it("keeps a listed tool's name when a server joining later would have taken it", async () => {
@@ -1623,39 +1635,42 @@ describe("Chat MCP servers starting in the background", () => {
     const notes = catalog(syntheticToolNames("note", 10));
     const gates = settledGates("notes");
     const agents = catalog(["write"], gates.files);
-    // Named like the tool search and offering the tool its call tool is listed as, it joins after the first round.
-    const go = gate();
-    const late = catalog(["call_tool"], [go]);
+    // Named like the tool search and reached through it, it joins after the first round and takes _2 names: a URL
+    // server's own start budget is longer than the turn's, so it is the one still starting when the bound passes.
+    const late = await startFakeHttpMcp({ tools: [{ name: "call_tool", description: "Runs a tool", inputSchema: { type: "object" } }], toolsDelayMs: 1_200 });
     const controller = new AbortController();
     controllers.push(controller);
-    const session = await background({ agents: agents.server, custom: { notes: notes.server, mcp: late.server } }, controller.signal, 8, gates.onSettled);
-    expect(names(session)).toEqual(["agents_write", "mcp_search_tools", "mcp_describe_tool", "mcp_call_tool"]);
-    writeFileSync(go, "");
-    await joined(session);
-    expect(names(session)).toEqual(["agents_write", "mcp_call_tool_2", "mcp_search_tools", "mcp_describe_tool", "mcp_call_tool"]);
-    await expect(session.execute("mcp_call_tool", { name: "notes_note_1", arguments: {} }, controller.signal)).resolves.toEqual({ ok: true, text: "ran note_1" });
+    try {
+      const session = await background({ agents: agents.server, custom: { notes: notes.server, mcp: { type: "http", url: late.url, headers: {} } } }, controller.signal, 8, gates.onSettled, { startupMs: 800 });
+      expect(names(session)).toEqual(["agents_write", "mcp_search_tools", "mcp_describe_tool", "mcp_call_tool"]);
+      await joined(session);
+      expect(names(session)).toEqual(["agents_write", "mcp_search_tools_2", "mcp_describe_tool_2", "mcp_call_tool_2", "mcp_search_tools", "mcp_describe_tool", "mcp_call_tool"]);
+      await expect(session.execute("mcp_call_tool", { name: "notes_note_1", arguments: {} }, controller.signal)).resolves.toEqual({ ok: true, text: "ran note_1" });
+      await expect(session.execute("mcp_call_tool_2", { name: "call_tool", arguments: {} }, controller.signal)).resolves.toMatchObject({ ok: true, text: "remote execution recorded" });
+    } finally { await late.close(); }
   });
 
   it("keeps a searched tool's name when a listed server joins the tool search later", async () => {
     // "x" is listed and "x_a" searched; then "y" joins and takes the room "x" had, so "x" is searched too, before "x_a",
-    // and its "a_b" reads as "x_a_b", the name the searched "b" of "x_a" already has.
-    const listed = catalog(["a_b", "p_1"]);
+    // and its "a_b" reads as "x_a_b_2", beside the "x_a_b" the searched "b" of "x_a" already has. "y" is a URL server,
+    // whose own start budget is longer than the turn's, so it is the one still starting when the bound passes.
+    const listed = catalog(["a_b", "p_1", "q_1", "r_1"]);
     const searched = catalog(["b", ...syntheticToolNames("c", 5)]);
     const gates = settledGates("x", "x_a");
     const agents = catalog(["write"], gates.files);
-    const go = gate();
-    const late = catalog(["write"], [go]);
+    const late = await startFakeHttpMcp({ tools: [{ name: "call_tool", description: "Runs a tool", inputSchema: { type: "object" } }], toolsDelayMs: 1_200 });
     const controller = new AbortController();
     controllers.push(controller);
-    const session = await background({ agents: agents.server, custom: { x: listed.server, x_a: searched.server, y: late.server } }, controller.signal, 7, gates.onSettled);
-    expect(names(session)).toEqual(["agents_write", "x_a_b", "x_p_1", "mcp_search_tools", "mcp_describe_tool", "mcp_call_tool"]);
-    const call = (name: string) => session.execute("mcp_call_tool", { name, arguments: {} }, controller.signal);
-    await expect(call("x_a_b")).resolves.toEqual({ ok: true, text: "ran b" });
-    writeFileSync(go, "");
-    await joined(session);
-    expect(names(session)).toEqual(["agents_write", "y_write", "mcp_search_tools", "mcp_describe_tool", "mcp_call_tool"]);
-    await expect(call("x_a_b")).resolves.toEqual({ ok: true, text: "ran b" });
-    await expect(call("x_a_b_2")).resolves.toEqual({ ok: true, text: "ran a_b" });
+    try {
+      const session = await background({ agents: agents.server, custom: { x: listed.server, x_a: searched.server, y: { type: "http", url: late.url, headers: {} } } }, controller.signal, 9, gates.onSettled, { startupMs: 800 });
+      expect(names(session)).toEqual(["agents_write", "x_a_b", "x_p_1", "x_q_1", "x_r_1", "mcp_search_tools", "mcp_describe_tool", "mcp_call_tool"]);
+      const call = (name: string) => session.execute("mcp_call_tool", { name, arguments: {} }, controller.signal);
+      await expect(call("x_a_b")).resolves.toEqual({ ok: true, text: "ran b" });
+      await joined(session);
+      expect(names(session)).toEqual(["agents_write", "y_search_tools", "y_describe_tool", "y_call_tool", "mcp_search_tools", "mcp_describe_tool", "mcp_call_tool"]);
+      await expect(call("x_a_b")).resolves.toEqual({ ok: true, text: "ran b" });
+      await expect(call("x_a_b_2")).resolves.toEqual({ ok: true, text: "ran a_b" });
+    } finally { await late.close(); }
   });
 
   it("waits for every server without the agents server, or when not started in the background", async () => {
