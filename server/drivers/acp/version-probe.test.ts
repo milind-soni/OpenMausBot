@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseVersionTriple, versionAtLeast, versionFromProbe } from "./version-probe.ts";
+import { parseSemVer, parseVersionTriple, semVerAtLeast, versionAtLeast, versionFromProbe } from "./version-probe.ts";
 
 describe("versionFromProbe", () => {
   it("prefers stdout", () => {
@@ -45,4 +45,32 @@ describe("versionAtLeast", () => {
     expect(versionAtLeast([3, 0, 0], [2, 1, 232])).toBe(true);
     expect(versionAtLeast([1, 0, 122], [2, 1, 232])).toBe(false);
   });
+});
+
+describe("semVerAtLeast", () => {
+  it.each([
+    ["0.2.2-rc.1", "0.2.2-rc.2"],
+    ["0.2.2-rc.2", "0.2.2-rc.10"],
+    ["0.2.2-alpha.9", "0.2.2-rc.1"],
+    ["0.2.2-1", "0.2.2-alpha"],
+    ["0.2.2-alpha", "0.2.2-alpha.1"],
+    ["0.2.2-rc.10", "0.2.2"],
+    ["0.2.2", "0.2.3-alpha.2"],
+    ["0.2.9", "0.2.10"],
+  ])("orders %s before %s", (lower, higher) => {
+    expect(semVerAtLeast(lower, higher)).toBe(false);
+    expect(semVerAtLeast(higher, lower)).toBe(true);
+  });
+
+  it("accepts an equal version and ignores build metadata", () => {
+    expect(semVerAtLeast("0.2.2-rc.2", "0.2.2-rc.2")).toBe(true);
+    expect(semVerAtLeast("0.2.2-rc.2+linux.01\n", "0.2.2-rc.2+build.2")).toBe(true);
+  });
+
+  it.each(["", "unknown", "0.2", "0.2.2-", "0.2.2-rc..2", "0.02.2", "0.2.2-rc.02"])(
+    "treats %j as an unreadable version", (value) => {
+      expect(parseSemVer(value)).toBeNull();
+      expect(semVerAtLeast(value, "0.2.2-rc.2")).toBe(false);
+    },
+  );
 });

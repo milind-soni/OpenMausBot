@@ -7,6 +7,7 @@ import { failedTurnCause } from "../shared/failed-turn.ts";
 import { PLACE_STATES } from "../shared/place-view.ts";
 import { trialCreditKind } from "../shared/trial-credit.ts";
 import type { BoxReport } from "./bot-box/box.ts";
+import type { CloudBrowserReport } from "./cloud-browser/rails.ts";
 import type { RoomReport } from "./engine-memory.ts";
 import type { FirstHourReport } from "./host/first-hour.ts";
 import type { ValueReport } from "./host/value-ledger.ts";
@@ -261,7 +262,9 @@ export interface CloudHealthDeps {
   image: string | undefined;
   /** Null when connected apps are not set up here. */
   connectors: () => Promise<Record<string, { connected: boolean; pending?: boolean }>> | null;
-  browser: () => { available: boolean; installing: boolean; interrupted: number };
+  /** `cloudComputer`: a personal Cloud's bot browsers on their cloud computers today (server/cloud-browser/rails.ts):
+   * where sessions opened, resumes spent, and why a session stayed in the home, by reason name only. */
+  browser: () => { available: boolean; installing: boolean; interrupted: number; cloudComputer?: CloudBrowserReport | null };
   /** The bot box (server/bot-box): whether turns run boxed here, and the last self-check's count. */
   box?: () => BoxReport;
   /** A personal Cloud's milestones since its first boot, and the work its Chief did: times and counts only. */
@@ -351,7 +354,7 @@ export function createCloudHealth(deps: CloudHealthDeps) {
         v: 1 as const, version, image, bootedAt: ledger.bootedAt, at: now(),
         turns: read.turns, routines: guarded(() => deps.routines?.(ROUTINE_CAP) ?? [], []).filter((routine) => match(ID, routine.routineId)), schedule: guarded(() => deps.schedule?.() ?? null, null),
         engines: engines(), connectors: connectorState(),
-        browser: { available: browser.available, installing: browser.installing, interrupted: browser.interrupted },
+        browser: { available: browser.available, installing: browser.installing, interrupted: browser.interrupted, ...(browser.cloudComputer ? { cloudComputer: browser.cloudComputer } : {}) },
         box: boxSummary(deps.box?.()),
         firstHour: first?.firstHour ?? null, value: first?.value ?? null, room: deps.room?.() ?? null, speed: speed.report(), perf: perf(), ...storage(),
         // The data checks of this version's first start: check ids and counts (server/doctor/start.ts).

@@ -82,6 +82,13 @@ describe("room thread summaries", () => {
     expect(summary.repliers).toEqual(["b6", "b5", "b4", "b3", "b2"].map((botId) => ({ botId })));
   });
 
+  it("lists a thread whose only lines a webhook or a bot's post put there, and counts a later post as a reply", () => {
+    const hook = add("f", { role: "bot", kind: "text", text: "Deploy finished", from: { botId: "kiwi", name: "Kiwi", color: "blue" }, webhookPost: true });
+    const post = add("f", { role: "bot", kind: "text", text: "Posted the notes", from: { botId: "pip", name: "Pip", color: "blue" }, peerPost: {} });
+    const [summary] = roomThreadSummaries(["f"]);
+    expect(summary).toEqual({ threadId: "f", first: { text: "Deploy finished", speaker: { botId: "kiwi" }, at: hook.at }, replies: 1, lastReplyAt: post.at, repliers: [{ botId: "pip" }] });
+  });
+
   it("counts a person's own follow-up as a reply but not their first line", () => {
     add("e", person("one"));
     add("e", person("two"));

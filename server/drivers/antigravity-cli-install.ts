@@ -33,8 +33,9 @@ export const ANTIGRAVITY_NATIVE_CLI_ENV = "OMB_ANTIGRAVITY_NATIVE_CLI";
 export const ANTIGRAVITY_CLI_FIRST = process.env[ANTIGRAVITY_NATIVE_CLI_ENV] === "1";
 
 /** Where the CLI keeps a Google sign-in, under `<profile>/antigravity-acp/`, when it does not use the OS keyring (which
- * it skips while SSH_CONNECTION is set). It never writes the pinned runtime's `acp_token.json`, and stores no OAuth
- * client, so this app cannot refresh it. */
+ * it skips while SSH_CONNECTION is set up to 1.5.15, and while AGY_CLI_FORCE_FILE_TOKEN_STORAGE is set from 1.5.16):
+ * `{"token":{"access_token","expiry",…},"auth_method":"consumer"}` in 1.5.16. It never writes the pinned runtime's
+ * `acp_token.json`, and stores no OAuth client, so this app cannot refresh it. */
 export const ANTIGRAVITY_CLI_TOKEN_FILE = "antigravity-oauth-token";
 
 /** Whether a configuration that does not name the native CLI (no path, or `agy`) runs it on `platform` when no pinned

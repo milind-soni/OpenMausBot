@@ -123,6 +123,38 @@ describe("a bot's backup AIs in Simple", () => {
     expect(onChange).toHaveBeenCalledWith([{ instanceId: "gemini", model: "gemini-3-pro" }]);
   });
 
+  it("saves only the selected backup's model-specific reasoning and can restore the provider default", () => {
+    const [model] = codex.models.options;
+    fixture.instances.splice(1, 1, { ...codex, models: { ...codex.models, options: [{ ...model!, effortLevels: ["low", "medium"] }] } });
+    const backup = { instanceId: "codex", model: "gpt-5.5" };
+    const other = { instanceId: "gemini", model: "gemini-3-pro" };
+    render([backup, other]);
+    const picker = host.querySelector<HTMLSelectElement>('select[aria-label="Reasoning · gpt-5.5"]')!;
+    expect([...picker.options].map((option) => option.value)).toEqual(["", "low", "medium"]);
+    expect(picker.selectedOptions[0]?.textContent).toBe("Provider default");
+    picker.value = "medium";
+    flushSync(() => picker.dispatchEvent(new Event("change", { bubbles: true })));
+    expect(onChange).toHaveBeenLastCalledWith([{ ...backup, effort: "medium" }, other]);
+    render([{ ...backup, effort: "medium" }, other]);
+    picker.value = "";
+    flushSync(() => picker.dispatchEvent(new Event("change", { bubbles: true })));
+    expect(onChange).toHaveBeenLastCalledWith([backup, other]);
+  });
+
+  it("saves the provider's variant id when a backup model advertises named reasoning modes", () => {
+    const model = gemini.models.options[0]!;
+    const instance = { ...gemini, capabilities: { ...gemini.capabilities, modelVariants: true },
+      models: { ...gemini.models, options: [{ ...model, variants: [{ id: "thinking-medium", label: "Medium" }] }] } };
+    fixture.instances.splice(2, 1, instance as InstanceInfo);
+    const backup = { instanceId: gemini.instanceId, model: model.id };
+    render([backup]);
+    const picker = host.querySelector<HTMLSelectElement>("select")!;
+    expect([...picker.options].map((option) => option.textContent)).toEqual(["Provider default", "Medium"]);
+    picker.value = "thinking-medium";
+    flushSync(() => picker.dispatchEvent(new Event("change", { bubbles: true })));
+    expect(onChange).toHaveBeenCalledWith([{ ...backup, variant: "thinking-medium" }]);
+  });
+
   it("stops offering Add at the most the bot can keep", () => {
     const full = Array.from({ length: MAX_BACKUPS }, (_, index) => ({ instanceId: `engine-${index}`, model: "m" }));
     render(full);

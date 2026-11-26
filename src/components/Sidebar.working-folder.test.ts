@@ -35,7 +35,12 @@ const render = () => flushSync(() => root.render(createElement(BotEditorStore, {
   children: createElement(Sidebar, { open: true, onClose: () => {} }),
 })));
 const openMenu = () => flushSync(() => document.querySelector<HTMLButtonElement>('button[aria-label="Actions for Pepper"]')!.click());
-const menuItem = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((button) => button.textContent === label);
+const menuItemLabel = (button: HTMLButtonElement) => {
+  const clone = button.cloneNode(true) as HTMLButtonElement;
+  for (const hidden of clone.querySelectorAll('[aria-hidden="true"]')) hidden.remove();
+  return clone.textContent?.trim() ?? "";
+};
+const menuItem = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((button) => menuItemLabel(button) === label);
 
 beforeEach(() => {
   access.admin = true;

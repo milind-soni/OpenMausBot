@@ -500,18 +500,25 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
     const notes = { command: process.execPath, args: ["/tmp/notes-mcp.js"], env: {} };
     const { turnId } = await instance.adapter.sendTurn({ threadId: `cli-mcp-${own}-${name.length}`, text: "hello", cwd: fake.directory, integrations: { agents, composio, browser, custom: { notes } } });
     expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: true });
-    const sent = JSON.parse(readFileSync(`${fake.dump}.mcp.json`, "utf8")) as Array<{ name: string; type?: string; url?: string; command?: string }>;
+    // Under a schema profile (the native CLI carries the Gemini engine's) the person's stdio server goes through the MCP gate.
+    const sent = JSON.parse(readFileSync(`${fake.dump}.mcp.json`, "utf8")) as Array<{ name: string; type?: string; url?: string; command?: string; args?: string[]; env?: Array<{ name: string; value: string }> }>;
     expect(sent.map((server) => server.name)).toEqual(["agents", "composio", "browser", "notes"]);
-    const byName = Object.fromEntries(sent.map((server) => [server.name, server]));
+    const byName = Object.fromEntries(sent.map((server) => [server.name, server])) as Record<string, { command?: string; args?: string[]; env?: Array<{ name: string; value: string }> }>;
     if (own === "url") {
       expect(byName.agents).toMatchObject({ type: "http", url: `${harness}/api/internal/mcp-http/agents` });
-      expect(byName.browser).toEqual({ type: "http", name: "browser", url: `${harness}/api/internal/mcp-http/browser`, headers: [{ name: "authorization", value: "Bearer synthetic-browser-capability" }] });
+      // With its share of the CLI's session-wide tool budget.
+      expect(byName.browser).toEqual({ type: "http", name: "browser", url: `${harness}/api/internal/mcp-http/browser`,
+        headers: [{ name: "authorization", value: "Bearer synthetic-browser-capability" }, { name: "x-omb-tool-share", value: expect.stringMatching(/^listShare:\d+$/) }] });
     } else {
       expect(byName.agents).toMatchObject({ command: process.execPath, args: agents.args });
       expect(byName.browser).toMatchObject({ command: process.execPath, args: browser.args });
+      expect(JSON.stringify([byName.agents, byName.browser])).not.toContain("listShare:");
     }
     expect(byName.composio).toMatchObject({ command: process.execPath, args: composio.args });
-    expect(byName.notes).toEqual({ name: "notes", command: process.execPath, args: notes.args, env: [] });
+    expect(byName.notes!.command).toBe(process.execPath);
+    expect(byName.notes!.args![0]).toContain("mcp-gate");
+    const upstream = JSON.parse(byName.notes!.env!.find((entry) => entry.name === "OMB_GATE_UPSTREAM")!.value) as { command: string; args: string[]; env: Record<string, string> };
+    expect(upstream).toEqual({ command: process.execPath, args: notes.args, env: {} });
   }, 90_000);
 
   it("fails closed when the CLI does not confirm default mode", async () => {

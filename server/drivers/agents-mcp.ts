@@ -2,6 +2,8 @@
 // harness sets for it (see agents-proxy.ts): the stdio proxy an engine starts and the HTTP endpoint an engine reaches
 // both answer through it.
 import { resolveAgentsCall } from "../../shared/agents-tool-names.ts";
+import { TOOL_SCHEMA_PROFILE_ENV } from "../tool-schema-profile.ts";
+import { toolsForShareProfile, type ListedTool } from "../tool-list-budget.ts";
 import { TOOL_BRIDGE_ENV, createToolBridge } from "./agents-bridge.ts";
 import { availableTools, catalogProfileFromEnv } from "./agents-catalog.ts";
 import { DEFER_TOOLS_ENV, withDeferMarks } from "./agents-claude-defer.ts";
@@ -9,18 +11,22 @@ import { callTool, capResult, toolCallContextFromEnv } from "./agents-call.ts";
 import { sendToolReceipt } from "./agents-timing.ts";
 import type { Json } from "./agents-client.ts";
 import { capToolListResult, toolLimitFromEnv } from "../tool-count-limit.ts";
+import { fitToolListForBudget, toolSchemaProfileFromEnv } from "../tool-schema-profile.ts";
 
 /** What the agents server lists for `env`, before any tool limit. */
 export function agentsToolList(env: NodeJS.ProcessEnv) {
   const profile = catalogProfileFromEnv(env);
   const available = availableTools(profile);
   const bridge = env[TOOL_BRIDGE_ENV] === "1" ? createToolBridge(available) : undefined;
-  return { available, bridge, listed: bridge ? bridge.listed : env[DEFER_TOOLS_ENV] === "1" ? withDeferMarks(available, profile.chief) : available };
+  const listed = bridge ? bridge.listed : env[DEFER_TOOLS_ENV] === "1" ? withDeferMarks(available, profile.chief) : available;
+  // A share of the session's tool budget fits only what is shown; calls are checked against `available` as they are.
+  return { available, bridge, listed: toolsForShareProfile(listed as readonly ListedTool[], env[TOOL_SCHEMA_PROFILE_ENV], (line) => console.warn(`[agents] ${line}`)) as typeof listed };
 }
 
 export function agentsMcp(env: NodeJS.ProcessEnv): (msg: Json) => Promise<Json | undefined> {
   const { available, bridge, listed } = agentsToolList(env);
   const limit = toolLimitFromEnv(env);
+  const schemaProfile = toolSchemaProfileFromEnv(env);
   const context = toolCallContextFromEnv(env);
   const ok = (id: unknown, result: unknown): Json => ({ jsonrpc: "2.0", id, result } as Json);
   const rpcErr = (id: unknown, code: number, message: string): Json => ({ jsonrpc: "2.0", id, error: { code, message } } as Json);
@@ -43,7 +49,7 @@ export function agentsMcp(env: NodeJS.ProcessEnv): (msg: Json) => Promise<Json |
       case "ping":
         return ok(id, {});
       case "tools/list":
-        return ok(id, capToolListResult({ tools: listed }, limit, (line) => console.warn(`[agents] ${line}`)));
+        return ok(id, capToolListResult({ tools: fitToolListForBudget(listed as Array<{ name: string; inputSchema?: unknown }>, schemaProfile, (line) => console.warn(`[agents] ${line}`)) }, limit, (line) => console.warn(`[agents] ${line}`)));
       case "tools/call": {
         const called = { name: params.name as string, arguments: (params.arguments ?? {}) as Json };
         // Security: past the bridge a use_tool call is a direct call: same unknown-tool check, callTool and result bounds.

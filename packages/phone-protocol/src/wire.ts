@@ -370,7 +370,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   /** Which of a paired phone's apps this bot may use; absent: every bot may use what the phone allows (shared/phone-apps.ts). */
   phoneApps?: import("./phone-apps.ts").PhoneApps;
   /** Ordered backups used only by opt-in, pre-prompt startup recovery. */
-  fallback?: Array<{ instanceId: string; model: string }>;
+  fallback?: ModelSelection[];
   /** Whether this bot gets the app's built-in browser. */
   browser?: boolean;
   /** Record a screenshot and a short note of each browser action, kept with
@@ -585,7 +585,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   /** On a Team Cloud, a line in its person's inbox: who it is from and where it came from. */
   inbox?: InboxItem;
   /** thread chips: "Opened thread #Title on @X". */
-  threadRef?: { botId: string; threadId: string; title: string };
+  threadRef?: { botId: string; threadId: string; title: string }; /** The quiet line recording hand-offs to this bot ("Mochi asked me: …"): who asked, how many it folds, their threads. */ askedBy?: { botId: string; name: string; count?: number; threadIds?: string[] };
   /** A "Sent to" row for work addressed into a room the bot `name` isn't in, so it went to the bot directly. `room`
    * names that room when this row is not in it. Clients say it in their own words; `tool.name` is the English. */
   sentDirectly?: { name: string; room?: string };

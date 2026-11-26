@@ -2,6 +2,7 @@ import { directMessageSent, roomMessageSent } from "@/lib/product-events";
 import { TeamAudienceLabel } from "./TeamSideSwitch";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
 import { ComposerForkError, useComposerFork } from "./ComposerFork";
+import { isNewChatThread } from "@/state/new-chat";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { Mic, Square } from "lucide-react";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { useStoreRef } from "@/state/store-ref"; import { sameDrawnBots } from "@/lib/drawn-bots";
@@ -68,7 +69,7 @@ import {
   type PasteAttachment,
 } from "@/lib/composer-attachments";
 import { goalCoordinatorForComposer, jevRoomRoutingOn, openTaskWorking, roomRouteForComposer } from "@/lib/group-routing";
-import { composerPlaceholder, sendLabels, SIMPLE_COMPOSER, SIMPLE_CONTROL, slotColors } from "./composer-simple"; import { ComposerSendButton } from "./ComposerSendButton"; import { ComposerContextMenu } from "./ComposerContextMenu";
+import { composerForkOwner, composerPlaceholder, sendLabels, SIMPLE_COMPOSER, SIMPLE_CONTROL, slotColors } from "./composer-simple"; import { ComposerSendButton } from "./ComposerSendButton"; import { ComposerContextMenu } from "./ComposerContextMenu";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { CallButton } from "./CallView";
 import { GroupCallButton } from "./GroupCallView";
@@ -102,6 +103,7 @@ import {
 } from "@/lib/composer-commands";
 import { useSlashSkills } from "@/lib/use-slash-skills";
 import { randomUuid } from "@/lib/random-uuid";
+import { useComposerThreadCommand } from "./use-composer-thread-command";
 
 const supportsAgents = (instances: InstanceInfo[], candidate?: Bot) =>
   Boolean(candidate && instances.find((instance) => instance.instanceId === candidate.modelSelection.instanceId)?.capabilities?.agentsMcp);
@@ -178,7 +180,7 @@ export function Composer({
     draftId,
     !group && bot && !state.config?.team ? `bot:${bot.id}` : undefined,
   );
-  const forkOwnerId = singleRow || group?.dm || !threadId ? undefined : group?.id ?? bot?.id;
+  const forkOwnerId = composerForkOwner({ phone: singleRow, group, botId: bot?.id, threadId: threadId && !isNewChatThread(threadId) ? threadId : undefined, startsThread: Boolean(onSendGroup) });
   const attachmentPending = useDraftAttachmentPending(draftId);
   const failedSends = useFailedComposerSends(draftId); const picks = mentionPicksFor(draftId);
   const [channelMode, setChannelMode] = useComposerChannelMode(draftId);
@@ -303,6 +305,12 @@ export function Composer({
   };
   const typedGoalText = !group?.dm ? goalTextFromComposer(text) : null;
   const effectiveText = typedGoalText ?? text;
+  // A room's threads are managed from the room, and a blank New thread has no conversation to act on yet.
+  const threadCommandAvailable = !group && Boolean(composerTask);
+  const { command: threadCommand, run: runThreadCommand, dialog: threadCommandDialog } = useComposerThreadCommand({
+    text: threadCommandAvailable ? text : "", botId: threadCommandAvailable ? bot?.id : undefined, threadId, mainThreadId: profile?.mainThreadId, threads: profile?.tasks,
+    title: composerTask?.title, busy, dispatch, returnFocusRef: inputRef, onCleared: () => { editText(""); setAttachments([]); picks.clear(); setCaret(0); setDismissedSlashAt(null); onConsumeReply?.(); setChannelMode("chat"); },
+  });
   const effectiveChannelMode = typedGoalText !== null ? "goal" : channelMode;
   const engineSupportsImages = imageTargetsSupport(effectiveText, effectiveChannelMode);
 
@@ -336,9 +344,11 @@ export function Composer({
       description: t("composer.command.setupDesc"),
     }, { kind: "command", id: "burst", label: "/burst", description: t("composer.command.burstDesc") });
     if (builtIns && forkOwnerId) available.push({ kind: "command", id: "fork", label: "/fork", description: t("composer.command.forkDesc") });
+    if (builtIns && !group && bot && composerTask) available.push({ kind: "command", id: "archive", label: "/archive", description: t("composer.command.archiveDesc") },
+      { kind: "command", id: "delete", label: "/delete", description: t("composer.command.deleteDesc") });
     available.push(...skillSlashCommands(slashSkills).filter((command) => !(builtIns && forkOwnerId && command.id === "fork")));
     return available.filter((command) => slashCommandMatches(command, slash.query));
-  }, [slash, dismissedSlashAt, group, bot, canLearn, state.instances, locale, slashSkills, forkOwnerId]);
+  }, [slash, dismissedSlashAt, group, bot, composerTask, canLearn, state.instances, locale, slashSkills, forkOwnerId]);
   const commandPickerOpen = commandCandidates.length > 0;
 
   const mention = mentionQueryAt(text, caret); const teammates = useTeammates(); const viewer = useViewerEmail();
@@ -566,6 +576,7 @@ export function Composer({
   };
   const send = (followUp: FollowUp | undefined = followUpFor(false)) => {
     if (locked || attachmentPending) return;
+    if (threadCommand) { setDismissedSlashAt(slash?.start ?? 0); runThreadCommand(); return; }
     if (fork.command) {
       setDismissedSlashAt(slash?.start ?? 0);
       fork.submit();
@@ -832,7 +843,9 @@ export function Composer({
             // An input method's confirming Enter and arrows pick its own candidates, not a mention or command.
             if (imeComposing(e.nativeEvent)) return;
             const submitsFork = fork.command && commandCandidates[highlight]?.id === "fork" && sendsMessage(e.nativeEvent, sendKey);
-            if (commandPickerOpen && !submitsFork) {
+            // A complete /archive or /delete is its own action: Enter runs it instead of only completing the word.
+            const submitsThreadCommand = Boolean(threadCommand) && commandCandidates[highlight]?.id === threadCommand && sendsMessage(e.nativeEvent, sendKey);
+            if (commandPickerOpen && !submitsFork && !submitsThreadCommand) {
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                 e.preventDefault();
                 const delta = e.key === "ArrowDown" ? 1 : -1;
@@ -978,6 +991,7 @@ export function Composer({
       <div className="pointer-events-auto">
       {approvalDialogs}
       </div>
+      {threadCommandDialog}
     </div>
   );
 }
