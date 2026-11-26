@@ -1,7 +1,7 @@
 import type { Dispatch } from "react";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { reorderNamesIfMoved } from "../../shared/bot-order";
-import { api, type Action, type AppState, type Bot } from "@/state/store";
+import { api, ApiError, type Action, type AppState, type Bot } from "@/state/store";
 
 const failure = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
@@ -69,7 +69,7 @@ let departmentOrderRequest = 0;
 let departmentOrderSaves: Promise<unknown> = Promise.resolve();
 
 /** Shows the departments `names` in this order at once and saves it for every device; every other department keeps
- * its place. True once the workspace has it. A refused save is undone only while no newer move has been made. */
+ * its place. True once the workspace has it. */
 export async function saveDepartmentOrder(dispatch: Dispatch<Action>, sections: readonly string[], names: string[]): Promise<boolean> {
   if (!reorderNamesIfMoved(sections, names)) return true;
   const before = sections.filter((name) => names.includes(name));
@@ -81,10 +81,21 @@ export async function saveDepartmentOrder(dispatch: Dispatch<Action>, sections: 
     await saved;
     return true;
   } catch (cause) {
-    if (request === departmentOrderRequest) dispatch({ type: "sectionsOrdered", sections: before });
+    await undoMove(dispatch, request, before, cause instanceof ApiError && cause.status < 500);
     dispatch({ type: "error", message: failure(cause) });
     return false;
   }
+}
+
+/** After a failed save, unless a newer move was made: one the server refused (4xx) changed nothing, so the order from
+ * before the move comes back; one with no answer or a server error may have been kept, so the order the server holds is
+ * shown (or the one from before, if that can't be read either). */
+async function undoMove(dispatch: Dispatch<Action>, request: number, before: string[], refused: boolean): Promise<void> {
+  // Only the departments moved here, so a department this person isn't shown stays out of the list.
+  const held = refused ? null : await api("/api/sidebar-sections", { timeoutMs: 10_000 })
+    .then((answer: { sections?: unknown }) => Array.isArray(answer?.sections) ? answer.sections.filter((name) => before.includes(name)) : null)
+    .catch(() => null);
+  if (request === departmentOrderRequest) dispatch({ type: "sectionsOrdered", sections: held ?? before });
 }
 
 export async function renameDepartment(dispatch: Dispatch<Action>, from: string, to: string): Promise<void> {
