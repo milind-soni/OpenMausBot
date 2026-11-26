@@ -152,25 +152,43 @@ describe("what a turn that may not use a listed tool is told", () => {
       const claim: RoomSkillsClaim = { claimed: false };
       takeRoomSkills(claim, 0, "writer", true);
       expect(roomTurnMayWriteSkills(claim, 1, "video")).toBe(false);
-      handRoomSkills(claim, "video");
+      handRoomSkills(claim, ["video"]);
       expect(roomTurnMayWriteSkills(claim, 1, "video")).toBe(true);
       expect(roomTurnMayWriteSkills(claim, 1, "editor")).toBe(false);
       takeRoomSkills(claim, 1, "video", true);
       expect(roomTurnMayWriteSkills(claim, 1, "video")).toBe(false);
     });
 
-    it("never lets a bot mentioned further down the chain change skills", () => {
+    it("lets a bot that first answer @mentions use its share even when another mentioned bot reaches it first", () => {
       const claim: RoomSkillsClaim = { claimed: false };
       takeRoomSkills(claim, 0, "writer", true);
-      handRoomSkills(claim, "video");
-      expect(roomTurnMayWriteSkills(claim, 2, "video")).toBe(false);
+      handRoomSkills(claim, ["video", "editor"]);
+      expect(roomTurnMayWriteSkills(claim, 2, "editor")).toBe(true);
+      takeRoomSkills(claim, 2, "editor", true);
+      expect(roomTurnMayWriteSkills(claim, 1, "editor")).toBe(false);
+    });
+
+    it("never lets a bot only a later answer mentions change skills", () => {
+      const claim: RoomSkillsClaim = { claimed: false };
+      takeRoomSkills(claim, 0, "writer", true);
+      handRoomSkills(claim, ["video"]);
       expect(roomTurnMayWriteSkills(claim, 2, "editor")).toBe(false);
+    });
+
+    it("withdraws the shares still unused once the first answer's mentions are done", () => {
+      const claim: RoomSkillsClaim = { claimed: false };
+      takeRoomSkills(claim, 0, "writer", true);
+      const withdraw = handRoomSkills(claim, ["video", "editor"]);
+      takeRoomSkills(claim, 1, "video", true);
+      withdraw();
+      expect(roomTurnMayWriteSkills(claim, 1, "editor")).toBe(false);
+      expect(roomTurnMayWriteSkills(claim, 1, "video")).toBe(false);
     });
 
     it("gives the share back to a turn that never ran", () => {
       const claim: RoomSkillsClaim = { claimed: false };
       takeRoomSkills(claim, 0, "writer", true);
-      handRoomSkills(claim, "video");
+      handRoomSkills(claim, ["video"]);
       takeRoomSkills(claim, 1, "video", true);
       takeRoomSkills(claim, 1, "video", false);
       expect(roomTurnMayWriteSkills(claim, 1, "video")).toBe(true);

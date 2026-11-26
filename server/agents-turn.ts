@@ -101,24 +101,26 @@ export function roomSkillsRefusal(handoff: boolean): string {
 }
 
 /** Who may still list and write skills on one person's message in a room: the first bot answering it (hop 0), once, and each
- * bot that answer @mentions (hop 1), once each. A bot those mention (hop 2 and on) never may. */
+ * bot that answer @mentions, once each, on its first turn however the chain reaches it. A bot only a later answer mentions never may. */
 export interface RoomSkillsClaim {
   claimed: boolean;
   mentioned?: Set<string>;
 }
 
 export function roomTurnMayWriteSkills(claim: RoomSkillsClaim, hop: number, botId: string): boolean {
-  return hop === 0 ? !claim.claimed : hop === 1 && claim.mentioned?.has(botId) === true;
+  return hop === 0 ? !claim.claimed : claim.mentioned?.has(botId) === true;
 }
 
-/** The first answer, holding the claim, @mentions `botId`: that bot may change its own skills once on this message. */
-export function handRoomSkills(claim: RoomSkillsClaim, botId: string): void {
-  (claim.mentioned ??= new Set()).add(botId);
+/** The first answer, holding the claim, @mentions `botIds`: each may change its own skills once on this message. Returns what
+ * withdraws the shares still unused, for when that answer's mentions are done, so no later answer's mention can use them. */
+export function handRoomSkills(claim: RoomSkillsClaim, botIds: readonly string[]): () => void {
+  for (const botId of botIds) (claim.mentioned ??= new Set()).add(botId);
+  return () => { for (const botId of botIds) claim.mentioned?.delete(botId); };
 }
 
 /** A turn that may write skills takes its share once its setup succeeded (`taken`), or gives it back when it never ran. */
 export function takeRoomSkills(claim: RoomSkillsClaim, hop: number, botId: string, taken: boolean): void {
   if (hop === 0) claim.claimed = taken;
   else if (taken) claim.mentioned?.delete(botId);
-  else handRoomSkills(claim, botId);
+  else handRoomSkills(claim, [botId]);
 }

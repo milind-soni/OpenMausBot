@@ -10375,7 +10375,8 @@ async function runClaimedGroupMemberTurn(
     }
     // A bot that spoke earlier answers a mention by its own name (not @everyone) again, unless it took a turn since this reply.
     const spokeBeforeReply = new Set(spoken), answeredSince = turnsSince(spoken), named = new Set(mentionedBots(replyText, members).map((member) => member.id));
-    for (const next of roomResponders(replyText, members, { kind: "mentions" })) {
+    const responders = roomResponders(replyText, members, { kind: "mentions" }), withdrawSkills = skillAuthoring && hop === 0 ? handRoomSkills(skillAuthoringClaim, responders.map((next) => next.id)) : undefined;
+    try { for (const next of responders) {
       if (isCancelled?.()) return false;
       if (spokeBeforeReply.has(next.id) ? answeredSince(next.id) > 0 || !named.has(next.id) : spoken.has(next.id)) continue;
       if (operation) {
@@ -10384,7 +10385,6 @@ async function runClaimedGroupMemberTurn(
         if (verdict === "skip") { noteGroupTurn(spoken, next.id); continue; }
       }
       if (providerTurnId) usageTrace.expect(threadId, { parent: { threadId, turnId: providerTurnId } });
-      if (skillAuthoring && hop === 0) handRoomSkills(skillAuthoringClaim, next.id);
       if (!(await runGroupMemberTurn(
         groupId,
         threadId,
@@ -10402,7 +10402,7 @@ async function runClaimedGroupMemberTurn(
       ))) {
         return false;
       }
-    }
+    } } finally { withdrawSkills?.(); }
   }
   return true;
   } catch (error) {
