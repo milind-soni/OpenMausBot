@@ -535,6 +535,15 @@ const __APP_VERSION__: string;
         seen?(): Promise<void>;
         onState(cb: (s: UpdaterState) => void): () => void;
       };
+      /** Update all on Settings → Devices, this computer's own page only (electron/update-all.mjs). `survey(fresh)`: each
+       * saved server's own answer, `fresh` skipping its hour-long cache. `start` takes saved-server ids; main finds their
+       * addresses and targets itself. Absent in older desktop builds and on any other page. */
+      updateAll?: {
+        survey(fresh?: boolean): Promise<import("../../electron/update-all-run.mjs").UpdateAllSurvey>;
+        start(ids: string[], withApp: boolean): Promise<import("../../electron/update-all-run.mjs").UpdateAllView>;
+        retry(id: string): Promise<import("../../electron/update-all-run.mjs").UpdateAllView>;
+        onState(cb: (view: import("../../electron/update-all-run.mjs").UpdateAllView) => void): () => void;
+      };
       /** On a server's page from the Server menu: asks for this app's own update, from the person's click. The page
        * learns only what was done; the app asks in its own dialog before it restarts. Absent in older desktop builds. */
       appUpdate?: {
