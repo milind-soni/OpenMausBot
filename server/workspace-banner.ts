@@ -132,6 +132,18 @@ function cleanWebp(bytes: Buffer): CheckedBanner {
   return { bytes: Buffer.concat([header, body]), mime: "image/webp", width, height };
 }
 
+/** A still PNG, JPEG or WebP with every chunk or segment that can carry metadata taken out and its pixels' bytes as they
+ * were (nothing is decoded or encoded again); null for anything else, an animation, or a file it can't read. */
+export function withoutPictureMetadata(bytes: Buffer): Buffer | null {
+  const mime = bannerMime(bytes);
+  if (!mime) return null;
+  try {
+    return (mime === "image/png" ? cleanPng(bytes) : mime === "image/jpeg" ? cleanJpeg(bytes) : cleanWebp(bytes)).bytes;
+  } catch {
+    return null;
+  }
+}
+
 /** The upload as it may be kept, or why not, in words the person can act on. */
 export function checkBanner(bytes: Buffer): BannerCheck {
   const mime = bannerMime(bytes);
