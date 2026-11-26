@@ -1,0 +1,10 @@
+{
+  "name": "Issue tracker",
+  "uses": ["data"],
+  "operations": {
+    "list": { "kind": "read" },
+    "stats": { "kind": "read" },
+    "add": { "kind": "change" },
+    "setStatus": { "kind": "change" }
+  }
+}

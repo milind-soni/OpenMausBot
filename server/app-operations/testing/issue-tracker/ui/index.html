@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Issue tracker</title>
+<form id="add"><input name="title" placeholder="New issue"><button>Add</button></form>
+<ul id="issues"></ul>
+<script>
+  const render = async () => {
+    const issues = await mausbot.app.call("list", {});
+    document.getElementById("issues").replaceChildren(...issues.map((issue) => {
+      const li = document.createElement("li");
+      li.textContent = `${issue.title} (${issue.status})`;
+      return li;
+    }));
+  };
+  document.getElementById("add").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await mausbot.app.call("add", { title: event.target.title.value });
+    render();
+  });
+  render();
+</script>

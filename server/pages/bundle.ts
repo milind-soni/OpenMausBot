@@ -6,6 +6,7 @@ import { basename, extname, isAbsolute, join, relative, resolve, sep } from "nod
 import { PAGE_FILE_EXTENSIONS, PAGE_MAX_BYTES, PAGE_MAX_FILES } from "../../shared/published-page.ts";
 import { guestWorkspaceToHost } from "../bot-attachment.ts";
 import { VM_WORKSPACE_GUEST } from "../container-computer.ts";
+import { isAppServerSide } from "../app-operations/private-files.ts";
 import { inSecretFolder, SECRET_FILE_REFUSAL } from "../secret-folder.ts";
 
 export interface PageFile {
@@ -23,7 +24,7 @@ export interface PageVideo {
   mtimeNs: string;
 }
 /** Why a page left a file out, in the order the bot is told them. */
-const SKIP_REASONS = ["type", "video", "name", "link", "deep", "packages", "hidden"] as const;
+const SKIP_REASONS = ["type", "video", "name", "link", "deep", "packages", "hidden", "app"] as const;
 /** A file or folder (its path ends in "/") a page left out. */
 export interface SkippedFile {
   path: string;
@@ -91,6 +92,7 @@ async function locate(requested: string, roots: readonly string[], exactRoots = 
     }
     const root = allowed.find((each) => containedBy(each, target));
     if (root && inSecretFolder(target)) throw new PageBundleError(SECRET_FILE_REFUSAL, 403);
+    if (root && isAppServerSide(target, root)) throw new PageBundleError("An app's app.json, server/ and migrations/ are never part of a page. Show or publish its ui/ folder.", 403);
     if (root) return { target, root };
     outside = true;
   }
@@ -158,6 +160,7 @@ export async function readPageBundle(requested: string, roots: readonly string[]
       // Every entry is resolved, not only links: a folder on the way swapped for a link while it is read resolves outside.
       const real = await realpath(full).catch(() => null);
       if (!real || !containedBy(root, real) || inSecretFolder(real)) { skipped.push({ path, why: "link" }); continue; }
+      if (isAppServerSide(real, root)) { skipped.push({ path: own.isDirectory() ? `${path}/` : path, why: "app" }); continue; }
       const entry = own.isSymbolicLink() ? await stat(real) : own;
       if (entry.isDirectory()) {
         const why = SKIPPED_FOLDERS.has(name) ? "packages" : depth >= 9 ? "deep" : !pageName(name) ? "name" : null;
@@ -203,6 +206,7 @@ function reason(file: SkippedFile): string {
     case "deep": return "nested too deep";
     case "packages": return "package and cache folders";
     case "hidden": return "hidden";
+    case "app": return "an app's server side";
   }
 }
 
@@ -259,7 +263,7 @@ export async function pageSignature(source: string, options: { videos?: boolean 
       if (name.startsWith(".") || !pageName(name) || inSecretFolder(full)) continue;
       const own = await lstat(full).catch(() => null);
       const real = own?.isSymbolicLink() ? await realpath(full).catch(() => null) : full;
-      if (!own || !real || !containedBy(source, real) || inSecretFolder(real)) continue;
+      if (!own || !real || !containedBy(source, real) || inSecretFolder(real) || isAppServerSide(real, source)) continue;
       const entry = own.isSymbolicLink() ? await stat(real).catch(() => null) : own;
       if (entry?.isDirectory()) {
         if (!SKIPPED_FOLDERS.has(name) && depth < 9) await walk(full, depth + 1);

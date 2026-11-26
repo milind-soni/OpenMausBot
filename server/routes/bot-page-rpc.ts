@@ -53,7 +53,8 @@ export function pageRows(result: Pick<RunResult, "columns" | "rows">): { columns
   return { columns, rows };
 }
 
-async function query(deps: PageRpcDeps, botId: string, params: Record<string, unknown>): Promise<PageRpcAnswer> {
+/** One page-gated SELECT on the bot's own database: a page's mausbot.data.query, and an app operation's ctx.data.query. */
+export async function pageDataQuery(deps: PageRpcDeps, botId: string, params: Record<string, unknown>): Promise<PageRpcAnswer> {
   if (!deps.data) return refuse(503, "This page cannot read data on this computer.");
   if (deps.apps.paused()) return refuse(503, PAUSED);
   if (deps.dataOff?.(botId)) return refuse(409, "Data is switched off for this bot, so its pages cannot read it.");
@@ -92,7 +93,7 @@ async function query(deps: PageRpcDeps, botId: string, params: Record<string, un
 export async function pageRpc(deps: PageRpcDeps, call: { botId: string; threadId: string; messageId: string; method: PageRpcMethod; params: Record<string, unknown> }): Promise<PageRpcAnswer> {
   const use: AppUse = call.method === "mausbot/data/query" ? "data" : "state";
   if (!deps.apps.declaredUses(call.threadId, call.messageId).includes(use)) return refuse(409, pageUseRefusal(use, false));
-  if (call.method === "mausbot/data/query") return query(deps, call.botId, call.params);
+  if (call.method === "mausbot/data/query") return pageDataQuery(deps, call.botId, call.params);
   const { states } = deps.apps;
   const key = call.params.key;
   const keyed = typeof key === "string" && key.length > 0 && key.length <= APP_LIMITS.pageStateKeyChars;

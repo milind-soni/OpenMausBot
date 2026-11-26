@@ -9,6 +9,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { lstat, readdir, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
+import { isAppServerSide } from "../app-operations/private-files.ts";
 import { canonicalRoots, containedBy, readContained } from "../pages/bundle.ts";
 import { inSecretFolder, SECRET_FILE_REFUSAL } from "../secret-folder.ts";
 import { HostingRefusal, megabytes, OWN_NETLIFY, type HostedApp, type HostingAllowance, type IncludedHosting } from "./included-hosting.ts";
@@ -65,7 +66,7 @@ export async function collectAppFiles(folder: string, limits: HostingAllowance["
       const info = await lstat(full);
       const needs = needsOwnNetlify(path);
       if (needs && !info.isSymbolicLink()) throw new HostingRefusal("needs_own_netlify", `This app uses ${needs}, which included hosting doesn't do: it publishes plain static files only. ${OWN_NETLIFY}`, true);
-      if (info.isSymbolicLink() || !publishable(path) || /[\p{Cc}\\]/u.test(name) || path.length > 512 || inSecretFolder(full)) { skipped.push(path); continue; }
+      if (info.isSymbolicLink() || !publishable(path) || /[\p{Cc}\\]/u.test(name) || path.length > 512 || inSecretFolder(full) || isAppServerSide(full, dir)) { skipped.push(path); continue; }
       if (info.isDirectory()) {
         if (depth >= MAX_DEPTH) { skipped.push(`${path}/`); continue; }
         await walk(full, depth + 1);
