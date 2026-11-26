@@ -123,6 +123,15 @@ describe("the sidebar's Unread filter", () => {
     expect(other.open.mock.calls).toEqual([["tech"]]);
   });
 
+  it("leaves out the bots the sidebar hides: a MausBot switched off and someone else's", async () => {
+    const hide = (one: Bot, extra: Partial<Bot>) => ({ ...one, ...extra });
+    await render([bot("ann"), unread("ben", 20), hide(unread("maus", 5), { defaultBot: {}, sidebarHidden: true }), hide(unread("zed", 7), { defaultBot: { person: "zed@example.com" } })]);
+    expect(ids()).not.toContain("maus");
+    expect(filter().dataset.sidebarUnreadFilter).toBe("1");
+    await click();
+    expect(ids()).toEqual(["ben"]);
+  });
+
   it("renames a listed bot from its menu", async () => {
     await render([bot("ann"), unread("ben", 20)]);
     await click();

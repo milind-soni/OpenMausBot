@@ -1111,7 +1111,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const layout = sections.arrange(naturalSectionIds);
   const sectionIds = withUnreadSection(layout.sectionIds, unreadBots.length > 0);
   const showPinnedCircleThreads = !simpleDesk && pinnedCircleThreadListVisible(pinnedCircles, density, pinnedBots.length);
-  const tiles = simpleDesk && (primary !== null || pinnedBots.length > 0), filterInList = naturalSectionIds.includes(PINNED_SECTION_ID), topIds = new Set([...pinnedBots, ...(primary ? [primary] : [])].map((bot) => bot.id)); const unreadFilter = useUnreadFilter([...sideLists.bots.filter((bot) => !bot.hidden), ...placed].filter((bot) => !topIds.has(bot.id)), (bot) => sidebarBotStatus(bot, state.pendingQueued).waiting, state.activeView === "chat" ? state.selectedId : null), filterOpen = unreadFilterShown && unreadFilter.open;
+  const tiles = simpleDesk && (primary !== null || pinnedBots.length > 0), filterInList = naturalSectionIds.includes(PINNED_SECTION_ID); const unreadFilter = useUnreadFilter([...(unsectionedChief ? [unsectionedChief] : []), ...saved.sectionChiefs, ...saved.sectionedBots, ...saved.unsectionedBots], (bot) => sidebarBotStatus(bot, state.pendingQueued).waiting, state.activeView === "chat" ? state.selectedId : null), filterOpen = unreadFilterShown && unreadFilter.open;
   const { interactive: layoutInteractive, collapsed: sectionCollapsed, toggle: toggleSection } = sections;
   const archivedBots = state.bots.filter((bot) => bot.hidden && !bot.movedTo);
   const archivedEntry = remoteClient ? undefined : { count: archivedBots.length, open: () => setArchivedBotsOpen(true) };
