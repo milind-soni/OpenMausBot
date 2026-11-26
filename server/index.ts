@@ -487,7 +487,7 @@ import { WebhookManager } from "./webhooks.ts";
 import { tieAutomationsToBots } from "./bot-automations.ts"; import { WaitManager } from "./waits.ts"; import { cancelWaitFromCard, createWaitHost, waitContinuationCheck, waitLineFields, waitRunChat, waitTurnRunId } from "./wait-host.ts"; import { continuedConversation } from "./routine-same-conversation.ts"; import { createWaitRoutes, findWaitPeer, handedAssignment, hostWaitRefusal, waitSourceRefusal, type WaitRouteContext } from "./routes/waits.ts";
 import type { WebhookTrigger } from "../shared/webhooks.ts";
 import { AGENTS_NODE_FLAG, SPAWNED_PROXIES } from "./proxy-paths.ts";
-import { agentsProxyLaunch, agentsToolBridgeEnv, applyAgentsBridge, bridgedToolTitle, turnEngine } from "./agents-bridge-switch.ts"; import { serverTurnedOff } from "./drivers/agents-tool-groups.ts"; import { availableToolGroups, toolsOffPart } from "./tool-groups.ts"; import { agentsServerEnv, botDrivenConversation, COMPUTER_OFF_REFUSAL, computerPickRefusal, directTurnKind, roomSkillsRefusal, type TurnKind } from "./agents-turn.ts";
+import { agentsProxyLaunch, agentsToolBridgeEnv, applyAgentsBridge, bridgedToolTitle, turnEngine } from "./agents-bridge-switch.ts"; import { serverTurnedOff } from "./drivers/agents-tool-groups.ts"; import { availableToolGroups, toolsOffPart } from "./tool-groups.ts"; import { agentsServerEnv, botDrivenConversation, COMPUTER_OFF_REFUSAL, computerPickRefusal, directTurnKind, handRoomSkills, roomSkillsRefusal, roomTurnMayWriteSkills, takeRoomSkills, type RoomSkillsClaim, type TurnKind } from "./agents-turn.ts";
 import { harnessMcpTokenEnv } from "./harness-mcp-token.ts";
 import { loadBundledSkills, loadUserSkills, mergeSkills, renderSkillInstructions, selectBundledSkills, skillsLibraryEnabled, readSkillLibraryIndex } from "./skill-library.ts";
 import { runSkillsLibraryBootSweep } from "./skills-library-migration.ts";
@@ -9476,7 +9476,7 @@ async function runClaimedGroupMemberTurn(
   isCancelled?: () => boolean,
   onProviderHandshakeStarted?: () => void,
   onProviderHandshakeSettled?: () => void,
-  skillAuthoringClaim: { claimed: boolean } = { claimed: false },
+  skillAuthoringClaim: RoomSkillsClaim = { claimed: false },
   orchestration?: GroupTurnOrchestration,
   operation?: GroupTurnOperation,
   // Rebuild the turn once from the fresh bot rather than mix a stale adapter with fresh permissions.
@@ -9593,8 +9593,7 @@ async function runClaimedGroupMemberTurn(
   const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
   const skillAuthoring =
     skillAuthoringEnabled(cfg) &&
-    hop === 0 &&
-    !skillAuthoringClaim.claimed &&
+    roomTurnMayWriteSkills(skillAuthoringClaim, hop, bot.id) &&
     !cardContinuation &&
     instance.adapter.capabilities.agentsMcp === true;
   if (instance.adapter.capabilities.agentsMcp === true) {
@@ -10039,7 +10038,7 @@ async function runClaimedGroupMemberTurn(
   ], integrations.agents, { rules: cfg.everyBotRules, pagesOff: (store.bot(bot.id) ?? bot).toolsOff?.includes("pages") });
 
   // Claim /learn only after setup succeeded, so a failed first responder does not consume it.
-  if (skillAuthoring) skillAuthoringClaim.claimed = true;
+  if (skillAuthoring) takeRoomSkills(skillAuthoringClaim, hop, bot.id, true);
   // Never launch a replacement into a stopped handshake's pre-id window.
   await pendingCancelledProviderHandshakes.waitForClear(threadId);
   const heldBeforeDispatch = roomHeld(store.group(group.id), bot.id);
@@ -10289,7 +10288,7 @@ async function runClaimedGroupMemberTurn(
     store.setActivity(bot.id, "idle");
   }
   if (outcome === "dispatch_failed") {
-    if (skillAuthoring) skillAuthoringClaim.claimed = false;
+    if (skillAuthoring) takeRoomSkills(skillAuthoringClaim, hop, bot.id, false);
     // No turn.completed follows a rejected room dispatch: retry what queued meanwhile.
     drainQueuedSends();
   }
@@ -10301,7 +10300,7 @@ async function runClaimedGroupMemberTurn(
     return true;
   }
   if (outcome === "provider_failed" || outcome === "parked") {
-    if (skillAuthoring) skillAuthoringClaim.claimed = false;
+    if (skillAuthoring) takeRoomSkills(skillAuthoringClaim, hop, bot.id, false);
     return false;
   }
   const resent = orchestration || cardContinuation || oneTimeInputTaken || outcome !== "settled" || isCancelled?.() ? undefined : await roomLimits.resendOnce(threadId, bot, preparedApprovalMode, turnCompleted, roomSpeaker?.since ?? 0,
@@ -10385,6 +10384,7 @@ async function runClaimedGroupMemberTurn(
         if (verdict === "skip") { noteGroupTurn(spoken, next.id); continue; }
       }
       if (providerTurnId) usageTrace.expect(threadId, { parent: { threadId, turnId: providerTurnId } });
+      if (skillAuthoring && hop === 0) handRoomSkills(skillAuthoringClaim, next.id);
       if (!(await runGroupMemberTurn(
         groupId,
         threadId,
@@ -10456,7 +10456,7 @@ async function runGroupGoalStep(args: {
   threadId: string;
   bot: BotRecord;
   operation: GroupTurnOperation;
-  skillAuthoringClaim: { claimed: boolean };
+  skillAuthoringClaim: RoomSkillsClaim;
   coordinator: boolean;
   instructions: string;
 }): Promise<{ ran: boolean; replyText: string; outcome?: GroupMemberTurnOutcome; stopReason?: string | null }> {
