@@ -17,6 +17,12 @@ export type JsonRpcMessage =
 export const APP_RPC_METHODS = ["tools/call", "tools/list", "resources/read", "resources/list"] as const;
 export type AppRpcMethod = (typeof APP_RPC_METHODS)[number];
 
+/** What a bot's page may ask its own server for, each only when the page declared it (show_html `uses`):
+ * `mausbot/data/query` {sql, params?} → {columns, rows, truncated}; `mausbot/state/get` {key} → {value?};
+ * `mausbot/state/set` {key, value?} (no value removes the key) → {}; `mausbot/state/keys` {} → {keys}. */
+export const PAGE_RPC_METHODS = ["mausbot/data/query", "mausbot/state/get", "mausbot/state/set", "mausbot/state/keys"] as const;
+export type PageRpcMethod = (typeof PAGE_RPC_METHODS)[number];
+
 export const RPC_METHOD_NOT_FOUND = -32601;
 export const RPC_INVALID_PARAMS = -32602;
 export const RPC_HOST_REFUSED = -32000;

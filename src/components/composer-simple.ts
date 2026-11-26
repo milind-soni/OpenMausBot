@@ -22,9 +22,8 @@ export function slotColors(color: Bot["color"] | undefined, room: boolean): { fi
   return { fill: tone.fill, ink: tone.ink, button: { className: BOT_BUTTON, style: botButtonStyle(own) } };
 }
 
-export function composerPlaceholder({ simple, locked, approval, attaching, listening, replying, busy, canSteer, queued, busyName, sendLabel, group, members, jevOn, goal, botName, setupHint, startsThread = false }: {
+export function composerPlaceholder({ simple, approval, attaching, listening, replying, busy, canSteer, queued, busyName, sendLabel, group, members, jevOn, goal, botName, setupHint, startsThread = false }: {
   simple: boolean;
-  locked: boolean;
   approval: boolean;
   attaching: boolean;
   listening: boolean;
@@ -43,7 +42,6 @@ export function composerPlaceholder({ simple, locked, approval, attaching, liste
   /** The room feed's composer: every line starts a thread. */
   startsThread?: boolean;
 }): string {
-  if (locked) return t("composer.placeholder.locked");
   if (approval) return t("composer.placeholder.approval");
   if (attaching) return t("composer.placeholder.attaching");
   if (listening) return t("composer.placeholder.listening");

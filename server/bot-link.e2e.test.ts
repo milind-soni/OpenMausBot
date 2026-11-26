@@ -127,7 +127,7 @@ it("a bot on the computer and a bot on the person's own server hand each other w
 
     // The computer's bot hands work to the server's bot by name, and is resumed with its result.
     // The work it is handed carries [LIVE TEAMMATES] with the computer's bots in it, marked as on this computer.
-    home.plan(atlas.id, { reply: "Atlas counted 42 orders.", expectContextIncludes: ["[LIVE TEAMMATES]", "- Writer — on this computer [id: link-"] });
+    home.plan(atlas.id, { reply: "Atlas counted 42 orders.", expectContextIncludes: ["[LIVE TEAMMATES]", "- Writer — on this computer ", "Sam's Mac", "[id: link-"] });
     computer.plan(writer.id,
       { steps: [{ tool: "list_bots", arguments: {} }, { tool: "coordinate_bots", arguments: { bot_ids: ["Atlas"], request_key: "count", message: "Count this week's orders." } }], reply: "Asked Atlas." },
       { reply: "Atlas says 42." });
@@ -306,6 +306,64 @@ it("bots made, renamed, hidden or shown after the link is on reach the other pla
     expect(said[0]).not.toMatch(/only within one place|can't be reached from here/u);
     for (const twin of twins) expect(said[1]).toContain(linkedAddress(paired.place.id, twin.id));
     expect(said[1]).toContain("Send it again with the id of the one you mean");
+  } finally {
+    await Promise.all(fixtures.map((fixture) => fixture.close()));
+  }
+}, 180_000);
+
+it("with the link on, an ordinary bot's roster has the other place's bots and a message naming one gets no can't-be-reached note; off, neither", async () => {
+  const fixtures = [await launchVerificationServer({}, undefined, undefined, undefined, undefined, { scripted: true }),
+    await launchVerificationServer({}, undefined, undefined, undefined, undefined, { scripted: true })];
+  const computer = place(fixtures[0]!), home = place(fixtures[1]!);
+  try {
+    const writer = (await computer.cli("new-bot", "--name", "Writer")).bot;
+    const ziggyHere = (await computer.cli("new-bot", "--name", "Ziggy")).bot;
+    await home.cli("new-bot", "--name", "Atlas");
+    const ziggyThere = (await home.cli("new-bot", "--name", "Ziggy")).bot;
+    // The app says where the person's other bots live, and keeps saying it while the link is on.
+    await computer.api("PUT", "/api/places/elsewhere", { v: 1, self: { name: "Sam's Mac", kind: "computer" }, places: [{ name: "My server", kind: "cloud", bots: ["Atlas", "Ziggy"], seen: Date.now() }] });
+    const preview = async () => JSON.stringify(await computer.api("GET", `/api/bots/${writer.id}/system-prompt`));
+    // Each in a conversation of its own, so its engine starts with the system prompt of that moment.
+    const turn = async (text: string) => {
+      const before = computer.providerTurns().filter((one) => one.botId === writer.id).length;
+      const { task } = await computer.api("POST", `/api/bots/${writer.id}/tasks`, { title: text.slice(0, 30) }, { status: 201 });
+      await computer.cli("send", "--bot", writer.id, "--task", task.threadId, "--text", text);
+      expect((await computer.cli("wait", "--bot", writer.id, "--task", task.threadId, "--timeout", "30")).status).toBe("settled");
+      const turns = computer.providerTurns().filter((one) => one.botId === writer.id);
+      expect(turns.length).toBe(before + 1);
+      return `${turns.at(-1)!.system}\n${JSON.stringify(turns.at(-1)!.prompt)}`;
+    };
+
+    // Off: the roster has only this computer's bots (and the line naming where the others live), and a message naming
+    // Atlas is told plainly that it can't be reached.
+    computer.plan(writer.id, { reply: "Atlas is on My server." }, { reply: "Asked Atlas." },
+      { steps: [{ tool: "coordinate_bots", arguments: { bot_ids: ["Ziggy"], request_key: "ziggy", message: "Name my cactus." }, expectError: true }], reply: "Which Ziggy?" });
+    expect(await preview()).not.toContain("OTHER PLACE BOTS");
+    const off = await turn("@Atlas can you count the orders?");
+    expect(off).toContain("can't be reached from here");
+    expect(off).not.toContain("- Atlas — ");
+
+    const pairing = await home.api("POST", "/api/auth/pairing", { label: "The person's app", scopes: ["admin", "client"] });
+    const owner = (await home.api("POST", "/api/auth/pair", { code: pairing.code })).token as string;
+    const thisComputer = { id: (await computer.api("GET", "/.well-known/openmausbot/environment")).environmentId as string, name: "Sam's Mac" };
+    const paired = await home.api("POST", "/api/bot-link/pair", { computer: thisComputer, name: "My server" }, { token: owner });
+    await computer.api("PUT", "/api/bot-link", { on: true, origin: home.url, token: paired.token, name: "Sam's Mac", cloud: paired.place });
+    await expect.poll(async () => (await computer.api("GET", "/api/bot-link")).online, { timeout: 15_000 }).toBe(true);
+
+    // On: the ordinary bot's roster lists the server's bots with where they live, the Ziggy there told apart from the
+    // one here, and the same message gets no note.
+    await expect.poll(preview, { timeout: 15_000 }).toContain("- Atlas — General assistant, on My Cloud [id: link-");
+    expect(await preview()).toContain(`- Ziggy — General assistant, on My Cloud, not the Ziggy here [id: ${linkedAddress(paired.place.id, ziggyThere.id)}]`);
+    const on = await turn("@Atlas can you count the orders?");
+    expect(on).toContain("- Atlas — General assistant, on My Cloud");
+    expect(on).not.toMatch(/can't be reached|not reachable from here/u);
+
+    // A name both places have is not settled on the one here: the bot is asked which, with both ids and places.
+    await turn("Ask the Ziggy on My server to name my cactus.");
+    const said = ((computer.providerTurns().filter((one) => one.botId === writer.id).at(-1)?.evidence ?? []) as any[]).filter((entry) => entry?.step).map((entry) => JSON.stringify(entry.response));
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain(`Ziggy here (id ${ziggyHere.id})`);
+    expect(said[0]).toContain(`Ziggy on My server (id ${linkedAddress(paired.place.id, ziggyThere.id)})`);
   } finally {
     await Promise.all(fixtures.map((fixture) => fixture.close()));
   }

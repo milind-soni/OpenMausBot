@@ -15,8 +15,9 @@ import {
   IMAGE_LAYER_VERSION,
   MANAGED_LABEL,
 } from "./container-computer.ts";
-import { VPS_CONTAINER_LABEL, VPS_IMAGE, VPS_MANAGED_LABEL, VPS_VIEWER_LABEL, vpsContainerName } from "./vps-computer.ts";
+import { VPS_CONTAINER_LABEL, VPS_ENVIRONMENT_LABEL, VPS_IMAGE, VPS_MANAGED_LABEL, VPS_VIEWER_LABEL, vpsContainerName } from "./vps-computer.ts";
 import { CONTROL_REFUSAL_PLAIN, controlRefusal, createControlClient } from "./control-client.ts";
+import { loadEnvironmentId } from "./environment.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import type { RoutineSchedule } from "../shared/routines.ts";
 import { workerPort } from "./testing/worker-port.ts";
@@ -29,6 +30,8 @@ const IMAGE_ID = `sha256:${"a".repeat(64)}`;
 const CONTAINER_ID = "b".repeat(64);
 /** Shortened, but past the 2 s after which the bridges' old control client told the model a person had taken control. */
 const CALL_WAIT_MS = 3_000;
+const TEST_IDLE_MINUTES = 137;
+const TEST_IDLE_MS = 4_000;
 
 // the fake docker is a POSIX shell script, like every process fixture here
 const posixOnly = describe.skipIf(process.platform === "win32");
@@ -105,13 +108,14 @@ function containerInspectTemplate(): string {
 const FAKE_DOCKER = `#!/bin/sh
 printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
 server=$(printf '%s' "$2" | sed 's|ssh://||')
-if [ -f "$FAKE_DOCKER_DIR/unreachable.$server" ]; then echo "ssh: Could not resolve hostname $server: nodename nor servname provided, or not known" >&2; exit 255; fi
+if [ -f "$FAKE_DOCKER_DIR/unreachable.$server" ]; then echo "error during connect: stderr=ssh: Could not resolve hostname $server: nodename nor servname provided, or not known" >&2; exit 255; fi
 if [ -f "$FAKE_DOCKER_DIR/hold" ]; then
   : > "$FAKE_DOCKER_DIR/started"
   while [ -f "$FAKE_DOCKER_DIR/hold" ]; do sleep 0.05; done
 fi
 case "$*" in
   *" run "*) rm -f "$FAKE_DOCKER_DIR/container-missing" ;;
+  *" stop "*) sed 's/"Running":true/"Running":false/' "$FAKE_DOCKER_DIR/container.json.tpl" > "$FAKE_DOCKER_DIR/container.next"; mv "$FAKE_DOCKER_DIR/container.next" "$FAKE_DOCKER_DIR/container.json.tpl" ;;
   *" start "*) sed 's/"Running":false/"Running":true/' "$FAKE_DOCKER_DIR/container.json.tpl" > "$FAKE_DOCKER_DIR/container.next"; mv "$FAKE_DOCKER_DIR/container.next" "$FAKE_DOCKER_DIR/container.json.tpl" ;;
   *" container ls "*)
     alias=$(printf '%s' "$2" | sed 's|ssh://||')
@@ -163,7 +167,7 @@ posixOnly("VPS turn routing e2e (fake ACP fleet + fake docker over SSH)", () => 
   let askerDump: string;
   let dockerLog: string;
 
-  type ApiBody = Record<string, string | boolean | null | RoutineSchedule | { instanceId: string; model: string } | { sshAlias: string }>;
+  type ApiBody = Record<string, string | boolean | null | RoutineSchedule | { instanceId: string; model: string } | { sshAlias: string } | { timeoutMinutes: number }>;
 
   const api = async (method: string, path: string, body?: ApiBody): Promise<{ status: number; body: any }> => {
     const res = await fetch(`${BASE}${path}`, {
@@ -205,6 +209,7 @@ posixOnly("VPS turn routing e2e (fake ACP fleet + fake docker over SSH)", () => 
 import { createServer } from 'node:net';
 const args = process.argv.slice(2);
 if (!args.includes('-L')) process.exit(0);
+(await import('node:fs')).writeFileSync(process.env.FAKE_DOCKER_DIR + '/viewer.pid', String(process.pid));
 const forward = args[args.indexOf('-L') + 1];
 const port = Number(forward.split(':')[1]);
 createServer(socket => socket.end()).listen(port, '127.0.0.1');
@@ -248,7 +253,11 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
     };
     if (process.env.PATH) env.PATH = process.env.PATH;
     if (process.env.SystemRoot) env.SystemRoot = process.env.SystemRoot;
-    child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
+    const idleClock = join(home, "idle-clock.cjs");
+    writeFileSync(idleClock, `const schedule = global.setTimeout;
+global.setTimeout = (fn, ms, ...args) => schedule(fn, ms === ${TEST_IDLE_MINUTES * 60_000} ? ${TEST_IDLE_MS} : ms, ...args);
+`);
+    child = spawn(process.execPath, ["--require", idleClock, join(SERVER_DIR, "index.ts")], {
       cwd: join(SERVER_DIR, ".."),
       env,
       stdio: ["ignore", "pipe", "pipe"],
@@ -271,6 +280,121 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
     await waitForExit(child, { signal: "SIGTERM" });
     await removeTempDir(home);
   });
+
+  it("closes the old viewer on a server switch, opens a fresh tunnel, and renews the idle window when the viewer drops", async () => {
+    const dir = dirname(dockerLog);
+    const template = join(dir, "container.json.tpl");
+    const original = readFileSync(template, "utf8");
+    const container = JSON.parse(original);
+    container[0].Config.Labels[VPS_ENVIRONMENT_LABEL] = loadEnvironmentId(join(home, ".openmausbot"));
+    const unreachable = join(dir, "unreachable.production-vps");
+    try {
+      writeFileSync(template, JSON.stringify(container));
+      expect((await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } })).status).toBe(200);
+      expect((await api("PATCH", "/api/config", { vpsIdle: { timeoutMinutes: TEST_IDLE_MINUTES } })).status).toBe(200);
+      const { bot } = (await api("POST", "/api/bots")).body;
+      const path = `/api/bots/${bot.id}`;
+      expect((await api("PATCH", path, { computer: "cloud", cloudBackend: "vps" })).status).toBe(200);
+      const oldJoin = await api("POST", `${path}/computer/join?threadId=${bot.threadId}`, {});
+      expect(oldJoin.status).toBe(200);
+      writeFileSync(unreachable, "");
+      expect((await api("PATCH", path, { vpsAlias: "alpha-vps" })).status).toBe(200);
+      const newJoin = await api("POST", `${path}/computer/join?threadId=${bot.threadId}`, {});
+      expect(newJoin.status).toBe(200);
+      expect(newJoin.body.joinUrl).not.toBe(oldJoin.body.joinUrl);
+      const stopped = () => {
+        const log = readFileSync(dockerLog, "utf8");
+        const stopAt = log.lastIndexOf(`ssh://alpha-vps stop ${CONTAINER_ID}`);
+        return stopAt >= 0 && log.slice(stopAt).includes(`ssh://alpha-vps inspect ${vpsContainerName(bot.id)}`);
+      };
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      const droppedAt = performance.now();
+      process.kill(Number(readFileSync(join(dir, "viewer.pid"), "utf8")));
+      await until(async () => stopped(), "idle stop on the new server", 8000);
+      expect(performance.now() - droppedAt).toBeGreaterThanOrEqual(TEST_IDLE_MS);
+    } finally {
+      rmSync(unreachable, { force: true });
+      writeFileSync(template, original);
+      await api("PATCH", "/api/config", { vpsIdle: { timeoutMinutes: 480 } });
+    }
+  }, 25_000);
+
+  it("idle-stops an already-running desktop on the new server after a per-bot or default-server switch", async () => {
+    const dir = dirname(dockerLog);
+    const template = join(dir, "container.json.tpl");
+    const original = readFileSync(template, "utf8");
+    const container = JSON.parse(original);
+    container[0].Config.Labels[VPS_ENVIRONMENT_LABEL] = loadEnvironmentId(join(home, ".openmausbot"));
+    const running = () => writeFileSync(template, JSON.stringify(container));
+    const downA = join(dir, "unreachable.production-vps");
+    const downB = join(dir, "unreachable.alpha-vps");
+    try {
+      expect((await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } })).status).toBe(200);
+      expect((await api("PATCH", "/api/config", { vpsIdle: { timeoutMinutes: TEST_IDLE_MINUTES } })).status).toBe(200);
+      const { bot } = (await api("POST", "/api/bots")).body;
+      const path = `/api/bots/${bot.id}`;
+      expect((await api("PATCH", path, { computer: "cloud", cloudBackend: "vps" })).status).toBe(200);
+      const waitStoppedOnB = async (since: number, label: string) => {
+        await until(async () => {
+          const log = readFileSync(dockerLog, "utf8").slice(since);
+          const stopAt = log.indexOf(`ssh://alpha-vps stop ${CONTAINER_ID}`);
+          return stopAt >= 0 && log.slice(stopAt).includes(`ssh://alpha-vps inspect ${vpsContainerName(bot.id)}`)
+            && (await api("GET", `${path}/computer`)).body.container === "stopped";
+        }, label, 10_000);
+      };
+
+      running();
+      let since = readFileSync(dockerLog, "utf8").length;
+      expect((await api("POST", `${path}/computer/join?threadId=${bot.threadId}`, {})).status).toBe(200);
+      writeFileSync(downA, "");
+      expect((await api("PATCH", path, { vpsAlias: "alpha-vps" })).status).toBe(200);
+      expect((await api("POST", `${path}/computer/viewer-close?threadId=${bot.threadId}`, {})).status).toBe(200);
+      await waitStoppedOnB(since, "idle stop on B without starting B after the move");
+      rmSync(downA, { force: true });
+
+      running();
+      expect((await api("POST", `${path}/computer/provision`, {})).status).toBe(200);
+      writeFileSync(downB, "");
+      expect((await api("PATCH", path, { vpsAlias: null })).status).toBe(200);
+      rmSync(downB, { force: true });
+      expect((await api("POST", `${path}/computer/join?threadId=${bot.threadId}`, {})).status).toBe(200);
+      since = readFileSync(dockerLog, "utf8").length;
+      writeFileSync(downA, "");
+      expect((await api("PATCH", path, { vpsAlias: "alpha-vps" })).status).toBe(200);
+      expect((await api("POST", `${path}/computer/viewer-close?threadId=${bot.threadId}`, {})).status).toBe(200);
+      await waitStoppedOnB(since, "idle stop on B after visiting A and returning");
+      rmSync(downA, { force: true });
+
+      writeFileSync(downB, "");
+      expect((await api("PATCH", path, { vpsAlias: null })).status).toBe(200);
+      rmSync(downB, { force: true });
+      running();
+      expect((await api("POST", `${path}/computer/join?threadId=${bot.threadId}`, {})).status).toBe(200);
+      since = readFileSync(dockerLog, "utf8").length;
+      writeFileSync(downA, "");
+      expect((await api("PUT", "/api/config", { vps: { sshAlias: "alpha-vps" } })).status).toBe(200);
+      expect((await api("POST", `${path}/computer/viewer-close?threadId=${bot.threadId}`, {})).status).toBe(200);
+      await waitStoppedOnB(since, "idle stop on B after default-server switch");
+
+      running();
+      expect((await api("POST", `${path}/computer/provision`, {})).status).toBe(200);
+      since = readFileSync(dockerLog, "utf8").length;
+      writeFileSync(downB, "");
+      expect((await api("POST", `${path}/computer/provision`, {})).status).toBe(409);
+      expect((await api("POST", `${path}/computer/sleep`, {})).status).toBe(409);
+      expect((await api("POST", `${path}/computer/remove`, {})).status).toBe(409);
+      rmSync(downB, { force: true });
+      await waitStoppedOnB(since, "idle stop on B after failed manual provision, sleep and remove");
+    } finally {
+      rmSync(downA, { force: true });
+      rmSync(downB, { force: true });
+      writeFileSync(template, original);
+      await api("PATCH", "/api/config", { vpsIdle: { timeoutMinutes: 480 } });
+      writeFileSync(downB, "");
+      await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } });
+      rmSync(downB, { force: true });
+    }
+  }, 45_000);
 
   it("recovers a transient VPS inspection failure through the real status route without provisioning", async () => {
     expect((await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } })).status).toBe(200);

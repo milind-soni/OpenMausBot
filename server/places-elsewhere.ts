@@ -37,7 +37,7 @@ type Kind = Place["kind"];
  * (`here`): only a computer's page in the desktop app moves its bots to My Cloud, and a server becomes home from its icon. */
 export function onePlace(here: Kind | null): string {
   const how = here === "computer"
-    ? ` To bring them together, in the desktop app ${CLOUD_HOW}, or right-click their own server's icon on the left of the desktop app and choose "Make … my home".`
+    ? ` To bring them together, with a My Cloud of their own, in the desktop app ${CLOUD_HOW}, or right-click their own server's icon on the left of the desktop app and choose "Make … my home".`
     : here === "cloud" ? " To bring a computer's bots here, the person can choose \"Bring them together\" on that computer's page in the desktop app."
       : here === "server" ? " To bring them together here, in the desktop app, right-click this server's icon on the left of the app and choose \"Make … my home\"."
         : "";
@@ -80,7 +80,7 @@ function bringTogether(place: Place, self: Elsewhere["self"], to: "bot" | "perso
 function moveToTeam(place: Place, self: Elsewhere["self"], to: "bot" | "person"): string {
   const move = self.kind === "cloud"
     ? `or move this bot to ${place.name}: in the desktop app, open the bot's menu in the sidebar and choose "Move to ${place.name}"`
-    : `or, from My Cloud, move a bot to ${place.name}`;
+    : `or, from a My Cloud of theirs, move a bot to ${place.name}`;
   return to === "bot" ? `Tell the person they can ask it in ${place.name}, ${move}.` : `Ask it in ${place.name}, ${move}.`;
 }
 
@@ -172,15 +172,16 @@ export function createPlacesElsewhere({ dataDir, here = null, now = Date.now }: 
     /** What kind of place of the person's other places has `bot`, or null. */
     kindOf: (bot: string): Place["kind"] | null => where(bot)?.place.kind ?? null,
     /** The bots of the person's other places that `text` @mentions (none named like a bot `here`), each with where it
-     * lives, told to the bot answering it. */
-    mentioned(text: string, bots: ReadonlyArray<{ name: string }>): string {
+     * lives, told to the bot answering it. `skip`: kinds of place that can be reached, through the link: a bot there is
+     * in the bot's roster, so nothing is said of it (never that it can't be reached). */
+    mentioned(text: string, bots: ReadonlyArray<{ name: string }>, skip: (kind: Place["kind"]) => boolean = () => false): string {
       const known = read();
-      return known ? mentionsOf(known, text, bots).map(({ bot, place }) => ` The user named @${bot}, a bot of theirs that is not here: ${livesElsewhere(bot, place, known.self)}`).join("") : "";
+      return known ? mentionsOf(known, text, bots).filter(({ place }) => !skip(place.kind)).map(({ bot, place }) => ` The user named @${bot}, a bot of theirs that is not here: ${livesElsewhere(bot, place, known.self)}`).join("") : "";
     },
     /** The same, as one plain line each for the chat, for the person. */
-    missed(text: string, bots: ReadonlyArray<{ name: string }>): string[] {
+    missed(text: string, bots: ReadonlyArray<{ name: string }>, skip: (kind: Place["kind"]) => boolean = () => false): string[] {
       const known = read();
-      return known ? mentionsOf(known, text, bots).map(({ bot, place }) =>
+      return known ? mentionsOf(known, text, bots).filter(({ place }) => !skip(place.kind)).map(({ bot, place }) =>
         `${bot} lives ${place.kind === "team" ? "in" : "on"} ${place.name}, so that mention didn't reach it: bots work together only within one place.${place.away ? "" : ` ${bringTogether(place, known.self, "person")}`}`) : [];
     },
   };

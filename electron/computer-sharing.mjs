@@ -932,7 +932,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
       wakeAsking();
     },
     resume: () => resumeLending(),
-    /** Whether every Cloud of the signed-in account's own may run commands here as this user, across restarts too. */
+    terminalOn: () => terminalAccount !== null && terminalAccount === signedInAccount(), // lendTerminal(on): whether every Cloud of the signed-in account's own may run commands here as this user, across restarts too.
     lendTerminal(on) {
       const account = on === true ? signedInAccount() : null;
       if (closed || terminalAccount === account) return;

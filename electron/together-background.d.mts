@@ -1,0 +1,22 @@
+export const TRY_AT_MS: number[];
+export const BUSY_RETRY_MS: number;
+export const BUSY_TRIES: number;
+export function holdsBots(dir: string, fs?: unknown): boolean;
+export function createTogetherBackground(deps: {
+  cloudHome(): boolean;
+  togetherOn(): boolean;
+  shown(): string | null;
+  ownCopyRuns(): boolean;
+  running(): string | null;
+  dataDir(): string;
+  open(id: string): Promise<boolean>;
+  leave(): Promise<boolean>;
+  busy(): Promise<boolean>;
+  linkOff?(): Promise<unknown>;
+  fs?: unknown;
+  tryAt?: number[];
+  now?(): number;
+  later?: typeof setTimeout;
+  cancel?: typeof clearTimeout;
+  log?(line: string): void;
+}): { start(): void; settled(): void; changed(): void; run(): Promise<boolean>; close(): void };

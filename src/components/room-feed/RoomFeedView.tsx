@@ -4,6 +4,7 @@ import { t } from "@/lib/i18n";
 import { catchUpOldMarks, openFeedThread } from "@/lib/room-feed";
 import { simpleRoomHeader } from "@/lib/room-panel";
 import { roomThreadAttention, roomThreadSpeakerId, roomThreadWorking } from "@/lib/room-threads";
+import { foldClosedRuns, threadRowCloser, unfoldStep } from "@/lib/room-thread-close";
 import { useComposerDockPad } from "@/lib/composer-dock";
 import { sameDrawnBots } from "@/lib/drawn-bots";
 import type { Bot, Group } from "@/state/store";
@@ -47,8 +48,14 @@ function toRow(group: Group, { task, summary }: FeedThread, bots: readonly Bot[]
     title: task.title,
     pinned: task.pinned === true,
     archived: isArchived(task),
+    closedBy: threadRowCloser(task),
   };
 }
+
+/** A closed thread folds away once nothing in it waits to be seen: not unread, not waiting, not running, not pinned and
+ * not the one open beside the feed. */
+const folds = (row: FeedRowData, openThread: string | null) =>
+  Boolean(row.closedBy) && row.mark === null && !row.working && !row.pinned && row.threadId !== openThread;
 
 /** A room as one feed of its threads, oldest at the top and the newest just above the composer, where a line starts a
  * new thread. A row opens its thread beside the feed; the room's current thread, which is everyone's, never moves. */
@@ -62,7 +69,7 @@ export function RoomFeedView({ group }: { group: Group }) {
   const openThread = useStoreSelector((state) => (state.forkPanel?.kind === "group" && state.forkPanel.ownerId === group.id ? state.forkPanel.threadId : null));
   const advanced = useAdvancedMode();
   const remoteClient = window.ogb?.remoteClient?.active === true;
-  const simpleHeader = simpleRoomHeader({ advanced, remoteClient, group, setupPending: false });
+  const simpleHeader = simpleRoomHeader({ advanced, remoteClient, group });
   const members = useMemo(() => group.memberIds.map((id) => bots.find((bot) => bot.id === id)).filter((bot): bot is Bot => Boolean(bot)), [group.memberIds, bots]);
   const [membersOpen, setMembersOpen] = useState(false);
   const [folderOpen, setFolderOpen] = useState(false);
@@ -94,6 +101,7 @@ export function RoomFeedView({ group }: { group: Group }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [group.id, since]);
   const [pending, setPending] = useState<{ text: string; at: number; threadId: string | null } | null>(null);
+  const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(() => new Set());
 
   const rows = useMemo(() => {
     if (!threads) return null;
@@ -102,6 +110,12 @@ export function RoomFeedView({ group }: { group: Group }) {
     return [...listed, { threadId: pending.threadId ?? "", speaker: { person: {} }, text: pending.text, at: pending.at, replies: 0, lastReplyAt: null,
       repliers: [], mark: null, working: false, workingBotId: null } satisfies FeedRowData];
   }, [threads, pending, group, bots]);
+  const items = useMemo(() => rows && foldClosedRuns(rows, (row) => folds(row, openThread), unfolded), [rows, openThread, unfolded]);
+  const unfold = useCallback((threadIds: readonly string[]) => {
+    // The fold stays where the person pressed it, and what it shows opens under it.
+    atFoot.current = false;
+    setUnfolded((shown) => new Set([...shown, ...unfoldStep({ threadIds })]));
+  }, []);
 
   const waiting = useCallback((text: string | null) => {
     setPending(text === null ? null : { text, at: Date.now(), threadId: null });
@@ -133,12 +147,12 @@ export function RoomFeedView({ group }: { group: Group }) {
       {membersOpen && !remoteClient && <ManageMembersPanel group={group} onClose={closeMembers} triggerRef={membersTriggerRef} />}
       <GlassScrollFrame className="flex-1 [--glass-tint:var(--color-app)]">
         <GlassBar edge="top" fade={!advanced && !remoteClient} className="z-[25]">
-          <RoomHeader group={group} members={members} simple={simpleHeader} setupPending={false} remoteClient={remoteClient} feed
+          <RoomHeader group={group} members={members} simple={simpleHeader} remoteClient={remoteClient} feed
             findOpen={false} onToggleFind={() => {}} onToggleFolder={() => setFolderOpen((shown) => !shown)} onOpenMembers={() => setMembersOpen(true)}
             membersTriggerRef={membersTriggerRef} />
           <ChatErrorBanner message={error} onDismiss={() => dispatch({ type: "error", message: null })} />
           <ChatNotice notice={notice} />
-          {!remoteClient && <RoomChiefAbsent group={group} />}
+          {!remoteClient && !simpleHeader && <RoomChiefAbsent group={group} />}
           <RoomHoldsBanner group={group} members={members} />
           {!simpleHeader && <RoomBulletin group={group} remoteClient={remoteClient} />}
           {folderOpen && <div className="w-full px-5"><div className="mb-1"><RoomWorkingFolder group={group} /></div></div>}
@@ -155,7 +169,7 @@ export function RoomFeedView({ group }: { group: Group }) {
               className="mt-2 inline-flex h-7 items-center self-center rounded-md px-2 text-[13px] font-medium leading-4 text-ink-secondary hover:text-ink">
               {showArchived ? t("room.feed.hideArchived") : t("room.feed.showArchived")}
             </button>}
-            {rows === null ? (
+            {rows === null || items === null ? (
               failed && (
                 <p role="alert" className="flex items-center justify-center gap-2 py-6 text-[13px] text-ink-secondary">
                   {t("room.feed.loadFailed")}
@@ -166,8 +180,15 @@ export function RoomFeedView({ group }: { group: Group }) {
               <p className="py-6 text-center text-[13px] text-ink-secondary">{t("room.feed.empty")}</p>
             ) : (
               <ol aria-label={t("room.feed.aria", { name: group.name })} className="flex flex-col gap-0.5 py-2">
-                {rows.map((row) => (
-                  <RoomFeedRow key={row.threadId || "pending"} row={row} groupId={group.id} bots={bots} you={you} now={now} open={row.threadId !== "" && row.threadId === openThread}
+                {items.map((item) => item.kind === "fold" ? (
+                  <li key={`fold:${item.key}`} className="flex">
+                    <button type="button" data-feed-fold={item.key} onClick={() => unfold(item.threadIds)}
+                      className="ms-12 flex h-8 touch:h-10 items-center rounded-md px-2 text-[13px] font-medium leading-[18px] text-ink-secondary transition-colors duration-[120ms] hover:bg-ink/[0.06] hover:text-ink active:bg-ink/[0.08] motion-reduce:transition-none">
+                      {item.threadIds.length === 1 ? t("room.feed.closedOne") : t("room.feed.closedMany", { count: item.threadIds.length })}
+                    </button>
+                  </li>
+                ) : (
+                  <RoomFeedRow key={item.row.threadId || "pending"} row={item.row} groupId={group.id} bots={bots} you={you} now={now} open={item.row.threadId !== "" && item.row.threadId === openThread}
                     onOpen={open} actions={actions} />
                 ))}
               </ol>

@@ -17,9 +17,11 @@ export function matchingRows(rows: readonly PlaceBotRow[], query: string): Place
 const bridge = () => (typeof window === "undefined" || window.ogb?.remoteClient?.active ? undefined : window.ogb?.placesTogether);
 
 let known: PlacesTogetherState | null = null;
+/** Main has answered at least once (or failed to): a notice waiting on it waits no longer. */
+let answered = false;
 let watching = 0, unsubscribe: (() => void) | null = null;
 const listeners = new Set<() => void>();
-const publish = (next: PlacesTogetherState | null) => { known = next; for (const listener of listeners) listener(); };
+const publish = (next: PlacesTogetherState | null) => { known = next ?? null; answered = true; for (const listener of listeners) listener(); };
 const read = () => { void bridge()?.state().then(publish, () => publish(null)); };
 
 function subscribe(listener: () => void): () => void {
@@ -60,10 +62,40 @@ export function usePlacesTogetherPart<T>(select: (state: PlacesTogetherState | n
   return useSyncExternalStore(subscribe, () => select(known), () => select(null));
 }
 
-/** Turns the switch, and says what main kept. */
-export async function setPlacesTogether(on: boolean): Promise<void> {
+/** Turns the switch, and says what main kept. From the notice of the default, turning it on never lends commands. */
+export async function setPlacesTogether(on: boolean, from?: "notice"): Promise<void> {
   const page = bridge();
-  if (page) publish(await page.set(on));
+  if (page) publish(await (from ? page.set(on, from) : page.set(on)));
+}
+
+/** Whether the one-time notice that this is on by default is due on this page: null until main first answers, false in a
+ * browser, on another place's page or on an older app. */
+export function useTogetherNoticeDue(): boolean | null {
+  const hasBridge = Boolean(bridge()?.noticeShown);
+  const due = usePlacesTogetherPart((state) => (state?.notice === true ? true : answered ? false : null));
+  return hasBridge ? due : false;
+}
+
+/** The notice was drawn: main turns the default on from now (it never does before). */
+export async function togetherNoticeShown(): Promise<void> {
+  const page = bridge();
+  if (!page?.noticeShown) return;
+  await page.noticeShown().catch(() => false);
+  read();
+}
+
+/** The person closed the notice or used one of its switches: it never shows again. */
+export function togetherNoticeDone(): void {
+  void bridge()?.noticeDone?.().catch(() => {});
+}
+
+/** The notice's own switch for "Let My Cloud's bots run commands on this computer": what main says it is now. */
+export async function setTogetherCommands(on: boolean): Promise<boolean> {
+  const page = bridge();
+  if (!page?.setCommands) throw new Error("unavailable");
+  const now = await page.setCommands(on);
+  read();
+  return now;
 }
 
 /** Opens one of the other place's bots there. */
@@ -73,6 +105,9 @@ export function openOtherPlaceBot(id: string): void {
 
 export function resetPlacesTogetherForTest(): void {
   known = null;
+  answered = false;
+  watching = 0;
+  unsubscribe = null;
   listeners.clear();
 }
 

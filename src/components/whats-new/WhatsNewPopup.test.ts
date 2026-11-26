@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
 import type { WhatsNewAction, WhatsNewSlide, WhatsNewView } from "@/lib/whats-new";
 
-vi.mock("@/components/Avatar", () => ({ MausAvatar: ({ color }: { color: string }) => createElement("i", { "data-maus": color }) }));
 const { WhatsNewPopup } = await import("./WhatsNewPopup");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -16,7 +15,10 @@ const PRO = "Meet the new MausBot Cloud", TEAM = "Shared bots for your whole tea
 
 let host: HTMLDivElement, root: Root, opener: HTMLButtonElement;
 let steps: Array<[WhatsNewAction, WhatsNewSlide]>;
-const props = { report: vi.fn((action: WhatsNewAction, slide: WhatsNewSlide) => void steps.push([action, slide])), onBuy: vi.fn(), onDone: vi.fn() };
+const props = { report: vi.fn((action: WhatsNewAction, slide: WhatsNewSlide) => void steps.push([action, slide])), onBuy: vi.fn(), onAddKey: vi.fn(), onDone: vi.fn() };
+const THREE: WhatsNewView = { ...BOTH, slides: ["pro", "team", "modelgo"], addKey: true };
+const SPONSOR = "ModelGo is now in MausBot";
+const MODELGO_URL = "https://modelgo.ai/?utm_source=openmausbot&utm_medium=sponsorship&utm_content=app&campaign_id=openmausbot&ad_group_id=app";
 const show = async (view: WhatsNewView = BOTH) => { await act(async () => { root.render(createElement(WhatsNewPopup, { view, ...props })); }); };
 const dialog = () => host.querySelector<HTMLElement>('[role="dialog"]')!;
 const title = () => document.getElementById(dialog().getAttribute("aria-labelledby")!)!.textContent;
@@ -42,6 +44,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   document.body.replaceChildren(); delete (window as { ogb?: unknown }).ogb;
   document.documentElement.style.removeProperty("--code-color-scheme");
+  delete document.documentElement.dataset.reducedMotion;
 });
 
 describe("the What's new popup", () => {
@@ -59,21 +62,32 @@ describe("the What's new popup", () => {
     expect(document.activeElement).toBe(opener);
   });
 
-  it("the first slide: the new Cloud's picture, its words and price, Get Pro and See the new Cloud", async () => {
+  it("the first slide: the new Cloud's loop of the app, its words and price, Get Pro and See the new Cloud", async () => {
     await show();
     const slide = live();
     expect(slide.textContent).toContain("Your bots keep working when this computer is off. The new Cloud website puts your Clouds, team, billing and usage in one place.");
     expect(slide.textContent).toContain("Pro · $49/month + tax · 14-day money-back");
-    const picture = slide.querySelector("img")!;
-    expect(picture.getAttribute("alt")).toBe("The new Cloud website's Home: each Cloud with its plan and status, this month's usage and the apps signed in.");
-    expect(picture.getAttribute("src"), "dark skins get the dark picture").toMatch(/cloud-home-dark\.webp/);
+    const clip = slide.querySelector("video")!;
+    expect(clip.getAttribute("aria-label")).toBe("The app's Cloud plans: the pointer picks Pro's free trial.");
+    expect(clip.getAttribute("src"), "dark skins get the dark loop").toMatch(/cloud-dark\.mp4/);
+    expect(clip.getAttribute("poster")).toMatch(/cloud-dark\.webp/);
+    for (const flag of ["autoplay", "loop", "playsinline"]) expect(clip.hasAttribute(flag), flag).toBe(true);
+    expect(clip.muted).toBe(true);
+    expect(host.querySelectorAll("video"), "only the slide on screen plays").toHaveLength(1);
+    expect(host.querySelector('[data-whats-new-picture="team"] img')!.getAttribute("src"), "the others show their still").toMatch(/team-dark\.webp/);
     expect([...slide.querySelectorAll("button")].map(item => item.textContent)).toEqual(["Get Pro", "See the new Cloud"]);
   });
 
-  it("a light skin gets the light picture", async () => {
+  it("a light skin gets the light loops; reduced motion gets each slide's still, never a video", async () => {
     document.documentElement.style.setProperty("--code-color-scheme", "light");
-    await show();
-    expect(live().querySelector("img")!.getAttribute("src")).toMatch(/cloud-home-light\.webp/);
+    await show(THREE);
+    expect(live().querySelector("video")!.getAttribute("src")).toMatch(/cloud-light\.mp4/);
+    await act(async () => root.render(null));
+    document.documentElement.dataset.reducedMotion = "true";
+    await show(THREE);
+    expect(host.querySelector("video")).toBeNull();
+    expect(live().querySelector("img")!.getAttribute("src")).toMatch(/cloud-light\.webp/);
+    expect(live().querySelector("img")!.getAttribute("alt")).toBe("The app's Cloud plans: the pointer picks Pro's free trial.");
   });
 
   it("Next, Back, the dots and the arrow keys move between the slides; each slide is counted seen once, and each move from where it was", async () => {
@@ -97,7 +111,7 @@ describe("the What's new popup", () => {
     expect(props.onDone).not.toHaveBeenCalled();
   });
 
-  it("the Team slide: shared bots first, each person's own MausBot as their inbox, what the team shares, its picture and Start a Team", async () => {
+  it("the Team slide: shared bots first, each person's own MausBot as their inbox, what the team shares, its loop and Start a Team", async () => {
     await show(TEAM_ONLY);
     const slide = live();
     expect(title()).toBe(TEAM);
@@ -105,7 +119,7 @@ describe("the What's new popup", () => {
     for (const point of ["Connected apps, set up once for everyone", "Group chats with teammates and bots together", "Team memory the bots share",
       "Bots hand work to each other across the team", "Choose who can use each bot"]) expect(slide.textContent).toContain(point);
     expect(slide.textContent).toContain("Free for 3 days, then $40/month + tax");
-    expect(slide.querySelector('svg[role="img"]')!.getAttribute("aria-label")).toBe("Ada, Ben, Cleo and Dara, each with their own MausBot, share the team's Support and Sales bots on one Team Cloud.");
+    expect(slide.querySelector("video")!.getAttribute("aria-label")).toBe("A team's group chat in MausBot: messages from people and bots, each with its replies.");
     expect([...slide.querySelectorAll("button")].map(item => item.textContent)).toEqual(["Start a Team"]);
     expect(button("Next")).toBeUndefined(); expect(button("Back")).toBeUndefined(); expect(button("Slide 1 of 1"), "one slide has no dots").toBeUndefined();
     expect(steps).toEqual([["seen", "team"]]);
@@ -175,5 +189,50 @@ describe("the What's new popup", () => {
     expect((await key("Escape")).defaultPrevented).toBe(false);
     await key("ArrowRight");
     expect(title()).toBe(PRO); expect(props.onDone).not.toHaveBeenCalled();
+  });
+
+  it("three slides: the new Cloud, Team, then the sponsor's, with its words, sponsor label, loop, Get a ModelGo key and Add key", async () => {
+    await show(THREE);
+    expect(live().getAttribute("aria-label")).toBe("Slide 1 of 3");
+    await click("Next"); await click("Next");
+    const slide = live();
+    expect(title()).toBe(SPONSOR); expect(live().getAttribute("aria-label")).toBe("Slide 3 of 3");
+    expect(slide.textContent).toContain("One API key, every model.");
+    expect(slide.querySelector("[data-modelgo-sponsor]")!.textContent).toBe("Sponsor");
+    expect(slide.querySelector("video")!.getAttribute("aria-label")).toBe("Settings, AI: the pointer sets up ModelGo and pastes a key.");
+    expect(slide.querySelector("video")!.getAttribute("src")).toMatch(/modelgo-dark\.mp4/);
+    expect([...slide.querySelectorAll("button")].map(item => item.textContent)).toEqual(["Get a ModelGo key", "Add key"]);
+    expect(slide.textContent, "no plan terms on the sponsor's slide").not.toContain("$");
+    expect(steps).toEqual([["seen", "pro"], ["next", "pro"], ["seen", "team"], ["next", "team"], ["seen", "modelgo"]]);
+  });
+
+  it("Get a ModelGo key opens exactly the sponsor's address; Add key opens Settings where its key goes; each ends it", async () => {
+    await show({ ...THREE, slides: ["modelgo"] });
+    await click("Get a ModelGo key"); await flush();
+    expect(window.ogb!.openExternal).toHaveBeenCalledWith(MODELGO_URL);
+    expect(props.onDone).toHaveBeenCalledOnce(); expect(steps.at(-1)).toEqual(["get_key", "modelgo"]);
+    vi.clearAllMocks(); await act(async () => root.render(null)); await show({ ...THREE, slides: ["modelgo"] });
+    await click("Add key");
+    expect(props.onAddKey).toHaveBeenCalledOnce(); expect(props.onDone).toHaveBeenCalledOnce(); expect(steps.at(-1)).toEqual(["add_key", "modelgo"]);
+    expect(window.ogb!.openExternal).not.toHaveBeenCalled();
+    await act(async () => root.render(null)); await show({ ...THREE, slides: ["modelgo"], addKey: false });
+    expect(button("Add key"), "someone who can't change this place's settings").toBeUndefined();
+  });
+
+  it("a Team Cloud's Owner or Admin: Invite your team opens the team's People page", async () => {
+    const url = "https://cloud.openmausbot.com/team/t1/people?invite=1";
+    await show({ ...THREE, slides: ["team", "modelgo"], plans: {}, team: { kind: "invite", url } });
+    expect([...live().querySelectorAll("button")].map(item => item.textContent)).toEqual(["Invite your team"]);
+    await click("Invite your team"); await flush();
+    expect(window.ogb!.openExternal).toHaveBeenCalledWith(url);
+    expect(props.onDone).toHaveBeenCalledOnce(); expect(steps.at(-1)).toEqual(["invite", "team"]);
+    expect(props.onBuy).not.toHaveBeenCalled();
+  });
+
+  it("a page that sells no plan starts a Team on the website, even for an audience it can't tell", async () => {
+    await show({ ...THREE, slides: ["team"], audience: "other", plans: { team: { name: "Team", terms: "$40 a month for 2 people, $20 for each extra person." } }, team: { kind: "start", inApp: false } });
+    expect(live().textContent).toContain("$40 a month for 2 people, $20 for each extra person.");
+    await click("Start a Team"); await flush();
+    expect(window.ogb!.openExternal).toHaveBeenCalledWith("https://cloud.openmausbot.com/pro/buy?plan=team&src=app_whats_new_team");
   });
 });

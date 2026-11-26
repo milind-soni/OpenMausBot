@@ -114,10 +114,9 @@ describe("the room header in Simple mode", () => {
     expect(header(markup)).not.toContain("data-room-name");
   });
 
-  it("leaves a room that is still being set up as it is", () => {
+  it("gives a room an older app left without setup the same calm header", () => {
     const markup = view(room({ setupCompletedAt: null, setupSkippedAt: null }));
-    expect(shown(header(markup))).toEqual(["find", "export", "usage", "members"]);
-    expect(header(markup)).not.toContain("data-room-name");
+    expect(header(markup)).toContain("data-room-name");
   });
 });
 
@@ -132,7 +131,7 @@ describe("the Simple header's buttons", () => {
   const onOpenMembers = vi.fn();
   const draw = () => flushSync(() => root.render([
     createElement(RoomHeader, {
-      key: "header", group: room(), members: bots, simple: true, setupPending: false, remoteClient: false, findOpen: false,
+      key: "header", group: room(), members: bots, simple: true, remoteClient: false, findOpen: false,
       onToggleFind: vi.fn(), onToggleFolder: vi.fn(), onOpenMembers, membersTriggerRef: { current: null },
     }),
     createElement(Probe, { key: "probe" }),
@@ -159,7 +158,7 @@ describe("the Simple header's buttons", () => {
     fixture.chrome = captionChrome("mac-inset");
     // Read off the markup: happy-dom's CSSStyleDeclaration drops the Electron-only property.
     const markup = renderToStaticMarkup(createElement(RoomHeader, {
-      group: room(), members: bots, simple: true, setupPending: false, remoteClient: false, findOpen: false,
+      group: room(), members: bots, simple: true, remoteClient: false, findOpen: false,
       onToggleFind: vi.fn(), onToggleFolder: vi.fn(), onOpenMembers, membersTriggerRef: { current: null },
     }));
     expect(markup).toMatch(/^<div data-window-drag="" style="-webkit-app-region:drag"/);

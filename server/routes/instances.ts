@@ -394,7 +394,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           return json(res, 200, { instances: await describeInstances() });
         }
         if (action === "auth/complete") {
-          const body = await readBody(req);
+          const body = await readBody(req, 8192);
           const flowId = typeof body?.flowId === "string" ? body.flowId : "";
           // `code` for a pasted sign-in code (Claude), `callbackUrl` for a browser callback
           const callbackUrl = typeof body?.callbackUrl === "string" ? body.callbackUrl : typeof body?.code === "string" ? body.code : "";
@@ -426,7 +426,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
       }
-      const body = await readBody(req);
+      const body = await readBody(req, 4096);
       const cli = typeof body?.cli === "string" ? body.cli.trim() : "";
       if (!cli || /[\n\r]/.test(cli)) return json(res, 400, { error: "cli must be a non-empty path" });
       const driver = typeof body?.driver === "string" ? BUILT_IN_DRIVERS.find((d) => d.driverKind === body.driver) : undefined;
@@ -441,7 +441,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
       }
-      await readBody(req);
+      await readBody(req, 4096);
       const target = registry.cliTarget(claudeUpdate[1]);
       if (!target) return json(res, 404, { error: "no such provider instance" });
       if (target.driverKind !== "claudeAgent") {
@@ -496,8 +496,8 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         const instances = persistableInstanceConfigs(result.config);
         if (!result.ok || !Object.hasOwn(instances, instanceId)) return json(res, 404, { error: `unknown instance "${instanceId}"` });
         const entry = instances[instanceId];
-        if ((body.configDir !== undefined && entry.driver !== "claudeAgent") || (body.displayName !== undefined && !["claudeAgent", "codex"].includes(entry.driver))) {
-          return json(res, 400, { error: "Account settings are available for Claude and ChatGPT accounts only." });
+        if ((body.configDir !== undefined && entry.driver !== "claudeAgent") || (body.displayName !== undefined && !["claudeAgent", "codex", "antigravityAgent"].includes(entry.driver))) {
+          return json(res, 400, { error: "Account settings are available for Claude, ChatGPT and Google Gemini (Antigravity) accounts only." });
         }
         if (body.hidden === true && providerInUse(instanceId)) {
           return json(res, 409, { error: "Choose another model for the bots and default model using this provider before hiding it." });

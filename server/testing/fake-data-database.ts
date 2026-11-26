@@ -57,6 +57,14 @@ export class FakeDataDatabase implements BotDatabase {
     return table ? this.tables.get(table[1]!) : undefined;
   }
 
+  async pageQuery(sql: string, _params: unknown, options: { maxRows: number; timeoutMs: number; signal?: AbortSignal }): Promise<RunResult> {
+    this.calls.push({ method: "pageQuery", sql, connection: "page", maxRows: options.maxRows });
+    await this.settle(options);
+    const { columns, rows } = this.take();
+    const kept = rows.slice(0, options.maxRows);
+    return { columns, rows: kept, rowCount: kept.length, truncated: kept.length < rows.length, elapsedMs: 1 };
+  }
+
   async run(sql: string, options: RunOptions): Promise<RunResult> {
     this.calls.push({ method: "run", sql, connection: options.connection, maxRows: options.maxRows });
     await this.settle(options);

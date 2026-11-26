@@ -204,7 +204,7 @@ export interface GroupTask {
   pinned?: boolean;
   updatedAt?: number;
   turnTimeoutMinutes?: number;
-  archivedAt?: number; activity?: "waiting-on-you";
+  archivedAt?: number; activity?: "waiting-on-you"; closedAt?: number; closedBy?: import("../../shared/room-threads").RoomThreadCloser;
   lastThreadOrderAt?: number;
   working?: boolean;
   busyBotId?: string | null;
@@ -624,7 +624,7 @@ export type Action =
       heldAtStart: readonly Message[];
     }
   | { type: "groupDeleted"; groupId: string }
-  | { type: "createGroup"; memberIds: string[]; name?: string; section?: string }
+  | { type: "createGroup"; memberIds: string[]; name?: string; section?: string; setup?: { bulletin: string; defaultResponder: GroupDefaultResponder } }
   | {
       type: "sendGroup";
       groupId: string;
@@ -2555,9 +2555,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               memberIds: action.memberIds,
               name: action.name,
               section: action.section,
-              ...(window.ogb?.remoteClient?.active
-                ? { setup: { bulletin: "", defaultResponder: { kind: "mentions" } } }
-                : {}),
+              setup: action.setup,
             }),
           })
             .then(({ group }) => {
@@ -2741,7 +2739,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const message = error instanceof Error ? error.message : String(error);
               settle(message);
               if (action.type === "newTask" && action.onError) action.onError(message);
-              else showError(error);
+              else if (action.type === "switchTask" && error instanceof ApiError && error.status === 404) rawDispatch({ type: "notice", notice: { kind: "thread-gone", botName: null } }); else showError(error);
             });
           break;
         }
@@ -2773,7 +2771,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "switchGroupTask":
           api<{ group?: Partial<Group> & { id: string } }>(`/api/groups/${action.groupId}/tasks/${action.threadId}?messages=${SWITCH_MESSAGE_COUNT}`, { method: "POST" })
             .then(roomAnswer(action.groupId, true))
-            .catch(showError);
+            .catch((error) => (error instanceof ApiError && error.status === 404 ? rawDispatch({ type: "notice", notice: { kind: "thread-gone", botName: null } }) : showError(error)));
           break;
         case "renameGroupTask":
         case "pinGroupTask":

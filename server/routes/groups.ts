@@ -66,12 +66,12 @@ export function createGroupRoutes(deps: GroupRouteDeps): RouteHandler {
       if (body.action !== "complete" && body.action !== "skip") {
         return json(res, 400, { error: "action must be complete or skip" });
       }
-      if (group.setupCompletedAt != null || group.setupSkippedAt != null) {
+      const settled = group.setupCompletedAt != null || group.setupSkippedAt != null;
+      const talkedIn = store.messagesFor(group.threadId).length > 0;
+      if (settled && (talkedIn || body.action === "skip")) {
         return json(res, 200, { group: own(publicGroupState(group)) } satisfies RoomUpdateResponse);
       }
-      if (store.messagesFor(group.threadId).length > 0) {
-        return json(res, 409, { error: "room setup must be finished before the first message" });
-      }
+      if (talkedIn) return json(res, 409, { error: "room setup must be finished before the first message" });
 
       const patch: Partial<Pick<GroupRecord, "cwd" | "defaultResponder" | "bulletin" | "setupCompletedAt" | "setupSkippedAt">> = {};
       if (body.action === "complete") {
@@ -84,7 +84,7 @@ export function createGroupRoutes(deps: GroupRouteDeps): RouteHandler {
         patch.cwd = checked.cwd ?? undefined;
         patch.defaultResponder = responder;
         patch.bulletin = body.bulletin;
-        patch.setupCompletedAt = Date.now();
+        patch.setupCompletedAt = group.setupCompletedAt ?? Date.now();
       } else {
         patch.setupSkippedAt = Date.now();
       }

@@ -1,17 +1,20 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { track } from "@/lib/analytics";
+import { jevRoomRoutingOn } from "@/lib/group-routing";
 import { useStore } from "@/state/store";
+import { useModalDialog } from "@/hooks/use-modal-dialog";
 import { t } from "@/lib/i18n";
-import { imeComposing } from "@/lib/send-key";
+import { newRoomName, newRoomResponder } from "../../shared/new-room";
 import { BotPickerList } from "./BotPickerList";
 
-/** Sidebar → New channel: name it, optionally file it under a context, pick its bots. */
+/** Sidebar → New group chat: pick the bots and start chatting. */
 export function NewRoomPanel({ onClose }: { onClose: () => void }) {
   const { state, dispatch } = useStore();
-  const [name, setName] = useState("");
-  const [section, setSection] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const dialogRef = useRef<HTMLDivElement>(null);
   const bots = state.bots.filter((b) => !b.hidden);
+  useModalDialog(dialogRef, onClose);
+  useEffect(() => dialogRef.current?.querySelector<HTMLButtonElement>("button[role=checkbox]")?.focus(), []);
   const toggle = (id: string) =>
     setPicked((prev) => {
       const next = new Set(prev);
@@ -20,50 +23,29 @@ export function NewRoomPanel({ onClose }: { onClose: () => void }) {
       return next;
     });
   const create = () => {
-    if (!picked.size) return;
+    const members = [...picked].flatMap((id) => bots.filter((bot) => bot.id === id));
+    if (!members.length) return;
+    const memberIds = members.map((bot) => bot.id);
+    const sections = new Set(members.map((bot) => bot.section?.trim() ?? ""));
+    const section = sections.size === 1 ? [...sections][0] || undefined : undefined;
     dispatch({
       type: "createGroup",
-      memberIds: [...picked],
-      name: name.trim() || undefined,
-      section: section.trim() || undefined,
+      memberIds,
+      name: newRoomName(members.map((bot) => bot.name), state.groups.map((group) => group.name)),
+      section,
+      setup: { bulletin: "", defaultResponder: newRoomResponder(memberIds, jevRoomRoutingOn(state.config)) },
     });
-    track("room_created", { members: picked.size, context: Boolean(section.trim()) });
+    track("room_created", { members: memberIds.length, context: Boolean(section) });
     onClose();
   };
   return (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/40"
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 px-4"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="w-[340px] rounded-2xl border border-hairline/50 bg-card p-4 shadow-2xl">
-        <div className="mb-3 text-[15px] font-semibold text-ink">{t("sidebar.newChannel.title")}</div>
-        <input
-          autoFocus
-          maxLength={100}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => {
-            if (imeComposing(e.nativeEvent)) { e.stopPropagation(); return; }
-            if (e.key === "Enter") create();
-            if (e.key === "Escape") onClose();
-          }}
-          aria-label={t("sidebar.newChannel.nameLabel")}
-          placeholder={t("sidebar.newChannel.name")}
-          className="mb-3 w-full rounded-lg bg-raised/70 px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
-        />
-        <input
-          value={section}
-          maxLength={60}
-          onChange={(e) => setSection(e.target.value)}
-          onKeyDown={(e) => {
-            if (imeComposing(e.nativeEvent)) { e.stopPropagation(); return; }
-            if (e.key === "Enter") create();
-            if (e.key === "Escape") onClose();
-          }}
-          placeholder={t("sidebar.newChannel.context")}
-          aria-label={t("sidebar.newChannel.contextAria")}
-          className="mb-3 w-full rounded-lg bg-raised/70 px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
-        />
+      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="new-room-title"
+        className="w-[340px] max-w-full rounded-2xl border border-hairline/50 bg-card p-4 shadow-2xl outline-none">
+        <div id="new-room-title" className="mb-3 text-[15px] font-semibold text-ink">{t("sidebar.newChannel.title")}</div>
         <BotPickerList
           bots={bots}
           picked={picked}

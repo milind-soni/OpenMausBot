@@ -96,9 +96,30 @@ test("each place is read again at most every ten minutes, unless something about
   assert.equal(w.reads, 3);
 });
 
+test("My Cloud is read for the card only right after the Admin said just now that it is awake: never on its older word", async () => {
+  const handlers = new Map(), asked = [];
+  let fresh = false;
+  const main = installTwoPlacesMain({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, guard: (_channel, handler) => handler,
+    localRequest: async () => Response.json(summary("Scout")),
+    fetch: async (url) => { asked.push(new URL(url).origin); return Response.json(summary("Chief")); },
+    environments: () => [], cloud: () => ({ origin: "https://omb-u-1.fly.dev", asleep: false }),
+    oneHome: { journal: () => null, keep: { state: () => ({ shown: true, on: true, moved: false }), set: async () => {} } },
+    ownHome: { owns: () => false, offers: () => false, start: async () => {}, active: () => false, away: () => false, refresh: () => {} },
+    dismissed: memory(), awakeNow: async () => fresh, tell: () => {},
+  });
+  try {
+    await main.refresh({ force: true });
+    assert.deepEqual(asked, [], "the cached awake is not enough: nothing is asked");
+    fresh = true;
+    await main.refresh({ force: true });
+    assert.deepEqual([...new Set(asked)], ["https://omb-u-1.fly.dev"]);
+  } finally { main.close(); }
+});
+
 test("main's places: My Cloud only while the person keeps this computer's bots here, a server only when it says it is theirs alone; never a team's Cloud", async () => {
   const handlers = new Map(), asked = [];
-  let keep = { shown: true, on: true, moved: false }, offered = new Set(["garage"]), journal = null, active = false;
+  let keep = { shown: true, on: true, moved: false }, offered = new Set(["garage"]), journal = null, active = false, together = false;
   const environments = [
     { id: "garage", kind: "remote", name: "Garage server", origin: "https://garage.example.test" },
     { id: "family", kind: "remote", name: "Family server", origin: "https://family.example.test" },
@@ -112,9 +133,13 @@ test("main's places: My Cloud only while the person keeps this computer's bots h
     oneHome: { journal: () => journal, keep: { state: () => keep, set: async (on) => { keep = { ...keep, on }; } } },
     ownHome: { owns: (place) => offered.has(place.id), offers: (place) => offered.has(place.id), start: async (id) => { active = true; asked.push(`start:${id}`); }, active: () => active,
       away: () => false, refresh: () => {} },
-    dismissed: memory(), tell: () => {},
+    dismissed: memory(), together: () => together, tell: () => {},
   });
   try {
+    together = true;
+    await main.refresh({ force: true });
+    assert.equal(main.state().suggest?.key, "server:https://garage.example.test", "with this computer and My Cloud together, their bots already work together: My Cloud is not suggested");
+    together = false;
     await main.refresh({ force: true });
     assert.deepEqual(await handlers.get("two-places:state")({}), { suggest: { key: "cloud:https://omb-u-1.fly.dev", name: "My Cloud", kind: "cloud" } });
     assert.deepEqual([...new Set(asked)].sort(), ["https://garage.example.test", "https://omb-u-1.fly.dev"], "never the team's Cloud or a server others use");

@@ -5,10 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Action, Bot, Task } from "@/state/store";
 
 const dispatch = vi.hoisted(() => vi.fn());
-vi.mock("@/state/store-select", () => ({ useStoreDispatch: () => dispatch, useStoreSelector: (select: (state: unknown) => unknown) => select({ settingsOpen: false, pendingQueued: {}, bots: [], newChat: null }) }));
+const store = vi.hoisted(() => ({ state: {} as Record<string, unknown> }));
+vi.mock("@/state/store-select", () => ({ useStoreDispatch: () => dispatch, useStoreSelector: (select: (state: unknown) => unknown) => select(store.state) }));
 vi.mock("./Avatar", () => ({ BotAvatar: () => null }));
 
 import { ChatHeadPill } from "./ChatHeadPill";
+import { useThreadCycleKeys } from "./thread-cycle";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -18,9 +20,15 @@ const THREADS = [task("sales", "Weekly sales", 5, { busy: true }), task("launch"
 
 let root: Root | null = null;
 const onToggle = vi.fn();
+/** Simple mode's header pill, with the app's Ctrl+Tab keys listening as they do in the app. */
+function Header({ bot }: { bot: Bot }) {
+  useThreadCycleKeys();
+  return createElement(ChatHeadPill, { bot, avatar: {} as never, privacy: null, onToggle, switcher: true });
+}
 const render = (bot: Bot) => {
-  root = createRoot(document.body.appendChild(document.createElement("div")));
-  act(() => root!.render(createElement(ChatHeadPill, { bot, avatar: {} as never, privacy: null, onToggle, switcher: true })));
+  store.state = { settingsOpen: false, pendingQueued: {}, bots: [bot], selectedId: bot.id, activeView: "chat", shortcutsOpen: false, newChat: null };
+  if (!root) root = createRoot(document.body.appendChild(document.createElement("div")));
+  act(() => root!.render(createElement(Header, { bot })));
 };
 const q = <T extends Element = HTMLElement>(selector: string) => document.querySelector<T & HTMLElement>(selector);
 const chips = () => [...document.querySelectorAll<HTMLElement>("[role=option]")];
@@ -73,6 +81,32 @@ describe("the pill's thread switcher", () => {
     act(() => q("[data-chathead-threads]")!.click());
     act(() => q("[data-thread-chip-new]")!.click());
     expect(sent()).toEqual([{ type: "newTask", botId: "pepper" }]);
+  });
+
+  it("shows for a bot whose second open thread another bot opened, beside its main thread", () => {
+    const lead = { botId: "lead", name: "Lead", at: 1 };
+    render(pepper([task("sales", "Weekly sales", 5), task("brief", "Launch brief", 3, { openedBy: lead })], "sales"));
+    act(() => q("[data-chathead-threads]")!.click());
+    expect(chips().map((chip) => chip.textContent)).toEqual(["Weekly sales", "Launch brief"]);
+  });
+
+  it("Ctrl+Tab walks the threads in the order the pill lists them, wrapping", () => {
+    const helper = task("brief", "Launch brief", 4, { openedBy: { botId: "lead", name: "Lead", at: 1 } });
+    const threads = [...THREADS, helper];
+    render(pepper(threads, "launch"));
+    act(() => q("[data-chathead-threads]")!.click());
+    const order = chips().map((chip) => chip.dataset.threadChip!);
+    expect(order).toEqual(["launch", "sales", "brief", "trip"]);
+    const visited: string[] = [];
+    let open = order[0]!;
+    for (let step = 0; step < order.length; step += 1) {
+      act(() => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", ctrlKey: true, bubbles: true, cancelable: true })); });
+      const action = sent().at(-1) as Extract<Action, { type: "switchTask" }>;
+      open = action.threadId;
+      visited.push(open);
+      render(pepper(threads, open));
+    }
+    expect(visited).toEqual([...order.slice(1), order[0]]);
   });
 
   it("stays the plain pill for a bot with one thread", () => {
