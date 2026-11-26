@@ -36,6 +36,10 @@ const mount = (child: ReactElement, bots: Bot[] = []) => act(async () => {
 });
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 const click = (selector: string) => act(async () => { document.querySelector<HTMLElement>(selector)!.click(); });
+const type = (element: HTMLInputElement, value: string) => act(async () => {
+  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")!.set!.call(element, value);
+  element.dispatchEvent(new Event("input", { bubbles: true }));
+});
 const shown = (view: InboxView) => { server.view = view; setInboxView(view); };
 
 beforeEach(() => {
@@ -96,6 +100,31 @@ describe("the inbox waiting filter", () => {
     await click("[data-inbox-waiting-only]");
     await click("[data-inbox-mark-all]");
     expect(server.calls).toContainEqual({ path: "/api/inbox/read-all", method: "POST" });
+  });
+
+  it("leaves the active and finished conversation lists out while it is on", async () => {
+    const ada = { id: "ada", name: "Ada", threadId: "ada-main", tasks: [
+      { threadId: "ada-run", title: "Ada running", createdAt: 0, updatedAt: INBOX_NOW - 60_000, busy: true },
+      { threadId: "ada-done", title: "Ada finished", createdAt: 0, updatedAt: INBOX_NOW - 500 * 60_000 },
+    ] } as unknown as Bot;
+    openInbox();
+    await mount(createElement(InboxPanel), [ada]);
+    expect(document.querySelector("[data-inbox-active]")).not.toBeNull();
+    expect(document.querySelector("[data-inbox-finished]")).not.toBeNull();
+    expect(document.querySelector("[data-inbox-thread-filter]")).not.toBeNull();
+    await click("[data-inbox-waiting-only]");
+    expect(document.querySelector("[data-inbox-active]")).toBeNull();
+    expect(document.querySelector("[data-inbox-finished]")).toBeNull();
+    expect(document.querySelector("[data-inbox-thread-filter]")).toBeNull();
+  });
+
+  it("says no inbox line matches the search instead of claiming nothing waits", async () => {
+    openInbox();
+    await mount(createElement(InboxPanel));
+    await click("[data-inbox-waiting-only]");
+    await type(document.querySelector<HTMLInputElement>('input[type="search"]')!, "daily");
+    expect(document.querySelector("[data-inbox-waiting-empty]")).toBeNull();
+    expect(document.querySelector("[data-inbox-list]")!.textContent).toContain("Nothing in the inbox matches.");
   });
 });
 

@@ -161,7 +161,7 @@ export const InboxPanel = memo(function InboxPanel() {
               </label>}
               <div data-inbox-list className="px-1.5 pb-1.5">
                 {rows.length === 0
-                  ? waitingOnly && listed.length
+                  ? waitingOnly && shown.length === 0 && listed.length > 0
                     ? (
                       <div data-inbox-waiting-empty className="mx-auto flex max-w-[16rem] flex-col items-center px-4 py-10 text-center">
                         <Inbox size={22} aria-hidden="true" className="text-ink-tertiary" />
@@ -180,16 +180,16 @@ export const InboxPanel = memo(function InboxPanel() {
                       )
                   : <InboxGroups groups={groups} now={now} current={held} onOpen={open} onAction={act} moreForYou={fixes > 0} />}
               </div>
-              {!query.trim() && threads.owners.length > 0 && <ThreadFilterBar owners={threads.owners} filter={filter} onChange={setFilter} />}
-              {!query.trim() && threadFilterOn(filter) && !threads.any && (
+              {!query.trim() && !waitingOnly && threads.owners.length > 0 && <ThreadFilterBar owners={threads.owners} filter={filter} onChange={setFilter} />}
+              {!query.trim() && !waitingOnly && threadFilterOn(filter) && !threads.any && (
                 <div data-inbox-filter-empty className="flex flex-col items-center gap-1 px-4 py-6 text-center">
                   <p className="text-[13px] text-ink-secondary">{t("inbox.filter.noMatch")}</p>
                   <button type="button" onClick={() => setFilter({})} className="text-[12px] text-accent hover:underline">{t("inbox.filter.clear")}</button>
                 </div>
               )}
-              {!query.trim() && <InboxActive view={view} current={openThread} exclude={pinnedThreads} faces={faces} filter={filter} />}
+              {!query.trim() && !waitingOnly && <InboxActive view={view} current={openThread} exclude={pinnedThreads} faces={faces} filter={filter} />}
               {/* The finished, already-read conversations. */}
-              {!query.trim() && <FinishedThreads rows={threads.finishedRows} faces={faces} now={now} current={openThread} onOpen={jump} />}
+              {!query.trim() && !waitingOnly && <FinishedThreads rows={threads.finishedRows} faces={faces} now={now} current={openThread} onOpen={jump} />}
               {!waitingOnly && done.length > 0 && (
                 <section data-inbox-done className="px-1.5 pb-1.5">
                   <button type="button" data-inbox-done-toggle aria-expanded={showDone} onClick={() => setShowDone(!showDone)}
