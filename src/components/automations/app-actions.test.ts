@@ -87,4 +87,14 @@ describe("the automation actions with app events added", () => {
     flushSync(() => { void actions.copyAddress("hook-1"); });
     expect(await shown()).toEqual({ error: "The webhook is gone", errorFor: "copy:hook-1" });
   });
+
+  it("drops a refused switch's refusal once the person confirms deleting a schedule", async () => {
+    refuseWith("The assigned bot no longer exists");
+    flushSync(() => { void actions.toggle(schedule); });
+    expect(await shown()).toEqual({ error: "The assigned bot no longer exists", errorFor: "toggle:routine-1" });
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    flushSync(() => { void actions.remove(schedule, "Delete it?"); });
+    await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalledWith({ type: "deleteRoutine", routineId: "routine-1" }));
+    expect(await shown()).toEqual({ error: "", errorFor: null });
+  });
 });

@@ -54,6 +54,7 @@ export function useAutomationActions() {
   /** Deletes it once the person said yes to the question; false when it is kept, so a refusal stays in view. */
   const removeConfirmed = async (automation: Automation): Promise<boolean> => {
     if (automation.kind === "schedule") {
+      clearError();
       dispatch({ type: "deleteRoutine", routineId: automation.id });
       return true;
     }
