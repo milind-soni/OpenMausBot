@@ -32,7 +32,6 @@ export function windowEntries(windowPref: WindowPref, read: (id: WindowPrefId) =
     windowPref("appearance.pinnedPages", "Pinned pages", "Web pages pinned beside the chat. Send the full list; chat pages pinned from a conversation stay.", "layout",
       ["pinned panels", "pinned pages", "web panel", "side page"], 'a list of up to 6 {"name","url"} with http(s) addresses; an empty list unpins every web page',
       { says: (pages: Array<{ name: string; url: string }>) => (pages.length ? `Pin these pages beside the chat: ${pages.map((page) => `${page.name} (${page.url})`).join(", ")}` : "Unpin every web page beside the chat"),
-        // Simple shows pinned pages only in the window frame's top bar.
         refusal: advancedOnly("Pinned pages", () => read("appearance.windowFrame") === true) }),
     flag("appearance.showComputers", "Show your computers", "The rail of places down the side of the window (desktop app).", "layout", ["rail", "show your computers", "places"],
       "Show the rail of your computers and Clouds", "Hide the rail of your computers and Clouds"),

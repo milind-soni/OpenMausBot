@@ -92,7 +92,6 @@ export function createAppSettings(deps: AppSettingsDeps) {
   const reply = (status: number, body: Record<string, unknown>) => ({ status, body });
   const refuse = (status: number, error: string) => reply(status, { error });
   const describe = (entry: SettingEntry) => ({ id: entry.id, label: entry.label, tier: entry.tier, value: text(entry.read()), where: placePath(entry.where),
-    // A bot changes it in Simple mode too; the person sees the path only when they want to look themselves.
     ...(entry.tier !== "owner-only" && advancedOnlyPlace(entry.where) ? { inSimple: "set it as usual; never switch modes for it" } : {}) });
   /** Null when the turn is the owner's own; otherwise why not, so the refusal can say what the person can do instead. */
   const notOwners = (turn: Turn): NotOwners | null =>
