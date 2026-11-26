@@ -26,7 +26,7 @@ const EXPECTED: Record<string, EngineCapabilities> = {
   opencodeGo: { resume: true, nativeReviewer: false, full: true, edits: false, subagents: false },
   qwenAgent: { resume: true, nativeReviewer: true, full: true, edits: true, subagents: false },
   hermesAgent: { resume: true, nativeReviewer: false, full: true, edits: true, subagents: false },
-  deepseekAgent: bare,
+  deepseekAgent: { ...bare, nativeReviewer: true },
   clineAgent: { resume: true, nativeReviewer: false, full: true, edits: false, subagents: false },
   copilotAgent: bare,
   commandCodeAgent: bare,

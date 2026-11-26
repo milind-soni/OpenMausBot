@@ -27,11 +27,11 @@ import {
   claudeCostSnapshot,
   restoredCostBase,
   STEERED_CONTINUATION_GRACE_MS,
-  sumNativeTurnResults,
   turnCostFromRunningTotal,
   type ClaudeConfig,
 } from "./claude.ts";
 import { spawnContractDiff } from "./claude-spawn-contract.ts";
+import { sumNativeTurnResults } from "./claude-turn-result.ts";
 import { TEAM_TOOLS_FAILED } from "./team-tools.ts";
 import { claudeLimitMessage } from "./claude-limits.ts";
 import { flushNativeLog } from "./native.ts";
@@ -720,7 +720,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(failure).toMatchObject({ message: "Not logged in \u00b7 Please run /login", setup: true });
     expect(recorder.events.some((e: any) => e.type === "item.completed" && e.itemType === "assistant_text")).toBe(false);
     expect(recorder.events.some((e: any) => e.type === "content.delta")).toBe(false);
-    expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: false, stopReason: "auth_required" });
+    expect(recorder.events.at(-1), "refused before the model saw it").toMatchObject({ type: "turn.completed", ok: false, stopReason: "auth_required", unsent: true });
     const pid = dumpedPid(dump);
     await expect.poll(() => {
       try { process.kill(pid, 0); return false; } catch { return true; }
@@ -730,7 +730,9 @@ describe("ClaudeDriver turns (fake CLI)", () => {
   it("reads an error result saying the OAuth session expired as a sign-out", async () => {
     await create("oauth-expired-result");
     await instance.adapter.sendTurn({ threadId: "t-oauth", text: "hi" });
-    expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: false, stopReason: "auth_required" });
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ ok: false, stopReason: "auth_required" });
+    expect(done, "an error result alone does not prove the model never saw the turn").not.toHaveProperty("unsent");
     expect(recorder.events.find((e: any) => e.type === "runtime.error")).toMatchObject({ message: "OAuth session expired. Please sign in again.", setup: true });
   });
 
@@ -747,8 +749,9 @@ describe("ClaudeDriver turns (fake CLI)", () => {
   it("keeps a sign-out after model activity as an ordinary failed turn", async () => {
     await create("not-logged-in", { FAKE_CLAUDE_AUTH_AFTER_WORK: "1" });
     await expect(instance.adapter.sendTurn({ threadId: "t-auth-work", text: "hi", startupRecovery: true })).resolves.toHaveProperty("turnId");
-    expect(await recorder.until(event => event.type === "turn.completed"))
-      .toMatchObject({ ok: false, stopReason: "auth_required" });
+    const done = await recorder.until(event => event.type === "turn.completed");
+    expect(done).toMatchObject({ ok: false, stopReason: "auth_required" });
+    expect(done, "the model had already worked on it").not.toHaveProperty("unsent");
     expect(recorder.events.find(event => event.type === "runtime.error"))
       .toMatchObject({ message: "Not logged in · Please run /login", setup: true });
   });
