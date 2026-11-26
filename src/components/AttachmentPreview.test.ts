@@ -418,6 +418,15 @@ describe("image preview wheel", () => {
       expect(picture().alt).toBe("next.png");
       expect(picture().style.transform).toBe("");
 
+      await wheel(-200);
+      expect(picture().style.transform).not.toBe("");
+      const replaced = [images[0]!, { src: "/api/files/replaced.png", name: "replaced.png" }];
+      await act(async () => {
+        root.render(createElement("div", { onWheel: chatWheel }, createElement(AttachmentPreviewDialog, { image: replaced[0]!, images: replaced, onClose: () => {} })));
+      });
+      expect(picture().alt).toBe("replaced.png");
+      expect(picture().style.transform).toBe("");
+
       expect(chatWheel).not.toHaveBeenCalled();
     } finally {
       act(() => root.unmount());

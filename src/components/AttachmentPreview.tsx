@@ -463,6 +463,7 @@ export function AttachmentPreviewDialog({
   const [failedSource, setFailedSource] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const zoom = usePreviewZoom();
+  useLayoutEffect(() => zoom.reset(), [current.src, zoom.reset]);
 
   useLayoutEffect(() => {
     closeRef.current = onClose;
@@ -471,8 +472,7 @@ export function AttachmentPreviewDialog({
   const navigate = useCallback((step: -1 | 1) => {
     setIndex((value) => wrappedImageIndex(value, step, items.length));
     setFailedSource(null);
-    zoom.reset();
-  }, [items.length, zoom.reset]);
+  }, [items.length]);
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
