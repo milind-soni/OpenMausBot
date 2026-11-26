@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { Grid2x2Plus } from "lucide-react";
+import { cn } from "@/lib/cn";
 
 import type { LocalApp } from "../../../shared/local-apps";
 import { t } from "@/lib/i18n";
@@ -10,7 +12,18 @@ import { LocalAppCard } from "./LocalAppCard";
 
 export const REMOVE_UNDO_MS = 6_000;
 export const SECTION_TITLE = "text-[17px] font-semibold text-ink";
-export const APP_GRID = "grid grid-cols-[repeat(auto-fill,minmax(min(300px,100%),1fr))] gap-3";
+export const APP_GRID = "grid grid-cols-[repeat(auto-fill,minmax(min(220px,100%),1fr))] gap-4";
+
+/** The page's empty state: an icon tile, a title and one line. `big` when nothing at all is on the page yet. */
+export function AppsEmpty({ title, hint, big = false, data }: { title: string; hint: string; big?: boolean; data: string }) {
+  return (
+    <div {...{ [`data-${data}`]: "" }} className={cn("px-6 text-center", big ? "py-16" : "py-10")}>
+      <div aria-hidden="true" className="mx-auto mb-4 flex size-12 items-center justify-center rounded-2xl bg-accent/10 text-accent"><Grid2x2Plus size={22} /></div>
+      <h3 className="text-[17px] font-semibold text-ink">{title}</h3>
+      <p className="mx-auto mt-2 max-w-md text-balance text-[14px] leading-relaxed text-ink-secondary">{hint}</p>
+    </div>
+  );
+}
 
 /** The chat a saved app came from, while its bot still has it; else the bot's own chat; null once the bot is gone. */
 export function chatOfApp(app: LocalApp, state: Pick<AppState, "bots">): Action | null {
@@ -28,7 +41,8 @@ export function openAppWindow(id: string): (() => void) | undefined {
 type Line = { kind: "removed"; app: LocalApp; undo(): void } | { kind: "failed"; text: string };
 
 /** "On this computer" (or "In this Cloud"): the apps saved here, as tiles, each opening in its own view. */
-export function LocalAppsSection({ place }: { place: "computer" | "cloud" }) {
+/** `alone`: the published list is empty too, so an empty section speaks for the whole page. */
+export function LocalAppsSection({ place, alone = false }: { place: "computer" | "cloud"; alone?: boolean }) {
   const bots = useStoreSelector((state) => state.bots);
   const dispatch = useStoreDispatch();
   const { apps, status } = useLocalApps();
@@ -80,7 +94,7 @@ export function LocalAppsSection({ place }: { place: "computer" | "cloud" }) {
   const title = t(place === "cloud" ? "localApps.section.cloud" : "localApps.section.computer");
   return (
     <section aria-labelledby="local-apps-title" data-local-apps={apps ? apps.length : status}>
-      <h2 id="local-apps-title" className={SECTION_TITLE}>{title}</h2>
+      <h2 id="local-apps-title" className={cn(SECTION_TITLE, alone && apps?.length === 0 && "sr-only")}>{title}</h2>
       <div role="status" aria-live="polite" className="empty:hidden mt-3">
         {line?.kind === "removed" && (
           <p className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-inset px-3 py-2 text-[13px] text-ink-secondary">
@@ -96,9 +110,9 @@ export function LocalAppsSection({ place }: { place: "computer" | "cloud" }) {
           <button type="button" className="ui-button ui-button-md" onClick={() => void loadLocalApps()}>{t("common.tryAgain")}</button>
         </p>
       ) : apps && apps.length === 0 ? (
-        <p data-local-apps-empty="" className="mt-3 rounded-xl border border-dashed border-hairline px-4 py-6 text-center text-[13px] text-ink-secondary">
-          {t("localApps.empty")}
-        </p>
+        alone
+          ? <AppsEmpty data="apps-empty" title={t("localApps.emptyAll.title")} hint={t("localApps.emptyAll.body")} big />
+          : <AppsEmpty data="local-apps-empty" title={t("localApps.emptyTitle")} hint={t("localApps.empty")} />
       ) : apps ? (
         <ul aria-label={title} className={`mt-3 ${APP_GRID}`}>
           {apps.map((app) => (

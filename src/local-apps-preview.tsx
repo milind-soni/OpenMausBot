@@ -1,7 +1,7 @@
 // Dev-only gallery of saved apps, served at /local-apps-preview.html; not in the packaged app. It mounts the real apps
 // page, app view and page toolbar over a fake store and answers every /api request itself, so nothing reaches a server.
 // ?view=list|empty|app|toolbar|window|icons &place=computer|cloud &skin=midnight|daylight &long=1 (long names) &desktop=1 (the desktop
-// app's bridge: Open in its own window and Install show, the first app installed) &act=menu|rename|removed|versions (opens that state once drawn)
+// app's bridge: Open in its own window and Install show, the first app installed) &many=1 (13 apps) &published=0 &act=menu|rename|removed|versions (opens that state once drawn)
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { AppMessage } from "@/components/app/AppMessage";
@@ -37,13 +37,19 @@ const app = (id: string, name: string, botId: string, updated: number, more: Par
   return { id: `la_${id.padEnd(16, "0")}`, name, botId, bot: bot ? { name: bot.name, color: bot.color as never } : null, threadId: bot?.tasks.at(-1)?.threadId ?? "gone", messageId: `m-${id}`,
     versions: [{ rev: 0, at: now - updated }], rev: 0, createdAt: now - 9 * DAY, updatedAt: now - updated, manifest: { name }, chat: Boolean(bot), ...more };
 };
-const LOCAL: LocalApp[] = view === "empty" ? [] : [
+const LOCAL: LocalApp[] = view === "empty" || params.get("saved") === "0" ? [] : [
   app("sales", long ? "Quarterly sales board for the north and east regions with returns" : "Sales board", "mira", 2 * HOUR,
     { versions: [0, 1, 2].map((rev) => ({ rev, at: now - (3 - rev) * HOUR })), rev: 2 }),
   app("rota", "Staff rota", "otto", 26 * HOUR),
   app("budget", "Household budget", "juno", 3 * DAY),
   app("reading", "Reading list", "mira", 9 * DAY),
   app("tide", "Tide times", "gone", 20 * DAY, { chat: false }),
+  ...(params.get("many") === "1" ? [
+    app("habits", "Habit tracker", "juno", 4 * HOUR), app("trip", "Lisbon trip plan", "otto", 30 * HOUR),
+    app("recipes", "Recipe box", "mira", 2 * DAY), app("invoices", "Invoice checker", "otto", 5 * DAY),
+    app("garden", "Garden watering", "juno", 6 * DAY), app("books", "Book club votes", "mira", 12 * DAY),
+    app("gym", "Gym log", "gone", 15 * DAY, { chat: false }), app("rent", "Rent split", "otto", 25 * DAY),
+  ] : []),
 ];
 const PUBLISHED: PublishedApp[] = [
   { id: "page-bakery", source: "page", title: "Bakery order page", url: "https://bakery.example.mausbot.page/", bot: { id: "mira", name: "Mira" }, threadId: "sales",
@@ -88,6 +94,22 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}td,t
 </tbody></table></div>
 </section></main></body></html>`;
 
+const page = (title: string, accent: string, body: string) => `<!doctype html><html><head><meta charset="utf-8"><style>
+:root{color-scheme:light dark;--bg:#fbfbfa;--card:#fff;--ink:#1d1d1f;--muted:#6b6b70;--line:#e6e6e3;--accent:${accent}}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--card:#1c1c1f;--ink:#f1f1f2;--muted:#a1a1a8;--line:#2c2c30}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--ink)}
+main{max-width:1120px;margin:0 auto;padding:32px}h1{font-size:28px;margin:0 0 20px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}.tag{display:inline-block;padding:2px 10px;border-radius:999px;background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--accent);font-size:13px}
+table{width:100%;border-collapse:collapse}td,th{padding:10px 8px;border-bottom:1px solid var(--line);text-align:start}th{color:var(--muted);font-weight:500}
+.bar{height:10px;border-radius:5px;background:var(--accent)}</style></head><body><main><h1>${title}</h1>${body}</main></body></html>`;
+const ROTA = page("Staff rota", "#d9822b", `<table><tr><th>Day</th><th>Morning</th><th>Afternoon</th><th>Close</th></tr>${["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day, n) =>
+  `<tr><td>${day}</td><td><span class="tag">${["Ana", "Ben", "Cleo"][n % 3]}</span></td><td><span class="tag">${["Dev", "Eli", "Fay"][n % 3]}</span></td><td>${["Gus", "Hal"][n % 2]}</td></tr>`).join("")}</table>`);
+const BUDGET = page("Household budget", "#1f8a55", `<div class="grid">${[["Rent", 72], ["Food", 48], ["Transport", 22], ["Energy", 35], ["Fun", 18], ["Savings", 60]].map(([label, value]) =>
+  `<div class="card"><div>${label}</div><div style="font-size:26px;font-weight:600;margin:6px 0">€${Number(value) * 13}</div><div class="bar" style="width:${value}%"></div></div>`).join("")}</div>`);
+const READING = page("Reading list", "#3f7be0", `<div class="grid">${["The Overstory", "Piranesi", "Klara and the Sun", "Project Hail Mary", "Circe", "The Dispossessed"].map((book, n) =>
+  `<div class="card"><div style="height:120px;border-radius:10px;background:color-mix(in srgb,var(--accent) ${12 + n * 8}%,var(--card))"></div><p style="margin:10px 0 0;font-weight:600">${book}</p></div>`).join("")}</div>`);
+const PAGES = [DASHBOARD, ROTA, BUDGET, READING];
+
 const PAGE: AppPayload = { v: 1, source: "html", title: "Sales board", doc: "d2", rev: 2, history: ["d0", "d1"], bytes: 4200, border: true, network: { connect: [], resources: [] } };
 const rows: Message[] = [
   { id: "m-sales", role: "bot", kind: "app", at: now, text: "[App] Sales board", app: PAGE },
@@ -100,9 +122,13 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const path = url.pathname;
   if (path === "/api/local-apps" && init?.method === "POST") return reply({ app: LOCAL[0] }, 201);
   if (path === "/api/local-apps") return reply({ apps: LOCAL });
-  if (path === "/api/published-apps") return reply({ apps: view === "empty" ? [] : PUBLISHED });
+  if (path === "/api/published-apps") return reply({ apps: view === "empty" || params.get("published") === "0" ? [] : PUBLISHED });
   if (path === "/api/published-apps/framing") return reply({ framing: "blocked" });
-  if (path.endsWith("/app")) return reply(botHtmlDocument({ messageId: "m-sales", rev: Number(url.searchParams.get("rev") ?? 2), html: DASHBOARD }));
+  if (path.endsWith("/app")) {
+    const id = path.split("/").at(-2) ?? "";
+    const html = PAGES[LOCAL.findIndex((one) => one.id === id) % PAGES.length] ?? DASHBOARD;
+    return reply(botHtmlDocument({ messageId: "m-sales", rev: Number(url.searchParams.get("rev") ?? 2), html }));
+  }
   return reply({ error: "not in the preview" }, 404);
 };
 
@@ -152,7 +178,7 @@ const whenDrawn = (selector: string, run: () => void) => {
 const menuRow = (name: string) => [...document.querySelectorAll("[role=menu] [role^=menuitem]")].find((row) => row.textContent?.includes(name));
 const ready = () => { document.body.dataset.shotReady = ""; };
 if (act === "menu" || act === "rename" || act === "removed") {
-  whenDrawn("[data-local-app]", () => {
+  whenDrawn("[data-thumbs-ready]", () => {
     click(document.querySelector("[data-local-app] [aria-haspopup], [data-local-app] [aria-expanded]"));
     window.setTimeout(() => {
       if (act === "rename") click(menuRow("Rename"));
@@ -173,3 +199,9 @@ if (view === "icons") {
     window.setTimeout(ready, 300);
   }));
 }
+const thumbsReady = () => {
+  const onScreen = [...document.querySelectorAll<HTMLElement>("[data-local-app-thumb]")].filter((thumb) => thumb.getBoundingClientRect().top < window.innerHeight);
+  if (onScreen.length && onScreen.every((thumb) => thumb.dataset.localAppThumb === "live")) window.setTimeout(() => { document.body.dataset.thumbsReady = ""; }, 300);
+  else window.setTimeout(thumbsReady, 100);
+};
+thumbsReady();

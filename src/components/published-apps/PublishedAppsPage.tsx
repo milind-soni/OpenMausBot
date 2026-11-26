@@ -13,7 +13,7 @@ import { TOOL_PAGE_TITLE, ToolPage, ToolPageHeader } from "../ToolPageShell";
 import { PublishedAppCard, type DeleteProblem } from "./PublishedAppCard";
 import { chatOfApp, LocalAppsSection, openAppWindow, SECTION_TITLE } from "./LocalAppsSection";
 import { LocalAppView } from "./LocalAppView";
-import { openLocalApp, useOpenLocalApp } from "@/lib/local-apps";
+import { openLocalApp, useLocalApps, useOpenLocalApp } from "@/lib/local-apps";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 const DELETE_PROBLEMS: Record<PublishedAppDeleteRefusal, LocaleKey> = {
@@ -51,6 +51,8 @@ function AppsList() {
   const { state, dispatch } = useStore();
   const [apps, setApps] = useState<PublishedApp[] | null>(null);
   const [included, setIncluded] = useState<PublishedAppsList["included"]>();
+  const saved = useLocalApps().apps;
+  const nothingYet = apps?.length === 0 && saved?.length === 0;
   const [failed, setFailed] = useState(false);
   const back = useRef<HTMLButtonElement>(null);
   const loading = useRef<AbortController | null>(null);
@@ -103,8 +105,8 @@ function AppsList() {
       </ToolPageHeader>
       <div className="min-h-0 flex-1 overflow-y-auto" data-published-apps={apps ? apps.length : "loading"}>
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-10 p-4 sm:p-6">
-          <LocalAppsSection place={state.config?.cloudHome === true ? "cloud" : "computer"} />
-          <section aria-labelledby="published-apps-title">
+          <LocalAppsSection place={state.config?.cloudHome === true ? "cloud" : "computer"} alone={apps?.length === 0} />
+          {!nothingYet && <section aria-labelledby="published-apps-title">
           <h2 id="published-apps-title" className={`${SECTION_TITLE} mb-3`}>{t("publishedApps.section.published")}</h2>
           {apps && included && <p data-included-apps={`${included.used}/${included.max}`} className="mb-3 text-[13px] text-ink-secondary">{t("publishedApps.included.used", included)}</p>}
           {failed && !apps ? (
@@ -126,7 +128,7 @@ function AppsList() {
               ))}
             </ul>
           ) : null}
-          </section>
+          </section>}
         </div>
       </div>
     </ToolPage>

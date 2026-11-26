@@ -41,11 +41,13 @@ const ROTA = app("la_rota00000000000000", "Staff rota", { chat: false, botId: "g
 let root: Root;
 let host: HTMLElement;
 let saved: LocalApp[];
+let published: unknown[];
 const calls: Array<{ method: string; path: string; body?: unknown }> = [];
 
 beforeEach(() => {
   vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
   saved = [BOARD, ROTA];
+  published = [];
   calls.length = 0;
   fixture.dispatch.mockReset();
   fixture.state.config = {};
@@ -53,7 +55,8 @@ beforeEach(() => {
   fixture.api.mockImplementation(async (path: string, init?: { method?: string; body?: string }) => {
     const method = init?.method ?? "GET";
     calls.push({ method, path, ...(init?.body ? { body: JSON.parse(init.body) } : {}) });
-    if (path === "/api/published-apps") return { apps: [] };
+    if (path === "/api/published-apps") return { apps: published };
+    if (path.startsWith("/api/published-apps/framing")) return { framing: "blocked" };
     if (path === "/api/local-apps") return { apps: saved };
     const one = /^\/api\/local-apps\/(la_\w+)(\/app)?/.exec(path);
     const found = saved.find((candidate) => candidate.id === one?.[1]);
@@ -87,12 +90,22 @@ const menuItem = (name: string) => [...([...document.querySelectorAll("[role=men
   .find((one) => one.textContent?.includes(name))!;
 
 describe("saved apps on the apps page", () => {
-  it("says in one line how to get one when nothing is saved, above the published apps", async () => {
+  it("says how to get one when nothing is saved, above the published apps", async () => {
     saved = [];
+    published = [{ id: "page-a", source: "page", title: "Bakery", url: "https://abcdefghijklmnopqrstuvwxyz.mausbot.page/", bot: { id: "mira", name: "Mira" },
+      threadId: "main", publishedAt: NOW, access: "link", canDelete: true }];
     await show();
     const headings = [...host.querySelectorAll("h2")].map((heading) => heading.textContent);
     expect(headings.slice(0, 2)).toEqual(["On this computer", "Published"]);
-    expect(host.querySelector("[data-local-apps-empty]")?.textContent).toBe("Ask a bot to build a page, then Save as app.");
+    expect(host.querySelector("[data-local-apps-empty]")?.textContent).toBe("No saved apps yetAsk a bot to build a page, then Save as app.");
+  });
+
+  it("shows one empty state, not two, when nothing is saved or published", async () => {
+    saved = [];
+    await show();
+    expect(host.querySelector("[data-apps-empty]")?.textContent).toBe("No apps yetAsk a bot to build a page, then save it as an app or publish it.");
+    expect(host.querySelector("[data-local-apps-empty]")).toBeNull();
+    expect(host.textContent).not.toContain("Nothing published yet");
   });
 
   it("words the place as this Cloud on a Cloud", async () => {
@@ -105,7 +118,7 @@ describe("saved apps on the apps page", () => {
     await show();
     expect([...host.querySelectorAll("[data-local-app-name]")].map((title) => title.textContent)).toEqual(["Sales board", "Staff rota"]);
     expect(card(BOARD.id).textContent).toContain("Mira · 2 hr ago");
-    expect(card(ROTA.id).textContent).toContain("Its bot was removed");
+    expect(card(ROTA.id).textContent).toContain("Bot removed");
     expect(button(card(BOARD.id), "Open in its own window")).toBeUndefined();
   });
 
