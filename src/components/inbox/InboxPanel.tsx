@@ -187,7 +187,7 @@ export const InboxPanel = memo(function InboxPanel() {
                   <button type="button" onClick={() => setFilter({})} className="text-[12px] text-accent hover:underline">{t("inbox.filter.clear")}</button>
                 </div>
               )}
-              {!query.trim() && !waitingOnly && <InboxActive view={view} current={openThread} exclude={pinnedThreads} faces={faces} filter={filter} />}
+              {!query.trim() && <InboxActive view={view} current={openThread} exclude={pinnedThreads} faces={faces} filter={filter} conversations={!waitingOnly} />}
               {/* The finished, already-read conversations. */}
               {!query.trim() && !waitingOnly && <FinishedThreads rows={threads.finishedRows} faces={faces} now={now} current={openThread} onOpen={jump} />}
               {!waitingOnly && done.length > 0 && (

@@ -20,6 +20,7 @@ vi.mock("../../state/api", () => ({
 import { initialState, StoreContext, type AppState, type Bot } from "@/state/store";
 import { BOT_BUTTON, botButtonTone } from "@/lib/bot-button";
 import { closeInbox, currentInbox, currentInboxPanel, inboxVersion, openInbox, setInboxView, useInboxLoader } from "@/state/inbox";
+import { setTeamPeople } from "@/state/team-people";
 import { approvalRow, INBOX_NOW, inboxView, messageRow, questionRow, reportRow, settledRow } from "@/testing/inbox-fixture";
 import type { InboxRow, InboxView } from "../../../shared/inbox";
 import { InboxCardSlot } from "./InboxCard";
@@ -51,6 +52,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   act(() => root.unmount());
+  setTeamPeople(null);
   closeInbox();
   setInboxView(null);
   document.body.innerHTML = "";
@@ -116,6 +118,18 @@ describe("the inbox waiting filter", () => {
     expect(document.querySelector("[data-inbox-active]")).toBeNull();
     expect(document.querySelector("[data-inbox-finished]")).toBeNull();
     expect(document.querySelector("[data-inbox-thread-filter]")).toBeNull();
+  });
+
+  it("keeps what a teammate must fix visible while the conversation lists are hidden", async () => {
+    openInbox();
+    await mount(createElement(InboxPanel));
+    await act(async () => { setTeamPeople({ people: [], me: null, admin: true, needsYou: [
+      { kind: "connection", id: "c", at: 1, app: "github", botIds: ["reporter"], threadId: "rep-main", text: "Reconnect GitHub" },
+    ] }); });
+    expect(document.querySelector("[data-inbox-fixes]")).not.toBeNull();
+    await click("[data-inbox-waiting-only]");
+    expect(document.querySelector("[data-inbox-fixes]")).not.toBeNull();
+    expect(document.querySelector("[data-inbox-active]")).toBeNull();
   });
 
   it("says no inbox line matches the search instead of claiming nothing waits", async () => {
