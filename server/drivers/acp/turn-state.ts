@@ -3,7 +3,7 @@
 import type { RequestOutcome, SendTurnInput } from "../../contracts.ts";
 import type { spawnCli } from "../../procs.ts";
 import { noticeFailure } from "../../chat-notices.ts";
-import { errorReplyFailure, type ErrorReplyFailure } from "../engine-errors.ts";
+import { errorReplyFailure, quotesErrorBody, type ErrorReplyFailure } from "../engine-errors.ts";
 import type { AcpConfig } from "./core.ts";
 import type { AcpDriverHooks } from "./driver-hooks.ts";
 import type { AcpHost, AcpLink } from "./host.ts"; import type { AppliedConfig } from "./applied-config.ts";
@@ -136,20 +136,98 @@ export interface AcpTurnEnd {
   error?: Omit<ErrorReplyFailure, "stopReason">;
 }
 
+export type IncompleteEnding = "tool_call_fragment" | "announced_action";
+
+const TOOL_CALL_TAIL_TAGS = ["</parameter>", "</invoke>", "<tool_call>"];
+const ANNOUNCED_ACTION = /^(?:i['’]ll|running|now\s+i['’]ll|assigning)\s/i;
+
+/** True when `s` opens a JSON value that never closes: quotes and escapes respected, only JSON
+ * characters so far, still inside a string or container at the end, with a string or key seen. */
+function unterminatedJson(s: string): boolean {
+  let inString = false; let escape = false; let depth = 0; let evidence = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inString) {
+      if (escape) escape = false;
+      else if (ch === "\\") escape = true;
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') { inString = true; evidence = true; }
+    else if (ch === "{" || ch === "[") depth++;
+    else if (ch === "}" || ch === "]") { if (--depth <= 0) return false; }
+    else if (ch === ":") evidence = true;
+    else if (!" \t\r\n,0123456789.+-eEtruefalsn".includes(ch)) return false;
+  }
+  return evidence && (inString || depth > 0);
+}
+
+/** True when the reply's tail is a JSON object or array: parsed to the very end, or cut off inside one. */
+function endsOnTrailingJson(text: string): boolean {
+  const tail = text.length > 2000 ? text.slice(-2000) : text;
+  for (let i = 0; i < tail.length; i++) {
+    if (tail[i] !== "{" && tail[i] !== "[") continue;
+    const candidate = tail.slice(i);
+    try {
+      JSON.parse(candidate);
+      return true;
+    } catch {
+      if (unterminatedJson(candidate)) return true;
+    }
+  }
+  return false;
+}
+
+/** True when the reply's end sits inside a ``` fence that never closed: a cut-off example block, not a leak. */
+function endsInsideUnclosedFence(text: string): boolean {
+  const fences = text.match(/```/g);
+  return fences !== null && fences.length % 2 === 1;
+}
+
+function endsOnToolCallTag(text: string): boolean {
+  const tail = text.slice(-64).toLowerCase();
+  if (TOOL_CALL_TAIL_TAGS.some((tag) => tail.endsWith(tag))) return true;
+  return /<parameter(?:\s[^<>]*)?>?$/i.test(text);
+}
+
+function announcesUnrunAction(text: string): boolean {
+  const last = text.split(/(?<=[.!?])\s+|\n+/).map((sentence) => sentence.trim()).findLast(Boolean) ?? "";
+  return ANNOUNCED_ACTION.test(last);
+}
+
+/** How a reply ends without the work being done, when no tool ran in the turn: `tool_call_fragment` for a raw
+ * tool-call tail (`</parameter>`, `</invoke>`, `<tool_call>`, an unclosed `<parameter`, a trailing JSON object or
+ * array), `announced_action` for a last sentence announcing an action ("I'll run X") instead of reporting a result.
+ * A reply ending inside an unclosed ``` fence reads as a cut-off example, not a leak. */
+export function incompleteEnding(text: string, toolRan: boolean): IncompleteEnding | null {
+  if (toolRan) return null;
+  const trimmed = text.trimEnd();
+  if (!trimmed || endsInsideUnclosedFence(trimmed)) return null;
+  if (endsOnToolCallTag(trimmed) || endsOnTrailingJson(trimmed)) return "tool_call_fragment";
+  if (announcesUnrunAction(trimmed)) return "announced_action";
+  return null;
+}
+
 /** How a settling turn ends, once its last text is out. A Stop the agent answers with end_turn (OpenCode does) is the
  * person's stop. A reply that is only a provider's error body fails the turn in plain words. Otherwise `end_turn` with
  * nothing to show is a lost turn: a provider may cut a reasoning-only stream and still answer end_turn, and a turn that
- * was talking, then streamed reasoning after its tools without landing a reply after it, went out midstream. Tool-only
- * turns that never said anything, and turns that plainly end on their tools, stay successes. */
+ * was talking, then streamed reasoning after its tools without landing a reply after it, went out midstream. A turn
+ * whose reply ends on a raw tool-call fragment, or whose last sentence announces an action no tool ran, fails too: the
+ * model wrote the call as text or promised work it never did. Tool-only turns that never said anything, and turns that
+ * plainly end on their tools, stay successes. */
 export function endTurn(current: AcpTurn, ok: boolean, stopReason: string | null, ai: string): AcpTurnEnd {
   const ended = ok && stopReason === null;
-  const errorReply = ended && !current.state.stopped && !current.state.repliedText ? errorReplyFailure(ai, current.state.text) : null;
-  if (!errorReply) current.flushAssistantText();
+  const failedBody = ended && !current.state.stopped ? errorReplyFailure(ai, current.state.text) : null;
+  const errorReply = failedBody && !current.state.repliedText ? failedBody : null;
+  const incomplete = ended && !current.state.stopped && !failedBody && !quotesErrorBody(current.state.text)
+    ? incompleteEnding(current.state.text, current.runningTools.size > 0 || current.endedToolIds.size > 0)
+    : null;
+  if (!errorReply && !incomplete) current.flushAssistantText();
   if (ended && current.state.stopped) return { ok, stopReason: "cancelled" };
   if (errorReply) {
     const { stopReason: failed, ...error } = errorReply;
     return { ok: false, stopReason: failed, error };
   }
+  if (incomplete === "tool_call_fragment") return { ok: false, stopReason: "tool_call_fragment", error: noticeFailure("chat.notice.acpToolCallFragment", { provider: ai }) };
+  if (incomplete === "announced_action") return { ok: false, stopReason: "announced_action", error: noticeFailure("chat.notice.acpAnnouncedAction", { provider: ai }) };
   if (ended && !current.state.producedItem) return { ok: false, stopReason: "empty_turn", error: noticeFailure("chat.notice.acpEmpty", { provider: ai }) };
   if (ended && current.state.repliedText && current.state.thoughtSinceTool) return { ok: false, stopReason: "ended_after_tools", error: noticeFailure("chat.notice.acpEndedAfterTools", { provider: ai }) };
   return { ok, stopReason };

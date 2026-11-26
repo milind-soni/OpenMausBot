@@ -177,6 +177,13 @@ function isErrorBody(body: string): boolean {
   }
 }
 
+/** A reply that quotes a provider's error body among its own words ("The deploy failed with this response:
+ * 403 {…} I'll retry with the API key"): the model reporting a failure it saw, so its ending is the error
+ * body's business, not a tool-call fragment or an announcement of an action. */
+export function quotesErrorBody(text: string): boolean {
+  return /\b[45]\d\d \{/.test(text);
+}
+
 export interface ErrorReplyFailure {
   message: string;
   text?: ServerText;
