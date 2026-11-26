@@ -536,7 +536,13 @@ export class Runtime {
     if (this.pendingSettlements.size === 0) return;
     for (const [id, pending] of this.pendingSettlements) {
       const n = this.store.get(id);
-      if (!n || isTerminal(n)) { this.pendingSettlements.delete(id); continue; }
+      // Only a still-running node may take the stored result: a node that left
+      // running some other way (needs_input, cancelled tree) must not have a
+      // stale settlement replayed onto it.
+      if (!n || isTerminal(n) || n.status !== "running") {
+        this.pendingSettlements.delete(id);
+        continue;
+      }
       try {
         this.withBatch(() => this.finishTurn(n, pending.result, pending.live));
         this.pendingSettlements.delete(id);

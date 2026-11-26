@@ -1701,6 +1701,29 @@ describe("Runtime: a settlement the store refused is retried, not lost", () => {
     expect(checkInvariants(w.store, w.runner.live())).toEqual([]);
   });
 
+
+  it("never replays a refused settlement onto a node the user cancelled meanwhile", async () => {
+    const w = world(() => "hold", { turnStallMs: 1_000, stallMs: 10_000 });
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.tick();
+    const real = w.store.transaction.bind(w.store);
+    let refuse = true;
+    (w.store as { transaction: (fn: () => unknown) => unknown }).transaction = fn => {
+      if (refuse) { refuse = false; throw new Error("disk hiccup"); }
+      return real(fn);
+    };
+    await w.runner.release(child.id, { kind: "completed", text: "all done" });
+    expect(w.store.get(child.id)?.status).toBe("running");
+    // The user stops the tree while the settlement is still pending.
+    w.runtime.cancel(child.id);
+    w.runtime.tick();
+    expect(w.store.get(child.id)).toMatchObject({ status: "cancelled", outcome: "stopped" });
+    // The refused settlement must not overwrite the user's stop with the completed result.
+    expect(w.store.get(child.id)?.result).toBe("Stopped by user");
+    expect(checkInvariants(w.store, w.runner.live())).toEqual([]);
+  });
+
   it("retries a refused end() the same way", async () => {
     const w = world(() => "hold", { turnStallMs: 1_000, stallMs: 10_000 });
     const root = w.runtime.begin(beginReq());
