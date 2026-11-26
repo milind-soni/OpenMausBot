@@ -814,7 +814,7 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
   }
 }
 
-import { WORKSPACE_CREDENTIAL_ENV, CONTROL_PLANE_ENV, CONTROL_PLANE_ENV_PREFIX, stripControlPlaneEnv, stripWorkspaceCredentialEnv, PROVIDER_CREDENTIAL_ENV, OPENCODE_PROVIDER_ENV } from "./credential-env.ts";
+import { WORKSPACE_CREDENTIAL_ENV, CONTROL_PLANE_ENV, CONTROL_PLANE_ENV_PREFIX, stripControlPlaneEnv, stripWorkspaceCredentialEnv, PROVIDER_CREDENTIAL_ENV, OPENCODE_PROVIDER_ENV, onWorkspaceServer } from "./credential-env.ts";
 export { WORKSPACE_CREDENTIAL_ENV, CONTROL_PLANE_ENV, CONTROL_PLANE_ENV_PREFIX, stripControlPlaneEnv, stripWorkspaceCredentialEnv, PROVIDER_CREDENTIAL_ENV, OPENCODE_PROVIDER_ENV };
 
 export const OPENCODE_PROVIDER_KEY_LIMIT = 20;
@@ -1181,10 +1181,10 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
       if (cfg.openaiCompat.provider) defaults.provider = cfg.openaiCompat.provider;
       if (Object.keys(defaults).length) {
         const raw = entry.config;
-        const current =
-          typeof raw === "object" && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+        const current = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
         const merged = { ...current };
-        for (const [k, v] of Object.entries(defaults)) {
+        const workspaceServer = onWorkspaceServer(current.url, cfg.openaiCompat.url || process.env.OPENAI_COMPAT_URL);
+        for (const [k, v] of Object.entries(defaults).filter(([key]) => key === "url" || workspaceServer)) {
           // An empty provider means "no upstream pin"; never fill it from the workspace.
           if (k === "provider" && typeof merged[k] === "string") continue;
           if (typeof merged[k] !== "string" || !(merged[k] as string).trim()) merged[k] = v;
