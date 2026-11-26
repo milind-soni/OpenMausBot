@@ -4149,5 +4149,6 @@
   "server.github.card.description": "Connectez GitHub pour que {bot} puisse pousser son travail vers vos dépôts.",
   "server.github.card.connectInApps": "Connectez GitHub depuis cette carte dans l'app de votre ordinateur, ou dans Apps.",
   "githubSignIn.title": "Connexion à GitHub",
-  "githubSignIn.tokenPlaceholder": "github_pat_…"
+  "githubSignIn.tokenPlaceholder": "github_pat_…",
+  "settings.startFreshShortcut.title": "Raccourci pour Repartir à zéro"
 }

@@ -11896,5 +11896,6 @@
   "server.github.card.description": "Connetti GitHub perché {bot} possa inviare il suo lavoro ai tuoi repository.",
   "server.github.card.connectInApps": "Connetti GitHub da questa scheda nell'app sul tuo computer, oppure in App.",
   "githubSignIn.title": "Accesso a GitHub",
-  "githubSignIn.tokenPlaceholder": "github_pat_…"
+  "githubSignIn.tokenPlaceholder": "github_pat_…",
+  "settings.startFreshShortcut.title": "Scorciatoia per Parti da zero"
 }

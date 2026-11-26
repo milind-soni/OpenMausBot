@@ -10559,5 +10559,6 @@
   "server.github.card.description": "連線 GitHub 後，{bot} 就能把工作推送到你的儲存庫。",
   "server.github.card.connectInApps": "請在電腦上的應用程式中透過此卡片連線 GitHub，或在「應用程式」中連線。",
   "githubSignIn.title": "GitHub 登入",
-  "githubSignIn.tokenPlaceholder": "github_pat_…"
+  "githubSignIn.tokenPlaceholder": "github_pat_…",
+  "settings.startFreshShortcut.title": "重新開始對話快速鍵"
 }

@@ -10468,5 +10468,6 @@
   "server.github.card.description": "连接 GitHub 后，{bot} 就能把工作推送到你的仓库。",
   "server.github.card.connectInApps": "请在电脑上的应用中通过此卡片连接 GitHub，或在“应用”中连接。",
   "githubSignIn.title": "GitHub 登录",
-  "githubSignIn.tokenPlaceholder": "github_pat_…"
+  "githubSignIn.tokenPlaceholder": "github_pat_…",
+  "settings.startFreshShortcut.title": "重新开始对话快捷键"
 }

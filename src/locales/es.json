@@ -6741,5 +6741,6 @@
   "server.github.card.description": "Conecta GitHub para que {bot} pueda subir su trabajo a tus repositorios.",
   "server.github.card.connectInApps": "Conecta GitHub desde esta tarjeta en la app de tu ordenador o en Apps.",
   "githubSignIn.title": "Inicio de sesión en GitHub",
-  "githubSignIn.tokenPlaceholder": "github_pat_…"
+  "githubSignIn.tokenPlaceholder": "github_pat_…",
+  "settings.startFreshShortcut.title": "Atajo para Empezar de nuevo"
 }

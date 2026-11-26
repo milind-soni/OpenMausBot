@@ -4421,5 +4421,6 @@
   "server.github.card.description": "Підключіть GitHub, щоб {bot} міг надсилати роботу у ваші репозиторії.",
   "server.github.card.connectInApps": "Підключіть GitHub через цю картку в застосунку на комп'ютері або в розділі «Застосунки».",
   "githubSignIn.title": "Вхід у GitHub",
-  "githubSignIn.tokenPlaceholder": "github_pat_…"
+  "githubSignIn.tokenPlaceholder": "github_pat_…",
+  "settings.startFreshShortcut.title": "Сполучення клавіш для початку з нуля"
 }

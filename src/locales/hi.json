@@ -4001,5 +4001,6 @@
   "server.github.card.description": "GitHub कनेक्ट करें ताकि {bot} अपना काम आपकी रिपॉज़िटरी में पुश कर सके।",
   "server.github.card.connectInApps": "अपने कंप्यूटर के ऐप में इस कार्ड से, या Apps में, GitHub कनेक्ट करें।",
   "githubSignIn.title": "GitHub साइन-इन",
-  "githubSignIn.tokenPlaceholder": "github_pat_…"
+  "githubSignIn.tokenPlaceholder": "github_pat_…",
+  "settings.startFreshShortcut.title": "नई शुरुआत का शॉर्टकट"
 }

@@ -8278,5 +8278,6 @@
   "server.github.card.description": "GitHub に接続すると、{bot} が作業をあなたのリポジトリにプッシュできます。",
   "server.github.card.connectInApps": "コンピューターのアプリのこのカード、またはアプリ画面から GitHub に接続してください。",
   "githubSignIn.title": "GitHub サインイン",
-  "githubSignIn.tokenPlaceholder": "github_pat_…"
+  "githubSignIn.tokenPlaceholder": "github_pat_…",
+  "settings.startFreshShortcut.title": "最初からやり直すショートカット"
 }
