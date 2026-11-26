@@ -52,20 +52,22 @@ export function chiefOfStaffPrompt(
   // Linked: every bot of both places, one rule for every bot (peer-roster.ts `linkedLayout`).
   const layout = linked?.far ? linkedLayout([...team, ...others], linked.far) : undefined;
   const teamMax = layout ? Math.min(team.length, layout.max) : ROSTER_MAX_BOTS;
-  const compact = layout ? { compact: layout.compact, keepId: layout.keepId } : {};
+  const othersMax = Math.max(ROSTER_MAX_BOTS - team.length, OTHERS_MIN_BOTS);
+  // The lines named with the link off stay exactly as they are; only those past them are names alone.
+  const compact = (full: number) => (layout ? { compact: layout.compact, full, keepId: layout.keepId } : {});
   const roster = renderRoster(team, {
     max: teamMax,
     empty: "- No other visible bots are available yet.",
-    about: !layout?.compact,
+    about: true,
     department: chiefSection,
-    ...compact,
+    ...compact(ROSTER_MAX_BOTS),
   });
   const othersRoster = others.length ? renderRoster(others, {
-    max: layout ? layout.max - teamMax : Math.max(ROSTER_MAX_BOTS - team.length, OTHERS_MIN_BOTS),
+    max: layout ? layout.max - teamMax : othersMax,
     empty: "",
     about: false,
     department: chiefSection,
-    ...compact,
+    ...compact(othersMax),
   }) : "";
 
   const delegation = canDelegate

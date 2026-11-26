@@ -116,7 +116,8 @@ export function createLinkedRoster(deps: LinkedRosterDeps) {
   function ordered(rows: readonly LinkedRow[], chief: LinkedRow | null, busy: boolean, max: number): LinkedRow[] {
     const first = (a: LinkedRow) => (a.id === chief?.id ? 2 : a.bot.chief ? 1 : 0);
     const byName = (a: LinkedRow, b: LinkedRow) => farLabel(a.bot.name, NAME_MAX).localeCompare(farLabel(b.bot.name, NAME_MAX), "en", { numeric: true, sensitivity: "base" }) || a.id.localeCompare(b.id);
-    const settled = (a: LinkedRow, b: LinkedRow) => first(b) - first(a) || Number(b.online) - Number(a.online) || byName(a, b);
+    const byPlace = (a: LinkedRow, b: LinkedRow) => farLabel(a.place.name, PLACE_MAX).localeCompare(farLabel(b.place.name, PLACE_MAX), "en", { sensitivity: "base" }) || a.peer.localeCompare(b.peer);
+    const settled = (a: LinkedRow, b: LinkedRow) => first(b) - first(a) || Number(b.online) - Number(a.online) || byPlace(a, b) || byName(a, b);
     const used = new Map<string, number>();
     if (busy && rows.length > max) for (const node of deps.active?.() ?? []) used.set(node.botId, Math.max(used.get(node.botId) ?? 0, node.createdAt));
     const kept = new Set([...rows].sort((a, b) => first(b) - first(a) || (used.get(b.id) ?? 0) - (used.get(a.id) ?? 0) || settled(a, b)).slice(0, max));
@@ -150,7 +151,8 @@ export function createLinkedRoster(deps: LinkedRosterDeps) {
       const role = (withRole || about) && !compact ? `${farLabel(row.bot.title, ROLE_MAX) || "General assistant"}, ` : "";
       const crown = row.id === chief?.id ? " [the person's Chief of Staff]" : row.bot.chief ? ` [Chief of Staff ${row.kind === "cloud" ? "on My Cloud" : "on this computer"}]` : "";
       const twin = here.has(folded) ? `, not the ${name} here` : "";
-      const id = !compact || twin || (names.get(folded) ?? 0) > 1 ? ` [id: ${address(row.id)}]` : "";
+      // The id stays where the name alone would not find the bot: shared, or cleaned or clipped on its way here.
+      const id = !compact || twin || (names.get(folded) ?? 0) > 1 || foldName(name) !== folded ? ` [id: ${address(row.id)}]` : "";
       const line = `- ${name} — ${role}${where(row)}${twin}${said ? ` (${said})` : ""}${crown}${what ? `: ${what}` : ""}${id}`;
       if (used + line.length + 1 > chars) break;
       used += line.length + 1;

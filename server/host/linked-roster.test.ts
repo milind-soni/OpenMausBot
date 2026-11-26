@@ -227,9 +227,9 @@ describe("every bot is told of the person's bots in both places while the link i
     expect(short).toContain("- Ziggy — Helper [id: ziggy-here]");
     expect(short).toContain(`- Ziggy — Helper, on My Cloud, not the Ziggy here [id: ${linkedId(CLOUD, "ziggy")}]`);
     const many = createLinkedRoster({ link: onCloud([mac({ id: "ziggy", name: "Ziggy" }, MAC, "MacBook Pro"), ...Array.from({ length: 25 }, (_, index) => mac({ id: `m${index}`, name: `Mac ${index}` }, MAC, "MacBook Pro"))]), bots: () => local });
-    const long = peerRosterPrompt([ziggy, chief], writer, many.forPeer(writer)).roster.split("\n");
-    expect(long).toContain("- Ziggy [id: ziggy-here]");
-    expect(long).toContain("- MausBot [Chief of Staff]");
+    const long = peerRosterPrompt([ziggy, chief, ...team(12)], writer, many.forPeer(writer)).roster.split("\n");
+    expect(long).toContain("- Ziggy — Helper [id: ziggy-here]");
+    expect(long).toContain("- Local 11");
     expect(long).toContain(`- Ziggy — on this computer "MacBook Pro", not the Ziggy here [id: ${linkedId(MAC, "ziggy")}]`);
     expect(long).toContain(`- Mac 3 — on this computer "MacBook Pro"`);
     expect(long.join("\n")).toContain("reach each with coordinate_bots by its name, or by the id shown where two bots share a name");
@@ -241,7 +241,8 @@ describe("every bot is told of the person's bots in both places while the link i
     expect(full).toContain("- Local 0 — Helper [id: local0]");
     expect(full).toContain(`- Helper 4 — Researcher, on My Cloud [id: ${linkedId(CLOUD, "far4")}]`);
     const compact = peerRosterPrompt(team(ROSTER_FULL_MAX - 5), writer, far(6)).roster.split("\n");
-    expect(compact).toContain("- Local 0");
+    expect(compact).toContain("- Local 0 — Helper [id: local0]");
+    expect(compact).toContain("- Local 14");
     expect(compact).toContain("- Helper 5 — on My Cloud");
     const capped = peerRosterPrompt(team(50), writer, far(30)).roster.split("\n");
     expect(capped.filter((line) => line.startsWith("- Local "))).toHaveLength(50);
@@ -254,11 +255,34 @@ describe("every bot is told of the person's bots in both places while the link i
     expect(overflow.at(-1)).toBe("[/TEAM ROSTER]");
   });
 
+  it("every line of this place's roster with the link off is in it, word for word, with the link on, past the long-form mark too", () => {
+    const bots = (count: number): Local[] => [chief, ...Array.from({ length: count }, (_, index) => ({ id: `local${index}`, name: `Local ${index}`, title: "Helper", description: "Helps" }))];
+    const botLines = (text: string) => text.split("\n").filter((line) => line.startsWith("- ") && !line.startsWith("- …"));
+    for (const [count, farCount] of [[5, 3], [15, 10], [30, 40], [45, 5]] as const) {
+      const roster = createLinkedRoster({ link: directory(farBots(farCount)), bots: () => bots(count) });
+      const team = bots(count).slice(1);
+      const off = peerRosterPrompt(team, writer).roster, on = peerRosterPrompt(team, writer, roster.forPeer(writer)).roster;
+      for (const line of botLines(off)) expect(on.split("\n"), `${count}+${farCount}`).toContain(line);
+      const chiefOff = chiefOfStaffPrompt("chief", bots(count), true, undefined, []).roster;
+      const chiefOn = chiefOfStaffPrompt("chief", bots(count), true, undefined, [], roster.forChief(chief, true)).roster;
+      for (const line of botLines(chiefOff)) expect(chiefOn.split("\n"), `Chief ${count}+${farCount}`).toContain(line);
+    }
+  });
+
+  it("a far bot whose name was cleaned on its way here keeps its id in the long form, and places come before names", () => {
+    const rows = [...farBots(25), row({ id: "odd", name: "Odd [one]" })];
+    const text = peerRosterPrompt([], writer, createLinkedRoster({ link: directory(rows), bots: () => local }).forPeer(writer)).roster;
+    expect(text).toContain(`- Odd one — on My Cloud [id: ${linkedId(CLOUD, "odd")}]`);
+    expect(text).toContain("- Helper 3 — on My Cloud\n");
+    const two = createLinkedRoster({ link: onCloud([mac({ id: "b", name: "Beta" }, MAC2, "Work PC"), mac({ id: "a", name: "Alpha" }, MAC2, "Work PC"), mac({ id: "z", name: "Zed" }, MAC, "Home Mac")]), bots: () => local });
+    expect(fenced(peerRosterPrompt([], writer, two.forPeer(writer)).roster.split("\n").slice(1, -1)).map((line) => line.split(" —")[0])).toEqual(["- Zed", "- Alpha", "- Beta"]);
+  });
+
   it("a Chief's roster follows the same rule with its own team, and list_bots names exactly the far bots a roster may", () => {
     const rows = [...farBots(25), row({ id: "paused", name: "Paused", paused: true })];
     const roster = createLinkedRoster({ link: directory(rows), bots: () => local });
     const prompt = chiefOfStaffPrompt("chief", local, true, undefined, [], roster.forChief(chief, true)).roster.split("\n");
-    expect(prompt).toContain("- Writer");
+    expect(prompt).toContain("- Writer — Writer: Drafts posts [id: writer]");
     expect(prompt.filter((line) => line.startsWith("- Helper "))).toHaveLength(25);
     expect(rows.filter((one) => roster.reaches(writer, one.id)).map((one) => one.bot.name)).toEqual(farBots(25).map((one) => one.bot.name));
     expect(roster.reaches({ visibility: { people: ["sam@example.com"] } }, rows[0]!.id)).toBe(false);

@@ -304,14 +304,17 @@ export interface RosterOptions {
   about: boolean;
   /** The reader's own department: a roster reaching past it names each bot's. */
   department?: string;
-  /** A long linked roster (`linkedLayout`): names alone, with an id only where `keepId` says two bots share the name. */
+  /** A long linked roster (`linkedLayout`): the lines past the first `full` (the ones the roster names with the link
+   * off) are names alone, with an id only where `keepId` says two bots share the name. */
   compact?: boolean;
+  full?: number;
   keepId?: (bot: RosterMember) => boolean;
 }
 
 /** While "This computer and My Cloud together" is on, every bot is told of every bot of the person's in both places it can
  * reach: at most ROSTER_ALL_MAX in all, this place's first; up to ROSTER_FULL_MAX in all each line carries its role, past
- * that names and places alone (list_bots has the rest). With the link off, rosters are what they always were. */
+ * that names and places alone (list_bots has the rest), except this place's lines the roster names with the link off,
+ * which stay as they are. With the link off, rosters are what they always were. */
 export const ROSTER_ALL_MAX = 60;
 export const ROSTER_FULL_MAX = 20;
 
@@ -346,9 +349,9 @@ export function renderRoster(team: readonly RosterMember[], opts: RosterOptions)
   const filed = new Set(team.map(bot => sectionKey(bot.section)));
   if (opts.department !== undefined) filed.add(sectionKey(opts.department));
   const departments = filed.size > 1;
-  const lines = listed.map((bot) => {
+  const lines = listed.map((bot, index) => {
     const name = clip(bot.name, ROSTER_NAME_MAX);
-    if (opts.compact) return `- ${name}${bot.chiefOfStaff ? " [Chief of Staff]" : ""}${opts.keepId?.(bot) ? ` [id: ${clip(bot.id, ROSTER_NAME_MAX)}]` : ""}`;
+    if (opts.compact && index >= (opts.full ?? 0)) return `- ${name}${bot.chiefOfStaff ? " [Chief of Staff]" : ""}${opts.keepId?.(bot) ? ` [id: ${clip(bot.id, ROSTER_NAME_MAX)}]` : ""}`;
     const role = clip(bot.title ?? "", ROSTER_ROLE_MAX) || "General assistant";
     const about = opts.about ? clip(bot.description ?? "", ROSTER_ABOUT_MAX) : "";
     const department = departments ? ` (${departmentLabel(bot)})` : "";
@@ -400,7 +403,7 @@ export function peerRosterPrompt(team: readonly RosterMember[], self?: Pick<Rost
       empty: layout ? "" : "- No other bots are reachable from here yet.",
       about: false,
       ...(self ? { department: self.section ?? "" } : {}),
-      ...(layout ? { compact: layout.compact, keepId: layout.keepId } : {}),
+      ...(layout ? { compact: layout.compact, full: PEER_ROSTER_MAX, keepId: layout.keepId } : {}),
     }),
     layout?.far,
     ROSTER_CLOSE,
