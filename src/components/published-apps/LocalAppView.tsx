@@ -139,7 +139,8 @@ export function LocalAppView({ id, botOf, onBack, onGoToChat, onOpenWindow }: {
     <Centered><Retry text={t("localApps.view.loadFailed")} onRetry={() => setReload((count) => count + 1)} /></Centered>
   ) : current ? (
     <AppFrame key={key} doc={current} botId={app.botId} threadId={app.threadId} title={app.name} height={600} handle={handle}
-      onHeight={() => {}} onProblem={setProblem} onTeardownRequested={() => onBack?.()} fill />
+      onHeight={() => {}} onProblem={setProblem} onTeardownRequested={() => onBack?.()} fill
+      {...(app.chat ? {} : { pageRefusal: t("localApps.view.chatGoneData") })} />
   ) : (
     <Centered><Loader2 size={18} className="animate-spin text-ink-tertiary motion-reduce:animate-none" aria-hidden="true" /></Centered>
   );
@@ -151,6 +152,9 @@ export function LocalAppView({ id, botOf, onBack, onGoToChat, onOpenWindow }: {
       ) : (
         <header className="shrink-0 border-b border-hairline/35 bg-app px-4 py-3"><div className="flex flex-wrap items-center gap-2">{header}</div></header>
       )}
+      {app && !app.chat && app.manifest.uses?.length ? (
+        <p role="status" data-local-app-chat-gone="" className="shrink-0 border-b border-hairline/35 px-4 py-2 text-[13px] text-ink-secondary">{t("localApps.view.chatGoneData")}</p>
+      ) : null}
       {installFailed && <p role="alert" className="shrink-0 border-b border-hairline/35 px-4 py-2 text-[13px] text-danger">{installFailed}</p>}
       <div data-local-app-view={id} data-local-app-state={current ? "live" : failed ? "failed" : app ? "loading" : "absent"} className="relative min-h-0 flex-1 bg-app">
         {body}

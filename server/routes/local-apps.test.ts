@@ -215,13 +215,18 @@ describe("local apps", () => {
     expect((await save(page(), "guest")).status).toBe(403);
   });
 
-  it("carries the abilities the page declared into the app's manifest", async () => {
-    const { page, save, store, bot } = await fixture();
-    const messageId = page();
-    const row = store.messagesFor(bot.threadId).find((message) => message.id === messageId)!;
-    store.patchMessage(bot.threadId, messageId, { app: { ...row.app!, uses: ["data", "state", "Not valid"] } as never });
-    expect((await save(messageId)).body.app.manifest).toEqual({ name: "Sales board", uses: ["data", "state"] });
+  it("carries the abilities the page declared into the app's manifest, and its newest version's after", async () => {
+    const { save, chatApps, bot, call } = await fixture();
+    const shown = chatApps.createAppCard({ bot, threadId: bot.threadId, input: { tool: "show_html", html: "<p>x</p>", title: "Sales board", uses: ["data", "state"] } });
+    if (shown instanceof Promise || !shown.ok) throw new Error("not shown");
+    const app = (await save(shown.messageId)).body.app;
+    expect(app.manifest).toEqual({ name: "Sales board", uses: ["data", "state"] });
+    chatApps.createAppCard({ bot, threadId: bot.threadId, input: { tool: "update_html", app_id: shown.messageId, html: "<p>y</p>", uses: ["state"] } });
+    expect((await call("GET", `/api/local-apps/${app.id}`)).body.app.manifest).toEqual({ name: "Sales board", uses: ["state"] });
+    chatApps.createAppCard({ bot, threadId: bot.threadId, input: { tool: "update_html", app_id: shown.messageId, html: "<p>z</p>", uses: [] } });
+    expect((await call("GET", `/api/local-apps/${app.id}`)).body.app.manifest).toEqual({ name: "Sales board" });
   });
+
 
   it("lets only whoever saved an app, or an admin, rename or remove it, and never from a conversation they may not change", async () => {
     const { page, save, call } = await fixture(() => true, { everything: true });

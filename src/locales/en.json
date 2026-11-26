@@ -7412,6 +7412,7 @@
   "localApps.view.version": "Version {n}",
   "localApps.view.kept": "Version {n} · kept",
   "localApps.view.chatGone": "The chat it came from was deleted",
+  "localApps.view.chatGoneData": "This app's chat was deleted, so its live data and saved state aren't available.",
   "localApps.view.loadFailed": "This app couldn't be opened.",
   "localApps.view.gone": "This app is no longer here.",
   "localApps.view.by": "By {bot}",

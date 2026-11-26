@@ -22,7 +22,7 @@ class FakeApiError extends Error {
   status: number; body?: Record<string, unknown>;
   constructor(message: string, status: number, body?: Record<string, unknown>) { super(message); this.status = status; this.body = body; }
 }
-vi.mock("@/state/store", () => ({ useStore: () => ({ state: fixture.state, dispatch: fixture.dispatch, flushBotPatches: async () => null }) }));
+vi.mock("@/state/store", () => ({ useStore: () => ({ state: fixture.state, dispatch: fixture.dispatch, flushBotPatches: async () => null }), api: fixture.api, ApiError: FakeApiError }));
 vi.mock("@/state/api", () => ({ api: fixture.api, ApiError: FakeApiError }));
 
 const { PublishedAppsPage } = await import("./PublishedAppsPage");
@@ -58,12 +58,14 @@ beforeEach(() => {
     if (path === "/api/published-apps") return { apps: published };
     if (path.startsWith("/api/published-apps/framing")) return { framing: "blocked" };
     if (path === "/api/local-apps") return { apps: saved };
+    if (path.endsWith("/rpc")) return { columns: [{ name: "region", type: "VARCHAR" }], rows: [{ region: "north" }], truncated: false };
     const one = /^\/api\/local-apps\/(la_\w+)(\/app)?/.exec(path);
     const found = saved.find((candidate) => candidate.id === one?.[1]);
     if (!one || !found) throw new FakeApiError("No such app.", 404);
     if (one[2]) {
       const rev = new URL(path, "http://omb.test").searchParams.get("rev");
-      return botHtmlDocument({ messageId: found.messageId, rev: Number(rev), html: `<p>${found.name} version ${Number(rev) + 1}</p>` });
+      return botHtmlDocument({ messageId: found.messageId, rev: Number(rev), html: `<p>${found.name} version ${Number(rev) + 1}</p>`,
+        ...(found.manifest.uses ? { uses: found.manifest.uses as Array<"data" | "state"> } : {}) });
     }
     if (method === "DELETE") { saved = saved.filter((candidate) => candidate.id !== found.id); return { ok: true }; }
     if (method === "PATCH") {
@@ -306,3 +308,44 @@ describe("installing a saved app on this computer", () => {
     expect(host.querySelector("header [data-local-app-installed]")).toBeNull();
   });
 });
+
+describe("a saved app's live data and state", () => {
+  const frame = () => host.querySelector<HTMLIFrameElement>("[data-local-app-view] iframe")!;
+  const fromPage = (data: unknown) => act(async () => {
+    window.dispatchEvent(new MessageEvent("message", { data, source: frame().contentWindow as unknown as MessageEventSource }));
+    for (let i = 0; i < 4; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  let toPage: Array<{ id?: unknown; result?: unknown; error?: { message?: string } }>;
+  const handshake = async () => {
+    toPage = [];
+    vi.spyOn(frame().contentWindow!, "postMessage").mockImplementation((message: unknown) => { toPage.push(message as never); });
+    await fromPage({ jsonrpc: "2.0", id: "init", method: "ui/initialize", params: {} });
+    await fromPage({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} });
+  };
+  const QUERY = { jsonrpc: "2.0", id: "q1", method: "mausbot/data/query", params: { sql: "SELECT region FROM sales" } };
+
+  it("queries its bot's data through the page route, with its source conversation and message", async () => {
+    saved = [{ ...BOARD, manifest: { name: "Sales board", uses: ["data", "state"] } }];
+    openLocalApp(BOARD.id);
+    await show();
+    await handshake();
+    await fromPage(QUERY);
+    const call = calls.find((one) => one.path.endsWith("/rpc"))!;
+    expect(call).toEqual({ method: "POST", path: `/api/bots/mira/apps/m-${BOARD.id}/rpc`,
+      body: { threadId: "sales", method: "mausbot/data/query", params: { sql: "SELECT region FROM sales" } } });
+    expect(toPage.find((message) => message.id === "q1")?.result).toEqual({ columns: [{ name: "region", type: "VARCHAR" }], rows: [{ region: "north" }], truncated: false });
+    expect(host.querySelector("[data-local-app-chat-gone]")).toBeNull();
+  });
+
+  it("says once that its chat was deleted, and answers the page's calls with why, asking no server", async () => {
+    saved = [{ ...ROTA, manifest: { name: "Staff rota", uses: ["data"] } }];
+    openLocalApp(ROTA.id);
+    await show();
+    expect(host.querySelector("[data-local-app-chat-gone]")?.textContent).toBe("This app's chat was deleted, so its live data and saved state aren't available.");
+    await handshake();
+    await fromPage(QUERY);
+    expect(calls.some((one) => one.path.endsWith("/rpc"))).toBe(false);
+    expect(toPage.find((message) => message.id === "q1")?.error?.message).toBe("This app's chat was deleted, so its live data and saved state aren't available.");
+  });
+});
+

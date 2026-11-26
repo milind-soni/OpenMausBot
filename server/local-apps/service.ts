@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { oneLine, type AppDocument, type AppPayload } from "../../shared/app.ts";
+import { APP_USES, oneLine, type AppDocument, type AppPayload, type AppUse } from "../../shared/app.ts";
 import { botHtmlDocument } from "../../shared/app-frame/document.ts";
 import { LOCAL_APP_NAME_MAX, type LocalApp, type LocalAppManifest } from "../../shared/local-apps.ts";
 import type { AppDocs } from "../app-docs.ts";
@@ -27,11 +27,17 @@ export type SaveRefusal = { ok: false; status: 404 | 409 | 507; error: string };
 
 const NOT_HERE = "That page is not in this conversation.";
 
-function pageUses(app: AppPayload): string[] | undefined {
-  const declared = (app as { uses?: unknown }).uses;
-  if (!Array.isArray(declared)) return undefined;
-  const uses = [...new Set(declared.filter((use): use is string => typeof use === "string" && /^[a-z][\w-]{0,31}$/.test(use)))].slice(0, 16);
+/** What a stored version of the page declared it uses (show_html `uses`), as the chat reads it. */
+function docUses(docs: AppDocs, doc: string): AppUse[] | undefined {
+  const declared = docs.read(doc)?.data?.uses;
+  const uses = Array.isArray(declared) ? declared.filter((use): use is AppUse => (APP_USES as readonly string[]).includes(use)) : [];
   return uses.length ? uses : undefined;
+}
+
+/** The manifest says what the newest version declared. */
+function withUses(manifest: LocalAppManifest, uses: AppUse[] | undefined): LocalAppManifest {
+  const { uses: _was, ...rest } = manifest;
+  return uses ? { ...rest, uses } : rest;
 }
 
 /** The versions a page's row still keeps, oldest first. */
@@ -83,7 +89,10 @@ export function createLocalApps(deps: {
     for (const record of store.savedFrom(threadId, message.id)) {
       const known = new Set(record.versions.map((version) => version.rev));
       const added = rowVersions(app, now()).filter((version) => !known.has(version.rev) && version.rev > Math.max(...known));
-      if (added.length) store.update(record.id, (was) => ({ ...was, versions: [...was.versions, ...added] }), now());
+      if (added.length) {
+        const uses = docUses(deps.docs, added.at(-1)!.doc);
+        store.update(record.id, (was) => ({ ...was, versions: [...was.versions, ...added], manifest: withUses(was.manifest, uses) }), now());
+      }
     }
   };
   const followRow = (record: LocalAppRecord) => {
@@ -121,7 +130,7 @@ export function createLocalApps(deps: {
       const existing = store.fromPage(threadId, messageId, owner);
       if (existing) return { ok: true, app: followRow(existing), created: false };
       if (store.full()) return { ok: false, status: 507, error: "There are too many saved apps here. Remove one first." };
-      const uses = pageUses(row.app);
+      const uses = docUses(deps.docs, row.app.doc);
       const name = nameOf(row.app.title) || "App";
       const manifest: LocalAppManifest = { name, ...(uses ? { uses } : {}) };
       const app = store.add({ name, botId, threadId, messageId, ...(owner ? { owner } : {}), versions: rowVersions(row.app, now()), manifest }, now());
@@ -151,8 +160,9 @@ export function createLocalApps(deps: {
       const folder = stored.data?.folder && origin
         ? files.folder(target, { key: viewer?.key ?? "", allowed: () => keeps(id, version.doc) && (viewer?.allowed() ?? true) }) : undefined;
       const filesAt = folder ? `${origin}${LOCAL_APP_FILES_PREFIX}${folder.slice(PAGE_FILES_PREFIX.length)}` : undefined;
+      const uses = docUses(deps.docs, version.doc);
       return botHtmlDocument({ messageId: record.messageId, rev: version.rev, html: stored.html, title: record.name,
-        ...(stored.data?.format === "jsx" ? { format: "jsx" as const } : {}), ...(filesAt ? { files: filesAt } : {}) });
+        ...(stored.data?.format === "jsx" ? { format: "jsx" as const } : {}), ...(filesAt ? { files: filesAt } : {}), ...(uses ? { uses } : {}) });
     },
     serveFile(req, res, path, method) {
       if (!path.startsWith(LOCAL_APP_FILES_PREFIX)) return false;

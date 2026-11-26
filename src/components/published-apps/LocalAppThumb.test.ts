@@ -73,4 +73,24 @@ describe("a saved app's card picture", () => {
     await show("la_thumb000000000004");
     expect(seen).toBeNull();
   });
+
+  it("answers nothing the page asks: no data, state or message reaches a server", async () => {
+    api.mockResolvedValue(botHtmlDocument({ messageId: "m", rev: 0, html: "<p>board</p>", uses: ["data", "state"] }));
+    await show("la_thumb000000000005");
+    await act(async () => seen!([{ isIntersecting: true }]));
+    await settle();
+    const frame = host.querySelector("iframe")!;
+    const posted: unknown[] = [];
+    vi.spyOn(frame.contentWindow!, "postMessage").mockImplementation((message: unknown) => { posted.push(message); });
+    for (const data of [{ jsonrpc: "2.0", id: "init", method: "ui/initialize", params: {} },
+      { jsonrpc: "2.0", id: "q", method: "mausbot/data/query", params: { sql: "SELECT 1" } },
+      { jsonrpc: "2.0", id: "s", method: "mausbot/state/set", params: { key: "a", value: 1 } },
+      { jsonrpc: "2.0", id: "m", method: "ui/message", params: { role: "user", content: [{ type: "text", text: "hi" }] } }]) {
+      await act(async () => { window.dispatchEvent(new MessageEvent("message", { data, source: frame.contentWindow as unknown as MessageEventSource })); });
+    }
+    await settle();
+    expect(posted).toEqual([]);
+    expect(api).toHaveBeenCalledTimes(1);
+  });
 });
+
