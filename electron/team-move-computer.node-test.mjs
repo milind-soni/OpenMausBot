@@ -272,3 +272,42 @@ test("a team's own page moves several of this computer's bots after one confirm 
     assert.equal(no.journal.value, null, "a cancel moves nothing");
   } finally { no.done(); }
 });
+
+test("a bot held for another move here (on its way to My Cloud) is not let go of by a team move that was refused its hold", async () => {
+  const calls = [];
+  let journal = null;
+  const moves = createTeamMove({
+    journal: { read: () => structuredClone(journal), write: (value) => { journal = structuredClone(value); } }, inTeam: () => true,
+    timers: { set: () => null, clear: () => {} },
+    open: () => ({
+      engine: { move: async () => {}, check: async () => ({ ok: true }) },
+      myCloud: { call: async (method, route, body) => { calls.push(`${method} ${body?.state ?? ""}`.trim()); return method === "POST" ? reply(409, { error: "Scout is moving to My Cloud. It's ready there in a moment." }) : reply(200, { released: true }); } },
+      team: { begin: async () => ({ name: "Scout" }), done: async () => {} }, close: async () => {},
+    }),
+  });
+  await moves.start({ bot: BOTS[0], team: ACME, from: "computer" });
+  assert.deepEqual(calls, ["POST moving"], "no DELETE: the other move's hold stays");
+  assert.deepEqual((({ phase, failing }) => ({ phase, failing }))(journal.moves[0]), { phase: "copy", failing: true });
+  moves.close();
+});
+
+test("a bot on its way to My Cloud by itself is not offered to a team, and stops before anything changes if asked by id", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "omb-team-computer-"));
+  const handlers = new Map(), here = [];
+  const journal = { value: null, read() { return this.value; }, write(next) { this.value = next; } };
+  const move = installTeamMove({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, cloudPage: (event) => event.page ?? null, home: () => null,
+    computer: { available: () => true, busy: (id) => id === "quill-bot-1", request: async (route) => { here.push(route); return new Response(JSON.stringify(route === "/api/bots?messages=0" ? { bots: BOTS } : {}), { status: 200 }); } },
+    account: () => ({ state: () => ({ status: "connected", teams: [{ id: ACME.id, name: ACME.name, machine: { origin: ACME.origin, status: "ready" } }] }), pairTeam: async () => { throw new Error("offline"); } }),
+    file: () => join(dir, "send.json"), journalFile: () => join(dir, "moves.json"), journal,
+  });
+  try {
+    assert.deepEqual((await handlers.get("cloud-send:team-choices")(LOCAL)).bots.map((bot) => bot.id), ["scout-bot-1", "wren-bot-1"]);
+    await handlers.get("cloud-send:team-move-coded")(LOCAL, "quill-bot-1", ACME.id, "Quill");
+    await move.kick();
+    assert.deepEqual((({ stopped, why }) => ({ stopped, why }))(journal.value.moves[0]), { stopped: true, why: "elsewhere" });
+    assert.equal(move.moving("quill-bot-1"), false, "a stopped move holds no bot");
+    await handlers.get("cloud-send:team-move-coded")(LOCAL, "scout-bot-1", ACME.id, "Scout");
+    assert.equal(move.moving("scout-bot-1"), true, "My Cloud's move is told this one is taken");
+  } finally { move.close(); rmSync(dir, { recursive: true, force: true }); }
+});

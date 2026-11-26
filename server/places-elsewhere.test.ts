@@ -110,6 +110,12 @@ describe("when the app couldn't read a place lately", () => {
     expect(here.missed("ask @Sales", [], linked)).toHaveLength(1);
   });
 
+  it("on this computer, a bot in the person's team comes with the way to move one there from this bot's menu", () => {
+    const here = createPlacesElsewhere({ dataDir: dataDir() });
+    here.write({ v: 1, self: { name: "this computer", kind: "computer" }, places: [{ name: "Acme", kind: "team", bots: ["Sales"] }] });
+    expect((here.explain("Sales") as { where: string }).where).toContain("or move this bot to Acme: in the desktop app, open the bot's menu in the sidebar and choose \"Move to Acme\"");
+  });
+
   it("a place the app no longer lists is named, but nothing is offered there", () => {
     const here = createPlacesElsewhere({ dataDir: dataDir() });
     here.write({ v: 1, self: { name: "this computer", kind: "computer" }, places: [{ ...ZIGGY, away: true }, { name: "Acme", kind: "team", bots: ["Sales"], away: true }] });

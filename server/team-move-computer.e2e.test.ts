@@ -58,8 +58,9 @@ async function say(bot: { id: string }, threadId: string, text: string) {
   await expect.poll(async () => await idle() && (await rows(fx.local, threadId)).length >= before + 2, { timeout: 60_000, interval: 100 }).toBe(true);
 }
 
-/** A bot on this computer with a chat; `routine`: a routine that is on; `file`: a file in its folder. */
-async function botHere(name: string, { routine = false, file = false } = {}) {
+/** A bot on this computer with a chat; `routine`: a routine that is on; `file`: a file in its folder; `engine`: then set
+ * to run on an AI only this computer has. */
+async function botHere(name: string, { routine = false, file = false, engine = "" } = {}) {
   const created = await fx.local("POST", "/api/bots", { name, soul: `You are ${name}.`, modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   const bot = created.body.bot as Bot;
@@ -72,6 +73,7 @@ async function botHere(name: string, { routine = false, file = false } = {}) {
     expect(made.body.routine.enabled).toBe(true);
     routineId = made.body.routine.id as string;
   }
+  if (engine) expect((await fx.local("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: engine, model: "llama-9" } })).status).toBe(200);
   if (file) {
     mkdirSync(desktopHome("workspaces", bot.id), { recursive: true });
     writeFileSync(desktopHome("workspaces", bot.id, "report.md"), `# ${name} report\nPorto, June.\n`);
@@ -112,22 +114,26 @@ it("offers Acme on this computer's page, and refuses the bots that stay: MausBot
   expect(journal()).toEqual([]);
 }, hostTimeout(60_000));
 
-it("moves three bots, one after another, with their chats, a routine and a file; the app quit half-way goes on where it was", async () => {
-  moved = [await botHere("Scout", { routine: true }), await botHere("Quill", { file: true }), await botHere("Wren")];
+it("moves three bots, one after another, with their chats, a routine, a file and an AI only this computer has; the app quit half-way goes on where it was", async () => {
+  moved = [await botHere("Scout", { routine: true }), await botHere("Quill", { file: true }), await botHere("Wren", { engine: "ollama-here" })];
   const ids = moved.map((entry) => entry.bot.id);
   const watch = watchRoutine(moved[0]!.routine!);
   // The app is killed while Quill, the second, is on its way into the check: Scout is in Acme, Quill held here.
+  let killed = false;
   fx.beforeTeamJournalWrite = (value) => {
-    if ((value?.moves ?? []).some((entry: { bot: { id: string }; phase: string }) => entry.bot.id === ids[1] && entry.phase === "check")) throw new Error("the app was killed");
+    if (killed || !(value?.moves ?? []).some((entry: { bot: { id: string }; phase: string }) => entry.bot.id === ids[1] && entry.phase === "check")) return;
+    killed = true;
+    throw new Error("the app was killed");
   };
   const started = await ask<Many>("cloud-send:team-move-many", ids, ACME.id);
   expect(started.view?.batch?.map((bot) => bot.id)).toEqual(ids);
-  await expect.poll(() => journal().find((move) => move.bot.id === ids[1])?.phase, { timeout: 240_000, interval: 250 }).toBe("final");
+  await expect.poll(() => killed, { timeout: 240_000, interval: 250 }).toBe(true);
+  await fx.relaunch();
   fx.beforeTeamJournalWrite = null;
+  expect(journal().find((move) => move.bot.id === ids[1])?.phase).toBe("final");
   expect(journal().find((move) => move.bot.id === ids[0])?.phase).toBe("done");
   expect(journal().find((move) => move.bot.id === ids[2])?.phase).toBe("copy");
   expect((await localBots()).find((bot) => bot.id === ids[1])?.movedTo?.state, "this computer holds Quill").toBe("moving");
-  await fx.relaunch();
   await fx.teamMove.kick();
   await settled(ids);
   await watch.stop();
@@ -148,6 +154,10 @@ it("moves three bots, one after another, with their chats, a routine and a file;
     expect(existsSync(notes) ? readFileSync(notes, "utf8") : "").not.toContain("oolong");
   }
   expect(readFileSync(teamHome("workspaces", moved[1]!.bot.id, "report.md"), "utf8")).toBe("# Quill report\nPorto, June.\n");
+  // Wren runs here on an AI Acme doesn't have: the move still finishes, and Wren arrives on one of Acme's own.
+  type Engine = { modelSelection?: { instanceId: string } };
+  expect(((await localBots()).find((entry) => entry.id === ids[2]) as Engine).modelSelection?.instanceId).toBe("ollama-here");
+  expect((there.find((entry) => entry.id === ids[2]) as Engine).modelSelection?.instanceId).toBe("claude");
 
   // The routine is on in Acme, gone from this computer, and was never on in both places.
   expect((await teamRoutines("olive")).filter((routine) => routine.id === moved[0]!.routine)).toEqual([expect.objectContaining({ enabled: true, botId: ids[0] })]);
@@ -183,4 +193,15 @@ it("the whole-computer move stays refused at the Team Cloud: a member's own sess
   expect((await onTeam("olive")("GET", "/api/cloud-send/manifest")).status).toBe(403);
   expect((await onTeam("olive")("GET", "/api/cloud-send?move=1")).status).toBe(403);
   expect((await onTeam("olive")("POST", "/api/cloud-send/chats", { v: 1, dataDir: "/x", conversations: [] })).status).toBe(403);
+}, hostTimeout(60_000));
+
+it("with a My Cloud that takes this computer's bots, a team is offered only once the person keeps them here", async () => {
+  const teamOnly = fx.account.state;
+  fx.account.state = { ...teamOnly, machine: { status: "ready", origin: fx.cloudBase, moves: true } };
+  try {
+    expect(await ask("cloud-send:teams")).toEqual({ teams: [] });
+    expect((await ask<Many>("cloud-send:team-move-many", [moved[0]!.bot.id], ACME.id)).refused?.code).toBe("computerMoving");
+    await ask("one-home:keep-set", true);
+    expect(await ask("cloud-send:teams")).toEqual({ teams: [{ ...ACME, ready: true }], from: "computer" });
+  } finally { fx.account.state = teamOnly; }
 }, hostTimeout(60_000));

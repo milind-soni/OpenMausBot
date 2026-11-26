@@ -76,9 +76,10 @@ function bringTogether(place: Place, self: Elsewhere["self"], to: "bot" | "perso
   return to === "bot" ? `Offer to bring their bots together on ${home.name}: ${how}.` : `To bring your bots together on ${home.name}, ${how}.`;
 }
 
-/** Nothing connects a team to the person's own places. The app offers "Move to Acme" only on My Cloud's own page. */
+/** Nothing connects a team to the person's own places. The app offers "Move to Acme" on My Cloud's own page and on this
+ * computer's. */
 function moveToTeam(place: Place, self: Elsewhere["self"], to: "bot" | "person"): string {
-  const move = self.kind === "cloud"
+  const move = self.kind === "cloud" || self.kind === "computer"
     ? `or move this bot to ${place.name}: in the desktop app, open the bot's menu in the sidebar and choose "Move to ${place.name}"`
     : `or, from My Cloud, move a bot to ${place.name}`;
   return to === "bot" ? `Tell the person they can ask it in ${place.name}, ${move}.` : `Ask it in ${place.name}, ${move}.`;

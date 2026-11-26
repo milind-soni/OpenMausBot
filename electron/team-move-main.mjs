@@ -138,7 +138,7 @@ const STAYS_TEXT = {
  *   pageOrigin?(event: unknown): string | null,
  *   confirmMove?(words: { message: string, detail: string, buttons: string[] }): Promise<boolean>,
  *   home(): { origin: string, grant(): Promise<{ origin: string, code: string }> } | null,
- *   computer?: { request(route: string, init?: RequestInit): Promise<Response>, available(): boolean } | null,
+ *   computer?: { request(route: string, init?: RequestInit): Promise<Response>, available(): boolean, busy?(botId: string): boolean } | null,
  *   account(): { state(): any, pairTeam(teamId: string): Promise<{ origin: string, code: string }> } | null,
  *   file(): string,
  *   journalFile(): string,
@@ -149,7 +149,8 @@ const STAYS_TEXT = {
  *   log?(line: string): void,
  *   t?(key: string, params?: Record<string, string | number>): string,
  * }} deps `home`: My Cloud and the Admin's code for it. `computer`: this computer's own server, as its owner, and whether
- * its bots are its own to move now (not while they move to My Cloud or live there). `account`: the MausBot Cloud sign-in,
+ * its bots are its own to move now (not while they move to My Cloud or live there), and whether one is on its way to My
+ * Cloud by itself (`busy`). `account`: the MausBot Cloud sign-in,
  * whose verified session names the person's teams. `file`: the send's own state; `journalFile`: the moves'. `openTeam`:
  * shows the team's page. `pageOrigin`: the origin of the page asking, when it is this window's active server's main frame.
  * `confirmMove`: asks the person outside any page.
@@ -222,6 +223,7 @@ export function installTeamMove({ ipcMain, cloudPage, pageOrigin = () => null, c
         if (!bot) throw Object.assign(new Error(`${move.bot.name} is no longer on ${place}.`), { final: true, why: "gone" });
         if (bot.movedTo && bot.movedTo.team?.id !== move.team.id) throw Object.assign(new Error(`${bot.name} is moving to ${bot.movedTo.team?.name}.`), { final: true, why: "elsewhere" });
         if (fromComputer) {
+          if (computer?.busy?.(bot.id)) throw Object.assign(new Error(`${bot.name} is moving to My Cloud.`), { final: true, why: "elsewhere" });
           const stays = computerStays(bots, bot.id, move.team.id);
           if (stays) throw Object.assign(new Error(STAYS_TEXT[stays](bot.name)), { final: true, why: stays });
         } else if (bot.chiefOfStaff) throw Object.assign(new Error(`${bot.name} is your Chief of Staff, which stays on My Cloud.`), { final: true, why: "chief" });
@@ -296,7 +298,7 @@ export function installTeamMove({ ipcMain, cloudPage, pageOrigin = () => null, c
     if (!computer || !computerReady()) return [];
     const listed = await computerSession(computer).call("GET", "/api/bots?messages=0");
     if (!listed.ok) throw new Error("OpenMausBot on this computer did not answer.");
-    return bringableBots(listed.body?.bots);
+    return bringableBots(listed.body?.bots).filter((bot) => !computer.busy?.(bot.id));
   }
   /** Of `ids`, this computer's bots that may go, by its own list: none of them names a bot that stays. */
   async function chosenComputerBots(ids) {
@@ -379,7 +381,7 @@ export function installTeamMove({ ipcMain, cloudPage, pageOrigin = () => null, c
     retry: () => moves.retry(),
     close: () => moves.close(),
     journal: () => (journal ?? jsonFile(journalFile)).read(),
-    /** A bot of this computer moving into a team now: its menu offers no other move. */
-    moving: (botId) => sourceOf(moves.moving(botId)) === "computer" && moves.moving(botId) !== null,
+    /** This bot is on its way into a team now: no other move takes it meanwhile. */
+    moving: (botId) => { const held = moves.moving(botId); return Boolean(held) && !held.stopped; },
   };
 }

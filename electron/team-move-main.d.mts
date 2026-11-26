@@ -13,7 +13,7 @@ export function installTeamMove(deps: {
   pageOrigin?(event: unknown): string | null;
   confirmMove?(words: { message: string; detail: string; buttons: string[] }): Promise<boolean>;
   home(): { origin: string; grant(): Promise<{ origin: string; code: string }> } | null;
-  computer?: { request(route: string, init?: RequestInit): Promise<Response>; available(): boolean } | null;
+  computer?: { request(route: string, init?: RequestInit): Promise<Response>; available(): boolean; busy?(botId: string): boolean } | null;
   account(): { state(): any; pairTeam(teamId: string): Promise<{ origin: string; code: string }> } | null;
   file(): string;
   journalFile(): string;
@@ -32,4 +32,5 @@ export function installTeamMove(deps: {
   retry(): Promise<void>;
   close(): void;
   journal(): unknown;
+  moving(botId: string): boolean;
 };

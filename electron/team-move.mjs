@@ -155,6 +155,8 @@ export function createTeamMove(deps) {
     try { answer = await io.myCloud.call("POST", `/api/bot-moves/${move.bot.id}`, { v: 1, state: "moving", team: { id: move.team.id, name: move.team.name } }); }
     catch (error) { return failed(io, move, error, true); }
     if (answer.status === 409 && typeof answer.body?.busy === "string") { later(BUSY_POLL_MS); return null; }
+    // Refused (held for another move, or moved already): this move holds nothing there, so it lets go of nothing.
+    if (answer.status === 409) return failed(io, move, new Error(sentence(answer.body?.error) ?? "My Cloud could not hold the bot."), false);
     if (!answer.ok || !record(answer.body?.movedTo)) return failed(io, move, new Error(sentence(answer.body?.error) ?? "My Cloud could not hold the bot."), true);
     return update(move.bot.id, { phase: "final", held: Array.isArray(answer.body.movedTo.held) ? answer.body.movedTo.held : [], frozenAt: now() });
   }

@@ -154,9 +154,11 @@ export function installOneHome({ localRequest: anyServer, clean = null, account,
     move: () => (home?.view() === null && other()?.view() ? other() : home), teamMove: () => teamMove, botMove: () => botMove, moveSession });
   teamMove = installTeamMove({ t, ipcMain: sendDeps.ipcMain, cloudPage: sendDeps.cloudPage, pageOrigin: sendDeps.pageOrigin, confirmMove: sendDeps.confirmMove, home: sendDeps.home, account: () => account(), fetch: fetchImpl, openTeam,
     // This computer's bots are its own to move into a team unless they are on their way to, or live on, My Cloud or a
-    // server of the person's own.
+    // server of the person's own, or a My Cloud that takes them would move them all there (the switch that keeps them
+    // here is off). One on its way to My Cloud by itself is not offered.
     computer: { request: (route, init = {}) => localRequest(route, { signal: AbortSignal.timeout(120_000), ...init }),
-      available: () => { const moving = parseJournal(journal.read()); return (!moving || moving.phase === "back") && !other()?.active(); } },
+      available: () => { const moving = parseJournal(journal.read()); return (!moving || moving.phase === "back") && !other()?.active() && (!cloudTakesBots() || home.keeps()); },
+      busy: (botId) => botMove.moving().includes(botId) },
     file: () => join(dirname(journalFile()), "team-move-send.json"), journalFile: () => join(dirname(journalFile()), "team-moves.json"), ...(teamJournal ? { journal: teamJournal } : {}),
     onChange: () => send.publish(), log });
   const journal = kept ?? jsonFile(journalFile);
@@ -240,7 +242,7 @@ export function installOneHome({ localRequest: anyServer, clean = null, account,
     label: async () => String((await local.json("/api/cloud-connections").catch(() => null))?.computer?.label ?? "") });
   // The person says which bots go, once, when there is a choice to make.
   const choice = jsonFile(() => join(dirname(journalFile()), "one-home-choice.json"));
-  const botsHere = async () => choosable((await local.json("/api/bots?messages=0"))?.bots);
+  const botsHere = async () => choosable((await local.json("/api/bots?messages=0"))?.bots).filter((bot) => !teamMove.moving(bot.id));
   const cloudTakesBots = () => { const cloud = oneHomeCloud(account()?.state()); return Boolean(cloud?.origin && cloud.moves && !cloud.ended); };
   botMove = createBotMove({ journal: jsonFile(() => join(dirname(journalFile()), "bot-moves.json")), local, send, session: () => moveSession.open(target()), ready: cloudTakesBots, lend, log, onChange: () => send.publish(),
     lease: createMoveLease({ session: () => moveSession.open(target()), holder: installation, log, label: async () => String((await local.json("/api/cloud-connections").catch(() => null))?.computer?.label ?? "") }) });
