@@ -1,12 +1,18 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { join, resolve } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   planSkillFolder, prepareSkillFolder, skillFilePathProblem, skillFolderDigest, skillImportSummary, writeSkillFolder,
 } from "./skill-folder.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
+
+vi.mock("node:fs", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  return { ...fs, writeFileSync: vi.fn(fs.writeFileSync) };
+});
+const realWriteFileSync = (await vi.importActual<typeof import("node:fs")>("node:fs")).writeFileSync;
 
 const SKILL = "---\nname: tidy\ndescription: Keeps things tidy.\n---\n\n# Tidy\n";
 
@@ -131,6 +137,28 @@ describe("writing and checking a skill folder", () => {
     }
     expect(existsSync(join(scratch, "escape.md"))).toBe(false);
     expect(() => writeSkillFolder(folder, SKILL, [])).toThrow(/EEXIST/);
+  });
+
+  it.skipIf(process.platform === "win32")("applies the requested mode when the created file is left with another", () => {
+    const folder = join(scratch, "tidy");
+    const forced = new Map<string, number>([
+      [join(folder, "SKILL.md"), 0o700],
+      [resolve(folder, "references/guide.md"), 0o700],
+      [resolve(folder, "scripts/run.sh"), 0o600],
+    ]);
+    vi.mocked(writeFileSync).mockImplementation((path, data, options) => {
+      realWriteFileSync(path, data, options);
+      const mode = forced.get(String(path));
+      if (mode !== undefined) chmodSync(String(path), mode);
+    });
+    try {
+      writeSkillFolder(folder, SKILL, files);
+      expect(statSync(join(folder, "SKILL.md")).mode & 0o777).toBe(0o600);
+      expect(statSync(join(folder, "references", "guide.md")).mode & 0o777).toBe(0o600);
+      expect(statSync(join(folder, "scripts", "run.sh")).mode & 0o777).toBe(0o700);
+    } finally {
+      vi.mocked(writeFileSync).mockReset().mockImplementation(realWriteFileSync);
+    }
   });
 
   it("hashes the files that came in and notices any change to one, but not files added beside them", () => {

@@ -16,7 +16,7 @@ import { claudeAuthStatus } from "./claude-auth-status.ts";
 import { projectMcpServers } from "./claude-project-mcp.ts";
 import { botSettingsFor, folderSettingsEnv, withBotSettings } from "./claude-bot-settings.ts"; import { claudeHookSettings } from "./claude-hooks.ts";
 import { claudeBilling, claudeCallUsage } from "./claude-billing.ts";
-import { claudeAuthFailure, claudeAuthRecovery, claudeOAuthExpired } from "./claude-auth-recovery.ts"; import { AWS_CREDENTIAL_ENV_KEYS, bedrockResultError, withBedrockCredentialError } from "./claude-bedrock-aws.ts";
+import { claudeAuthFailure, claudeAuthRecovery, claudeOAuthExpired, readRefusalFrame, refusedSignedOut, type RefusalRead } from "./claude-auth-recovery.ts"; import { sumNativeTurnResults, type NativeTurnResult } from "./claude-turn-result.ts"; import { AWS_CREDENTIAL_ENV_KEYS, bedrockResultError, withBedrockCredentialError } from "./claude-bedrock-aws.ts";
 import { CLAUDE_MODEL_ID, STATIC_CLAUDE_MODELS, claudeModelExtras, currentEngineCatalog, endpointModelCatalog, withCliVersionGate } from "./claude-model-extras.ts";
 import { claudeOwnMcpOverHttp, withLoopbackNoProxy } from "./own-mcp-http.ts"; import { claudeAgentsMount, claudeToolSearchSetting } from "./claude-tool-search.ts"; import { claudeDisabledNativeSkillRules, unusableBuiltIns } from "./claude-unusable-tools.ts"; import { shellOff } from "./shell-off.ts"; import { EMAIL_READ_TOOL_NAMES } from "../../shared/email.ts";
 import { claudeElicitations } from "./claude-elicitation.ts"; import { claudePrestartTools, type ClaudePrestartTools } from "./claude-prestart.ts"; import { spawnContractDiff } from "./claude-spawn-contract.ts"; import { claudeContextUsage, liveContextBreakdown, writeControlFrame } from "./claude-context-usage.ts";
@@ -359,37 +359,6 @@ function askSummary(ask: Ask): string {
   const questions = askQuestions(ask);
   if (questions) return askQuestionSummary(questions);
   return askInputSummary(ask.input) ?? ask.tool ?? "tool";
-}
-
-/** One native `result` frame. A steer sent after the turn's last model call runs as the CLI's next
- * native turn, so one logical turn can span several. */
-export interface NativeTurnResult {
-  ok: boolean;
-  stopReason: string | null;
-  cost: number | null;
-  usage?: { input: number; output: number; cachedInput?: number };
-}
-
-/** Merges native turns into one logical turn. Cost takes the latest figure: total_cost_usd is
- * "cumulative across turns in streaming-input sessions … read the latest result rather than
- * summing" (2.1.282). */
-export function sumNativeTurnResults(earlier: NativeTurnResult | null, latest: NativeTurnResult): NativeTurnResult {
-  if (!earlier) return latest;
-  const usage = earlier.usage && latest.usage
-    ? {
-        input: earlier.usage.input + latest.usage.input,
-        output: earlier.usage.output + latest.usage.output,
-        ...(earlier.usage.cachedInput !== undefined || latest.usage.cachedInput !== undefined
-          ? { cachedInput: (earlier.usage.cachedInput ?? 0) + (latest.usage.cachedInput ?? 0) }
-          : {}),
-      }
-    : latest.usage ?? earlier.usage;
-  return {
-    ok: earlier.ok && latest.ok,
-    stopReason: latest.stopReason ?? earlier.stopReason,
-    cost: latest.cost ?? earlier.cost,
-    ...(usage ? { usage } : {}),
-  };
 }
 
 /** How long after a `result` the CLI may announce, with `init`, the native turn for a steer sent
@@ -795,6 +764,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
          * never took the prompt */
         awaitingInit?: boolean;
         authFailed?: boolean;
+        refusalRead?: RefusalRead;
         updateRequired?: boolean;
         limit?: ClaudeLimit | null;
         limitReached?: boolean;
@@ -1335,6 +1305,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         stopReason: string | null,
         total: number | null = null,
         usage?: { input: number; output: number; cachedInput?: number },
+        unsent?: true,
       ) => {
         const t = session.turn;
         if (!t || t.settled) return;
@@ -1360,10 +1331,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         else if (session.teamToolsFailed) closeSession(threadId, "team tools did not connect");
         const cost = turnCostFromRunningTotal(total, session.costTotal ?? null);
         if (total !== null) session.costTotal = total;
-        emit({ ...base(threadId, t.turnId), type: "turn.completed", ok, stopReason, cost, ...(usage ? { usage } : {}) });
+        emit({ ...base(threadId, t.turnId), type: "turn.completed", ok, stopReason, cost, ...(usage ? { usage } : {}), ...(unsent ? { unsent } : {}) });
         if (session.child.exitCode === null && !session.closing) armIdle(threadId);
       };
-      const settleResult = (result: NativeTurnResult) => settle(result.ok, result.stopReason, result.cost, result.usage);
+      const settleResult = (result: NativeTurnResult) => settle(result.ok, result.stopReason, result.cost, result.usage, result.unsent);
       const currentTurnId = () => session.turn?.turnId ?? turnId;
       const unconfirmedStopWarning = () => { if (session.unconfirmedStopWarned) return; session.unconfirmedStopWarned = true; emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: "Claude could not be confirmed stopped; its helper processes may still be running." }); };
       session.releaseInterrupted = () => { if (session.turn?.stopRequested) { unconfirmedStopWarning(); settle(false, "interrupted"); } };
@@ -1396,6 +1367,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         }
         if (session.context.frame(o) || session.tools?.frame(o) || session.spare) return;
         authRecovery.frame(threadId, o, session.costTotal);
+        if (session.turn) readRefusalFrame(session.turn.refusalRead ??= {}, o, session.costTotal);
         // A replayed stdin message carries its images again: keep their bytes out of the log.
         appendNative(threadId, { dir: "in", source: "claude.sdk.message", msg: o?.type === "user" && o.isReplay === true && o.message ? diagnosticClaudeUserMessage(o) : o });
         if (session.elicit.frame(o)) return;
@@ -1573,6 +1545,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                       ? o.terminal_reason ?? (typeof o.subtype === "string" && o.subtype !== "success" ? o.subtype : null) ?? o.stop_reason ?? null
                       : o.stop_reason ?? o.terminal_reason ?? null,
               cost: o.total_cost_usd ?? null,
+              ...(session.turn?.authFailed && session.turn.refusalRead && refusedSignedOut(session.turn.refusalRead) ? { unsent: true as const } : {}),
               ...(o.usage
                 ? {
                     usage: {

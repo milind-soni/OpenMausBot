@@ -370,7 +370,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   /** Which of a paired phone's apps this bot may use; absent: every bot may use what the phone allows (shared/phone-apps.ts). */
   phoneApps?: import("./phone-apps.ts").PhoneApps;
   /** Ordered backups used only by opt-in, pre-prompt startup recovery. */
-  fallback?: Array<{ instanceId: string; model: string }>;
+  fallback?: ModelSelection[];
   /** Whether this bot gets the app's built-in browser. */
   browser?: boolean;
   /** Record a screenshot and a short note of each browser action, kept with
