@@ -4,9 +4,9 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { APP_LIMITS, ROOM_VIEW_ONLY } from "../../shared/app.ts";
+import { APP_LIMITS } from "../../shared/app.ts";
 import { createChatApps, type ChatApps } from "../chat-apps.ts";
 import { DATA_DIR } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
@@ -16,7 +16,7 @@ import type { RequestAuth } from "../request-auth.ts";
 import { Store } from "../store.ts";
 import { AppStates } from "../app-state.ts";
 import { pageRows } from "./bot-page-rpc.ts";
-import { createChatAppRoutes } from "./chat-apps.ts";
+import { createChatAppRoutes, type ChatAppRouteDeps } from "./chat-apps.ts";
 import { dispatchRoutes } from "./table.ts";
 
 const sonnet: ModelSelection = { instanceId: "claude", model: "claude-sonnet-5" };
@@ -32,16 +32,21 @@ afterEach(async () => {
 });
 afterAll(async () => { await engine.closeAll(); });
 
-async function fixture(options: { dataOff?: boolean; paused?: () => boolean } = {}) {
+async function fixture(options: { dataOff?: boolean; paused?: () => boolean; threadVisible?: ChatAppRouteDeps["threadVisible"] } = {}) {
   const store = new Store(() => sonnet);
   const bot = store.createBot({ name: "Scout" });
   const other = store.createBot({ name: "Other" });
   const chatApps = createChatApps({ store, dataDir: DATA_DIR, sweeps: false, ...(options.paused ? { paused: options.paused } : {}) });
   apps.push(chatApps);
-  const routes = [createChatAppRoutes({ store, apps: chatApps, data: engine, dataOff: () => options.dataOff === true })];
+  const routes = [createChatAppRoutes({ store, apps: chatApps, data: engine, dataOff: () => options.dataOff === true,
+    ...(options.threadVisible ? { threadVisible: options.threadVisible } : {}) })];
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
-    const auth = { kind: "loopback", scopes: ["admin", "client"] } as RequestAuth;
+    // A test names a paired person with x-session; otherwise the request is the owner's, on this computer.
+    const person = req.headers["x-session"];
+    const auth = (typeof person === "string"
+      ? { kind: "session", session: { id: person, email: `${person}@example.com` }, via: "bearer", scopes: ["client"] }
+      : { kind: "loopback", scopes: ["admin", "client"] }) as RequestAuth;
     try {
       if (!await dispatchRoutes(routes, { req, res, url, path: url.pathname, method: req.method ?? "GET", auth, json, readBody })) json(res, 404, { from: "inline routes" });
     } catch (error) {
@@ -58,9 +63,9 @@ async function fixture(options: { dataOff?: boolean; paused?: () => boolean } = 
     if (result instanceof Promise || !result.ok) throw new Error("not shown");
     return result.messageId;
   };
-  const rpc = async (id: string, method: string, params?: unknown, who = bot, threadId = bot.threadId) => {
+  const rpc = async (id: string, method: string, params?: unknown, who = bot, threadId = bot.threadId, session?: string) => {
     const response = await fetch(`${base}/api/bots/${who.id}/apps/${id}/rpc`, {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId, method, ...(params === undefined ? {} : { params }) }),
+      method: "POST", headers: { "content-type": "application/json", ...(session ? { "x-session": session } : {}) }, body: JSON.stringify({ threadId, method, ...(params === undefined ? {} : { params }) }),
     });
     return { status: response.status, body: await response.json() as Record<string, any> };
   };
@@ -122,13 +127,32 @@ describe("mausbot.data.query on the rpc route", () => {
     expect((await rpc(theirs, "mausbot/data/query", { sql: "SELECT count(*) FROM sales" }, other, other.threadId)).status).toBe(409);
     const room = store.createGroup("Launch", [bot.id, other.id]);
     const inRoom = show({ uses: ["data"] }, bot, room.threadId);
-    expect(await rpc(inRoom, "mausbot/data/query", { sql: "SELECT 1" }, bot, room.threadId)).toEqual({ status: 409, body: { error: ROOM_VIEW_ONLY } });
+    for (const method of ["mausbot/data/query", "mausbot/state/keys"]) {
+      expect(await rpc(inRoom, method, { sql: "SELECT 1" }, bot, room.threadId))
+        .toEqual({ status: 409, body: { error: { code: -32000, message: "In a room, a page cannot read its bot's data or keep state." } } });
+    }
     let paused = true;
     const waiting = await fixture({ paused: () => paused });
     expect((await waiting.rpc(waiting.show({ uses: ["data"] }), "mausbot/data/query", { sql: "SELECT 1" })).status).toBe(503);
     paused = false;
     const off = await fixture({ dataOff: true });
     expect((await off.rpc(off.show({ uses: ["data"] }), "mausbot/data/query", { sql: "SELECT 1" })).body.error.message).toContain("Data is switched off");
+  });
+
+  it("is refused to a person who cannot see the conversation, for data and state alike; the owner still reads it", async () => {
+    const visible = vi.fn((auth: RequestAuth) => auth.kind !== "session" || auth.session.id !== "outsider");
+    const { show, rpc, bot } = await fixture({ threadVisible: visible });
+    const id = show({ uses: ["data", "state"] });
+    const calls: Array<[string, Record<string, unknown>]> = [
+      ["mausbot/data/query", { sql: "SELECT count(*) AS n FROM sales" }], ["mausbot/state/get", { key: "a" }],
+      ["mausbot/state/set", { key: "a", value: 1 }], ["mausbot/state/keys", {}],
+    ];
+    for (const [method, params] of calls) {
+      expect(await rpc(id, method, params, bot, bot.threadId, "outsider"), method).toEqual({ status: 404, body: { error: "no such conversation" } });
+    }
+    expect((await rpc(id, "mausbot/state/keys")).body).toEqual({ keys: [] });
+    expect((await rpc(id, "mausbot/data/query", { sql: "SELECT count(*) AS n FROM sales" })).body.rows).toEqual([{ n: 300 }]);
+    expect((await rpc(id, "mausbot/state/get", { key: "a" }, bot, bot.threadId, "member")).status).toBe(200);
   });
 
   it("holds a page to the rpc rate", async () => {
