@@ -1373,6 +1373,30 @@ describe("the link between a computer and its Cloud", () => {
     await until(() => cloud.runs.some((run) => run.botId === "moved-bot-1"), "the moved bot works on the Cloud");
   });
 
+  it("a name a bot here and a bot of the other place both have is not settled on the one here: the bot is asked which, with both ids and places", async () => {
+    const { computer, cloud } = await two();
+    cloud.bots.push({ id: "cloud-writer", name: "writer" });
+    cloud.link.botsChanged();
+    await until(() => computer.link.linked().length === 3, "the computer hears of the Cloud's Writer");
+    let asked = false;
+    const { answer } = await computer.handOff("shared", call(["Writer"], "Name my cactus"), async () => { asked = true; return { status: 200, body: {} }; });
+    expect(asked).toBe(false);
+    expect(answer.status).toBe(403);
+    expect(answer.body.error).toContain("Writer here (id local-writer)");
+    expect(answer.body.error).toContain(`writer on My Cloud (id ${onCloud("cloud-writer")})`);
+    expect(answer.body.error).toContain("the place they named, or the one here if they named none");
+    // Either id goes through as it always did.
+    const { answer: byId } = await computer.handOff("shared", call(["local-writer"], "Name my cactus"), async () => { asked = true; return { status: 200, body: { receipts: [] } }; });
+    expect([asked, byId.status]).toEqual([true, 200]);
+    // A far bot of that name its place paused is no choice to offer.
+    cloud.bots.find((bot) => bot.id === "cloud-writer")!.paused = true;
+    cloud.link.botsChanged();
+    await until(() => computer.link.linked().some((one) => one.bot.paused), "the computer hears of the pause");
+    asked = false;
+    await computer.handOff("shared", call(["Writer"], "Name my cactus"), async () => { asked = true; return { status: 200, body: { receipts: [] } }; });
+    expect(asked).toBe(true);
+  });
+
   it("with the link on, two bots of the other place with one name are not guessed between: the bot is asked which, by id", async () => {
     const { computer, cloud } = await two();
     cloud.bots.push({ id: "cloud-analyst-2", name: "Analyst" });

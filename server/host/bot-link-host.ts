@@ -174,6 +174,9 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
       if (!link.on() || places.kindOf(name) === "team") return places.explain(name);
       return { hint: link.reachableElsewhere() };
     },
+    /** A kind of the person's other places the link reaches now: its bots are in every roster and list_bots, so nothing
+     * says they can't be reached (places-elsewhere.ts `skip`). A team, which the link never joins, never is. */
+    reaches: (kind: string): boolean => link.on() && kind !== "team",
     /** Once the server is up. Off: nothing. On, on the computer: it starts asking the Cloud. */
     start(): void {
       // Off: nothing, unless a room here still has a member from another place, which is then found and shown as away.
