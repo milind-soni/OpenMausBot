@@ -4,9 +4,8 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
 import { setLocale } from "./i18n";
-import { isPlacedBot, otherPlaceDispatch, useOtherPlaceBots, placedBot, placedLine, placeHeading, placeMark, placeOfHome, placeParts, resetPlaceRowsForTest, type Place } from "./place-rows";
+import { isPlacedBot, otherPlaceDispatch, useOtherPlaceBots, placedBot, placedLine, placeMark, placeOfHome, resetPlaceRowsForTest, type Place } from "./place-rows";
 import { resetPlacesTogetherForTest, type PlaceBotRow, type PlacesTogetherState } from "./places-together";
-import { partitionSidebarBots, sidebarBotRows } from "./sidebar-layout";
 
 const row = (home: "computer" | "cloud", id: string, over: Partial<PlaceBotRow> = {}): PlaceBotRow => ({ home, id, threadId: `t-${id}`, name: id, color: "blue", ...over });
 const own = (id: string, over: Partial<Bot> = {}): Bot => ({ id, name: id, threadId: `${id}-t`, title: "", description: "", color: "green", unread: false,
@@ -35,6 +34,11 @@ describe("a row of the other place as a bot of the one list", () => {
     expect(bot.chiefOfStaff).toBeUndefined();
     expect(placedBot(row("cloud", "w", { waiting: true }), "ready").activity).toBe("waiting-on-you");
     expect(placedBot(row("cloud", "x", { color: "url(javascript:1)" }), "ready").color).toBe("green");
+  });
+
+  it("carries its department there, so the other page draws a bot of the home place in it", () => {
+    expect(placedBot(row("computer", "ledger", { section: "Finance" }), "ready").section).toBe("Finance");
+    expect("section" in placedBot(row("computer", "git"), "ready")).toBe(false);
   });
 
   it("shows its title as its second line in Simple, and nothing in Advanced, whose row shows it as the role", () => {
@@ -73,41 +77,6 @@ describe("a row of the other place as a bot of the one list", () => {
     expect(placeMark(rack, "ready", true, "Render")).toMatchObject({ icon: "server", label: "Working on Basement server now", shows: "always" });
     expect(placeMark(rack, "offline", false, "Render")).toMatchObject({ icon: "server-off", label: "Basement server can't be reached right now. Render carries on when it's back.", shows: "always" });
     expect(placeMark(studio, "offline", false, "Render").icon).toBe("computer-off");
-  });
-});
-
-describe("one list: each place in a part of its own, in one order on both pages", () => {
-  const order = (here: "computer" | "cloud", home: "computer" | "cloud" | null) => placeParts(here, home, true)!.map((part) => `${part.home}${part.own ? " (own)" : ""}`);
-
-  it("lists the person's home place first and the other second, whichever page is open, so a click to the other page moves no part", () => {
-    expect(order("computer", "computer")).toEqual(["computer (own)", "cloud"]);
-    expect(order("cloud", "computer")).toEqual(["computer", "cloud (own)"]);
-    expect(order("cloud", "cloud")).toEqual(["cloud (own)", "computer"]);
-    expect(order("computer", "cloud")).toEqual(["cloud", "computer (own)"]);
-    const places = (here: "computer" | "cloud", home: "computer" | "cloud") => placeParts(here, home, true)!.map((part) => part.home);
-    expect(places("computer", "computer")).toEqual(places("cloud", "computer"));
-    expect(places("computer", "cloud")).toEqual(places("cloud", "cloud"));
-  });
-
-  it("this computer comes first from an app that does not say which place is home", () => {
-    expect(order("computer", null)).toEqual(["computer (own)", "cloud"]);
-    expect(order("cloud", null)).toEqual(["computer", "cloud (own)"]);
-  });
-
-  it("no parts while the one list is off, or while the other place has no row and no line to show: the sidebar is as it was", () => {
-    expect(placeParts(null, null, true)).toBeNull();
-    expect(placeParts(null, "computer", true)).toBeNull();
-    expect(placeParts("computer", "computer", false)).toBeNull();
-  });
-
-  it("each heading names its place in the person's language", () => {
-    expect([placeHeading("computer"), placeHeading("cloud")]).toEqual(["On this computer", "On My Cloud"]);
-  });
-
-  it("the other place's rows stay out of this place's own parts, so a drag or Alt+Up/Down never meets one and no bot is listed twice", () => {
-    const rows = sidebarBotRows(partitionSidebarBots([own("chief", { chiefOfStaff: true }), own("a"), own("b")]), () => false, false);
-    expect(rows.inPlace.unsectionedBots.map((bot) => bot.id)).toEqual(["a", "b"]);
-    expect(rows.unsectionedBots.some(isPlacedBot)).toBe(false);
   });
 });
 

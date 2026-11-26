@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
-// The one list in the real Sidebar: with "This computer and My Cloud together" on, each place's bots sit under a heading
-// naming it, the person's home place first, the same on both pages; with it off, or with main never answering, the
-// sidebar is exactly as it was.
+// The one list in the real Sidebar: with "This computer and My Cloud together" on, the other place's bots land in a
+// department named after their place and can be dragged anywhere from there, and both pages draw the same list; with it
+// off, or with main never answering, the sidebar is exactly as it was.
 import { act, createElement } from "react";
+import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
-import type { PlaceBotRow, PlacesTogetherState } from "@/lib/places-together";
+import type { ArrangedBot, PlaceBotRow, PlacesTogetherState } from "@/lib/places-together";
 
 const mode = vi.hoisted(() => ({ advanced: false }));
 vi.mock("@/lib/interface-mode", async (original) => ({
@@ -45,6 +46,7 @@ const page = {
   set: vi.fn(async () => said()),
   open: vi.fn(async () => true),
   onChanged: vi.fn((callback: () => void) => { changed = callback; return () => {}; }),
+  arrange: vi.fn(async (entries: ArrangedBot[]) => entries),
 };
 const tree = (bots: Bot[], icons = false) => createElement(BotEditorStore, {
   value: { state: { ...initialState, connected: true, bots, selectedId: bots[0]!.id }, dispatch,
@@ -58,11 +60,33 @@ async function render(bots = OWN, icons = false) {
 const q = (selector: string) => host.querySelector<HTMLElement>(selector);
 const ids = (selector = "") => [...host.querySelectorAll<HTMLElement>(`${selector} [data-sidebar-bot-row]`)].map((item) => item.dataset.sidebarBotRow);
 const mark = (id: string) => q(`[data-sidebar-bot-row="${id}"] [data-bot-place]`);
-const OWN_BOTS = '[data-sidebar-section-id="builtin:bots"]', ON_CLOUD = '[data-sidebar-place="cloud"]', ON_COMPUTER = '[data-sidebar-place="computer"]';
-const headings = () => [...host.querySelectorAll("[data-section]")].map((header) => header.getAttribute("data-section"));
-/** The place parts as drawn, in order: each heading, then its rows by their own ids (a row's place key left out). */
-const drawn = () => [...host.querySelectorAll<HTMLElement>("[data-sidebar-place-heading] [data-section], [data-sidebar-place] [data-sidebar-bot-row], [data-sidebar-section-id] [data-sidebar-bot-row]")]
+const OWN_BOTS = '[data-sidebar-section-id="builtin:bots"]', MY_CLOUD = '[data-sidebar-section-id="section:My Cloud"]';
+/** The list as drawn: each department heading, then its rows by their own ids (a row's place key left out). */
+const drawn = () => [...host.querySelectorAll<HTMLElement>("[data-sidebar-section-id] [data-section], [data-sidebar-section-id] [data-sidebar-bot-row]")]
   .map((element) => element.dataset.section ?? element.dataset.sidebarBotRow!.replace(/^(cloud|computer):/, ""));
+function transfer() {
+  const data = new Map<string, string>();
+  return { data, effectAllowed: "all", dropEffect: "none", get types() { return [...data.keys()]; },
+    setData: (type: string, value: string) => { data.set(type, value); }, getData: (type: string) => data.get(type) ?? "", setDragImage: () => {}, files: [], items: [] };
+}
+function fire(target: Element, type: string, carried: ReturnType<typeof transfer>, clientY = 0) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "dataTransfer", { value: carried });
+  Object.defineProperty(event, "clientY", { value: clientY });
+  flushSync(() => target.dispatchEvent(event));
+}
+const dragHost = (id: string) => q(`[data-sidebar-bot-row="${id}"]`)?.closest('[draggable="true"]') ?? null;
+/** Drags `moving` onto the lower edge of `onto`'s row and lets go. */
+function dragBelow(moving: string, onto: string) {
+  const from = dragHost(moving), target = dragHost(onto), carried = transfer();
+  expect(from, `${moving} is draggable`).not.toBeNull();
+  expect(target, `${onto} takes a drop`).not.toBeNull();
+  fire(from!, "dragstart", carried);
+  const box = target!.getBoundingClientRect();
+  fire(target!, "dragover", carried, box.bottom - 2);
+  fire(target!, "drop", carried, box.bottom - 2);
+  fire(from!, "dragend", carried);
+}
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -117,28 +141,26 @@ describe("switch off: nothing changes", () => {
 });
 
 describe("switch on: one list", () => {
-  for (const advanced of [false, true]) it(`${advanced ? "Advanced" : "Simple"}: lists My Cloud's bots in a part of their own under "On My Cloud", below this computer's, which keep their order under "On this computer"`, async () => {
+  for (const advanced of [false, true]) it(`${advanced ? "Advanced" : "Simple"}: My Cloud's bots land in a "My Cloud" department after this computer's departments; this computer's bots stay where they were`, async () => {
     window.ogb = { placesTogether: page } as never;
     mode.advanced = advanced;
-    await render();
+    await render([...OWN, bot("finn", { section: "Finance" })]);
     expect(ids(OWN_BOTS)).toEqual(["git", "ledger"]);
-    expect(ids(ON_CLOUD)).toEqual(["cloud:scout", "cloud:tech"]);
-    expect(drawn()).toEqual(["On this computer", "git", "ledger", "On My Cloud", "scout", "tech"]);
-    // The place's heading stands for the first Bots heading: no second heading over the same rows.
-    expect(headings()).not.toContain("Bots");
+    expect(ids(MY_CLOUD)).toEqual(["cloud:scout", "cloud:tech"]);
+    expect(drawn().filter((item) => item !== "Bots")).toEqual(["git", "ledger", "Finance", "finn", "My Cloud", "scout", "tech"]);
     expect(q('[data-sidebar-section-id="builtin:unread"]')).toBeNull();
     expect(q("[data-other-place]")).toBeNull();
     expect(q('[data-sidebar-bot-row="cloud:scout"]')!.textContent).toContain("Open issues");
     expect(q('[data-sidebar-bot-row="cloud:tech"]')!.textContent).toContain("Deploy passed on staging.");
   });
 
-  it("unread rows of both places keep their places, each in its own part", async () => {
+  it("unread rows of both places keep their places", async () => {
     window.ogb = { placesTogether: page } as never;
     const nova = bot("nova", { unread: true, tasks: [{ threadId: "nova-t", title: "Chat", createdAt: 1, updatedAt: 5_000, unread: true }] });
     answer = async () => said({ other: { home: "cloud", state: "ready", bots: [row("old", { unread: true, lastAt: 1_000 }), row("tech", { unread: true, lastAt: 9_000 })] } });
     await render([...OWN, nova]);
     expect(ids(OWN_BOTS)).toEqual(["git", "ledger", "nova"]);
-    expect(ids(ON_CLOUD)).toEqual(["cloud:old", "cloud:tech"]);
+    expect(ids(MY_CLOUD)).toEqual(["cloud:old", "cloud:tech"]);
     expect(q('[data-sidebar-section-id="builtin:unread"]')).toBeNull();
   });
 
@@ -147,7 +169,7 @@ describe("switch on: one list", () => {
     answer = async () => said({ other: { home: "cloud", state: "ready", bots: [row("git", { name: "Git there" })] } });
     await render();
     expect(ids(OWN_BOTS)).toEqual(["git", "ledger"]);
-    expect(ids(ON_CLOUD)).toEqual(["cloud:git"]);
+    expect(ids(MY_CLOUD)).toEqual(["cloud:git"]);
     expect(q('[data-sidebar-bot-row="cloud:git"]')!.textContent).toContain("Git there");
   });
 
@@ -228,8 +250,6 @@ describe("switch on: one list", () => {
       search.dispatchEvent(new Event("input", { bubbles: true }));
     });
     expect(ids()).toEqual(["cloud:scout"]);
-    // This place has nothing that matches: its heading is left out rather than shown over nothing.
-    expect(headings().filter((name) => name?.startsWith("On "))).toEqual(["On My Cloud"]);
   });
 
   it("in the avatars-only sidebar the place joins each row's own label", async () => {
@@ -240,75 +260,63 @@ describe("switch on: one list", () => {
     expect(q('[data-sidebar-bot-row="git"]')!.getAttribute("aria-label")).toContain("Lives on this computer");
   });
 
-  it("both pages draw the same parts in the same order, home first: opening a bot of the other place moves no heading and no row", async () => {
-    const cloudBots = [bot("maus", { chiefOfStaff: true }), bot("scout"), bot("tech")];
-    const computerRows = [row("git", { home: "computer" }), row("ledger", { home: "computer" })];
-    for (const advanced of [false, true]) {
-      mode.advanced = advanced;
-      for (const home of ["computer", "cloud"] as const) {
-        window.ogb = { placesTogether: page } as never;
-        answer = async () => said({ home });
-        await render();
-        const onComputer = drawn();
-        await act(async () => root.unmount());
-        resetPlacesTogetherForTest(); resetPlaceRowsForTest();
-        root = createRoot(host);
-        answer = async () => said({ here: "cloud", home, other: { home: "computer", state: "ready", bots: computerRows } });
-        await render(cloudBots);
-        const onCloud = drawn();
-        await act(async () => root.unmount());
-        resetPlacesTogetherForTest(); resetPlaceRowsForTest();
-        root = createRoot(host);
-        expect(onCloud, `${advanced ? "Advanced" : "Simple"}, home ${home}`).toEqual(onComputer);
-        expect(onComputer).toEqual(home === "computer" ? ["On this computer", "git", "ledger", "On My Cloud", "scout", "tech"] : ["On My Cloud", "scout", "tech", "On this computer", "git", "ledger"]);
-      }
-    }
+  it("dragging a Cloud bot into another department keeps it there through a restart, and My Cloud's page draws the same list; this computer's server never hears of it", async () => {
+    window.ogb = { placesTogether: page } as never;
+    const own = [...OWN, bot("finn", { section: "Finance" })];
+    const fetched: string[] = [];
+    vi.stubGlobal("fetch", (url: string, init?: RequestInit) => { fetched.push(`${init?.method ?? "GET"} ${url} ${String(init?.body ?? "")}`); return new Promise(() => {}); });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const rows = [...document.querySelectorAll('[draggable="true"]')], index = Math.max(0, rows.indexOf(this));
+      return { top: index * 50, bottom: index * 50 + 50, height: 50, left: 0, right: 200, width: 200, x: 0, y: index * 50, toJSON: () => ({}) } as DOMRect;
+    });
+    await render(own);
+    expect(q('[data-section="Finance"] [aria-haspopup="menu"]')).not.toBeNull();
+    dragBelow("cloud:tech", "finn");
+    expect(page.arrange).toHaveBeenCalled();
+    const kept = page.arrange.mock.calls.at(-1)![0];
+    expect(kept).toEqual(expect.arrayContaining([{ key: "cloud:tech", section: "Finance", after: "computer:finn" }]));
+    expect(ids('[data-sidebar-section-id="section:Finance"]')).toEqual(["finn", "cloud:tech"]);
+    const afterDrag = drawn();
+    expect(JSON.stringify(dispatch.mock.calls)).not.toMatch(/cloud:|computer:/);
+    expect(fetched.filter((line) => /cloud:|computer:/.test(line))).toEqual([]);
+    // A restart: main hands back what it kept.
+    const arranged = page.arrange.mock.calls.flatMap(([entries]) => entries);
+    vi.restoreAllMocks();
+    await act(async () => root.unmount());
+    resetPlacesTogetherForTest(); resetPlaceRowsForTest();
+    root = createRoot(host);
+    answer = async () => said({ arranged });
+    await render(own);
+    expect(drawn()).toEqual(afterDrag);
+    // The window goes to My Cloud's page: the same list, this computer's bots as rows there.
+    await act(async () => root.unmount());
+    resetPlacesTogetherForTest(); resetPlaceRowsForTest();
+    root = createRoot(host);
+    answer = async () => said({ here: "cloud", arranged, other: { home: "computer", state: "ready", sections: ["Finance"], bots: [row("git", { home: "computer" }), row("ledger", { home: "computer" }), row("finn", { home: "computer", section: "Finance" })] } });
+    await render([bot("maus", { chiefOfStaff: true }), bot("scout", { title: "Open issues" }), bot("tech")]);
+    expect(drawn()).toEqual(afterDrag);
+    // There, this computer's rows stay where this computer keeps them; My Cloud's own bots are moved through main.
+    expect(dragHost("computer:git")).toBeNull();
+    expect(dragHost("scout")).not.toBeNull();
+    // Its departments are this computer's: their menus belong to this computer's page.
+    expect(q('[data-section="Finance"] [aria-haspopup="menu"]')).toBeNull();
   });
 
-  it("My Cloud's page: this computer's bots open there; while they can't be read, the line says so under this computer's heading", async () => {
+  it("a new Cloud bot lands in My Cloud's department; one already placed stays put", async () => {
     window.ogb = { placesTogether: page } as never;
-    const cloudBots = [bot("maus", { chiefOfStaff: true }), bot("scout"), bot("atlas")];
-    answer = async () => said({ here: "cloud", other: { home: "computer", state: "ready", bots: [row("git", { home: "computer", unread: true })] } });
-    await render(cloudBots);
-    expect(ids(ON_COMPUTER)).toEqual(["computer:git"]);
-    expect(ids(OWN_BOTS)).toEqual(["scout", "atlas"]);
-    await act(async () => q('[data-sidebar-bot-row="computer:git"]')!.click());
-    expect(page.open.mock.calls).toEqual([["git"]]);
-    answer = async () => said({ here: "cloud", other: { home: "computer", state: "offline", bots: [] } });
-    resetPlaceRowsForTest();
-    await act(async () => changed());
-    await act(async () => { await Promise.resolve(); });
-    expect(headings().slice(0, 2)).toEqual(["On this computer", "On My Cloud"]);
-    expect(q(`${ON_COMPUTER} [data-other-place-line]`)!.textContent).toBe("This computer's bots can't be read right now.");
-  });
-
-  it("a heading folds its part like any section's heading and is never dragged; the fold is kept for that place", async () => {
-    window.ogb = { placesTogether: page } as never;
+    answer = async () => said({ arranged: [{ key: "cloud:scout", section: "", after: "computer:git" }],
+      other: { home: "cloud", state: "ready", bots: [row("scout"), row("tech"), row("nova")] } });
     await render();
-    const toggle = q('[data-sidebar-place-heading="cloud"] button')!;
-    expect(q('[data-sidebar-place-heading="cloud"] [draggable]')).toBeNull();
-    await act(async () => toggle.click());
-    expect(ids(ON_CLOUD)).toEqual([]);
-    expect(q('[data-sidebar-place-heading="cloud"] [data-section-mark="unread"]')).not.toBeNull();
-    expect(ids(OWN_BOTS)).toEqual(["git", "ledger"]);
-    expect(localStorage.getItem("openmausbot.sidebarCollapsedSections.v1")).toContain("place:cloud");
-    await act(async () => q('[data-sidebar-place-heading="cloud"] button')!.click());
-    expect(ids(ON_CLOUD)).toEqual(["cloud:scout", "cloud:tech"]);
+    expect(ids(OWN_BOTS)).toEqual(["git", "cloud:scout", "ledger"]);
+    expect(ids(MY_CLOUD)).toEqual(["cloud:tech", "cloud:nova"]);
   });
 
-  it("while the other place has nothing to show, either page is exactly as with the switch off: no heading, no place mark", async () => {
-    const cloudBots = [bot("maus", { chiefOfStaff: true }), bot("scout"), bot("atlas")];
-    for (const advanced of [false, true]) {
-      mode.advanced = advanced;
-      const browser = await htmlWith(null);
-      answer = async () => said({ other: { home: "cloud", state: "loading", bots: [] } });
-      expect(await htmlWith({ placesTogether: page })).toBe(browser);
-      const cloudBrowser = await htmlWith(null, cloudBots);
-      for (const power of ["loading", "ready"] as const) {
-        answer = async () => said({ here: "cloud", other: { home: "computer", state: power, bots: [] } });
-        expect(await htmlWith({ placesTogether: page }, cloudBots), `${advanced ? "Advanced" : "Simple"}, My Cloud's page, ${power}`).toBe(cloudBrowser);
-      }
-    }
+  it("with My Cloud as home, this computer's bots land in a \"This computer\" department on either page", async () => {
+    window.ogb = { placesTogether: page } as never;
+    answer = async () => said({ here: "computer", home: "cloud", other: { home: "cloud", state: "ready", bots: [row("scout"), row("tech")] } });
+    await render();
+    expect(ids(OWN_BOTS)).toEqual(["cloud:scout", "cloud:tech"]);
+    expect(ids('[data-sidebar-section-id="section:This computer"]')).toEqual(["git", "ledger"]);
   });
 
   it("rows of the other place come in below this place's own and show their marks at once, with the pointer on the list, moving no row", async () => {
@@ -321,7 +329,7 @@ describe("switch on: one list", () => {
     await act(async () => release(said({ other: { home: "cloud", state: "ready", bots: [row("tech", { unread: true, lastAt: 9_000 }), row("scout", { working: true })] } })));
     expect(ids().slice(0, local.length)).toEqual(local);
     expect(ids(OWN_BOTS)).toEqual(["git", "ledger"]);
-    expect(ids(ON_CLOUD)).toEqual(["cloud:tech", "cloud:scout"]);
+    expect(ids(MY_CLOUD)).toEqual(["cloud:tech", "cloud:scout"]);
     expect(q('[data-sidebar-section-id="builtin:unread"]')).toBeNull();
     // No wait for the list to go quiet: Scout's working mark shows now, in its place.
     expect(q('[data-sidebar-bot-row="cloud:scout"] [data-testid="working-dot"]')).not.toBeNull();
@@ -342,7 +350,7 @@ describe("switch on: one list", () => {
     window.ogb = { placesTogether: page } as never;
     answer = async () => said({ other: { home: "cloud", state: "asleep", bots: [row("scout", { working: true }), row("atlas")] } });
     await render();
-    expect(ids(ON_CLOUD)).toEqual(["cloud:scout", "cloud:atlas"]);
+    expect(ids(MY_CLOUD)).toEqual(["cloud:scout", "cloud:atlas"]);
     expect(mark("cloud:scout")!.getAttribute("data-bot-place")).toBe("cloud-asleep");
     expect(q('[data-sidebar-bot-row="cloud:scout"] [data-testid="working-dot"]')).toBeNull();
   });
@@ -379,12 +387,9 @@ describe("switch on: one list", () => {
     answer = () => new Promise((resolve) => { release = resolve; });
     await render();
     expect(ids()).toEqual(["mausbot", "git", "ledger"].filter((id) => q(`[data-sidebar-bot-row="${id}"]`)));
-    expect(ids(OWN_BOTS)).toEqual(["git", "ledger"]);
-    const rows = [...host.querySelectorAll(`${OWN_BOTS} [data-sidebar-bot-row]`)];
+    expect(ids('[data-sidebar-section-id="builtin:bots"]')).toEqual(["git", "ledger"]);
     await act(async () => release(said()));
     expect(ids(OWN_BOTS)).toEqual(["git", "ledger"]);
-    expect(ids(ON_CLOUD)).toEqual(["cloud:scout", "cloud:tech"]);
-    // The headings come in around this place's rows; the rows themselves are the same elements.
-    [...host.querySelectorAll(`${OWN_BOTS} [data-sidebar-bot-row]`)].forEach((element, index) => expect(element).toBe(rows[index]));
+    expect(ids(MY_CLOUD)).toEqual(["cloud:scout", "cloud:tech"]);
   });
 });

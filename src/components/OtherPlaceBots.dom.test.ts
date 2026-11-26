@@ -31,7 +31,7 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); resetPlacesTogetherForTest(); vi.unstubAllGlobals(); delete (window as { ogb?: unknown }).ogb; });
 
-it("draws nothing with the switch off, nothing in a browser, and nothing while the other place has rows: they are listed under its heading", async () => {
+it("draws nothing with the switch off, nothing in a browser, and nothing while the other place has rows: they are in the list", async () => {
   said = state({ on: false, other: null });
   await render(createElement(OtherPlaceLine, { key: "line" }));
   expect(q("[data-other-place]")).toBeNull();

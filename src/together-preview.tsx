@@ -1,8 +1,9 @@
 // Dev-only gallery of "This computer and My Cloud together" on by default, served at /together-preview.html; not in the
 // packaged app. It mounts the real rail, sidebar and notice over fake bridges, with no server behind them.
 // ?view=before|after|notice|notice-cloud-home|notice-off|rail-before|rail-after|rail-cloud-home&mode=simple|advanced&skin=midnight|daylight&lang=pt-br
-// The sidebar's place parts: ?page=cloud (My Cloud's own page), ?home=cloud (the person's home is My Cloud), and
-// ?other=asleep|waking|offline|signin (the other place lists no rows and says why).
+// The one list: ?page=cloud (My Cloud's own page), ?home=cloud (the person's home is My Cloud),
+// ?other=asleep|waking|offline|signin (the other place lists no rows and says why), and ?arranged=1 (the person dragged
+// Scout under Git Tasks and Atlas into Finance).
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import type { RailState } from "../electron/cloud-rail.mjs";
@@ -36,7 +37,7 @@ const otherState = (["asleep", "waking", "offline", "signin"] as const).find((na
 // tile on its own page, and a row (first, as main lists it) among its rows on the other page.
 const chief = here("mausbot", "MausBot", "violet", "Today", "Your week is planned; three things need you.", { chiefOfStaff: true } as Partial<Bot>);
 const computerBots: Bot[] = [
-  here("ledger", "Ledger", "orange", "Invoices", "The March invoices are filed in your Drive."),
+  here("ledger", "Ledger", "orange", "Invoices", "The March invoices are filed in your Drive.", { section: "Finance" }),
   here("git", "Git Tasks", "teal", "Release notes", "Release notes drafted from the last 40 commits."),
 ];
 const cloudBots: Bot[] = [
@@ -45,12 +46,13 @@ const cloudBots: Bot[] = [
 ];
 const bots: Bot[] = [chief, ...(page === "cloud" ? cloudBots : computerBots)];
 const rowOf = (home: BotHome, bot: Bot): PlaceBotRow => ({ home, id: bot.id, threadId: bot.threadId, name: bot.name, color: bot.color, lastAt: AT + 20 * 60_000,
-  preview: (bot.messages[0] as { text: string }).text, chat: bot.tasks?.[0]?.title, ...(bot.unread ? { unread: true as const } : {}), ...(bot.chiefOfStaff ? { chief: true as const } : {}) });
+  preview: (bot.messages[0] as { text: string }).text, chat: bot.tasks?.[0]?.title, ...(bot.section ? { section: bot.section } : {}), ...(bot.unread ? { unread: true as const } : {}), ...(bot.chiefOfStaff ? { chief: true as const } : {}) });
 const otherHome: BotHome = page === "cloud" ? "computer" : "cloud";
 const otherRows: PlaceBotRow[] = otherState ? [] : [chief, ...(page === "cloud" ? computerBots : cloudBots)].map((bot) => rowOf(otherHome, bot));
 const joined = !["before", "rail-before"].includes(view) && view !== "notice-off";
 const together: PlacesTogetherState = joined
-  ? { v: 1, available: true, on: true, here: page, home: homePlace, other: { home: otherHome, state: otherState ?? "ready", bots: otherRows, newBot: true }, ...(view.startsWith("notice") ? { notice: true, commands: false, ...(view === "notice-cloud-home" ? { profileHome: true as const } : {}) } : {}) }
+  ? { v: 1, available: true, on: true, here: page, home: homePlace, arranged: params.get("arranged") ? [{ key: "cloud:scout", section: "", after: "computer:git" }, { key: "cloud:atlas", section: "Finance", after: "computer:ledger" }] : [],
+    other: { home: otherHome, state: otherState ?? "ready", bots: otherRows, ...(page === "cloud" ? { sections: ["Finance"] } : {}), newBot: true }, ...(view.startsWith("notice") ? { notice: true, commands: false, ...(view === "notice-cloud-home" ? { profileHome: true as const } : {}) } : {}) }
   : { v: 1, available: true, on: false, here: page, other: null, ...(view === "notice-off" ? { notice: true, commands: false } : {}) };
 
 const cloudHome = view === "rail-cloud-home" || homePlace === "cloud";
@@ -74,7 +76,7 @@ Object.assign(window, { ogb: {
 } });
 
 function Gallery() {
-  const state: AppState = { ...initialState, bots, selectedId: page === "cloud" ? "atlas" : "ledger", connected: true, config: { ...initialState.config, profile: { name: "Sam", email: "", aboutMe: "" } } as AppState["config"] };
+  const state: AppState = { ...initialState, bots, sections: page === "cloud" ? [] : ["Finance"], selectedId: page === "cloud" ? "atlas" : "ledger", connected: true, config: { ...initialState.config, profile: { name: "Sam", email: "", aboutMe: "" } } as AppState["config"] };
   const value = { state, dispatch: () => {}, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   useEffect(() => {
     if (!view.startsWith("rail-")) return;
