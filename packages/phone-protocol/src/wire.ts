@@ -562,7 +562,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   /** On a conversational bot's user line: the picker label of the quick model its reply ran on. */
   quickModel?: string;
   /** On a "Sent to" hand-off row: the done_when the sender set, redacted, so the chip can show what counts as finished. */
-  doneWhen?: string;
+  doneWhen?: string; /** On a Check before done line that sent the answer back for fixing: that round, so a client can fold the answer it replaced. */ checkRound?: number;
   /** Set on the user-role line another bot delivered into this bot's own
    * conversation (coordinate_bots, start_thread). `incident`: the line is a
    * Team incidents report about that bot's thread

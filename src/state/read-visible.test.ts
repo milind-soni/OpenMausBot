@@ -194,3 +194,62 @@ describe("a conversation marked unread while it is open", () => {
     });
   });
 });
+
+describe("a conversation a reloaded page put back on screen unread", () => {
+  const reloaded = async () => { vi.resetModules(); return import("./read-visible"); };
+  const tasks = [{ threadId: "side", unread: true, updatedAt: 10 }, { threadId: "main", unread: true, updatedAt: 20 }];
+  const showing = (threadId: string) => ({ selectedId: "bot", activeView: "chat", forkPanel: null, groups: [],
+    bots: [{ id: "bot", threadId, mainThreadId: "main", tasks }] }) as unknown as AppState;
+
+  it("stays held when the page itself moves to the bot's main thread at launch", async () => {
+    const page = await reloaded();
+    page.holdRestoredUnread(showing("side"));
+    page.launchNavigation(() => page.holdMarkedUnread({ type: "switchTask", botId: "bot", threadId: "main" }, showing("side")));
+    expect(page.shownChatHeldUnread(showing("main"))).toBe(true);
+    const read: string[] = [];
+    page.markVisibleBotThreadsRead(showing("main"), { id: "bot", unread: true, tasks } as unknown as BotAnnouncement, true, (_path, threadId) => read.push(threadId));
+    expect(read).toEqual([]);
+    page.holdMarkedUnread({ type: "switchTask", botId: "bot", threadId: "main" }, showing("main"));
+    expect(page.shownChatHeldUnread(showing("main")), "the person opening it ends the hold").toBe(false);
+  });
+
+  it("still holds the restored conversation when the launch move fails and the page shows it again", async () => {
+    const page = await reloaded();
+    page.holdRestoredUnread(showing("side"));
+    page.launchNavigation(() => page.holdMarkedUnread({ type: "switchTask", botId: "bot", threadId: "main" }, showing("side")));
+    expect(page.shownChatHeldUnread(showing("side"))).toBe(true);
+    const read: string[] = [];
+    page.markVisibleBotThreadsRead(showing("side"), { id: "bot", unread: true, tasks } as unknown as BotAnnouncement, true, (_path, threadId) => read.push(threadId));
+    expect(read).toEqual([]);
+  });
+
+  it("tags only the page's own launch switch, which the server then leaves unseen", async () => {
+    const page = await reloaded();
+    const move = { type: "switchTask", botId: "bot", threadId: "main" } as const;
+    let tagged: unknown;
+    page.launchNavigation(() => { tagged = page.launchTagged(move); });
+    expect(tagged).toEqual({ ...move, auto: true });
+    expect(page.launchTagged(move)).toBe(move);
+    expect(page.launchTagged({ type: "select", id: "bot" } as never)).toEqual({ type: "select", id: "bot" });
+  });
+
+  it("keeps a bot announced without its conversations unread when a thread beside it is read", async () => {
+    const page = await reloaded();
+    const state = { selectedId: "bot", activeView: "chat", groups: [], forkPanel: { kind: "bot", ownerId: "bot", threadId: "fork" },
+      bots: [{ id: "bot", threadId: "main", unread: true }] } as unknown as AppState;
+    page.holdRestoredUnread(state);
+    const bot = { id: "bot", unread: true } as unknown as BotAnnouncement;
+    page.markVisibleBotThreadsRead(state, bot, true, () => {});
+    expect(bot.unread).toBe(true);
+  });
+
+  it("keeps a room announced without its threads unread when a thread beside it is read", async () => {
+    const page = await reloaded();
+    const state = { selectedId: "room", activeView: "chat", bots: [], config: {}, forkPanel: { kind: "group", ownerId: "room", threadId: "fork" },
+      groups: [{ id: "room", threadId: "main", unread: true }] } as unknown as AppState;
+    page.holdRestoredUnread(state);
+    const group = { id: "room", unread: true } as Partial<Group> & { id: string };
+    page.markVisibleGroupThreadsRead(state, group, true, () => {});
+    expect(group.unread).toBe(true);
+  });
+});

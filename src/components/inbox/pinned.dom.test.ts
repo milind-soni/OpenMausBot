@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, Group, GroupTask, Task } from "@/state/store";
 import { t } from "@/lib/i18n";
-import type { AttentionThread } from "../SidebarBotActivity";
+import { botFaces, type AttentionThread } from "../SidebarBotActivity";
 import { PinnedThreads, pinnedThreadRows } from "./PinnedThreads";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -20,7 +20,7 @@ let root: Root;
 const onOpen = vi.fn();
 const onUnpin = vi.fn();
 const mount = (bots: Bot[], groups: Group[] = [], current?: { kind: "bot"; botId: string; threadId: string }) => act(async () => {
-  root.render(createElement(PinnedThreads, { rows: pinnedThreadRows(bots, groups, {}), now: NOW, current, onOpen, onUnpin }));
+  root.render(createElement(PinnedThreads, { rows: pinnedThreadRows(bots, groups, {}), faces: botFaces(bots), now: NOW, current, onOpen, onUnpin }));
 });
 const rowTitles = () => [...document.querySelectorAll<HTMLElement>("[data-pinned-row]")].map((row) => row.querySelector("[data-pinned-title]")?.textContent);
 

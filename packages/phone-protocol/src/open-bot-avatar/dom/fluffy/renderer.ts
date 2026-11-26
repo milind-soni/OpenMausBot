@@ -12,8 +12,11 @@
 import type { EyeMark, SurfaceEye, ViewBasis } from '../../render.ts';
 import { DYE_RAMP_SIZE, dyeRamp } from './dye.ts';
 import { ROOT_PASSES, buildMesh, halfDepth, rootsIn, type IndexRange, type FluffyShape } from './mesh.ts';
-import { PASS, fragmentShader, vertexShader } from './shaders.ts';
+import { FINISH, PASS, fragmentShader, vertexShader } from './shaders.ts';
 import { SOCKET_TILE, exposedHeight, socketKey, socketRegion, socketTile } from './socket.ts';
+
+/** MausBot: how the surface is finished. Matte and metallic light the bare body and draw no pile. */
+export type FluffyFinish = keyof typeof FINISH;
 
 /** The colors of a coat and the eyes set into it (none for a state mark). */
 export interface FluffyLook {
@@ -23,6 +26,8 @@ export interface FluffyLook {
   ink: string;
   /** Up to two eyes, left first. */
   eyes: SurfaceEye[];
+  /** Fluffy when left out. */
+  finish?: FluffyFinish;
 }
 
 /** A rendered coat. It lasts until the next render: draw or copy it at once. */
@@ -49,6 +54,8 @@ const FULL_DETAIL = 2.56;
 /** Largest image, pixels a side. */
 const MAX_PIXELS = 1024;
 const MIN_PIXELS = 32;
+/** Pixels around an image that are cleared with it, for the painter's smoothing to read. */
+const EDGE_PIXELS = 2;
 /** Room around the body for the pile, viewBox units. */
 const PILE_REACH = 4;
 /** The eyes sit this far above their host's surface at most, viewBox units. */
@@ -193,7 +200,7 @@ function createRenderer(onContextRestored: () => void): Renderer | null {
   const uniform = (name: string) => gl.getUniformLocation(program, name);
   const u = {
     view: uniform('view'), pivot: uniform('pivot'), extent: uniform('extent'), radius: uniform('radius'),
-    shell: uniform('shell'), strandWidth: uniform('strandWidth'), pass: uniform('pass'), color: uniform('color'), ink: uniform('ink'),
+    shell: uniform('shell'), strandWidth: uniform('strandWidth'), pass: uniform('pass'), finish: uniform('finish'), color: uniform('color'), ink: uniform('ink'),
     eyeRegion: uniform('eyeRegion[0]'), eyeSize: uniform('eyeSize[0]'),
   };
   gl.enable(gl.DEPTH_TEST);
@@ -325,7 +332,7 @@ function createRenderer(onContextRestored: () => void): Renderer | null {
 
   const readColor = colorReader();
   const shown = {
-    geometry: null as Geometry | null, view: null as ViewBasis | null, pixels: 0, color: '', ink: '',
+    geometry: null as Geometry | null, view: null as ViewBasis | null, pixels: 0, color: '', ink: '', finish: '',
     regions: new Float32Array(8), contours: ['', ''],
   };
   let dye = '';
@@ -339,6 +346,7 @@ function createRenderer(onContextRestored: () => void): Renderer | null {
     // allocates its buffers anew. Each image sits in the corner WebGL counts from, the lower left.
     if (canvas.width < pixels) canvas.width = canvas.height = pixels;
     const image = { canvas, x: 0, y: canvas.height - pixels, size: pixels, cx, cy, radius };
+    const finish = look.finish ?? 'fluffy';
 
     // The sockets: where each eye is, and its contour's distance tile.
     const eyeZ = 'eyeZ' in shape ? shape.eyeZ : [];
@@ -357,7 +365,7 @@ function createRenderer(onContextRestored: () => void): Renderer | null {
       ? Math.abs(view.cY - shown.view.cY) + Math.abs(view.sY - shown.view.sY) + Math.abs(view.sP - shown.view.sP) + Math.abs(view.cP - shown.view.cP)
       : Infinity;
     if (
-      shown.geometry === geometry && shown.pixels === pixels && shown.color === look.color && shown.ink === look.ink &&
+      shown.geometry === geometry && shown.pixels === pixels && shown.color === look.color && shown.ink === look.ink && shown.finish === finish &&
       contours.every((key, slot) => key === shown.contours[slot]) && regions.every((value, i) => value === shown.regions[i]) &&
       turn < SAME_VIEW / (radius * scale)
     ) {
@@ -368,6 +376,8 @@ function createRenderer(onContextRestored: () => void): Renderer | null {
     shown.pixels = pixels;
     shown.color = look.color;
     shown.ink = look.ink;
+    shown.finish = finish;
+    gl.uniform1i(u.finish, FINISH[finish]);
     shown.regions.set(regions);
 
     look.eyes.forEach(({ mark }, slot) => {
@@ -396,13 +406,17 @@ function createRenderer(onContextRestored: () => void): Renderer | null {
     gl.uniformMatrix3fv(u.view, false, [view.cY, view.sY * view.sP, -view.sY * view.cP, 0, view.cP, view.sP, view.sY, -view.cY * view.sP, view.facing]);
 
     gl.viewport(0, 0, pixels, pixels);
-    gl.scissor(0, 0, pixels, pixels);
+    // The painter smooths the image as it scales it, blending in the pixels just past its edge:
+    // clear those too, or a larger avatar's image from before shows as a line along its top and right.
+    const cleared = Math.min(canvas.width, pixels + EDGE_PIXELS);
+    gl.scissor(0, 0, cleared, cleared);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     const { shells, strandPasses, fineSockets } = fluffyDetail(scale);
     const triangles = fineSockets ? geometry.fine : geometry.coarse;
     gl.bindVertexArray(geometry.surface);
     gl.uniform1i(u.pass, PASS.body);
     gl.drawElements(gl.TRIANGLES, triangles.count, gl.UNSIGNED_INT, 4 * triangles.start);
+    if (finish !== 'fluffy') return image;
     gl.uniform1i(u.pass, PASS.shell);
     for (let layer = 1; layer <= shells; layer++) {
       gl.uniform1f(u.shell, layer / shells);

@@ -104,6 +104,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
       separatorBefore: true,
       label: t("task.newShort"),
       icon: <SquarePen size={16} />,
+      trailing: <ShortcutHint id="new-thread" />,
       onSelect: () => dispatch({ type: "newTask", botId: profile.id }),
     } satisfies SidebarMenuItem]),
     // With one thread there is nothing to switch to.

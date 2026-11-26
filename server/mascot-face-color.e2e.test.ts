@@ -65,7 +65,7 @@ it("saves, reads and clears a custom body color through the isolated HTTP routes
   }
 }, 60_000);
 
-it("saves, reads and clears the fluffy finish through the isolated HTTP routes", async () => {
+it("saves, reads and clears each finish through the isolated HTTP routes", async () => {
   const fixture = await launchVerificationServer();
   const api = async (method: string, path: string, body?: unknown, status = 200) => {
     const response = await fetch(`${fixture.info.url}${path}`, {
@@ -82,12 +82,12 @@ it("saves, reads and clears the fluffy finish through the isolated HTTP routes",
     }, 201);
     expect(bot.mascotMaterial).toBe("fluffy");
     const path = `/api/bots/${bot.id}`;
-    for (const mascotMaterial of ["fluffy", null]) {
+    for (const mascotMaterial of ["matte", "metallic", "fluffy", null]) {
       expect((await api("PATCH", path, { mascotMaterial })).bot.mascotMaterial).toBe(mascotMaterial);
       const saved = JSON.parse(readFileSync(join(fixture.info.dataDir, "bots.json"), "utf8"));
       expect(saved.find((value: { id: string }) => value.id === bot.id).mascotMaterial).toBe(mascotMaterial);
     }
-    expect((await api("PATCH", path, { mascotMaterial: "shaggy" }, 400)).error).toBe("mascotMaterial must be fluffy, or null");
+    expect((await api("PATCH", path, { mascotMaterial: "shaggy" }, 400)).error).toBe("mascotMaterial must be fluffy, matte, metallic, or null");
     const after = (await api("GET", "/api/bots")).bots.find((value: { id: string }) => value.id === bot.id);
     expect(after).toMatchObject({ color: "yellow", mascotBody: "blob", mascotMaterial: null });
   } finally {

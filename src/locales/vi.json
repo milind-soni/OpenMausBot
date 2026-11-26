@@ -1524,7 +1524,7 @@
   "chat.unpin": "Bỏ ghim",
   "chat.pinnedJump": "Đi đến tin nhắn đã ghim",
   "chat.you": "Bạn",
-  "chat.peer.asked": "đã hỏi qua ask_bot",
+  "chat.peer.asked": "đã hỏi",
   "chat.peer.handedTask": "đã giao một nhiệm vụ",
   "chat.peer.openedThread": "đã mở luồng này",
   "chat.peer.requested": "đã gửi một yêu cầu",

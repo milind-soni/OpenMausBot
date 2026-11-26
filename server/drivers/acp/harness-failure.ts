@@ -13,6 +13,8 @@ export interface StderrFailure {
   line: RegExp;
   /** What the person is told. */
   message: string;
+  /** The failure one such line stands for when it says more than that the process failed, e.g. a usage limit. */
+  failure?: (line: string) => Error | undefined;
 }
 
 const MAX_LINE_CHARS = 64 * 1024;
@@ -24,8 +26,10 @@ export function watchStderrFailure(host: AcpHost, spec: StderrFailure): void {
     const lines = (partial + String(chunk)).split("\n");
     partial = lines.pop() ?? "";
     if (partial.length > MAX_LINE_CHARS) partial = "";
-    if (failed.has(host) || !lines.some((line) => line.length <= MAX_LINE_CHARS && spec.line.test(line.replace(/\r$/u, "")))) return;
-    const error = Object.assign(new Error(spec.message), { acpSessionFailure: true });
+    if (failed.has(host)) return;
+    const line = lines.map((each) => each.replace(/\r$/u, "")).find((each) => each.length <= MAX_LINE_CHARS && spec.line.test(each));
+    if (line === undefined) return;
+    const error = Object.assign(spec.failure?.(line) ?? new Error(spec.message), { acpSessionFailure: true });
     failed.set(host, error);
     host.draining = true;
     for (const link of host.links) link.failAll(error);

@@ -6,8 +6,8 @@ import type { Bot, Group } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import {
-  attentionOwnerName, attentionRowStatus, crossBotPinnedThreads, isOpenThread, openThreadRow,
-  type AttentionThread, type OpenThread,
+  AttentionFace, attentionOwnerName, attentionRowStatus, crossBotPinnedThreads, isOpenThread, openThreadRow,
+  type AttentionThread, type BotFace, type OpenThread,
 } from "../SidebarBotActivity";
 import { formatUpdatedAt, threadRecency, threadUpdatedLabel } from "../SidebarThreadRow";
 
@@ -18,8 +18,10 @@ export function pinnedThreadRows(bots: readonly Bot[], groups: readonly Group[],
     .sort((a, b) => threadRecency(b.task) - threadRecency(a.task));
 }
 
-export function PinnedThreads({ rows, now, current, onOpen, onUnpin }: {
+export function PinnedThreads({ rows, faces, now, current, onOpen, onUnpin }: {
   rows: readonly AttentionThread[];
+  /** The bots' pictures, from botFaces: each row leads with its own. */
+  faces: readonly BotFace[];
   /** The clock each row's last-activity label is relative to. */
   now: number;
   /** The conversation the chat window has open, marked like a selected sidebar row. */
@@ -48,9 +50,7 @@ export function PinnedThreads({ rows, now, current, onOpen, onUnpin }: {
               aria-current={open ? "page" : undefined} data-open-thread={open || undefined}
               onClick={() => onOpen(row)}
               className={cn("flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[13px] text-ink hover:bg-menu-hover", open && openThreadRow)}>
-              {active
-                ? <Icon size={16} aria-hidden="true" className={cn("shrink-0", colorClass)} />
-                : <Pin size={16} aria-hidden="true" className="shrink-0 text-ink-tertiary" />}
+              <AttentionFace entry={row} faces={faces} Icon={active ? Icon : Pin} iconClass={active ? colorClass : "text-ink-tertiary"} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate" data-pinned-title>{row.task.title}</span>
                 <span className="block truncate text-[11px] text-ink-secondary">

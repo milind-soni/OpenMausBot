@@ -191,6 +191,13 @@ export function antigravityTurnFailure(
   return restarting(new AcpReportedFailure(engineFailure(provider, message!.trim(), { kind: transient ? "server" : "refused", status: http })!, false));
 }
 
+/** The usage limit a harness failure line on stderr reports, when it reports one; undefined for any other failure. */
+export function antigravityHarnessLimit(provider: string, line: string, now: number = Date.now()): AcpReportedFailure | undefined {
+  const apiError = API_ERROR.exec(line) ?? statusError(line);
+  const exhausted = QUOTA_EXHAUSTED.test(line) || apiError?.[1] === "429" || apiError?.[3] === "RESOURCE_EXHAUSTED";
+  return exhausted ? usageLimit(provider, line, now) : undefined;
+}
+
 /**
  * Antigravity reports an upstream API failure as a chat message and `end_turn`. Its session log ends that turn with an
  * error step, so the check reads only steps the current prompt added, read-only, from this session's own unlinked

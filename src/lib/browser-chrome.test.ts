@@ -41,6 +41,17 @@ describe("theme-color follows the skin ground", () => {
     expect(bar.getAttribute("content")).toBe("#0b0c0b");
   });
 
+  it("accepts a three-digit or six-digit hex color and refuses nine digits", () => {
+    const short = doc();
+    expect(applyThemeColor("#abc", short)).toBe(true);
+    expect(short.created[0].getAttribute("content")).toBe("#abc");
+    const full = doc();
+    expect(applyThemeColor("#121212", full)).toBe(true);
+    const nine = doc();
+    expect(applyThemeColor("#123456789", nine)).toBe(false);
+    expect(nine.created).toHaveLength(0);
+  });
+
   it("leaves the bar alone when the surface is not a hex color", () => {
     const page = doc();
     expect(applyThemeColor("var(--color-app)", page)).toBe(false);

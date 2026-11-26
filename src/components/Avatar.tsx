@@ -108,7 +108,7 @@ export type MausAvatarProps = {
   faceColor?: MascotFaceColor | null;
   /** A custom `#rrggbb` body colour; it wins over `color` for the body only. */
   bodyColor?: string | null;
-  /** Fluffy fur on a body the engine draws (the shapes and objects); the cursor and festival bodies stay flat. */
+  /** The finish (matte, metallic or fluffy fur) of a body the engine draws (the shapes and objects); the cursor and festival bodies stay flat. */
   material?: MascotMaterial | null;
   /** Whose face this is; a decorative mascot has none. */
   kind?: AvatarKind;

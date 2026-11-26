@@ -18,6 +18,7 @@ import type { Routine, RoutineManager } from "../routines.ts";
 import type { BotRecord, GroupRecord, Store } from "../store.ts";
 import { createTeamBackup, importTeamBackup } from "../team-backup.ts";
 import { fetchGithubTeam, fetchLibraryTeam, fetchTeamCatalog } from "../team-library.ts";
+import { withCatalogPictures } from "../team-library-pictures.ts";
 import { parseTeamManifest } from "../team-manifest.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -68,7 +69,7 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
     }
     if (method === "GET" && path === "/api/team-library/catalog") {
       try {
-        return json(res, 200, await fetchTeamCatalog());
+        return json(res, 200, await withCatalogPictures(await fetchTeamCatalog()));
       } catch (error) {
         return json(res, 502, { error: error instanceof Error ? error.message : "The team library is unavailable" });
       }
