@@ -5,12 +5,12 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 
 /** The row under the pinned bots that opens the Unread filter, shaped like the Inbox row, with the bots it would list
- * as its count. It stays quiet with nothing to read. */
-export function SidebarUnreadFilterRow({ count, open, large, onToggle }: { count: number; open: boolean; large: boolean; onToggle: () => void }) {
+ * as its count. It stays quiet with nothing to read. `inList`: it sits in the scrolling list, under a Pinned section. */
+export function SidebarUnreadFilterRow({ count, open, large, inList, onToggle }: { count: number; open: boolean; large: boolean; inList: boolean; onToggle: () => void }) {
   const quiet = count === 0 && !open;
   const label = open ? t("sidebar.unreadFilter.close") : count > 0 ? t("sidebar.unreadFilter.count", { count }) : t("sidebar.unreadFilter.label");
   return (
-    <div className="px-3 pb-1">
+    <div className={inList ? "pt-1" : "px-3 pb-1"}>
       <button type="button" data-sidebar-unread-filter={count} aria-pressed={open} aria-label={label} title={label} onClick={onToggle}
         className={cn("flex w-full min-w-0 items-center gap-2.5 rounded-xl px-2 py-1.5 text-start outline-none transition-colors duration-[120ms] hover:bg-ink/[0.06] focus-visible:ring-2 focus-visible:ring-focus motion-reduce:transition-none",
           open && "bg-raised hover:bg-raised-hover")}>

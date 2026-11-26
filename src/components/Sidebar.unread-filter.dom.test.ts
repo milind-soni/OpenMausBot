@@ -3,9 +3,11 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
+import type { PlaceBotRow, PlacesTogetherState } from "@/lib/places-together";
 
+const mode = vi.hoisted(() => ({ advanced: false }));
 vi.mock("@/lib/interface-mode", async (original) => ({
-  ...await original<typeof import("@/lib/interface-mode")>(), useAdvancedMode: () => false,
+  ...await original<typeof import("@/lib/interface-mode")>(), useAdvancedMode: () => mode.advanced,
 }));
 vi.mock("@/lib/thread-preferences", async (original) => ({
   ...await original<typeof import("@/lib/thread-preferences")>(), useShowThreads: () => false,
@@ -20,6 +22,9 @@ vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => true }));
 const { Sidebar } = await import("./Sidebar");
 const { BotEditorStore, initialState } = await import("@/state/store");
 const { setLocale } = await import("@/lib/i18n");
+const { resetPlacesTogetherForTest } = await import("@/lib/places-together");
+const { resetPlaceRowsForTest } = await import("@/lib/place-rows");
+const { setUniversalPins } = await import("@/lib/sidebar-preferences");
 
 const bot = (id: string, extra: Partial<Bot> = {}): Bot => ({
   id, name: id[0]!.toUpperCase() + id.slice(1), threadId: `${id}-t`, title: "", description: "", color: "green", unread: false,
@@ -40,6 +45,10 @@ async function render(bots: Bot[], selectedId = "") {
   await act(async () => { await Promise.resolve(); });
 }
 const ids = () => [...host.querySelectorAll<HTMLElement>("[data-sidebar-bot-row]")].map((item) => item.dataset.sidebarBotRow);
+const shown = () => { const seen = ids(); return { seen, once: new Set(seen).size === seen.length }; };
+const row = (id: string, over: Partial<PlaceBotRow> = {}): PlaceBotRow => ({ home: "cloud", id, threadId: `t-${id}`, name: id[0]!.toUpperCase() + id.slice(1), color: "blue", ...over });
+const cloud = (bots: PlaceBotRow[]): PlacesTogetherState => ({ v: 1, available: true, on: true, here: "computer", other: { home: "cloud", state: "ready", bots } });
+const page = (said: PlacesTogetherState) => ({ state: vi.fn(async () => said), set: vi.fn(async () => said), open: vi.fn(async () => true), onChanged: vi.fn(() => () => {}) });
 const filter = () => host.querySelector<HTMLButtonElement>("[data-sidebar-unread-filter]")!;
 const click = async () => act(async () => filter().click());
 
@@ -48,6 +57,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", () => new Promise(() => {}));
   localStorage.clear();
   setLocale("en");
+  mode.advanced = false;
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -55,7 +65,11 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  setUniversalPins(false);
+  resetPlacesTogetherForTest();
+  resetPlaceRowsForTest();
   vi.unstubAllGlobals();
+  delete (window as { ogb?: unknown }).ogb;
 });
 
 describe("the sidebar's Unread filter", () => {
@@ -96,5 +110,59 @@ describe("the sidebar's Unread filter", () => {
     await render([bot("ann"), bot("ben")], "ann");
     expect(ids()).toEqual([]);
     expect(host.textContent).toContain("All read");
+  });
+
+  it("counts and lists My Cloud's bots too, and opens one where it lives", async () => {
+    const other = page(cloud([row("scout"), row("tech", { waiting: true, lastAt: 5 }), row("old", { unread: true, lastAt: 1 })]));
+    window.ogb = { placesTogether: other } as never;
+    await render([bot("ann"), unread("ben", 20)]);
+    expect(filter().dataset.sidebarUnreadFilter).toBe("3");
+    await click();
+    expect(ids()).toEqual(["cloud:old", "cloud:tech", "ben"]);
+    await act(async () => host.querySelector<HTMLElement>('[data-sidebar-bot-row="cloud:tech"]')!.click());
+    expect(other.open.mock.calls).toEqual([["tech"]]);
+  });
+
+  it("renames a listed bot from its menu", async () => {
+    await render([bot("ann"), unread("ben", 20)]);
+    await click();
+    await act(async () => { host.querySelector('[data-sidebar-bot-row="ben"]')!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 10 })); });
+    const rename = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.textContent === "Rename");
+    await act(async () => rename!.click());
+    expect(host.querySelector('[data-sidebar-bot-row="ben"] input')).not.toBeNull();
+  });
+
+  const withPin = [bot("ann"), bot("pip", { pinned: true, unread: true, tasks: [{ threadId: "pip-t", title: "Chat", createdAt: 1, updatedAt: 5, unread: true }] }), unread("ben", 20)];
+  const after = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  it("sits under the Pinned section and lists a pinned bot once, in the pins, not in its count", async () => {
+    mode.advanced = true;
+    await render(withPin);
+    const pinned = host.querySelector('[data-sidebar-section-id="builtin:pinned"]')!;
+    expect(pinned.contains(filter())).toBe(true);
+    expect(after(pinned.querySelector('[data-sidebar-bot-row="pip"]')!, filter())).toBe(true);
+    expect(filter().dataset.sidebarUnreadFilter).toBe("1");
+    await click();
+    expect(shown()).toEqual({ seen: ["pip", "ben"], once: true });
+    expect(after(filter(), host.querySelector('[data-sidebar-bot-row="ben"]')!)).toBe(true);
+  });
+
+  it("sits under the pins kept above the list and lists a pinned bot once", async () => {
+    mode.advanced = true;
+    setUniversalPins(true);
+    await render(withPin);
+    expect(after(host.querySelector("[data-sidebar-universal-pins]")!, filter())).toBe(true);
+    expect(filter().dataset.sidebarUnreadFilter).toBe("1");
+    await click();
+    expect(shown()).toEqual({ seen: ["pip", "ben"], once: true });
+  });
+
+  it("sits under the pinned tiles of the Simple sidebar and lists a pinned bot once", async () => {
+    await render(withPin);
+    const pip = host.querySelector('[data-sidebar-bot-row="pip"]')!;
+    expect(after(pip, filter())).toBe(true);
+    expect(filter().dataset.sidebarUnreadFilter).toBe("1");
+    await click();
+    expect(shown()).toEqual({ seen: ["pip", "ben"], once: true });
   });
 });

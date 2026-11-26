@@ -1089,7 +1089,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
         b.projects?.some((folder) => folder.name.toLowerCase().includes(q)),
     );
   const visibleGroups = sideLists.groups.filter((g) => !q || g.name.toLowerCase().includes(q) || g.tasks?.some((task) => task.title.toLowerCase().includes(q)));
-  const viewerEmail = useViewerEmail(), placed = useOtherPlaceBots(q), placeHere = useOneListHere(), unreadFilterShown = !q && density !== "icons", unreadFilter = useUnreadFilter(sideLists.bots.filter((bot) => !bot.hidden), (bot) => sidebarBotStatus(bot, state.pendingQueued).waiting, state.activeView === "chat" ? state.selectedId : null);
+  const viewerEmail = useViewerEmail(), placed = useOtherPlaceBots(q), placeHere = useOneListHere(), unreadFilterShown = !q && density !== "icons";
   const parts = partitionSidebarBots(botDrag.preview(matchingBots), { universalPins, viewerEmail, welcoming: useWelcomingBot(), searching: Boolean(q) });
   const saved = withOtherPlace(simpleDesk ? withPrimaryTile(parts, myDefaultBot(state.bots, viewerEmail)?.id) : { ...parts, primary: null }, placed);
   // Rows keep their place while the app is in use: unread, work and a wait on the person show as marks on the row, never
@@ -1111,14 +1111,14 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const layout = sections.arrange(naturalSectionIds);
   const sectionIds = withUnreadSection(layout.sectionIds, unreadBots.length > 0);
   const showPinnedCircleThreads = !simpleDesk && pinnedCircleThreadListVisible(pinnedCircles, density, pinnedBots.length);
-  const tiles = simpleDesk && (primary !== null || pinnedBots.length > 0);
+  const tiles = simpleDesk && (primary !== null || pinnedBots.length > 0), filterInList = naturalSectionIds.includes(PINNED_SECTION_ID), topIds = new Set([...pinnedBots, ...(primary ? [primary] : [])].map((bot) => bot.id)); const unreadFilter = useUnreadFilter([...sideLists.bots.filter((bot) => !bot.hidden), ...placed].filter((bot) => !topIds.has(bot.id)), (bot) => sidebarBotStatus(bot, state.pendingQueued).waiting, state.activeView === "chat" ? state.selectedId : null), filterOpen = unreadFilterShown && unreadFilter.open;
   const { interactive: layoutInteractive, collapsed: sectionCollapsed, toggle: toggleSection } = sections;
   const archivedBots = state.bots.filter((bot) => bot.hidden && !bot.movedTo);
   const archivedEntry = remoteClient ? undefined : { count: archivedBots.length, open: () => setArchivedBotsOpen(true) };
   const showAttention = (advanced && inboxSupport === "no") || (attentionPinned && density !== "icons");
   const attention = showAttention ? crossBotAttentionThreads(state.bots, state.pendingQueued, undefined, state.groups) : [];
   const restoreBot = teamFeedback?.restoreBot, pendingUndo = teamFeedback?.undo ?? (restoreBot ? () => void undoBotArchive(restoreBot) : undefined);
-  const botRow = (bot: Bot) => isPlacedBot(bot) ? botRowProps(state, otherPlaceDispatch(bot), bot, { density, query: q, onMenu: NO_MENU, placeHere }) : botRowProps(state, dispatch, bot, { density, query: q, onMenu: setMenu, placeHere, renameRequest: renameRequest?.botId === bot.id ? renameRequest.nonce : 0, ...drops.row(bot.id) });
+  const botRow = (bot: Bot) => isPlacedBot(bot) ? botRowProps(state, otherPlaceDispatch(bot), bot, { density, query: q, onMenu: NO_MENU, placeHere }) : botRowProps(state, dispatch, bot, { density, query: q, onMenu: setMenu, placeHere, renameRequest: renameRequest?.botId === bot.id ? renameRequest.nonce : 0, ...(!filterOpen && drops.row(bot.id)) }); const filterRow = unreadFilterShown && <SidebarUnreadFilterRow count={unreadFilter.count} open={unreadFilter.open} large={!advanced} inList={filterInList} onToggle={unreadFilter.toggle} />, filterList = <SidebarUnreadFilterList bots={unreadFilter.bots} item={(bot) => <BotListItem key={bot.id} {...botRow(bot)} />} />;
   const railSearch = () => {
     if (collapseToIcons) return openCommandPalette();
     setSearchOpen(true);
@@ -1336,7 +1336,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
       )}
 
       {tiles && <SidebarTileGrid primary={primary} pinned={pinnedBots} row={botRow} corner={corner} />}
-      {simpleDesk && !tiles && <SidebarNoBots />}{unreadFilterShown && <SidebarUnreadFilterRow count={unreadFilter.count} open={unreadFilter.open} large={!advanced} onToggle={unreadFilter.toggle} />}
+      {simpleDesk && !tiles && <SidebarNoBots />}{!filterInList && filterRow}
       </GlassBar>
 
       {!collapseToIcons && !phone && <SidebarResizeHandle sizing={sizing} sidebarRef={sidebarRef} avatars={density === "icons"} avatarsWidth={rail ? 92 : 80}
@@ -1347,15 +1347,15 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
           {matchingBots.length === 0 && visibleGroups.length === 0 && !placed.length && q && q.length < MIN_QUERY && (
             <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">{t("sidebar.noMatch", { query })}</div>
           )}
-          {unreadFilterShown && unreadFilter.open ? <SidebarUnreadFilterList bots={unreadFilter.bots} item={(bot) => <BotListItem key={bot.id} {...botRowProps(state, dispatch, bot, { density, query: q, onMenu: setMenu, placeHere })} />} /> : <>{!q && <NeedsYouButton compact={rail} />}{!q && <SidebarPeople compact={rail} onOpened={phone ? onClose : undefined} />}
-          {unsectionedChief && (phone ? (
+          {filterOpen && !filterInList ? filterList : <>{!q && !filterOpen && <NeedsYouButton compact={rail} />}{!q && !filterOpen && <SidebarPeople compact={rail} onOpened={phone ? onClose : undefined} />}
+          {unsectionedChief && !filterOpen && (phone ? (
             <PhoneHero bot={unsectionedChief} selected={botRow(unsectionedChief).selected} onOpen={() => openBotRow(dispatch, unsectionedChief, showThreads, botRow(unsectionedChief).selected)} onMenu={setMenu} />
           ) : (
             <div className="mb-1.5">
               <BotListItem {...botRow(unsectionedChief)} />
             </div>
           ))}
-          {sectionIds.map((id, index) => {
+          {(filterOpen ? sectionIds.filter((id) => id === PINNED_SECTION_ID) : sectionIds).map((id, index) => {
             const sectionName = userSectionName(id);
             const sectionChiefItems = sectionName
               ? sectionChiefs.filter((bot) => bot.section === sectionName)
@@ -1453,19 +1453,19 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
                     )}
                   </>
                 )}
-                {layout.dropLine(id, "after")}
+                {id === PINNED_SECTION_ID && filterInList && <>{filterRow}{filterOpen && filterList}</>}{layout.dropLine(id, "after")}
               </div>
             );
           })}
-          <OtherPlaceLine query={query} icons={density === "icons"} /><MovedBotRows bots={state.bots} /><MovedToMyCloudRow bots={state.bots} /><SearchResults query={query} onLanded={() => { setQuery(""); setSearchOpen(false); }} />
-          {showPinnedCircleThreads && (
+          {!filterOpen && <><OtherPlaceLine query={query} icons={density === "icons"} /><MovedBotRows bots={state.bots} /><MovedToMyCloudRow bots={state.bots} /><SearchResults query={query} onLanded={() => { setQuery(""); setSearchOpen(false); }} />
+          {showPinnedCircleThreads && !filterOpen && (
             <PinnedCircleThreadSection
               bots={pinnedBots}
               collapsed={pinnedCircleThreadsCollapsed}
               onToggle={() => setPinnedCircleThreadsCollapsed((collapsed) => !collapsed)}
               row={botRow}
             />
-          )}</>}
+          )}</>}</>}
         </div>
       </GlassScroller>
       <p className="sr-only" aria-live="polite" aria-atomic="true">
