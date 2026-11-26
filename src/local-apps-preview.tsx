@@ -1,12 +1,13 @@
 // Dev-only gallery of saved apps, served at /local-apps-preview.html; not in the packaged app. It mounts the real apps
 // page, app view and page toolbar over a fake store and answers every /api request itself, so nothing reaches a server.
-// ?view=list|empty|app|toolbar|window &place=computer|cloud &skin=midnight|daylight &long=1 (long names) &desktop=1 (the desktop
-// app's bridge: Open in its own window shows) &act=menu|rename|removed|versions (opens that state once drawn)
+// ?view=list|empty|app|toolbar|window|icons &place=computer|cloud &skin=midnight|daylight &long=1 (long names) &desktop=1 (the desktop
+// app's bridge: Open in its own window and Install show, the first app installed) &act=menu|rename|removed|versions (opens that state once drawn)
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { AppMessage } from "@/components/app/AppMessage";
 import { PublishedAppsPage } from "@/components/published-apps/PublishedAppsPage";
 import { LocalAppWindow } from "./local-app-window";
+import { appIconPng } from "@/lib/app-icon";
 import { loadLocale } from "@/lib/i18n";
 import { openLocalApp } from "@/lib/local-apps";
 import { applySkinChoice, SKIN_IDS, type SkinId } from "@/lib/skins";
@@ -110,13 +111,24 @@ const state = { ...initialState, hydrated: true, bots: BOTS as never, config: co
 const store = { state, dispatch: () => {}, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
 if (view === "app") openLocalApp(LOCAL[0]!.id);
 if (params.get("desktop") === "1" || view === "window") {
-  (window as { ogb?: unknown }).ogb = { localApps: { openWindow: async () => true, openChat: async () => true } };
+  let installed = [LOCAL[0]!.id];
+  (window as { ogb?: unknown }).ogb = {
+    localApps: { openWindow: async () => true, openChat: async () => true },
+    appInstall: {
+      list: async () => ({ available: true, apps: installed.map((id) => ({ id, name: "", path: null })) }),
+      install: async ({ id, name }: { id: string; name: string }) => { installed = [...installed, id]; return { ok: true, app: { id, name, path: null } }; },
+      uninstall: async (id: string) => { installed = installed.filter((one) => one !== id); return { ok: true, removed: true }; },
+      cleanup: async () => [],
+    },
+  };
 }
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <StoreContext.Provider value={store as never}>
-      {view === "window" ? (
+      {view === "icons" ? (
+        <main data-icons="" className="flex min-h-screen flex-wrap items-center justify-center gap-6 bg-app p-8" />
+      ) : view === "window" ? (
         <LocalAppWindow id={LOCAL[0]!.id} />
       ) : view === "toolbar" ? (
         <main className="min-h-screen bg-app p-4 sm:p-8">
@@ -150,3 +162,14 @@ if (act === "menu" || act === "rename" || act === "removed") {
   });
 }
 if (act === "versions") whenDrawn("[data-local-app-version]", () => { click(document.querySelector("[data-local-app-version]")?.closest("button")); window.setTimeout(ready, 300); });
+if (view === "icons") {
+  whenDrawn("[data-icons]", () => void Promise.all(LOCAL.map((one) => appIconPng(one.name, one.bot?.color))).then((pngs) => {
+    for (const png of pngs) {
+      const image = document.createElement("img");
+      if (png) image.src = URL.createObjectURL(new Blob([new Uint8Array(png)], { type: "image/png" }));
+      image.width = image.height = 128;
+      document.querySelector("[data-icons]")!.append(image);
+    }
+    window.setTimeout(ready, 300);
+  }));
+}

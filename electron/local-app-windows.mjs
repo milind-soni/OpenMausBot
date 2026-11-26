@@ -4,10 +4,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { appFrameNavigationAllowed } from "./app-frame-guard.mjs";
+import { validAppId } from "./app-link.mjs";
 import { chatLinkFrom } from "./chat-link.mjs";
 
-/** Must match LOCAL_APP_ID in shared/local-apps.ts. */
-const APP_ID = /^la_[A-Za-z0-9_-]{16}$/;
 export const APP_WINDOW_SIZE = { width: 1100, height: 760 };
 export const APP_WINDOW_MIN = { width: 420, height: 360 };
 const SIZES_KEPT = 100;
@@ -20,7 +19,7 @@ export function isLocalAppWindow(win) {
 }
 
 export function appIdFrom(value) {
-  return typeof value === "string" && APP_ID.test(value) ? value : null;
+  return validAppId(value) ? value : null;
 }
 
 /** The address of the app's own page on `origin`, or null for anything but an http(s) origin. */
@@ -79,10 +78,13 @@ function originOf(url) {
 /**
  * `guard(channel, handler)`: who may open one (this computer's page or My Cloud's own); `senderOrigin(event)`: the
  * server the asking page shows; `webPreferences()`: the main window's; `openChat(link)`: main's chat link queue, which
- * brings the main window up; `openExternal(url)`: the person's browser.
+ * brings the main window up; `openExternal(url)`: the person's browser. `launches` (app-launches.mjs): the apps opened
+ * from their launchers, opened on `launchOrigin()` (this computer's server) once `ready()`. `windowDetails(id)`: on
+ * Windows, the installed launcher's taskbar details for the app's window, or null.
  */
 export function installLocalAppWindows({
   ipcMain, guard, BrowserWindow, senderOrigin, webPreferences, openChat, openExternal, sizes, workAreas = () => [], icon, background = () => undefined, log = () => {},
+  launches, ready = () => true, launchOrigin = () => null, windowDetails = async () => null,
 }) {
   const open = new Map();
 
@@ -116,6 +118,9 @@ export function installLocalAppWindows({
     win.on("close", remember);
     win.once("closed", () => { if (open.get(key) === win) open.delete(key); });
     win.once("ready-to-show", () => { if (!win.isDestroyed()) { win.show(); win.focus(); } });
+    void Promise.resolve().then(() => windowDetails(id)).then((details) => {
+      if (details && !win.isDestroyed()) win.setAppDetails?.(details);
+    }).catch(() => {});
 
     win.webContents.setWindowOpenHandler(({ url: target }) => {
       if (/^https?:\/\//i.test(target)) void Promise.resolve(openExternal(target)).catch(() => {});
@@ -150,6 +155,11 @@ export function installLocalAppWindows({
     const chat = chatLinkFrom(link);
     if (!sender || !chat || !/^openmausbot:\/\/(?:thread|bot)\//i.test(chat)) return false;
     return Boolean(openChat(chat));
+  });
+
+  launches?.attach((id) => {
+    const origin = ready() ? launchOrigin() : null;
+    return Boolean(origin) && openWindow(origin, id);
   });
 
   return { openWindow, windows: () => [...open.values()].filter((win) => !win.isDestroyed()) };

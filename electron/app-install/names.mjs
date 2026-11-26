@@ -2,39 +2,14 @@
 // identity it carries, and the link it opens.
 import { createHash } from "node:crypto";
 
-export const APP_LINK_PREFIX = "openmausbot://app/";
+export { launcherLink, validAppId } from "../app-link.mjs";
+
 export const FOLDER_NAME = "MausBot Apps";
 export const HOST_BUNDLE_ID = "com.openmausbot.app";
 
-/** Security invariant: an id reaches a shell script, a desktop entry's Exec line, a shortcut argument and a file name,
- * so only this alphabet passes. */
-const APP_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const BUNDLE_ID = /^[A-Za-z0-9][A-Za-z0-9.-]{0,154}$/;
 
-export const validAppId = (id) => typeof id === "string" && APP_ID.test(id);
 export const validBundleId = (id) => typeof id === "string" && BUNDLE_ID.test(id) && !id.includes("..");
-
-export function appLink(id) {
-  if (!validAppId(id)) throw new Error("invalid app id");
-  return `${APP_LINK_PREFIX}${id}`;
-}
-
-/** `openmausbot://app/<id>` (a trailing slash allowed) to its id, or null. */
-export function appIdFromLink(value) {
-  if (typeof value !== "string" || value.length > 256) return null;
-  const link = value.trim();
-  if (link.slice(0, APP_LINK_PREFIX.length).toLowerCase() !== APP_LINK_PREFIX) return null;
-  const id = link.slice(APP_LINK_PREFIX.length).replace(/\/$/, "");
-  return validAppId(id) ? id : null;
-}
-
-export function appIdFromCommandLine(argv) {
-  for (const value of Array.isArray(argv) ? argv : []) {
-    const id = appIdFromLink(value);
-    if (id) return id;
-  }
-  return null;
-}
 
 export const appKey = (id) => createHash("sha256").update(`openmausbot-local-app\n${id}`).digest("hex").slice(0, 16);
 

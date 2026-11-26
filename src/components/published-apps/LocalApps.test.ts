@@ -28,6 +28,7 @@ vi.mock("@/state/api", () => ({ api: fixture.api, ApiError: FakeApiError }));
 const { PublishedAppsPage } = await import("./PublishedAppsPage");
 const { REMOVE_UNDO_MS } = await import("./LocalAppsSection");
 const { openLocalApp, resetLocalApps } = await import("@/lib/local-apps");
+const { resetAppInstall } = await import("@/lib/local-app-install");
 
 const NOW = Date.parse("2026-11-26T12:00:00Z");
 const app = (id: string, name: string, more: Partial<LocalApp> = {}): LocalApp => ({
@@ -211,5 +212,84 @@ describe("a saved app open in its own view", () => {
     openLocalApp("la_missing0000000000");
     await show();
     expect(host.textContent).toContain("This app is no longer here.");
+  });
+});
+
+describe("installing a saved app on this computer", () => {
+  let bridge: { list: ReturnType<typeof vi.fn>; install: ReturnType<typeof vi.fn>; uninstall: ReturnType<typeof vi.fn>; cleanup: ReturnType<typeof vi.fn> };
+  beforeEach(() => {
+    resetAppInstall();
+    let installed = [BOARD.id];
+    bridge = {
+      list: vi.fn(async () => ({ available: true, apps: installed.map((id) => ({ id, name: "x", path: "/p" })) })),
+      install: vi.fn(async (input: { id: string; name: string }) => { installed = [...installed, input.id]; return { ok: true, app: { id: input.id, name: input.name, path: "/p" } }; }),
+      uninstall: vi.fn(async (id: string) => { installed = installed.filter((one) => one !== id); return { ok: true, removed: true }; }),
+      cleanup: vi.fn(async () => []),
+    };
+    vi.stubGlobal("ogb", { appInstall: bridge });
+  });
+
+  it("tidies launchers against the whole list, marks an installed app, and offers Install or Uninstall in its menu", async () => {
+    await show();
+    expect(bridge.cleanup).toHaveBeenCalledWith([BOARD.id, ROTA.id]);
+    expect(card(BOARD.id).querySelector("[data-local-app-installed]")?.textContent).toBe("Installed");
+    expect(card(ROTA.id).querySelector("[data-local-app-installed]")).toBeNull();
+    act(() => button(card(BOARD.id), "More for Sales board").click());
+    expect(menuItem("Uninstall")).toBeDefined();
+    expect(menuItem("Install on this computer")).toBeUndefined();
+    act(() => button(card(ROTA.id), "More for Staff rota").click());
+    await act(async () => menuItem("Install on this computer").click());
+    await settle();
+    expect(bridge.install).toHaveBeenCalledWith({ id: ROTA.id, name: "Staff rota" });
+    expect(card(ROTA.id).querySelector("[data-local-app-installed]")).not.toBeNull();
+    expect(document.querySelector("[role=dialog], [role=alertdialog]")).toBeNull();
+  });
+
+  it("says so in one line when a launcher couldn't be written", async () => {
+    bridge.install.mockResolvedValueOnce({ ok: false, reason: "failed" });
+    await show();
+    act(() => button(card(ROTA.id), "More for Staff rota").click());
+    await act(async () => menuItem("Install on this computer").click());
+    await settle();
+    expect(host.querySelector("[role=alert]")?.textContent).toBe("“Staff rota” couldn't be installed on this computer. Try again.");
+  });
+
+  it("offers nothing where launchers can't be installed", async () => {
+    bridge.list.mockResolvedValue({ available: false, apps: [] });
+    await show();
+    act(() => button(card(ROTA.id), "More for Staff rota").click());
+    expect(menuItem("Install on this computer")).toBeUndefined();
+    expect(host.querySelector("[data-local-app-installed]")).toBeNull();
+  });
+
+  it("uninstalls once a removal is past its Undo, and reinstalls under a new name", async () => {
+    await show();
+    act(() => button(card(BOARD.id), "More for Sales board").click());
+    await act(async () => menuItem("Rename").click());
+    const field = card(BOARD.id).querySelector<HTMLInputElement>("[data-local-app-name-field]")!;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, "Team board");
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    act(() => field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    await settle();
+    expect(bridge.install).toHaveBeenCalledWith({ id: BOARD.id, name: "Team board" });
+    vi.useFakeTimers({ now: NOW, toFake: ["Date", "setTimeout", "clearTimeout"] });
+    act(() => button(card(BOARD.id), "More for Team board").click());
+    await act(async () => menuItem("Remove").click());
+    expect(bridge.uninstall).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(REMOVE_UNDO_MS + 10); });
+    expect(bridge.uninstall).toHaveBeenCalledWith(BOARD.id);
+  });
+
+  it("offers Uninstall from the app view's header, and marks it installed there", async () => {
+    openLocalApp(BOARD.id);
+    await show();
+    expect(host.querySelector("header [data-local-app-installed]")).not.toBeNull();
+    act(() => button(host, "More for Sales board").click());
+    await act(async () => menuItem("Uninstall").click());
+    await settle();
+    expect(bridge.uninstall).toHaveBeenCalledWith(BOARD.id);
+    expect(host.querySelector("header [data-local-app-installed]")).toBeNull();
   });
 });

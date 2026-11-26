@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Loader2, MessageSquare, AppWindowMac } from "lucide-react";
+import { AppWindowMac, Check, ChevronDown, Loader2, MessageSquare, MoreHorizontal } from "lucide-react";
 
 import type { AppDocument } from "../../../shared/app";
 import type { LocalApp } from "../../../shared/local-apps";
@@ -8,7 +8,8 @@ import { t } from "@/lib/i18n";
 import { changeLocalApp, fetchLocalAppDocument, loadLocalApps, useLocalApps } from "@/lib/local-apps";
 import type { Bot } from "@/state/store";
 import { AppFrame, type AppFrameHandle, type AppFrameProblem } from "../app/AppFrame";
-import { LocalAppMark } from "./LocalAppCard";
+import { InstalledMark, installItems, LocalAppMark } from "./LocalAppCard";
+import { installLocalApp, readInstalled, uninstallLocalApp, useAppInstall } from "@/lib/local-app-install";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "../SidebarPopoverMenu";
 import { TOOL_PAGE_TITLE, ToolPage, ToolPageActions, ToolPageHeader } from "../ToolPageShell";
 
@@ -58,6 +59,9 @@ export function LocalAppView({ id, botOf, onBack, onGoToChat, onOpenWindow }: {
   const [problem, setProblem] = useState<AppFrameProblem | null>(null);
   const handle = useRef<AppFrameHandle | null>(null);
   const back = useRef<HTMLButtonElement>(null);
+  const install = useAppInstall();
+  const [installFailed, setInstallFailed] = useState<string | null>(null);
+  useEffect(() => { if (!install) void readInstalled(); }, [install]);
 
   useEffect(() => { if (!apps) void loadLocalApps(); }, [apps]);
   useEffect(() => {
@@ -85,6 +89,12 @@ export function LocalAppView({ id, botOf, onBack, onGoToChat, onOpenWindow }: {
   const failed = loaded && loaded.key === key && "failed" in loaded;
   const goToChat = app ? onGoToChat?.(app) : undefined;
   const title = app?.name ?? "";
+  const installed = Boolean(app && install?.ids.has(app.id));
+  const installOne = app && install?.available ? { installed, run: () => {
+    setInstallFailed(null);
+    void (installed ? uninstallLocalApp(app.id) : installLocalApp(app))
+      .catch(() => setInstallFailed(t(installed ? "localApps.install.uninstallFailed" : "localApps.install.failed", { name: app.name })));
+  } } : undefined;
 
   const header = (
     <>
@@ -92,6 +102,7 @@ export function LocalAppView({ id, botOf, onBack, onGoToChat, onOpenWindow }: {
         {app && <LocalAppMark app={app} bot={app ? botOf?.(app.botId) : undefined} size="sm" />}
         <h1 dir="auto" className={cn(TOOL_PAGE_TITLE, "min-w-0 truncate")} title={title}>{title}</h1>
         {maker?.name && <span dir="auto" className="shrink-0 truncate text-[13px] text-ink-tertiary max-sm:hidden">{t("localApps.view.by", { bot: maker.name })}</span>}
+        {installed && <span className="max-sm:hidden"><InstalledMark /></span>}
       </div>
       {app && (
         <ToolPageActions>
@@ -106,6 +117,11 @@ export function LocalAppView({ id, botOf, onBack, onGoToChat, onOpenWindow }: {
             {onOpenWindow && (
               <button type="button" className="ui-icon-button hover:bg-ink/[0.06] hover:text-ink" onClick={onOpenWindow}
                 aria-label={t("localApps.card.openWindow")} title={t("localApps.card.openWindow")}><AppWindowMac size={16} /></button>
+            )}
+            {installOne && (
+              <SidebarPopoverMenu items={installItems(installOne)} ariaLabel={t("localApps.card.more", { name: app.name })} placement="below" align="end"
+                triggerTitle={t("localApps.card.more", { name: app.name })} triggerClassName="ui-icon-button hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.06]"
+                renderTrigger={() => <MoreHorizontal size={16} aria-hidden="true" />} />
             )}
           </span>
         </ToolPageActions>
@@ -135,6 +151,7 @@ export function LocalAppView({ id, botOf, onBack, onGoToChat, onOpenWindow }: {
       ) : (
         <header className="shrink-0 border-b border-hairline/35 bg-app px-4 py-3"><div className="flex flex-wrap items-center gap-2">{header}</div></header>
       )}
+      {installFailed && <p role="alert" className="shrink-0 border-b border-hairline/35 px-4 py-2 text-[13px] text-danger">{installFailed}</p>}
       <div data-local-app-view={id} data-local-app-state={current ? "live" : failed ? "failed" : app ? "loading" : "absent"} className="relative min-h-0 flex-1 bg-app">
         {body}
       </div>

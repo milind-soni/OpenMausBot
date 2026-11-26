@@ -1,5 +1,5 @@
 import { MentionText } from "./MentionText";
-import { localAppIdFromLink } from "../../shared/local-apps";
+import { parseAppLink } from "../../electron/app-link.mjs";
 import { openLocalApp } from "@/lib/local-apps";
 import type { MentionPeer } from "@/lib/mentions";
 import { createContext, Fragment, useContext, useMemo, useRef, type ReactNode } from "react";
@@ -77,7 +77,7 @@ export function ThreadLink({ target, ambiguous, children }: { target: ThreadLink
 
 /** Security: a link from outside the app only navigates. */
 export function openChatLink(dispatch: (action: Action) => void, link: string, state: AppState, threadsShown: boolean): boolean {
-  const appId = localAppIdFromLink(link);
+  const appId = parseAppLink(link)?.id;
   if (appId) {
     openLocalApp(appId);
     dispatch({ type: "showPublishedApps" });

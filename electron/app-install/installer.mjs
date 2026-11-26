@@ -1,14 +1,14 @@
 // Installs a saved app as a launcher of its own on this computer: a bundle in ~/Applications/MausBot Apps on macOS, a
 // Start menu shortcut in "MausBot Apps" on Windows, a desktop entry in ~/.local/share/applications on Linux. Each one
-// opens openmausbot://app/<id> in MausBot.
+// opens openmausbot://app/<id>?window=1: the app in a window of its own in MausBot.
 //
 // Security invariants: nothing is written outside those folders, this app's own data folder and, on Linux, its icon
 // folder; an existing file is replaced or removed only when it names the same app id inside it (a bundle's Info.plist,
 // a desktop entry's key, a shortcut's argument), so a launcher the person made or renamed into place is never touched.
-import { firstFreeName, launcherName, nameKey, validAppId, appKey, appLink, FOLDER_NAME } from "./names.mjs";
+import { firstFreeName, launcherName, nameKey, validAppId, appKey, launcherLink, FOLDER_NAME } from "./names.mjs";
 import { MAC_ICONSET, icoFromPng, letterTilePng, pngSize } from "./icons.mjs";
 import {
-  MAC_EXECUTABLE, MAC_ICON, desktopEntry, desktopEntryAppId, macInfoPlist, macLauncherScript, macPlistAppId, windowsShortcut,
+  MAC_EXECUTABLE, MAC_ICON, desktopEntry, desktopEntryAppId, macInfoPlist, macLauncherScript, macPlistAppId, windowsShortcut, windowsWindowDetails,
 } from "./launchers.mjs";
 
 const MANIFEST = "installed.json";
@@ -68,7 +68,7 @@ export function createAppInstaller(options) {
     if (kind === "bundle") return stat.isDirectory() && macPlistAppId(await readText(path.join(file, "Contents", "Info.plist"))) === id;
     if (kind === "desktop-entry") return stat.isFile() && desktopEntryAppId(await readText(file)) === id;
     if (kind === "shortcut") {
-      try { return stat.isFile() && String(shell.readShortcutLink?.(file)?.args ?? "").trim() === appLink(id); } catch { return false; }
+      try { return stat.isFile() && String(shell.readShortcutLink?.(file)?.args ?? "").trim() === launcherLink(id); } catch { return false; }
     }
     if (kind === "icon") return stat.isFile() && path.basename(file).includes(appKey(id));
     return false;
@@ -268,6 +268,16 @@ export function createAppInstaller(options) {
 
     /** The launchers still on disk as this app wrote them, `{ id, name, path }` each. */
     installedApps: () => serial(async () => (enabled ? present(await readManifest()) : [])),
+
+    /** On Windows, what the app's own window gives the taskbar so it shows as its installed launcher (its own button,
+     * icon and relaunch); null anywhere else or when it is not installed. */
+    windowDetails: (id) => serial(async () => {
+      if (!enabled || platform !== "win32" || !validAppId(id)) return null;
+      const entry = (await readManifest()).apps[id];
+      if (!entry) return null;
+      const iconPath = entry.files?.find((f) => f.kind === "icon")?.path;
+      return windowsWindowDetails({ id, name: entry.name, executable: options.executable, ...(iconPath ? { iconPath } : {}) });
+    }),
 
     isInstalled: (id) => serial(async () => {
       if (!enabled || !validAppId(id)) return false;

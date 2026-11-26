@@ -4,6 +4,7 @@ import { useSyncExternalStore } from "react";
 import type { AppDocument } from "../../shared/app";
 import type { LocalApp, LocalAppsList } from "../../shared/local-apps";
 import { api, ApiError } from "@/state/api";
+import { afterRemoved, afterRenamed, tidyInstalled } from "@/lib/local-app-install";
 
 export type LocalAppsState = { status: "idle" | "loading" | "failed"; apps: readonly LocalApp[] | null };
 
@@ -27,7 +28,9 @@ export function loadLocalApps(): Promise<void> {
     if (!state.apps) changed({ status: "loading" });
     try {
       const list = await api<LocalAppsList>("/api/local-apps");
-      changed({ status: "idle", apps: Array.isArray(list?.apps) ? list.apps : [] });
+      const apps = Array.isArray(list?.apps) ? list.apps : [];
+      changed({ status: "idle", apps });
+      void tidyInstalled(apps.map((app) => app.id));
     } catch {
       changed({ status: "failed" });
     } finally {
@@ -66,6 +69,7 @@ const onePath = (id: string) => `/api/local-apps/${encodeURIComponent(id)}`;
 export async function changeLocalApp(id: string, change: { name?: string; pinnedRev?: number | null }): Promise<LocalApp> {
   const { app } = await api<{ app: LocalApp }>(onePath(id), { method: "PATCH", body: JSON.stringify(change) });
   put(app);
+  if (change.name !== undefined) void afterRenamed(app);
   return app;
 }
 
@@ -91,6 +95,7 @@ export async function removeLocalApp(id: string): Promise<void> {
   } catch (error) {
     if (!(error instanceof ApiError && error.status === 404)) throw error;
   }
+  await afterRemoved(id);
 }
 
 export function localAppDocumentPath(id: string): string {

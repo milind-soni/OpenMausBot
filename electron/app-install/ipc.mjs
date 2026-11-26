@@ -16,6 +16,9 @@ export function installAppInstall({ ipcMain, guard, installer }) {
   }));
   ipcMain.handle("app-install:uninstall", guard("app-install:uninstall", (_event, id) => installer.uninstallApp(typeof id === "string" ? id : "")));
   ipcMain.handle("app-install:list", guard("app-install:list", async () => ({ available: installer.available(), apps: await installer.installedApps() })));
+  // `ids`: every saved app's id, from the page that just read the whole list; anything else removes nothing.
+  ipcMain.handle("app-install:cleanup", guard("app-install:cleanup", (_event, ids) =>
+    (Array.isArray(ids) && ids.length <= 10_000 && ids.every((id) => typeof id === "string") ? installer.cleanup(ids) : [])));
 }
 
 /** Main's wiring: the real folders, Electron's shell and image tools, and `execFile` for sips and iconutil. */

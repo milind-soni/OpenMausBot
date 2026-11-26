@@ -3,6 +3,7 @@ import type { MausColor } from "./wire.ts";
 /** A bot's page the person saved as an app: it runs on the computer or Cloud that keeps it, privately, and lives on
  * without the chat it came from. */
 
+/** Must match LOCAL_APP_ID in electron/app-link.mjs, the one parser of a saved app's link. */
 export const LOCAL_APP_ID = /^la_[A-Za-z0-9_-]{16}$/;
 export const LOCAL_APP_NAME_MAX = 80;
 /** The versions an app keeps, oldest dropped first: a live page can make a new one every few seconds. */
@@ -41,14 +42,4 @@ export interface LocalApp {
 
 export interface LocalAppsList {
   apps: LocalApp[];
-}
-
-/** openmausbot://app/<id>: the app's id, or null for anything else. */
-export function localAppIdFromLink(link: string): string | null {
-  const match = /^openmausbot:\/\/app\/([^/?#]+)\/?$/i.exec(link.trim());
-  return match && LOCAL_APP_ID.test(match[1]!) ? match[1]! : null;
-}
-
-export function localAppLink(id: string): string {
-  return `openmausbot://app/${id}`;
 }

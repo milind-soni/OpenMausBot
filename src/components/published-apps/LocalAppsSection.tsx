@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { LocalApp } from "../../../shared/local-apps";
 import { t } from "@/lib/i18n";
 import { changeLocalApp, hideLocalApp, loadLocalApps, openLocalApp, removeLocalApp, useLocalApps } from "@/lib/local-apps";
+import { installLocalApp, uninstallLocalApp, useAppInstall } from "@/lib/local-app-install";
 import type { Action, AppState } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { LocalAppCard } from "./LocalAppCard";
@@ -64,6 +65,13 @@ export function LocalAppsSection({ place }: { place: "computer" | "cloud" }) {
   const rename = (app: LocalApp, name: string) => {
     void changeLocalApp(app.id, { name }).catch(() => setLine({ kind: "failed", text: t("localApps.renameFailed") }));
   };
+  const install = useAppInstall();
+  const installOf = (app: LocalApp) => {
+    if (!install?.available) return undefined;
+    const installed = install.ids.has(app.id);
+    return { installed, run: () => void (installed ? uninstallLocalApp(app.id) : installLocalApp(app)).catch(() =>
+      setLine({ kind: "failed", text: t(installed ? "localApps.install.uninstallFailed" : "localApps.install.failed", { name: app.name }) })) };
+  };
   const goToChat = (app: LocalApp) => {
     const action = chatOfApp(app, { bots });
     return action ? () => dispatch(action) : undefined;
@@ -96,7 +104,7 @@ export function LocalAppsSection({ place }: { place: "computer" | "cloud" }) {
           {apps.map((app) => (
             <LocalAppCard key={app.id} app={app} bot={bots.find((bot) => bot.id === app.botId)}
               onOpen={() => openLocalApp(app.id)} onOpenWindow={openAppWindow(app.id)} onRename={(name) => rename(app, name)}
-              onGoToChat={goToChat(app)} onRemove={() => remove(app)} />
+              onGoToChat={goToChat(app)} onRemove={() => remove(app)} install={installOf(app)} />
           ))}
         </ul>
       ) : <div aria-hidden="true" className="mt-3 h-24" />}

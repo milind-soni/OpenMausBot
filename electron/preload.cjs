@@ -511,13 +511,14 @@ const bridge = {
   },
 
   /** Saved apps as launchers on this computer: this app's own page only (never REMOTE_SAFE; main checks the sender
-   * again). `install({ id, name, iconPng?, desktopShortcut? })`, `uninstall(id)`, `list()`. */
+   * again). `install({ id, name, iconPng?, desktopShortcut? })`, `uninstall(id)`, `list()`, `cleanup(ids)` (every saved app's id). */
   appInstall: {
     install: (input) => ipcRenderer.invoke("app-install:install", {
       id: input?.id, name: input?.name, iconPng: iconBytes(input?.iconPng), desktopShortcut: input?.desktopShortcut === true,
     }),
     uninstall: (id) => ipcRenderer.invoke("app-install:uninstall", id),
     list: () => ipcRenderer.invoke("app-install:list"),
+    cleanup: (ids) => ipcRenderer.invoke("app-install:cleanup", Array.isArray(ids) ? ids.filter((id) => typeof id === "string") : null),
   },
 
   /** A remote page may read the list but never change where this window goes. */

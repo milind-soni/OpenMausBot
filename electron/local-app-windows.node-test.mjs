@@ -73,6 +73,7 @@ class FakeWindow extends EventEmitter {
   show() {}
   focus() { this.focused += 1; }
   getNormalBounds() { return this.bounds; }
+  setAppDetails(details) { this.appDetails = details; }
   close() { this.emit("close"); this.destroyed = true; this.emit("closed"); }
 }
 
@@ -173,3 +174,31 @@ test("only an app's own window may bring up the main window, and only on a chat"
   assert.equal(await call("local-apps:open-chat", { sender: new FakeContents() }, "openmausbot://thread/t1?bot=b1"), false);
   assert.deepEqual(chats, ["openmausbot://thread/t1?bot=b1"]);
 });
+
+test("a launcher's app opens in its own window on this computer's server once it is up, never in the main window", async () => {
+  const { createAppLaunches } = await import("./app-launches.mjs");
+  const later = [];
+  const launches = createAppLaunches({ later: (run) => { later.push(run); } });
+  launches.fromUrl(`openmausbot://app/${ID}?window=1`);
+  let up = false;
+  install({ launches, ready: () => up, launchOrigin: () => "http://127.0.0.1:8799" });
+  assert.equal(FakeWindow.made.length, 0);
+  up = true;
+  later.splice(0).forEach((run) => run());
+  assert.equal(FakeWindow.made.length, 1);
+  assert.equal(FakeWindow.made[0].loaded, `http://127.0.0.1:8799/local-app?id=${ID}`);
+  launches.fromArgs(["exe", `openmausbot://app/${ID}?window=1`]);
+  assert.equal(FakeWindow.made.length, 1);
+  assert.equal(FakeWindow.made[0].focused, 1);
+});
+
+test("on Windows an installed app's window takes its launcher's taskbar details", async () => {
+  const details = { appId: "com.openmausbot.app.localapp.0123456789abcdef", relaunchCommand: "x", relaunchDisplayName: "Board" };
+  const { call } = install({ windowDetails: async (id) => (id === ID ? details : null) });
+  await call("local-apps:open-window", fromMain, ID);
+  await call("local-apps:open-window", fromMain, OTHER);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(FakeWindow.made[0].appDetails, details);
+  assert.equal(FakeWindow.made[1].appDetails, undefined);
+});
+

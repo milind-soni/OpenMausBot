@@ -1,7 +1,6 @@
 // A saved app in a window of its own (/local-app?id=…): only the app and its slim header, without the chat app's store,
 // stream or sidebar. The frame is the same one the chat mounts.
 import { useEffect, useMemo } from "react";
-import { localAppLink } from "../shared/local-apps";
 import { LocalAppView } from "@/components/published-apps/LocalAppView";
 import { productName } from "@/lib/brand";
 import { useLocalApps } from "@/lib/local-apps";
@@ -22,7 +21,7 @@ export function LocalAppWindow({ id }: { id: string }) {
   const openChat = window.ogb?.localApps?.openChat;
   return (
     <BotEditorStore value={value}>
-      <div data-local-app-window={localAppLink(id)} className="flex h-dvh min-h-0 flex-col bg-app">
+      <div data-local-app-window={id} className="flex h-dvh min-h-0 flex-col bg-app">
         <LocalAppView id={id}
           onGoToChat={(app) => (openChat && app.chat ? () => void openChat(chatLink(app.threadId, app.botId)).catch(() => undefined) : undefined)} />
       </div>

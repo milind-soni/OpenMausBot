@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { MessageSquare, MoreHorizontal, AppWindowMac, Pencil, Trash2 } from "lucide-react";
+import { AppWindowMac, MessageSquare, MonitorDown, MonitorUp, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 
 import type { LocalApp } from "../../../shared/local-apps";
 import { cn } from "@/lib/cn";
@@ -46,7 +46,19 @@ export function InlineName({ name, onDone }: { name: string; onDone: (next: stri
   );
 }
 
-export function LocalAppCard({ app, bot, onOpen, onOpenWindow, onRename, onGoToChat, onRemove }: {
+/** Install on this computer or Uninstall, for a menu: nothing where the desktop app can't install launchers. */
+export function installItems(install: { installed: boolean; run(): void } | undefined): SidebarMenuItem[] {
+  if (!install) return [];
+  return [install.installed
+    ? { key: "uninstall", label: t("localApps.install.uninstall"), icon: <MonitorUp size={16} />, onSelect: install.run }
+    : { key: "install", label: t("localApps.install.install"), icon: <MonitorDown size={16} />, onSelect: install.run }];
+}
+
+export function InstalledMark() {
+  return <span data-local-app-installed="" className="shrink-0 rounded-full bg-ink/[0.06] px-1.5 text-[11px] leading-4 text-ink-secondary">{t("localApps.install.installed")}</span>;
+}
+
+export function LocalAppCard({ app, bot, onOpen, onOpenWindow, onRename, onGoToChat, onRemove, install }: {
   app: LocalApp;
   bot?: Bot;
   onOpen: () => void;
@@ -56,6 +68,8 @@ export function LocalAppCard({ app, bot, onOpen, onOpenWindow, onRename, onGoToC
   /** Absent when the chat it came from is gone. */
   onGoToChat?: () => void;
   onRemove: () => void;
+  /** Present only where this computer can install launchers. */
+  install?: { installed: boolean; run(): void };
 }) {
   const [renaming, setRenaming] = useState(false);
   const maker = bot?.name ?? app.bot?.name;
@@ -63,6 +77,7 @@ export function LocalAppCard({ app, bot, onOpen, onOpenWindow, onRename, onGoToC
   const items: SidebarMenuItem[] = [
     { key: "rename", label: t("localApps.card.rename"), icon: <Pencil size={16} />, onSelect: () => setRenaming(true) },
     ...(onGoToChat ? [{ key: "chat", label: t("localApps.card.goToChat"), icon: <MessageSquare size={16} />, onSelect: onGoToChat }] : []),
+    ...installItems(install),
     { key: "remove", label: t("localApps.card.remove"), icon: <Trash2 size={16} />, separatorBefore: true, onSelect: onRemove },
   ];
   return (
@@ -77,7 +92,10 @@ export function LocalAppCard({ app, bot, onOpen, onOpenWindow, onRename, onGoToC
           className="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-1 text-start transition-colors duration-[120ms] hover:bg-ink/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus motion-reduce:transition-none">
           <LocalAppMark app={app} bot={bot} />
           <span className="min-w-0 flex-1">
-            <span dir="auto" data-local-app-name="" className="block truncate text-[14px] font-medium leading-5 text-ink">{app.name}</span>
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span dir="auto" data-local-app-name="" className="min-w-0 truncate text-[14px] font-medium leading-5 text-ink">{app.name}</span>
+              {install?.installed && <InstalledMark />}
+            </span>
             <span dir="auto" className="mt-0.5 block truncate text-[12px] leading-4 text-ink-tertiary">{facts}</span>
           </span>
         </button>

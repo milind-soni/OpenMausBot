@@ -1,6 +1,6 @@
 // The text of each launcher: a macOS bundle's Info.plist and executable, a Linux desktop entry, and the options of a
 // Windows shortcut. Every one names the app's id, which is how the installer recognises a launcher as its own.
-import { appLink, launcherBundleId, validAppId, validBundleId, windowsAppUserModelId, HOST_BUNDLE_ID } from "./names.mjs";
+import { launcherLink, launcherBundleId, validAppId, validBundleId, windowsAppUserModelId, HOST_BUNDLE_ID } from "./names.mjs";
 
 export const MAC_ID_KEY = "OpenMausBotLocalApp";
 export const LINUX_ID_KEY = "X-OpenMausBot-LocalApp";
@@ -55,7 +55,7 @@ const shellQuote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`;
  * outlives updates and moves; plain `open` falls back to whichever app handles the link.
  */
 export function macLauncherScript({ id, hostBundleId = HOST_BUNDLE_ID }) {
-  const link = shellQuote(appLink(id));
+  const link = shellQuote(launcherLink(id));
   const host = shellQuote(validBundleId(hostBundleId) ? hostBundleId : HOST_BUNDLE_ID);
   return `#!/bin/sh\n/usr/bin/open -b ${host} ${link} 2>/dev/null || exec /usr/bin/open ${link}\n`;
 }
@@ -72,7 +72,7 @@ export function desktopEntry({ id, name, executable, iconPath }) {
     "Type=Application",
     "Version=1.0",
     `Name=${desktopString(name)}`,
-    `Exec=${desktopString(`${execArgument(executable)} ${appLink(id)}`)}`,
+    `Exec=${desktopString(`${execArgument(executable)} ${execArgument(launcherLink(id))}`)}`,
     ...(iconPath ? [`Icon=${desktopString(iconPath)}`] : []),
     "Terminal=false",
     "Categories=Utility;",
@@ -92,7 +92,7 @@ export function windowsShortcut({ id, name, executable, iconPath }) {
   if (typeof executable !== "string" || !executable) throw new Error("no executable");
   return {
     target: executable,
-    args: appLink(id),
+    args: launcherLink(id),
     description: name,
     ...(iconPath ? { icon: iconPath, iconIndex: 0 } : {}),
     appUserModelId: windowsAppUserModelId(id),
@@ -105,7 +105,7 @@ export function windowsWindowDetails({ id, name, executable, iconPath }) {
   return {
     appId: windowsAppUserModelId(id),
     ...(iconPath ? { appIconPath: iconPath, appIconIndex: 0 } : {}),
-    relaunchCommand: `"${executable}" ${appLink(id)}`,
+    relaunchCommand: `"${executable}" ${launcherLink(id)}`,
     relaunchDisplayName: name,
   };
 }

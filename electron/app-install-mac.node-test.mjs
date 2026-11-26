@@ -19,13 +19,13 @@ test("macOS: a real bundle built in a temporary home is structurally valid", { s
   const installer = createAppInstaller({
     platform: "darwin", path, home, userData: path.join(root, "user-data"), fs: fs.promises, run, hostBundleId: "com.openmausbot.app", enabled: true,
   });
-  const result = await installer.installApp({ id: "real-test", name: "Real Test" });
+  const result = await installer.installApp({ id: "la_realtest00000000", name: "Real Test" });
   assert.equal(result.ok, true);
   const bundle = path.join(home, "Applications", "MausBot Apps", "Real Test.app");
   assert.equal(result.app.path, bundle);
   const plist = path.join(bundle, "Contents", "Info.plist");
   assert.equal((await run("/usr/bin/plutil", ["-lint", plist])).code, 0);
-  assert.equal(macPlistAppId(fs.readFileSync(plist, "utf8")), "real-test");
+  assert.equal(macPlistAppId(fs.readFileSync(plist, "utf8")), "la_realtest00000000");
   const executable = path.join(bundle, "Contents", "MacOS", "launcher");
   assert.equal(fs.statSync(executable).mode & 0o111, 0o111);
   assert.match(fs.readFileSync(executable, "utf8"), /^#!\/bin\/sh\n/);
@@ -35,6 +35,6 @@ test("macOS: a real bundle built in a temporary home is structurally valid", { s
   assert.deepEqual(fs.readdirSync(path.join(root, "user-data", "app-install")), ["installed.json"]);
   assert.deepEqual(fs.readdirSync(path.join(home, "Applications", "MausBot Apps")), ["Real Test.app"]);
 
-  assert.deepEqual(await installer.uninstallApp("real-test"), { ok: true, removed: true });
+  assert.deepEqual(await installer.uninstallApp("la_realtest00000000"), { ok: true, removed: true });
   assert.equal(fs.existsSync(bundle), false);
 });

@@ -1,13 +1,18 @@
-// openmausbot://thread/<thread-id>?bot=<bot-id>, openmausbot://bot/<bot-id> and openmausbot://app/<saved app id>. The page checks them strictly against
-// its chats; opening one never sends, interrupts or creates anything.
-const CHAT_LINK_PREFIXES = ["openmausbot://thread/", "openmausbot://bot/", "openmausbot://app/"];
+// openmausbot://thread/<thread-id>?bot=<bot-id>, openmausbot://bot/<bot-id> and a saved app's openmausbot://app/<id>. The
+// page checks them strictly against its chats; opening one never sends, interrupts or creates anything. A launcher's app
+// link (`?window=1`) is not the page's: it opens the app's own window (app-launches.mjs).
+import { parseAppLink } from "./app-link.mjs";
+
+const CHAT_LINK_PREFIXES = ["openmausbot://thread/", "openmausbot://bot/"];
 const MAX_LINK_LENGTH = 1024;
 
 export function chatLinkFrom(value) {
   const link = typeof value === "string" ? value.trim() : "";
   if (link.length > MAX_LINK_LENGTH) return null;
   const lower = link.toLowerCase();
-  return CHAT_LINK_PREFIXES.some((prefix) => lower.startsWith(prefix)) ? link : null;
+  if (CHAT_LINK_PREFIXES.some((prefix) => lower.startsWith(prefix))) return link;
+  const app = parseAppLink(link);
+  return app && !app.window ? link : null;
 }
 
 export function chatLinkFromCommandLine(argv) {
