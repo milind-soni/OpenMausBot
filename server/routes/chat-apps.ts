@@ -1,7 +1,8 @@
 import { APP_LIMITS, ROOM_VIEW_ONLY, type AppPayload } from "../../shared/app.ts";
-import { APP_RPC_METHODS, PAGE_RPC_METHODS, pageUseRefusal, RPC_HOST_REFUSED, type AppRpcMethod, type PageRpcMethod } from "../../shared/app-frame/bridge.ts";
+import { APP_RPC_METHODS, PAGE_RPC_METHODS, pageMethodUse, pageUseRefusal, RPC_HOST_REFUSED, type AppRpcMethod, type PageRpcMethod } from "../../shared/app-frame/bridge.ts";
 import { webOrigin } from "../../shared/app-frame/csp.ts";
 import { appRow, createChatApps, rowRate, type ChatApps } from "../chat-apps.ts";
+import type { ConnectorGate } from "../connector-gate.ts";
 import type { DataEngine } from "../data/types.ts";
 import { messageFileDisposition } from "../message-file.ts";
 import type { RequestAuth } from "../request-auth.ts";
@@ -11,7 +12,9 @@ import { pageRpc } from "./bot-page-rpc.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export { createChatApps };
-export { createChatAppsMcp } from "../chat-apps-mcp.ts";
+export { botApproval, createChatAppsMcp } from "../chat-apps-mcp.ts";
+export { createConnectorGate } from "../connector-gate.ts";
+export { createConnectorGateApps } from "../host/connector-gate-host.ts";
 
 export interface McpRpcRequest {
   auth: RequestAuth;
@@ -41,6 +44,18 @@ export interface ChatAppRouteDeps {
   data?: Pick<DataEngine, "unavailable" | "forBot">;
   /** True when the person switched this bot's Data tools off. */
   dataOff?(botId: string): boolean;
+  /** The connector tools a bot's page declared, called with the viewer's own connections. */
+  connectors?: {
+    gate: ConnectorGate;
+    /** Whose own connections the viewer's calls use, where each person connects their own; null elsewhere. */
+    person(auth: RequestAuth): string | null;
+    /** May this viewer have the bot act: a viewer who may only read its conversations may not. */
+    mayAct(auth: RequestAuth, botId: string): boolean;
+    /** Would a turn of this bot in this conversation run a change without asking. */
+    fullAccess(botId: string, threadId: string): boolean;
+    /** A conversation whose turns are confined (a guest's, a read-and-draft run's): its pages call no connected apps. */
+    confined?(threadId: string): boolean;
+  };
 }
 
 const DOCUMENT = /^\/api\/threads\/([\w-]+)\/messages\/([\w-]+)\/app(\/download)?$/;
@@ -108,7 +123,7 @@ export function createChatAppRoutes(deps: ChatAppRouteDeps): RouteHandler {
       (PAGE_RPC_METHODS as readonly string[]).includes(body.method);
     if (store.groupByThread(threadId)) {
       return json(res, 409, pageCall(appRow(store, threadId, messageId))
-        ? { error: { code: RPC_HOST_REFUSED, message: pageUseRefusal("data", true) } } : { error: ROOM_VIEW_ONLY });
+        ? { error: { code: RPC_HOST_REFUSED, message: pageUseRefusal(pageMethodUse(body.method as PageRpcMethod), true) } } : { error: ROOM_VIEW_ONLY });
     }
     if (!store.taskByThread(bot.id, threadId)) return json(res, 404, { error: "no such conversation" });
     const refused = deps.threadRefusal?.(auth, threadId);
@@ -127,9 +142,20 @@ export function createChatAppRoutes(deps: ChatAppRouteDeps): RouteHandler {
 
     if (pageMethod) {
       if (body.params !== undefined && !isRecord(body.params)) return json(res, 400, { error: "params must be an object" });
+      const connectorCall = pageMethodUse(body.method as PageRpcMethod) === "connectors";
+      const linked = deps.connectors;
+      if (connectorCall && linked && !linked.mayAct(auth, bot.id)) {
+        return json(res, 403, { error: { code: RPC_HOST_REFUSED, message: `Only someone who can chat with ${bot.name} can use this page's connected apps.` } });
+      }
+      if (connectorCall && linked?.confined?.(threadId)) {
+        return json(res, 403, { error: { code: RPC_HOST_REFUSED, message: "In this conversation, pages cannot use connected apps." } });
+      }
       if (!pageRate.take(`${threadId}:${row.id}`)) return json(res, 429, { error: { code: -32000, message: "Too many calls from this page. Wait a moment." } });
-      const answer = await pageRpc({ apps, ...(deps.data ? { data: deps.data } : {}), ...(deps.dataOff ? { dataOff: deps.dataOff } : {}) }, {
+      const answer = await pageRpc({
+        apps, ...(deps.data ? { data: deps.data } : {}), ...(deps.dataOff ? { dataOff: deps.dataOff } : {}), ...(linked ? { connectors: linked.gate } : {}),
+      }, {
         botId: bot.id, threadId, messageId: row.id, method: body.method as PageRpcMethod, params: isRecord(body.params) ? body.params : {},
+        ...(connectorCall && linked ? { viewer: { person: linked.person(auth), fullAccess: () => linked.fullAccess(bot.id, threadId) } } : {}),
       });
       return json(res, answer.status, answer.body);
     }
