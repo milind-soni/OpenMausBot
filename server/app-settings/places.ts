@@ -7,7 +7,7 @@ const byId = new Map(PLACES.map((place) => [place.id, place]));
 
 function described(place: SettingsPlace): string {
   const notes = [
-    ...(place.advanced ? [place.simplePath ? `in Simple mode it is at ${place.simplePath}` : "shown in Advanced mode only; app_settings set appearance.advanced true turns it on"] : []),
+    ...(place.advanced ? [place.simplePath ? `in Simple mode it is at ${place.simplePath}` : "shown in Advanced mode; the switch is at the bottom of Settings. Don't switch modes for it: change its setting yourself, and give this path only if the person wants to look"] : []),
     ...(place.only ? [`only in ${place.only}`] : []),
   ];
   return notes.length ? `${place.path} (${notes.join("; ")})` : place.path;
