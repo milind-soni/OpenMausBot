@@ -1,7 +1,5 @@
 import { useSyncExternalStore } from "react";
 
-import { windowPrefChanged } from "./window-pref-changes";
-
 /** Local preference key for triggering Start fresh from the keyboard. */
 export const START_FRESH_SHORTCUT_KEY = "omb-start-fresh-shortcut";
 export const DEFAULT_START_FRESH_SHORTCUT = "mod+shift+k";
@@ -349,7 +347,6 @@ export function setStartFreshShortcut(chord: ShortcutChord | null): void {
   } catch {
   }
   notify();
-  windowPrefChanged();
 }
 
 export function resetStartFreshShortcut(): void {
@@ -360,7 +357,6 @@ export function resetStartFreshShortcut(): void {
   } catch {
   }
   notify();
-  windowPrefChanged();
 }
 
 /** Reset cached state for tests when stubbing or clearing localStorage outside StorageEvents. */
