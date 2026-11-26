@@ -162,13 +162,15 @@ export const InboxPanel = memo(function InboxPanel() {
               <div data-inbox-list className="px-1.5 pb-1.5">
                 {rows.length === 0
                   ? waitingOnly && shown.length === 0 && listed.length > 0
-                    ? (
-                      <div data-inbox-waiting-empty className="mx-auto flex max-w-[16rem] flex-col items-center px-4 py-10 text-center">
-                        <Inbox size={22} aria-hidden="true" className="text-ink-tertiary" />
-                        <p className="mt-3 text-[14px] font-medium text-ink">{t("inbox.waitingOnly.empty")}</p>
-                        <button type="button" onClick={toggleWaitingOnly} className="mt-1 text-[12px] text-accent hover:underline">{t("inbox.waitingOnly.showAll")}</button>
-                      </div>
-                    )
+                    ? fixes === 0
+                      ? (
+                        <div data-inbox-waiting-empty className="mx-auto flex max-w-[16rem] flex-col items-center px-4 py-10 text-center">
+                          <Inbox size={22} aria-hidden="true" className="text-ink-tertiary" />
+                          <p className="mt-3 text-[14px] font-medium text-ink">{t("inbox.waitingOnly.empty")}</p>
+                          <button type="button" onClick={toggleWaitingOnly} className="mt-1 text-[12px] text-accent hover:underline">{t("inbox.waitingOnly.showAll")}</button>
+                        </div>
+                      )
+                      : null
                     : query.trim() && listed.length
                       ? <p className="px-4 py-8 text-center text-[13px] text-ink-secondary">{t("inbox.noMatch")}</p>
                       : (

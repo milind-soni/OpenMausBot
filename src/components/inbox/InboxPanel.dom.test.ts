@@ -96,6 +96,19 @@ describe("the inbox waiting filter", () => {
     expect(localStorage.getItem(INBOX_WAITING_ONLY_KEY)).toBe("0");
   });
 
+  it("does not claim nothing is waiting when a teammate fix is", async () => {
+    shown(inboxView([messageRow, reportRow]));
+    localStorage.setItem(INBOX_WAITING_ONLY_KEY, "1");
+    openInbox();
+    await mount(createElement(InboxPanel));
+    await act(async () => { setTeamPeople({ people: [], me: null, admin: true, needsYou: [
+      { kind: "connection", id: "c", at: 1, app: "github", botIds: ["reporter"], threadId: "rep-main", text: "Reconnect GitHub" },
+    ] }); });
+    expect(document.querySelector("[data-inbox-waiting-empty]")).toBeNull();
+    expect(document.querySelector("[data-inbox-empty]")).toBeNull();
+    expect(document.querySelector("[data-inbox-fixes]")).not.toBeNull();
+  });
+
   it("keeps Mark all as read working while the filter is on", async () => {
     openInbox();
     await mount(createElement(InboxPanel));
