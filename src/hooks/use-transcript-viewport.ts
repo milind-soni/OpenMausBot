@@ -152,6 +152,15 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     if (aside) setAside.current = { key: transcriptKey, selection: aside };
     return next;
   };
+  /**
+   * `next`, widened over the rows on screen. A step counts rows, and rows that draw nothing (a long reply's hidden tool
+   * steps) put no height between the reader and the edge it lets go, so the cap alone could let go the row being read.
+   */
+  const keepReader = (next: TranscriptWindowBounds): TranscriptWindowBounds => {
+    const el = scrollRef.current, list = transcriptRef.current;
+    const shown = el && list ? rowsInView(el, list, restingCardId.current).map((row) => messages.findIndex((message) => message.id === row.rowId)).filter((index) => index >= 0) : [];
+    return shown.length ? holdRows(next, messages.length, { first: Math.min(...shown), last: Math.max(...shown) }) ?? next : next;
+  };
   const readingBottom = () => {
     const el = scrollRef.current;
     return Boolean(el) && gapBelow(el!) <= el!.clientHeight;
@@ -179,7 +188,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     ? { start: current.restore?.start ?? tailStart, end: current.restore?.end ?? null, added: -1 }
     : nextWindow(transcriptWindow, messages, following, readingBottom);
   const moves = proposed.start !== transcriptWindow.start || proposed.end !== transcriptWindow.end;
-  const next = !switched && moves ? { ...proposed, ...keepSelection(proposed) } : proposed;
+  const next = !switched && moves ? { ...proposed, ...keepSelection(following ? proposed : keepReader(proposed)) } : proposed;
   if (switched || next.start !== transcriptWindow.start || next.end !== transcriptWindow.end || first !== transcriptWindow.first) {
     // Rows came in front of the drawn ones or left their top: the DOM is still the last commit's, so it is read now.
     if (!switched && !following && (next.added > 0 || next.start > transcriptWindow.start)) holdRow();
@@ -390,7 +399,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
 
   /** Draws the window `step` gives, in a transition so its rows mount between frames; false when there is nothing to draw. */
   const stepWindow = (step: (window: TranscriptWindowBounds, total: number) => TranscriptWindowBounds) => {
-    const target = keepSelection(step(drawnBounds, messages.length), drawnBounds);
+    const target = keepSelection(keepReader(step(drawnBounds, messages.length)), drawnBounds);
     if (target.start === drawnBounds.start && target.end === drawnBounds.end) return false;
     holdRow(windowRef.current);
     startTransition(() => setTranscriptWindow((w) => w.key === transcriptKey ? { ...w, ...target } : w));
