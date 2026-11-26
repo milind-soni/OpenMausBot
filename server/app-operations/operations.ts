@@ -8,7 +8,7 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -194,8 +194,10 @@ export class AppOperations extends EventEmitter {
 
   /** The state for `appDir`, re-read only when the folder's stamp moved. */
   private current(appDir: string): AppState {
+    let real: string;
+    try { real = realpathSync(appDir); } catch { return this.appState(appDir); }
     for (const state of this.apps.values()) {
-      if (state.app.dir === appDir && state.stamp === appStamp(appDir)) return state;
+      if (state.app.dir === real && state.stamp === appStamp(real)) return state;
     }
     return this.appState(appDir);
   }
@@ -455,9 +457,7 @@ export class AppOperations extends EventEmitter {
 
   /** For process exit handlers: kills every child at once, synchronously. */
   killAllNow() {
-    for (const state of this.apps.values()) {
-      state.running?.process.kill("SIGKILL");
-      state.db.kill();
-    }
+    for (const child of this.children) child.kill("SIGKILL");
+    for (const state of this.apps.values()) state.db.kill();
   }
 }

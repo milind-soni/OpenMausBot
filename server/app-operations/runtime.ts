@@ -56,6 +56,8 @@ export class RuntimeUnavailable extends Error {}
 const sha256 = (data: Uint8Array) => createHash("sha256").update(data).digest("hex");
 
 const inflight = new Map<string, Promise<string>>();
+/** Binaries verified by this process: hashing 140 MB costs about 100 ms, once per server start. */
+const verified = new Set<string>();
 
 /** The path of a verified workerd binary for this computer, downloading it once. Concurrent callers share one download. */
 export function ensureRuntime(options: EnsureRuntimeOptions): Promise<string> {
@@ -66,11 +68,12 @@ export function ensureRuntime(options: EnsureRuntimeOptions): Promise<string> {
   const folder = join(options.dataDir, "runtimes", "workerd", version);
   const binary = join(folder, asset.executable);
   const key = binary;
+  if (verified.has(key) && existsSync(binary)) return Promise.resolve(binary);
   const running = inflight.get(key);
   if (running) return running;
   const work = (async () => {
     if (existsSync(binary)) {
-      if (!asset.binarySha256 || sha256(readFileSync(binary)) === asset.binarySha256) return binary;
+      if (!asset.binarySha256 || sha256(readFileSync(binary)) === asset.binarySha256) { verified.add(key); return binary; }
       rmSync(binary, { force: true });
     }
     const response = await options.fetch(releaseUrl(version, asset));
@@ -86,6 +89,7 @@ export function ensureRuntime(options: EnsureRuntimeOptions): Promise<string> {
       writeFileSync(staged, unpacked, { mode: 0o700 });
       chmodSync(staged, 0o755);
       renameSync(staged, binary);
+      verified.add(key);
     } finally {
       rmSync(staged, { force: true });
     }

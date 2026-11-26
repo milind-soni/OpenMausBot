@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { collectAppFiles } from "../host/app-publisher.ts";
+import { DEFAULT_HOSTING_LIMITS } from "../host/included-hosting.ts";
 import { PageBundleError, pageSignature, readPageBundle, skippedNote } from "../pages/bundle.ts";
 import { isAppServerSide } from "./private-files.ts";
 
@@ -64,5 +66,13 @@ describe("an app's server side and its page", () => {
     writeFileSync(join(app, "server", "operations.js"), "export async function list() { return []; }\n// changed\n");
     expect(await pageSignature(app)).toBe(before);
     expect(before).not.toMatch(/server|migrations|app\.json/);
+  });
+
+  it("included hosting publishes an app's ui but not its server side", async () => {
+    const { app } = botFolderWithApp();
+    writeFileSync(join(app, "index.html"), "<p>top</p>");
+    const collected = await collectAppFiles(app, DEFAULT_HOSTING_LIMITS);
+    expect(collected.files.map((file) => file.path).sort()).toEqual(["index.html", "ui/index.html"]);
+    expect(collected.skipped.sort()).toEqual(["app.json", "migrations", "server"]);
   });
 });

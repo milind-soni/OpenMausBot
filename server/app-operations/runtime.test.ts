@@ -1,8 +1,8 @@
 // Fetching the app runtime: pinned, verified before it is unpacked, never left half-written or unverified.
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 
@@ -58,13 +58,14 @@ describe("ensureRuntime", () => {
     await expect(ensureRuntime({ dataDir, fetch: serve(PACKED).fetch, platform: null, version: "1.0.0" })).rejects.toThrow(/do not run on/);
   });
 
-  it("replaces a binary that changed on disk since it was verified", async () => {
+  it("replaces a binary that changed on disk before this server verified it", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "ao-rt-"));
     const server = serve(PACKED);
-    const path = await ensureRuntime({ dataDir, fetch: server.fetch, platform: "linux-x64", assets: asset(), version: "1.0.0" });
+    const path = join(dataDir, "runtimes", "workerd", "1.0.0", "workerd");
+    mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, "tampered");
     await ensureRuntime({ dataDir, fetch: server.fetch, platform: "linux-x64", assets: asset(), version: "1.0.0" });
     expect(readFileSync(path)).toEqual(BINARY);
-    expect(server.urls).toHaveLength(2);
+    expect(server.urls).toHaveLength(1);
   });
 });
