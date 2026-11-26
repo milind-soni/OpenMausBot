@@ -34,7 +34,7 @@ const pageLanguage = loadPageLanguage();
 
 // The app is its own chunk, so these pages don't parse it. Everywhere else its fetch starts now, alongside the session
 // read, instead of after it. A failed fetch renders as a throw, so PageBoundary offers a reload.
-const PAGES_WITHOUT_THE_APP = new Set(["/home", "/pair", "/desktop-viewer"]);
+const PAGES_WITHOUT_THE_APP = new Set(["/home", "/pair", "/desktop-viewer", "/local-app"]);
 const loadApp = () => import("./App").catch((error: unknown) => ({ default: (): never => { throw error; } }));
 const appPage = PAGES_WITHOUT_THE_APP.has(location.pathname) ? null : loadApp();
 if (appPage) startDesktopLaunchMarks();
@@ -76,6 +76,11 @@ async function chooseRoot(): Promise<React.ReactNode> {
   if (location.pathname === "/desktop-viewer") {
     const { DesktopViewer } = await import("./components/DesktopViewer");
     return <DesktopViewer />;
+  }
+  if (location.pathname === "/local-app") {
+    const { LocalAppWindow } = await import("./local-app-window");
+    await pageLanguage;
+    return <LocalAppWindow id={new URLSearchParams(location.search).get("id") ?? ""} />;
   }
   const { default: App } = await (appPage ?? loadApp());
   void loadTheme();

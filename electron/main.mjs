@@ -87,7 +87,7 @@ import {
 } from "./companion-account-service.mjs";
 import capabilitiesModule from "./capabilities.cjs";
 import environmentsModule from "./environments.cjs";
-import { pairingPageUrl, vouchForPlainHttpServers } from "./server-address.mjs"; import { createServerConnect } from "./server-probe.mjs"; import { createTailnetShare, remotePolicyAllows } from "./tailnet-share.mjs"; import { checkTailscale } from "./tailscale-check.mjs"; import { onTailnet } from "./tailnet.mjs"; import { checkServer, createServerStatus, installServerStatus } from "./server-status.mjs"; import { installUpdateAll } from "./update-all.mjs";
+import { pairingPageUrl, vouchForPlainHttpServers } from "./server-address.mjs"; import { createServerConnect } from "./server-probe.mjs"; import { createTailnetShare, remotePolicyAllows } from "./tailnet-share.mjs"; import { checkTailscale } from "./tailscale-check.mjs"; import { onTailnet } from "./tailnet.mjs"; import { checkServer, createServerStatus, installServerStatus } from "./server-status.mjs"; import { installUpdateAll } from "./update-all.mjs"; import { createAppWindowSizes, installLocalAppWindows, isLocalAppWindow } from "./local-app-windows.mjs"; import { createDesktopAppInstaller, installAppInstall } from "./app-install/ipc.mjs"; import { createAppLaunches } from "./app-launches.mjs";
 import localOriginModule from "./local-origin.cjs";
 import { buildApplicationMenu } from "./menu.mjs";
 import { createComputerSharing, isHomeFolder, validateSharedFolders } from "./computer-sharing.mjs"; import { installServerLending } from "./server-lending.mjs"; import { ownEnvironmentIds } from "./lent-mcp.mjs";
@@ -142,7 +142,7 @@ let desktopWorkspaceManager = null;
 let desktopWorkspaceOwner = null;
 let pendingOrganizationEntry = takeOrganizationDeepLink(process.argv);
 function appWindows() {
-  return BrowserWindow.getAllWindows().filter((win) => !isTalkPanel(win));
+  return BrowserWindow.getAllWindows().filter((win) => !isTalkPanel(win) && !isLocalAppWindow(win));
 }
 const cloudEntry = createCloudEntry({
   reveal: () => { if (!desktopTray?.show()) activateExistingWindow(appWindows()); },
@@ -154,7 +154,7 @@ const cloudEntry = createCloudEntry({
 });
 cloudEntry.fromLaunch(process.argv); const teamLinks = installTeamJoin({ argv: process.argv, account: () => (app.isPackaged && !desktopRemoteAccess ? ensureCloudAccount() : null), addAccount: () => accountRing()?.addBrowser() ?? Promise.resolve(), openTeam: team => workspaceMenuAction(async () => { homeWindow.cancel(); await showHome({ place: { team: team.id, name: team.name } }); }), confirm: async (message, detail, button) => (await dialog.showMessageBox({ type: "question", buttons: [button, nativeT("native.common.cancel")], defaultId: 0, cancelId: 1, message, detail })).response === 0, t: (key, params) => nativeT(key, params), reveal: () => { if (!desktopTray?.show()) activateExistingWindow(appWindows()); }, store: jsonFile(path.join(app.getPath("userData"), "team-landing.json")), ownPlace: () => Boolean(homeWindow.cloudOrigin()) || Boolean(homePlaces.remembered()), log: line => slog(line) });
 let pendingPackageInstallUrl = pendingOrganizationEntry ? null : packageUrlFromCommandLine(process.argv);
-let pendingChatLink = pendingOrganizationEntry ? null : chatLinkFromCommandLine(process.argv);
+let pendingChatLink = pendingOrganizationEntry ? null : chatLinkFromCommandLine(process.argv); const appLaunches = createAppLaunches(); appLaunches.fromArgs(process.argv);
 let organizationEntryReady = false;
 let mainWindow = null; const browserPanes = createBrowserPanes({ createView: (options) => new WebContentsView(options), createPopup: (options) => new BrowserWindow(options), createParking: () => new BrowserWindow({ show: false, width: 1280, height: 800, skipTaskbar: true, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } }), keepsRunning: () => process.platform === "darwin" || hiddenStart || alwaysOnHome.on(), quitting: () => desktopShutdownStarted, fromPartition: (name) => session.fromPartition(name), owner: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null), chromeVersion: process.versions.chrome, log: (line) => slog(line) });
 const serverUnavailableWindows = new WeakSet();
@@ -243,7 +243,7 @@ function queueChatLink(rawLink) {
 }
 
 app.on("open-url", (event, url) => {
-  if (!teamLinks.fromUrl(url) && !queueOrganizationEntry(url) && !cloudEntry.fromUrl(url) && !queuePackageInstall(url) && !queueChatLink(url)) return;
+  if (!teamLinks.fromUrl(url) && !queueOrganizationEntry(url) && !cloudEntry.fromUrl(url) && !queuePackageInstall(url) && !appLaunches.fromUrl(url) && !queueChatLink(url)) return;
   event.preventDefault();
 });
 
@@ -252,7 +252,7 @@ app.on("second-instance", (_event, commandLine) => {
     queueOrganizationEntry("openmausbot://organization");
     return;
   }
-  if (cloudEntry.fromArgs(commandLine)) return; if (teamLinks.fromArgs(commandLine)) return;
+  if (cloudEntry.fromArgs(commandLine)) return; if (teamLinks.fromArgs(commandLine)) return; if (appLaunches.fromArgs(commandLine)) return;
   const packageUrl = packageUrlFromCommandLine(commandLine);
   if (packageUrl) pendingPackageInstallUrl = packageUrl;
   const chatLink = chatLinkFromCommandLine(commandLine);
@@ -2669,7 +2669,7 @@ ipcMain.handle("environments:add-from-link", localWorkspaceOnly("environments:ad
 ipcMain.handle("environments:forget", localWorkspaceOnly("environments:forget", (_event, id, purge) => forgetEnvironment(typeof id === "string" ? id : "", purge === true)));
 const savedServerStatus = createServerStatus({ entries: () => environmentsState.environments.filter((e) => e.kind === "remote" && !e.home && !e.team && !e.cloud), check: (origin) => checkServer(origin, (...args) => session.defaultSession.fetch(...args)),
   appVersion: app.getVersion(), onChange: () => { if (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })) mainWindow.webContents.send("environments:status-changed"); } });
-installServerStatus({ ipcMain, guard: localWorkspaceOnly, status: savedServerStatus, app, powerMonitor, online: () => net.isOnline() }); installUpdateAll({ ipcMain, guard: localWorkspaceOnly, servers: savedServerStatus.saved, fetch: (...args) => session.defaultSession.fetch(...args), send: (channel, view) => { if (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })) mainWindow.webContents.send(channel, view); } });
+installServerStatus({ ipcMain, guard: localWorkspaceOnly, status: savedServerStatus, app, powerMonitor, online: () => net.isOnline() }); installUpdateAll({ ipcMain, guard: localWorkspaceOnly, servers: savedServerStatus.saved, fetch: (...args) => session.defaultSession.fetch(...args), send: (channel, view) => { if (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })) mainWindow.webContents.send(channel, view); } }); const appInstaller = createDesktopAppInstaller({ app, shell, nativeImage, env: process.env, platform: process.platform, log: slog }); installAppInstall({ ipcMain, guard: localWorkspaceOnly, installer: appInstaller }); installLocalAppWindows({ ipcMain, guard: localOrHome, BrowserWindow, senderOrigin: (event) => { try { return new URL(event.senderFrame.url).origin; } catch { return null; } }, webPreferences: () => ({ contextIsolation: true, preload: path.join(__dirname, "preload.cjs"), additionalArguments: [...desktopCompanionRendererArguments(rendererOrigin(), desktopRemoteAccess), ...(app.isPackaged && !desktopRemoteAccess ? ["--omb-company-desktop=1"] : []), `--omb-app-version=${app.getVersion()}`, ...(linuxSoftwareRendering ? [SOFTWARE_RENDERING_ARG] : [])] }), openChat: queueChatLink, openExternal: (url) => shell.openExternal(externalLinkUrl(url)), sizes: createAppWindowSizes({ file: () => path.join(app.getPath("userData"), "app-windows.json"), log: slog }), workAreas: () => screen.getAllDisplays().map((display) => display.workArea), icon: APP_ICON, background: () => windowBackground(nativeTheme.shouldUseDarkColors), log: slog, launches: appLaunches, ready: () => app.isReady() && serverReady, launchOrigin: () => rendererOrigin(), windowDetails: (id) => appInstaller.windowDetails(id) });
 
 // A cloud page may open the native chooser, never choose a destination or edit the saved list.
 // Once My Cloud is home the switcher lists only whole places, and shows only when there is more than My Cloud.
