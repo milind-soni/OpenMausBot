@@ -24,9 +24,9 @@ describe("a work thread's one status", () => {
     const asked = { text: "Which date?", askedAt: 1 };
     expect(status({ state: "needs_person", question: { ...asked, person: "p_me", name: "Me" } })).toEqual({ kind: "needs", label: "Needs you" });
     expect(status({ state: "needs_person", question: asked })).toEqual({ kind: "needs", label: "Needs you" });
-    expect(status({ state: "needs_person", question: { ...asked, person: "p_mira", name: "Mira" } })).toEqual({ kind: "needs", label: "Needs Mira" });
-    expect(status({ state: "needs_person", question: { ...asked, person: "p_mira" } }), "an item asked before names were kept").toEqual({ kind: "needs", label: "Needs an answer" });
-    expect(status({ state: "needs_person", question: { ...asked, person: "p_me" } }, null), "before the viewer is known").toEqual({ kind: "needs", label: "Needs an answer" });
+    expect(status({ state: "needs_person", question: { ...asked, person: "p_mira", name: "Mira" } })).toEqual({ kind: "needs", label: "Needs Mira", someoneElse: true });
+    expect(status({ state: "needs_person", question: { ...asked, person: "p_mira" } }), "an item asked before names were kept").toEqual({ kind: "needs", label: "Needs an answer", someoneElse: true });
+    expect(status({ state: "needs_person", question: { ...asked, person: "p_me" } }, null), "before the viewer is known").toEqual({ kind: "needs", label: "Needs an answer", someoneElse: true });
   });
 
   it("is Done or Stopped once settled, and nothing once cancelled or with no item", () => {

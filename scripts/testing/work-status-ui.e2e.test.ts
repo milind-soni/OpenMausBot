@@ -173,6 +173,9 @@ async function openApp(size: readonly [string, string]) {
       [byTitle("Order printed banners")]: "Stopped",
     });
     expect(await app.evaluate<string>("document.querySelector('main').innerText"), "no Board for people").not.toMatch(/\bBoard\b/);
+    const mark = (title: string) => app!.evaluate<string | null>(`document.querySelector('[data-feed-thread="${byTitle(title)}"] [data-feed-mark]')?.dataset.feedMark ?? null`);
+    expect(await mark("Pick the launch date"), "what waits on Mira does not wait on Olive").not.toBe("waiting");
+    expect(await mark("Book the venue")).toBe("waiting");
     await app.evaluate(`document.querySelector('[data-feed-thread="${byTitle("Book the venue")}"] > button').click(); true`);
     await app.until(`document.querySelector('[data-thread-panel="${byTitle("Book the venue")}"] [data-thread-work="needs"]')`);
     expect(await app.evaluate<string>(`document.querySelector('[data-thread-work]').textContent`)).toBe("Needs you");

@@ -6,6 +6,8 @@ import { t } from "@/lib/i18n";
 export interface WorkStatus {
   kind: "next" | "working" | "needs" | "done" | "stopped";
   label: string;
+  /** `needs` only: it waits on someone else, so it does not wait on the viewer. */
+  someoneElse?: true;
 }
 
 /** Hierarchy from ink: what waits on a person reads first, a bot at work next, the rest quietly. */
@@ -33,7 +35,7 @@ export function workStatus(item: BoardItem | undefined, viewer: string | null, b
       const asked = item.question?.person;
       if (!asked || asked === viewer) return { kind: "needs", label: t("room.work.needsYou") };
       const name = item.question?.name?.trim();
-      return { kind: "needs", label: name ? t("room.work.needsName", { name }) : t("room.work.needsAnswer") };
+      return { kind: "needs", label: name ? t("room.work.needsName", { name }) : t("room.work.needsAnswer"), someoneElse: true };
     }
     case "done":
       return { kind: "done", label: t("room.work.done") };

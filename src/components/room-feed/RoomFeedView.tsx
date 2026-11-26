@@ -44,7 +44,8 @@ function toRow(group: Group, { task, summary }: FeedThread, bots: readonly Bot[]
     replies: summary.replies,
     lastReplyAt: summary.lastReplyAt,
     repliers: summary.repliers,
-    mark: waiting ? "waiting" : unread ? "unread" : null,
+    // A piece of work waiting on someone else does not wait on the viewer.
+    mark: waiting && !work?.someoneElse ? "waiting" : unread ? "unread" : null,
     working: roomThreadWorking(group, task.threadId),
     workingBotId: roomThreadSpeakerId(group, task.threadId),
     title: task.title,
