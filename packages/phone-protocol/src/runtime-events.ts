@@ -147,6 +147,8 @@ export type RuntimeEvent = RuntimeEventBase &
         /** The files a read tool's ask reads (absolute): a request that reads only the bot's own files is answered
          * without the person. Like `command`, never broadcast. */
         reads?: string[];
+        /** Raw structured tool input forwarded by ACP drivers for non-question permission prompts; never broadcast. */
+        rawInput?: unknown;
         choices?: string[];
         /** A provider's structured ask (Claude's AskUserQuestion): the whole
          * set of questions, each with its own options, so the card can offer
@@ -180,6 +182,8 @@ export type RuntimeEvent = RuntimeEventBase &
          * was already gone and the action never ran */
         source: "user" | "auto" | "timeout" | "system" | "unavailable" | "peer";
         approvalScope?: "local-computer";
+        /** Optional reason attached to the approval card while waiting, preserved on timeout. */
+        heldReason?: string;
       }
     | {
         type: "thread.token-usage.updated"; input: number; output: number; cachedInput?: number;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { connectorCallsIn, effectiveOutboundPolicy, isOutboundTool, isReadOnlyTool, normalizeOutboundPolicy, outboundCallsIn, trimOutboundPolicy } from "./outbound.ts";
+import { connectorCallsIn, effectiveOutboundPolicy, effectiveToolName, isOutboundTool, isReadOnlyTool, normalizeOutboundPolicy, outboundCallsIn, trimOutboundPolicy } from "./outbound.ts";
 
 describe("isOutboundTool", () => {
   it("flags tools that send, reply, post, publish, invite, share, or move money", () => {
@@ -209,5 +209,12 @@ describe("outboundCallsIn", () => {
     expect(sends.map((call) => call.slug)).toEqual(["GMAIL_SEND_EMAIL"]);
     expect(outboundCallsIn("GMAIL_FETCH_EMAILS", {})).toEqual([]);
     expect(isOutboundTool("COMPOSIO_PROXY_EXECUTE")).toBe(true);
+  });
+  it("resolves generic ACP tool placeholders from Run mcp_* summaries", () => {
+    expect(effectiveToolName("other", "Run mcp_composio_GMAIL_SEND_EMAIL")).toBe("mcp_composio_GMAIL_SEND_EMAIL");
+    expect(effectiveToolName("bash", "Run mcp_composio_GMAIL_SEND_EMAIL")).toBe("bash");
+    expect(isOutboundTool("other", "Run mcp_composio_GMAIL_SEND_EMAIL")).toBe(true);
+    expect(isOutboundTool("other", "Run mcp_composio_COMPOSIO_PROXY_EXECUTE")).toBe(true);
+    expect(isOutboundTool("other", "Run mcp_computer_click")).toBe(false);
   });
 });

@@ -90,15 +90,29 @@ export function isReadOnlyTool(name: string): boolean {
 /** The built-in agents server's X research tools only read X: x_post reads a post, it does not post one. */
 const AGENTS_X_READS = /^(?:mcp__agents__|agents__|agents_)?x_(?:search|user_posts|post|profile)$/;
 
+const GENERIC_SUMMARY_MCP = /^Run\s+(mcp_[A-Za-z0-9_.:-]+)\b/i;
+
+/** Resolves the underlying MCP tool name when an ACP driver reports `tool: "other"` with `summary: "Run mcp_..."`. */
+export function effectiveToolName(name: string, summary?: string): string {
+  const trimmed = name.trim();
+  if (trimmed && trimmed.toLowerCase() !== "other") return name;
+  if (summary) {
+    const match = GENERIC_SUMMARY_MCP.exec(summary.trim());
+    if (match?.[1]) return match[1];
+  }
+  return name;
+}
+
 /** Does this tool send something to someone, or move money? */
-export function isOutboundTool(name: string): boolean {
+export function isOutboundTool(name: string, summary?: string): boolean {
+  const resolved = effectiveToolName(name, summary);
   // A raw API call from the workbench can do anything an app tool can, and
   // nothing here can read which; it is treated as a send.
-  if (name === "COMPOSIO_PROXY_EXECUTE" || RAW_API_ACTION.test(name)) return true;
-  if (AGENTS_X_READS.test(name)) return false;
-  const tokens = actionTokens(name);
+  if (resolved === "COMPOSIO_PROXY_EXECUTE" || resolved.endsWith("_COMPOSIO_PROXY_EXECUTE") || RAW_API_ACTION.test(resolved)) return true;
+  if (AGENTS_X_READS.test(resolved)) return false;
+  const tokens = actionTokens(resolved);
   if (tokens.length === 0) return false;
-  if (isReadOnlyTool(name)) return false;
+  if (isReadOnlyTool(resolved)) return false;
   if (tokens.some((token) => SEND_VERBS.has(token))) return true;
   if (tokens.includes("DRAFT")) return false;
   return tokens.some((token) => CREATE_VERBS.has(token)) && tokens.some((token) => SENT_NOUNS.has(token));
