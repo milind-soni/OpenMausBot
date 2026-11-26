@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Check, Loader2, MoreHorizontal, Plus } from "lucide-react";
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { useShowInstances } from "@/state/use-show-instances";
@@ -11,15 +11,18 @@ import { ClaudeSignIn } from "./ClaudeSignIn";
 import { DeviceSignIn, deviceSignInProvider } from "./DeviceSignIn";
 import { ChatGptPlanStatus } from "./ChatGptPlanStatus";
 import { EngineCard, engineReady, providerName, type EngineCardSummary } from "./EngineLibrary";
-import { CommandRow, EngineSetup, EngineUpdateNotice, EngineWarningNotice } from "./EngineSetup";
+import { AntigravitySignIn, CommandRow, EngineSetup, EngineUpdateNotice, EngineWarningNotice } from "./EngineSetup";
+import { AntigravitySwitchCli } from "./AntigravitySwitchCli";
+import { AntigravityFreeSpace } from "./AntigravityFreeSpace";
 import { MENU_SHEET } from "./menu-recipe";
 
 /** Providers whose accounts are listed together on one card, each signed in on its own. */
-export type AccountGroup = "claude" | "chatgpt";
+export type AccountGroup = "claude" | "chatgpt" | "antigravity";
 
 export function accountGroupOf(instance: InstanceInfo): AccountGroup | null {
   if (instance.readOnly || instance.trialCredit || instance.access === "custom" || instance.access === "api") return null;
   if (instance.driverKind === "claudeAgent") return "claude";
+  if (instance.driverKind === "antigravityAgent") return "antigravity";
   const method = instance.authentication?.method;
   return instance.snapshot.chatgptPlan === true || ((method === "device-code" || method === "browser-pkce") && deviceSignInProvider(instance.driverKind) === "codex")
     ? "chatgpt" : null;
@@ -35,12 +38,17 @@ function accountState(instance: InstanceInfo): AccountState {
 const COPY: Record<AccountGroup, Record<"title" | "add" | "removeBody", LocaleKey>> = {
   claude: { title: "accounts.claude", add: "accounts.addClaude", removeBody: "accounts.removeBodyClaude" },
   chatgpt: { title: "accounts.chatgpt", add: "accounts.addChatgpt", removeBody: "accounts.removeBodyChatgpt" },
+  antigravity: { title: "accounts.antigravity", add: "engineSetup.antigravity.addAccount", removeBody: "accounts.removeBodyAntigravity" },
 };
+
+export function accountGroupTitle(group: AccountGroup): string {
+  return t(COPY[group].title);
+}
 
 /** What an account's menu offers. Only accounts added here can be removed; each provider's first account stays, and
  * ChatGPT's built-in rows (Codex, ChatGPT plan) can be hidden instead. */
 export function accountActions(group: AccountGroup, instance: InstanceInfo): { signOut: boolean; remove: boolean; hide: boolean } {
-  const remove = group === "claude" ? instance.instanceId !== "claude" && instance.claudeAccount?.isDefault !== true : instance.instanceId.startsWith("chatgpt-");
+  const remove = group === "claude" ? instance.instanceId !== "claude" && instance.claudeAccount?.isDefault !== true : instance.instanceId.startsWith(`${group}-`);
   return {
     signOut: accountState(instance) === "signedIn" && instance.authentication?.signOut === true && instance.snapshot.account?.method !== "api-key",
     remove,
@@ -61,7 +69,7 @@ function summaryFor(group: AccountGroup, accounts: InstanceInfo[]): EngineCardSu
     ? t("accounts.count", { count: String(accounts.length), signedIn: String(signedIn.length) })
     : signedIn[0]?.snapshot.account?.email ?? providerName(accounts[0]!);
   return {
-    title: t(COPY[group].title),
+    title: accountGroupTitle(group),
     subtitle,
     ready,
     status: ready ? t("onboarding.engines.ready") : installed ? t("model.signInRequired") : t("onboarding.engines.needsSetup"),
@@ -69,7 +77,7 @@ function summaryFor(group: AccountGroup, accounts: InstanceInfo[]): EngineCardSu
   };
 }
 
-function AccountMenu({ group, instance, onRename }: { group: AccountGroup; instance: InstanceInfo; onRename: () => void }) {
+function AccountMenu({ group, instance, signingIn, onRename }: { group: AccountGroup; instance: InstanceInfo; signingIn: boolean; onRename: () => void }) {
   const { state } = useStore();
   const showInstances = useShowInstances();
   const [open, setOpen] = useState(false);
@@ -125,7 +133,7 @@ function AccountMenu({ group, instance, onRename }: { group: AccountGroup; insta
       </button>
       {open && (
         <div role="menu" className={cn("absolute right-0 top-full z-40 mt-1 w-[220px] overflow-hidden text-[13px]", MENU_SHEET)}>
-          <button type="button" role="menuitem" className={cn(item, "text-ink")} onClick={() => { setOpen(false); onRename(); }}>{t("accounts.rename")}</button>
+          <button type="button" role="menuitem" disabled={signingIn} className={cn(item, "text-ink")} onClick={() => { setOpen(false); onRename(); }}>{t("accounts.rename")}</button>
           {canSignOut && <button type="button" role="menuitem" className={cn(item, "text-ink")} onClick={() => { setOpen(false); setConfirm("signOut"); }}>{t("accounts.signOut")}</button>}
           {canHide && <button type="button" role="menuitem" disabled={usedBy > 0} title={t("engines.hideHint")} className={cn(item, "text-ink")} onClick={() => { setOpen(false); void run("hide"); }}>{t("engines.hide")}</button>}
           {(canRemove || canHide) && usedBy > 0 && <p className="px-3 pb-1 pt-0.5 text-[11px] leading-snug text-ink-secondary">{t("accounts.inUse", { count: String(usedBy) })}</p>}
@@ -200,15 +208,35 @@ function AccountRow({ group, instance, several, signingIn, onSignIn, onSignInDon
   onSignInDone: () => void;
 }) {
   const [renaming, setRenaming] = useState(false);
+  const signInButton = useRef<HTMLButtonElement>(null);
+  const signInPanel = useRef<HTMLDivElement | null>(null);
+  const focusWasInPanel = useRef(false);
+  const panelRef = useCallback((node: HTMLDivElement | null) => {
+    signInPanel.current = node;
+    if (!node) return;
+    return () => { focusWasInPanel.current = node.contains(document.activeElement); };
+  }, []);
+  const wasSigningIn = useRef(false);
   const state = accountState(instance);
   const account = instance.snapshot.account;
   // This server cannot run the provider's sign-in (a remote browser for a local-only flow): say why, offer nothing.
   const blocked = instance.snapshot.authenticationUnavailableReason;
   const detail = blocked && state !== "signedIn" ? blocked : state === "signedIn"
-    ? account?.method === "api-key" ? t("accounts.apiKey") : [account?.email, account?.organization].filter(Boolean).join(" · ") || t("accounts.signedIn")
+    ? account?.method === "api-key" ? t("accounts.apiKey") : [account?.email, account?.organization].filter(Boolean).join(" · ") || t(group === "antigravity" ? "engineSetup.antigravity.signedInGoogle" : "accounts.signedIn")
     : state === "signedOut" ? t("accounts.notSignedIn")
     : state === "unknown" ? t("accounts.unknown")
     : instance.snapshot.reason ?? t("onboarding.engines.needsSetup");
+  const setsUp = group === "antigravity" && state === "unavailable";
+  const signedIn = state === "signedIn";
+  useEffect(() => {
+    if (group === "antigravity" && signingIn && signedIn) onSignInDone();
+  }, [group, signingIn, signedIn, onSignInDone]);
+  useEffect(() => {
+    const opened = signingIn && !wasSigningIn.current, closed = !signingIn && wasSigningIn.current;
+    wasSigningIn.current = signingIn;
+    if (closed && focusWasInPanel.current) signInButton.current?.focus();
+    if (opened) requestAnimationFrame(() => signInPanel.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus());
+  }, [signingIn]);
 
   return (
     <li data-account={instance.instanceId} data-account-state={state} className="px-3 py-2.5">
@@ -224,17 +252,18 @@ function AccountRow({ group, instance, several, signingIn, onSignIn, onSignInDon
               <div className="truncate text-[12px] text-ink-secondary" title={detail}>{detail}</div>
             </div>
             {state !== "signedIn" && state !== "unavailable" && !blocked && !signingIn && (
-              <button type="button" onClick={onSignIn} className={cn("shrink-0 rounded-lg px-3 py-1.5 text-[12px] font-semibold",
+              <button ref={signInButton} type="button" onClick={onSignIn} className={cn("shrink-0 rounded-lg px-3 py-1.5 text-[12px] font-semibold",
                 state === "signedOut" ? "bg-accent text-white hover:brightness-110" : "bg-control text-ink hover:bg-raised-hover")}>
                 {t("accounts.signIn")}
               </button>
             )}
-            <AccountMenu group={group} instance={instance} onRename={() => setRenaming(true)} />
+            <AccountMenu group={group} instance={instance} signingIn={signingIn && !setsUp} onRename={() => setRenaming(true)} />
           </>
         )}
       </div>
-      {signingIn && (
-        <div className="pl-9">
+      {setsUp && <div data-account-setup={instance.instanceId} className="pl-9"><EngineSetup instance={instance} unframed /></div>}
+      {signingIn && !setsUp && (
+        <div ref={panelRef} className="pl-9">
           {group === "claude"
             ? <>
               <ClaudeSignIn instanceId={instance.instanceId} autoStart onDone={onSignInDone} />
@@ -245,6 +274,8 @@ function AccountRow({ group, instance, several, signingIn, onSignIn, onSignInDon
                 </details>
               )}
             </>
+            : group === "antigravity"
+            ? <div data-account-sign-in={instance.instanceId}><AntigravitySignIn instance={instance} onDone={onSignInDone} /></div>
             : <>
               {several && instance.authentication?.method === "device-code" && <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("accounts.chatgptDeviceHint")}</p>}
               <DeviceSignIn instanceId={instance.instanceId} provider="codex" browserPkce={instance.authentication?.method === "browser-pkce"} autoStart onDone={onSignInDone} />
@@ -254,6 +285,10 @@ function AccountRow({ group, instance, several, signingIn, onSignIn, onSignInDon
       {group === "chatgpt" && state === "signedIn" && instance.snapshot.chatgptPlan && (
         <div className="pl-9"><ChatGptPlanStatus instanceId={instance.instanceId} welcome={false} /></div>
       )}
+      {group === "antigravity" && <div className="pl-9">
+        <AntigravitySwitchCli instance={instance} />
+        {instance.freeUpSpace && <AntigravityFreeSpace instance={instance} />}
+      </div>}
     </li>
   );
 }
@@ -329,9 +364,18 @@ export function AddAccount({ label, endpoint, extra, folder: offerFolder = false
 
 /** One card for a provider's accounts: who is signed in, one button for whoever is not, and one way to add another. */
 export function AccountsCard({ group, accounts, advanced, bare = false }: { group: AccountGroup; accounts: InstanceInfo[]; advanced?: ReactNode; bare?: boolean }) {
-  const [signingIn, setSigningIn] = useState<string | null>(null);
+  const [signingIn, setSigningIn] = useState<readonly string[]>([]);
+  const startSignIn = (instanceId: string) => setSigningIn((current) => group === "antigravity" ? [...current.filter((id) => id !== instanceId), instanceId] : [instanceId]);
+  const endSignIn = (instanceId: string) => setSigningIn((current) => current.includes(instanceId) ? current.filter((id) => id !== instanceId) : current);
+  const shown = accounts.map((instance) => instance.instanceId);
+  const wereShown = useRef(shown);
+  useEffect(() => {
+    const gone = wereShown.current.filter((id) => !shown.includes(id));
+    wereShown.current = shown;
+    if (gone.length) setSigningIn((current) => current.filter((id) => !gone.includes(id)));
+  });
   const primary = accounts[0]!;
-  const installed = accounts.some((instance) => instance.snapshot.state === "available");
+  const listed = group === "antigravity" || accounts.some((instance) => instance.snapshot.state === "available");
   const policy = accounts.find((instance) => instance.policy)?.policy;
   // Only the browser sign-in can be refused by a ChatGPT organization; Codex's own device-code sign-in is not.
   const browserAccounts = group === "chatgpt" && accounts.some((instance) => instance.snapshot.chatgptPlan === true || instance.authentication?.method === "browser-pkce");
@@ -341,19 +385,20 @@ export function AccountsCard({ group, accounts, advanced, bare = false }: { grou
       {policy && <p className="mb-3 text-[12px] leading-relaxed text-ink-secondary">
         <span className="font-medium text-ink">{t("policy.managedBy", { organization: policy.organizationName })}</span> · {policy.reason}
       </p>}
-      {!installed ? <EngineSetup instance={primary} unframed /> : (
+      {!listed ? <EngineSetup instance={primary} unframed /> : (
         <div className="space-y-2">
           <ul data-accounts={group} className="divide-y divide-hairline/40 rounded-xl border border-hairline/50 bg-panel/40">
             {accounts.map((instance) => (
               <AccountRow key={instance.instanceId} group={group} instance={instance} several={accounts.length > 1}
-                signingIn={signingIn === instance.instanceId}
-                onSignIn={() => setSigningIn(instance.instanceId)}
-                onSignInDone={() => setSigningIn((current) => current === instance.instanceId ? null : current)} />
+                signingIn={signingIn.includes(instance.instanceId)}
+                onSignIn={() => startSignIn(instance.instanceId)}
+                onSignInDone={() => endSignIn(instance.instanceId)} />
             ))}
           </ul>
           {!primary.snapshot.authenticationUnavailableReason && <>
             <AddAccount label={t(COPY[group].add)} endpoint={`/api/instances/${group}-accounts`} folder={group === "claude"}
-              describedBy={browserAccounts ? noteId : undefined} onAdded={setSigningIn} />
+              extra={group === "antigravity" ? { sourceInstanceId: (accounts.find((instance) => instance.snapshot.state === "available") ?? primary).instanceId } : undefined}
+              describedBy={browserAccounts ? noteId : undefined} onAdded={startSignIn} />
             {browserAccounts && <p id={noteId} className="px-2 text-[12px] leading-relaxed text-ink-secondary">{t("accounts.addChatgptWorkspaceNote")}</p>}
           </>}
           {group === "chatgpt" && <p data-codex-shared-setup className="px-2 text-[12px] leading-relaxed text-ink-secondary">{t("accounts.chatgptSharedSetupNote")}</p>}

@@ -53,6 +53,9 @@ export interface Notification {
   /** On a Team Cloud, the one person this is for (their person key): a teammate tagged by name, or the person a bot
    * passed a message to. It reaches nobody else, an admin included. */
   forPerson?: string;
+  /** On a `done`: the report of a scheduled routine run, not a reply in a chat. Clients may let the person keep these
+   * while chat replies stay quiet. Absent from older servers and from the saved feed. */
+  routine?: true;
 }
 
 /** A `Notification` as the feed stores it: the live `notify` frame and `GET /api/notifications` carry the same entry. */
