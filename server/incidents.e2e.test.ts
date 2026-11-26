@@ -131,6 +131,41 @@ it("reports a crashed run to the Chief, who retries it from the incidents thread
   }
 }, 150_000);
 
+it("retries from a room as a turn in the failed thread, even when that thread failed the Chief's own request", async () => {
+  const { dataDir, api, control, file, dump, messages, botsNow, useCli, turnEnded, close } = await launch();
+  try {
+    const chief = (await control(["new-bot", "--name", "Clive", "--section", "Ops"])).bot;
+    await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true });
+    const ada = (await control(["new-bot", "--name", "Ada", "--section", "Ops"])).bot;
+    const room = (await api("POST", "/api/groups", { name: "Ops room", memberIds: [chief.id, ada.id], setup: { bulletin: "", defaultResponder: { kind: "member", botId: chief.id } } }, undefined, 201)).group;
+    const [own, failing, ownDone] = [chief.activeTaskId, join(dataDir, "ada-fails"), join(dataDir, "own-done")];
+    // The Chief's own turn and its room turn stay open so their tokens are live; the next other turn after `failing` crashes once.
+    await useCli(`thread === ${JSON.stringify(room.threadId)} ? "slow" : thread === ${JSON.stringify(own)} ? (existsSync(${JSON.stringify(ownDone)}) ? "happy" : "slow")
+      : existsSync(${JSON.stringify(failing)}) ? ((await import("node:fs")).rmSync(${JSON.stringify(failing)}), "exit-early") : "happy"`);
+
+    await control(["send", "--bot", chief.id, "--text", "Look after the invoices."]);
+    const ownToken = (await dump(own)).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    writeFileSync(failing, "");
+    const handed = await api("POST", "/api/internal/coordinate-bots", { fromBotId: chief.id, fromThreadId: own, botIds: [ada.id], message: "Reconcile the September invoices.", thread: "new", reply: "resume" }, ownToken);
+    const failed = handed.receipts[0].threadId as string;
+    await expect.poll(async () => (await messages(failed)).some((m) => m.kind === "activity" && /exit_before_result|error/i.test(m.tool?.name ?? "")), { timeout: 20_000 }).toBe(true);
+    await turnEnded(ada.id, failed);
+    writeFileSync(ownDone, "");
+    writeFileSync(file(own, "gate"), "finish");
+    await expect.poll(async () => (await botsNow()).find((b) => b.id === chief.id)?.tasks?.every((t: any) => !t.busy), { timeout: 30_000 }).toBe(true);
+
+    await api("POST", `/api/groups/${room.id}/messages`, { text: "Clive, how are the invoices going?" }, undefined, 202);
+    const inRoom = (await dump(room.threadId)).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const retried = await api("POST", "/api/internal/retry-thread", { fromBotId: chief.id, fromThreadId: room.threadId, toBotId: ada.id, toThreadId: failed }, inRoom);
+    expect(retried.message).toMatch(/is running again\. Its result stays in that thread; you are not woken for it/);
+    await expect.poll(async () => (await messages(failed)).some((m) => m.role === "user" && /requested by Clive, your Chief of Staff/.test(m.text ?? "")), { timeout: 20_000 }).toBe(true);
+    expect((await messages(room.threadId)).some((m) => m.kind === "activity" && (m.tool?.name ?? "").startsWith("Retried Ada's thread #") && m.threadRef?.threadId === failed)).toBe(true);
+    writeFileSync(file(room.threadId, "gate"), "finish");
+  } finally {
+    await close();
+  }
+}, 150_000);
+
 it("files a failed run's incident only once its thread has settled, so the Chief's retry is accepted straight away", async () => {
   const { url, api, control, dump, useCli, incidentsThread, close } = await launch();
   const stream = await openSse(`${url}/api/events`, { origin: url });
