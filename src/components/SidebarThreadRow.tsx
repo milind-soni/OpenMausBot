@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
-import { Archive, ArchiveRestore, BellOff, Brain, Check, ChevronRight, Clock, Clock3, FolderInput, Link2, Link2Off, Loader2, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Star, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, BellOff, Brain, Check, ChevronRight, CircleCheck, CircleDashed, Clock, Clock3, FolderInput, Link2, Link2Off, Loader2, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Star, Trash2 } from "lucide-react";
 import type { Action, AppState, BotProject, Task } from "@/state/store";
 import { api } from "@/state/store";
 import type { RoutineRun } from "@/lib/routines";
@@ -282,6 +282,8 @@ type ThreadRowProps = {
   onSnooze?: (task: ThreadRowTask, snoozedUntil: number | null) => void;
   onLink?: (task: ThreadRowTask, link: string | null) => void;
   onRefreshPermissions?: (task: ThreadRowTask) => void;
+  /** A room's thread: Close marks its work finished (`closedBy` says it is), Reopen takes that back. */
+  onSetClosed?: (task: ThreadRowTask, closed: boolean) => void;
   /** Opens the bot's memory for this conversation, once the row has opened it. */
   onMemory?: (task: ThreadRowTask) => void;
   selectMode?: boolean;
@@ -308,7 +310,7 @@ function SetMainThreadItem({ main, onPick }: { main: boolean; onPick: () => void
   return <button type="button" disabled={main} title={main ? t("sidebar.bot.simple.isMainThread") : undefined} onClick={onPick} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40"><Star size={16} />{t("sidebar.bot.simple.setMainThread")}</button>;
 }
 
-export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, current, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSetMain, onSnooze, onLink, onRefreshPermissions, onMemory, activityLabel: liveActivity, now, selectMode = false, checked = false, onToggleSelect, panel = false, preview, main = false }: ThreadRowProps) {
+export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, current, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSetMain, onSnooze, onLink, onRefreshPermissions, onSetClosed, onMemory, activityLabel: liveActivity, now, selectMode = false, checked = false, onToggleSelect, panel = false, preview, main = false }: ThreadRowProps) {
   const activityLabel = useHeldText(liveActivity);
   // Simple mode's menu keeps what a person needs for a conversation; Advanced adds the rest.
   const advanced = useAdvancedMode();
@@ -332,7 +334,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
   const openMenu = (x: number, y: number) => setMenu(threadMenuAt(x, y));
   const startRename = () => { if (task.sharedChat) return; finishing.current = false; setDraft(task.title); setRenaming(true); setMenu(null); };
   const menuSheet = useThreadRowMenu({ task, displayTitle, ownerId, folders, main, menu, setMenu, actionRef, onStartRename: startRename, onSelect, onRegenerateTitle, onDelete, onMove,
-    onArchive, onPin, onSetMain, onSnooze, onLink, onRefreshPermissions, onMemory });
+    onArchive, onPin, onSetMain, onSnooze, onLink, onRefreshPermissions, onSetClosed, onMemory });
   const finishRename = (save: boolean) => {
     if (finishing.current) return;
     finishing.current = true;
@@ -399,7 +401,7 @@ export const threadMenuAt = (x: number, y: number): ThreadMenuAt =>
   ({ left: Math.max(8, Math.min(x, window.innerWidth - 228)), top: Math.max(8, Math.min(y, window.innerHeight - 230)) });
 
 type ThreadMenuProps = Pick<ThreadRowProps, "task" | "ownerId" | "folders" | "main" | "onRegenerateTitle" | "onDelete" | "onMove" | "onArchive" | "onPin" | "onSetMain"
-  | "onSnooze" | "onLink" | "onRefreshPermissions" | "onMemory"> & {
+  | "onSnooze" | "onLink" | "onRefreshPermissions" | "onSetClosed" | "onMemory"> & {
   menu: ThreadMenuAt | null;
   setMenu: Dispatch<SetStateAction<ThreadMenuAt | null>>;
   /** The control that opened the menu: a click on it is not a click outside, and focus returns to it. */
@@ -414,7 +416,7 @@ type ThreadMenuProps = Pick<ThreadRowProps, "task" | "ownerId" | "folders" | "ma
 };
 
 /** A thread row's menu and its delete confirmation, for every list that draws a thread with its actions. */
-export function useThreadRowMenu({ task, displayTitle, ownerId, folders, main = false, menu, setMenu, actionRef, onStartRename, onSelect, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSetMain, onSnooze, onLink, onRefreshPermissions, onMemory, extra, deletable = true }: ThreadMenuProps): ReactNode {
+export function useThreadRowMenu({ task, displayTitle, ownerId, folders, main = false, menu, setMenu, actionRef, onStartRename, onSelect, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSetMain, onSnooze, onLink, onRefreshPermissions, onSetClosed, onMemory, extra, deletable = true }: ThreadMenuProps): ReactNode {
   const advanced = useAdvancedMode();
   const [webLink, setWebLink] = useState<string | null>(null);
   useEffect(() => {
@@ -483,6 +485,7 @@ export function useThreadRowMenu({ task, displayTitle, ownerId, folders, main = 
       {onPin && <button type="button" onClick={() => { setMenu(null); onPin(task, task.pinned !== true); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover">{task.pinned === true ? <PinOff size={16} /> : <Pin size={16} />}{task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin")}</button>}
       {onSetMain && !task.routineRunId && !task.private && !archived && <SetMainThreadItem main={main} onPick={() => { setMenu(null); onSetMain(task); }} />}
       {advanced && onLink && task.link && <button type="button" onClick={() => { setMenu(null); onLink(task, null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Link2Off size={16} />{t("task.removeLink")}</button>}
+      {onSetClosed && <button type="button" data-thread-close={task.closedBy ? "reopen" : "close"} onClick={() => { setMenu(null); onSetClosed(task, !task.closedBy); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover">{task.closedBy ? <CircleDashed size={16} /> : <CircleCheck size={16} />}{task.closedBy ? t("task.reopenThread") : t("task.closeThread")}</button>}
       {onArchive && <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); onArchive(task, isArchived(task) ? null : Date.now()); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40">{archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}{archived ? t("task.unarchive") : t("task.archive")}</button>}
       {advanced && onSnooze && <div className="px-2 pt-1">
         <span className="flex items-center gap-2 text-[12px] font-medium text-ink-secondary"><Clock size={16} />{t("task.snooze")}</span>

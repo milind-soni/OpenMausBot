@@ -121,7 +121,7 @@ export function Composer({
   onClearReply,
   onConsumeReply,
   onRestoreReply,
-  locked: setupLocked = false, onSendGroup,
+  onSendGroup,
 }: {
   bot?: Bot;
   group?: Group;
@@ -131,12 +131,11 @@ export function Composer({
   onClearReply?: () => void;
   onConsumeReply?: () => void;
   onRestoreReply?: (message: Message, threadId: string) => void;
-  locked?: boolean;
   /** Takes a room's send instead of the store: the room feed starts a new thread with it. */
   onSendGroup?: (action: Extract<Action, { type: "sendGroup" }>) => void;
 }) {
   const bot = profile ? currentTaskBot(profile) : undefined;
-  const locked = setupLocked || Boolean(bot?.awaitingThreadSnapshot);
+  const locked = Boolean(bot?.awaitingThreadSnapshot);
   const state = useStoreSelector((s) => ({ instances: s.instances, config: s.config, queued: s.pendingQueued[group?.threadId ?? bot?.threadId ?? ""] }), sameFields), dispatch = useStoreDispatch(), store = useStoreRef(), bots = useStoreSelector((s) => s.bots, sameDrawnBots);
   const { threads, currentBotId } = useThreadRefs();
   const advanced = useAdvancedMode();
@@ -922,7 +921,7 @@ export function Composer({
           disabled={blocking || locked}
           aria-busy={bot?.awaitingThreadSnapshot || undefined}
           placeholder={composerPlaceholder({
-            simple: !advanced, locked: setupLocked, approval: blocking, attaching: attachmentPending, listening: recording,
+            simple: !advanced, approval: blocking, attaching: attachmentPending, listening: recording,
             replying: Boolean(replyTo), busy, canSteer: steersNow, queued: pendingCount > 0, busyName, sendLabel, group, members: members ?? [],
             jevOn: jevRoomRoutingOn(state.config), goal: channelMode === "goal", botName: bot?.name ?? "",
             setupHint: group ? null : setupRequestPlaceholder(bot, threadId), startsThread: Boolean(onSendGroup),

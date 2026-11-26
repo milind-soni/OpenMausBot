@@ -3,9 +3,9 @@ import { act, createElement, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
-import { DeviceNotificationsRow } from "./NotificationSettingsRows";
+import { DeviceNotificationsRow, ReportNotificationsRow } from "./NotificationSettingsRows";
 
-const fixture = vi.hoisted(() => ({ optedIn: true, setFinishedNotifications: vi.fn() }));
+const fixture = vi.hoisted(() => ({ optedIn: true, reports: true, setFinishedNotifications: vi.fn(), setReportNotifications: vi.fn() }));
 vi.mock("@/lib/notification-preferences", () => ({
   useNotificationSounds: () => true,
   setNotificationSounds: vi.fn(),
@@ -13,6 +13,8 @@ vi.mock("@/lib/notification-preferences", () => ({
   setNotificationFeed: vi.fn(),
   useFinishedNotifications: () => fixture.optedIn,
   setFinishedNotifications: fixture.setFinishedNotifications,
+  useReportNotifications: () => fixture.reports,
+  setReportNotifications: fixture.setReportNotifications,
 }));
 
 let root: Root | undefined;
@@ -24,6 +26,7 @@ const requestPermission = vi.fn(async (): Promise<NotificationPermission> => "gr
 beforeEach(() => {
   vi.clearAllMocks();
   fixture.optedIn = true;
+  fixture.reports = true;
   permission = "granted";
   setLocale("en");
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -104,4 +107,29 @@ it("ignores hidden pages and stops listening once unmounted", async () => {
   await resume("visibilitychange");
   await resume("focus");
   expect(readPermission).not.toHaveBeenCalled();
+});
+
+it("turns scheduled report notices on and off by themselves, only once the browser allows notifications", async () => {
+  fixture.reports = false;
+  await act(async () => root!.render(createElement(ReportNotificationsRow)));
+  expect(container.textContent).toContain("Scheduled report notifications");
+  expect(toggle().getAttribute("aria-checked")).toBe("false");
+  await act(async () => toggle().click());
+  expect(fixture.setReportNotifications).toHaveBeenCalledWith(true);
+  expect(fixture.setFinishedNotifications).not.toHaveBeenCalled();
+  permission = "denied";
+  await resume("focus");
+  expect(toggle().disabled).toBe(true);
+  expect(requestPermission).not.toHaveBeenCalled();
+});
+
+it("lets the report switch be used as soon as the device switch gets the browser's permission", async () => {
+  permission = "default";
+  await act(async () => root!.render(createElement(StrictMode, null, createElement("div", null, createElement(DeviceNotificationsRow), createElement(ReportNotificationsRow)))));
+  const [device, report] = container.querySelectorAll<HTMLButtonElement>('[role="switch"]');
+  expect(report.disabled).toBe(true);
+  await act(async () => device.click());
+  expect(requestPermission).toHaveBeenCalledOnce();
+  expect(report.disabled).toBe(false);
+  expect(report.getAttribute("aria-checked")).toBe("true");
 });

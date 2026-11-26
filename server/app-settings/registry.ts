@@ -165,7 +165,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
 
   const safe: SettingEntry[] = [
     windowPref("appearance.skin", "Skin", "The window's built-in look; \"system\" follows the computer's light or dark mode. A custom look (any colours, fonts, CSS, pictures) is a theme: use action theme.", "theme", ["theme", "dark mode", "light mode", "colors", "look"], enumOf(WINDOW_PREFS["appearance.skin"].options)),
-    windowPref("appearance.advanced", "Advanced mode", "Advanced shows every setting and tool; Simple keeps the everyday ones.", "advanced-mode", ["simple mode", "advanced mode", "interface mode"], "true or false"),
+    windowPref("appearance.advanced", "Advanced mode", "Advanced shows every setting and tool; Simple keeps the everyday ones. Change it only when the person asks for Simple or Advanced mode by name, never to reach another setting: those change in either mode.", "advanced-mode", ["simple mode", "advanced mode", "interface mode"], "true or false"),
     windowPref("appearance.font", "Font", "The app's typeface.", "tool-calls", ["typeface", "typography"], enumOf(WINDOW_PREFS["appearance.font"].options)),
     windowPref("appearance.chatWidth", "Chat width", "How wide the chat column is.", "tool-calls", ["layout", "column", "wide"], enumOf(WINDOW_PREFS["appearance.chatWidth"].options)),
     windowPref("general.sendKey", "Send key", "Which key sends a message in the composer.", "send-key", ["enter", "typing", "keyboard", "shortcut"], enumOf(WINDOW_PREFS["general.sendKey"].options)),
@@ -343,7 +343,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
       ["https", "public address"], () => "managed in Settings"),
   ];
 
-  return [...safe, ...providers, engines, ...botEntries(deps, writable), ...pictureEntries(deps, writable), ...configEntries(deps, writable), ...windowEntries(windowPref), ...secret, ...owner];
+  return [...safe, ...providers, engines, ...botEntries(deps, writable), ...pictureEntries(deps, writable), ...configEntries(deps, writable), ...windowEntries(windowPref, (id) => deps.window.read(id)), ...secret, ...owner];
 }
 
 export function findSettings(entries: readonly SettingEntry[], query: string, limit = 8): SettingEntry[] {

@@ -1,5 +1,4 @@
 import { roomFeedEnabled } from "@/lib/feature-flags";
-import { roomNeedsSetup } from "@/lib/room-setup";
 import { SIDEBAR_INLINE } from "@/lib/use-media-query";
 import { api, type Action, type AppState, type Group } from "@/state/store";
 
@@ -7,13 +6,11 @@ export type FeedRoom = Pick<Group, "dm"> & { messages?: readonly unknown[] };
 type ThreadOwner = { id: string; threadId: string; dm?: boolean; tasks?: ReadonlyArray<{ threadId: string }> };
 
 const wideWindow = () => typeof window === "undefined" || typeof window.matchMedia !== "function" || window.matchMedia(SIDEBAR_INLINE).matches;
-const remoteClient = () => typeof window !== "undefined" && window.ogb?.remoteClient?.active === true;
-export const settingUp = (group: FeedRoom) => !remoteClient() && Array.isArray(group.messages) && roomNeedsSetup(group as Group);
 
 /** A room shows its threads as one feed, with the open one beside it, where its server has the feed and the window is
- * wide enough for the thread beside it. A bot-to-bot room keeps its one conversation, and a new room its setup. */
+ * wide enough for the thread beside it. A bot-to-bot room keeps its one conversation. */
 export function roomFeedShows(config: AppState["config"] | undefined, group: FeedRoom | undefined, wide = wideWindow()): boolean {
-  return Boolean(group) && roomFeedEnabled(config) && !group!.dm && wide && !settingUp(group!);
+  return Boolean(group) && roomFeedEnabled(config) && !group!.dm && wide;
 }
 
 export const openFeedThread = (groupId: string, threadId: string, focusComposer = false): Action =>

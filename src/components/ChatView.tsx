@@ -737,7 +737,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
   const advanced = useAdvancedMode(), activity = useChatActivity(), skillBurger = useFeature("skillBurger");
   const phone = useMediaQuery(PHONE_LAYOUT);
   const phoneMenu = phone && !remoteClient;
-  const simpleHead = !advanced && !remoteClient, headTabs = useThreadTabsShown(bot.id) && !inForkPanel; useTabsFrameOnRoot(headTabs ? (simpleHead ? "simple" : "advanced") : undefined);
+  const simpleHead = !advanced && !remoteClient, headTabs = useThreadTabsShown() && !inForkPanel; useTabsFrameOnRoot(headTabs ? (simpleHead ? "simple" : "advanced") : undefined);
   const canWrite = useCanWriteIn(bot.threadId, bot.yourAccess), mayWrite = canWrite !== false;
 
   const computerStarting = computerStartLine(state.computerStart, bot.name); useScreensWhile(Boolean(computerStarting));

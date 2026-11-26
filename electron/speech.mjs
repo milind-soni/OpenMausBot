@@ -29,6 +29,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(__dirname, "resources", "speech-helper.swift");
 const INFO = path.join(__dirname, "resources", "speech-helper-Info.plist");
 const WINDOWS_HELPER = path.join(__dirname, "resources", "speech-helper-windows.ps1");
+// Run by WINDOWS_HELPER from the same session folder when the desktop recognizer lacks the display language.
+const WINDOWS_ONECORE_HELPER = path.join(__dirname, "resources", "speech-helper-windows-onecore.ps1");
 // A signed app bundle must never be rewritten: lazy compilation would break its seal.
 const BUNDLE = app.isPackaged
   ? path.join(process.resourcesPath, "OpenMausBot Speech.app")
@@ -120,6 +122,7 @@ function startWindowsSpeech(sink, endpointMs) {
     sessionDir = mkdtempSync(path.join(app.getPath("temp"), "openmausbot-speech-"));
     script = path.join(sessionDir, "speech-helper.ps1");
     writeFileSync(script, readFileSync(WINDOWS_HELPER));
+    writeFileSync(path.join(sessionDir, "speech-helper-onecore.ps1"), readFileSync(WINDOWS_ONECORE_HELPER));
   } catch {
     if (sessionDir) rmSync(sessionDir, { recursive: true, force: true });
     sink.end({ code: 1, reason: "helper-start-failed" });

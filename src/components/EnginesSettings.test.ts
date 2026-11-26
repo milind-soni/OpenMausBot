@@ -228,14 +228,14 @@ describe("Settings → Engines → setup cards", () => {
       snapshot: { state: "available", authenticated }, models: { default: "gemini", options: [] },
       authentication: { method: "callback-url", signOut },
     });
-    fixture.instances = [account("antigravity", true, true)];
-    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain(">Sign out<");
-    fixture.instances = [account("antigravity-work", true, true)];
-    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain(">Sign out<");
-    fixture.instances = [account("antigravity", false, true)];
-    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain(">Sign out<");
-    fixture.instances = [account("antigravity", true, false)];
-    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain(">Sign out<");
+    expect(accountActions("antigravity", account("antigravity", true, true)).signOut).toBe(true);
+    expect(accountActions("antigravity", account("antigravity-work", true, true)).signOut).toBe(true);
+    expect(accountActions("antigravity", account("antigravity", false, true)).signOut).toBe(false);
+    expect(accountActions("antigravity", account("antigravity", true, false)).signOut).toBe(false);
+    fixture.instances = [account("antigravity", true, true), account("antigravity-work", true, true)];
+    const html = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(html.match(/data-account="antigravity[^"]*"/g)).toEqual(['data-account="antigravity"', 'data-account="antigravity-work"']);
+    expect(html.match(/aria-label="Options for Google account"/g)).toHaveLength(2);
   });
 
   it("shows every Company provider as read-only while preserving personal controls", () => {
@@ -306,11 +306,13 @@ describe("Settings → Engines → setup cards", () => {
       install: { managed: { label: "Install Antigravity", downloadBytes: 10 } },
     }];
     const html = renderToStaticMarkup(createElement(EnginesSettings));
-    expect(html).toContain("Sign in with Google");
-    expect(html).toContain("Set up");
+    expect(html).toMatch(/data-account="agy"[\s\S]*<button[^>]*>Sign in<\/button>/);
+    expect(html).toContain("Sign-in required");
     expect(html).toContain("CLI path and updates");
     fixture.instances[0].access = "custom";
-    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("Sign in with Google");
+    const custom = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(custom).not.toContain("Sign in with Google");
+    expect(custom).not.toContain("data-account=");
   });
 
   it("keeps an API-key engine listed after its key is saved, with the key masked and Replace beside it", () => {

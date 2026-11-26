@@ -13,6 +13,7 @@ import { nameFromEmail, ownerEmail } from "../../shared/bot-owner.ts";
 import type { Notification } from "../../shared/notification.ts";
 import { mentionablePeople, teammateMentions } from "../../shared/person-mention.ts";
 import type { InboxView } from "../../shared/inbox.ts";
+import { countsForYou } from "../../shared/inbox-reason.ts";
 import type { NeedsYouItem } from "../../shared/today.ts";
 import type { ResolvedSender } from "../../shared/wire.ts";
 import { audienceMember, type Audience } from "../audience.ts";
@@ -400,12 +401,12 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       const me = sessionPerson(auth);
       return team && me ? inbox.view(me.key) : null;
     },
-    /** How many of the viewer's lines wait on them. */
+    /** How many of the viewer's For you lines wait on them, the number the inbox shows; Activity is never counted. */
     count(auth: RequestAuth): number | null {
       if (!team && deps.place) return deps.place.count(auth);
       const me = sessionPerson(auth);
       const view = team && me ? inbox.view(me.key) : null;
-      return view ? view.rows.filter((row) => row.tab === "needs-you" || (row.tab === "info" && row.unread)).length : null;
+      return view ? view.rows.filter(countsForYou).length : null;
     },
     /** The viewer is done with a line of news in their inbox. */
     markDone(auth: RequestAuth, id: string): ReturnType<PersonInbox["markDone"]> {

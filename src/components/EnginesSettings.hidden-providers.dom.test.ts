@@ -215,7 +215,8 @@ describe("Settings → AI: Sign out on other CLI sign-ins", () => {
     fixture.state = { ...fixture.state, instances: [...server.all] };
     await render();
     await click(rowButton("antigravity"));
-    await click([...container.querySelectorAll('[data-engine-card="antigravity"] button')].find((button) => button.textContent === "Sign out"));
+    await click(container.querySelector('[data-account="antigravity"] button[aria-label="Options for Antigravity"]'));
+    await click([...container.querySelectorAll('[data-account="antigravity"] [role="menuitem"]')].find((item) => item.textContent === "Sign out"));
     expect(document.body.textContent).toContain("Bots that use this account need it signed in again before their next task.");
     expect(document.body.textContent).not.toContain("keeps one sign-in");
   });
