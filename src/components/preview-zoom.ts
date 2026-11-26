@@ -35,10 +35,11 @@ export function usePreviewZoom() {
       event.stopPropagation();
       const area = stage.current;
       const picture = image.current;
-      if (!area || !picture || event.deltaY === 0 || !area.contains(event.target as Node)) return;
+      if (!area || !picture || !area.contains(event.target as Node)) return;
+      const deltaY = wheelPixels(event, area.clientHeight);
+      if (deltaY === 0 || (deltaY < 0 && event.target !== picture)) return;
       const box = area.getBoundingClientRect();
       const point = { x: event.clientX - box.left - picture.offsetLeft, y: event.clientY - box.top - picture.offsetTop };
-      const deltaY = wheelPixels(event, area.clientHeight);
       setZoom((current) => zoomAtPoint(current, deltaY, point));
     };
     element.addEventListener("wheel", onWheel, { passive: false });

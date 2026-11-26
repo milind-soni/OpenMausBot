@@ -406,6 +406,13 @@ describe("image preview wheel", () => {
       expect((await wheel(-200, document.querySelector("[role=dialog] header")!)).defaultPrevented).toBe(true);
       expect(picture().style.transform).toBe("");
 
+      const beside = picture().parentElement!;
+      expect((await wheel(-200, beside)).defaultPrevented).toBe(true);
+      expect(picture().style.transform).toBe("");
+      await wheel(-200);
+      await wheel(400, beside);
+      expect(picture().style.transform).toBe("");
+
       await wheel(-200);
       await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" })); });
       expect(picture().alt).toBe("next.png");
