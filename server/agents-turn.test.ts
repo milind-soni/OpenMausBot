@@ -187,13 +187,25 @@ describe("what a turn that may not use a listed tool is told", () => {
 
     it("lets the first answer hand shares to the bots it @mentions even when its own engine can't write skills", () => {
       const claim: RoomSkillsClaim = { claimed: false };
-      expect(roomSkillsTurn(claim, 0, "writer", { allowed: true, canWrite: false })).toEqual({ writes: false, hands: true });
-      expect(roomSkillsTurn(claim, 0, "writer", { allowed: true, canWrite: true })).toEqual({ writes: true, hands: true });
-      expect(roomSkillsTurn(claim, 0, "writer", { allowed: false, canWrite: true })).toEqual({ writes: false, hands: false });
+      expect(roomSkillsTurn(claim, 0, "writer", { allowed: true, canWrite: false })).toEqual({ writes: false, hands: true, claims: true });
+      expect(roomSkillsTurn(claim, 0, "writer", { allowed: true, canWrite: true })).toEqual({ writes: true, hands: true, claims: true });
+      expect(roomSkillsTurn(claim, 0, "writer", { allowed: false, canWrite: true })).toEqual({ writes: false, hands: false, claims: false });
       handRoomSkills(claim, ["video"]);
-      expect(roomSkillsTurn(claim, 1, "video", { allowed: true, canWrite: true })).toEqual({ writes: true, hands: false });
+      expect(roomSkillsTurn(claim, 1, "video", { allowed: true, canWrite: true })).toEqual({ writes: true, hands: false, claims: true });
       takeRoomSkills(claim, 0, "editor", true);
-      expect(roomSkillsTurn(claim, 0, "other", { allowed: true, canWrite: true })).toEqual({ writes: false, hands: false });
+      expect(roomSkillsTurn(claim, 0, "other", { allowed: true, canWrite: true })).toEqual({ writes: false, hands: false, claims: false });
+    });
+
+    it("keeps the claim with a first answer that can't write skills, so a later top-level answer hands no shares", () => {
+      const claim: RoomSkillsClaim = { claimed: false };
+      const first = roomSkillsTurn(claim, 0, "writer", { allowed: true, canWrite: false });
+      expect(first.claims).toBe(true);
+      takeRoomSkills(claim, 0, "writer", true);
+      handRoomSkills(claim, ["video"])();
+      expect(roomSkillsTurn(claim, 0, "editor", { allowed: true, canWrite: true })).toEqual({ writes: false, hands: false, claims: false });
+      takeRoomSkills(claim, 0, "writer", false);
+      expect(roomSkillsTurn(claim, 0, "editor", { allowed: true, canWrite: true }).hands).toBe(true);
+      expect(roomSkillsTurn(claim, 1, "video", { allowed: true, canWrite: true }).claims).toBe(false);
     });
 
     it("gives the share back to a turn that never ran", () => {

@@ -10035,7 +10035,7 @@ async function runClaimedGroupMemberTurn(
   ], integrations.agents, { rules: cfg.everyBotRules, pagesOff: (store.bot(bot.id) ?? bot).toolsOff?.includes("pages") });
 
   // Claim /learn only after setup succeeded, so a failed first responder does not consume it.
-  if (skillAuthoring) takeRoomSkills(skillAuthoringClaim, hop, bot.id, true);
+  if (roomSkills.claims) takeRoomSkills(skillAuthoringClaim, hop, bot.id, true);
   // Never launch a replacement into a stopped handshake's pre-id window.
   await pendingCancelledProviderHandshakes.waitForClear(threadId);
   const heldBeforeDispatch = roomHeld(store.group(group.id), bot.id);
@@ -10285,7 +10285,7 @@ async function runClaimedGroupMemberTurn(
     store.setActivity(bot.id, "idle");
   }
   if (outcome === "dispatch_failed") {
-    if (skillAuthoring) takeRoomSkills(skillAuthoringClaim, hop, bot.id, false);
+    if (roomSkills.claims) takeRoomSkills(skillAuthoringClaim, hop, bot.id, false);
     // No turn.completed follows a rejected room dispatch: retry what queued meanwhile.
     drainQueuedSends();
   }
@@ -10297,7 +10297,7 @@ async function runClaimedGroupMemberTurn(
     return true;
   }
   if (outcome === "provider_failed" || outcome === "parked") {
-    if (skillAuthoring) takeRoomSkills(skillAuthoringClaim, hop, bot.id, false);
+    if (roomSkills.claims) takeRoomSkills(skillAuthoringClaim, hop, bot.id, false);
     return false;
   }
   const resent = orchestration || cardContinuation || oneTimeInputTaken || outcome !== "settled" || isCancelled?.() ? undefined : await roomLimits.resendOnce(threadId, bot, preparedApprovalMode, turnCompleted, roomSpeaker?.since ?? 0,
