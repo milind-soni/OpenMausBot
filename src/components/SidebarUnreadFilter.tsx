@@ -4,6 +4,9 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 
+import { SidebarSectionHeader } from "./SidebarSectionHeader";
+import type { UnreadFilterRow } from "./unread-notice";
+
 /** The row under the pinned bots that opens the Unread filter, shaped like the Inbox row, with the bots it would list
  * as its count. It stays quiet with nothing to read. `inList`: it sits in the scrolling list, under a Pinned section. */
 export function SidebarUnreadFilterRow({ count, open, large, inList, onToggle }: { count: number; open: boolean; large: boolean; inList: boolean; onToggle: () => void }) {
@@ -25,8 +28,19 @@ export function SidebarUnreadFilterRow({ count, open, large, inList, onToggle }:
   );
 }
 
-/** What the sidebar lists while the Unread filter is open: its bots, or one line once everything is read. */
-export function SidebarUnreadFilterList<T>({ bots, item }: { bots: readonly T[]; item: (bot: T) => ReactNode }) {
-  if (bots.length === 0) return <div className="px-3 py-6 text-center text-[13px] leading-[18px] text-ink-secondary">{t("sidebar.unreadFilter.empty")}</div>;
-  return <>{bots.map(item)}</>;
+/** What the sidebar lists while the Unread filter is open: its bots, then its rooms, each under a title when it has any,
+ * or one line once everything is read. `line`: the titles take the Simple section line. */
+export function SidebarUnreadFilterList({ rows, line, item }: { rows: readonly UnreadFilterRow[]; line: boolean; item: (row: UnreadFilterRow) => ReactNode }) {
+  if (rows.length === 0) return <div className="px-3 py-6 text-center text-[13px] leading-[18px] text-ink-secondary">{t("sidebar.unreadFilter.empty")}</div>;
+  const bots = rows.filter((row) => row.bot), rooms = rows.filter((row) => row.group);
+  return (
+    <>
+      {[[t("sidebar.unreadFilter.bots"), bots] as const, [t("sidebar.unreadFilter.rooms"), rooms] as const].map(([name, part]) => part.length > 0 && (
+        <div key={name} data-unread-filter-block={name} className="flex flex-col gap-0.5">
+          <SidebarSectionHeader name={name} line={line} collapsed={false} reorderable={false} dragging={false} />
+          {part.map(item)}
+        </div>
+      ))}
+    </>
+  );
 }

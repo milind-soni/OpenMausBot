@@ -248,18 +248,33 @@ describe("the sidebar's Unread filter", () => {
       search.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
-    it("counts and lists unread and waiting rooms among the bots in one fixed order, and gives the list back", async () => {
+    const titles = () => [...host.querySelectorAll<HTMLElement>("[data-unread-filter-block]")].map((block) => block.dataset.unreadFilterBlock);
+
+    it("counts unread and waiting rooms and lists them after the bots, each part in a fixed order, and gives the list back", async () => {
       mode.advanced = true;
       await render(bots, "", rooms);
       const all = rows();
       expect(filter().dataset.sidebarUnreadFilter).toBe("4");
       await click();
-      expect(rows()).toEqual(["room:ops", "ben", "room:dev", "eve"]);
-      await render(bots, "", [...rooms, unreadRoom("late", 5)]);
-      expect(rows()).toEqual(["room:ops", "ben", "room:dev", "eve", "room:late"]);
+      expect(filter().getAttribute("aria-label")).toBe("Show all");
+      expect(titles()).toEqual(["Bots", "Rooms"]);
+      expect(rows()).toEqual(["ben", "eve", "room:ops", "room:dev"]);
+      await render([...bots, unread("kit", 2)], "", [...rooms, unreadRoom("late", 5)]);
+      expect(rows()).toEqual(["ben", "eve", "kit", "room:ops", "room:dev", "room:late"]);
+      expect(filter().dataset.sidebarUnreadFilter).toBe("6");
       await click();
       await render(bots, "", rooms);
       expect(rows()).toEqual(all);
+    });
+
+    it("titles only the part that has rows", async () => {
+      await render([bot("ann")], "", [unreadRoom("dev", 30)]);
+      await click();
+      expect(titles()).toEqual(["Rooms"]);
+      await render([unread("ben", 20)], "", [room("dev", 30)]);
+      await click();
+      await click();
+      expect(titles()).toEqual(["Bots"]);
     });
 
     it("leaves an archived conversation's wait out", async () => {
@@ -273,9 +288,9 @@ describe("the sidebar's Unread filter", () => {
       await click();
       const read = [room("dev", 30), room("quiet", 50), waits];
       await render(bots, "dev", read);
-      expect(rows()).toEqual(["room:ops", "ben", "room:dev", "eve"]);
+      expect(rows()).toEqual(["ben", "eve", "room:ops", "room:dev"]);
       await render(bots, "ann", read);
-      expect(rows()).toEqual(["room:ops", "ben", "eve"]);
+      expect(rows()).toEqual(["ben", "eve", "room:ops"]);
     });
 
     it("keeps an open room and the order through a search that leaves it out", async () => {
@@ -286,9 +301,9 @@ describe("the sidebar's Unread filter", () => {
       await render(bots, "dev", read);
       await type("eve");
       await type("");
-      expect(rows()).toEqual(["room:ops", "ben", "room:dev", "eve"]);
+      expect(rows()).toEqual(["ben", "eve", "room:ops", "room:dev"]);
       await render(bots, "eve", read);
-      expect(rows()).toEqual(["room:ops", "ben", "eve"]);
+      expect(rows()).toEqual(["ben", "eve", "room:ops"]);
     });
   });
 });

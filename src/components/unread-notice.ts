@@ -81,7 +81,7 @@ export function unreadFilterRoomSince(groups: readonly Group[], bots: readonly P
 export type UnreadFilterRow = { bot: Bot; group?: undefined } | { group: Group; bot?: undefined };
 
 /** The sidebar's Unread filter: how many of `bots` and `rooms` show unread or wait on the person, and while it is open,
- * those rows in a fixed order, bots and rooms together. The open bot or room stays listed until another conversation is
+ * those rows in a fixed order, the bots before the rooms. The open bot or room stays listed until another conversation is
  * open. Nothing is saved; it starts closed. `speakers` are the bots a room's wait is read from. */
 export function useUnreadFilter(bots: readonly Bot[], waiting: (bot: Bot) => boolean, openId: string | null, rooms: readonly Group[] = [], speakers: readonly Bot[] = bots) {
   const [open, setOpen] = useState(false);
@@ -96,7 +96,7 @@ export function useUnreadFilter(bots: readonly Bot[], waiting: (bot: Bot) => boo
   return {
     open,
     count: since.size,
-    rows: order.flatMap((id) => byId.get(id) ?? []),
+    rows: order.flatMap((id) => byId.get(id) ?? []).sort((a, b) => Number(!!a.group) - Number(!!b.group)),
     toggle: () => setOpen((value) => !value),
   };
 }
