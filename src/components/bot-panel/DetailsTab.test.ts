@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ItemRow } from "./DetailsTab";
+import { CONVERSATION_ITEMS, ItemRow } from "./DetailsTab";
 
 const spans = (markup: string) => [...markup.matchAll(/<span class="([^"]*)"/g)].map((match) => match[1].split(" "));
 
@@ -26,5 +26,15 @@ describe("Details tab item row", () => {
     expect(label).toEqual(expect.arrayContaining(["min-w-0", "flex-1", "truncate"]));
     expect(trailing).toContain("shrink-0");
     expect(trailing).not.toContain("flex-1");
+  });
+
+  it("lists Set as main thread under This conversation as an action, with no chevron, its hint as the tooltip when off", () => {
+    expect(CONVERSATION_ITEMS.slice(0, 3)).toEqual(["find", "start-fresh", "set-main"]);
+    const markup = renderToStaticMarkup(createElement(ItemRow, {
+      item: { key: "set-main", label: "Set as main thread", icon: null, disabled: true, title: "This is already the main thread", onSelect: () => undefined },
+    }));
+    expect(markup).toContain('title="This is already the main thread"');
+    expect(markup).toContain("disabled");
+    expect(markup).not.toContain("lucide-chevron-right");
   });
 });
