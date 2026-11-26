@@ -32,13 +32,6 @@ async function liveInstance() {
   return fake.created.get("inst-1")!;
 }
 
-beforeEach(() => {
-  // A developer's shell may carry the log's own settings; the default-bound tests need the defaults.
-  for (const name of ["OMB_EVENT_LOG_BATCH_LINES", "OMB_EVENT_LOG_QUEUE_EVENTS", "OMB_EVENT_LOG_QUEUE_BYTES", "OMB_EVENT_LOG_DRAIN_THREADS"]) {
-    delete process.env[name];
-  }
-});
-
 describe("EventBus", () => {
   beforeEach(() => {
     rmSync(EVENTS_DIR, { recursive: true, force: true });
@@ -394,6 +387,51 @@ describe("EventBus", () => {
       expect(warning.message).toContain("dropped events because the event log queue was full");
       expect(warning.message).not.toContain("could not write");
     }
+  });
+
+  it("counts a byte-bound drop and still logs a terminal event", async () => {
+    const writes: string[] = [];
+    const bus = new EventBus((_path, data) => { writes.push(data); }, undefined,
+      { batchLines: 64, queueEvents: 4096, queueBytes: 1, drainThreads: 8 });
+    bus.publish(testEvent({ eventId: "first" }));
+    bus.publish(testEvent({ eventId: "refused" }));
+    bus.publish(testEvent({ eventId: "done", type: "turn.completed", ok: true } as Partial<RuntimeEvent>));
+
+    expect(bus.dropStats().events).toBe(1);
+    expect(bus.dropStats().bytes).toBeGreaterThan(0);
+    await bus.flush();
+    const ids = writes.flatMap((chunk) => chunk.trim().split("\n").map((line) => JSON.parse(line) as { eventId: string })).map((line) => line.eventId);
+    expect(ids).toContain("first");
+    expect(ids).toContain("done");
+    expect(ids).not.toContain("refused");
+  });
+
+  it("keeps a batch and a worker when the limits say zero", async () => {
+    const writes: string[] = [];
+    const bus = new EventBus((_path, data) => { writes.push(data); }, undefined,
+      { batchLines: 0, queueEvents: 1, queueBytes: 1, drainThreads: 0 });
+    bus.publish(testEvent({ eventId: "first" }));
+    bus.publish(testEvent({ eventId: "refused" }));
+    await bus.flush();
+    const ids = writes.flatMap((chunk) => chunk.trim().split("\n").map((line) => JSON.parse(line) as { eventId: string })).map((line) => line.eventId);
+    expect(ids).toContain("first");
+    expect(ids).not.toContain("refused");
+    expect(bus.dropStats().events).toBe(1);
+  });
+
+  it("scrubs the write-failure marker it stores", async () => {
+    let failing = true;
+    const writes: string[] = [];
+    const bus = new EventBus((_path, data) => { if (failing) throw new Error("disk full"); writes.push(data); });
+    const threadId = "sk-ant-abcdefghijklmnop";
+    bus.publish(testEvent({ threadId }));
+    await bus.flush();
+    failing = false;
+    bus.publish(testEvent({ threadId, eventId: "after", type: "turn.completed", ok: true } as Partial<RuntimeEvent>));
+    await bus.flush();
+    const lines = writes.flatMap((chunk) => chunk.trim().split("\n"));
+    expect(lines.join("\n")).toContain("«redacted");
+    expect(lines.join("\n")).not.toContain("abcdefghijklmnop");
   });
 
   it("appends different threads at the same time, and one thread's lines in order", async () => {

@@ -108,7 +108,13 @@ export class EventBus {
   constructor(appendLog: EventLogAppend = defaultAppend, gate?: (event: RuntimeEvent) => boolean, limits: EventLogLimits = eventLogLimits()) {
     this.appendLog = appendLog;
     this.gate = gate;
-    this.limits = limits;
+    // A batch or worker count below one would leave drain() unable to empty the queue.
+    this.limits = {
+      batchLines: Math.max(1, Math.floor(limits.batchLines) || 1),
+      queueEvents: Math.max(1, Math.floor(limits.queueEvents) || 1),
+      queueBytes: Math.max(1, Math.floor(limits.queueBytes) || 1),
+      drainThreads: Math.max(1, Math.floor(limits.drainThreads) || 1),
+    };
   }
 
   /** Events the queue's bounds refused since this bus started, and their size. Never counted as disk failures. */
@@ -295,7 +301,7 @@ export class EventBus {
     const warning = this.pendingLogWarnings.get(threadId);
     const events = items.map((item) => item.event);
     const lines = items.map((item) => item.line);
-    if (warning) lines.unshift(JSON.stringify(warning));
+    if (warning) lines.unshift(JSON.stringify(redactSecrets(warning)));
     const file = join(EVENTS_DIR, `${threadId}.ndjson`);
     try {
       await this.appendLog(file, lines.join("\n") + "\n", { mode: 0o600 });
