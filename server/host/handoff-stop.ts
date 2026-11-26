@@ -47,10 +47,14 @@ export function stopHandedOn(deps: HandoffStopDeps, input: StopRequest): { statu
 }
 
 /** A link to the work, titled, only where its result would reach this conversation. */
-function workRef(deps: HandoffStopDeps, node: HandoffView, parent: HandoffView, assignee: string): { threadRef?: { botId: string; threadId: string; title: string } } {
+function workRef(deps: Pick<HandoffStopDeps, "store" | "withheld">, node: HandoffView, parent: HandoffView, fallback: string): { threadRef?: { botId: string; threadId: string; title: string } } {
   if (deps.withheld(node, parent)) return {};
-  return { threadRef: { botId: node.botId, threadId: node.threadId, title: deps.store.taskByThread(node.botId, node.threadId)?.title ?? assignee } };
+  return { threadRef: { botId: node.botId, threadId: node.threadId, title: deps.store.taskByThread(node.botId, node.threadId)?.title ?? fallback } };
 }
+
+/** The link on the result row a requester's conversation gets when handed-off work ends (done, stopped or stalled): under the
+ * same rule as the stop and quiet lines, a room reading one person's private work gets no title or link. */
+export const handoffResultRef = (deps: Pick<HandoffStopDeps, "store" | "withheld">, child: HandoffView, parent: HandoffView) => workRef(deps, child, parent, "Teammate work");
 
 function senderFrom(deps: HandoffStopDeps, botId: string): { botId: string; name: string; color: string } | undefined {
   const bot = deps.store.bot(botId);

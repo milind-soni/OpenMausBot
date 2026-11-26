@@ -62,7 +62,7 @@ const defaultClock: Clock = { now: () => Date.now(), monotonic: () => performanc
 
 /** `interruption`: a resume for a teammate's question while other work is still out; the node's restart note waits for its real resume.
  * `carried`: the settled children whose results the turn's input carried; one that settles later owes the node another resume. */
-interface LiveTurn { controller: AbortController; rootId: string; activeAt: number; interruption: boolean; carried: ReadonlySet<string>; quietTold?: boolean; quietFrom?: number }
+interface LiveTurn { controller: AbortController; rootId: string; activeAt: number; interruption: boolean; carried: ReadonlySet<string>; quietTold?: boolean; quietFrom?: number; waited?: boolean }
 
 type TerminalStatus = "completed" | "failed" | "cancelled";
 
@@ -909,12 +909,18 @@ export class Runtime {
 
   /** Handed-off work quiet for `quiet`: its requester hears it once per quiet stretch, and at handoffQuietMaxMs it fails as
    * stalled, which aborts its turn even with a command still running. A turn waiting on a person or a computer is not quiet,
-   * and its quiet stretch starts over when the wait ends: a long wait never stops the work the moment it is answered. */
+   * and its quiet stretch starts over when the wait ends, counted from the first tick that sees it over (no event marks
+   * that end): a long wait never stops the work the moment it is answered. */
   private quietHandoff(n: Assignment, turn: LiveTurn, mono: number): void {
     const { handoffQuietNoticeMs: notice, handoffQuietMaxMs: max } = this.limits;
     if (this.safe("waiting", () => this.runner.waiting?.(n) ?? false) !== false) {
-      turn.quietFrom = mono;
+      turn.waited = true;
       turn.quietTold = false;
+      return;
+    }
+    if (turn.waited) {
+      turn.waited = false;
+      turn.quietFrom = mono;
       return;
     }
     const quiet = mono - Math.max(turn.activeAt, turn.quietFrom ?? turn.activeAt);

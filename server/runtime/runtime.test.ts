@@ -390,6 +390,30 @@ describe("Runtime: one tree, one lane", () => {
     invariants(w);
   });
 
+  it("gives handed-off work its whole quiet limit after a wait that ends just before the next tick", () => {
+    const w = world(() => "hold", { handoffQuietNoticeMs: 1_000, handoffQuietMaxMs: 3_000 });
+    let waiting = true;
+    w.runner.waiting = () => waiting;
+    w.runner.quiet = () => {};
+    const root = w.runtime.begin(beginReq());
+    const a = ok(w.runtime.enqueue(toBot("a", root.id)));
+    w.runtime.tick();
+    w.clock.advance(5_000);
+    w.runtime.tick();
+    w.clock.advance(2_999);
+    waiting = false;
+    w.clock.advance(2);
+    w.runtime.tick();
+    expect(w.store.get(a.id)?.status).toBe("running");
+    w.clock.advance(3_000);
+    w.runtime.tick();
+    expect(w.store.get(a.id)?.status).toBe("running");
+    w.clock.advance(1);
+    w.runtime.tick();
+    expect(w.store.get(a.id)).toMatchObject({ status: "failed", outcome: "stalled" });
+    invariants(w);
+  });
+
   it("stalls a turn with no activity on the monotonic clock, and a tree with no progress, but never a parked tree", async () => {
     const w = world(() => "hold", { turnStallMs: 1_000, stallMs: 10_000 });
     const root = w.runtime.begin(beginReq());

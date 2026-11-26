@@ -3,13 +3,14 @@ import { describe, expect, it } from "vitest";
 import type { CoordinatorHost, HandoffView, HostTurnResult } from "../coordinator.ts";
 import { RuntimeCoordinator } from "../runtime-coordinator.ts";
 import type { Message } from "../store.ts";
-import { noticeQuiet, stopHandedOn, type HandoffStopDeps } from "./handoff-stop.ts";
+import { handoffResultRef, noticeQuiet, stopHandedOn, type HandoffStopDeps } from "./handoff-stop.ts";
 
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
 /** A host whose every handed-off turn is a command that never ends by itself: only an abort ends it, as an interrupt does. */
 /** `kept`: the work's result is withheld from the requester's conversation (a room reading one person's private work). */
-function rig(kept = false) {
+/** `stallNow`: a quiet limit already passed, so the next tick stops the work as stalled. */
+function rig(kept = false, stallNow = false) {
   const aborted: string[] = [];
   const reports: Array<{ child: HandoffView; parent?: HandoffView }> = [];
   const host: CoordinatorHost = {
@@ -24,7 +25,7 @@ function rig(kept = false) {
     levelOf: () => ({ level: "full" }),
     chiefOf: () => false,
   };
-  const coordinator = new RuntimeCoordinator({ dataDir: ":memory:", host, log: () => {} });
+  const coordinator = new RuntimeCoordinator({ dataDir: ":memory:", host, log: () => {}, ...(stallNow ? { runtimeLimits: { handoffQuietNoticeMs: -1, handoffQuietMaxMs: -1 } } : {}) });
   const rows: Array<{ threadId: string; row: Partial<Message> }> = [];
   const bots: Record<string, { id: string; name: string; color: string }> = {
     maus: { id: "maus", name: "MausBot", color: "#111" }, lead: { id: "lead", name: "Dev Lead", color: "#222" }, back: { id: "back", name: "Dev Back", color: "#333" },
@@ -71,6 +72,29 @@ describe("stopHandedOn: the bot that handed work on stops it", () => {
     stopHandedOn(w, { senderId: "maus", senderName: "MausBot", senderThreadId: "maus-chat", id: w.node.id, why: "" });
     const again = w.coordinator.enqueue({ botId: "maus", threadId: "maus-chat" }, "gen-maus", undefined, { botId: "lead", threadId: "lead-work" }, "Build the PR", { rework: true });
     expect(again.node.status).not.toBe("cancelled");
+  });
+});
+
+describe("handoffResultRef: the result row when handed-off work ends", () => {
+  /** The work ends as the requester's stop or the quiet limit ends it; the result row reaches the requester's conversation. */
+  async function ended(kept: boolean, how: "stopped" | "stalled") {
+    const w = rig(kept, how === "stalled");
+    if (how === "stopped") stopHandedOn(w, { senderId: "maus", senderName: "MausBot", senderThreadId: "maus-chat", id: w.node.id, why: "enough" });
+    else w.coordinator.tick();
+    await flush();
+    const report = w.reports.find(r => r.child.id === w.node.id)!;
+    expect(report.child).toMatchObject(how === "stopped" ? { status: "cancelled", outcome: "stopped" } : { status: "failed", outcome: "stalled" });
+    return handoffResultRef(w, report.child, report.parent!);
+  }
+
+  it.each(["stopped", "stalled"] as const)("names no title or link where the work's result is withheld, after it is %s", async (how) => {
+    const ref = await ended(true, how);
+    expect(ref).toEqual({});
+    expect(JSON.stringify(ref)).not.toMatch(/salary|lead-work/);
+  });
+
+  it.each(["stopped", "stalled"] as const)("links the work by its title where the requester reads its result, after it is %s", async (how) => {
+    expect(await ended(false, how)).toEqual({ threadRef: { botId: "lead", threadId: "lead-work", title: "Private: salary review" } });
   });
 });
 
