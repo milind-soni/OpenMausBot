@@ -21,12 +21,12 @@ const cloud = [bot("scout"), bot("atlas")];
 /** This computer's page: its own bots, and My Cloud's as rows. */
 const onComputer = (arranged: ArrangedBot[], cloudBots = cloud) => {
   const keyOf = keyed("computer");
-  return drawn(layOneList({ homeBots: computer, homeSections: ["Finance"], otherBots: cloudBots.map((b) => bot(`cloud:${b.id}`, b.section ? { section: b.section } : {})), arranged, keyOf, landing: placeDepartment("cloud") }), keyOf);
+  return drawn(layOneList({ certain: true, homeBots: computer, homeSections: ["Finance"], otherBots: cloudBots.map((b) => bot(`cloud:${b.id}`, b.section ? { section: b.section } : {})), arranged, keyOf, landing: placeDepartment("cloud") }), keyOf);
 };
 /** My Cloud's page: this computer's bots as rows (each saying its department there), and its own. */
 const onCloud = (arranged: ArrangedBot[], cloudBots = cloud) => {
   const keyOf = keyed("cloud");
-  return drawn(layOneList({ homeBots: computer.map((b) => bot(`computer:${b.id}`, b.section ? { section: b.section } : {})), homeSections: ["Finance"], otherBots: cloudBots, arranged, keyOf, landing: placeDepartment("cloud") }), keyOf);
+  return drawn(layOneList({ certain: true, homeBots: computer.map((b) => bot(`computer:${b.id}`, b.section ? { section: b.section } : {})), homeSections: ["Finance"], otherBots: cloudBots, arranged, keyOf, landing: placeDepartment("cloud") }), keyOf);
 };
 
 describe("the one list's departments", () => {
@@ -69,20 +69,20 @@ describe("the one list's departments", () => {
 
   it("a pinned bot or a Chief outside any department stays where its own page draws it and is not laid out", () => {
     const keyOf = keyed("cloud");
-    const laid = layOneList({ homeBots: [], homeSections: [], otherBots: [bot("maus", { chiefOfStaff: true }), bot("pin", { pinned: true }), bot("scout")], arranged: [], keyOf, landing: "My Cloud" });
+    const laid = layOneList({ certain: true, homeBots: [], homeSections: [], otherBots: [bot("maus", { chiefOfStaff: true }), bot("pin", { pinned: true }), bot("scout")], arranged: [], keyOf, landing: "My Cloud" });
     expect(laid.bots.map((b) => [b.id, b.section ?? ""])).toEqual([["maus", ""], ["pin", ""], ["scout", "My Cloud"]]);
   });
 
   it("pinned bots keep their own order across departments, as with the switch off", () => {
     const home = [bot("a", { section: "A" }), bot("p1", { pinned: true, section: "B" }), bot("p2", { pinned: true, section: "A" }), bot("p3", { pinned: true })];
-    const laid = layOneList({ homeBots: home, homeSections: ["A", "B"], otherBots: [], arranged: [], keyOf: keyed("computer"), landing: "My Cloud" });
+    const laid = layOneList({ certain: true, homeBots: home, homeSections: ["A", "B"], otherBots: [], arranged: [], keyOf: keyed("computer"), landing: "My Cloud" });
     expect(laid.bots.filter((b) => b.pinned).map((b) => b.id)).toEqual(["p1", "p2", "p3"]);
     expect(laid.bots.filter((b) => b.pinned).every((b, index) => b === home.filter((h) => h.pinned)[index])).toBe(true);
   });
 
   it("a row that did not move is the same value from one layout to the next, so it is not drawn again", () => {
     const rows = cloud.map((b) => bot(`cloud:${b.id}`));
-    const lay = () => layOneList({ homeBots: computer, homeSections: ["Finance"], otherBots: rows, arranged: [], keyOf: keyed("computer"), landing: "My Cloud" }).bots;
+    const lay = () => layOneList({ certain: true, homeBots: computer, homeSections: ["Finance"], otherBots: rows, arranged: [], keyOf: keyed("computer"), landing: "My Cloud" }).bots;
     lay().forEach((b, index) => expect(b).toBe(lay()[index]));
   });
 });
@@ -108,24 +108,56 @@ describe("what main keeps when bots move", () => {
   });
 
   /** This computer's page laid out with `arranged`, as the sidebar holds it. */
-  const laidOut = (arranged: ArrangedBot[], homeSections = ["Finance"]) => layOneList({ homeBots: computer, homeSections,
+  const laidOut = (arranged: ArrangedBot[], homeSections = ["Finance"]) => layOneList({ certain: true, homeBots: computer, homeSections,
     otherBots: cloud.map((b) => bot(`cloud:${b.id}`)), arranged, keyOf: keyed("computer"), landing: "My Cloud" }).bots;
 
   it("renaming the place's department moves every Cloud bot drawn in it, also the ones only there by landing", () => {
     // No bot was ever moved: both are in "My Cloud" by landing, and both follow the rename.
-    expect(renamedEntries(laidOut([]), "My Cloud", "Trips", kept, keyOf, "My Cloud")).toEqual([
+    expect(renamedEntries(laidOut([]), [], "My Cloud", "Trips", kept, keyOf, "My Cloud")).toEqual([
       { key: "cloud:scout", section: "Trips", after: null },
       { key: "cloud:atlas", section: "Trips", after: "cloud:scout" },
     ]);
     // One was put there by hand, one landed: still both, in the order drawn, never split.
     const some: ArrangedBot[] = [{ key: "cloud:atlas", section: LANDING_SECTION, after: null }];
-    expect(renamedEntries(laidOut(some), "My Cloud", "Trips", kept, keyOf, "My Cloud").map((entry) => [entry.key, entry.section])).toEqual([["cloud:atlas", "Trips"], ["cloud:scout", "Trips"]]);
+    expect(renamedEntries(laidOut(some), some, "My Cloud", "Trips", kept, keyOf, "My Cloud").map((entry) => [entry.key, entry.section])).toEqual([["cloud:atlas", "Trips"], ["cloud:scout", "Trips"]]);
     // Once "Trips" is made on this computer's server (the rename does that first), no bot is left behind in "My Cloud".
-    const renamed = [...some, ...renamedEntries(laidOut(some), "My Cloud", "Trips", kept, keyOf, "My Cloud")];
+    const renamed = [...some, ...renamedEntries(laidOut(some), some, "My Cloud", "Trips", kept, keyOf, "My Cloud")];
     const keyOfBot = keyed("computer");
-    expect(drawn(layOneList({ homeBots: computer, homeSections: ["Finance", "Trips"], otherBots: cloud.map((b) => bot(`cloud:${b.id}`)), arranged: renamed, keyOf: keyOfBot, landing: "My Cloud" }), keyOfBot))
+    expect(drawn(layOneList({ certain: true, homeBots: computer, homeSections: ["Finance", "Trips"], otherBots: cloud.map((b) => bot(`cloud:${b.id}`)), arranged: renamed, keyOf: keyOfBot, landing: "My Cloud" }), keyOfBot))
       .toEqual(["computer:git", "# Finance", "computer:ledger", "# Trips", "cloud:atlas", "cloud:scout"]);
-    expect(renamedEntries(laidOut([]), "Finance", "Money", kept, keyOf, "My Cloud")).toEqual([]);
+    expect(renamedEntries(laidOut([]), [], "Finance", "Money", kept, keyOf, "My Cloud")).toEqual([]);
+  });
+});
+
+describe("while the home place's departments are not known yet", () => {
+  // The app is starting, or the place is loading, asleep or out of reach: no rows and no departments of it are here.
+  const stored: ArrangedBot[] = [{ key: "cloud:atlas", section: "Finance", after: null }, { key: "cloud:scout", section: "Trips", after: null }];
+
+  it("every Cloud bot is drawn under the department it was kept in, on this computer's page while its store loads", () => {
+    const keyOf = keyed("computer");
+    const lay = (certain: boolean) => drawn(layOneList({ certain, homeBots: [], homeSections: [], otherBots: cloud.map((b) => bot(`cloud:${b.id}`)), arranged: stored, keyOf, landing: "My Cloud" }), keyOf);
+    expect(lay(false)).toEqual(["# Trips", "cloud:scout", "# Finance", "cloud:atlas"]);
+    // Once the departments are known for sure, one the home place lacks sends its bot back to the place's own.
+    expect(lay(true)).toEqual(["# My Cloud", "cloud:scout", "cloud:atlas"]);
+  });
+
+  it("on My Cloud's page while this computer is loading, asleep or out of reach, too", () => {
+    const keyOf = keyed("cloud");
+    const lay = (certain: boolean) => drawn(layOneList({ certain, homeBots: [], homeSections: [], otherBots: cloud, arranged: stored, keyOf, landing: "My Cloud" }), keyOf);
+    expect(lay(false)).toEqual(["# Trips", "cloud:scout", "# Finance", "cloud:atlas"]);
+    expect(lay(true)).toEqual(["# My Cloud", "cloud:scout", "cloud:atlas"]);
+  });
+
+  it("a rename while the Cloud is asleep, or while a search hides its bots, still carries every bot kept in that department", () => {
+    const keyOf = (id: string) => (id.includes(":") ? id : `computer:${id}`), kept = (id: string) => id.includes(":");
+    // Asleep: no Cloud bot is drawn at all; a search: only Scout is.
+    expect(renamedEntries(computer, stored, "Finance", "Money", kept, keyOf, "My Cloud")).toEqual([{ key: "cloud:atlas", section: "Money", after: null }]);
+    const searched = [bot("cloud:scout", { section: "Finance" })];
+    expect(renamedEntries(searched, [...stored, { key: "cloud:nova", section: "Finance", after: "cloud:atlas" }], "Finance", "Money", kept, keyOf, "My Cloud")).toEqual([
+      { key: "cloud:scout", section: "Money", after: null },
+      { key: "cloud:atlas", section: "Money", after: null },
+      { key: "cloud:nova", section: "Money", after: "cloud:atlas" },
+    ]);
   });
 });
 
@@ -136,7 +168,7 @@ describe("departments that change elsewhere, and the language", () => {
     expect(onCloud([{ key: "cloud:atlas", section: "Trips", after: null }])).toEqual(onComputer([{ key: "cloud:atlas", section: "Trips", after: null }]));
     // While the home place has it, the bot stays there.
     const keyOf = keyed("computer");
-    expect(drawn(layOneList({ homeBots: computer, homeSections: ["Finance", "Trips"], otherBots: [bot("cloud:atlas")], arranged: [{ key: "cloud:atlas", section: "Trips", after: null }], keyOf, landing: "My Cloud" }), keyOf))
+    expect(drawn(layOneList({ certain: true, homeBots: computer, homeSections: ["Finance", "Trips"], otherBots: [bot("cloud:atlas")], arranged: [{ key: "cloud:atlas", section: "Trips", after: null }], keyOf, landing: "My Cloud" }), keyOf))
       .toEqual(["computer:git", "# Finance", "computer:ledger", "# Trips", "cloud:atlas"]);
   });
 
@@ -144,7 +176,7 @@ describe("departments that change elsewhere, and the language", () => {
     // Home is My Cloud: this computer's bots land in "This computer".
     const keyOf = keyed("cloud");
     const arranged: ArrangedBot[] = [{ key: "computer:git", section: LANDING_SECTION, after: null }, { key: "computer:ledger", section: "This computer", after: "computer:git" }];
-    const lay = (landing: string) => drawn(layOneList({ homeBots: [], homeSections: [], otherBots: [bot("computer:ledger"), bot("computer:git")], arranged, keyOf, landing }), keyOf);
+    const lay = (landing: string) => drawn(layOneList({ certain: true, homeBots: [], homeSections: [], otherBots: [bot("computer:ledger"), bot("computer:git")], arranged, keyOf, landing }), keyOf);
     expect(lay(placeDepartment("computer"))).toEqual(["# This computer", "computer:git", "computer:ledger"]);
     await loadLocale("pt-br");
     const there = placeDepartment("computer");

@@ -84,8 +84,8 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
     if (across && (!route || route.server(botId))) moveBotsToSection(actions.current.dispatch, [botId], move.section);
     saveBotOrder(actions.current.dispatch, bots, route ? order.filter((id) => route.server(id)) : order);
     if (route) {
-      if (across && from !== undefined) route.place(from, (lists.get(from) ?? []).filter((id) => id !== botId));
-      route.place(move.section, order);
+      if (across && from !== undefined) route.place(from, (lists.get(from) ?? []).filter((id) => id !== botId), botId);
+      route.place(move.section, order, botId);
     }
     if (!keyboard) return;
     const name = bots.find((bot) => bot.id === botId)?.name ?? "";
@@ -110,7 +110,7 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
   };
   const rowDrop = (event: DragEvent<HTMLElement>, botId: string): BotDrop => {
     const box = event.currentTarget.getBoundingClientRect();
-    const canGroup = !latest.current.withinList && botListOf(latest.current.lists, botId) === "";
+    const canGroup = !latest.current.withinList && botListOf(latest.current.lists, botId) === "" && latest.current.route?.group !== false;
     return { kind: "row", botId, place: botDropPlace(event.clientY - box.top, box.height, canGroup) };
   };
 

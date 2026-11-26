@@ -4,6 +4,7 @@ import type { Dispatch } from "react";
 import { arrangedEntries, deletedEntries, layOneList, pageLevel, placeDepartment, renamedEntries } from "@/lib/one-list";
 import { isPlacedBot, oneListOn, type PlacedBot } from "@/lib/place-rows";
 import { arrangeOneList, usePlacesTogetherPart, type ArrangedBot, type BotHome, type PlacesTogetherState } from "@/lib/places-together";
+import { t } from "@/lib/i18n";
 import { api, type Action, type Bot } from "@/state/store";
 
 /** What a drag of the one list does with each bot: this page's server keeps the place of its own bots on the home
@@ -13,8 +14,11 @@ export interface OneListRoute {
   server(id: string): boolean;
   kept(id: string): boolean;
   movable(id: string): boolean;
-  /** `order`: the list's ids as drawn after a move. */
-  place(list: string, order: readonly string[]): void;
+  /** `order`: the list's ids as drawn after a move; `moved`: the bot the person moved, when it was one. */
+  place(list: string, order: readonly string[], moved?: string): void;
+  /** Dropping a bot on another starts a department: not on the other page, which can make no department of the home
+   * place's. */
+  group: boolean;
   rename(from: string, to: string, onServer: () => Promise<void>): Promise<void>;
 }
 
@@ -33,26 +37,27 @@ export interface OneList {
   realize(name: string): Promise<void> | null;
 }
 
-type View = { here: BotHome; home: BotHome; arranged: readonly ArrangedBot[]; sections: readonly string[] };
+type View = { here: BotHome; home: BotHome; arranged: readonly ArrangedBot[]; sections: readonly string[]; ready: boolean };
 let lastView: { state: PlacesTogetherState | null; text: string; view: View | null } = { state: null, text: "", view: null };
 const viewOf = (state: PlacesTogetherState | null): View | null => {
   if (state === lastView.state) return lastView.view;
-  const view = oneListOn(state) ? { here: state!.here, home: state!.home ?? "computer", arranged: state!.arranged ?? [], sections: state!.other?.sections ?? [] } : null;
+  const view = oneListOn(state) ? { here: state!.here, home: state!.home ?? "computer", arranged: state!.arranged ?? [], sections: state!.other?.sections ?? [], ready: state!.other?.state === "ready" } : null;
   const text = JSON.stringify(view);
   lastView = { state, text, view: text === lastView.text ? lastView.view : view };
   return lastView.view;
 };
 
 /** The one list for this page while it is on; null with it off. `own`: this page's bots as the sidebar shows them (search
- * applied), `placed`: the other place's rows, `ownSections`: this page's server's departments. */
-export function useOneList(own: Bot[], placed: readonly PlacedBot[], ownSections: readonly string[], dispatch: Dispatch<Action>): OneList | null {
+ * applied), `placed`: the other place's rows, `ownSections`: this page's server's departments, `loaded`: this page's
+ * store has loaded them. */
+export function useOneList(own: Bot[], placed: readonly PlacedBot[], ownSections: readonly string[], dispatch: Dispatch<Action>, loaded: boolean): OneList | null {
   const view = usePlacesTogetherPart(viewOf);
   if (!view) return null;
   const { here, home, arranged } = view, mirror = here !== home;
   const keyOf = (id: string) => (id.includes(":") ? id : `${here}:${id}`);
   const kept = (id: string) => id.includes(":") !== mirror;
-  const landing = placeDepartment(home === "cloud" ? "computer" : "cloud");
-  const laid = layOneList<Bot>({
+  const landing = placeDepartment(home === "cloud" ? "computer" : "cloud"), certain = mirror ? view.ready : loaded;
+  const laid = layOneList<Bot>({ certain,
     homeBots: mirror ? placed : own, homeSections: mirror ? view.sections : ownSections, otherBots: mirror ? own : placed,
     arranged, keyOf: (bot) => (isPlacedBot(bot) ? bot.id : keyOf(bot.id)), landing,
   });
@@ -61,23 +66,36 @@ export function useOneList(own: Bot[], placed: readonly PlacedBot[], ownSections
    * department the home place has or in the place's own, keeps it. */
   const create = (name: string) => api<{ sections: string[] }>("/api/sidebar-sections", { method: "POST", body: JSON.stringify({ name, botIds: [] }) })
     .then(({ sections }) => { dispatch({ type: "sections", sections }); });
-  const renamed = (from: string, to: string) => arrangeOneList(renamedEntries(laid.bots, from, to, kept, keyOf, landing));
+  /** A department made for bots main then would not keep is taken away again, and the person is told. */
+  const unmake = (name: string) => api<{ sections: string[] }>(`/api/sidebar-sections?section=${encodeURIComponent(name)}`, { method: "DELETE" })
+    .then(({ sections }) => { dispatch({ type: "sectionDeleted", section: name, sections }); }, () => {}).then(() => { throw new Error(t("together.switch.failed")); });
+  const renamed = (from: string, to: string) => arrangeOneList(renamedEntries(laid.bots, arranged, from, to, kept, keyOf, landing));
   const leave = (name: string) => {
     const members = laid.bots.filter((bot) => !pageLevel(bot) && bot.section === name && kept(bot.id)).map((bot) => keyOf(bot.id));
     const moved = deletedEntries(members, laid.bots.filter((bot) => !pageLevel(bot) && !bot.section).map((bot) => keyOf(bot.id)));
     if (moved) arrangeOneList(moved);
   };
-  const place = (list: string, order: readonly string[]) => arrangeOneList(arrangedEntries(list, order, kept, keyOf, landing));
+  // While the home place's departments are not known for sure, a move writes the moved bot only: every other bot's
+  // entry is carried through as it was, never rewritten from a place it is only drawn in for now.
+  const place = (list: string, order: readonly string[], moved?: string) => arrangeOneList(arrangedEntries(list, order, kept, keyOf, landing)
+    .filter((entry) => certain || moved === undefined || entry.key === keyOf(moved)));
+  const failed = (cause: unknown) => { dispatch({ type: "error", message: cause instanceof Error ? cause.message : String(cause) }); };
   return {
     bots: laid.bots, sections: laid.sections, mirror, virtual, renamed,
     route: {
       server: (id) => !mirror && !id.includes(":"),
       kept,
       movable: (id) => !mirror || !id.includes(":"),
-      place: (list, order) => { if (list && list !== landing && virtual(list) && order.some(kept)) void create(list).then(() => place(list, order), () => {}); else place(list, order); },
+      place: (list, order, moved) => {
+        if (!(list && list !== landing && virtual(list) && order.some(kept))) return void place(list, order, moved);
+        // A failed make stores nothing, so the drop goes back; a department main would not fill is taken away again.
+        void create(list).then(() => place(list, order, moved).then((saved) => (saved ? undefined : unmake(list)))).catch(failed);
+      },
+      group: !mirror,
       // The place's own department, while only main holds it, becomes a department of the new name on this page's
       // server, and every bot drawn in it moves there; new bots of the other place land in the place's own again.
-      rename: (from, to, onServer) => (virtual(from) ? create(to) : onServer()).then(() => renamed(from, to)),
+      rename: (from, to, onServer) => (virtual(from) ? create(to).then(() => renamed(from, to).then((saved) => (saved ? undefined : unmake(to))))
+        : onServer().then(() => { void renamed(from, to); })),
     },
     deleteDepartment: (name, onServer) => (virtual(name) ? Promise.resolve(leave(name)).then(() => ({ sections: [...ownSections] }))
       : onServer().then((answer) => { leave(name); return answer; })),

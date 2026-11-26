@@ -36,6 +36,10 @@ export interface OneListInput<B extends Bot> {
   keyOf: (bot: B) => string;
   /** Where a bot of the other place with no entry lands. */
   landing: string;
+  /** The home place's departments are known for sure (its page's store has loaded; on the other page, that place is
+   * ready). Only then does a bot kept in a department the home place lacks go back to the place's own: while they are
+   * not known yet (the app starting, a place loading, asleep or out of reach), every bot is drawn where it was kept. */
+  certain: boolean;
 }
 
 /** A bot in a given department, kept while both stay the same so a row that did not move is not drawn again. */
@@ -54,7 +58,7 @@ export const pageLevel = (bot: Bot): boolean => Boolean(bot.pinned) || (Boolean(
 
 /** The one list's bots in order, each in its department, and the departments in order: the home place's, then any other
  * a bot was put in (the place's department among them). Each department's bots keep the relative order given here. */
-export function layOneList<B extends Bot>({ homeBots, homeSections, otherBots, arranged, keyOf, landing }: OneListInput<B>): { bots: B[]; sections: string[] } {
+export function layOneList<B extends Bot>({ homeBots, homeSections, otherBots, arranged, keyOf, landing, certain }: OneListInput<B>): { bots: B[]; sections: string[] } {
   const lists = new Map<string, string[]>(), byKey = new Map<string, B>(), sectionOf = new Map<string, string>();
   const list = (section: string) => { let ids = lists.get(section); if (!ids) lists.set(section, (ids = [])); return ids; };
   const kept: B[] = [];
@@ -68,7 +72,7 @@ export function layOneList<B extends Bot>({ homeBots, homeSections, otherBots, a
   // A department the home place no longer has (renamed or deleted elsewhere: the Team map, another window, a phone) holds
   // nothing here: its bots go back to the place's own department, never to a department of a name the server lacks.
   const known = new Set(["", landing, ...homeSections, ...homeBots.map((bot) => bot.section ?? "")]);
-  const sectionFor = (entry: ArrangedBot | undefined) => (!entry ? undefined : entry.section === LANDING_SECTION ? landing : known.has(entry.section) ? entry.section : undefined);
+  const sectionFor = (entry: ArrangedBot | undefined) => (!entry ? undefined : entry.section === LANDING_SECTION ? landing : !certain || known.has(entry.section) ? entry.section : undefined);
   let waiting: Array<{ key: string; section: string; after: string | null | undefined }> = [];
   for (const bot of otherBots) {
     if (pageLevel(bot)) { kept.push(bot); continue; }
@@ -108,9 +112,13 @@ export function arrangedEntries(list: string, order: readonly string[], kept: (i
 }
 
 /** A department renamed: every bot of the other place drawn in it follows, in the order drawn, whether main kept its
- * place before or it was only there by landing. `bots` is the list as laid out (layOneList). */
-export function renamedEntries(bots: readonly Bot[], from: string, to: string, kept: (id: string) => boolean, keyOf: (id: string) => string, landing?: string): ArrangedBot[] {
-  return arrangedEntries(to, bots.filter((bot) => !pageLevel(bot) && (bot.section ?? "") === from).map((bot) => bot.id), kept, keyOf, landing);
+ * place before or it was only there by landing; so does every bot main keeps in it that is not drawn now (its place
+ * asleep, or a search hiding it). `bots` is the list as laid out (layOneList). */
+export function renamedEntries(bots: readonly Bot[], arranged: readonly ArrangedBot[], from: string, to: string, kept: (id: string) => boolean, keyOf: (id: string) => string, landing?: string): ArrangedBot[] {
+  const drawn = arrangedEntries(to, bots.filter((bot) => !pageLevel(bot) && (bot.section ?? "") === from).map((bot) => bot.id), kept, keyOf, landing);
+  const keys = new Set(drawn.map((entry) => entry.key)), section = to === landing ? LANDING_SECTION : to;
+  const inFrom = (entry: ArrangedBot) => entry.section === from || (from === landing && entry.section === LANDING_SECTION);
+  return [...drawn, ...arranged.filter((entry) => inFrom(entry) && !keys.has(entry.key)).map((entry) => ({ ...entry, section }))];
 }
 
 /** A department deleted: its bots kept by main (`members`, in the order drawn) go to the end of the list outside any

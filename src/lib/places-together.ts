@@ -98,13 +98,15 @@ export async function setTogetherCommands(on: boolean): Promise<boolean> {
   return now;
 }
 
-/** Keeps where the person moved bots in the one list. The list shows it at once; main's answer then stands. */
-export function arrangeOneList(entries: readonly ArrangedBot[]): void {
+/** Keeps where the person moved bots in the one list. The list shows it at once; main's answer then stands. Whether main
+ * kept every entry. */
+export function arrangeOneList(entries: readonly ArrangedBot[]): Promise<boolean> {
   const page = bridge();
-  if (!page?.arrange || !entries.length || !known?.on) return;
+  if (!page?.arrange || !entries.length || !known?.on) return Promise.resolve(!entries.length);
   const keys = new Set(entries.map((entry) => entry.key));
   publish({ ...known, arranged: [...(known.arranged ?? []).filter((entry) => !keys.has(entry.key)), ...entries] });
-  void page.arrange([...entries]).then(() => read(), () => read());
+  const same = (a: ArrangedBot, b: ArrangedBot) => a.key === b.key && a.section === b.section && a.after === b.after;
+  return page.arrange([...entries]).then((kept) => { read(); return entries.every((entry) => kept.some((had) => same(had, entry))); }, () => { read(); return false; });
 }
 
 /** Opens one of the other place's bots there. */
