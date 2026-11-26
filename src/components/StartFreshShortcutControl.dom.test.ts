@@ -59,6 +59,7 @@ describe("StartFreshShortcutControl", () => {
 
     await keyDownRecorder({ key: "L", code: "KeyL", ctrlKey: true, shiftKey: true });
     expect(host.querySelector("[data-start-fresh-recorder]")).toBeNull();
+    expect(document.activeElement).toBe(host.querySelector("[data-start-fresh-change]"));
     expect(formatCanonicalChord(readStartFreshShortcut()!)).toBe("mod+shift+l");
     expect(host.querySelector("[data-start-fresh-reset]")).not.toBeNull();
 
@@ -71,7 +72,7 @@ describe("StartFreshShortcutControl", () => {
     expect(host.querySelector("[data-start-fresh-reset]")).toBeNull();
   });
 
-  it("rejects unmodified keys and built-in/reserved conflicts with inline alerts, and cancels on Escape", async () => {
+  it("rejects unmodified keys and built-in/reserved conflicts with inline alerts, and cancels on Escape without stealing focus on blur", async () => {
     await renderRow();
     await click("[data-start-fresh-change]");
 
@@ -87,7 +88,20 @@ describe("StartFreshShortcutControl", () => {
 
     await keyDownRecorder({ key: "Escape", code: "Escape" });
     expect(host.querySelector("[data-start-fresh-recorder]")).toBeNull();
+    expect(document.activeElement).toBe(host.querySelector("[data-start-fresh-change]"));
     expect(host.querySelector('[role="alert"]')).toBeNull();
     expect(formatCanonicalChord(readStartFreshShortcut()!)).toBe(DEFAULT_START_FRESH_SHORTCUT);
+
+    // Blur should close recording without stealing focus back to Change.
+    const external = document.createElement("button");
+    document.body.append(external);
+    await click("[data-start-fresh-change]");
+    await act(async () => {
+      external.focus();
+      host.querySelector<HTMLButtonElement>("[data-start-fresh-recorder]")!.dispatchEvent(new FocusEvent("blur"));
+    });
+    expect(host.querySelector("[data-start-fresh-recorder]")).toBeNull();
+    expect(document.activeElement).toBe(external);
+    external.remove();
   });
 });

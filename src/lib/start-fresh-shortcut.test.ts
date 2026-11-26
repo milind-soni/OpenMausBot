@@ -98,6 +98,15 @@ describe("chordFromKeyboardEvent", () => {
       ok: true,
       chord: { mod: true, ctrl: false, alt: false, shift: true, key: "k" },
     });
+    // Non-macOS Dvorak + Alt must capture the layout letter (`e`), matching what matchesShortcutChord checks.
+    const nonMacDvorak = chordFromKeyboardEvent(keyEvent({ key: "e", code: "KeyD", ctrlKey: true, altKey: true }), false);
+    expect(nonMacDvorak).toEqual({
+      ok: true,
+      chord: { mod: true, ctrl: false, alt: true, shift: false, key: "e" },
+    });
+    if (nonMacDvorak.ok) {
+      expect(matchesShortcutChord(keyEvent({ key: "e", code: "KeyD", ctrlKey: true, altKey: true }), nonMacDvorak.chord, false)).toBe(true);
+    }
   });
 
   it("distinguishes modifier-only vs missing primary modifier", () => {
@@ -130,6 +139,8 @@ describe("shortcutConflict", () => {
     expect(shortcutConflict(parseShortcutChord("mod+k")!, true)).toEqual({ kind: "builtin", itemId: "command-palette" });
     expect(shortcutConflict(parseShortcutChord("ctrl+k")!, false)).toEqual({ kind: "builtin", itemId: "command-palette" });
     expect(shortcutConflict(parseShortcutChord("mod+shift+n")!, true)).toEqual({ kind: "builtin", itemId: "new-thread" });
+    expect(shortcutConflict(parseShortcutChord("mod+shift+f")!, true)).toEqual({ kind: "builtin", itemId: "find-conversation" });
+    expect(shortcutConflict(parseShortcutChord("mod+alt+f")!, false)).toEqual({ kind: "builtin", itemId: "find-conversation" });
     expect(shortcutConflict(parseShortcutChord("mod+r")!, true)).toEqual({ kind: "reserved" });
     expect(shortcutConflict(parseShortcutChord("mod+w")!, false)).toEqual({ kind: "reserved" });
   });
@@ -143,7 +154,10 @@ describe("persistence", () => {
     setStartFreshShortcut(custom);
     expect(localStorage.getItem(START_FRESH_SHORTCUT_KEY)).toBe("mod+shift+l");
     resetStartFreshShortcutCache();
-    expect(formatCanonicalChord(readStartFreshShortcut()!)).toBe("mod+shift+l");
+    const reloadedFirst = readStartFreshShortcut();
+    const reloadedSecond = readStartFreshShortcut();
+    expect(formatCanonicalChord(reloadedFirst!)).toBe("mod+shift+l");
+    expect(reloadedFirst).toBe(reloadedSecond);
 
     setStartFreshShortcut(null);
     expect(localStorage.getItem(START_FRESH_SHORTCUT_KEY)).toBe("off");

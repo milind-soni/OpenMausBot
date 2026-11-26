@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -33,7 +33,14 @@ export function StartFreshShortcutControl({
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState("");
   const changeRef = useRef<HTMLButtonElement>(null);
+  const restoreFocusRef = useRef(false);
   const isMac = isMacPlatform();
+
+  useEffect(() => {
+    if (recording || !restoreFocusRef.current) return;
+    restoreFocusRef.current = false;
+    changeRef.current?.focus();
+  }, [recording]);
 
   const updateError = (next: string) => {
     setError(next);
@@ -41,8 +48,8 @@ export function StartFreshShortcutControl({
   };
 
   const stopRecording = () => {
+    restoreFocusRef.current = true;
     setRecording(false);
-    changeRef.current?.focus();
   };
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {

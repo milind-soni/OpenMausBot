@@ -185,7 +185,7 @@ export function chordFromKeyboardEvent(
     return { ok: false, reason: "need-modifier" };
   }
 
-  const key = eventKeyToken(event, { usePhysicalLetterWhenAlt: true });
+  const key = eventKeyToken(event, { usePhysicalLetterWhenAlt: isMac });
   if (!key) {
     return { ok: false, reason: "unsupported" };
   }
@@ -271,6 +271,10 @@ export function shortcutConflict(
   chord: ShortcutChord,
   isMac: boolean = isMacPlatform(),
 ): { kind: "builtin"; itemId: string } | { kind: "reserved" } | null {
+  // useChatFindShortcut consumes any Meta/Ctrl+F chord regardless of Shift or Alt.
+  if ((chord.mod || chord.ctrl) && chord.key === "f") {
+    return { kind: "builtin", itemId: "find-conversation" };
+  }
   const canonical = effectiveCanonical(chord, isMac);
   const builtin = BUILTIN_CHORDS.find((entry) => entry.chord === canonical);
   if (builtin) return { kind: "builtin", itemId: builtin.itemId };
@@ -279,6 +283,7 @@ export function shortcutConflict(
 }
 
 let sessionChoice: ShortcutChord | null | undefined;
+let cachedSnapshot: { raw: string | null | undefined; chord: ShortcutChord | null } | undefined;
 const listeners = new Set<() => void>();
 
 function storage(): Storage | undefined {
@@ -293,10 +298,18 @@ export function readStartFreshShortcut(): ShortcutChord | null {
   if (sessionChoice !== undefined) return sessionChoice;
   try {
     const raw = storage()?.getItem(START_FRESH_SHORTCUT_KEY);
-    if (raw === null || raw === undefined) return DEFAULT_START_FRESH_CHORD;
-    const normalized = raw.trim().toLowerCase();
-    if (normalized === "" || normalized === "off") return null;
-    return parseShortcutChord(normalized) ?? DEFAULT_START_FRESH_CHORD;
+    if (cachedSnapshot && cachedSnapshot.raw === raw) return cachedSnapshot.chord;
+    let parsed: ShortcutChord | null;
+    if (raw === null || raw === undefined) {
+      parsed = DEFAULT_START_FRESH_CHORD;
+    } else {
+      const normalized = raw.trim().toLowerCase();
+      parsed = normalized === "" || normalized === "off"
+        ? null
+        : (parseShortcutChord(normalized) ?? DEFAULT_START_FRESH_CHORD);
+    }
+    cachedSnapshot = { raw, chord: parsed };
+    return parsed;
   } catch {
     return DEFAULT_START_FRESH_CHORD;
   }
@@ -310,6 +323,7 @@ function onStorage(event: StorageEvent) {
   if (event.key !== START_FRESH_SHORTCUT_KEY && event.key !== null) return;
   if (event.storageArea && event.storageArea !== storage()) return;
   sessionChoice = undefined;
+  cachedSnapshot = undefined;
   notify();
 }
 
@@ -327,9 +341,11 @@ function subscribe(listener: () => void): () => void {
 }
 
 export function setStartFreshShortcut(chord: ShortcutChord | null): void {
+  const raw = chord ? formatCanonicalChord(chord) : "off";
   sessionChoice = chord;
+  cachedSnapshot = { raw, chord };
   try {
-    storage()?.setItem(START_FRESH_SHORTCUT_KEY, chord ? formatCanonicalChord(chord) : "off");
+    storage()?.setItem(START_FRESH_SHORTCUT_KEY, raw);
   } catch {
   }
   notify();
@@ -338,6 +354,7 @@ export function setStartFreshShortcut(chord: ShortcutChord | null): void {
 
 export function resetStartFreshShortcut(): void {
   sessionChoice = DEFAULT_START_FRESH_CHORD;
+  cachedSnapshot = { raw: null, chord: DEFAULT_START_FRESH_CHORD };
   try {
     storage()?.removeItem(START_FRESH_SHORTCUT_KEY);
   } catch {
@@ -349,6 +366,7 @@ export function resetStartFreshShortcut(): void {
 /** Reset cached state for tests when stubbing or clearing localStorage outside StorageEvents. */
 export function resetStartFreshShortcutCache(): void {
   sessionChoice = undefined;
+  cachedSnapshot = undefined;
 }
 
 export function useStartFreshShortcut(): ShortcutChord | null {
