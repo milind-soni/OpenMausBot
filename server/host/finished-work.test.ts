@@ -1,8 +1,12 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { HandoffView } from "../coordinator.ts";
 import type { BotRecord, Message, StoreChange, TaskRecord } from "../store.ts";
-import { archivedOnResult, archivesOnResult, closesOnResult, createHandedClose, finishHandedThread, opensAgain, reopenHandedThread, STOP_GRACE_MS, stoppedByPerson, SYSTEM_STOP } from "./finished-work.ts";
+import { WaitManager } from "../waits.ts";
+import { archivedOnResult, archivesOnResult, closesOnResult, createHandedClose, finishHandedThread, type HandedCloseDeps, opensAgain, reopenHandedThread, STOP_GRACE_MS, stoppedByPerson, SYSTEM_STOP } from "./finished-work.ts";
 
 type Task = Parameters<typeof closesOnResult>[0];
 const opened = (more: Partial<NonNullable<TaskRecord["openedBy"]>> = {}): NonNullable<TaskRecord["openedBy"]> =>
@@ -137,6 +141,26 @@ describe("stoppedByPerson", () => {
     expect(stoppedByPerson(ended({ outcomeDetail: "Stopped with the request it was for" }), { outcomeDetail: "The routine restarted" })).toBe(false);
     expect(stoppedByPerson({ status: "failed", outcome: "stalled", outcomeDetail: "Stopped by user" })).toBe(false);
   });
+
+  it("follows queued work the person's Stop ended before it started or resumed to that Stop, and a system stop to the system", () => {
+    for (const cause of ["Stopped before it started", "Stopped before it resumed"]) {
+      expect(stoppedByPerson(ended({ outcomeDetail: cause }), { outcomeDetail: "Stopped by user" })).toBe(true);
+      expect(stoppedByPerson(ended({ outcomeDetail: cause }), { outcomeDetail: "The coordinated turn was cut" })).toBe(false);
+      expect(stoppedByPerson(ended({ outcomeDetail: cause }), { outcomeDetail: "Stopped by @Clive, who handed this work on" })).toBe(false);
+      expect(stoppedByPerson(ended({ outcomeDetail: cause }))).toBe(false);
+    }
+  });
+
+  it("follows work handed on twice up to the conversation whose stop ended it", () => {
+    const nodes: Record<string, Pick<HandoffView, "outcomeDetail" | "parentId">> = {
+      person: { outcomeDetail: "Stopped by user" },
+      system: { outcomeDetail: "The routine restarted" },
+    };
+    const middle = (root: string) => ({ outcomeDetail: "Stopped with the request it was for", parentId: root });
+    expect(stoppedByPerson(ended({ outcomeDetail: "Stopped before it started" }), middle("person"), (id) => nodes[id])).toBe(true);
+    expect(stoppedByPerson(ended({ outcomeDetail: "Stopped with the request it was for" }), middle("person"), (id) => nodes[id])).toBe(true);
+    expect(stoppedByPerson(ended({ outcomeDetail: "Stopped before it started" }), middle("system"), (id) => nodes[id])).toBe(false);
+  });
 });
 
 describe("opensAgain", () => {
@@ -170,11 +194,11 @@ describe("createHandedClose", () => {
       patchTask: (_botId: string, _threadId: string, patch: Partial<TaskRecord>) => { Object.assign(record, patch); return changed(); },
       onChange: (listener: (change: StoreChange) => void) => { listeners.add(listener); return () => listeners.delete(listener); },
     };
-    const start = () => { const close = createHandedClose({ store, working: () => live.working, waitArmed: () => live.waitArmed }); vi.advanceTimersByTime(0); return close; };
+    const start = (more: Partial<HandedCloseDeps> = {}) => { const close = createHandedClose({ store, working: () => live.working, waitArmed: () => live.waitArmed, ...more }); vi.advanceTimersByTime(0); return close; };
     const write = (message: Partial<Message>) => emit({ type: "message", threadId: record.threadId, message: message as Message });
     /** Something on the thread changed outside this module: it was read, a question was answered, a turn ended. */
     const update = (patch: Partial<TaskRecord>) => { Object.assign(record, patch); changed(); };
-    return { record, live, start, write, update };
+    return { record, live, start, write, update, emit };
   };
   const chief = { id: "chief-node", botId: "chief", threadId: "chief-chat" } as HandoffView;
   const work = (more: Partial<HandoffView>) => ({ id: "h1", parentId: "chief-node", botId: "lead", threadId: "lead-thread", status: "completed", ...more }) as HandoffView;
@@ -234,7 +258,6 @@ describe("createHandedClose", () => {
     const cases: Array<[Partial<TaskRecord>, { working: boolean; waitArmed: boolean }, (w: ReturnType<typeof world>) => void]> = [
       [{ unread: true }, { working: false, waitArmed: false }, (w) => w.update({ unread: false })],
       [{ activity: "waiting-on-you" }, { working: false, waitArmed: false }, (w) => w.update({ activity: "idle" })],
-      [{}, { working: false, waitArmed: true }, (w) => { w.live.waitArmed = false; w.update({}); }],
     ];
     for (const [task, live, settle] of cases) {
       const w = world({ openedBy: oneShot(), ...task }, { ...live });
@@ -247,6 +270,101 @@ describe("createHandedClose", () => {
       settle(w);
       expect(w.record).toMatchObject(closedAt(from + 5_000));
     }
+  });
+
+  describe("with the thread's bot waiting on something", () => {
+    const dirs: string[] = [];
+    afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+    /** The real wait list, as the host wires it: a wait going tells the close to look again. */
+    const waiting = async (w: ReturnType<typeof world>, followUp?: string, post: () => boolean = () => true, report = { there: false }) => {
+      const dir = mkdtempSync(join(tmpdir(), "omb-handed-waits-"));
+      dirs.push(dir);
+      let close: ReturnType<typeof createHandedClose> | undefined;
+      const waits = new WaitManager({
+        file: join(dir, "waits.json"), now: () => Date.now(), probes: { stamp: async () => (report.there ? { size: 4, mtimeMs: 1 } : null) },
+        sourceAlive: () => true, botBusy: () => false, post, followUp: () => {}, showCard: () => "card-1", settleCard: () => {},
+        ended: (wait) => close?.look(wait.botId),
+      });
+      close = w.start({ waitArmed: (botId, threadId) => waits.all().some((wait) => wait.botId === botId && wait.threadId === threadId) });
+      const made = await waits.create({ botId: "lead", threadId: "lead-thread", label: "the report", condition: { kind: "file_exists", path: "/nowhere/report.pdf" }, ...(followUp ? { followUp } : {}) });
+      if (made.state !== "created") throw new Error(`no wait: ${made.state}`);
+      return { close, waits, wait: made.wait };
+    };
+
+    it("closes the thread once the last wait there is cancelled, with nothing else changing", async () => {
+      for (const followUp of [undefined, "Send the report on"]) {
+        const w = world({ openedBy: oneShot() });
+        const { close, waits, wait } = await waiting(w, followUp);
+        const from = Date.now();
+        close.ended(work({}), chief, false);
+        expect(w.record.closedBy).toBeUndefined();
+        expect(w.record.archivedAt).toBeUndefined();
+        vi.advanceTimersByTime(5_000);
+        expect(waits.cancel(wait.id, "lead")).not.toBeNull();
+        expect(w.record).toMatchObject(closedAt(from + 5_000));
+      }
+    });
+
+    it("keeps the thread open through a wait's firing, so its message is read there, and closes it once read", async () => {
+      const w = world({ openedBy: oneShot() });
+      const report = { there: false };
+      // As the host posts a wait's message: the line lands first, then the thread is marked unread.
+      const { close, waits } = await waiting(w, undefined, () => {
+        w.emit({ type: "message", threadId: "lead-thread", message: { role: "bot", kind: "text" } as Message });
+        w.update({ unread: true });
+        return true;
+      }, report);
+      close.ended(work({}), chief, false);
+      report.there = true;
+      vi.advanceTimersByTime(60_000);
+      await waits.tick();
+      expect(waits.all()).toEqual([]);
+      expect(w.record.unread).toBe(true);
+      expect(w.record.closedBy).toBeUndefined();
+      expect(w.record.archivedAt).toBeUndefined();
+      w.update({ unread: false });
+      expect(w.record.archivedAt).toBe(1_000_000 + 60_000);
+    });
+
+    it("closes the thread once its bot, and so its waits, are gone", async () => {
+      const w = world({ openedBy: oneShot() });
+      const { close, waits } = await waiting(w);
+      close.ended(work({}), chief, false);
+      expect(w.record.archivedAt).toBeUndefined();
+      expect(waits.removeForBot("lead")).toBe(1);
+      expect(w.record.archivedAt).toBe(1_000_000);
+    });
+  });
+
+  it("looks again when a card in a due thread is settled, though the bot does not change", () => {
+    const { record, start, live, emit } = world({ openedBy: oneShot() }, { working: true, waitArmed: false });
+    start().ended(work({}), chief, false);
+    expect(record.archivedAt).toBeUndefined();
+    live.working = false;
+    emit({ type: "message.patch", threadId: "lead-thread", message: { role: "bot" } as Message });
+    expect(record.archivedAt).toBe(1_000_000);
+  });
+
+  it("gives queued work the person's Stop ended before it started or resumed the hour, and closes it at once for a system stop", () => {
+    for (const cause of ["Stopped before it started", "Stopped before it resumed"]) {
+      const person = world({ openedBy: oneShot() });
+      person.start().ended(work({ status: "cancelled", outcome: "stopped", outcomeDetail: cause }), { ...chief, outcomeDetail: "Stopped by user" }, false);
+      expect(person.record.archivedAt).toBeUndefined();
+      expect(person.record.openedBy?.closesAt).toBe(Date.now() + STOP_GRACE_MS);
+      const system = world({ openedBy: oneShot() });
+      system.start().ended(work({ status: "cancelled", outcome: "stopped", outcomeDetail: cause }), { ...chief, outcomeDetail: SYSTEM_STOP.turn }, false);
+      expect(system.record).toMatchObject(closedAt(Date.now()));
+    }
+  });
+
+  it("gives work handed on from work the person stopped the hour, reading up the line", () => {
+    const { record, start } = world({ openedBy: oneShot() });
+    const nodes: Record<string, HandoffView> = { root: { ...chief, id: "root", outcomeDetail: "Stopped by user" } };
+    const middle = { ...chief, id: "chief-node", parentId: "root", outcomeDetail: "Stopped with the request it was for" } as HandoffView;
+    start({ node: (id) => nodes[id] }).ended(work({ status: "cancelled", outcome: "stopped", outcomeDetail: "Stopped before it started" }), middle, false);
+    expect(record.closedBy).toBeUndefined();
+    vi.advanceTimersByTime(STOP_GRACE_MS);
+    expect(record.archivedAt).toBe(1_000_000 + STOP_GRACE_MS);
   });
 
   it("closes a one-shot thread a bot posted into and the person wrote in during the work", () => {

@@ -8,7 +8,7 @@ import type { BeginTurnRequest, ComposedTurn, CoordinatorHost, HandoffLimit, Han
 import type { RoomAddress } from "./coordinator.ts";
 import { needsInputQuestion, RuntimeCoordinator, view } from "./runtime-coordinator.ts";
 import { ENVELOPE_MARK } from "./runtime/envelope.ts";
-import type { Assignment, Level, Limits } from "./runtime/types.ts";
+import { TURN_CUT, type Assignment, type Level, type Limits } from "./runtime/types.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
@@ -1171,6 +1171,29 @@ describe("RuntimeCoordinator: a stop the system made is never remembered as the 
     expect(w.coordinator.node(followUp.id)?.status).toBe("cancelled");
     await tick();
     expect(send(w, chief, "gen-1", undefined, builder, "Plan the pricing feature", { rework: true }).node).toMatchObject({ botId: "builder", status: "queued" });
+  });
+
+  it("never takes a coordinated turn's own abort, with no stop under way, for the person's stop", async () => {
+    const { w, work, followUp } = await handedOut();
+    w.coordinator.stopAwaitingDirect("builder-work", TURN_CUT);
+    expect(w.coordinator.node(work.id)).toMatchObject({ status: "cancelled", outcomeDetail: TURN_CUT });
+    expect(w.coordinator.node(followUp.id)?.status).toBe("cancelled");
+    expect(w.coordinator.node(followUp.id)?.outcomeDetail).not.toBe("Stopped by user");
+    await tick();
+    expect(send(w, chief, "gen-1", undefined, builder, "Plan the pricing feature", { rework: true }).node).toMatchObject({ botId: "builder", status: "queued" });
+  });
+
+  it("takes a coordinated turn's own abort within the person's Stop of one hand-off as that stop, sparing the rest of the queue", async () => {
+    const w = world(hold);
+    const { node: first } = send(w, chief, "gen-1", undefined, builder, "Build it");
+    const { node: second } = send(w, { botId: "tester", threadId: "tester-chat" }, "gen-2", undefined, builder, "Build the other one");
+    w.coordinator.tick();
+    await tick();
+    const run = w.host.runs.find(r => r.node.id === first.id)!;
+    run.signal.addEventListener("abort", () => w.coordinator.stopAwaitingDirect(run.node.threadId, TURN_CUT), { once: true });
+    expect(w.coordinator.stopHandoff(first.id)).toBe("stopped");
+    expect(w.coordinator.node(first.id)).toMatchObject({ status: "cancelled", outcomeDetail: "Stopped by user" });
+    expect(w.coordinator.node(second.id)?.status).not.toBe("cancelled");
   });
 
   it("still remembers the person's own stop of that work, with the same follow-up queued", async () => {

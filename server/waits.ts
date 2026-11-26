@@ -68,6 +68,8 @@ export interface WaitManagerOptions {
   followUp(wait: WaitRecord & { followUp: string }): void;
   showCard(wait: WaitRecord & { followUp: string }): string | undefined;
   settleCard(wait: WaitRecord, how: "fired" | "expired" | "cancelled"): void;
+  /** The wait left the list: it was posted, cancelled, or its bot went. Whatever it held may go on. */
+  ended?(wait: WaitRecord): void;
 }
 
 const stampSchema = z.object({ size: z.number(), mtimeMs: z.number() });
@@ -272,6 +274,7 @@ export class WaitManager {
     if (!wait) return null;
     this.commit(() => { this.waits = this.waits.filter((w) => w !== wait); });
     if (wait.cardMessageId) this.safely(() => this.options.settleCard(wait, "cancelled"));
+    this.ended(wait);
     return cloneWait(wait);
   }
 
@@ -286,10 +289,11 @@ export class WaitManager {
   }
 
   removeForBot(botId: string): number {
-    const removed = this.waits.filter((w) => w.botId === botId).length;
-    if (!removed) return 0;
+    const gone = this.waits.filter((w) => w.botId === botId);
+    if (!gone.length) return 0;
     this.commit(() => { this.waits = this.waits.filter((w) => w.botId !== botId); });
-    return removed;
+    for (const wait of gone) this.ended(wait);
+    return gone.length;
   }
 
   noteBotBusy(botId: string): void {
@@ -386,6 +390,7 @@ export class WaitManager {
         this.commit(() => { this.waits = this.waits.filter((w) => w !== wait); });
         if (status === "fired" && wait.followUp) this.safely(() => this.options.followUp(wait as WaitRecord & { followUp: string }));
         if (wait.cardMessageId) this.safely(() => this.options.settleCard(wait, status === "fired" ? "fired" : "expired"));
+        this.ended(wait);
       }
     } finally {
       this.ticking = false;
@@ -438,6 +443,11 @@ export class WaitManager {
 
   private safely(run: () => void): void {
     try { run(); } catch (error) { console.error("wait: callback failed", error); }
+  }
+
+  private ended(wait: WaitRecord): void {
+    const ended = this.options.ended;
+    if (ended) this.safely(() => ended(cloneWait(wait)));
   }
 
   private commit(mutate: () => void): void {

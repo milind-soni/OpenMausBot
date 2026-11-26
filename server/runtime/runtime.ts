@@ -7,7 +7,7 @@ import { composeEnvelope } from "./envelope.ts";
 import { assignmentLevel } from "./level.ts";
 import type { RuntimeStore } from "./store.ts";
 import { answersSender, asking, awaited, childrenSince, settledSince, clip, continuations, CUT_TWICE, duration, isTerminal, loopStop, nextGuard, outwardDetail, ownsConversation, ownThread, path, restartNote, wakeOwner } from "./tree.ts";
-import { DEFAULT_LIMITS, STOPPED_BY_USER, STOPPED_WITH_REQUEST, type Answerer, type Assignment, type Assignee, type Clock, type EndResult, type EnqueueRequest, type EnqueueResult, type EnvelopeNames,
+import { DEFAULT_LIMITS, STOPPED_BEFORE_RESUME, STOPPED_BEFORE_START, STOPPED_BY_USER, STOPPED_WITH_REQUEST, type Answerer, type Assignment, type Assignee, type Clock, type EndResult, type EnqueueRequest, type EnqueueResult, type EnvelopeNames,
   type EventKind, type InboxItem, type InboxKind, type Level, type Limits, type LiveEdge, type Origin, type Outcome, type Owner,
   type Reply, type Requester, type RunInput, type RunResult, type StatusView, type TurnRunner } from "./types.ts";
 
@@ -683,7 +683,7 @@ export class Runtime {
         for (const child of this.store.children(n.id)) {
           if (isTerminal(child)) continue;
           const unstarted = child.status === "queued" && (child.executions === 0 || child.restart === "rerun");
-          this.cancelTree(child, !unstarted ? STOPPED_WITH_REQUEST : child.restart === "rerun" ? "Stopped before it resumed" : "Stopped before it started",
+          this.cancelTree(child, !unstarted ? STOPPED_WITH_REQUEST : child.restart === "rerun" ? STOPPED_BEFORE_RESUME : STOPPED_BEFORE_START,
             "cancelled", "stopped");
         }
         this.settle(n, "cancelled", "stopped", reason);
