@@ -403,6 +403,45 @@ describe("switch on: one list", () => {
     expect(calls.some((call) => call.startsWith("DELETE /api/sidebar-sections?section="))).toBe(true);
   });
 
+  it("home is My Cloud and main's copy of its departments is behind: a drag on this computer's page leaves the \"Design\" entries byte for byte", async () => {
+    window.ogb = { placesTogether: page } as never;
+    rowBoxes();
+    // "Design" was just made on My Cloud's page and the computer's bots dragged into it; main has not read My Cloud since.
+    const stored: ArrangedBot[] = [{ key: "computer:git", section: "Design", after: null }, { key: "computer:ledger", section: "Design", after: "computer:git" }];
+    answer = async () => said({ here: "computer", home: "cloud", arranged: stored, other: { home: "cloud", state: "ready", sections: ["Research"], bots: [row("scout")] } });
+    await render([bot("mausbot", { chiefOfStaff: true }), bot("git"), bot("ledger"), bot("finn")]);
+    expect(ids('[data-sidebar-section-id="section:This computer"]')).toEqual(["git", "ledger", "finn"]);
+    dragBelow("finn", "git");
+    const sent = page.arrange.mock.calls.flatMap(([entries]) => entries);
+    expect(sent.map((entry) => entry.key)).toEqual(["computer:finn"]);
+    const merged = [...stored.filter((entry) => !sent.some((moved) => moved.key === entry.key)), ...sent];
+    expect(JSON.stringify(merged.filter((entry) => entry.key !== "computer:finn"))).toBe(JSON.stringify(stored));
+  });
+
+  it("renaming My Cloud's department to a department this computer already has never takes that department away when main will not keep it", async () => {
+    window.ogb = { placesTogether: page } as never;
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? "GET"} ${url}`);
+      return new Response(JSON.stringify({ sections: ["Finance"] }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    page.arrange.mockImplementation(async () => []);
+    await render([...OWN, bot("finn", { section: "Finance" })]);
+    await act(async () => q('[data-section="My Cloud"] [aria-haspopup="menu"]')!.click());
+    const rename = [...document.body.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent === "Rename department")!;
+    await act(async () => rename.click());
+    const field = q("[data-section-name-field]") as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, "Finance");
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => { field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+    await act(async () => { await new Promise((done) => setTimeout(done, 0)); });
+    expect(page.arrange).toHaveBeenCalled();
+    expect(calls.filter((call) => call.startsWith("DELETE"))).toEqual([]);
+    expect(ids('[data-sidebar-section-id="section:Finance"]')).toContain("finn");
+  });
+
   it("an older app that does not say which place is home leaves My Cloud's page as it was: its own bots only", async () => {
     const cloudBots = [bot("maus", { chiefOfStaff: true }), bot("scout", { section: "Research" }), bot("atlas")];
     const browser = await htmlWith(null, cloudBots);

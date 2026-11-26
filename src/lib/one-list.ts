@@ -58,7 +58,7 @@ export const pageLevel = (bot: Bot): boolean => Boolean(bot.pinned) || (Boolean(
 
 /** The one list's bots in order, each in its department, and the departments in order: the home place's, then any other
  * a bot was put in (the place's department among them). Each department's bots keep the relative order given here. */
-export function layOneList<B extends Bot>({ homeBots, homeSections, otherBots, arranged, keyOf, landing, certain }: OneListInput<B>): { bots: B[]; sections: string[] } {
+export function layOneList<B extends Bot>({ homeBots, homeSections, otherBots, arranged, keyOf, landing, certain }: OneListInput<B>): { bots: B[]; sections: string[]; fallback: ReadonlySet<string> } {
   const lists = new Map<string, string[]>(), byKey = new Map<string, B>(), sectionOf = new Map<string, string>();
   const list = (section: string) => { let ids = lists.get(section); if (!ids) lists.set(section, (ids = [])); return ids; };
   const kept: B[] = [];
@@ -74,10 +74,14 @@ export function layOneList<B extends Bot>({ homeBots, homeSections, otherBots, a
   const known = new Set(["", landing, ...homeSections, ...homeBots.map((bot) => bot.section ?? "")]);
   const sectionFor = (entry: ArrangedBot | undefined) => (!entry ? undefined : entry.section === LANDING_SECTION ? landing : !certain || known.has(entry.section) ? entry.section : undefined);
   let waiting: Array<{ key: string; section: string; after: string | null | undefined }> = [];
+  /** Bots kept somewhere the layout could not draw them, shown in the place's own department instead: never written
+   * from where they are drawn, so main's list being behind can never cost the person where they put them. */
+  const fallback = new Set<string>();
   for (const bot of otherBots) {
     if (pageLevel(bot)) { kept.push(bot); continue; }
     const key = keyOf(bot), entry = entries.get(key), section = sectionFor(entry);
     byKey.set(key, bot);
+    if (entry && section === undefined) fallback.add(key);
     waiting.push(section !== undefined ? { key, section, after: entry!.after } : { key, section: landing, after: undefined });
   }
   // A bot goes in right under the bot it was put under, once that one is in place; at the top for none. One whose bot
@@ -99,7 +103,7 @@ export function layOneList<B extends Bot>({ homeBots, homeSections, otherBots, a
   for (const bot of waiting) { list(bot.section).push(bot.key); sectionOf.set(bot.key, bot.section); }
   const bots: B[] = [];
   for (const [section, ids] of lists) for (const key of ids) bots.push(filed(byKey.get(key)!, section));
-  return { bots: [...kept, ...bots], sections: [...new Set([...homeSections, ...[...lists.keys()].filter(Boolean)])] };
+  return { bots: [...kept, ...bots], sections: [...new Set([...homeSections, ...[...lists.keys()].filter(Boolean)])], fallback };
 }
 
 /** Each bot moved into or out of `list`, and every bot of that list main keeps, as main keeps them: its department, and
@@ -111,14 +115,29 @@ export function arrangedEntries(list: string, order: readonly string[], kept: (i
   return order.flatMap((id, index) => (kept(id) ? [{ key: keyOf(id), section, after: index > 0 ? keyOf(order[index - 1]!) : null }] : []));
 }
 
-/** A department renamed: every bot of the other place drawn in it follows, in the order drawn, whether main kept its
- * place before or it was only there by landing; so does every bot main keeps in it that is not drawn now (its place
- * asleep, or a search hiding it). `bots` is the list as laid out (layOneList). */
-export function renamedEntries(bots: readonly Bot[], arranged: readonly ArrangedBot[], from: string, to: string, kept: (id: string) => boolean, keyOf: (id: string) => string, landing?: string): ArrangedBot[] {
-  const drawn = arrangedEntries(to, bots.filter((bot) => !pageLevel(bot) && (bot.section ?? "") === from).map((bot) => bot.id), kept, keyOf, landing);
-  const keys = new Set(drawn.map((entry) => entry.key)), section = to === landing ? LANDING_SECTION : to;
-  const inFrom = (entry: ArrangedBot) => entry.section === from || (from === landing && entry.section === LANDING_SECTION);
-  return [...drawn, ...arranged.filter((entry) => inFrom(entry) && !keys.has(entry.key)).map((entry) => ({ ...entry, section }))];
+/** Which of the bots drawn, and which entries main keeps, a rename or a delete of `name` is about: the other place's bots
+ * drawn in it (in the order drawn), except any only drawn there because its own department could not be (`fallback`),
+ * and every entry of the other place's (`keptKey`) whose kept department is `name`, drawn or not (its place asleep, or a
+ * search hiding it). */
+function inDepartment(bots: readonly Bot[], arranged: readonly ArrangedBot[], name: string, kept: (id: string) => boolean, keyOf: (id: string) => string, keptKey: (key: string) => boolean, fallback: ReadonlySet<string>, landing?: string) {
+  const drawn = bots.filter((bot) => !pageLevel(bot) && (bot.section ?? "") === name && !fallback.has(keyOf(bot.id))).map((bot) => bot.id);
+  const keys = new Set(drawn.filter(kept).map(keyOf));
+  const stored = arranged.filter((entry) => keptKey(entry.key) && !keys.has(entry.key) && (entry.section === name || (name === landing && entry.section === LANDING_SECTION)));
+  return { drawn, stored };
+}
+
+/** A department renamed: every bot of the other place in it follows (inDepartment), the drawn ones in the order drawn.
+ * `bots` is the list as laid out (layOneList). */
+export function renamedEntries(bots: readonly Bot[], arranged: readonly ArrangedBot[], from: string, to: string, kept: (id: string) => boolean, keyOf: (id: string) => string, keptKey: (key: string) => boolean, fallback: ReadonlySet<string>, landing?: string): ArrangedBot[] {
+  const { drawn, stored } = inDepartment(bots, arranged, from, kept, keyOf, keptKey, fallback, landing), section = to === landing ? LANDING_SECTION : to;
+  return [...arrangedEntries(to, drawn, kept, keyOf, landing), ...stored.map((entry) => ({ ...entry, section }))];
+}
+
+/** A department deleted: every bot of the other place in it (inDepartment) goes to the end of the list outside any
+ * department. Null when none was. */
+export function leftEntries(bots: readonly Bot[], arranged: readonly ArrangedBot[], name: string, kept: (id: string) => boolean, keyOf: (id: string) => string, keptKey: (key: string) => boolean, fallback: ReadonlySet<string>, landing?: string): ArrangedBot[] | null {
+  const { drawn, stored } = inDepartment(bots, arranged, name, kept, keyOf, keptKey, fallback, landing);
+  return deletedEntries([...drawn.filter(kept).map(keyOf), ...stored.map((entry) => entry.key)], bots.filter((bot) => !pageLevel(bot) && !bot.section).map((bot) => keyOf(bot.id)));
 }
 
 /** A department deleted: its bots kept by main (`members`, in the order drawn) go to the end of the list outside any

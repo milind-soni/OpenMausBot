@@ -1,7 +1,7 @@
 // The sidebar's side of the one list (src/lib/one-list.ts): the bots laid out in departments for this page, and what a
 // drag, a rename or a delete does with a bot or department that main keeps rather than this page's server.
 import type { Dispatch } from "react";
-import { arrangedEntries, deletedEntries, layOneList, pageLevel, placeDepartment, renamedEntries } from "@/lib/one-list";
+import { arrangedEntries, layOneList, leftEntries, placeDepartment, renamedEntries } from "@/lib/one-list";
 import { isPlacedBot, oneListOn, type PlacedBot } from "@/lib/place-rows";
 import { arrangeOneList, usePlacesTogetherPart, type ArrangedBot, type BotHome, type PlacesTogetherState } from "@/lib/places-together";
 import { t } from "@/lib/i18n";
@@ -56,6 +56,7 @@ export function useOneList(own: Bot[], placed: readonly PlacedBot[], ownSections
   const { here, home, arranged } = view, mirror = here !== home;
   const keyOf = (id: string) => (id.includes(":") ? id : `${here}:${id}`);
   const kept = (id: string) => id.includes(":") !== mirror;
+  const otherPlace = home === "cloud" ? "computer" : "cloud", keptKey = (key: string) => key.startsWith(`${otherPlace}:`);
   const landing = placeDepartment(home === "cloud" ? "computer" : "cloud"), certain = mirror ? view.ready : loaded;
   const laid = layOneList<Bot>({ certain,
     homeBots: mirror ? placed : own, homeSections: mirror ? view.sections : ownSections, otherBots: mirror ? own : placed,
@@ -69,16 +70,16 @@ export function useOneList(own: Bot[], placed: readonly PlacedBot[], ownSections
   /** A department made for bots main then would not keep is taken away again, and the person is told. */
   const unmake = (name: string) => api<{ sections: string[] }>(`/api/sidebar-sections?section=${encodeURIComponent(name)}`, { method: "DELETE" })
     .then(({ sections }) => { dispatch({ type: "sectionDeleted", section: name, sections }); }, () => {}).then(() => { throw new Error(t("together.switch.failed")); });
-  const renamed = (from: string, to: string) => arrangeOneList(renamedEntries(laid.bots, arranged, from, to, kept, keyOf, landing));
+  const renamed = (from: string, to: string) => arrangeOneList(renamedEntries(laid.bots, arranged, from, to, kept, keyOf, keptKey, laid.fallback, landing));
   const leave = (name: string) => {
-    const members = laid.bots.filter((bot) => !pageLevel(bot) && bot.section === name && kept(bot.id)).map((bot) => keyOf(bot.id));
-    const moved = deletedEntries(members, laid.bots.filter((bot) => !pageLevel(bot) && !bot.section).map((bot) => keyOf(bot.id)));
+    const moved = leftEntries(laid.bots, arranged, name, kept, keyOf, keptKey, laid.fallback, landing);
     if (moved) arrangeOneList(moved);
   };
   // While the home place's departments are not known for sure, a move writes the moved bot only: every other bot's
-  // entry is carried through as it was, never rewritten from a place it is only drawn in for now.
+  // entry is carried through as it was, never rewritten from a place it is only drawn in for now. A bot drawn where
+  // the layout fell back is never written unless it is the one being moved.
   const place = (list: string, order: readonly string[], moved?: string) => arrangeOneList(arrangedEntries(list, order, kept, keyOf, landing)
-    .filter((entry) => certain || moved === undefined || entry.key === keyOf(moved)));
+    .filter((entry) => (moved !== undefined && entry.key === keyOf(moved)) || (!laid.fallback.has(entry.key) && (certain || moved === undefined))));
   const failed = (cause: unknown) => { dispatch({ type: "error", message: cause instanceof Error ? cause.message : String(cause) }); };
   return {
     bots: laid.bots, sections: laid.sections, mirror, virtual, renamed,
@@ -94,8 +95,11 @@ export function useOneList(own: Bot[], placed: readonly PlacedBot[], ownSections
       group: !mirror,
       // The place's own department, while only main holds it, becomes a department of the new name on this page's
       // server, and every bot drawn in it moves there; new bots of the other place land in the place's own again.
-      rename: (from, to, onServer) => (virtual(from) ? create(to).then(() => renamed(from, to).then((saved) => (saved ? undefined : unmake(to))))
-        : onServer().then(() => { void renamed(from, to); })),
+      // Only a department this rename made is taken away again: one of that name that was there before stays.
+      rename: (from, to, onServer) => {
+        const fresh = virtual(to), refused = () => (fresh ? unmake(to) : Promise.reject(new Error(t("together.switch.failed"))));
+        return virtual(from) ? create(to).then(() => renamed(from, to)).then((saved) => (saved ? undefined : refused())) : onServer().then(() => { void renamed(from, to); });
+      },
     },
     deleteDepartment: (name, onServer) => (virtual(name) ? Promise.resolve(leave(name)).then(() => ({ sections: [...ownSections] }))
       : onServer().then((answer) => { leave(name); return answer; })),

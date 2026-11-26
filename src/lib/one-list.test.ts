@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Bot } from "@/state/store";
 import { loadLocale, setLocale } from "./i18n";
-import { arrangedEntries, deletedEntries, LANDING_SECTION, layOneList, placeDepartment, renamedEntries } from "./one-list";
+import { arrangedEntries, deletedEntries, LANDING_SECTION, layOneList, leftEntries, placeDepartment, renamedEntries } from "./one-list";
 import type { ArrangedBot } from "./places-together";
 
 const bot = (id: string, over: Partial<Bot> = {}): Bot => ({ id, name: id, threadId: `${id}-t`, title: "", description: "", color: "green", unread: false,
@@ -14,6 +14,9 @@ const drawn = (laid: { bots: Bot[]; sections: string[] }, keyOf: (b: Bot) => str
 });
 
 beforeEach(() => setLocale("en"));
+/** My Cloud's bots' keys: what main keeps the place of on this computer's page. */
+const cloudKey = (key: string) => key.startsWith("cloud:");
+const NOFALL: ReadonlySet<string> = new Set();
 
 // This computer is home: Git Tasks outside any department, Ledger in Finance. My Cloud has Scout and Atlas.
 const computer = [bot("git"), bot("ledger", { section: "Finance" })];
@@ -113,19 +116,19 @@ describe("what main keeps when bots move", () => {
 
   it("renaming the place's department moves every Cloud bot drawn in it, also the ones only there by landing", () => {
     // No bot was ever moved: both are in "My Cloud" by landing, and both follow the rename.
-    expect(renamedEntries(laidOut([]), [], "My Cloud", "Trips", kept, keyOf, "My Cloud")).toEqual([
+    expect(renamedEntries(laidOut([]), [], "My Cloud", "Trips", kept, keyOf, cloudKey, NOFALL, "My Cloud")).toEqual([
       { key: "cloud:scout", section: "Trips", after: null },
       { key: "cloud:atlas", section: "Trips", after: "cloud:scout" },
     ]);
     // One was put there by hand, one landed: still both, in the order drawn, never split.
     const some: ArrangedBot[] = [{ key: "cloud:atlas", section: LANDING_SECTION, after: null }];
-    expect(renamedEntries(laidOut(some), some, "My Cloud", "Trips", kept, keyOf, "My Cloud").map((entry) => [entry.key, entry.section])).toEqual([["cloud:atlas", "Trips"], ["cloud:scout", "Trips"]]);
+    expect(renamedEntries(laidOut(some), some, "My Cloud", "Trips", kept, keyOf, cloudKey, NOFALL, "My Cloud").map((entry) => [entry.key, entry.section])).toEqual([["cloud:atlas", "Trips"], ["cloud:scout", "Trips"]]);
     // Once "Trips" is made on this computer's server (the rename does that first), no bot is left behind in "My Cloud".
-    const renamed = [...some, ...renamedEntries(laidOut(some), some, "My Cloud", "Trips", kept, keyOf, "My Cloud")];
+    const renamed = [...some, ...renamedEntries(laidOut(some), some, "My Cloud", "Trips", kept, keyOf, cloudKey, NOFALL, "My Cloud")];
     const keyOfBot = keyed("computer");
     expect(drawn(layOneList({ certain: true, homeBots: computer, homeSections: ["Finance", "Trips"], otherBots: cloud.map((b) => bot(`cloud:${b.id}`)), arranged: renamed, keyOf: keyOfBot, landing: "My Cloud" }), keyOfBot))
       .toEqual(["computer:git", "# Finance", "computer:ledger", "# Trips", "cloud:atlas", "cloud:scout"]);
-    expect(renamedEntries(laidOut([]), [], "Finance", "Money", kept, keyOf, "My Cloud")).toEqual([]);
+    expect(renamedEntries(laidOut([]), [], "Finance", "Money", kept, keyOf, cloudKey, NOFALL, "My Cloud")).toEqual([]);
   });
 });
 
@@ -151,9 +154,9 @@ describe("while the home place's departments are not known yet", () => {
   it("a rename while the Cloud is asleep, or while a search hides its bots, still carries every bot kept in that department", () => {
     const keyOf = (id: string) => (id.includes(":") ? id : `computer:${id}`), kept = (id: string) => id.includes(":");
     // Asleep: no Cloud bot is drawn at all; a search: only Scout is.
-    expect(renamedEntries(computer, stored, "Finance", "Money", kept, keyOf, "My Cloud")).toEqual([{ key: "cloud:atlas", section: "Money", after: null }]);
+    expect(renamedEntries(computer, stored, "Finance", "Money", kept, keyOf, cloudKey, NOFALL, "My Cloud")).toEqual([{ key: "cloud:atlas", section: "Money", after: null }]);
     const searched = [bot("cloud:scout", { section: "Finance" })];
-    expect(renamedEntries(searched, [...stored, { key: "cloud:nova", section: "Finance", after: "cloud:atlas" }], "Finance", "Money", kept, keyOf, "My Cloud")).toEqual([
+    expect(renamedEntries(searched, [...stored, { key: "cloud:nova", section: "Finance", after: "cloud:atlas" }], "Finance", "Money", kept, keyOf, cloudKey, NOFALL, "My Cloud")).toEqual([
       { key: "cloud:scout", section: "Money", after: null },
       { key: "cloud:atlas", section: "Money", after: null },
       { key: "cloud:nova", section: "Money", after: "cloud:atlas" },
@@ -184,5 +187,43 @@ describe("departments that change elsewhere, and the language", () => {
     // Another language: the marked bot follows the name; the one kept as text goes back to the place's own department.
     expect(lay(there)).toEqual([`# ${there}`, "computer:git", "computer:ledger"]);
     expect(arrangedEntries(there, ["computer:git"], (id) => id.includes(":"), (id) => id, there)).toEqual([{ key: "computer:git", section: LANDING_SECTION, after: null }]);
+  });
+});
+
+describe("a place the layout only fell back to is never written", () => {
+  const keyOf = (id: string) => (id.includes(":") ? id : `computer:${id}`), kept = (id: string) => id.includes(":");
+  // "Design" is on the home place, but main's copy of its departments is behind: Atlas is drawn in "My Cloud" for now.
+  const stored: ArrangedBot[] = [{ key: "cloud:atlas", section: "Design", after: null }];
+  const laid = () => layOneList({ certain: true, homeBots: computer, homeSections: ["Finance"], otherBots: cloud.map((b) => bot(`cloud:${b.id}`)), arranged: stored, keyOf: keyed("computer"), landing: "My Cloud" });
+
+  it("the layout says which bots it fell back for", () => {
+    expect([...laid().fallback]).toEqual(["cloud:atlas"]);
+    expect(laid().bots.find((b) => b.id === "cloud:atlas")!.section).toBe("My Cloud");
+  });
+
+  it("deleting or renaming the place's department leaves such a bot's entry alone", () => {
+    const { bots, fallback } = laid();
+    expect(leftEntries(bots, stored, "My Cloud", kept, keyOf, cloudKey, fallback, "My Cloud")!.map((entry) => entry.key)).toEqual(["cloud:scout"]);
+    expect(renamedEntries(bots, stored, "My Cloud", "Trips", kept, keyOf, cloudKey, fallback, "My Cloud").map((entry) => entry.key)).toEqual(["cloud:scout"]);
+  });
+});
+
+describe("a delete or rename reaches every Cloud bot kept in that department, and only those", () => {
+  const keyOf = (id: string) => (id.includes(":") ? id : `computer:${id}`), kept = (id: string) => id.includes(":");
+  const stored: ArrangedBot[] = [{ key: "cloud:atlas", section: "Finance", after: "computer:ledger" }, { key: "cloud:nova", section: "Finance", after: "cloud:atlas" }];
+
+  it("a delete with the Cloud asleep (none drawn) or a search hiding some still sends them all out of the department", () => {
+    expect(leftEntries(computer, stored, "Finance", kept, keyOf, cloudKey, NOFALL, "My Cloud")).toEqual([
+      { key: "cloud:atlas", section: "", after: "computer:git" },
+      { key: "cloud:nova", section: "", after: "cloud:atlas" },
+    ]);
+    const searched = [bot("git"), bot("cloud:atlas", { section: "Finance" })];
+    expect(leftEntries(searched, stored, "Finance", kept, keyOf, cloudKey, NOFALL, "My Cloud")!.map((entry) => [entry.key, entry.section])).toEqual([["cloud:atlas", ""], ["cloud:nova", ""]]);
+  });
+
+  it("an entry left over for one of this computer's own bots is not renamed or moved", () => {
+    const withOwn: ArrangedBot[] = [...stored, { key: "computer:old", section: "Finance", after: null }];
+    expect(renamedEntries(computer, withOwn, "Finance", "Money", kept, keyOf, cloudKey, NOFALL, "My Cloud").map((entry) => entry.key)).toEqual(["cloud:atlas", "cloud:nova"]);
+    expect(leftEntries(computer, withOwn, "Finance", kept, keyOf, cloudKey, NOFALL, "My Cloud")!.map((entry) => entry.key)).toEqual(["cloud:atlas", "cloud:nova"]);
   });
 });
