@@ -15,6 +15,7 @@ import {
   redactPackageSecrets,
   type PackageDocument,
 } from "../shared/package-format.ts";
+import { addScrubCounts, emptyScrubCounts, personalNames, scrubTree, type ScrubCounts } from "../shared/publish-scrub.ts";
 import type { TemplateAvatar, TemplateCard, TemplateDetails, TemplateScope } from "../shared/share-card.ts";
 import { manifestDetails, packageDetails } from "../shared/share-details.ts";
 import {
@@ -63,6 +64,11 @@ export interface ShareHostDeps {
   /** The bot's own folder, where a template it makes is written for it to read and edit. */
   botFolder(botId: string): string;
   publisher: CommunityPublisher;
+  /** The person's own names here (this computer's user name, the profile's name): taken out of what a template carries
+   * unless one is the name it is published under. */
+  personNames?(): ReadonlyArray<string | undefined>;
+  /** The name "Published by" most likely holds (the profile's), kept in the text a template is made with. */
+  suggestedCredit?(): string | undefined;
   /** Re-draws a template card already in a conversation. */
   patch(threadId: string, messageId: string, text: string, card: TemplateCard): void;
 }
@@ -79,6 +85,9 @@ const recordSchema = z.object({
   prUrl: z.string().optional(),
   error: z.string().optional(),
   redacted: z.number().int().min(0),
+  scrubbed: z.object({ paths: z.number().int().min(0), emails: z.number().int().min(0), phones: z.number().int().min(0), names: z.number().int().min(0) }).optional(),
+  secret: z.boolean().optional(),
+  author: z.string().max(100).optional(),
   skipped: z.array(z.string()),
   avatars: z.array(z.object({ key: z.string(), name: z.string(), color: z.string(), picture: z.string().optional(), mascotExpression: z.string().optional(), mascotBody: z.string().optional() })),
   cards: z.array(z.object({ threadId: z.string(), messageId: z.string() })),
@@ -96,6 +105,34 @@ const plainTagline = (scope: TemplateScope) => `A ${scope === "bot" ? "bot" : "d
 const plainSummary = (scope: TemplateScope) => scope === "bot"
   ? `Shared from ${productName()}. The bot arrives as a new copy with its skills and routines; routines start paused and chat history never travels.`
   : `Shared from ${productName()}. Its bots, skills, group chats and routines arrive as new copies; routines start paused and chat history never travels.`;
+/** The credit a template carries when its publisher gives no name. */
+export const COMMUNITY_CREDIT = "Community";
+const SECRET_REFUSAL = "This template holds something that looks like a key or token, so it can't be published. Remove it from the bot's instructions or skills, then make the template again.";
+
+/** "Published by" as one line of plain words: undefined when not given, "" when cleared, null for an email address. */
+export function creditName(value: unknown): string | null | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") return null;
+  const name = value.normalize("NFKC").replace(/[\p{Cc}\p{Cf}]+/gu, " ").replace(/\s+/g, " ").trim().slice(0, 100).trim();
+  return name.includes("@") ? null : name;
+}
+
+/** The package with the person's details taken out of every text, checked again. */
+function scrubbedPackage(document: PackageDocument, names: readonly string[]): { document: PackageDocument; counts: ScrubCounts } {
+  const { value, counts } = scrubTree(document.package, { names });
+  try {
+    return { document: parsePackageDocument({ ...document, package: value }, { trust: "file" }), counts };
+  } catch (error) {
+    throw new ShareError(error instanceof Error ? error.message : "This template can't be published.");
+  }
+}
+
+const withCredit = (document: PackageDocument, credit: string): PackageDocument =>
+  ({ ...document, package: { ...document.package, author: { name: credit || COMMUNITY_CREDIT } } });
+
+const shownCounts = ({ secrets: _secrets, ...counts }: ScrubCounts) => counts;
+const anyScrubbed = (counts: TemplateRecord["scrubbed"]) => Boolean(counts && Object.values(counts).some((count) => count > 0));
+
 const skipWords = (skip: TeamExportSkip) => `${SKIP_WORDS[skip.reason] ?? "an item that can't be shared"} (${skip.part})`;
 
 const slugOf = (name: string) => name.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "template";
@@ -285,6 +322,10 @@ export function createShareHost(deps: ShareHostDeps) {
         apps: pkg?.requirements.apps.length ?? 0,
       },
       redacted: record.redacted,
+      ...(anyScrubbed(record.scrubbed) ? { scrubbed: record.scrubbed } : {}),
+      ...(record.secret ? { secret: true } : {}),
+      ...(record.author !== undefined ? { author: record.author } : {}),
+      ...(record.status === "published" && record.author ? { publishedBy: record.author } : {}),
       skipped: record.skipped,
       status: record.status,
       ...(record.link ? { link: record.link } : {}),
@@ -311,7 +352,11 @@ export function createShareHost(deps: ShareHostDeps) {
     return card;
   };
 
-  function build(target: { scope: "bot"; bot: BotRecord } | { scope: "department"; section: string; bots: readonly BotRecord[] }, routines: readonly Routine[]) {
+  /** The names to take out of a template published under `credit`. */
+  const namesFor = (credit: string | undefined, more: ReadonlyArray<string | undefined> = []) =>
+    personalNames([...(deps.personNames?.() ?? []), ...more], credit);
+
+  function build(target: { scope: "bot"; bot: BotRecord } | { scope: "department"; section: string; bots: readonly BotRecord[] }, routines: readonly Routine[], names: readonly string[]) {
     const bots = target.scope === "bot"
       ? [{ ...target.bot, section: undefined, chiefOfStaff: false }]
       : target.bots.filter((bot) => !bot.hidden && (bot.section?.trim() ?? "") === target.section);
@@ -338,6 +383,7 @@ export function createShareHost(deps: ShareHostDeps) {
     }
     const brief = target.scope === "department" ? deps.brief(target.section)?.trim() : undefined;
     const lead = target.scope === "bot" ? target.bot : undefined;
+    let credential = false;
     let exported;
     try {
       exported = createTeamPackageExport({
@@ -345,7 +391,7 @@ export function createShareHost(deps: ShareHostDeps) {
         name: lead ? lead.name : target.scope === "department" ? target.section : undefined,
         tagline: (lead && firstLine(lead.title || lead.description, 160)) || plainTagline(target.scope),
         summary: lead?.description?.trim().slice(0, 2_000) || plainSummary(target.scope),
-        authorName: `${productName()} user`,
+        authorName: COMMUNITY_CREDIT,
         bots,
         groups: target.scope === "bot" ? [] : deps.groups(),
         routines: target.scope === "bot" ? routines.filter((routine) => routine.botId === target.bot.id && routine.target !== "room-goal") : routines,
@@ -356,12 +402,15 @@ export function createShareHost(deps: ShareHostDeps) {
         avatars,
         mcpServers: {},
         skipped: skills.skipped,
+        // Connections never travel in a template, so a key in one doesn't keep it from being published.
+        beforeRedaction: (definition) => { credential = scrubTree({ ...definition, connections: undefined }).counts.secrets > 0; },
       });
     } catch (error) {
       if (error instanceof TeamExportError) throw new ShareError(error.message);
       throw error;
     }
-    const { document, redacted } = templateDocument(exported.document, bots, exported.published.keys.bots);
+    const made = templateDocument(exported.document, bots, exported.published.keys.bots);
+    const { document, counts } = scrubbedPackage(made.document, names);
     const keyOf = new Map(Object.entries(exported.published.keys.bots).map(([id, key]) => [key, id]));
     const avatarsShown: TemplateAvatar[] = document.package.agents.slice(0, 12).map((agent) => {
       const bot = bots.find((each) => each.id === keyOf.get(agent.key));
@@ -373,18 +422,19 @@ export function createShareHost(deps: ShareHostDeps) {
         ...(agent.appearance.mascotBody ? { mascotBody: agent.appearance.mascotBody } : {}),
       };
     });
-    return { document, redacted: redacted + exported.redacted.length, skipped: [...exported.skipped.map(skipWords), ...fileSkips], avatars: avatarsShown };
+    return { document, redacted: made.redacted + exported.redacted.length, scrubbed: shownCounts(counts), secret: credential || counts.secrets > 0,
+      skipped: [...exported.skipped.map(skipWords), ...fileSkips], avatars: avatarsShown };
   }
 
   return {
     /** Makes (or makes again, in the same folder) the template of a bot or a department. `writer` is the bot whose own
      * folder receives it: the bot itself, or the Chief that shares its department; none for the department's Share. */
     export(target: { scope: "bot"; bot: BotRecord } | { scope: "department"; section: string; bots: readonly BotRecord[] }, routines: readonly Routine[], writer?: BotRecord): { card: TemplateCard; dir: string; document: PackageDocument } {
-      const built = build(target, routines);
       const botId = target.scope === "bot" ? target.bot.id : writer?.id;
       const section = target.scope === "department" ? target.section : undefined;
       const existing = [...records.values()].find((record) => record.status !== "gone" && record.scope === target.scope &&
         (target.scope === "bot" ? record.botId === botId : record.section === section && record.botId === botId));
+      const built = build(target, routines, namesFor(existing?.author ?? deps.suggestedCredit?.()));
       const id = existing?.id ?? randomBytes(8).toString("hex");
       const slug = built.document.package.id;
       const dir = botId ? join(deps.botFolder(botId), "templates", slug) : join(deps.dataDir, "share", id, slug);
@@ -401,7 +451,7 @@ export function createShareHost(deps: ShareHostDeps) {
       };
       records.set(id, record);
       const card = update(record, {
-        dir, slug, redacted: built.redacted, skipped: built.skipped, avatars: built.avatars,
+        dir, slug, redacted: built.redacted, scrubbed: built.scrubbed, secret: built.secret, skipped: built.skipped, avatars: built.avatars,
         status: "draft", error: undefined,
       }, built.document);
       return { card, dir, document: built.document };
@@ -438,25 +488,34 @@ export function createShareHost(deps: ShareHostDeps) {
     files(id: string): { slug: string; files: Record<string, string | Uint8Array> } {
       const record = records.get(id);
       if (!record || record.status === "gone") throw new ShareError("This template was deleted.", 404);
-      return { slug: record.slug, files: writeShareFolder(folderPackage(record.dir, record.scope), record.scope) };
+      const { document } = scrubbedPackage(folderPackage(record.dir, record.scope), namesFor(record.author ?? deps.suggestedCredit?.()));
+      return { slug: record.slug, files: writeShareFolder(document, record.scope) };
     },
 
-    async publish(id: string): Promise<TemplateCard> {
+    /** Publishes to the community repository under `author` ("Published by"; "" for none, left out for the last one
+     * used), with the person's details taken out first. `names` are more of the person's own names to take out. */
+    async publish(id: string, options: { author?: string; names?: ReadonlyArray<string | undefined> } = {}): Promise<TemplateCard> {
       const record = records.get(id);
       if (!record || record.status === "gone") throw new ShareError("This template was deleted.", 404);
       if (record.status === "publishing") return lastCards.get(id) ?? cardOf(record);
-      let document: PackageDocument;
+      if (deps.publisher.availability()) return update(record, { status: "draft", error: undefined });
+      const credit = options.author ?? record.author ?? "";
+      let document: PackageDocument, counts: ScrubCounts;
       try {
-        document = folderPackage(record.dir, record.scope);
+        ({ document, counts } = scrubbedPackage(folderPackage(record.dir, record.scope), namesFor(credit, options.names)));
       } catch (error) {
         if (error instanceof ShareError) return update(record, { status: "failed", error: error.message });
         throw error;
       }
+      if (record.secret || counts.secrets > 0) return update(record, { status: "failed", error: SECRET_REFUSAL, secret: true }, document);
+      document = withCredit(document, credit);
+      if (Object.values(counts).some((count) => count > 0) && ownFolder(record)) writeFolder(record.dir, writeShareFolder(document, record.scope));
+      const scrubbed = shownCounts(addScrubCounts({ ...emptyScrubCounts(), ...record.scrubbed }, counts));
       const files = writeShareFolder(withoutSkillFiles(document), record.scope);
       const bytes = Object.values(files).reduce((sum, value) => sum + (typeof value === "string" ? Buffer.byteLength(value) : value.byteLength), 0);
       if (Object.keys(files).length > COMMUNITY_MAX_FILES) return update(record, { status: "failed", error: `A template can have at most ${COMMUNITY_MAX_FILES} files.` }, document);
       if (bytes > COMMUNITY_MAX_BYTES) return update(record, { status: "failed", error: "This template is bigger than 4 MB. Leave out large pictures or skills, then publish again." }, document);
-      update(record, { status: "publishing", error: undefined }, document);
+      update(record, { status: "publishing", error: undefined, scrubbed, ...(options.author === undefined ? {} : { author: options.author }) }, document);
       const result = await deps.publisher.submit({
         slug: record.slug,
         files: Object.fromEntries(Object.entries(files).map(([path, value]) => [path, typeof value === "string" ? value : { base64: Buffer.from(value).toString("base64") }])),

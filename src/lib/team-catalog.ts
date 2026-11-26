@@ -23,6 +23,8 @@ export interface TeamCatalogEntry {
   members: number;
   skills: string[];
   requires: { apps: string[] };
+  /** Who published it. */
+  author?: string;
 }
 
 export interface TeamCatalog {
