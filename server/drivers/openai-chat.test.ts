@@ -1166,6 +1166,10 @@ describe("createOpenAIChatRuntime output-limit continuation", () => {
     `data: ${JSON.stringify({ choices: [{ index: 0, delta }] })}\n\n`
     + `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: finishReason }], usage: { prompt_tokens: 10, completion_tokens: 4 } })}\n\n`;
   const text = (value: string, finishReason: string) => stream({ content: value }, finishReason);
+  const two = (first: Record<string, unknown>, second: Record<string, unknown>, finishReason: string) =>
+    `data: ${JSON.stringify({ choices: [{ index: 0, delta: first }] })}\n\n`
+    + `data: ${JSON.stringify({ choices: [{ index: 0, delta: second }] })}\n\n`
+    + `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: finishReason }], usage: { prompt_tokens: 10, completion_tokens: 4 } })}\n\n`;
   const json = (value: string, finishReason: string) => new Response(JSON.stringify({
     choices: [{ index: 0, message: { role: "assistant", content: value }, finish_reason: finishReason }],
     usage: { prompt_tokens: 10, completion_tokens: 4 },
@@ -1222,6 +1226,49 @@ describe("createOpenAIChatRuntime output-limit continuation", () => {
       { role: "assistant", content: "This is" },
       { role: "user", content: LENGTH_CONTINUATION },
     ]);
+  });
+
+  it("keeps a credential split across the reasoning of a continuation masked", async () => {
+    const secret = "abcdefgh12345678";
+    let requests = 0;
+    const events = await runTurn(
+      () => ++requests === 1
+        ? sse(two({ reasoning_content: "checking abcdefgh" }, { content: "before" }, "length"))
+        : sse(two({ reasoning_content: "12345678 again" }, { content: " after" }, "stop")),
+      "openai-compat",
+      { MINIMAX_API_KEY: secret },
+    );
+    expect(requests).toBe(2);
+    expect(textOf(events)).toEqual(["before after"]);
+    const reasoning = events.flatMap((event) => event.type === "content.delta" && event.streamKind === "reasoning_text" ? [event.delta] : []).join("");
+    expect(reasoning).toContain("[redacted]");
+    expect(reasoning).not.toContain("abcdefgh");
+    expect(reasoning).not.toContain("12345678");
+  });
+
+  it("drops a held prefix when the continuation ends in a tool call", async () => {
+    let requests = 0;
+    const events = await runTurn(
+      () => ++requests === 1
+        ? sse(text("before abcdefgh", "length"))
+        : sse(stream({ tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "no_such_tool", arguments: "{}" } }] }, "tool_calls")),
+      "openai-compat",
+      { MINIMAX_API_KEY: "abcdefgh12345678" },
+    );
+    const shown = events.flatMap((event) => event.type === "content.delta" && event.streamKind === "assistant_text" ? [event.delta]
+      : event.type === "item.completed" && event.itemType === "assistant_text" ? [event.text] : []).join("");
+    expect(shown).not.toContain("abcdefgh");
+    expect(shown).toContain("before");
+  });
+
+  it("keeps the partial answer when the continuation request fails", async () => {
+    let requests = 0;
+    const events = await runTurn(() => ++requests === 1
+      ? sse(text("The report is", "length"))
+      : new Response(JSON.stringify({ error: { message: "bad request" } }), { status: 400, headers: { "content-type": "application/json" } }));
+    expect(requests).toBe(2);
+    expect(textOf(events)).toEqual(["The report is"]);
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
   });
 
   it("still fails a length finish with no text", async () => {

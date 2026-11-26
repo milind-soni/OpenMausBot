@@ -497,6 +497,27 @@ describe("what Responses can answer", () => {
     expect(textOf(seen, "assistant_text")).toBe("Half and half.");
   });
 
+  it("does not repeat a cut message whose done event carried no output index", async () => {
+    let responses = 0;
+    const f = await fixture(onResponses((response) => {
+      responses += 1;
+      if (responses === 1) {
+        const reasoning = reasoningItem();
+        const partial = messageItem("Half");
+        events(response, [
+          created,
+          done(partial),
+          { type: "response.incomplete", response: { status: "incomplete", incomplete_details: { reason: "max_output_tokens" }, output: [reasoning, partial], usage } },
+        ]);
+        return;
+      }
+      answer(response, " and half.");
+    }));
+    const { end, events: seen } = await f.turn();
+    expect(end).toMatchObject({ ok: true });
+    expect(textOf(seen, "assistant_text")).toBe("Half and half.");
+  });
+
   it("refuses a tool call cut off by an incomplete response without running it", async () => {
     const f = await fixture(onResponses((response) => {
       events(response, [done(callItem()), { type: "response.incomplete", response: { status: "incomplete", incomplete_details: { reason: "max_output_tokens" }, output: [callItem()] } }]);

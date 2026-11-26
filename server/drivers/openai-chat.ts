@@ -21,7 +21,7 @@ import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent,
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
 import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
 import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, CUT_REPLY_NOTE, cutReplyContinues, cutReplyWillContinue, object, replayableToolCalls, toolArguments, type ChatToolCall } from "./openai-chat-protocol.ts";
-import { maskSecretHalves } from "./secret-halves.ts";
+import { ContinuedReply, MaskedDeltas, maskSecretHalves } from "./cut-reply-text.ts";
 import { ChatHttpError, completionError, httpErrorDetail, refusedToolCall, refusedToolCallFailure, rejectsReasoningReplay, rejectsToolsParameter, RejectedToolCallError, sseData, StreamTruncatedError, UnsupportedChatToolsError, UnsupportedReasoningReplayError, type ProviderBody } from "./openai-chat-refusals.ts";
 import { ChatRepeatGuard } from "./chat-repeat-guard.ts";
 import { TextCallHoldback, textToolCalls } from "./chat-text-tool-calls.ts";
@@ -593,7 +593,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       let toolFailed = false, spoke = false, unfloored = 0, blockedAfterReply = false; // unfloored: failed calls the safety floor did not block after the bot spoke
       let correctiveRounds = 0;
       const cutReplies = { count: 0 };
-      let carried = "", continuedReply = "";
+      const answer = new ContinuedReply((text) => emit({ ...base(turn.threadId, turnId), type: "item.completed", itemType: "assistant_text", text }));
+      let carried = "", carriedReasoning = "";
       const denials: string[] = [], failedCalls: string[] = [];
       const seenCalls = new Set<string>();
       let nudges = 0;
@@ -644,12 +645,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             let answerStreamed = false;
             const holdback = options.localModel && tools.definitions.length ? new TextCallHoldback() : undefined;
             prefix = carried;
-            const pending = { assistant_text: prefix, reasoning_text: "" };
-            const delta = (text: string, streamKind: keyof typeof pending, flush = false) => {
-              const masked = maskSecrets(pending[streamKind] + text, flush);
-              pending[streamKind] = masked.held;
-              if (masked.visible) emit({ ...base(turn.threadId, turnId), type: "content.delta", streamKind, delta: masked.visible });
-            };
+            const deltas = new MaskedDeltas(secrets, safeText, (delta, streamKind) => emit({ ...base(turn.threadId, turnId), type: "content.delta", streamKind, delta }));
+            deltas.seed("assistant_text", prefix); deltas.seed("reasoning_text", carriedReasoning);
+            const delta = deltas.feed.bind(deltas);
             try {
               completion = await complete(messages, model, true, abort.signal, (text, streamKind) => {
                 streamed = true;
@@ -672,10 +670,11 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               }
               willContinue = !completion.toolCalls.length
                 && cutReplyWillContinue(cutReplies, completion, Boolean(options.localModel && tools.definitions.length));
-              // A continuation resumes the same text, so a held credential prefix crosses over instead of being shown.
+              // A held prefix that no continuation will complete is dropped, not shown as half a credential.
+              if (prefix && (!completion.text.trim() || completion.toolCalls.length > 0)) { prefix = ""; deltas.seed("assistant_text", ""); }
               delta("", "assistant_text", !willContinue);
-              delta("", "reasoning_text", true);
-              carried = willContinue ? maskSecrets(prefix + completion.text, false).held : "";
+              delta("", "reasoning_text", !willContinue);
+              carried = willContinue ? maskSecrets(prefix + completion.text, false).held : ""; carriedReasoning = willContinue ? maskSecrets(carriedReasoning + completion.reasoning, false).held : "";
               break;
             } catch (value) {
               const error = asError(value);
@@ -744,8 +743,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           // Reasoning on a tool-call round belongs to the protocol, not a final reply.
           const reply = completion.text.trim() ? completion.text : completion.toolCalls.length || unreadable ? "" : completion.reasoning;
           const shownReply = prefix || willContinue ? maskSecrets(prefix + completion.text, !willContinue).visible : safeText(reply);
-          if (reply.trim()) { spoke = true; continuedReply += shownReply; }
-          if (!willContinue && continuedReply) { emit({ ...base(turn.threadId, turnId), type: "item.completed", itemType: "assistant_text", text: continuedReply }); continuedReply = ""; }
+          if (reply.trim()) { spoke = true; answer.add(shownReply); }
+          if (!willContinue) answer.end();
           abort.signal.throwIfAborted();
           if (unreadable) {
             askedAgain = true;
@@ -896,6 +895,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       } finally {
         turnEntry.ending = true;
         approval.close();
+        answer.end();
         let cleanupFailed = false;
         try { await tools?.close(); }
         catch {
